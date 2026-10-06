@@ -1,7 +1,6 @@
 import { isRecord } from "./ast.ts";
-import { helperCall, helperStatements, SYSTEM_SPEAKER, type HelperName } from "./helpers.ts";
+import { helperStatements, SYSTEM_SPEAKER, type HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
-import type { AcceptedForm } from "./workarounds.ts";
 
 /**
  * The legacy desktop player's profile: the distribution's intro asked the player's name and gender once, and its
@@ -152,7 +151,6 @@ const ifMissing = (key: string, body: IrStatement[]): IrStatement => ({
 export function legacyProfilePrompt(
   programs: readonly MigrationProgram[],
   main: MigrationProgram,
-  accepted: ReadonlySet<AcceptedForm>,
 ): IrStatement[] {
   const reads = new Set<string>();
   const saves = new Set<string>();
@@ -163,10 +161,10 @@ export function legacyProfilePrompt(
   if (asked.includes("intro.name"))
     body.push(
       ifMissing("intro.name", [
-        say("What is your name?"),
         save(lit("intro.name"), {
           kind: "input",
           input: "askText",
+          question: lit("What is your name?"),
           defaultValue: lit("Slave"),
           speaker: SYSTEM_SPEAKER,
         }),
@@ -202,7 +200,7 @@ export function legacyProfilePrompt(
     const keys = asked.filter((key) => key.startsWith(`${group}.`));
     if (keys.length === 0) continue;
     needsBooleans = true;
-    body.push(...ownedItems(keys, group, names, question, accepted));
+    body.push(...ownedItems(keys, group, names, question));
   }
   const defined = (name: string): boolean =>
     main.statements.some(
@@ -210,13 +208,7 @@ export function legacyProfilePrompt(
         (statement.kind === "function" || statement.kind === "speaker") && statement.name === name,
     );
   // Helpers the entry already defines, such as the system speaker, stay single.
-  const helpers = helperStatements(
-    new Set<HelperName>(
-      needsBooleans && !accepted.has("askBooleans")
-        ? ["systemSpeaker", "askBooleansSystem"]
-        : ["systemSpeaker"],
-    ),
-  ).filter(
+  const helpers = helperStatements(new Set<HelperName>(["systemSpeaker"])).filter(
     (statement) =>
       !(statement.kind === "function" || statement.kind === "speaker") || !defined(statement.name),
   );
@@ -225,7 +217,7 @@ export function legacyProfilePrompt(
     { kind: "function", name: PROFILE_HELPER, parameters: [], body, span: null },
     {
       kind: "comment",
-      text: `// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (${asked.join(", ")}) once; this package asks what is missing here and saves it under the same keys, so other packages reuse the answers.`,
+      text: `// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (${asked.join(", ")}) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.`,
       trailing: false,
       span: null,
     },
@@ -245,61 +237,37 @@ function isProfileKey(key: string): boolean {
 }
 
 /**
- * The distribution's yes/no list for owned items, for the keys not answered yet: `askBooleans`, or its workaround,
- * over the items' names, then each answer saved under its key.
+ * The distribution's yes/no list for owned items, for the keys not answered yet: a form of toggles over the items'
+ * names, asked by the system speaker, keyed by the storage keys, whose answers are saved under their keys.
  */
 function ownedItems(
   keys: readonly string[],
   group: string,
   names: ReadonlyMap<string, string>,
   question: string,
-  accepted: ReadonlySet<AcceptedForm>,
 ): IrStatement[] {
-  const list = (items: readonly string[]): IrExpression => ({
-    kind: "list",
-    items: items.map((item) => lit(item)),
-  });
-  const add = (target: string, value: IrExpression): IrStatement => ({
-    kind: "expression",
-    expression: { kind: "methodCall", target: v(target), name: "add", arguments: [value] },
-    span: null,
-  });
   const name = (part: string): string =>
     `profile${group[0]!.toUpperCase()}${group.slice(1)}${part}`;
-  const missingKeys = name("Keys");
-  const missingNames = name("Names");
-  const defaults = name("Defaults");
+  const fields = name("Fields");
   const position = name("Index");
   const answers = name("Answers");
   const key = name("Key");
-  const texts = keys.map((item) => names.get(item.slice(group.length + 1)) ?? item);
+  const texts: IrExpression = {
+    kind: "list",
+    items: keys.map((item) => lit(names.get(item.slice(group.length + 1)) ?? item)),
+  };
   return [
     {
       kind: "let",
-      name: missingKeys,
-      value: { kind: "list", items: [] },
-      type: "string[]",
-      span: null,
-    },
-    {
-      kind: "let",
-      name: missingNames,
-      value: { kind: "list", items: [] },
-      type: "string[]",
-      span: null,
-    },
-    {
-      kind: "let",
-      name: defaults,
-      value: { kind: "list", items: [] },
-      type: "boolean[]",
+      name: fields,
+      value: { kind: "object", properties: [], dict: true },
       span: null,
     },
     { kind: "let", name: position, value: lit(0), span: null },
     {
       kind: "for",
       variable: key,
-      collection: list(keys),
+      collection: { kind: "list", items: keys.map((item) => lit(item)) },
       body: [
         {
           kind: "if",
@@ -310,9 +278,19 @@ function ownedItems(
             right: lit(null),
           },
           then: [
-            add(missingKeys, v(key)),
-            add(missingNames, { kind: "index", target: list(texts), index: v(position) }),
-            add(defaults, lit(false)),
+            {
+              kind: "assign",
+              target: { kind: "index", target: v(fields), index: v(key), dict: true },
+              operator: "=",
+              value: {
+                kind: "object",
+                properties: [
+                  { name: "value", value: lit(false) },
+                  { name: "text", value: { kind: "index", target: texts, index: v(position) } },
+                ],
+              },
+              span: null,
+            },
           ],
           else: [],
           span: null,
@@ -326,32 +304,28 @@ function ownedItems(
       condition: {
         kind: "binary",
         operator: ">",
-        left: { kind: "property", target: v(missingKeys), name: "length" },
+        left: { kind: "property", target: v(fields), name: "length" },
         right: lit(0),
       },
       then: [
         {
           kind: "let",
           name: answers,
-          value: accepted.has("askBooleans")
-            ? {
-                kind: "call",
-                name: "askBooleans",
-                positional: [],
-                named: { message: lit(question), texts: v(missingNames), defaults: v(defaults) },
-              }
-            : helperCall("askBooleansSystem", [lit(question), v(missingNames), v(defaults)]),
+          value: {
+            kind: "input",
+            input: "askForm",
+            question: lit(question),
+            fields: v(fields),
+            speaker: SYSTEM_SPEAKER,
+          },
           span: null,
         },
-        { kind: "assign", target: v(position), operator: "=", value: lit(0), span: null },
         {
           kind: "for",
           variable: key,
-          collection: v(missingKeys),
-          body: [
-            save(v(key), { kind: "index", target: v(answers), index: v(position) }),
-            { kind: "assign", target: v(position), operator: "+=", value: lit(1), span: null },
-          ],
+          collection: v(answers),
+          dict: true,
+          body: [save(v(key), { kind: "index", target: v(answers), index: v(key), dict: true })],
           span: null,
         },
       ],

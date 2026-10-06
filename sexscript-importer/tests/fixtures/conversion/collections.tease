@@ -28,6 +28,15 @@ function sexscriptLegacyMax(first, second) {
   }
   return second
 }
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
 let items = ["kneel", "wait", "count"]
 let upper = []
 for it in items {
@@ -97,4 +106,97 @@ for it in 0..rounds {
   say "Round"
 }
 say "Second ${[1, 2, 3][[1, 2, 3].length - 2]}"
+// A position compared with null reads null past the end, as Groovy did.
+let hand = ["Ace", "King"]
+// NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(hand, 2) != null {
+  say "Third card"
+} else {
+  say "Two cards"
+}
+// A list that only ever starts empty grows at its end, also by a computed position.
+let shoe = []
+let d = 0
+while d < 2 {
+  let c = 0
+  while c < 2 {
+    // NOTE SX_LIST_PADDING line 31: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it with 0, which Groovy truth treats like null, since nothing compares its elements with null.
+    while shoe.length <= d * 2 + c {
+      shoe.add(0)
+    }
+    shoe[d * 2 + c] = c
+    c += 1
+  }
+  d += 1
+}
+say "Shoe ${shoe.length}"
+// A division of values not proven numbers sets a number.
+let odds: number = 0
+let parts = [3, 4]
+odds = parts[0] / parts[1]
+say "Odds ${odds}"
+// Positions computed from values of unknown type, and a literal position past a literal list, grow the list.
+function joinDecks(first, second, offset) {
+  let joined = []
+  let i = 0
+  while i < 2 {
+    // NOTE SX_LIST_GROWTH line 41: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i < joined.length {
+      joined[i] = first[i]
+    } else {
+      joined.add(first[i])
+    }
+    i += 1
+  }
+  i = 0
+  while i < 2 {
+    // NOTE SX_PLUS_OPERAND_TYPE line 42: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+    // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i + offset < joined.length {
+      joined[i + offset] = second[i]
+    } else {
+      joined.add(second[i])
+    }
+    i += 1
+  }
+  return joined
+}
+let labels = ["< Previous", "Next >"]
+labels.add("Exit")
+say "Decks ${joinDecks([1, 2], [3, 4], 2).length} ${labels.length}"
+// A list filled from its end, or past its end, gets padding up to the position, as Groovy padded it with null: 0 where
+// nothing compares its elements with null, and null where something does.
+let slots = []
+let k = 2
+while k >= 0 {
+  // NOTE SX_LIST_PADDING line 51: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it with 0, which Groovy truth treats like null, since nothing compares its elements with null.
+  while slots.length <= k {
+    slots.add(0)
+  }
+  slots[k] = k * 10
+  k -= 1
+}
+let seats = []
+// NOTE SX_LIST_PADDING line 53: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it the same way.
+while seats.length <= 1 {
+  seats.add(null)
+}
+seats[1] = "Ann"
+// NOTE SX_INDEX_PAST_END line 54: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(seats, 0) == null {
+  say "Seat 0 is free"
+}
+// A write that reads the same position first needs no padding: the position exists already.
+k = 0
+while k < 3 {
+  slots[k] = slots[k] + 1
+  k += 1
+}
+say "Slots ${slots.length} ${seats.length}"
+// collect() without a closure collects each element as it is.
+let positions = []
+for item in 0..=2 {
+  positions.add(item)
+}
+say "Positions ${positions.length}"
 exit

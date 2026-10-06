@@ -14,7 +14,13 @@ import {
   type RuntimeTemporalCapture,
 } from "../temporal-captures.js";
 import type { PendingActionOperationResult } from "./model.js";
-import { captureExecutableData, isPlainRecord, pendingResult } from "./support.js";
+import {
+  captureExecutableData,
+  type CapturedExecutableData,
+  isPlainRecord,
+  pendingResult,
+} from "./support.js";
+import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 
 export type ContinueCaptureOutcome =
   | { readonly kind: "recorded"; readonly boundaryMs: number }
@@ -30,8 +36,19 @@ export function recordContinueCapture(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   capture: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<ContinueCaptureOutcome> {
   const captured = captureExecutableData(plan, snapshot);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const recorded = recordCapturedContinueCapture(captured, capture);
+  closeDebugTrace(trace, recorded);
+  return recorded;
+}
+
+function recordCapturedContinueCapture(
+  captured: CapturedExecutableData,
+  capture: unknown,
+): PendingActionOperationResult<ContinueCaptureOutcome> {
   const current = captured.snapshot;
   const invalid = (message: string) =>
     pendingResult(current, [], { kind: "invalidCapture", message } as const);

@@ -616,6 +616,7 @@ function isInteractionCommand(value: string | undefined): boolean {
     value === "askDate" ||
     value === "askTime" ||
     value === "askDateTime" ||
+    value === "askForm" ||
     value === "choose"
   );
 }

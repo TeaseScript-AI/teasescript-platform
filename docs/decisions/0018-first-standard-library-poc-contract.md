@@ -101,33 +101,29 @@ Later synchronous utility libraries may use exact runtime library binding where 
 The selected interaction forms support an optional requesting speaker:
 
 ```tease
-let answer = askText as mistress "Enter text"
-let amount = askNumber as mistress "Enter a number"
+let answer = askText as mistress "What is your name?"
+let amount = askNumber as mistress "How many?"
 let choice = choose as mistress yes: "Yes", no: "No"
 showButton as mistress "Ready"
 ```
 
 Without `as`, the form uses the current contextual or default speaker. When no speaker is available, narrator/system provenance is represented without inventing a speaker.
 
-The speaker identifies who requested the answer or acknowledgement. Control text is not automatically emitted as a speaker chat message.
+The speaker identifies who requested the answer or acknowledgement, and says the question of a basic ask
+([questions and hints](#ask-questions-and-hints)). Other control text is not automatically emitted as a speaker chat
+message.
 
 ### `askText`
 
 ```tease
 let answer = askText
-let answer = askText "Type here"
+let answer = askText "What is your name?"
 let answer = askText as mistress
-let answer = askText as mistress "Type here"
+let answer = askText as mistress "What is your name?", hint: "Type your name"
 ```
 
-The optional text is Standard UI field text or a hint. It is not a transcript question. The ordinary pattern is:
-
-```tease
-say as mistress "Tell me your name."
-let name = askText as mistress "Type your name"
-```
-
-Omitting the hint uses a localized Standard UI default. An explicit empty string requests no visible hint while the control still receives an accessible name.
+The optional text is the question, which the requesting speaker says in the chat; `hint:` is the field's help text
+([questions and hints](#ask-questions-and-hints)).
 
 Completion rules:
 
@@ -164,7 +160,7 @@ after completion; `askInteger` below is the whole-number counterpart.
 ### `askInteger`
 
 Owner-approved extension (2026-10-04, #539): `askInteger` copies the compact `askNumber` forms, including `as speaker`,
-the hint, and `default:`, and returns `integer`.
+the question, `default:`, and `hint:`, and returns `integer`.
 
 ```tease
 let count = askInteger "How many repetitions?"
@@ -181,7 +177,7 @@ interaction whose UI only accepts whole numbers, so completion, prefill, checkpo
 ### `askDate`, `askTime`, and `askDateTime`
 
 Owner-approved extension (2026-10-04, #532): `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
-forms, including `as speaker`, the hint, and `default:`, and return `date`, `time`, and `datetime`.
+forms, including `as speaker`, the question, `default:`, and `hint:`, and return `date`, `time`, and `datetime`.
 
 ```tease
 let day = askDate "Which day?"
@@ -197,8 +193,8 @@ text; text must be converted first, as in `default: toDate("2026-10-04")`.
 
 ### Default answers
 
-Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `default:` answer after the hint
-or instead of it. It follows the general
+Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `default:` answer after the
+question or without one. It follows the general
 [default-answer rules](../specifications/accepted-syntaxes-v30.md#default-answers): an editable prefill that the player
 still submits, never a fallback for a cleared field.
 
@@ -208,14 +204,53 @@ let minutes = askNumber as mistress "Corner time?", default: cornerBase + player
 let name = askText default: player.name
 ```
 
-The default is evaluated once, after the hint. Its prefill text is captured with the active interaction and survives
-checkpoint save/restore without re-evaluating author expressions. An `askNumber` default prefills the shortest number
-text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0`, so submitting it unchanged returns
-that number.
+The default is evaluated once, after the question and in written order with `hint:`. Its prefill text is captured with
+the active interaction and survives checkpoint save/restore without re-evaluating author expressions. An `askNumber`
+default prefills the shortest number text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0`,
+so submitting it unchanged returns that number.
 
-Inside an object literal or call arguments, `default:` binds to the nearest compact ask:
-`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: (askText "Name?"), default: "Ada" }`
-for an object property named `default`.
+Inside an object literal or call arguments, `default:` and `hint:` bind to the nearest compact ask:
+`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: askText("Name?"), default: "Ada" }`
+or `{ answer: (askText "Name?"), default: "Ada" }` for an object property named `default`.
+
+### Parenthesized basic asks
+
+Owner decision (2026-10-05, #627): `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` also
+take their compact arguments inside parentheses, as V30 §20 writes them. Both forms give the same interaction:
+`askText()` is `askText`, and `askText as mistress ("Type here", default: "Ada")` is
+`askText as mistress "Type here", default: "Ada"`. The speaker clause stays before the parentheses, and the `)` ends the
+ask inside a larger expression. The parentheses accept only the optional question, `default:`, and `hint:`.
+
+### Ask questions and hints
+
+Owner decision (2026-10-05, #627), superseding the earlier rule that the optional text of a basic ask is only field
+text and not a transcript question: one ask is one complete author action. Its text is the question, which the
+requesting speaker says in the chat before the field opens; `hint:` is help shown in the field only.
+
+```tease
+let name = askText as mistress "What is your name?", default: "Ada", hint: "Type your name"
+let count = askInteger("How many?", default: 3)
+let day = askDate hint: "Pick a day"
+```
+
+- The requesting speaker is captured first, then the question, `default:`, and `hint:` are evaluated once, the options
+  in the order they are written. A default that asks itself therefore asks first. Then the question is said and the
+  field opens. The question and the field have the same speaker; a nested ask without `as` uses the default speaker,
+  as before.
+- The question is said as by `say`, with its markup, interpolation, and pacing: it waits behind earlier paced output,
+  and the field opens as soon as it is said. It accepts the values a field text accepts, so a list is an error
+  (`TSV040`, or `TSR021` at runtime) rather than shown notation.
+- Without a question nothing is said; an explicit empty question is said like `say ""`.
+- The question is said once. A refused answer, a timer or button block that interrupts the field, and a restored
+  checkpoint show the open field again without saying the question again. Running the ask again, as in a loop, asks
+  again.
+- `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
+  question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
+- `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
+  hint shows none while the control keeps its accessible name. In a text or number field the hint shows only while the
+  field is empty, so a default usually hides it; a date or time control shows it beside the control, also with a
+  default. Examples write `default:` first. Neither the question nor the hint becomes the
+  accessible name.
 
 ### `choose`
 
@@ -360,7 +395,7 @@ The engine uses one discriminated foreground interaction family rather than inde
 Conceptually each active interaction contains enough JSON-safe data for:
 
 ```text
-kind: button | text | number | temporal | image | choice
+kind: button | text | number | temporal | image | choice | form
 stable action identity
 owning and continuation instruction positions
 scene time when it appeared, and a button's timeout when set
@@ -392,7 +427,16 @@ choose control:
 
 showButton:
     actionId
+
+form submission:
+    actionId
 ```
+
+A form ([V30 §20](../specifications/accepted-syntaxes-v30.md#forms); Owner decisions on #512, 2026-10-06) is the one
+interaction whose state changes before it completes: its answers and the one draft being edited are part of the pending
+action, and the host changes them only through validated, absolute, non-settling edits that name a field by its ID. An
+edit publishes no event or transcript and does not resume the script; submission settles the form once with all its
+answers ([`RUNTIME.md`](../RUNTIME.md#forms)).
 
 Exact cross-origin property names remain a host-protocol decision. The semantic payload above is fixed.
 
@@ -402,7 +446,8 @@ Retries are built into the interaction contract. An ordinary author does not nee
 
 ## Mandatory completion and pause policy
 
-`askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result:
+`askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result (a form written with
+`cancel:` is the exception: cancelling it returns `null`; see [V30 §20](../specifications/accepted-syntaxes-v30.md#forms)):
 
 - they never complete with `null` as a cancellation result (`choose` returns `null` only as the value of a selected
   option);
@@ -724,11 +769,13 @@ This ADR accepts these scoped post-V30 changes:
 - replace the V30 split between `choose` bodies with values and lists without them by one comma-separated compact form;
 - retain identifier and numeric values before `:` from accepted V30 capability;
 - extend `say` with `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
-- define field text as Standard UI hint/label data rather than automatic transcript output;
+- define field text as Standard UI hint/label data rather than automatic transcript output (for basic asks superseded by
+  [questions and hints](#ask-questions-and-hints));
 - express the V30 `showButton` timeout and elapsed-time return through the compact `timeout:` option and value form.
 
 The broader parenthesized V30 input APIs, including the parenthesized `showButton` forms, are not rejected merely
-because the first POC implements compact forms first. Their advanced options and compatibility mapping remain later
+because the first POC implements compact forms first. Apart from the
+[parenthesized basic asks](#parenthesized-basic-asks), their advanced options and compatibility mapping remain later
 work.
 
 ## Follow-up implementation boundaries
@@ -750,7 +797,7 @@ The implementation issues must inspect the then-current plan/snapshot versions a
 This ADR intentionally defers:
 
 - detailed result objects containing elapsed time or metadata, and the option name that selects such a return type;
-- advanced parenthesized call forms and richer input/choice options;
+- parenthesized call forms other than the basic asks, and richer input/choice options;
 - custom input hints for compact `choose`;
 - any concrete platform guard that a real boundary requires; its mechanism and selected boundary must be justified under ADR 0019 before tests verify it;
 - the exact advanced accessibility-override field;

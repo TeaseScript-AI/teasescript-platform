@@ -223,6 +223,10 @@ test(
           'save("picked", pick("Pack 2"))',
           'save("missing", pick("Pack 3"))',
           'save("count", new File(getDataFolder() + "images/Mistress/Pack 1").listFiles().length)',
+          'def listed = new File("images/Mistress/Pack 1").listFiles()',
+          'def names = listed.findAll { f -> f.name.endsWith(".jpg") }.name',
+          'names += listed.findAll { f -> f.name.endsWith(".png") }.name',
+          'save("names", names.join(","))',
           "",
         ].join("\n"),
       );
@@ -250,6 +254,7 @@ test(
         picked: "Mistress/Pack 2/c.JPG",
         missing: "none",
         count: 2,
+        names: "a.jpg,b.png",
       });
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -464,6 +469,8 @@ test("names media files as the package holds them", { skip: parserUnavailable },
         'setImage("peach/peach/four.jpg")',
         'playSound("music/theme.mid")',
         'setImage("room/bed.jpg")',
+        'setImage("Domme/Domme43.jpg")',
+        'setImage("")',
         "",
       ].join("\n"),
     );
@@ -485,9 +492,16 @@ test("names media files as the package holds them", { skip: parserUnavailable },
       'showImage "peach/four.jpg"',
       'playAudio "music/theme.mp3"',
       'showImage "room/bed.jpg"',
+      // A path that no file matches stays as written, with a note; the legacy player found nothing either.
+      'showImage "Domme/Domme43.jpg"',
     ])
       assert.ok(source.includes(`\n${expected}\n`), expected);
     assert.match(source, /NOTE SX_MEDIA_PATH_CASE line 6/u);
+    assert.match(
+      source,
+      /NOTE SX_MEDIA_MISSING line 7: No file in the package matches "Domme\/Domme43.jpg"; unless the script creates it/u,
+    );
+    assert.equal(source.match(/SX_MEDIA_MISSING/gu)?.length, 1);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -743,7 +757,7 @@ test(
       // A list case holding a range keeps Groovy's membership test.
       assert.match(output, /\[1\.\.=3, 5\]\.contains\(/u);
       // Legacy showed a number default as text; a map default has no text form.
-      assert.match(output, /^let code = askText default: "42"$/mu);
+      assert.match(output, /^let code = askText "Code\?", default: "42"$/mu);
       assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
       // A negative button timeout failed in legacy and is rejected by TeaseScript.
       assert.match(output, /^\/\/ TODO SX_BUTTON_TIMEOUT line 14: /mu);

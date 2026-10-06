@@ -1,5 +1,6 @@
 import { createApp, h } from "vue";
 import { openIndexedDbMediaRepository } from "../../indexeddb-media-repository.js";
+import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
 import { prepareHostedScript, type ScriptHost } from "./hostedScript";
@@ -39,6 +40,10 @@ const app = developmentPreview
           scriptStorage: createLocalScriptStorage(browserStorage(), host.storageScope),
           // An image the script saves a reference to stays in this browser for later runs.
           capturedMedia: { repository: capturedMediaRepository },
+          // Export and import of saved data cover every script this browser has played.
+          savedData: browserSavedData(browserStorage(), capturedMediaRepository),
+          // The script's storage scope identifies it; development packages and the demo have no release version.
+          debugPackage: { id: host.storageScope, version: null },
         });
         const failure = prepareHostedScript(player, host);
         return () => h(PlayerApp, { player, failure: failure.value });

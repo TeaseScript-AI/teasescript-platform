@@ -1,4 +1,4 @@
-import type { FileTarget, Program } from "./ast.js";
+import type { Block, FileTarget, InteractionExpression, Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
@@ -9,7 +9,7 @@ import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, PreparedFormShape, TypeCheckPlan } from "./plan/model.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
@@ -122,7 +122,7 @@ function compileProjectFiles(
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
-      plan = lowerProject(files, checked.typeChecks, catalog.images);
+      plan = lowerProject(files, checked.typeChecks, catalog.images, checked.formShapes);
     } else {
       const main = files[0]!.result;
       const noExit = createDiagnostic(
@@ -160,6 +160,8 @@ interface CompiledProjectFile {
   readonly parsed: ReturnType<typeof parse> | null;
   /** The files each glob target may pick, once the names are checked. */
   picks?: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The variables each timer, media, or button block shares with the code that created it. */
+  captures?: ReadonlyMap<Block, readonly string[]>;
 }
 
 /** Valid, unique package paths in plan order, and a `TSC009` diagnostic for every other path or a missing main. */
@@ -259,6 +261,7 @@ function checkProject(
   options: ProjectCheckOptions,
 ): {
   readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   readonly reachesExit: boolean;
 } | null {
   let current = 0;
@@ -275,13 +278,14 @@ function checkProject(
     names.forEach((result, index) => {
       addSemanticDiagnostics(files[index]!, result.diagnostics);
       files[index]!.picks = result.picks;
+      files[index]!.captures = result.captures;
     });
     if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(
       files.map((file) => ({ path: file.result.path, program: file.result.program })),
-      options,
+      { ...options, sharedWrites: new Set(names.flatMap((result) => [...result.sharedWrites])) },
       track,
     );
     // A transfer or script reference that can run enters its label afresh, which has then run nothing of its file. As
@@ -318,7 +322,11 @@ function checkProject(
     );
     return files.some((file) => hasErrors(file.result.diagnostics))
       ? null
-      : { typeChecks: types.runtimeChecks, reachesExit: types.reachesExit };
+      : {
+          typeChecks: types.runtimeChecks,
+          formShapes: types.formShapes,
+          reachesExit: types.reachesExit,
+        };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     const file = files[current]!;
@@ -354,6 +362,7 @@ function lowerProject(
   files: CompiledProjectFile[],
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   images: readonly PlanImage[],
+  formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>,
 ): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
@@ -363,6 +372,7 @@ function lowerProject(
         path: file.result.path,
         program: file.result.program,
         ...(file.picks === undefined ? {} : { picks: file.picks }),
+        ...(file.captures === undefined ? {} : { captures: file.captures }),
         tags: scriptTags(file.result),
       })),
       typeChecks,
@@ -370,6 +380,7 @@ function lowerProject(
         current = files[fileIndex]!;
       },
       images,
+      formShapes,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);

@@ -129,7 +129,10 @@ export function requiredInstructionTemporaries(
             output.add(instruction.preparedUi.backgroundTemporary);
           if (instruction.preparedUi.timeoutTemporary !== undefined)
             output.add(instruction.preparedUi.timeoutTemporary);
-        } else if (instruction.preparedUi.kind === "image") {
+        } else if (
+          instruction.preparedUi.kind === "image" ||
+          instruction.preparedUi.kind === "form"
+        ) {
           output.add(instruction.preparedUi.requestTemporary);
         } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)

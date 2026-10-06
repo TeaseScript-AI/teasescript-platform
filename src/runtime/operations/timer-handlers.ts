@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../../plan/model.js";
+import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../captures.js";
 import type { InterpreterEvent } from "../events.js";
 import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../state.js";
 import { processDueWork } from "./observe-time.js";
@@ -7,13 +8,18 @@ import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 export { timerHandlerDispatchable };
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { assertCounterCanAdvance, copySpan } from "./support.js";
+import type { TraceStore } from "../debug-trace.js";
 
 /**
  * Starts the next queued expiry, cue, or button block as an interrupt frame. The block sees top-level names and its own
  * locals; the interrupted foreground action becomes inert inside the frame. Emits no event and runs no instruction; due
  * work that became due meanwhile stays unsettled until the block returns or a later observation arrives while it waits.
  */
-export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
+export function startTimerHandler(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  trace: TraceStore | null = null,
+): void {
   const invocation = snapshot.pendingTimerHandlers[0]!;
   const definition = plan.functions[invocation.handlerFunctionId - 1];
   if (definition === undefined || definition.handler === null) {
@@ -36,6 +42,7 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
     kind: "function",
     id: snapshot.nextCallFrameId,
     rootScopeId: invocation.rootScopeId,
+    captures: cloneCaptures(invocation.captures),
     functionId: definition.id,
     functionName: definition.name,
     callSiteSpan: copySpan(definition.declarationSpan),
@@ -71,6 +78,13 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
           ]
         : [],
   });
+  if (trace !== null && definition.selfHandle !== null && "mediaId" in invocation) {
+    trace.at(definition.entryInstruction, snapshot.currentSessionTimeMs);
+    trace.writeBinding("declaration", snapshot.nextScopeId, definition.selfHandle, {
+      kind: "mediaHandle",
+      mediaId: invocation.mediaId,
+    });
+  }
   snapshot.nextScopeId += 1;
   snapshot.foregroundAction = null;
   snapshot.status = "running";
@@ -88,17 +102,19 @@ export function returnFromTimerHandler(
   snapshot: RuntimeSnapshot,
   frame: RuntimeCallFrameSnapshot,
   events: InterpreterEvent[],
+  trace: TraceStore | null,
 ): void {
-  snapshot.frames.splice(frame.scopeBaseDepth);
+  leaveScopes(snapshot, frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
+  sweepRetainedScopes(snapshot, false);
   // Copied one by one: a wide caller state must not depend on the host's argument-spread limit.
   snapshot.temporaries.length = 0;
   for (const temporary of frame.callerTemporaries) snapshot.temporaries.push({ ...temporary });
   snapshot.nextInstruction = frame.returnInstruction;
   restoreSuspendedAction(plan, snapshot, frame, events);
   // Due work that waited behind this block continues in scene-time order, including a restored overdue delay.
-  processDueWork(plan, snapshot, events);
+  processDueWork(plan, snapshot, events, trace);
 }
 
 function restoreSuspendedAction(

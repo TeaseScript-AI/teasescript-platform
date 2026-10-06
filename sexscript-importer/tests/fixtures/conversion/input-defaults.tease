@@ -8,18 +8,13 @@ function sexscriptLegacyAskInteger(prefill) {
 }
 // Inputs that pre-fill a value the player can accept or change.
 let level = 3
-say "What is your name?"
-let name = askText default: "slave"
-say "Set your level"
-let newLevel = askInteger default: level
-say "Your weight in kg?"
-let weight = askNumber default: 70.5
+let name = askText "What is your name?", default: "slave"
+let newLevel = askInteger "Set your level", default: level
+let weight = askNumber "Your weight in kg?", default: 70.5
 // Legacy showed any default as text, a list as [a, b].
-say "Your code?"
-let code = askText default: "${level}"
+let code = askText "Your code?", default: "${level}"
 let toys = ["plug", "clamps"]
-say "Which toys?"
-let wanted = askText default: "[${toys.join(", ")}]"
+let wanted = askText "Which toys?", default: "[${toys.join(", ")}]"
 // An integer input's default that may hold a fraction asks without it then; Groovy found no method for a fraction.
 let total: number = 0
 total += level / 2

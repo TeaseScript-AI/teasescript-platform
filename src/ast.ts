@@ -178,8 +178,8 @@ export interface HideCameraStatement {
 }
 
 /**
- * Shared data of `showPermanentButton <text> { [persist: true] ... }`. The block is the click action; `persist: true`,
- * only as its first line, keeps the button when the file entry that showed it is left.
+ * Shared data of `showPermanentButton <text>[, persist: true] { ... }`. The block is the click action; `persist: true`
+ * keeps the button when the file entry that showed it is left.
  */
 export interface ShowPermanentButtonParts {
   readonly text: Expression;
@@ -517,7 +517,10 @@ export interface RepeatStatement {
 
 export interface ForStatement {
   readonly kind: "forStatement";
+  /** The element, or with {@link valueVariable} the key of each dict entry. */
   readonly variable: Identifier;
+  /** `for key, value in dict`: each entry's value, a copy taken when the loop starts. */
+  readonly valueVariable: Identifier | null;
   readonly iterable: Expression;
   readonly body: Block;
   readonly span: SourceSpan;
@@ -611,15 +614,27 @@ export interface TypeTestExpression {
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
-  readonly interactionKind: "text" | "number" | "integer" | "date" | "time" | "datetime" | "choice";
+  readonly interactionKind:
+    "text" | "number" | "integer" | "date" | "time" | "datetime" | "choice" | "form";
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
+  /** The question of a basic ask, said in the chat by its speaker before the field opens. */
+  readonly question: Expression | null;
+  /** The `hint:` text shown in the field only; its position against `default:` gives their evaluation order. */
   readonly hint: Expression | null;
-  /** The `default:` answer that prefills an `askText` or `askNumber` field. */
+  /** The `default:` answer that prefills the field of a basic ask. */
   readonly defaultValue: Expression | null;
   readonly options: readonly InteractionChoiceOption[];
+  /** The named arguments of `askForm`, such as `fields:` and `submit:`, in written order; empty for other asks. */
+  readonly formArguments: readonly FormArgument[];
   readonly span: SourceSpan;
+}
+
+/** One named argument of `askForm`, such as `fields: { ... }`. */
+export interface FormArgument {
+  readonly name: Identifier;
+  readonly value: Expression;
 }
 
 /** One compact `choose` option: an optional authored value before `:`, then its expression. */

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "clothes-lap-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "nclothes and nlap are declared without a value and set by initmf and initz before the game reads them in other functions, so TeaseScript sees values that may be null there. nclothes starts at 0, the count initmf starts from, and nlap at 5, the smallest value initz gives it.",
+      "diff": "clothes-lap-start.diff"
+    }
+  ]
+}

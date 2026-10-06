@@ -20,3 +20,30 @@ def level = null
 def pick = { -> level = getInteger("Level?", 3) }
 if (level == null) pick()
 show("Level ${level}")
+// So do numbers that functions add to, since Groovy failed on a null sum.
+def points
+def addPoints = { ->
+	points = 0
+	points += 300
+}
+addPoints()
+show("Points ${points}")
+// A Date reads its milliseconds as a number, so a variable it sets starts at 0.
+def started
+def mark = { -> started = new Date().getTime() }
+mark()
+show("Took " + (new Date().getTime() - started))
+// A function's own counter starts at 0 too, also where another function names a text the same.
+def fill = { n ->
+	def i
+	def marks = []
+	i = 0
+	while (i < n) {
+		marks[i] = i * 2
+		i += 1
+	}
+	show("Marks ${marks.size()}")
+}
+def spell = { -> for (i in ["a", "b"]) show(i) }
+fill(3)
+spell()

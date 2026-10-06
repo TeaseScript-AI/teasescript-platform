@@ -14,7 +14,13 @@ import {
 import type { PendingActionOperationResult } from "./model.js";
 import { processDueWork } from "./observe-time.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
-import { captureExecutableData, pendingResult } from "./support.js";
+import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
+import {
+  closeDebugTrace,
+  openDebugTrace,
+  type RuntimeDebugContext,
+  type TraceStore,
+} from "../debug-trace.js";
 
 /** The Player's load result for one media ID. */
 export type MediaLoadReport =
@@ -40,8 +46,21 @@ export function reportMediaLoad(
   snapshot: RuntimeSnapshot,
   mediaId: unknown,
   report: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<MediaReportOutcome> {
   const captured = captureExecutableData(plan, snapshot);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const reported = reportCapturedMediaLoad(captured, mediaId, report, trace);
+  closeDebugTrace(trace, reported);
+  return reported;
+}
+
+function reportCapturedMediaLoad(
+  captured: CapturedExecutableData,
+  mediaId: unknown,
+  report: unknown,
+  trace: TraceStore | null,
+): PendingActionOperationResult<MediaReportOutcome> {
   const current = captured.snapshot;
   const parsed = parseLoadReport(report);
   if (!isMediaId(mediaId) || parsed === null) {
@@ -86,7 +105,7 @@ export function reportMediaLoad(
       releaseMediaWait(captured.plan, current, mediaId, "loaded", events, span);
     }
   }
-  processDueWork(captured.plan, current, events);
+  processDueWork(captured.plan, current, events, trace);
   return pendingResult(current, events, { kind: "accepted" });
 }
 

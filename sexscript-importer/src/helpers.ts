@@ -167,7 +167,6 @@ function withNestedBodies(
 export type HelperName =
   | "abs"
   | "array"
-  | "askBooleans"
   | "fixed"
   | "packagePath"
   | "pathTag"
@@ -176,7 +175,6 @@ export type HelperName =
   | "truth"
   | "text"
   | "systemSpeaker"
-  | "askBooleansSystem"
   | "deviceButtons"
   | "showDevice"
   | "openTray"
@@ -188,6 +186,7 @@ export type HelperName =
   | "plainText"
   | "listPart"
   | "listMinus"
+  | "textMinus"
   | "repeatList"
   | "compare"
   | "replaceChars"
@@ -239,7 +238,6 @@ export function helperDefinitionOrder(statement: IrStatement): number {
 export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] {
   const needed = new Set(names);
   if (needed.has("switchButton")) needed.add("switchButtonId");
-  if (needed.has("askBooleansSystem")) needed.add("systemSpeaker");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
@@ -274,7 +272,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "max",
   "min",
   "abs",
-  "askBooleans",
   "fixed",
   "packagePath",
   "pathTag",
@@ -282,7 +279,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "itemAt",
   "truth",
   "text",
-  "askBooleansSystem",
   "deviceButtons",
   "showDevice",
   "openTray",
@@ -294,6 +290,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "plainText",
   "listPart",
   "listMinus",
+  "textMinus",
   "repeatList",
   "compare",
   "replaceChars",
@@ -466,64 +463,6 @@ function removeDeviceButton(device: IrExpression): IrStatement[] {
   ];
 }
 
-/** A yes/no answer per text, confirmed at the end: legacy getBooleans() and the profile's owned items. */
-function askBooleansHelper(name: string, speaker?: string): IrStatement {
-  const asSpeaker = speaker === undefined ? {} : { speaker };
-  return fn(
-    name,
-    ["message", "texts", "defaults"],
-    [
-      letS("answers", { kind: "list", items: [] }),
-      letS("confirmed", lit(false)),
-      {
-        kind: "while",
-        condition: { kind: "unary", operator: "not", value: v("confirmed") },
-        body: [
-          set(v("answers"), { kind: "list", items: [] }),
-          { kind: "say", value: v("message"), ...asSpeaker, span: null },
-          letS("index", lit(0)),
-          forS("text", v("texts"), [
-            letS("yes", lit("Yes")),
-            letS("no", lit("No (preset)")),
-            ifS(
-              bin(
-                "and",
-                bin("<", v("index"), prop(v("defaults"), "length")),
-                bin("==", at(v("defaults"), v("index")), lit(true)),
-              ),
-              [set(v("yes"), lit("Yes (preset)")), set(v("no"), lit("No"))],
-            ),
-            { kind: "say", value: v("text"), ...asSpeaker, span: null },
-            add(
-              "answers",
-              bin(
-                "==",
-                { kind: "choice", options: [v("yes"), v("no")], labels: ["yes", "no"] },
-                lit("yes"),
-              ),
-            ),
-            set(v("index"), lit(1), "+="),
-          ]),
-          set(
-            v("confirmed"),
-            bin(
-              "==",
-              {
-                kind: "choice",
-                options: [lit("Confirm"), lit("Change answers")],
-                labels: ["confirm", "change"],
-              },
-              lit("confirm"),
-            ),
-          ),
-        ],
-        span: null,
-      },
-      ret(v("answers")),
-    ],
-  );
-}
-
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
   // Legacy background sounds overlapped and playBackgroundSound(null) stopped them all; TeaseScript stops async
   // media through its handle, so the handles are collected.
@@ -606,17 +545,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret(lit(0)),
         ],
       ),
-  },
-  // Workaround for askBooleans(), which main does not implement yet (workarounds.ts): one yes/no choice per item, the
-  // preset marked in its button, and a confirmation that can start over.
-  askBooleans: {
-    name: "sexscriptLegacyAskBooleans",
-    build: () => askBooleansHelper("sexscriptLegacyAskBooleans"),
-  },
-  // The same questions asked as the system speaker, for the legacy player's profile.
-  askBooleansSystem: {
-    name: "sexscriptLegacyAskBooleansSystem",
-    build: () => askBooleansHelper("sexscriptLegacyAskBooleansSystem", SYSTEM_SPEAKER),
   },
   // Java %.Nf: the number rounded to `digits` decimals, written with exactly that many.
   fixed: {
@@ -916,11 +844,15 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["key", "question"],
         [
           ifS(bin("==", { kind: "load", key: v("key") }, lit(null)), [
-            { kind: "say", value: v("question"), speaker: SYSTEM_SPEAKER, span: null },
             {
               kind: "save",
               key: v("key"),
-              value: { kind: "input", input: "askText", speaker: SYSTEM_SPEAKER },
+              value: {
+                kind: "input",
+                input: "askText",
+                question: v("question"),
+                speaker: SYSTEM_SPEAKER,
+              },
               span: null,
             },
           ]),
@@ -1169,6 +1101,40 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `text - part`: the text without the first occurrence of the part.
+  textMinus: {
+    name: "sexscriptLegacyTextMinus",
+    build: () =>
+      fn(
+        "sexscriptLegacyTextMinus",
+        ["text", "part"],
+        [
+          letS("position", {
+            kind: "methodCall",
+            target: v("text"),
+            name: "indexOf",
+            arguments: [v("part")],
+          }),
+          ifS(bin("<", v("position"), lit(0)), [ret(v("text"))]),
+          ret(
+            template(
+              {
+                kind: "methodCall",
+                target: v("text"),
+                name: "substring",
+                arguments: [lit(0), v("position")],
+              },
+              {
+                kind: "methodCall",
+                target: v("text"),
+                name: "substring",
+                arguments: [bin("+", v("position"), prop(v("part"), "length"))],
+              },
+            ),
+          ),
         ],
       ),
   },

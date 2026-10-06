@@ -6,6 +6,12 @@ keywords: "training"
 ---
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
+function sexscriptLegacyText(value): string? {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
 function sexscriptLegacyCompare(left, right) {
   if left == null {
     if right == null {
@@ -26,12 +32,11 @@ function sexscriptLegacyCompare(left, right) {
 }
 let visits = load "training.visits", default: 0
 save visits + 1 as "training.visits"
-let elvisValue = load "training.title"
-let title = "pet"
-if elvisValue != null and elvisValue != "" {
-  title = elvisValue
+let title = load "training.title"
+if title == null or title == "" {
+  title = "pet"
 }
-if (load "training.finished") == true {
+if load("training.finished") == true {
   say "Welcome back, ${title}"
   goto "finished.tease"
 }
@@ -43,11 +48,18 @@ let greeting = "Mistress"
 greeting = load "training.greeting", default: greeting
 say "Hello ${greeting}"
 // Groovy ordered a missing storage value, null, below every value.
-if sexscriptLegacyCompare(load "training.level", 3) < 0 {
+if sexscriptLegacyCompare(load("training.level"), 3) < 0 {
   say "Still a beginner"
 }
+// So did a function that returns a stored value.
+function rank {
+  return load "training.rank"
+}
+if sexscriptLegacyCompare(rank(), 2) >= 0 {
+  say "Ranked"
+}
 // A read from the legacy online service, too.
-// NOTE SX_ONLINE_STORAGE line 19: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+// NOTE SX_ONLINE_STORAGE line 22: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 let record = load "training.record"
 if sexscriptLegacyCompare(record, 10) >= 0 {
   say "A new record"
@@ -56,7 +68,7 @@ if sexscriptLegacyCompare(record, 10) >= 0 {
 say "Keep the streak?"
 if (choose yes: "Yes", no: "No") == "yes" {
   let streak = 0
-  // NOTE SX_LOAD_KEEPS_VALUE line 24: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  // NOTE SX_LOAD_KEEPS_VALUE line 27: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
   streak = load "training.streak", default: streak
   say "Streak ${streak + 1}"
 } else {
@@ -66,4 +78,25 @@ if (choose yes: "Yes", no: "No") == "yes" {
     say "No streak"
   }
 }
+// loadString() read a stored number as text.
+save 2 as "training.version"
+// NOTE SX_LOAD_STRING_TEXT line 36: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+if sexscriptLegacyText(load("training.version")) == "2" {
+  say "Version 2"
+}
+// An online read with a default for a missing value reads with that default.
+// NOTE SX_ONLINE_STORAGE line 38: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let best = load "training.best", default: 0
+// NOTE SX_PLUS_OPERAND_TYPE line 40: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Best ${best + 1}"
+// Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a
+// default that a read in between uses stays a test.
+let shocks = load "training.shocks", default: 3
+let tempo = load "training.tempo", default: 0.5
+let suffix = load "training.suffix"
+let keyed = load "training.key.${suffix}"
+if suffix == null {
+  suffix = "a"
+}
+say "Settings ${shocks} ${tempo} ${suffix} ${keyed}"
 exit

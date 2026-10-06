@@ -2,14 +2,13 @@ speaker system {
   title: "System"
 }
 function sexscriptLegacyAskOnce(key, question) {
-  if (load key) == null {
-    say as system question
-    save (askText as system) as key
+  if load(key) == null {
+    save (askText as system question) as key
   }
   return load key
 }
 function sexscriptLegacyDeviceId {
-  if (load "system.deviceId") == null {
+  if load("system.deviceId") == null {
     save "${randomInteger(0..2147483647)}" as "system.deviceId"
   }
   return load "system.deviceId"

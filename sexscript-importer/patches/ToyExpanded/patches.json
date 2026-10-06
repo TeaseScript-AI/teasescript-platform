@@ -251,6 +251,13 @@
       "category": "b",
       "reason": "The difficulty settings built the level overview with a collect over a GString holding a ternary and the choice list with (lmin..5).eachWithIndex, neither of which converts, so the overview was empty and only 'Cancel' could be chosen. Build both in loops with the same texts and IDs, and save the chosen level as the number it names: the defaults are numbers and getLevel reads a number, where the legacy saved the label text.",
       "diff": "difficulty-menu.diff"
+    },
+    {
+      "id": "gag-text-type",
+      "layer": "source",
+      "category": "b",
+      "reason": "gagText reads its text parameter t by character (t[it]); untyped, the parameter cannot be proven text, so the conversion indexes it like a list, which stops the script. Every caller passes a text, so the parameter is declared String, and the characters convert to substring reads.",
+      "diff": "gag-text-type.diff"
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { createCapturedArray } from "../external-data-capture.js";
 import { type InstructionPlan } from "../plan/model.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
@@ -12,7 +13,7 @@ import {
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 68;
+export const CHECKPOINT_VERSION = 77;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -49,8 +50,45 @@ export function createCheckpoint(
 }
 
 export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
-  const restored = restoreCheckpoint(checkpoint);
-  return serializeJsonIterative(restored);
+  return serializeValidatedRuntimeJson(restoreCheckpoint(checkpoint));
+}
+
+/**
+ * JSON of plain runtime data that checkpoint validation produced, such as a checkpoint or one of its snapshots, without
+ * validating it again. Native JSON writes it as the iterative writer does, unless a host hook could apply or the data is
+ * deeper than the host stack allows.
+ */
+export function serializeValidatedRuntimeJson(value: unknown): string {
+  if (!inheritsToJson()) {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      if (!isStackExhaustion(error)) throw error;
+    }
+  }
+  return serializeJsonIterative(value);
+}
+
+/**
+ * Whether native `JSON.stringify` would consult a `toJSON` that validated checkpoint data inherits. Its containers are
+ * plain data whose prototype is `Object.prototype`, `Array.prototype`, the frozen prototype of captured arrays, or
+ * null. `in` on these ordinary objects runs no getter.
+ */
+function inheritsToJson(): boolean {
+  return (
+    Object.getPrototypeOf(Array.prototype) !== Object.prototype ||
+    "toJSON" in Array.prototype ||
+    "toJSON" in createCapturedArray(0)
+  );
+}
+
+/** A native stack overflow: a `RangeError` in V8 and JavaScriptCore, an `InternalError` in SpiderMonkey. */
+function isStackExhaustion(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    ((error.name === "RangeError" && /call stack/i.test(error.message)) ||
+      (error.name === "InternalError" && /recursion/i.test(error.message)))
+  );
 }
 
 function serializeJsonIterative(value: unknown): string {

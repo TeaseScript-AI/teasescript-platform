@@ -22,3 +22,9 @@ def counts = [3, 5]
 dialog = loadString("training.greeting")
 dialog = dialog + counts[1] + " swats" + "\n"
 show(dialog)
+// A text read by a range is the part from its first through its last position, also counted from the end; text minus a
+// part drops its first occurrence; text times a count of unknown type repeats it.
+def code = "ABCDOEFO"
+def cut = 3
+def stars = { count -> return "*" * count }
+show(code[0..2] + code[-2..-1] + code[1..<cut] + code[cut..-1] + (code - "O") + stars(cut))

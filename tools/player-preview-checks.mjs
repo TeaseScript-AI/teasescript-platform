@@ -2174,6 +2174,422 @@ async function markupLinkChecks(page) {
 // keyboard and touch; explanations stay collapsed until their label opens them, several at once; jumps go to the Debug
 // log and an invisible live region, never the transcript or notices; a badge shows auto-skip; and `time=skip` only
 // sets the initial state. This group replaces the development scenario with its own script.
+// Debug's Now tab names a development Stage fixture as such, and the session's image again once Runtime is selected.
+async function debugNowOverrideChecks(page) {
+  const base = page.url().split("?")[0];
+  await page.goto(`${base}?dev`);
+  const status = (value) => page.locator(`[data-debug-now-image] [data-status="${value}"]`);
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
+  await status("displayed").waitFor({ timeout: 5_000 });
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  const fixture = page.getByLabel("Stage media fixture");
+  const fixtures = await fixture.locator("option").allInnerTexts();
+  await fixture.selectOption(fixtures.find((name) => name !== "Runtime"));
+  await status("overridden").waitFor({ timeout: 5_000 });
+  await fixture.selectOption("Runtime");
+  await status("displayed").waitFor({ timeout: 5_000 });
+  return "PASS Debug Now names a Stage fixture override and the session image after Runtime";
+}
+
+// Debug's Variables tab (DEBUGGER.md "Player Debug"): the newest message opens to the values it shows and their
+// immediate causes, further levels open by click, keyboard and tap, the trace keeps recording while the panel is hidden,
+// long values wrap and clamp inside the panel, and turning Debug off and on drops the old history honestly.
+async function debugVariablesChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const longTool = `a very long tool name ${"that keeps going ".repeat(12)}to test wrapping`;
+  const source = [
+    'showImage "images/coast.svg"',
+    "let low = 10",
+    "let spanks = randomInteger(low..=30)",
+    `let tools = ["paddle", "cane", ${JSON.stringify(longTool)}]`,
+    `let variable_${"verylong".repeat(24)} = 7`,
+    `say "You get \${spanks} spanks, \${spanks} in all, \${variable_${"verylong".repeat(24)}}", instant`,
+    'let pick = choose a: "Apple", b: "Pear"',
+    'say "You picked ${pick}", instant',
+    'let done = showButton "Done"',
+    // After Debug turns on again: a chain eight values deep from an unrecorded value, with a wide sum on the way.
+    ...Array.from({ length: 25 }, (_, index) => `let x${index} = ${index}`),
+    `let wide = ${Array.from({ length: 25 }, (_, index) => `x${index}`).join(" + ")}`,
+    "let e1 = low + wide",
+    ...Array.from({ length: 7 }, (_, index) => `let e${index + 2} = e${index + 1} + 1`),
+    `say "Done with \${e8} and \${variable_${"verylong".repeat(24)}}", instant`,
+    'let after = askText "Anything else?"',
+    "exit",
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    // Plain string handling: the run-code sandbox that executes this check has no URL global.
+    const url = route.request().url();
+    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
+    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
+  const base = page.url().split("?")[0];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${base}?dev`);
+  const panel = page.locator('[data-tool="Debug"]');
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await panel.locator("[data-panel-pin]").click();
+  // Now names the statement that set the Stage image.
+  await panel
+    .locator("[data-debug-now-image-origin]")
+    .filter({ hasText: "main.tease:1" })
+    .waitFor();
+  const variablesTab = page.getByRole("tab", { name: "Variables", exact: true });
+  await variablesTab.click();
+  const rows = panel.locator("[data-trace-row]");
+  const depth = (value) => panel.locator(`[data-trace-depth="${value}"]`);
+  await rows.first().waitFor({ timeout: 5_000 });
+  check(
+    (await panel.locator("[data-debug-trace-status]").innerText()).includes(
+      "Recording since Start",
+    ),
+    "A Debug session from Start must say so",
+  );
+  // Two levels by default: the newest message and the value it shows; that value's causes stay closed.
+  const spanks = panel
+    .locator('[data-trace-depth="1"]')
+    .filter({ has: page.locator('[data-trace-kind="record"]') })
+    .filter({ hasText: "let spanks" });
+  // The repeated value links to its first row.
+  await panel.locator('[data-trace-depth="1"] [data-trace-kind="reference"]').first().waitFor();
+  await spanks.waitFor();
+  check((await depth(2).count()) === 0, "Causes beyond the message's values opened by default");
+  const toggle = spanks.locator("[data-trace-toggle]");
+  check(
+    (await toggle.getAttribute("aria-label")) === "Show causes of let spanks",
+    "A cause toggle must name what it opens",
+  );
+  await toggle.click();
+  await depth(2).filter({ hasText: "randomInteger(10..=30)" }).waitFor();
+  check((await toggle.getAttribute("aria-expanded")) === "true", "Opened causes must say so");
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await depth(2).first().waitFor({ state: "detached" });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const box = await toggle.boundingBox();
+  check(
+    box.width >= 44 && box.height >= 44,
+    `A cause toggle is smaller than a touch target: ${JSON.stringify(box)}`,
+  );
+  const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  await depth(2).first().waitFor();
+
+  // The trace keeps recording while the panel is hidden: the answer given meanwhile explains the next message.
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await panel.waitFor({ state: "hidden" });
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Pear" }).click();
+  await page.locator(".transcript-entry").filter({ hasText: "You picked b" }).waitFor();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await variablesTab.click();
+  await rows.filter({ hasText: '"You picked b"' }).waitFor();
+  await panel.getByRole("button", { name: "Show causes of let pick", exact: true }).click();
+  await depth(2).filter({ hasText: "Answer" }).waitFor();
+
+  // Long values wrap inside the panel and show in full on request; the view keeps its state across tabs.
+  await panel.locator("[data-debug-background-toggle]").click();
+  await panel.getByLabel("Filter variables by name").fill("tools");
+  await page.getByRole("tab", { name: "Now", exact: true }).click();
+  await variablesTab.click();
+  check(
+    (await panel.getByLabel("Filter variables by name").inputValue()) === "tools",
+    "Another tab reset the Variables view",
+  );
+  const tools = panel.locator("[data-debug-variable]").filter({ hasText: "let tools" });
+  await tools.waitFor();
+  await tools.getByRole("button", { name: "Show all", exact: true }).click();
+  await tools.getByText(longTool, { exact: false }).waitFor();
+  const body = panel.locator("[data-tool-body]");
+  check(
+    await body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    "A long value widened the Debug panel",
+  );
+
+  // Debug off drops the trace; on again records from now, and earlier values say so.
+  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
+  await debugSwitch.click();
+  await panel.getByText("Debug is off.").first().waitFor();
+  await debugSwitch.click();
+  await variablesTab.click();
+  await panel.getByText("Recording since Debug was turned on").waitFor();
+  check((await rows.count()) === 0, "A new trace showed messages from before it began");
+
+  // Everything fits the Small dock and the narrowest drawer: long names, unknown origins, and links to rows above.
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
+  // The question that follows is the newest message; values from before Debug was turned on say so, also at the
+  // deepest indentation, next to the page of a wide cause list.
+  await rows.filter({ hasText: "Done with" }).locator("[data-trace-toggle]").click();
+  for (let guard = 0; guard < 40; guard += 1) {
+    const closed = panel.locator('[data-trace-toggle][aria-expanded="false"]');
+    if ((await closed.count()) === 0) break;
+    await closed.first().click();
+  }
+  const depthOf = (locator) =>
+    locator.evaluate((element) => Number(element.closest("li").dataset.traceDepth));
+  await panel.locator("[data-trace-more]").first().waitFor();
+  const deepest = [
+    await depthOf(panel.locator("[data-trace-more]").first()),
+    Math.max(
+      ...(await panel
+        .locator("[data-trace-unknown]")
+        .evaluateAll((elements) =>
+          elements.map((element) => Number(element.closest("li").dataset.traceDepth)),
+        )),
+    ),
+  ];
+  check(
+    deepest[0] >= 9 && deepest[1] >= 8,
+    `The deepest rows lack the page control or the unknown origin: ${deepest}`,
+  );
+  await panel.locator("[data-debug-background-toggle]").click();
+  await panel.getByLabel("Filter variables by name").fill("");
+  const fits = async (where) => {
+    const sizes = await body.evaluate((element) => [element.scrollWidth, element.clientWidth]);
+    check(
+      sizes[0] <= sizes[1] + 1,
+      `The Variables tab overflows ${where}: ${JSON.stringify(sizes)}`,
+    );
+  };
+  await fits("the default dock");
+  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: "Small", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await fits("the Small dock");
+  await page.setViewportSize({ width: 320, height: 700 });
+  // The narrow drawer opens the panel from its launcher.
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await show.isVisible()) await show.click();
+  if (!(await variablesTab.isVisible()))
+    await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await variablesTab.click();
+  await panel.locator("[data-debug-variables]").waitFor();
+  await fits("the narrow drawer");
+  return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, state across tabs, Debug off and on, fit in Small dock and narrow drawer";
+}
+
+// Explain values on a chat message (DEBUGGER.md "Player Debug") opens Debug's Variables tab on that message's own recorded
+// values, found by its event and not its text: through a function parameter, after the variable changed, for a message
+// with a link and a prose message, by click, keyboard and tap, from deep in a virtualized transcript, also in the narrow
+// drawer. Messages from before Debug was turned on say so, and Debug off removes the entry point without re-keying rows.
+async function explainValuesChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const source = [
+    "let n = 5",
+    "function tell(message) {",
+    "    say message, instant",
+    "}",
+    'tell("You get ${n}")',
+    "let m = 5",
+    'say "You get ${m}", instant',
+    'say "Read [the rules](https://example.com/rules) about ${n}", instant',
+    'say prose "A quiet aside about ${n}", instant',
+    "n = 9",
+    "for i in 1..=40 {",
+    '    say "Line ${i}", instant',
+    "}",
+    'let done = showButton "Done"',
+    'say "After ${n}", instant',
+    'let more = askText "More?"',
+    "exit",
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    const url = route.request().url();
+    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
+    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
+  const base = page.url().split("?")[0];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${base}?dev`);
+  const panel = page.locator('[data-tool="Debug"]');
+  const selected = panel.locator("[data-debug-selected-message]");
+  const entry = (text) => page.locator(".transcript-entry").filter({ hasText: text });
+  const explain = (locator) => locator.locator("[data-explain-values]");
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).waitFor();
+  check(!(await panel.isVisible()), "The Debug panel was open before Explain values");
+
+  // The first messages are far above the latest; the transcript renders them once scrolled to.
+  await page.locator(".transcript-scroll").evaluate((element) => (element.scrollTop = 0));
+  const same = entry("You get 5");
+  await same.nth(1).waitFor();
+  check((await same.count()) === 2, "Both equal messages must be rendered");
+  await same.nth(0).evaluate((element) => (element.dataset.explainMark = "kept"));
+  const button = explain(same.nth(0));
+  check(
+    (await button.getAttribute("aria-label")) === "Explain values",
+    "The entry point must say what it does",
+  );
+  await button.click();
+  await selected.waitFor();
+  check(
+    (await page
+      .getByRole("tab", { name: "Variables", exact: true })
+      .getAttribute("aria-selected")) === "true",
+    "Explain values must show the Variables tab",
+  );
+  // Through the parameter and the argument to the variable, with its value now.
+  for (const text of ["parameter message of tell()", "argument message of tell()", "let n"])
+    await selected.locator("[data-trace-row]").filter({ hasText: text }).first().waitFor();
+  await selected.locator("[data-trace-now]").filter({ hasText: "9" }).waitFor();
+  check(
+    await selected.evaluate((element) => element.contains(document.activeElement)),
+    "Focus must move to the selected message",
+  );
+
+  // The equal message has its own cause, chosen by keyboard.
+  await explain(same.nth(1)).focus();
+  await page.keyboard.press("Enter");
+  await selected.locator("[data-trace-row]").filter({ hasText: "let m" }).first().waitFor();
+  check(
+    (await selected.locator("[data-trace-row]").filter({ hasText: "let n" }).count()) === 0,
+    "An equal message borrowed another message's causes",
+  );
+
+  // A message with a link keeps its link; the entry point sits beside it.
+  const linked = entry("Read the rules about 5");
+  check(
+    (await linked.getByRole("link", { name: "the rules" }).count()) === 1,
+    "The message link must stay a link",
+  );
+  const url = page.url();
+  await explain(linked).click();
+  await selected
+    .locator("[data-trace-row]")
+    .filter({ hasText: "Read the rules" })
+    .first()
+    .waitFor();
+  check(page.url() === url, "Explain values followed the message link");
+
+  // A prose message offers it too, by tap.
+  const prose = page.locator(".transcript-entry[data-prose]").filter({ hasText: "A quiet aside" });
+  const proseButton = explain(prose);
+  // A touch, unlike a click, does not scroll its target into view.
+  await proseButton.scrollIntoViewIfNeeded();
+  const box = await proseButton.boundingBox();
+  check(
+    box.width >= 44 && box.height >= 44,
+    `Explain values is too small to tap: ${JSON.stringify(box)}`,
+  );
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  await selected.locator("[data-trace-row]").filter({ hasText: "A quiet aside" }).first().waitFor();
+
+  // Debug off removes the entry point and keeps every row; on again, earlier messages say why they cannot be explained.
+  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
+  await debugSwitch.click();
+  await page.locator("[data-explain-values]").first().waitFor({ state: "detached" });
+  check(
+    (await same.nth(0).getAttribute("data-explain-mark")) === "kept",
+    "Debug off re-created a transcript row",
+  );
+  await debugSwitch.click();
+  await explain(same.nth(0)).click();
+  await selected.locator("[data-debug-selected-unavailable]").waitFor();
+  check(
+    (await selected.innerText()).includes("Shown before Debug was turned on"),
+    "An earlier message must say why it cannot be explained",
+  );
+  await selected.locator("[data-debug-selected-dismiss]").click();
+  await selected.waitFor({ state: "detached" });
+
+  // A later message is explained in the narrow drawer.
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
+  await page.setViewportSize({ width: 320, height: 700 });
+  const after = entry("After 9");
+  await after.waitFor();
+  if (await page.getByRole("button", { name: "Hide sidebar", exact: true }).isVisible())
+    await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await explain(after).click();
+  await selected.locator("[data-trace-row]").filter({ hasText: "After 9" }).first().waitFor();
+  const body = panel.locator("[data-tool-body]");
+  check(
+    await body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    "The selected message widened the narrow drawer",
+  );
+  return "PASS Explain values by event through parameters, equal texts, link and prose messages, click, key and tap, virtualized history, Debug off and on, narrow drawer";
+}
+
+// With Storage, all four Debug tabs fit the Small dock and the narrow drawer: they wrap inside the tab list, each a full
+// touch target, without widening the panel.
+async function debugTabsFitChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const base = page.url().split("?")[0];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The camera scenario's host persists script storage, so the panel offers Storage.
+  await page.goto(`${base}?dev&scenario=camera`);
+  const panel = page.locator('[data-tool="Debug"]');
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await panel.locator("[data-panel-pin]").click();
+  await panel.locator('[data-debug-tab="storage"]').waitFor();
+  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: "Small", exact: true }).click();
+  await page.keyboard.press("Escape");
+  const fits = async (where) => {
+    const layout = await panel.evaluate((element) => {
+      const body = element.querySelector("[data-tool-body]");
+      const list = element.querySelector('[role="tablist"]').getBoundingClientRect();
+      const tabs = [...element.querySelectorAll('[role="tab"]')].map((tab) =>
+        tab.getBoundingClientRect(),
+      );
+      return {
+        width: [body.scrollWidth, body.clientWidth],
+        inside: tabs.every(
+          (tab) =>
+            tab.left >= list.left - 1 &&
+            tab.right <= list.right + 1 &&
+            tab.top >= list.top - 1 &&
+            tab.bottom <= list.bottom + 1 &&
+            tab.height >= 43,
+        ),
+      };
+    });
+    check(
+      layout.width[0] <= layout.width[1] + 1 && layout.inside,
+      `The Debug tabs do not fit ${where}: ${JSON.stringify(layout)}`,
+    );
+  };
+  await fits("the Small dock");
+  await page.setViewportSize({ width: 320, height: 700 });
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await show.isVisible()) await show.click();
+  if (!(await panel.locator('[data-debug-tab="storage"]').isVisible()))
+    await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await panel.locator('[data-debug-tab="storage"]').waitFor();
+  await fits("the narrow drawer");
+  // Arrow keys still move between the wrapped tabs.
+  await panel.locator('[data-debug-tab="log"]').click();
+  await page.keyboard.press("ArrowRight");
+  check(
+    (await panel.locator('[data-debug-tab="storage"]').getAttribute("aria-selected")) === "true",
+    "ArrowRight no longer reaches the wrapped Storage tab",
+  );
+  return "PASS Debug's four tabs wrap inside the Small dock and the narrow drawer, as touch targets reachable by arrow keys";
+}
+
 async function developmentTimeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2202,6 +2618,7 @@ async function developmentTimeChecks(page) {
   const badge = page.locator("[data-development-time-badge]");
   const announcement = page.locator('[role="status"]').filter({ hasText: "Debug log" });
   const logLines = page.locator("[data-debug-log] li");
+  const logTab = page.getByRole("tab", { name: "Log", exact: true });
   const autoSkip = page.getByRole("switch", { name: "Auto-skip", exact: true });
   const aboutAutoSkip = page.getByRole("button", { name: "About auto-skip", exact: true });
   const aboutJumps = page.getByRole("button", { name: "About time jumps", exact: true });
@@ -2219,13 +2636,41 @@ async function developmentTimeChecks(page) {
     return ![...texts, ...toasts].some((text) => text.includes("⏩"));
   };
 
-  // The development server opens the preview without `?dev`, but not the Debug tool.
+  // The development server opens the preview without `?dev`, with the Debug menu off.
   await page.reload();
   await page.locator("[data-launcher]").waitFor();
   check(
     (await launcher.count()) === 0 && (await badge.count()) === 0,
-    "The Debug tool exists without ?dev",
+    "The Debug menu starts on without ?dev",
   );
+  // Settings' Debug menu offers the panel, whose Debug switch starts on; turning the menu off removes even a pinned
+  // panel from every panel state, and turning it on again offers a fresh closed launcher.
+  const settings = page.getByRole("dialog", { name: "Player Settings" });
+  const debugMenu = settings.getByRole("switch", { name: "Debug menu", exact: true });
+  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
+  const toggleDebugMenu = async () => {
+    await page.locator("[data-settings-trigger]").click();
+    await debugMenu.click();
+    await page.keyboard.press("Escape");
+    await settings.waitFor({ state: "hidden" });
+  };
+  await toggleDebugMenu();
+  await launcher.click();
+  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
+  check(await debugSwitch.isChecked(), "The panel's Debug switch must start on");
+  await debugSwitch.click();
+  await autoSkip.waitFor({ state: "detached" });
+  await toggleDebugMenu();
+  await page.locator('[data-tool="Debug"]').waitFor({ state: "detached" });
+  check((await launcher.count()) === 0, "Turning the Debug menu off left its launcher");
+  await toggleDebugMenu();
+  check(
+    (await page.locator('[data-tool="Debug"]').count()) === 0,
+    "A removed Debug panel came back open",
+  );
+  await launcher.click();
+  await autoSkip.waitFor();
+  check(await debugSwitch.isChecked(), "Turning the Debug menu on must switch Debug on");
 
   // `?dev` starts with auto-skip off and the controls active; explanations start collapsed.
   await page.goto(`${base}?dev`);
@@ -2270,8 +2715,15 @@ async function developmentTimeChecks(page) {
   check(!(await autoSkip.isChecked()), "Tapping the label switched auto-skip");
 
   // Skip ends the wait at once and logs the jump; a waiting button offers +10 s and +1 min, but nothing to skip.
+  // Now is the first tab; the log keeps its lines while another tab shows.
+  check(
+    (await page.getByRole("tab", { name: "Now", exact: true }).getAttribute("aria-selected")) ===
+      "true",
+    "The Debug panel must open on Now",
+  );
   await skip.click();
   await foreground("Done").waitFor({ timeout: 5_000 });
+  await logTab.click();
   // What really elapsed before Skip is not skipped.
   await logLines
     .first()
@@ -2326,6 +2778,7 @@ async function developmentTimeChecks(page) {
   );
   await launcher.click();
   check(await autoSkip.isChecked(), "time=skip must switch auto-skip on");
+  await logTab.click();
   await logLines
     .first()
     .filter({ hasText: /^⏩ 1[45] s skipped$/ })
@@ -2333,7 +2786,7 @@ async function developmentTimeChecks(page) {
   await autoSkip.click();
   await badge.waitFor({ state: "detached" });
   check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
-  return "PASS Debug tool only with ?dev, collapsed explanations by click, key and tap, one button row, Debug log, announcements, auto-skip";
+  return "PASS Debug menu off without ?dev and pruned when turned off, Debug switch, collapsed explanations by click, key and tap, one button row, Debug log, announcements, auto-skip";
 }
 
 const groups = [
@@ -2361,6 +2814,10 @@ const groups = [
   directDemoLatestChecks,
   markupLinkChecks,
   developmentTimeChecks,
+  debugNowOverrideChecks,
+  debugVariablesChecks,
+  debugTabsFitChecks,
+  explainValuesChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,

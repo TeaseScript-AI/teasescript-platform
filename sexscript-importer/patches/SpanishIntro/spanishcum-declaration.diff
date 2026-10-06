@@ -1,0 +1,15 @@
+--- a/scripts/SpanishIntro.groovy
++++ b/scripts/SpanishIntro.groovy
+@@ -201,10 +201,11 @@
+ if (getBoolean("That's almost it for lección uno.\nI just wanted to meet you, and find out a little about you.  Be sure to study!\n\nWould you like to have a chance at an orgasm?")){
+ 	def spanishorgasmquestion = getString("How would one say...\n\n'I am glad to hear your name in Spanish!' ", " ");
+ 		if (spanishorgasmquestion == "¡Yo alegro escuchar tu nombre en español!") {
++				def spanishcum = 0;
+ 				if (spanishcum == 0) {
+ 			setImage("SpanishClass/015.jpg");
+ 			show("Mierde, you got it right.  I suppose a deal is a deal, go ahead and have an orgasm.");
+-			def spanishcum = 1;
++			spanishcum = 1;
+ 			wait(15);
+ 			setImage("SpanishClass/022.jpg");
+ 			if(getBoolean("¡Ay! ¡Tengo una idea!\n\nRuin that fucking orgasm.  I said you could have one, I never said it would be good.",	"Yes, Mistress", "I already finished, Mistress")) {

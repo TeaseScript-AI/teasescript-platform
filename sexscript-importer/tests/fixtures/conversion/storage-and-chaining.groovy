@@ -15,6 +15,9 @@ greeting = load("training.greeting")
 show("Hello " + greeting)
 // Groovy ordered a missing storage value, null, below every value.
 if (loadInteger("training.level") < 3) show("Still a beginner")
+// So did a function that returns a stored value.
+def rank = { -> return loadInteger("training.rank") }
+if (rank() >= 2) show("Ranked")
 // A read from the legacy online service, too.
 def record = receiveInteger("training.record")
 if (record >= 10) show("A new record")
@@ -28,4 +31,21 @@ if (getBoolean("Keep the streak?")) {
   streak = loadInteger("training.streak")
   if (streak == null) show("No streak")
 }
+// loadString() read a stored number as text.
+save("training.version", 2)
+if (loadString("training.version") == "2") show("Version 2")
+// An online read with a default for a missing value reads with that default.
+def best = receiveInteger("training.best")
+if (best == null) best = 0
+show("Best ${best + 1}")
+// Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a
+// default that a read in between uses stays a test.
+def shocks = loadInteger("training.shocks")
+def tempo = loadFloat("training.tempo")
+def suffix = loadString("training.suffix")
+if (shocks == null) shocks = 3
+if (tempo == null) tempo = 0.5
+def keyed = loadString("training.key." + suffix)
+if (suffix == null) suffix = "a"
+show("Settings ${shocks} ${tempo} ${suffix} ${keyed}")
 return null

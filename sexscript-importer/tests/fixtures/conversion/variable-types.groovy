@@ -71,3 +71,42 @@ def pick = chanceOrFlag
 def picked = false
 picked = pick(3)
 show("P " + picked)
+// A list that may become null, of elements no code shows, and a value that is first a number and then a date, are
+// declared with types an annotation can write.
+def picks = []
+if (getBoolean("Clear?")) picks = null
+show("Cleared " + (picks == null))
+def stamp = 0
+stamp = new Date()
+show("Stamped")
+// A variable that holds one of two ranges starts as null, not as a list.
+def span
+if (getBoolean("Low?")) span = 1..3 else span = 4..6
+for (n in span) show("N " + n)
+// A float parameter with a whole default takes fractions.
+def fade = { float seconds = 0.0 -> show("Fade " + seconds) }
+fade(0.5)
+// A function that ends in an endless loop returns only what its returns give.
+def pickPage = { ->
+	for (;;) {
+		def page = getInteger("Page?", 1)
+		if (page > 0) return page
+	}
+}
+def page = 9
+page = pickPage()
+show("Page ${page + 1}")
+// A local that a null test rules out in a branch holds no null there.
+def joinNames = { ->
+	def all = "0"
+	def next = "0"
+	for (def i = 0; next != null; i++) {
+		next = loadString("names." + i)
+		if (next == null) show("End")
+		else if (all == "0") all = next
+		else all = all + ", " + next
+	}
+	return all
+}
+def joined = joinNames()
+show("Names ${joined.length()}")

@@ -1,4 +1,10 @@
-import type { FileTarget, FunctionDeclaration, Program } from "../ast.js";
+import type {
+  Block,
+  FileTarget,
+  FunctionDeclaration,
+  InteractionExpression,
+  Program,
+} from "../ast.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -9,6 +15,7 @@ import {
   type PlanImage,
   type PlanTag,
   type TypeCheckPlan,
+  type PreparedFormShape,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
@@ -32,6 +39,8 @@ export interface StableProjectFile {
   readonly program: Program;
   /** The files each glob target may pick, from semantic validation. */
   readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The variables each timer, media, or button block shares with the code that created it. */
+  readonly captures?: ReadonlyMap<Block, readonly string[]>;
   /** The tags of the file's header, in name order; `null` for a file of declarations only. */
   readonly tags?: readonly PlanTag[] | null;
 }
@@ -56,6 +65,7 @@ export function compileStableProject(
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
   onFile: (fileIndex: number) => void = () => {},
   images: readonly PlanImage[] = [],
+  formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
@@ -69,7 +79,7 @@ export function compileStableProject(
   const globalIds = new Map<string, number>();
   const files: PlanFile[] = [];
   const destinations: PendingDestination[] = [];
-  for (const [fileIndex, { path, program, picks, tags }] of projectFiles.entries()) {
+  for (const [fileIndex, { path, program, picks, captures, tags }] of projectFiles.entries()) {
     const declarations = program.statements.filter(
       (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
     );
@@ -82,6 +92,8 @@ export function compileStableProject(
       project,
       path,
       picks,
+      captures,
+      formShapes,
     );
     const startInstruction = instructions.length;
     if (fileIndex === 0)

@@ -40,7 +40,7 @@ save 4 as "x.count"
 let stored: integer = load "x.count"
 // Another storage read may hold a fraction, which Groovy truncated.
 save 2.5 as "x.ratio"
-let ratio = toInteger(load "x.ratio")
+let ratio = toInteger(load("x.ratio"))
 say "Ratio ${ratio}"
 // A number that starts as null, and that nothing compares with null, starts at 0.
 let later: number = 0
@@ -101,4 +101,66 @@ let pick = "chanceOrFlag"
 let picked: boolean | number | null = false
 picked = sexscriptLegacyCall(pick, [3])
 say "P ${picked}"
+// A list that may become null, of elements no code shows, and a value that is first a number and then a date, are
+// declared with types an annotation can write.
+let picks: list | null = []
+say "Clear?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  picks = null
+}
+say "Cleared ${picks == null}"
+// NOTE SX_UNION_TYPE line 79: Groovy let 'stamp' hold values of several types; TeaseScript declares it 'integer | datetime' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if stamp is integer { ... }
+let stamp: integer | datetime = 0
+stamp = getDateTime()
+say "Stamped"
+// A variable that holds one of two ranges starts as null, not as a list.
+let span = null
+say "Low?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  span = 1..=3
+} else {
+  span = 4..=6
+}
+for n in span {
+  say "N ${n}"
+}
+// A float parameter with a whole default takes fractions.
+function fade(seconds: number = 0) {
+  say "Fade ${seconds}"
+}
+fade(0.5)
+// A function that ends in an endless loop returns only what its returns give.
+function pickPage {
+  while true {
+    let pageValue = askInteger "Page?", default: 1
+    if pageValue > 0 {
+      return pageValue
+    }
+  }
+}
+let page = 9
+page = pickPage()
+// NOTE SX_PLUS_OPERAND_TYPE line 98: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Page ${page + 1}"
+// A local that a null test rules out in a branch holds no null there.
+function joinNames {
+  let all = "0"
+  let next: string? = "0"
+  let i = 0
+  while next != null {
+    next = load "names.${i}"
+    if next == null {
+      say "End"
+    } else if all == "0" {
+      all = next
+    } else {
+      all += ", ${next}"
+    }
+    i += 1
+  }
+  return all
+}
+let joined = joinNames()
+// NOTE SX_LENGTH_RECEIVER line 112: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Names ${joined.length}"
 exit

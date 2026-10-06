@@ -40,8 +40,13 @@ export function useDevelopmentTime(
       snapshot.value !== null &&
       activePlayerRuntimeInteraction(snapshot.value) !== null,
   );
+  // A state Debug's rewind restored is inspected until input adopts it; auto-skip waits for that.
   const autoSkipDue = computed(
-    () => canSkip.value && autoSkip.value && autoSkippable(snapshot.value!),
+    () =>
+      canSkip.value &&
+      autoSkip.value &&
+      !player.rewind.inspecting.value &&
+      autoSkippable(snapshot.value!),
   );
 
   function record(from: PlayerRuntimeSession, to: PlayerRuntimeSession) {
@@ -61,6 +66,9 @@ export function useDevelopmentTime(
     jumping.value = true;
     const generation = player.generation.value;
     try {
+      // Skipping is input to a state Debug's rewind restored: it adopts the state first.
+      if (!(await player.prepareInput())) return;
+      if (disposed || player.generation.value !== generation) return;
       // Time that really elapsed is observed first, with the media progress actually played.
       const start = player.observe();
       const targetMs = start === null ? null : target(start);

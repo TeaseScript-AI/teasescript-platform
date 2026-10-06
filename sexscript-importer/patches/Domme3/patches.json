@@ -41,6 +41,13 @@
       "category": "e",
       "reason": "Resetting all settings saves domme3.lastday as DAY, which settings never defines (Domme3.groovy and introfirst define it locally), so the reset failed in Groovy. Define DAY in settings exactly as those scripts do.",
       "diff": "settings-reset-day.diff"
+    },
+    {
+      "id": "spanking-image-path",
+      "layer": "source",
+      "category": "b",
+      "reason": "One spanking picture is set with the literal path Domme/Domme43.jpg, a folder the unit does not have; Domme43.jpg exists only in Domme3/Domme0/, and the other Domme43 reference and the rest of the sequence use imagePath+\"Domme43.jpg\", which resolves there. Use imagePath.",
+      "diff": "spanking-image-path.diff"
     }
   ]
 }

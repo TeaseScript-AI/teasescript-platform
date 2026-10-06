@@ -12,3 +12,12 @@ def strokes = Integer.parseInt(typed)
 def pace = typed.toDouble() / 2
 def ratio = Double.parseDouble("1.5")
 show("Count ${count + strokes} at ${pace * ratio}")
+// A classic loop counter that a later block declares again gets another name there.
+for (int row = 0; row < 2; row++) show("Row " + row)
+if (getBoolean("Again?")) {
+  int row = 5
+  show("Row " + row)
+}
+// Groovy ranged over characters too.
+def letters = ("A".."C") + ("x".."y")
+show(letters.join(""))

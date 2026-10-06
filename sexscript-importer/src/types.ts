@@ -138,6 +138,12 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["toString", STRING],
   ["toUpperCase", STRING],
   ["trim", STRING],
+  // A Date's milliseconds, and the pixel size of a Java image or icon.
+  ["getTime", NUMBER],
+  ["getWidth", NUMBER],
+  ["getHeight", NUMBER],
+  ["getIconWidth", NUMBER],
+  ["getIconHeight", NUMBER],
 ]);
 
 /** Java list classes, whose constructors make a list. */
@@ -228,6 +234,9 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
   if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
   if (operator === "[") {
+    // A text read by a position or a range is text.
+    const target = inferType(asNode(node.left), environment);
+    if (onlyOf(target, STRING) && target !== 0) return STRING;
     if (environment.elementsPending === true) return 0;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
@@ -239,10 +248,11 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   }
-  // Groovy list - value is a list without the value.
+  // Groovy list - value is a list without the value, and text - part text without the part.
   if (operator === "-") {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
+    if (onlyOf(left, STRING) && left !== 0) return STRING;
   }
   if (operator === "*") {
     // Groovy `text * n` and `list * n` repeat the text or the list's elements.
@@ -271,6 +281,14 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   if (onlyOf(left, STRING | NULL) && left & STRING) return STRING;
   if (onlyOf(right, STRING | NULL) && right & STRING) return STRING;
   if (onlyOf(left, NUMBER) && onlyOf(right, NUMBER)) return NUMBER;
+  // Groovy failed on a null number operand, so where the sum has a value it is a number.
+  if (
+    onlyOf(left, NUMBER | NULL) &&
+    left & NUMBER &&
+    onlyOf(right, NUMBER | NULL) &&
+    right & NUMBER
+  )
+    return NUMBER;
   if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   return UNKNOWN;
 }
@@ -972,7 +990,9 @@ function declaredType(type: unknown): ValueType | null {
     return LIST;
   // A primitive parameter holds its value; a boxed one may also be null.
   if (["int", "long", "short", "byte", "double", "float"].includes(name)) return NUMBER;
-  if (["Integer", "Long", "Short", "Byte", "Double", "Float", "BigDecimal", "Number"].includes(name))
+  if (
+    ["Integer", "Long", "Short", "Byte", "Double", "Float", "BigDecimal", "Number"].includes(name)
+  )
     return NUMBER | NULL;
   if (name === "boolean") return BOOLEAN;
   if (name === "Boolean") return BOOLEAN | NULL;

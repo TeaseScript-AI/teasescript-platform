@@ -9,6 +9,7 @@ export interface PlayerTool {
 
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
+import Switch from "@/components/ui/switch/Switch.vue";
 import Sortable from "sortablejs";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
 import ToolPanelBody from "./ToolPanelBody.vue";
@@ -38,6 +39,10 @@ import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
+import SavedDataExport from "./SavedDataExport.vue";
+import SavedDataImport from "./SavedDataImport.vue";
+import type { SavedDataImportReview } from "./usePlayerSession";
+import type { SavedScript, StorageBundle } from "../../storage-transfer.js";
 import {
   computed,
   nextTick,
@@ -58,12 +63,29 @@ const props = defineProps<{
   stageHeight: number;
   mediaAspect: number;
   fullscreen: boolean;
-  /** The script's saved data when the host persists it; clearing is possible only while no session runs. */
-  savedData?: { readonly canClear: boolean; readonly clear: () => Promise<boolean> } | null;
+  /**
+   * The script's saved data when the host persists it: exporting is always possible, importing ends a session in
+   * progress after confirmation, and clearing is possible only while no session runs.
+   */
+  savedData?: {
+    readonly export: () => Promise<readonly SavedScript[]>;
+    readonly import: {
+      readonly available: boolean;
+      readonly sessionInProgress: boolean;
+      readonly review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
+      readonly commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
+    };
+    /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
+    readonly clear: { readonly available: boolean; readonly run: () => Promise<boolean> } | null;
+  } | null;
+  /** Whether a session or a Player error can be exported for a developer; the action opens the export dialog. */
+  debugExport?: { readonly available: boolean; readonly open: () => void } | null;
 }>();
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
 const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
+// Testing: whether the tools menu offers the Debug panel. PlayerApp owns it; it is not a stored preference.
+const debugMenu = defineModel<boolean>("debugMenu", { required: true });
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = usePlayerPreference<LabelMode>("player-menu-label-mode", ["icons", "preview", "labels"], "icons");
 const hoverPreview = ref(false);
@@ -203,7 +225,7 @@ async function askToClearSavedData() {
 }
 async function confirmClearSavedData() {
   clearSavedData.value = "clearing";
-  clearSavedData.value = (await props.savedData?.clear()) ? "cleared" : "failed";
+  clearSavedData.value = (await props.savedData?.clear?.run()) ? "cleared" : "failed";
 }
 watch(
   [sidebarVisible, narrow],
@@ -446,6 +468,32 @@ async function showToolMenu(event: MouseEvent) {
 }
 let pendingToolClose: { tool: Tool; timer: ReturnType<typeof setTimeout> } | null = null;
 let lastClosedTool: { tool: Tool; index: number; pinned: boolean } | null = null;
+// A tool the caller no longer supplies, such as Debug after the Debug menu is turned off, leaves every panel state and
+// unmounts its content. Focus inside its panel moves to the tools toggle.
+watch(
+  () => props.tools.map((tool) => tool.name),
+  async (names) => {
+    const removed = (tool: Tool) => !names.includes(tool);
+    const removedFocus = visitedTools.value.some(
+      (tool) =>
+        removed(tool) &&
+        !!toolContentTargets[tool]?.closest("[data-tool]")?.contains(document.activeElement),
+    );
+    if (pendingToolClose && removed(pendingToolClose.tool)) cancelPendingClose();
+    if (lastClosedTool && removed(lastClosedTool.tool)) lastClosedTool = null;
+    if (narrowTool.value !== null && removed(narrowTool.value)) {
+      narrowTool.value = null;
+      narrowMenuVisible.value = true;
+    }
+    if (temporaryTool.value !== null && removed(temporaryTool.value)) temporaryTool.value = null;
+    openTools.value = openTools.value.filter((tool) => !removed(tool));
+    pinnedTools.value = pinnedTools.value.filter((tool) => !removed(tool));
+    visitedTools.value = visitedTools.value.filter((tool) => !removed(tool));
+    if (!removedFocus) return;
+    await nextTick();
+    focusToolsToggle();
+  },
+);
 const toolStrip = ref<HTMLElement | null>(null);
 let revealRequest = 0;
 
@@ -541,6 +589,21 @@ function clickTool(tool: Tool, event: MouseEvent) {
   temporaryTool.value = tool;
   void revealTool(tool);
 }
+
+/** Opens a tool's panel, or keeps it open, and shows it: the tools surface, the drawer in a narrow layout, the panel. */
+async function showTool(tool: Tool) {
+  cancelPendingClose();
+  lastClosedTool = null;
+  if (!openTools.value.includes(tool)) {
+    const index = temporaryTool.value ? openTools.value.indexOf(temporaryTool.value) : -1;
+    if (index >= 0) openTools.value.splice(index, 1, tool);
+    else openTools.value.push(tool);
+    temporaryTool.value = tool;
+  }
+  if (!sidebarVisible.value) setSidebarVisible(true);
+  await revealTool(tool);
+}
+defineExpose({ showTool });
 
 function setPinned(tool: Tool, pinned: boolean) {
   if (pendingToolClose?.tool === tool) cancelPendingClose();
@@ -832,7 +895,7 @@ async function updateSidebarVisibility(open: boolean) {
                     <DialogHeader>
                       <DialogTitle>Player Settings</DialogTitle>
                       <DialogDescription>
-                        Preferences for the Player interface{{ savedData ? " and this script's saved data" : "" }}.
+                        Preferences for the Player interface{{ savedData ? " and the saved data of the scripts you play" : "" }}.
                       </DialogDescription>
                     </DialogHeader>
                     <label class="flex flex-col gap-2 text-sm">
@@ -869,49 +932,97 @@ async function updateSidebarVisibility(open: boolean) {
                         B · Auto-hide, controls right
                       </label>
                     </fieldset>
+                    <section class="grid gap-2 border-t pt-4 text-sm" data-player-setting="testing">
+                      <h3 class="font-medium">Testing</h3>
+                      <label class="flex min-h-11 items-center justify-between gap-4">
+                        Debug menu
+                        <Switch v-model="debugMenu" data-player-setting="debug-menu" />
+                      </label>
+                      <p class="text-muted-foreground">
+                        Adds the Debug panel to the tools menu until the page is reloaded. It shows how the script
+                        runs and may reveal what comes next.
+                      </p>
+                      <template v-if="debugExport">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          class="min-h-11 justify-self-start"
+                          :disabled="!debugExport.available"
+                          data-player-setting="debug-export"
+                          @click="debugExport.open"
+                        >
+                          Download debug export…
+                        </Button>
+                        <p class="text-muted-foreground">
+                          {{
+                            debugExport.available
+                              ? "A file that helps a developer find what went wrong; you choose what it includes."
+                              : "Available once a session has started."
+                          }}
+                        </p>
+                      </template>
+                    </section>
                     <section
                       v-if="savedData"
                       class="grid gap-2 border-t pt-4 text-sm"
                       data-player-setting="saved-data"
                     >
-                      <h3 class="font-medium">Saved script data</h3>
-                      <p>What this script saved in this browser for its next runs.</p>
-                      <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
-                        <p>Clear all saved data for this script? This cannot be undone.</p>
-                        <div ref="clearConfirmation" class="flex gap-2">
+                      <h3 class="font-medium">Saved data</h3>
+                      <p>
+                        What the scripts you play saved in this browser. Export and import take every script at once,
+                        or the ones you tick.
+                      </p>
+                      <div class="flex flex-wrap gap-2">
+                        <SavedDataExport :read="savedData.export" />
+                        <SavedDataImport
+                          :available="savedData.import.available"
+                          :session-in-progress="savedData.import.sessionInProgress"
+                          :review="savedData.import.review"
+                          :commit="savedData.import.commit"
+                        />
+                      </div>
+                      <template v-if="savedData.clear">
+                        <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
+                          <p>Clear all saved data for this script? This cannot be undone.</p>
+                          <div ref="clearConfirmation" class="flex gap-2">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              class="min-h-11"
+                              :disabled="clearSavedData === 'clearing'"
+                              data-clear-saved-data-confirm
+                              @click="confirmClearSavedData"
+                            >
+                              {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              class="min-h-11"
+                              :disabled="clearSavedData === 'clearing'"
+                              @click="clearSavedData = 'idle'"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </template>
+                        <template v-else>
                           <Button
-                            variant="destructive"
-                            size="sm"
-                            :disabled="clearSavedData === 'clearing'"
-                            data-clear-saved-data-confirm
-                            @click="confirmClearSavedData"
-                          >
-                            {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
-                          </Button>
-                          <Button
+                            class="min-h-11 justify-self-start"
                             variant="outline"
                             size="sm"
-                            :disabled="clearSavedData === 'clearing'"
-                            @click="clearSavedData = 'idle'"
+                            :disabled="!savedData.clear.available"
+                            data-clear-saved-data
+                            @click="askToClearSavedData"
                           >
-                            Cancel
+                            Clear saved script data
                           </Button>
-                        </div>
-                      </template>
-                      <template v-else>
-                        <Button
-                          class="justify-self-start"
-                          variant="outline"
-                          size="sm"
-                          :disabled="!savedData.canClear"
-                          data-clear-saved-data
-                          @click="askToClearSavedData"
-                        >
-                          Clear saved script data
-                        </Button>
-                        <p v-if="!savedData.canClear">Available before the session starts or after it ends.</p>
-                        <p v-if="clearSavedData === 'cleared'" role="status">Saved script data cleared.</p>
-                        <p v-if="clearSavedData === 'failed'" role="status">Could not clear saved script data.</p>
+                          <p v-if="!savedData.clear.available">
+                            Clears only this script's data, before the session starts or after it ends.
+                          </p>
+                          <p v-if="clearSavedData === 'cleared'" role="status">Saved script data cleared.</p>
+                          <p v-if="clearSavedData === 'failed'" role="status">Could not clear saved script data.</p>
+                        </template>
                       </template>
                     </section>
                   </DialogContent>

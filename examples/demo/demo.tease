@@ -14,7 +14,7 @@ speaker session {
 speaker mistressVera
 
 // Script storage keeps the visit count in this browser; a visit counts as soon as the session starts.
-let visits = (load "demo.visits", default: 0) + 1
+let visits = load("demo.visits", default: 0) + 1
 save visits as "demo.visits"
 
 showImage "images/playroom.svg"
@@ -33,7 +33,7 @@ let patience = timer async hidden 12 s {
     say "When I ask, you answer. Promptly."
     showButton "Yes, Mistress"
 }
-let answer = askText "What you call her"
+let answer = askText hint: "What you call her"
 patience.stop()
 say "${answer}. Good. Don't forget it."
 

@@ -143,9 +143,14 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
           ),
         };
       case "input":
-        return value.defaultValue === undefined
-          ? value
-          : { ...value, defaultValue: expression(value.defaultValue) };
+        return {
+          ...value,
+          ...(value.question === undefined ? {} : { question: expression(value.question) }),
+          ...(value.fields === undefined ? {} : { fields: expression(value.fields) }),
+          ...(value.defaultValue === undefined
+            ? {}
+            : { defaultValue: expression(value.defaultValue) }),
+        };
       case "button":
         return {
           ...value,

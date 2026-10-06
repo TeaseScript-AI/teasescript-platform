@@ -11,6 +11,7 @@ import {
   validInstructionBoundary,
 } from "./validation-support.js";
 import type { Instruction } from "./model.js";
+import { recordValidationTestWork } from "../validation-testing.js";
 import { instructionKilledTemporaries, requiredInstructionTemporaries } from "./temporary-uses.js";
 
 /** Validated instruction boundaries of one plan file. */
@@ -529,9 +530,9 @@ function validateCanonicalPreparedSays(
     entries.push(instructionIndex);
     producers.set(temporaryId, entries);
   });
-  const explicitIncomingSources = hasPreparedSay
-    ? collectExplicitIncomingSources(instructions)
-    : [];
+  // Built for the first prepared say that reaches the clear and bypass checks.
+  let rangesCache: PreparedSayRanges | null = null;
+  const ranges = (): PreparedSayRanges => (rangesCache ??= preparedSayRanges(instructions, index));
   const payloadReferences = hasPreparedSay
     ? collectPayloadTemporaryReferences(instructions)
     : new Map<number, readonly number[]>();
@@ -598,7 +599,7 @@ function validateCanonicalPreparedSays(
       region,
       instructions,
       index,
-      explicitIncomingSources,
+      ranges,
       producers,
       consumed,
       errors,
@@ -612,7 +613,7 @@ function validateCanonicalPreparedSays(
       region,
       instructions,
       index,
-      explicitIncomingSources,
+      ranges,
       producers,
       consumed,
       errors,
@@ -625,7 +626,7 @@ function validateCanonicalPreparedSays(
       region,
       instructions,
       index,
-      explicitIncomingSources,
+      ranges,
       payloadReferences,
       producers,
       consumed,
@@ -661,7 +662,7 @@ function validatePreparedSayProducer(
   region: InstructionExecutionRegion,
   instructions: readonly unknown[],
   index: PlanValidationIndex,
-  explicitIncomingSources: readonly (readonly number[])[],
+  ranges: () => PreparedSayRanges,
   producers: ReadonlyMap<number, readonly number[]>,
   consumed: Set<number>,
   errors: PlanValidationError[],
@@ -704,7 +705,7 @@ function validatePreparedSayProducer(
     return;
   }
   consumed.add(producerIndex);
-  if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, preparedTemporaryId)) {
+  if (preparedSayTemporaryIsCleared(ranges(), producerIndex, sayIndex, preparedTemporaryId)) {
     errors.push(
       planError(
         "TSC002",
@@ -713,7 +714,7 @@ function validatePreparedSayProducer(
       ),
     );
   }
-  if (preparedSayCanBeBypassed(index, explicitIncomingSources, region, producerIndex, sayIndex)) {
+  if (preparedSayCanBeBypassed(ranges(), region, producerIndex, sayIndex)) {
     errors.push(
       planError(
         "TSC002",
@@ -732,7 +733,7 @@ function validatePreparedSayContextualSpeaker(
   region: InstructionExecutionRegion,
   instructions: readonly unknown[],
   index: PlanValidationIndex,
-  explicitIncomingSources: readonly (readonly number[])[],
+  ranges: () => PreparedSayRanges,
   payloadReferences: ReadonlyMap<number, readonly number[]>,
   producers: ReadonlyMap<number, readonly number[]>,
   consumed: Set<number>,
@@ -777,7 +778,7 @@ function validatePreparedSayContextualSpeaker(
   }
   consumed.add(producerIndex);
   // EVIDENCE: validation: temporaryId passed Number.isSafeInteger before this analysis.
-  if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, temporaryId as number)) {
+  if (preparedSayTemporaryIsCleared(ranges(), producerIndex, sayIndex, temporaryId as number)) {
     errors.push(
       planError(
         "TSC002",
@@ -804,7 +805,7 @@ function validatePreparedSayContextualSpeaker(
       ),
     );
   }
-  if (preparedSayCanBeBypassed(index, explicitIncomingSources, region, producerIndex, sayIndex)) {
+  if (preparedSayCanBeBypassed(ranges(), region, producerIndex, sayIndex)) {
     errors.push(
       planError(
         "TSC002",
@@ -965,28 +966,124 @@ function collectExpressionTemporaryReferences(value: unknown, output: Set<number
   }
 }
 
-function preparedSayTemporaryIsCleared(
+/**
+ * Facts for the clear and bypass checks of prepared says, indexed once per validation. Each check is then a lookup
+ * instead of a walk over the instructions between a producer and its say, which nested asks make overlap.
+ */
+interface PreparedSayRanges {
+  readonly index: PlanValidationIndex;
+  readonly explicitIncomingSources: readonly (readonly number[])[];
+  /** The ascending indices of the instructions that clear each temporary. */
+  readonly clears: ReadonlyMap<number, readonly number[]>;
+  /** At `i + 1`: how many instructions up to `i` are the target of a `goto`, transfer, or fallback. */
+  readonly gotoTargets: Int32Array;
+  /** At `i`: how many instructions up to `i` have another owner than the one before. */
+  readonly ownerChanges: Int32Array;
+  /** The lowest and highest jump source of each instruction from its own region, by range. */
+  readonly lowestSource: RangeTable;
+  readonly highestSource: RangeTable;
+}
+
+function preparedSayRanges(
   instructions: readonly unknown[],
+  index: PlanValidationIndex,
+): PreparedSayRanges {
+  const explicitIncomingSources = collectExplicitIncomingSources(instructions);
+  const clears = new Map<number, number[]>();
+  const addClear = (temporaryId: unknown, instructionIndex: number) => {
+    if (typeof temporaryId !== "number") return;
+    const entries = clears.get(temporaryId) ?? [];
+    if (entries.at(-1) !== instructionIndex) entries.push(instructionIndex);
+    clears.set(temporaryId, entries);
+  };
+  const count = instructions.length;
+  const gotoTargets = new Int32Array(count + 1);
+  const ownerChanges = new Int32Array(count);
+  const lowest = new Float64Array(count).fill(Infinity);
+  const highest = new Float64Array(count).fill(-Infinity);
+  recordValidationTestWork("preparedSayRangeSteps", count);
+  for (let instructionIndex = 0; instructionIndex < count; instructionIndex += 1) {
+    const instruction = instructions[instructionIndex];
+    if (isRecord(instruction) && instruction.kind === "clearTemporary")
+      addClear(instruction.temporaryId, instructionIndex);
+    else if (
+      isRecord(instruction) &&
+      instruction.kind === "clearTemporaries" &&
+      Array.isArray(instruction.temporaryIds)
+    )
+      for (const temporaryId of instruction.temporaryIds) addClear(temporaryId, instructionIndex);
+    let gotoTarget = false;
+    for (const sourceIndex of explicitIncomingSources[instructionIndex] ?? []) {
+      if (index.gotoSources.has(sourceIndex)) gotoTarget = true;
+      else if (index.owners[sourceIndex] === index.owners[instructionIndex]) {
+        lowest[instructionIndex] = Math.min(lowest[instructionIndex]!, sourceIndex);
+        highest[instructionIndex] = Math.max(highest[instructionIndex]!, sourceIndex);
+      }
+    }
+    gotoTargets[instructionIndex + 1] = gotoTargets[instructionIndex]! + (gotoTarget ? 1 : 0);
+    ownerChanges[instructionIndex] =
+      instructionIndex === 0
+        ? 0
+        : ownerChanges[instructionIndex - 1]! +
+          (index.owners[instructionIndex] === index.owners[instructionIndex - 1] ? 0 : 1);
+  }
+  return {
+    index,
+    explicitIncomingSources,
+    clears,
+    gotoTargets,
+    ownerChanges,
+    lowestSource: rangeTable(lowest, Math.min),
+    highestSource: rangeTable(highest, Math.max),
+  };
+}
+
+/** A sparse table: the combination of any range of values in constant time. */
+interface RangeTable {
+  readonly levels: readonly Float64Array[];
+  readonly combine: (left: number, right: number) => number;
+}
+
+function rangeTable(
+  values: Float64Array,
+  combine: (left: number, right: number) => number,
+): RangeTable {
+  const levels = [values];
+  for (let width = 2; width <= values.length; width *= 2) {
+    const previous = levels.at(-1)!;
+    const level = new Float64Array(values.length - width + 1);
+    for (let start = 0; start < level.length; start += 1)
+      level[start] = combine(previous[start]!, previous[start + width / 2]!);
+    levels.push(level);
+  }
+  return { levels, combine };
+}
+
+/** The combination of the values from `first` to `last`, both included. */
+function rangeQuery(table: RangeTable, first: number, last: number): number {
+  const level = Math.floor(Math.log2(last - first + 1));
+  const values = table.levels[level]!;
+  return table.combine(values[first]!, values[last - (1 << level) + 1]!);
+}
+
+function preparedSayTemporaryIsCleared(
+  ranges: PreparedSayRanges,
   producerIndex: number,
   sayIndex: number,
   temporaryId: number,
 ): boolean {
-  for (
-    let instructionIndex = producerIndex + 1;
-    instructionIndex < sayIndex;
-    instructionIndex += 1
-  ) {
-    const instruction = instructions[instructionIndex];
-    if (
-      isRecord(instruction) &&
-      ((instruction.kind === "clearTemporary" && instruction.temporaryId === temporaryId) ||
-        (instruction.kind === "clearTemporaries" &&
-          Array.isArray(instruction.temporaryIds) &&
-          instruction.temporaryIds.includes(temporaryId)))
-    )
-      return true;
+  recordValidationTestWork("preparedSayRangeSteps");
+  const clears = ranges.clears.get(temporaryId);
+  if (clears === undefined) return false;
+  // The first clear after the producer.
+  let low = 0;
+  let high = clears.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (clears[middle]! <= producerIndex) low = middle + 1;
+    else high = middle;
   }
-  return false;
+  return low < clears.length && clears[low]! < sayIndex;
 }
 
 function collectExplicitIncomingSources(
@@ -1010,42 +1107,62 @@ function collectExplicitIncomingSources(
   return incoming;
 }
 
+/**
+ * Whether an instruction after the producer, up to the say, is the target of a `goto`, transfer, or fallback, or of a
+ * jump from outside that range in the same region.
+ */
 function preparedSayCanBeBypassed(
-  index: PlanValidationIndex,
-  explicitIncomingSources: readonly (readonly number[])[],
+  ranges: PreparedSayRanges,
   region: InstructionExecutionRegion,
   producerIndex: number,
   sayIndex: number,
 ): boolean {
-  for (let target = producerIndex + 1; target <= sayIndex; target += 1) {
-    for (const sourceIndex of explicitIncomingSources[target] ?? []) {
-      if (index.gotoSources.has(sourceIndex)) return true;
-      if (index.owners[sourceIndex] !== region) continue;
-      if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
+  recordValidationTestWork("preparedSayRangeSteps");
+  const first = producerIndex + 1;
+  if (first > sayIndex) return false;
+  const { index } = ranges;
+  if (
+    index.owners[first] !== region ||
+    ranges.ownerChanges[sayIndex] !== ranges.ownerChanges[first]
+  ) {
+    // Only a malformed plan mixes regions here; check each target as written.
+    recordValidationTestWork("preparedSayRangeSteps", sayIndex - first + 1);
+    for (let target = first; target <= sayIndex; target += 1) {
+      for (const sourceIndex of ranges.explicitIncomingSources[target] ?? []) {
+        if (index.gotoSources.has(sourceIndex)) return true;
+        if (index.owners[sourceIndex] !== region) continue;
+        if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
+      }
     }
+    return false;
   }
-  return false;
+  return (
+    ranges.gotoTargets[sayIndex + 1] !== ranges.gotoTargets[first] ||
+    rangeQuery(ranges.lowestSource, first, sayIndex) < producerIndex ||
+    rangeQuery(ranges.highestSource, first, sayIndex) >= sayIndex
+  );
 }
 
+/** Structural equality of two plan values, walked with an explicit stack so that deep expressions fit. */
 function samePreparedSayValue(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => samePreparedSayValue(value, right[index]))
-    );
+  const pending: [unknown, unknown][] = [[left, right]];
+  while (pending.length > 0) {
+    const [a, b] = pending.pop()!;
+    if (Object.is(a, b)) continue;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      for (let item = 0; item < a.length; item += 1) pending.push([a[item], b[item]]);
+      continue;
+    }
+    if (!isRecord(a) || !isRecord(b)) return false;
+    const keys = Object.keys(a);
+    if (keys.length !== Object.keys(b).length) return false;
+    for (const key of keys) {
+      if (!Object.hasOwn(b, key)) return false;
+      pending.push([a[key], b[key]]);
+    }
   }
-  if (!isRecord(left) || !isRecord(right)) return false;
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every(
-      (key) => Object.hasOwn(right, key) && samePreparedSayValue(left[key], right[key]),
-    )
-  );
+  return true;
 }
 
 function validateCanonicalInteractionResultHandoffs(

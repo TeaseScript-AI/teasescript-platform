@@ -1,4 +1,5 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { cloneCaptures } from "../captures.js";
 import type { PermanentButtonPressedEvent } from "../events.js";
 import { permanentButtonBusy, shownPermanentButton } from "../permanent-buttons.js";
 import type { RuntimeSnapshot } from "../state.js";
@@ -6,11 +7,13 @@ import type { PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import {
   captureExecutableData,
+  type CapturedExecutableData,
   copySpan,
   pendingResult,
   positiveSafeInteger,
   takeSequence,
 } from "./support.js";
+import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 
 export type PermanentButtonPressOutcome =
   /** The click is queued; the next run starts the button's block. */
@@ -36,8 +39,19 @@ export function pressPermanentButton(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   buttonId: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<PermanentButtonPressOutcome> {
   const captured = captureExecutableData(plan, snapshot);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const pressed = pressCapturedPermanentButton(captured, buttonId);
+  closeDebugTrace(trace, pressed);
+  return pressed;
+}
+
+function pressCapturedPermanentButton(
+  captured: CapturedExecutableData,
+  buttonId: unknown,
+): PendingActionOperationResult<PermanentButtonPressOutcome> {
   const current = captured.snapshot;
   if (!positiveSafeInteger(buttonId)) {
     return pendingResult(current, [], {
@@ -74,6 +88,7 @@ export function pressPermanentButton(
     buttonId,
     handlerFunctionId: action.button.handlerFunctionId,
     rootScopeId: action.button.rootScopeId,
+    captures: cloneCaptures(action.button.captures),
     dueAtMs: current.currentSessionTimeMs,
     count: 1,
   });

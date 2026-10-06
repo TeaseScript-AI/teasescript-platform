@@ -10,14 +10,14 @@ import { IMAGE_ANSWER_TRANSCRIPT_TEXT } from "../../image-input.js";
 import type {
   InteractionAccessibleName,
   InteractionChoiceOption,
-  InteractionChoiceValue,
   InteractionUiPayload,
 } from "../../plan/model.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
-import type { RuntimeInteractionActionSnapshot } from "./model.js";
+import type { InteractionResultValue, RuntimeInteractionActionSnapshot } from "./model.js";
+import { submitForm } from "./form.js";
 
 /**
  * The milliseconds of a `showButton` timeout: a number of seconds or an elapsed duration that is finite and greater
@@ -34,7 +34,7 @@ export function buttonTimeoutMilliseconds(value: unknown): number | null {
 }
 
 export type ResolvedInteraction =
-  | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
+  | { readonly ok: true; readonly result: InteractionResultValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -49,6 +49,24 @@ export function resolveInteractionCompletion(
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
     return { ok: false, message: "Interaction completion payload must be an object." };
+  }
+  // A form is submitted with the answers its edits gave it; the payload carries none.
+  if (action.ui.kind === "form") {
+    if (
+      (payload.kind !== "submit" && payload.kind !== "cancel") ||
+      Object.keys(payload).length !== 1 ||
+      action.form === undefined
+    )
+      return {
+        ok: false,
+        message: "Form completion payload must be { kind: 'submit' } or { kind: 'cancel' }.",
+      };
+    // Cancelling drops every edit, also text that is not an answer, and returns `null`.
+    if (payload.kind === "cancel")
+      return action.ui.cancel === null
+        ? { ok: false, message: "This form has no cancel button; it must be submitted." }
+        : { ok: true, result: null, transcriptText: action.ui.cancel.text };
+    return submitForm(action.ui, action.form);
   }
   if (action.interactionKind === "button") {
     return payload.kind === "activate" && action.ui.kind === "button"
@@ -208,6 +226,7 @@ export function cloneImageUi(
 ): ImageInteractionUi {
   return {
     kind: "image",
+    question: ui.question,
     hint: ui.hint,
     allowCamera: ui.allowCamera,
     allowFile: ui.allowFile,
@@ -218,11 +237,14 @@ export function cloneImageUi(
 }
 
 /**
- * What an open image request keeps in its request temporary: its arguments as they apply, with the message as text and
- * no message, `types`, or `mime` when there is none. Reading it again gives the same request.
+ * What an open image request keeps in its request temporary: its arguments as they apply, with the question (`message`)
+ * and hint as text and no question, hint, `types`, or `mime` when there is none. Reading it again gives the same request.
  */
 export function imageRequestValue(
-  ui: Pick<ImageInteractionUi, "hint" | "allowCamera" | "allowFile" | "types" | "mime">,
+  ui: Pick<
+    ImageInteractionUi,
+    "question" | "hint" | "allowCamera" | "allowFile" | "types" | "mime"
+  >,
 ): SerializableRuntimeValue {
   const texts = (items: readonly string[]): SerializableRuntimeValue => ({
     kind: "list",
@@ -231,7 +253,8 @@ export function imageRequestValue(
   return {
     kind: "object",
     properties: [
-      ...(ui.hint === null ? [] : [{ name: "message", value: ui.hint }]),
+      ...(ui.question === null ? [] : [{ name: "message", value: ui.question }]),
+      ...(ui.hint === null ? [] : [{ name: "hint", value: ui.hint }]),
       { name: "allowCamera", value: ui.allowCamera },
       { name: "allowFile", value: ui.allowFile },
       ...(ui.types === null ? [] : [{ name: "types", value: texts(ui.types) }]),

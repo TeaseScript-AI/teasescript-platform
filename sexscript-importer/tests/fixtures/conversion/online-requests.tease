@@ -1,27 +1,6 @@
 speaker system {
   title: "System"
 }
-function sexscriptLegacyTruth(value) {
-  if value is boolean {
-    return value
-  }
-  if value is number {
-    return value != 0
-  }
-  if value is string {
-    return value != ""
-  }
-  if value is list or value is set {
-    return value.length > 0
-  }
-  if value is dict {
-    return value.length > 0
-  }
-  if value is object {
-    return value != {}
-  }
-  return value != null
-}
 function sexscriptLegacyMaskUrl(url) {
   let parts = "${url}".split("?")
   if parts.length < 2 {
@@ -46,7 +25,7 @@ let request = "https://example.org/cases.php?id=${userId}&apikey=SECRET&version=
 // NOTE SX_ONLINE_REQUEST line 5: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.
 say as system "Online feature not available here. The original would have requested: GET ${sexscriptLegacyMaskUrl(request)}"
 let answer = ""
-if not sexscriptLegacyTruth(answer) {
+if answer == "" {
   say "We are having trouble connecting to the internet."
 }
 // NOTE SX_ONLINE_REQUEST line 7: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.
@@ -60,4 +39,11 @@ function ask(prompt) {
   return null
 }
 say "Reply: ${ask("Hello")}"
+// A request whose address the function declared shows that address.
+// NOTE SX_ONLINE_REQUEST line 19: This function made a request to an online service, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.
+function ping {
+  say as system "Online feature not available here. The original would have requested: GET http://localhost:1234/ping"
+  return null
+}
+say "Ping ${ping()}"
 exit

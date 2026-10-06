@@ -1,4 +1,5 @@
 import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
+import { cloneCaptures, sweepRetainedScopes } from "../captures.js";
 import { interruptRunning } from "../activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
@@ -8,6 +9,7 @@ import type {
 import { isValidSessionTime } from "../actions/delay.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { nextXorShift32 } from "../random.js";
+import type { TraceStore } from "../debug-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
 import {
   expireTimerRound,
@@ -92,6 +94,7 @@ function settleTimerAction(
   const completionEventSequence = takeSequence(snapshot, 1);
   snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
   snapshot.settledTimers.push(action.timer);
+  sweepRetainedScopes(snapshot, false);
   const settlement: RuntimeTimerSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "timer",
@@ -122,9 +125,10 @@ export function expireTimerAction(
   endedAtMs: number,
   span: SourceSpan | PlanSourceLocation,
   events: InterpreterEvent[],
+  trace: TraceStore | null = null,
 ): void {
   const timer = action.timer;
-  expireTimerRound(timer, endedAtMs, (range) => drawWholeSeconds(snapshot, range));
+  expireTimerRound(timer, endedAtMs, (range) => drawWholeSeconds(snapshot, range, trace));
   // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
   // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
   // shorter than the deadline's resolution may end at the same time without looping.
@@ -143,13 +147,7 @@ export function expireTimerAction(
     timer.anchoredRounds = null;
   }
   if (timer.handlerFunctionId !== null) {
-    queueTimerHandler(
-      snapshot,
-      timer.timerId,
-      timer.handlerFunctionId,
-      timer.rootScopeId,
-      endedAtMs,
-    );
+    queueTimerHandler(snapshot, timer, timer.handlerFunctionId, endedAtMs);
   }
   if (timer.state === "finished") settleTimerAction(snapshot, action, span, events);
 }
@@ -188,11 +186,11 @@ export function stopAllTimersForSessionEnd(snapshot: RuntimeSnapshot): void {
 
 function queueTimerHandler(
   snapshot: RuntimeSnapshot,
-  timerId: number,
+  timer: RuntimeTimerSnapshot,
   handlerFunctionId: number,
-  rootScopeId: number,
   dueAtMs: number,
 ): void {
+  const { timerId, rootScopeId } = timer;
   // Keep the queue in due order: an expiry processed late may be due before one queued at an earlier observation.
   const queue = snapshot.pendingTimerHandlers;
   let index = queue.length;
@@ -208,13 +206,37 @@ function queueTimerHandler(
     previous.count += 1;
     return;
   }
-  queue.splice(index, 0, { timerId, handlerFunctionId, rootScopeId, dueAtMs, count: 1 });
+  queue.splice(index, 0, {
+    timerId,
+    handlerFunctionId,
+    rootScopeId,
+    captures: cloneCaptures(timer.captures),
+    dueAtMs,
+    count: 1,
+  });
 }
 
 /** Draws a repeat round from the persisted session RNG. */
-function drawWholeSeconds(snapshot: RuntimeSnapshot, range: RuntimeTimerRangeSnapshot): number {
+function drawWholeSeconds(
+  snapshot: RuntimeSnapshot,
+  range: RuntimeTimerRangeSnapshot,
+  trace: TraceStore | null,
+): number {
   const length = range.end - range.start + (range.inclusive ? 1 : 0);
-  return range.start + Math.floor(nextXorShift32(snapshot.rng) * length);
+  const before = snapshot.rng.state;
+  const seconds = range.start + Math.floor(nextXorShift32(snapshot.rng) * length);
+  if (trace !== null) {
+    trace.random(
+      "timerRepeat",
+      null,
+      length,
+      { kind: "range", ...range },
+      before,
+      snapshot.rng.state,
+    );
+    trace.randomResult(seconds);
+  }
+  return seconds;
 }
 
 export function timerSpan(plan: InstructionPlan, owningInstruction: number): SourceSpan {

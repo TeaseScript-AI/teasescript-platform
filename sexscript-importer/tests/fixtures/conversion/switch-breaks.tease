@@ -1,51 +1,23 @@
 speaker system {
   title: "System"
 }
-function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
-  let answers = []
-  let confirmed = false
-  while not confirmed {
-    answers = []
-    say as system message
-    let index = 0
-    for text in texts {
-      let yes = "Yes"
-      let no = "No (preset)"
-      if index < defaults.length and defaults[index] == true {
-        yes = "Yes (preset)"
-        no = "No"
-      }
-      say as system text
-      answers.add((choose yes: yes, no: no) == "yes")
-      index += 1
-    }
-    confirmed = (choose confirm: "Confirm", change: "Change answers") == "confirm"
-  }
-  return answers
-}
 function sexscriptLegacyAskProfile {
-  let profileToysKeys: string[] = []
-  let profileToysNames: string[] = []
-  let profileToysDefaults: boolean[] = []
+  let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.crop", "toys.paddle"] {
-    if (load profileToysKey) == null {
-      profileToysKeys.add(profileToysKey)
-      profileToysNames.add(["crop / cane", "paddle"][profileToysIndex])
-      profileToysDefaults.add(false)
+    if load(profileToysKey) == null {
+      profileToysFields[profileToysKey] = { value: false, text: ["crop / cane", "paddle"][profileToysIndex] }
     }
     profileToysIndex += 1
   }
-  if profileToysKeys.length > 0 {
-    let profileToysAnswers = sexscriptLegacyAskBooleansSystem("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
-    profileToysIndex = 0
-    for profileToysKey in profileToysKeys {
-      save profileToysAnswers[profileToysIndex] as profileToysKey
-      profileToysIndex += 1
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
     }
   }
 }
-// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (toys.crop, toys.paddle) once; this package asks what is missing here and saves it under the same keys, so other packages reuse the answers.
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (toys.crop, toys.paddle) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
 sexscriptLegacyAskProfile()
 function sexscriptLegacyCompare(left, right) {
   if left == null {
@@ -78,7 +50,7 @@ switch n {
   }
   case 1 {
     say "One"
-    say "One or two"
+    say "or two"
   }
   case 2 {
     say "One or two"
@@ -131,14 +103,14 @@ if n <= 3 and n >= 1 {
 // A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
 switch randomInteger(0..2) {
   case 0 {
-    if (load "toys.paddle") == true {
+    if load("toys.paddle") == true {
       say "Fetch the paddle"
-    } else if (load "toys.crop") == true {
+    } else if load("toys.crop") == true {
       say "Fetch the crop"
     }
   }
   default {
-    if (load "toys.crop") == true {
+    if load("toys.crop") == true {
       say "Fetch the crop"
     }
   }

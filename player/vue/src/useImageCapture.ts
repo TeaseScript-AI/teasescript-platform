@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, shallowRef, watch, type Ref, type ShallowRef } from "vue";
+import { computed, onScopeDispose, shallowRef, watch, type Ref } from "vue";
 import type { CapturedMediaStore } from "../../captured-media.js";
 import {
   activePlayerRuntimeInteraction,
@@ -45,7 +45,7 @@ interface Capture {
 }
 
 export interface ImageCaptureHost {
-  readonly session: ShallowRef<PlayerRuntimeSession | null>;
+  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly generation: Readonly<Ref<number>>;
   /** The session camera: a capture uses it while it is open, and never opens or releases it. */
   readonly sessionCamera: SessionCamera<MediaStreamTrack>;
@@ -129,7 +129,7 @@ export function useImageCapture(host: ImageCaptureHost) {
     const target: Capture = {
       generation: host.generation.value,
       actionId: request.actionId,
-      question: request.ui.hint ?? "Take a photo",
+      question: request.ui.question ?? "Take a photo",
       phase: "opening",
       reference: null,
       own: false,

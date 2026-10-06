@@ -41,3 +41,12 @@ def describe = { given ->
 	show("Mood " + mood.length())
 }
 describe(null)
+// A collected value with a ternary inside its text computes the ternary first, in the loop.
+def amounts = [1, 3]
+def labels = amounts.collect { "${it} stroke${it > 1 ? "s" : ""}" }
+show(labels.join(", "))
+// An Elvis assignment of a value that may be null to a text variable keeps it text: the fallback goes first.
+def pick = { -> return loadString("x.pick") }
+def word = "none"
+word = pick() ?: ""
+show("Word " + word.length())

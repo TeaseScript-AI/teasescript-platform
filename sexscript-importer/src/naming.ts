@@ -81,7 +81,7 @@ export function renameConflictingIdentifiers(
   };
   return {
     ...program,
-    statements: renameBlock(program.statements, rootScope, false, renamer),
+    statements: renameBlock(program.statements, rootScope, false, renamer, rootScope.keys()),
     ...(program.actions === undefined
       ? {}
       : { actions: program.actions.map((action) => functions.get(action) ?? action) }),
@@ -96,13 +96,19 @@ interface Renamer {
 
 type Scope = Map<string, string>;
 
+/** The names each block scope declares itself, apart from those it sees from outer blocks. */
+const blockNames = new WeakMap<Scope, Set<string>>();
+
 function renameBlock(
   statements: IrStatement[],
   outer: Scope,
   inFunction: boolean,
   renamer: Renamer,
+  /** Names this block declares that the outer scope already holds, such as the renamed globals of the file. */
+  own: Iterable<string> = [],
 ): IrStatement[] {
   const scope: Scope = new Map(outer);
+  blockNames.set(scope, new Set(own));
   return statements.map((statement) => renameStatement(statement, scope, inFunction, renamer));
 }
 
@@ -127,6 +133,7 @@ function renameStatement(
     case "function": {
       const functionScope: Scope = new Map(scope);
       const parameters = statement.parameters.map((parameter) => ({
+        ...parameter,
         name: declare(parameter.name, functionScope, true, renamer),
         defaultValue:
           parameter.defaultValue === null
@@ -142,7 +149,16 @@ function renameStatement(
     }
     case "let": {
       const value = expression(statement.value);
-      return { ...statement, value, name: declare(statement.name, scope, inFunction, renamer) };
+      const own = blockNames.get(scope);
+      // A name an outer block declared, such as the variable of a classic for loop that Groovy scoped to the loop,
+      // may not be declared again inside (TSV001), so the inner variable gets another name.
+      const shadows = own !== undefined && scope.has(statement.name) && !own.has(statement.name);
+      const name = shadows
+        ? renamer.fresh(statement.name)
+        : declare(statement.name, scope, inFunction, renamer);
+      if (shadows) scope.set(statement.name, name);
+      own?.add(statement.name);
+      return { ...statement, value, name };
     }
     case "for": {
       const collection = expression(statement.collection);
@@ -152,9 +168,18 @@ function renameStatement(
         ? renamer.fresh(statement.variable)
         : declare(statement.variable, loopScope, inFunction, renamer);
       loopScope.set(statement.variable, variable);
+      const valueVariable =
+        statement.valueVariable === undefined
+          ? undefined
+          : scope.has(statement.valueVariable)
+            ? renamer.fresh(statement.valueVariable)
+            : declare(statement.valueVariable, loopScope, inFunction, renamer);
+      if (statement.valueVariable !== undefined && valueVariable !== undefined)
+        loopScope.set(statement.valueVariable, valueVariable);
       return {
         ...statement,
         variable,
+        ...(valueVariable === undefined ? {} : { valueVariable }),
         collection,
         body: renameBlock(statement.body, loopScope, inFunction, renamer),
       };
@@ -339,9 +364,14 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
         ? { ...expression, value: renamer.functions.get(expression.value) ?? expression.value }
         : expression;
     case "input":
-      return expression.defaultValue === undefined
-        ? expression
-        : { ...expression, defaultValue: child(expression.defaultValue) };
+      return {
+        ...expression,
+        ...(expression.question === undefined ? {} : { question: child(expression.question) }),
+        ...(expression.fields === undefined ? {} : { fields: child(expression.fields) }),
+        ...(expression.defaultValue === undefined
+          ? {}
+          : { defaultValue: child(expression.defaultValue) }),
+      };
   }
 }
 

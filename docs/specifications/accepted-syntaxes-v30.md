@@ -963,8 +963,13 @@ picks.add("three")    // compile error
   session sets them up. A package checks its files in turn, `main.tease` first and then the others by path; a global
   function's body is checked where a call first needs its result, otherwise after its own file. The message for a later
   contradiction names the line of the first value, and its file when that is another one.
+- The decided type holds wherever the place is read, also before that first value in checking order, such as in a
+  function body checked earlier or in another file. A copy taken while no value decided its source yet, such as
+  `let b = a`, `a.toSet()`, or a property read into a variable, holds what the source held then, so it shares the
+  source's type: after `let a = []` and `let b = a.toSet()`, a later `a.add(1)` makes `b.add("x")` a compile error.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
-  decides nothing and is not rejected at compile time.
+  decides nothing and is not rejected at compile time. Where a place of known type takes it, also through a place that
+  no other value decided, such as `let box = { t: null }` set only from such a parameter, it is checked when it runs.
 
 ### Global variables
 
@@ -1120,8 +1125,9 @@ let level: integer = saved   // valid: saved is an integer here
 - Only plain variables narrow; `door.locked` and `items[0]` do not.
 - A function call, `wait`, interaction, `say`, timer, media command, storage write, or timer or media property write
   may let a function or block run, so it cancels narrowing for every top-level variable that a function or block
-  assigns. A loop's start forgets what the loop body may change, and a function or block body does not inherit
-  narrowing from the code around it.
+  assigns, and for every local variable that a timer, media, or button block shares and assigns
+  ([§14](#variables-in-timer-media-and-button-blocks)). A loop's start forgets what the loop body may change, and a
+  function or block body does not inherit narrowing from the code around it.
 
 ### Implicit conversions
 
@@ -1268,6 +1274,43 @@ if secondCondition {
     let message = "Second"
 }
 ```
+
+### Variables in timer, media, and button blocks
+**Status:** Accepted (Owner decision on #627, 2026-10-05; [ADR 0024](../decisions/0024-shared-block-variables.md))
+
+A timer expiry block, media block, or permanent button block uses the variables around it like any nested block: the
+globals, the top-level variables of its file, and the parameters and local variables, including loop variables, of the
+code that creates it. It shares them with that code: one variable, not a copy, so an assignment in either is seen by the
+other at its next read.
+
+```text
+function challenge {
+    let stop = false
+    showPermanentButton "Stop" {
+        stop = true
+    }
+    while not stop {
+        wait 5 s
+    }
+}
+```
+
+- A block sees the variables visible where it is created, not one declared later. Its own `let` may not reuse the name
+  of a variable it sees.
+- Each function call, each loop iteration, and each run of a loop body has its own variables:
+  `for name in names { showPermanentButton name { say name } }` gives each button its own `name`, and two calls of
+  `function offer(n: integer) { showPermanentButton "Add" { n += 1 } }` count separately. A variable declared before a
+  loop is one variable for every button the loop shows.
+- A block inside a block shares the same variables. A block's own `let` is new each time the block runs.
+- A variable lives while a timer, media, or button or a queued or running block uses it, also after its function
+  returned or its file entry was left ([§29](#29-script-files-and-paths)). A block that already runs keeps its
+  variables when its resource stops or is removed.
+- Assigning a shared variable cancels nothing: a running `wait` or question completes first. A value read before it is
+  stored as it was, so in `x += askInteger "Add?"` a click that sets `x` meanwhile is overwritten. Use `exit` to end at
+  once.
+- Assignment still copies values ([§12](#12-variable-declarations)): after `let b = a`, a block that changes `a` does
+  not change `b`.
+- A function called from a block sees its own variables and those of its file, never those of the block.
 
 ## 15. Objects
 **Status:** Accepted
@@ -1450,12 +1493,12 @@ its state: the time left (after `paused,` when paused), `stopped`, or `finished`
 the button's text, `<permanent button "Stop">`, or `<permanent button, removed>`. Handles show the state at the moment
 `say` runs. Message markup is not applied to the notation.
 
-Other text fields, such as a button label, an input hint, the `text` of a choice object, a timer label, or a speaker's
-name or title, do not select from a list. A list there is a compile error when the compiler can see it, such as a list
-literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"` and
-`list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error when
-the compiler can see it. A list as a whole `choose` option instead gives
-one button per element ([§19](#19-choices)).
+Other text fields, such as a button label, an ask question, an input hint, the `text` of a choice object, a timer label,
+or a speaker's name or title, do not select from a list. A list there is a compile error when the compiler can see it,
+such as a list literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"`
+and `list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error
+when the compiler can see it. A list as a whole `choose` option instead gives one button per element
+([§19](#19-choices)).
 
 To choose a specific element, use its index:
 
@@ -1714,7 +1757,31 @@ Rules:
 - `choose` does not return a result object.
 
 ## 20. Input functions
-**Status:** Accepted
+**Status:** Accepted (parenthesized basic asks implemented, and their text is the question: Owner decisions on #627,
+2026-10-05)
+
+`askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` are implemented in this parenthesized
+form with the arguments of their compact form
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional question,
+an optional `default:`, and an optional `hint:`. Both forms mean the same: `askText()` is `askText`, and
+`askText as mistress ("Name?", default: "Ada")` is `askText as mistress "Name?", default: "Ada"`. The speaker clause
+comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
+other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
+
+The question is said in the chat by the asking speaker, as by `say`, right before the field opens; `hint:` is help
+text shown in the field only
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). In a text or number
+field the hint shows only while the field is empty, so a default usually hides it; a date or time control shows the
+hint beside it, also with a default:
+
+```text
+let name = askText "What is your name?", default: "Slave", hint: "Type your name"
+```
+
+The question, `default:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
+the two options may be written in either order.
+The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
+accepts what a field text accepts, so a list is an error. Without a question nothing is said.
 
 ### Text input
 
@@ -1810,9 +1877,9 @@ let count = askInteger("Enter a whole number")
 ```
 
 `askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
-`askInteger [as speaker] [hint] [, default: integer]` is implemented as the whole-number counterpart of `askNumber`
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an optional sign and
-digits within the safe integer range.
+`askInteger [as speaker] [question] [, default: integer] [, hint: text]` is implemented as the whole-number counterpart
+of `askNumber` ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an
+optional sign and digits within the safe integer range.
 
 ### Multiple integer inputs
 
@@ -1866,7 +1933,153 @@ let selected = askBooleans(
 - `texts`: `string[]`
 - `defaults`: `boolean[]`
 
-It returns `boolean[]`.
+It returns `boolean[]`. It is a [form](#forms) of one toggle per text, in order, that returns the toggles' states in the
+same order, so texts may repeat; the lists must have the same non-zero length. With `cancel:` it returns `boolean[]?`,
+`null` only when cancelled. The message, as the form's question, may also come first without a name, and the form is
+implemented with `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)). `askBoolean(...)` stays a separate two-button question
+that completes when either button is chosen.
+
+### Forms
+
+**Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object or a dict of fields of
+every kind, with descriptions, `outro:`, `cancel:`, and `timeout:`, and `askBooleans` is implemented on it
+([RUNTIME.md](../RUNTIME.md#forms)).
+
+`askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
+returned until the player submits:
+
+```text
+let settings = askForm as mistress "Adjust your settings", hint: "Change values, then continue", fields: {
+    enabled: false, intensity: ["Low", "Medium", "High"], impact: 5, restraint: 5,
+    name: "Ada", day: toDate("2026-10-05"), start: toTime("20:00")
+}, submit: "Continue"
+say "${settings.name}: impact ${settings.impact}"
+```
+
+As for a basic ask, the compact and parenthesized forms mean the same, the optional question is said once by the asking
+speaker before the form opens, and `hint:` is help shown in the composer only. `fields:` is an object or a dict of
+fields. `submit:` (default `"OK"`) and `cancel:` take text or a button object `{ text, background? }`, and `outro:` takes
+text. The arguments are evaluated once, in written order, before the question is said; an edit or a restore does not
+evaluate them again.
+
+A field is a starting value or a descriptor object. A start decides the field's kind:
+
+| Start | Field |
+|---|---|
+| `true` or `false` | a toggle; returns `boolean` |
+| a list | a cycle through the list's options, starting at the first; returns the option's value |
+| an `integer` or a `number` | a number typed in the composer: `5` gives an `integer` field, `5.0` a `number` field |
+| text | text typed in the composer; ISO-looking text stays text |
+| a `date`, `time`, or `datetime` | the matching value typed in the composer |
+| an object | a descriptor |
+
+A descriptor has `value:` (the start), `text:` (the label, by default the field's name or key), `type:`, `options:`,
+`optional:`, `min:`, `max:`, `hint:`, `background:`, and `description:`. `type:` is `"boolean"`, `"cycle"`, `"integer"`,
+`"number"`, `"text"`, `"date"`, `"time"`, or `"datetime"`. It is needed when no start shows the kind, as in
+`{ type: "date" }`; an unknown type is an error that suggests a likely one, such as `unknown type 'intger' (use 'integer')`.
+The compiler types each answer from what the form can see: a descriptor written where the form is asked is read as
+written, and a descriptor built earlier by the properties its type shows. When the form opens, every field must answer
+within the type the compiler gave it; otherwise the form fails, and the error says to write `type:` where the field's
+starting object is created.
+
+```text
+let access = askForm("Access?", fields: { enabled: { value: false, options: [{ value: false, text: "Off", background: "firebrick" }, { value: true, text: "On", background: "seagreen" }] } })
+let level = askForm("Intensity?", fields: { intensity: [{ text: "Low", background: "seagreen" }, { text: "Medium", background: "orange" }, { text: "High", background: "red" }] })
+let details = askForm("Details?", fields: { impact: { type: "integer", optional: true, min: 1, max: 10, hint: "1 to 10" }, name: "Ada", day: { type: "date" } }, submit: "Continue")
+```
+
+Rules:
+
+- A toggle shows its label with a check mark. With `options:` it shows the option of its state instead: choice objects,
+  exactly one with `value: false` and one with `value: true`, in either order. `{ type: "boolean" }` starts `false`.
+- A cycle's `options:` are values or choice objects as for `choose` ([§19](#19-choices)), whose values are not `null` and
+  share one type. A press shows the next option and wraps around; `value:` starts at the first option equal to it.
+- Every field may set `background:`; the `background:` of a toggle's or cycle's shown option wins. Author colours keep
+  their contrast rule ([§37](#authored-colours)).
+- A typed field (`integer`, `number`, `text`, or a date or time) opens in the composer with its value, which Enter keeps
+  and typing replaces, and its answer is read as the matching ask reads it. A typed field is required. With
+  `optional: true` it may be submitted without a value and returns `null`; a toggle or cycle cannot be optional. A start
+  that is `null` or blank text gives no value, as an ask's empty default prefills nothing.
+- `min:` and `max:` bound an `integer` or `number` field inclusively. They only validate: an answer outside them is
+  refused and stays in the composer; nothing is clamped. A start outside them, or `min:` above `max:`, is an error.
+- A field's `hint:` is the composer's help while that field is edited.
+- A `description:` is not shown on the buttons. When the form opens, the asking speaker says one prose block after the
+  question: a line `<label> — <description>` for each field that has one, in field order, followed by `outro:`. Without
+  descriptions and `outro:` nothing more is said.
+- The composer edits one field at a time. Selecting another field first commits the text being edited; invalid text,
+  also blank text for a required field, keeps it open. Back or Escape drops the text and keeps the field's value.
+- Submitting commits the text being edited, as selecting another field does, and requires a value for every required
+  field; otherwise the form stays open. The author's starting values are never changed.
+- Edits add nothing to the transcript. Submitting adds one player line: `12 of 43 selected` when every field is a
+  toggle, otherwise `5 of 6 fields set`, which does not count an optional field without a value.
+- With `cancel:` the player may cancel the whole form, which returns `null`, so the form's type is optional. A field's
+  `null` is not a cancelled form. Without `cancel:` the player cannot cancel the form.
+- A timer, media, or permanent-button block may interrupt a form; the form then resumes with its answers and the text
+  being edited.
+
+The result is a fresh object with a property per field, or for a dict of fields a dict with an entry per key, in field
+order. Its types follow the fields: `settings.enabled` is a `boolean`, `settings.impact` an `integer`, `details.impact`
+an `integer?`, and a cycle has the type of its options' values.
+
+A dict of fields builds a form from data. A key identifies a field and its answer; `text:` is only the label, so a
+translated label keeps its saved value:
+
+```text
+let toys = dict {}
+for id in toyIds {
+    let owned: boolean = load "toys.${id}", default: false
+    toys[id] = { value: owned, text: toyNames[id] }
+}
+let selected = askForm "Which toys do you own?", fields: toys   // a boolean dict
+for id in selected { save selected[id] as "toys.${id}" }
+```
+
+A dict written where the form is asked combines the answer types its entries prove. For a computed dict, when its value
+type proves one kind, from a `value:` known where its values are created, the result is a dict of that answer
+type, such as an `integer dict`, or an `integer? dict` when a field may be `optional:`. Otherwise, as for an
+`object dict` of descriptors of different kinds with explicit `type:`, the result is a
+`(boolean | number | string | date | time | datetime | duration | timestamp | null) dict` (a cycle may return any
+choice value); read an answer into a local and narrow it with `is` ([§13](#13-explicit-types)):
+
+```text
+let menu: object dict = dict {}
+menu["impact"] = { type: "number", value: 2.5, min: 1, max: 10 }
+menu["day"] = { type: "date", optional: true }
+let answers = askForm "Adjust", fields: menu
+let impact = answers["impact"]
+if impact is number { say impact + 1 }
+```
+
+A dict of fields must not be empty, and each of its descriptors is checked when the form opens; an invalid one is an
+error that names its key.
+
+Remembered settings are loaded as the starts, and the result is saved:
+
+```text
+let saved = load "settings", default: { enabled: false, impact: 5 }
+let settings = askForm "Settings", fields: { enabled: saved.enabled, impact: saved.impact }
+save settings as "settings"
+```
+
+A response time needs no syntax: compare `getTimestamp()` before and after the form
+([§35](#35-date-time-durations-and-timestamps)):
+
+```text
+let asked = getTimestamp()
+let answers = askForm "Ready?", fields: { ready: false }
+let took = getTimestamp() - asked
+```
+
+`timeout:`, a number of seconds or an elapsed duration as for `showButton` ([§21](#21-blocking-button)), with
+`onTimeout: "submit"` or `onTimeout: "cancel"`, gives the form a time limit; each needs the other. When it is reached
+the form closes without a transcript line: `"submit"` returns the answers as they stand, without the text still being
+edited, and needs a value in every field from the start, which the compiler checks for fields written where the form
+is asked and the form checks for other fields when it opens; `"cancel"` returns `null`, so the form's type is then
+optional:
+
+```text
+let answers = askForm "Quick, choose", fields: { rope: false, gag: false }, timeout: 20 s, onTimeout: "submit"
+```
 
 ### Date and time input
 
@@ -1886,12 +2099,13 @@ askDateTime(...)  // datetime
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
-The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [hint] [, default: value]` are implemented
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The control
-submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone skips is a
-valid answer. The transcript shows the answer in the player's presentation. The Player's date and date-and-time
-controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is shown and
-edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text answers.
+The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, default: value] [, hint: text]` are
+implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
+control submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone
+skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and
+date-and-time controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is
+shown and edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text
+answers.
 
 ### Default answers
 
@@ -1994,10 +2208,11 @@ let folder = askFolder("Select a folder")
 
 ### Image input
 
-By default, camera and file upload are both available:
+By default, camera and file upload are both available. Like the basic asks, the message is the question, which the
+asking speaker says in the chat before the request opens, and `hint:` is help shown in the composer only:
 
 ```text
-let image = askImage("Add an image")
+let image = askImage("Show me your setup", hint: "Attach a photo")
 ```
 
 Explicit source permissions:
@@ -2024,18 +2239,19 @@ let image = askImage(
 
 `askImage(...)` returns one engine-managed image reference as `string`.
 
-`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route:
-while the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped
-onto the composer answers the request; outside such a request there is neither. A chosen image stays in the browser
-and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage
-references it. When the request allows the camera and the browser can capture, the camera turns on by itself as the
-request asks (owner round 5): the session camera when it is already open, otherwise one the request opens, which turns
-off again after the answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a
-script shows, with the request's message as its question and the shutter on the picture; the shutter counts down five
-seconds, as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with
-"Use this" and "Retake", and only "Use this" gives the script the photo. These are Player controls, not transcript
-messages. A camera that is denied or broken offers "Try again", and the paperclip keeps working. After a reload while
-the request waits, the camera is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not implemented yet.
+`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route: while
+the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped onto
+the composer answers the request; outside such a request there is neither. A chosen image stays in the browser and is
+session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage references it.
+When the request allows the camera and the browser can capture, the camera turns on by itself as the request asks (owner
+round 5): the session camera when it is already open, otherwise one the request opens, which turns off again after the
+answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a script shows, with the
+request's question (or "Take a photo" without one) and the shutter on the picture; the shutter counts down five seconds,
+as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with "Use this" and "Retake",
+and only "Use this" gives the script the photo. These are Player controls, not transcript messages. A camera that is
+denied or broken offers "Try again", and the paperclip keeps working. After a reload while the request waits, the camera
+is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not
+implemented yet.
 
 ### Video input
 
@@ -2154,7 +2370,9 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`. A [form](#forms), `askForm(...)` or
+  `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or by its
+  timeout with `onTimeout: "cancel"`.
 - Input functions complete only after valid input has been supplied.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.
@@ -2376,9 +2594,9 @@ playAudio async repeat "music/beat.mp3" {
   same interruption and resumption rules as [timer expiry blocks](#expiry-blocks); cues due at the same point run in
   source order. Media keeps playing while a block runs unless the block controls it. `stop()` cancels queued blocks of
   that media that have not started.
-- A block sees top-level names and its own locals, not the locals of the code that started the media. In
+- The blocks share the variables of the code that started the media
+  ([§14](#variables-in-timer-media-and-button-blocks)), all blocks of one media the same ones, across its repeats. In
   `let NAME = playAudio async ... { ... }` every block also sees `NAME` as its own handle, including inside a function.
-  This narrow self-handle binding is not general closure capture, which is tracked by #449.
 
 ### Failures, cleanup, and restore
 
@@ -2582,7 +2800,7 @@ showBackgroundImage(
 ```
 
 ## 23. Loops
-**Status:** Accepted
+**Status:** Accepted (`for key, value`: Owner decision on #627, 2026-10-05)
 
 ```text
 repeat 5 {
@@ -2598,6 +2816,21 @@ for item in items {
 
 `for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
 a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
+Each iteration has its own loop variable, which a block created in it keeps
+([§14](#variables-in-timer-media-and-button-blocks)).
+
+With two variables, `for` goes through the entries of a dict, giving each key and its value:
+
+```text
+for key, value in toys {
+    say "${key}: ${value}"
+}
+```
+
+The entries are taken when the loop starts, and each value is a copy: changing it, or adding, changing, or removing
+entries of the dict inside the loop, changes neither the dict's other entries nor what the loop visits. The key is text
+and the value has the dict's value type. The two names must differ. Another source is an error: a compile error when the
+compiler can see it, and runtime error `TSR044` otherwise. A list has no two-variable `for`.
 
 ```text
 while player.health > 0 {
@@ -2647,7 +2880,7 @@ for item in items {
 ```
 
 ## 25. Persistent storage and keys
-**Status:** Accepted
+**Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05)
 
 Save or overwrite a value:
 
@@ -2658,32 +2891,39 @@ save playerName as "player.name"
 `save value as key` evaluates the value first, then the key. It creates the key when absent and replaces its value
 when present. Saving `null` removes the key, like `delete`; stored top-level values are never `null`.
 
-The fallback `, default:` is optional:
+`load` has a bounded form and a compact form; the fallback `default:` is optional:
 
 ```text
-let playerName = load "player.name"              // null when the key is absent
-let score: number = load "player.score", default: 0
+let playerName = load("player.name")              // null when the key is absent
+let score: number = load("player.score", default: 0)
+let visits = load "visits", default: 0             // compact form
 ```
 
 `load` evaluates its key first. When the key exists, it returns the stored value with its stored TeaseScript type
 without evaluating the default. When absent, it evaluates and returns the default, or returns `null` without one.
-`load` never writes: the default is not stored. Only `save` creates or changes a stored value. An explicit target
-type may determine the intended numeric type of a literal default, as in the `number` example above.
+`load` never writes: the default is not stored. Only `save` creates or changes a stored value, apart from the Player's
+Debug storage editor, a debugging tool whose edits the next `load` returns (see `RUNTIME.md`, Script storage). An
+explicit target type may determine the intended numeric type of a literal default, as in the `number` example above.
 
-Key, value, and default operands are full expressions. `as` ends the value of `save`. A `, default:` belongs to the
-nearest construct before it that takes one: a `load`, the default answer of an ask, or a labelled option of a compact
-`choose`. Group the inner construct to give the fallback to `load`, as in `load (askText "Key?"), default: "none"` or
-`load (choose a: "x", b: "y"), default: "z"`; without the parentheses, the choice gets a third option labelled
-`default`. Inside `()`, `[]`, and object literals, where a line break does not end an expression, the comma may also
-start the next line. Group a `load` before combining its result with another expression:
+The bounded form takes the key and an optional named `default:` inside `()`, where line breaks follow the rules of
+other arguments. Its `)` ends the `load`, also with a space before `(`, so the result combines directly with another
+expression:
 
 ```text
-(load "k") == null
-(load "a", default: 0) + 1
+load("k") == null
+load("a", default: 0) + 1
 ```
 
-Without parentheses, `load "k" == null` uses `"k" == null` as the key, which is not a string. Group a nested `load`
-used as a key too. A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
+The operands of `save` and of a compact `load` are full expressions. `as` ends the value of `save`. A `, default:`
+belongs to the nearest construct before it that takes one, also inside a bounded `load`: a compact `load`, the default
+answer of an ask, or a labelled option of a compact `choose`. Group the inner construct, or use a parenthesized ask,
+to give the fallback to `load`, as in `load(askText("Key?"), default: "none")` or
+`load((choose a: "x", b: "y"), default: "z")`; without the inner parentheses, the choice gets a third option labelled
+`default`. Inside `()`, `[]`, and object literals, where a line
+break does not end an expression, the comma may also start the next line. Group a compact `load`, as in
+`(load "k") == null`, before combining its result with another expression. Without parentheses, `load "k" == null`
+uses `"k" == null` as the key, which is not a string. Group a nested compact `load` used as a key too.
+A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
 `save askText as "name"` asks and stores the answer, while an interaction with its own speaker clause is grouped, as in
 `save (askText as mistress "Name?") as "name"`. A default may suspend, such as
 `load "name", default: askText "Your name?"`; it starts only when the key is absent and can resume across checkpoint
@@ -2719,7 +2959,7 @@ Rules:
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
-  `Storage key must be a string. To compare the loaded value, write '(load "k") == null'.`
+  `Storage key must be a string. To compare the loaded value, write 'load("k") == null'.`
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
@@ -2858,8 +3098,8 @@ of the wrong type are rejected.
 ### Expiry blocks
 
 The block runs when the timer expires. It does not need an `onFinish` wrapper and runs without pausing currently
-playing audio or video. It may use top-level names, its own locals, normal functions, and new timers, but not the
-local variables of the code that started the timer.
+playing audio or video. It may use top-level names, the variables of the code that started the timer, which it shares
+([§14](#variables-in-timer-media-and-button-blocks)), its own locals, normal functions, and new timers.
 
 A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
 interaction, `wait`, or blocking timer; it waits while a paced message still blocks the chat. The interrupted action
@@ -2897,8 +3137,8 @@ cue declarations; `at` is measured from the start of a round and `beforeEnd` bac
 natural passage, including repeat rounds; `finish` runs once after the final round and never after `stop()`; an
 assignment to `remaining` that jumps over a cue does not fire it; and cue blocks run one at a time like expiry blocks.
 The existing compact block stays the per-round expiry block, like `beforeEnd 0 s`. A timer block of
-`let NAME = timer async ...` will likewise see `NAME` as its own handle; until then expiry blocks see no local of the
-code that started the timer.
+`let NAME = timer async ...` will likewise see `NAME` as its own handle; until then `NAME` is not visible in its own
+block, because it is declared only once the timer has started.
 
 ### Time
 
@@ -2913,7 +3153,8 @@ longer than that can never end; the compiler rejects one it can see, such as `wa
 error.
 
 ## 28. Permanent buttons
-**Status:** Accepted (inactive while the handler runs: Owner decision on #610, 2026-10-05)
+**Status:** Accepted (inactive while the handler runs: Owner decision on #610; `persist:` on the command: Owner
+decision on #627; both 2026-10-05)
 
 A permanent button remains available while the script continues and returns an identifier, which may be ignored. Its
 block is inherently the click action, so no `onClick` wrapper is used:
@@ -2932,11 +3173,11 @@ let buttonId = showPermanentButton "Stop" {
 }
 ```
 
-Persistent button; `persist: true` is recognized only as the first line of the block:
+Persistent button; `persist:` configures the button, so it follows the text on the command and takes the literal `true`
+or `false` (the default):
 
 ```text
-let buttonId = showPermanentButton "Fail" {
-    persist: true
+let buttonId = showPermanentButton "Fail", persist: true {
     goto retry
 }
 ```
@@ -2956,6 +3197,8 @@ Click and handler behavior:
   paced message still blocks the chat or another block runs. The interrupted action returns when the handler finishes.
 - From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
   becomes active again unless it was removed.
+- The handler shares the variables of the code that showed the button
+  ([§14](#variables-in-timer-media-and-button-blocks)).
 - A `goto` handler abandons the interrupted execution path.
 - Function handlers do not pause currently playing audio or video.
 
@@ -3031,8 +3274,10 @@ Rules:
 - Each entry into a file, by `goto` or `call` naming it, by `call` of a label, or by the fallback, starts with fresh
   top-level variables of that file. A `goto` to a label of the file continues with the variables of the entry it runs
   in.
-- A function sees the top-level variables of the entry that called it, and a timer or media block those of the entry
-  that started it, also after the session has left that entry.
+- A function sees the top-level variables of the entry that called it, and a timer, media, or button block those of the
+  entry that created it, also after the session has left that entry. A block also keeps the local variables it shares
+  ([§14](#variables-in-timer-media-and-button-blocks)), although a transfer discards the function, loop, and block
+  continuations that declared them.
 - `end`, also in a function or block, ends the running file and returns after its `call`. A file called from a block
   returns into that block.
 - A `goto label` in a block of an entry other than the running one continues that entry at the label, with its own
@@ -4467,6 +4712,7 @@ toys.length                             // the number of entries
 toys.keys                               // a new list of the keys, in entry order
 toys.values                             // a new list of the values, in the same order
 for name in toys { ... }                // the keys
+for name, toy in toys { ... }           // the keys with a copy of each value
 ```
 
 - **Keys** are text. In a literal, `collar:` is the key `"collar"`, quoted text is any key, and `[expr]:` computes one.
@@ -4486,8 +4732,8 @@ for name in toys { ... }                // the keys
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
   is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
   its result has the value type. Like any argument, the default is evaluated before the lookup.
-- **Iteration:** `for key in toys` goes through the keys as they were when the loop started
-  ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
+- **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
+  each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
   object are never equal.
 - **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
@@ -4498,7 +4744,7 @@ for name in toys { ... }                // the keys
   with its entry order.
 - **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
 
-Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
+Deferred: keys other than text, merging dicts, and sorted dicts.
 
 ## 41. Headers and tags
 **Status:** Accepted ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md))

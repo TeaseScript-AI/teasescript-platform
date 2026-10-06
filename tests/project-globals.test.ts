@@ -344,6 +344,148 @@ test("globals follow the let type rules with one type environment for all files"
   );
 });
 
+test("a global or property that starts as null takes its type from a store in any file, also where read before it", () => {
+  // Another file stores the property after main.tease read it in checking order: main.tease sees `integer?`, null
+  // before that file ran and the number after it.
+  const main =
+    'global params = { tcum: null, theme: null }\nlet v2 = params.tcum\nlet o2 = 0\nif v2 != null {\n  o2 = v2\n}\nsay "${o2}"\nif o2 == 0 {\n  goto "other.tease"\n}\nexit';
+  assert.deepEqual(
+    said(
+      runToEnd(
+        compiledPlan([
+          { path: "main.tease", source: main },
+          { path: "other.tease", source: 'params.tcum = 5\ngoto "main.tease"' },
+        ]),
+      ).events,
+    ),
+    ["0", "5"],
+  );
+  // Stores in a global function, a timer block, and a file a glob picks decide properties, also nested ones.
+  const { events } = assertRuntimeResumeEquivalent([
+    {
+      path: "main.tease",
+      source: [
+        "global params = { level: null, mode: null, opts: { pace: null } }",
+        'say "${params.level} ${params.mode} ${params.opts.pace}"',
+        "raise()",
+        "arm()",
+        'call "mods/*.tease"',
+        "let level = params.level",
+        "let mode = params.mode",
+        "let pace = params.opts.pace",
+        "if level != null and mode != null and pace != null {",
+        '  say "${level + 1} ${mode.length} ${pace * 2}"',
+        "}",
+        "exit",
+      ].join("\n"),
+    },
+    {
+      path: "lib.tease",
+      source:
+        "global function raise {\n  params.level = 2\n}\nglobal function arm {\n  timer async 1 { params.opts.pace = 1.5 }\n  wait 2\n}",
+    },
+    { path: "mods/fast.tease", source: 'params.mode = "fast"\nend' },
+  ]);
+  assert.deepEqual(said(events), ["null null null", "3 4 3"]);
+  // A store of another type is checked against that type everywhere: in the file that read first, and at a later
+  // store, which names the first one as without the earlier read.
+  const called = (store: string): ProjectSourceFile[] => [
+    {
+      path: "main.tease",
+      source:
+        'global best = null\nlet o = 0\ncall "set.tease"\nif best != null {\n  o = best\n}\nsay "${o}"\nexit',
+    },
+    { path: "set.tease", source: `${store}\nend` },
+  ];
+  assert.deepEqual(said(runToEnd(compiledPlan(called("best = 5"))).events), ["5"]);
+  assert.deepEqual(diagnostics(called('best = "a"')), [["main.tease", "TSV041", 5]]);
+  const conflicting = (read: string): string[] =>
+    messages([
+      { path: "main.tease", source: `global params = { level: null }\n${read}\nexit` },
+      { path: "a.tease", source: "params.level = 5\nexit" },
+      { path: "b.tease", source: 'params.level = "high"\nexit' },
+    ]);
+  assert.deepEqual(conflicting("let level = params.level"), [
+    "'params.level' holds a whole number (integer) or null since line 1 of a.tease, so it cannot be set to text (string). Use a separate property for a value of another type.",
+  ]);
+  assert.deepEqual(conflicting("let level = 0"), conflicting("let level = params.level"));
+});
+
+test("a value the compiler cannot know, such as an untyped parameter, decides no null-first place and is checked when it runs", () => {
+  // An untyped parameter is unknown, also for the global and the property it is stored in from another file: reads
+  // before that store are not narrowed to null, and a known place checks the value when it runs.
+  const project = (argument: string | null): ProjectSourceFile[] => [
+    {
+      path: "main.tease",
+      source: [
+        "global params = { tcum: null }",
+        "global plain = null",
+        "let v = params.tcum",
+        "let o = 0",
+        "if v != null {",
+        "  o = v",
+        "}",
+        "let w = plain",
+        "let p = 0",
+        "if w != null {",
+        "  p = w",
+        "}",
+        'say "${o} ${p}"',
+        "if o == 0 and p == 0 {",
+        '  goto "other.tease"',
+        "}",
+        "exit",
+      ].join("\n"),
+    },
+    {
+      path: "other.tease",
+      source: `global function setT(t) {\n  params.tcum = t\n  plain = t\n}\n${argument === null ? "" : `setT(${argument})\n`}${argument === null ? "exit" : 'goto "main.tease"'}`,
+    },
+  ];
+  assert.deepEqual(said(runToEnd(compiledPlan(project("5"))).events), ["0 0", "5 5"]);
+  for (const argument of ['"high"', "1.5"]) {
+    const result = runToEnd(compiledPlan(project(argument)));
+    assert.deepEqual([said(result.events), result.snapshot.failure?.code], [["0 0"], "TSR058"]);
+  }
+  // Without a call, nothing but null reaches the property.
+  assert.deepEqual(
+    said(
+      runToEnd(
+        compiledPlan([
+          {
+            path: "main.tease",
+            source:
+              'global params = { tcum: null }\nlet v = params.tcum\nlet o = 0\nif v != null {\n  o = v\n}\nsay "${o}"\nexit',
+          },
+          { path: "other.tease", source: "global function setT(t) {\n  params.tcum = t\n}" },
+        ]),
+      ).events,
+    ),
+    ["0"],
+  );
+});
+
+test("a global that is still null at the top of main.tease may be tested before another file sets it", () => {
+  // The start value makes `plain` null when main.tease begins, so the tested branch cannot run there; a later read,
+  // after a call that may set it, takes the value.
+  for (const declaration of ["global plain = null", "global plain: integer? = null"])
+    assert.deepEqual(
+      said(
+        runToEnd(
+          compiledPlan([
+            {
+              path: "main.tease",
+              source: `${declaration}\nlet p = 0\nif plain != null {\n  p = plain\n}\ncall "set.tease"\nif plain != null {\n  p = plain\n}\nsay "\${p}"\nexit`,
+            },
+            { path: "set.tease", source: "plain = 5\nend" },
+          ]),
+        ).events,
+      ),
+      ["5"],
+      declaration,
+    );
+});
+
 test("a global function is callable from every file and sees only globals, its parameters, and its locals", () => {
   const plan = compiledPlan([
     {

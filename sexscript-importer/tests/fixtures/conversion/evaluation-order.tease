@@ -23,8 +23,7 @@ if conditional2 {
 say conditional2
 let conditional3 = false
 if conditional3 {
-  say "Never ask"
-  conditional3 = askText != ""
+  conditional3 = askText("Never ask") != ""
 }
 if conditional3 {
   say "yes"
@@ -57,8 +56,7 @@ if (choose yes: "Yes", no: "No") == "yes" {
 let i: number = 0
 while i < 2 {
   say "Round"
-  say "Next"
-  i = askNumber
+  i = askNumber "Next"
 }
 // An increment used as a value follows the statement when nothing else in it reads the variable.
 let rules = ["Kneel", "Wait"]

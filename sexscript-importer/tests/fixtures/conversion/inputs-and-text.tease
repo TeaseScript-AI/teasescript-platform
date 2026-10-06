@@ -1,7 +1,5 @@
-say "What is your name?"
-let name = askText
-say "Your weight?"
-let weight = askNumber default: 0
+let name = askText "What is your name?"
+let weight = askNumber "Your weight?", default: 0
 say "Hello ${name}, you said ${weight}."
 say "Choose a task"
 let task = choose 0: "Kneel",
@@ -22,8 +20,7 @@ if name != "" {
 // The question of an endless loop's condition is asked again in every round.
 let roundValue = 0
 while true {
-  say "Round ${roundValue}"
-  let ignoredAnswer1 = askText
+  let ignoredAnswer1 = askText "Round ${roundValue}"
   roundValue += 1
   if roundValue == 2 {
     break
@@ -49,4 +46,23 @@ let answer = askText
 stored = "Ready now?"
 say stored
 let ready = (choose yes: "Yes", no: "No") == "yes"
+// A character of a text is its one-character substring, also counted from the end.
+let code = askText "Square?", default: "B4"
+say "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}"
+// Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
+function honorific {
+  return "Miss"
+}
+let question2 = "Ready, ${honorific()}?"
+let option = "Yes, ${honorific()}"
+say question2
+if (choose yes: option, no: "No") == "yes" {
+  say "Good."
+}
+// A range goes through its values with their positions.
+let position = 0
+for value in 5..=6 {
+  say "${position}: ${value}"
+  position += 1
+}
 exit

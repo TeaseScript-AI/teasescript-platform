@@ -23,11 +23,48 @@ report()
 // A number that the code compares with null keeps its null start, since null and 0 differ there.
 let level = null
 function pick {
-  say "Level?"
-  level = askInteger default: 3
+  level = askInteger "Level?", default: 3
 }
 if level == null {
   pick()
 }
 say "Level ${level}"
+// So do numbers that functions add to, since Groovy failed on a null sum.
+let points = 0
+function addPoints {
+  points = 0
+  points += 300
+}
+addPoints()
+say "Points ${points}"
+// A Date reads its milliseconds as a number, so a variable it sets starts at 0.
+let started = 0
+function mark {
+  started = getTimestamp().toMilliseconds()
+}
+mark()
+say "Took ${getTimestamp().toMilliseconds() - started}"
+// A function's own counter starts at 0 too, also where another function names a text the same.
+function fill(n) {
+  let i = 0
+  let marks = []
+  i = 0
+  while i < n {
+    // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i < marks.length {
+      marks[i] = i * 2
+    } else {
+      marks.add(i * 2)
+    }
+    i += 1
+  }
+  say "Marks ${marks.length}"
+}
+function spell {
+  for i in ["a", "b"] {
+    say i
+  }
+}
+fill(3)
+spell()
 exit

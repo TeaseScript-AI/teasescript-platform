@@ -23,6 +23,9 @@ class FakeElement implements MediaDeviceElement {
   /** When set, `play()` waits for `resolvePlays()`. */
   deferPlays = false;
   readonly pendingPlays: Array<() => void> = [];
+  /** When set, a seek's `seeked` event waits for `completeSeek()`, as a browser completes seeks asynchronously. */
+  deferSeeked = false;
+  #seekPending = false;
   plays = 0;
   readonly listeners = new Map<string, Array<() => void>>();
   get currentTime() {
@@ -31,6 +34,12 @@ class FakeElement implements MediaDeviceElement {
   set currentTime(value: number) {
     this.position = value;
     this.ended = false;
+    if (this.deferSeeked) this.#seekPending = true;
+    else this.emit("seeked");
+  }
+  completeSeek() {
+    if (!this.#seekPending) return;
+    this.#seekPending = false;
     this.emit("seeked");
   }
   play(): Promise<void> {

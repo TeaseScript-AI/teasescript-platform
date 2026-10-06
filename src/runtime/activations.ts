@@ -67,7 +67,7 @@ export function findRoot(
   id: number,
 ): RuntimeScopeFrameSnapshot | undefined {
   for (const frame of snapshot.frames) if (frame.id === id && frame.file !== null) return frame;
-  return snapshot.retainedScopes.find((frame) => frame.id === id);
+  return snapshot.retainedScopes.find((frame) => frame.id === id && frame.file !== null);
 }
 
 /** A scope on the stack or a retained root, by ID: where a prepared reference's binding lives. */

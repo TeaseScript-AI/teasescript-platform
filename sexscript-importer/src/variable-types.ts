@@ -118,6 +118,9 @@ interface Binding {
 /** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
 type BindingKey = IrStatement | IrFunctionParameter;
 
+/** The binding key of each two-variable loop's value variable, stable across analysis rounds. */
+const valueKeys = new WeakMap<IrStatement, IrFunctionParameter>();
+
 interface Conflict {
   binding: Binding;
   statement: IrStatement;
@@ -139,10 +142,7 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
 function functionReturns(
   statements: IrStatement[],
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
-): {
-  results: Map<string, TeaseType>;
-  returned: Map<string, TeaseType[]>;
-} {
+): { results: Map<string, TeaseType>; returned: Map<string, TeaseType[]> } {
   const bindings = new Map<BindingKey, Binding>();
   let results = new Map(knownResults);
   let returned = new Map<string, TeaseType[]>();
@@ -599,17 +599,22 @@ function declarationMessage(items: Conflict[]): string {
     lines.length === 0
       ? ""
       : ` (line${lines.length === 1 ? "" : "s"} ${lines.slice(0, 5).join(", ")}${lines.length > 5 ? ", ..." : ""})`;
-  return `${first}${where}. A TeaseScript variable keeps one type (V30 §12), while Groovy let '${binding.name}' change type, and the importer declares unions only of text, numbers, booleans, durations, lists, and objects. Use a separate variable for the other values, or give all values one type.`;
+  return `${first}${where}. A TeaseScript variable keeps one type (V30 §12), while Groovy let '${binding.name}' change type, and the importer declares unions only of text, numbers, booleans, durations, dates and times, lists, dicts, ranges, and objects. Use a separate variable for the other values, or give all values one type.`;
 }
 
 class Scope {
   readonly names = new Map<string, Binding>();
+  /** Local bindings that a null test of the enclosing `if` rules out null for in this branch. */
+  readonly nonNull = new Set<Binding>();
   readonly parent: Scope | null;
   constructor(parent: Scope | null) {
     this.parent = parent;
   }
   resolve(name: string): Binding | undefined {
     return this.names.get(name) ?? this.parent?.resolve(name);
+  }
+  rulesOutNull(binding: Binding): boolean {
+    return this.nonNull.has(binding) || (this.parent?.rulesOutNull(binding) ?? false);
   }
 }
 
@@ -687,15 +692,28 @@ function analyse(
     }
     return found;
   };
-  const typeOf = (value: IrExpression, scope: Scope): TeaseType =>
-    expressionType(
+  const nullFields = recordNullFields(statements);
+  const typeOf = (value: IrExpression, scope: Scope): TeaseType => {
+    const type = expressionType(
       value,
       (name) => {
         const found = scope.resolve(name);
-        return found === undefined ? UNKNOWN : (bindingType(found) ?? UNKNOWN);
+        if (found === undefined) return UNKNOWN;
+        const type = bindingType(found) ?? UNKNOWN;
+        return scope.rulesOutNull(found) ? nonNull(type) : type;
       },
       (name) => results.get(name),
     );
+    // A field that some records of the list leave null, `opts[i].ID` with `[lbl: "Back", ID: null]`, may be null;
+    // the others give its type.
+    const field =
+      value.kind === "property" &&
+      value.target.kind === "index" &&
+      value.target.target.kind === "variable"
+        ? nullFields.get(value.target.target.name)?.get(value.name)
+        : undefined;
+    return field === undefined ? type : { kind: "optional", value: field };
+  };
   const conflict = (
     target: Binding,
     statement: IrStatement,
@@ -827,6 +845,18 @@ function analyse(
             ? child.arguments[0]!
             : null;
       if (position !== null && isNumber(typeOf(position, scope))) analysis.indexes.add(child);
+      // The truth helper on a variable whose type is now known is written as a plain test, which narrows it.
+      const tested =
+        child.kind === "call" && child.name === TRUTH_HELPER && child.positional.length === 1
+          ? child.positional[0]!
+          : null;
+      if (tested?.kind === "variable") {
+        const known = nonNull(typeOf(tested, scope));
+        if (known.kind === "scalar" && known.name !== "duration") {
+          plainTruths.set(child, typeOf(tested, scope));
+          analysis.indexes.add(child);
+        } else plainTruths.delete(child);
+      }
     });
   };
 
@@ -995,8 +1025,27 @@ function analyse(
             neverNull(typeOf(before.value, scope));
           if (assigned || neverNull(typeOf(tested, scope))) analysis.unguarded.add(item);
         }
-        block(item.then, scope);
-        block(item.else, scope);
+        // `if x == null { ... } else { ... }` rules out null for a local x in the else branch, and `x != null` in the
+        // then branch, where the branch does not assign x.
+        const thenScope = new Scope(scope);
+        const elseScope = new Scope(scope);
+        const test = item.condition.kind === "binary" ? item.condition : null;
+        const variable =
+          test !== null &&
+          (test.operator === "==" || test.operator === "!=") &&
+          test.left.kind === "variable" &&
+          test.right.kind === "literal" &&
+          test.right.value === null
+            ? test.left.name
+            : null;
+        const local = variable === null ? undefined : scope.resolve(variable);
+        if (variable !== null && local !== undefined && root.names.get(variable) !== local) {
+          const branch = test!.operator === "==" ? item.else : item.then;
+          if (!assignsVariable(branch, variable))
+            (test!.operator === "==" ? elseScope : thenScope).nonNull.add(local);
+        }
+        walk(item.then, thenScope);
+        walk(item.else, elseScope);
         return;
       }
       case "while":
@@ -1012,6 +1061,16 @@ function analyse(
             ? scalar("string")
             : (elementType(typeOf(item.collection, scope)) ?? UNKNOWN);
         inner.names.set(item.variable, variable);
+        // The value of each entry has the dict's value type, which the analysis does not follow; it is a variable of
+        // its own, apart from the key.
+        if (item.valueVariable !== undefined) {
+          let key = valueKeys.get(item);
+          if (key === undefined) {
+            key = { name: item.valueVariable, defaultValue: null };
+            valueKeys.set(item, key);
+          }
+          inner.names.set(item.valueVariable, binding(key, item.valueVariable, null, UNKNOWN));
+        }
         for (const child of item.body) statement(child, inner);
         return;
       }
@@ -1082,16 +1141,87 @@ function analyse(
     returns = [];
     walk(item.body, scope);
     // A function that may end without `return` may return nothing (#526: an optional result).
-    if (
-      item.body.findLast((child) => child.kind !== "comment" && child.kind !== "blank")?.kind !==
-      "return"
-    )
-      returns.push(NULL);
+    if (mayFallOff(item.body)) returns.push(NULL);
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
   }
   return analysis;
+}
+
+/**
+ * Whether running the statements can go past their end: no `return`, `exit`, or transfer ends every path, and no
+ * endless loop (`while true` without a `break` of its own, as from Groovy `for (;;)`) keeps them from it.
+ */
+function mayFallOff(statements: readonly IrStatement[]): boolean {
+  const last = statements.findLast(
+    (statement) => !["comment", "blank", "function"].includes(statement.kind),
+  );
+  switch (last?.kind) {
+    case "return":
+    case "exit":
+    case "goto":
+      return false;
+    case "if":
+      return last.else.length === 0 || mayFallOff(last.then) || mayFallOff(last.else);
+    case "switch":
+      return (
+        last.default.length === 0 ||
+        mayFallOff(last.default) ||
+        last.cases.some((item) => mayFallOff(item.body))
+      );
+    case "while":
+      return !(
+        last.condition.kind === "literal" &&
+        last.condition.value === true &&
+        !breaksLoop(last.body)
+      );
+    default:
+      return true;
+  }
+}
+
+/** Whether the loop body holds a `break` of this loop, outside the loops nested in it. */
+function breaksLoop(body: readonly IrStatement[]): boolean {
+  return body.some((statement) => {
+    switch (statement.kind) {
+      case "break":
+        return true;
+      case "if":
+        return breaksLoop(statement.then) || breaksLoop(statement.else);
+      case "switch":
+        return (
+          breaksLoop(statement.default) || statement.cases.some((item) => breaksLoop(item.body))
+        );
+      default:
+        return false;
+    }
+  });
+}
+
+/** Whether the statements assign or declare `name`, also in nested blocks. */
+function assignsVariable(statements: readonly IrStatement[], name: string): boolean {
+  return statements.some((statement) => {
+    switch (statement.kind) {
+      case "assign":
+        return statement.target.kind === "variable" && statement.target.name === name;
+      case "let":
+        return statement.name === name;
+      case "if":
+        return assignsVariable(statement.then, name) || assignsVariable(statement.else, name);
+      case "while":
+      case "repeat":
+      case "for":
+        return assignsVariable(statement.body, name);
+      case "switch":
+        return (
+          assignsVariable(statement.default, name) ||
+          statement.cases.some((item) => assignsVariable(item.body, name))
+        );
+      default:
+        return false;
+    }
+  });
 }
 
 /** The statements with each of the `guards` replaced by its `then` statements. */
@@ -1265,6 +1395,52 @@ function recordAdds(statements: readonly IrStatement[]): Map<string, IrExpressio
   return result;
 }
 
+/**
+ * The fields of each list of records that some of its records hold null in and others a value: the records written in
+ * its declaration and those added to it later (recordAdds).
+ */
+function recordNullFields(statements: readonly IrStatement[]): Map<string, Map<string, TeaseType>> {
+  const added = recordAdds(statements);
+  const result = new Map<string, Map<string, TeaseType>>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "let" && typeof value.name === "string" && isRecord(value.value)) {
+      const initial = value.value;
+      const records = [
+        ...(initial.kind === "list" && Array.isArray(initial.items)
+          ? initial.items.filter(isObjectLiteral)
+          : []),
+        ...(added.get(value.name) ?? []).filter(isObjectLiteral),
+      ];
+      const nulls = new Set<string>();
+      const values = new Map<string, TeaseType[]>();
+      for (const record of records)
+        for (const property of record.properties) {
+          if (property.value.kind === "literal" && property.value.value === null)
+            nulls.add(property.name);
+          else
+            values.set(property.name, [
+              ...(values.get(property.name) ?? []),
+              expressionType(property.value, () => UNKNOWN),
+            ]);
+        }
+      const fields = new Map<string, TeaseType>();
+      for (const name of nulls) {
+        const types = values.get(name);
+        if (types !== undefined) fields.set(name, sharedValueType(types));
+      }
+      if (fields.size > 0) result.set(value.name, fields);
+    }
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(statements);
+  return result;
+}
+
 function isObjectLiteral(value: unknown): value is Extract<IrExpression, { kind: "object" }> {
   return isRecord(value) && value.kind === "object" && Array.isArray(value.properties);
 }
@@ -1383,10 +1559,23 @@ function annotation(type: TeaseType): string | null {
   const value = nonNull(type);
   const writable =
     value.kind === "scalar" ||
+    value.kind === "temporal" ||
     (value.kind === "list" && value.element.kind === "scalar") ||
     (value.kind === "union" && value.members.every(isWritableMember)) ||
-    (value.kind === "list" && hasUnion(value) && writableElements(value.element));
+    (value.kind === "list" && hasUnion(value) && writableElements(value.element)) ||
+    // Any list, object, dict, or range is written by its kind, which an optional one needs: `list | null`.
+    (type.kind === "optional" && isKindMember(value));
   return writable ? typeName(type) : null;
+}
+
+/** A type an annotation names by its kind alone: any list, object, dict, or range. */
+function isKindMember(type: TeaseType): boolean {
+  return (
+    (type.kind === "list" && type.element.kind === "unknown") ||
+    type.kind === "object" ||
+    type.kind === "dict" ||
+    type.kind === "range"
+  );
 }
 
 /** Whether a list's elements, possibly lists themselves, end in scalars or unions an annotation can name. */
@@ -1405,8 +1594,12 @@ function hasUnion(type: TeaseType): boolean {
 function isWritableMember(type: TeaseType): boolean {
   return (
     type.kind === "scalar" ||
+    type.kind === "temporal" ||
     type.kind === "object" ||
-    (type.kind === "list" && (type.element.kind === "scalar" || type.element.kind === "unknown"))
+    (type.kind === "list" &&
+      (type.element.kind === "scalar" ||
+        type.element.kind === "temporal" ||
+        type.element.kind === "unknown"))
   );
 }
 
@@ -1451,7 +1644,7 @@ function typeName(type: TeaseType): string {
           ? `(${typeName(type.element)})[]`
           : `${typeName(type.element)}[]`;
     case "optional":
-      return type.value.kind === "union"
+      return type.value.kind === "union" || isKindMember(type.value)
         ? `${typeName(type.value)} | null`
         : `${typeName(type.value)}?`;
     case "union":
@@ -1513,6 +1706,18 @@ function arithmeticType(
 ): TeaseType | undefined {
   const left = nonNull(leftType);
   const right = nonNull(rightType);
+  // A Groovy division of values not proven numbers gave a number too (legacy code has no durations), so a variable
+  // it sets holds fractions.
+  const plain = (type: TeaseType): boolean =>
+    type.kind === "unknown" ||
+    (type.kind === "scalar" && (type.name === "integer" || type.name === "number"));
+  if (
+    operator === "/" &&
+    plain(left) &&
+    plain(right) &&
+    (left.kind === "unknown" || right.kind === "unknown")
+  )
+    return scalar("number");
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
@@ -1644,6 +1849,9 @@ const CALL_RESULTS = new Map<string, TeaseType>([
   ["askInteger", scalar("integer")],
   ["askBoolean", scalar("boolean")],
   ["showButton", scalar("duration")],
+  // A photo reference, or null where the camera took none (V30 §33); a requested image always arrives.
+  ["takePhoto", { kind: "optional", value: scalar("string") }],
+  ["askImage", scalar("string")],
 ]);
 
 /** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */
@@ -1738,6 +1946,10 @@ export function expressionType(
       return sharedValueType(values);
     }
     case "input":
+      if (value.input === "askForm")
+        return {
+          kind: value.fields?.kind === "object" && value.fields.dict !== true ? "object" : "dict",
+        };
       return scalar(
         value.input === "askText" ? "string" : value.input === "askInteger" ? "integer" : "number",
       );
@@ -1830,6 +2042,49 @@ function forEachExpression(value: IrExpression, visit: (expression: IrExpression
 }
 
 /** Truncates the recorded list positions inside a statement's own expressions with `toInteger`. */
+/** The legacy truth helper (helpers.ts). */
+const TRUTH_HELPER = "sexscriptLegacyTruth";
+
+/** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
+const plainTruths = new WeakMap<IrExpression, TeaseType>();
+
+/** Groovy truth of a variable of a scalar type: not null, and not 0, "", or false. */
+function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
+  const scalarType = nonNull(type);
+  const compare = (operator: string, right: IrExpression): IrExpression => ({
+    kind: "binary",
+    operator,
+    left: value,
+    right,
+  });
+  const truth =
+    scalarType.kind === "scalar" && scalarType.name === "boolean"
+      ? compare("==", { kind: "literal", value: true })
+      : compare("!=", {
+          kind: "literal",
+          value: scalarType.kind === "scalar" && scalarType.name === "string" ? "" : 0,
+        });
+  if (type.kind !== "optional" || (scalarType.kind === "scalar" && scalarType.name === "boolean"))
+    return truth;
+  return {
+    kind: "binary",
+    operator: "and",
+    left: compare("!=", { kind: "literal", value: null }),
+    right: truth,
+  };
+}
+
+/** The opposite of a comparison, or of an `and` of comparisons; null for another expression. */
+function negatedTest(value: IrExpression): IrExpression | null {
+  if (value.kind !== "binary") return null;
+  if (value.operator === "==" || value.operator === "!=")
+    return { ...value, operator: value.operator === "==" ? "!=" : "==" };
+  if (value.operator !== "and") return null;
+  const left = negatedTest(value.left);
+  const right = negatedTest(value.right);
+  return left === null || right === null ? null : { kind: "binary", operator: "or", left, right };
+}
+
 function withIntegerIndexes<T extends IrStatement>(
   statement: T,
   indexes: ReadonlySet<IrExpression>,
@@ -1843,7 +2098,19 @@ function withIntegerIndexes<T extends IrStatement>(
   });
   const replace = (value: IrExpression): IrExpression => {
     const copy = mapChildren(value, replace);
+    // `not` before a plain truth test reads as the opposite test.
+    if (
+      copy.kind === "unary" &&
+      copy.operator === "not" &&
+      value.kind === "unary" &&
+      indexes.has(value.value) &&
+      plainTruths.has(value.value)
+    )
+      return negatedTest(copy.value) ?? copy;
     if (!indexes.has(value)) return copy;
+    const truthType = plainTruths.get(value);
+    if (truthType !== undefined && copy.kind === "call")
+      return plainTruth(copy.positional[0]!, truthType);
     if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
     if (copy.kind === "methodCall") return { ...copy, arguments: [truncated(copy.arguments[0]!)] };
     return copy;
@@ -1965,9 +2232,12 @@ export function mapChildren(
         ),
       };
     case "input":
-      return value.defaultValue === undefined
-        ? value
-        : { ...value, defaultValue: map(value.defaultValue) };
+      return {
+        ...value,
+        ...(value.question === undefined ? {} : { question: map(value.question) }),
+        ...(value.fields === undefined ? {} : { fields: map(value.fields) }),
+        ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
+      };
     case "range":
       return { ...value, from: map(value.from), to: map(value.to) };
     case "unary":

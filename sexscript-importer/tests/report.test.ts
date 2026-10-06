@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rootDiagnostics } from "../src/diagnostics.ts";
-import { analyzeFeasibility } from "../src/report.ts";
+import { analyzeFeasibility, lineOrderJumps } from "../src/report.ts";
 import type { MigrationDiagnostic } from "../src/ir.ts";
 import type { ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
 
@@ -16,6 +16,16 @@ test("keeps the innermost diagnostic and removes wrapper cascades", () => {
   ];
 
   assert.deepEqual(rootDiagnostics(diagnostics), [diagnostics[0]]);
+});
+
+test("counts the NOTE and TODO comments that name a legacy line well before the previous one", () => {
+  const source = [
+    "// NOTE SX_A line 10: first",
+    "// TODO SX_B line 40: later",
+    "// NOTE SX_C line 30: a local step back",
+    "// NOTE SX_D line 5: code that moved",
+  ].join("\n");
+  assert.equal(lineOrderJumps(source), 1);
 });
 
 test("reports source and IR counts separately instead of inventing a conversion percentage", () => {

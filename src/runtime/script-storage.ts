@@ -21,7 +21,7 @@ interface ScriptStorageView {
 }
 
 export const LOAD_KEY_MESSAGE =
-  "Storage key must be a string. To compare the loaded value, write '(load \"k\") == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
 export const WRITE_KEY_MESSAGE = "Storage key must be a string.";
 
 export function storageKey(

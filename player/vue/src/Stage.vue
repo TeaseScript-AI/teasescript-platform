@@ -10,17 +10,31 @@ const props = defineProps<{
    */
   camera?: MediaStreamTrack | null;
 }>();
-const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
+const emit = defineEmits<{
+  mediaAspect: [ratio: number];
+  mediaLoad: [src: string | null];
+  mediaFailure: [src: string | null];
+}>();
 const cameraMirrored = defineModel<boolean>("cameraMirrored", { default: true });
 // The camera view covers the Stage image without replacing it: the image stays loaded underneath, and the Stage follows
 // the camera's aspect while the view is shown. The image's own aspect is kept for when the view goes.
 let imageAspect = 0;
 const cameraRatio = ref(4 / 3);
+const imageElement = ref<HTMLImageElement | null>(null);
+// The source the image on the Stage could not load or decode, or `null`. The Stage then stays empty, without the
+// browser's broken-image look, until its source changes.
+const failedSource = ref<string | null>(null);
+watch(failedSource, (source) => emit("mediaFailure", source));
+// The source the image on the Stage has loaded and decoded, or `null` while it loads, failed, or the Stage is empty.
+const loadedSource = ref<string | null>(null);
+watch(loadedSource, (source) => emit("mediaLoad", source));
 // Only a new source needs measuring again; an equal source keeps its loaded image and aspect.
 watch(
   () => props.media?.src,
   () => {
     imageAspect = 0;
+    failedSource.value = null;
+    loadedSource.value = null;
     if (!props.camera) emit("mediaAspect", 0);
   },
 );
@@ -32,9 +46,19 @@ watch(
 );
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
-  if (!(image instanceof HTMLImageElement) || !image.naturalHeight) return;
+  if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;
+  if (!image.naturalHeight) return;
+  loadedSource.value = props.media.src;
   imageAspect = image.naturalWidth / image.naturalHeight;
   if (!props.camera) emit("mediaAspect", imageAspect);
+}
+// Only the image element on the Stage now counts, in its current state: a removed element, or one whose source was
+// replaced, may still finish loading its earlier source. The same holds for a successful load.
+function mediaFailed(event: Event) {
+  const image = event.currentTarget;
+  if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;
+  if (!image.complete || image.naturalWidth !== 0) return;
+  failedSource.value = props.media.src;
 }
 function cameraMeasured(ratio: number) {
   cameraRatio.value = ratio;
@@ -45,7 +69,7 @@ function cameraMeasured(ratio: number) {
 <template>
   <section class="player-stage" aria-label="Primary stage">
     <div class="stage-media-frame">
-      <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
+      <img v-if="media" v-show="failedSource === null" ref="imageElement" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" @error="mediaFailed" />
       <div
         v-if="camera || $slots.camera"
         class="stage-camera"

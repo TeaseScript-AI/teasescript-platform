@@ -29,7 +29,7 @@ say "Rounds left: ${rounds.length}"
 // A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
 function pickOwned(itemKeys) {
   for key in itemKeys {
-    if (load key) != true {
+    if load(key) != true {
       itemKeys = sexscriptLegacyListMinus(itemKeys, [key])
     }
   }

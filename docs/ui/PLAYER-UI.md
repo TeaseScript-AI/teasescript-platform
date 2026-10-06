@@ -58,8 +58,8 @@ specification may lead the implementation. The Player presents supported transcr
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Only `?dev` adds the Debug tool with development time controls, which is not a Standard Player tool; `player/README.md`
-describes it.
+Player Settings' Debug menu adds the Debug panel ([Player Settings](#player-settings)); `player/README.md` describes
+its controls.
 Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
 integration remain separate work. Values marked for retesting remain provisional tuning baselines.
 
@@ -264,17 +264,50 @@ available in every build to every user. It currently offers:
 - **Menu Sidebar labels:** icons only, icons with a temporary label preview, or icons with labels;
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
-- **Title bar on short screens · A/B test:** variant A or B above.
+- **Title bar on short screens · A/B test:** variant A or B above;
+- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)).
+  **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
+  started, also with the Debug menu off.
 
-These are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
+Apart from the Debug menu, these are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
-storage when the host frame denies it. Account settings may later take over or synchronize them.
+storage when the host frame denies it. Account settings may later take over or synchronize them. The Debug menu is not
+stored: every load starts with it off, so a tester who opens another script never debugs it by accident; the
+development preview's `?dev` starts it on.
 
-When the host persists script storage, Player Settings also contains a **Saved script data** section. Its **Clear saved
-script data** control removes, after a confirmation, only the values the current script saved for later runs; Player
-Settings, checkpoints, account data, and other scripts are unaffected, and the next new session starts without them. It
-is available before Start and after the session has ended, but not while a session runs or waits for Continue, because
-a running session keeps its own view of the saved values, and not when this browser's storage could not be read.
+Player Settings also contains a **Saved data** section, on every Player page whatever script it shows. Saved data
+belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script this browser
+has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)). It is
+not a session checkpoint.
+
+**Export…** reads every script's saved data freshly, also during a session, so saves already stored count. It lists each
+script that has saved values, by its title when a Player has shown it, otherwise by its storage scope, with its values,
+photos, and size; all are ticked, with **Select all** and **Select none**, and a long list scrolls. It warns that the
+export can contain private photos and offers two tabs for the ticked scripts: **File** prepares one file and then
+downloads it from the player's own press of **Download file**; **Text** shows the data in a read-only field with
+**Copy** and **Select text**, and when copying is refused or unavailable it selects the text for copying with the
+browser. Every change of the ticks prepares them again. Nothing leaves the browser except through these player actions,
+and closing the dialog releases the prepared file and text.
+
+**Import…** reads one exported file, chosen with **Choose file…** or dropped on its drop area in the **File** tab, or
+pasted text after **Review import** in the **Text** tab; a file dropped elsewhere on the dialog is ignored. Everything,
+every script's values and every photo, is checked before anything changes, and a problem, such as damaged data, is shown
+with nothing changed. The review asks "Replace the saved data of the ticked scripts? This cannot be undone.", lists the
+file's scripts, all ticked, each marked **New** or **Replaces saved data** with its counts and the shown script marked
+**This script**, and suggests exporting first; unticked scripts keep their saved data. Each script's data goes into its
+own saved data and never another's. When the shown script is ticked while its session runs, waits for Continue, or is
+starting, the confirmation is **End session and replace data** and explains that unsaved progress is lost; Cancel
+leaves the session running. Confirming replaces each ticked script's saved data at once; it ends that session first and
+then offers Start, which begins a new session with the imported data, and leaves a session of another script running.
+A script that cannot be imported keeps its saved data, and the dialog names it. Import is unavailable while saved data
+is imported or cleared.
+
+When the host persists the shown script's storage, the section also offers **Clear saved script data**, which removes,
+after a confirmation, only the values this script saved for later runs; Player Settings, checkpoints, account data, and
+other scripts are unaffected, and the next new session starts without them. It is available before Start and after the
+session has ended, but not while a session runs or waits for Continue, because a running session keeps its own view of
+the saved values, and not when this browser's storage could not be read. The dialogs fit narrow screens, and their own
+controls and rows are at least 44px tall.
 
 ## Left tools area
 
@@ -375,8 +408,18 @@ dock composition determine whether the tools framework uses a dock or drawer. Ex
 individual panels are capped by available allocation while retaining their chosen width preset. Conversation bounds and
 the stage-shape goal remain provisional visual inputs, not additional device modes.
 
-`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. A real
-platform Debugger remains future work described in [DEBUGGER.md](../DEBUGGER.md).
+`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. The Debug panel is
+the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#player-debug)); it appears first in the
+tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
+time controls stand above its tabs (shadcn-vue Tabs): Now, Variables, Log, and Storage, with its saved-value editor in
+a Dialog, when the host persists script storage. The tabs wrap to a second row in the narrowest panel, each still a
+44 px target; Now, Variables, and Storage wrap long paths, keys, names, and values
+so they fit the Small dock and the narrow drawer, also at the deepest indentation, where tags and text actions wrap
+instead of keeping one line. Variables rows open with full-height (44 px) toggles that name what they open; a long value
+shows three lines until **Show all**. While Debug runs, each script message, bubble or prose, has a 44 px **Explain
+values** icon button at its end, beside a bubble and below prose text, outside the message's own links; it opens the
+Debug panel, also in the narrow drawer, on the Variables tab and moves focus to the selected message there. Turning
+Debug off removes the buttons without re-creating the transcript's rows.
 
 ## Session start and user activation
 
@@ -395,6 +438,26 @@ cues and settlement wait, and an **Enable audio** [player notice](#player-notice
 click. In the Player the
 session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
 checkpoint storage and automatic resume across page reloads are tracked in #469.
+
+## Session end and failure
+
+When a script error stops the session, a card above the composer says "The session stopped because of an error.", names
+the error code and its file and line, and offers **Download debug export**; an exception of the Player itself says "The
+Player ran into an error." with the error's name instead. An error notice with the same action supplements the card
+until a new session starts. An ordinary end shows only "Session ended.", and media warnings are notices, never failures.
+The transcript and Stage stay for inspection, with the transcript's end scrolling clear of the card, and nothing opens
+by itself.
+
+The card, its notice, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
+([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
+labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
+saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed
+with a thumbnail, size, and where they were used, each with its own checkbox. The dialog warns that the file is not
+encrypted and that removing credentials and paths from text is best effort, so the player checks the preview; it states
+the file's size and whether the error can be replayed exactly, and previews what the file contains; every change
+prepares the file again, and **Download debug export** saves exactly that file from the player's press. An export larger
+than an issue attachment allows is not offered. The dialog fits narrow screens and scrolls, and its rows and buttons are
+at least 44px tall.
 
 ## Player notices
 
@@ -422,11 +485,13 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), and an image request that allows only the camera where no camera can be used (warning,
-withdrawn when the request ends). Each level also has a theme status colour, following the usual convention: info blue, warning
-orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
-panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
-most severe level that needs attention. The development preview's Visual Lab shows every level.
+Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
+withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
+[Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
+**Download debug export**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
+the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
+solid tone for the border and icon; a panel entry uses the same tint with a solid mark along its start edge and a solid
+icon; and the bell's dot takes the most severe level that needs attention. The development preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 
@@ -465,12 +530,17 @@ users may ever control playback is open; if accepted, such controls send typed h
 acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-playback)).
 
 The trusted host resolves authored package-relative references, such as `sounds/bell.mp3`, to playable sources; the
-runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve is
-reported as a failed load; an unresolvable Stage image leaves the Stage empty. The Player plays audio; a `playVideo`
-request is reported as a failed load ("Video playback is not supported by this Player yet."), so the script continues
-with the runtime's warning. An authored Stage image has no alternative text yet. Media-derived ambience, explicit
-transitions, and custom stage rendering are not yet implemented in the Player; the development preview's Stage media
-picker can override the Stage for layout comparison.
+runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve, or
+that the browser cannot load, is reported as a failed load; a Stage image that does not resolve, or that the browser
+cannot load or decode, leaves the Stage empty. The Player plays audio; a `playVideo` request is reported as a failed
+load ("Video playback is not supported by this Player yet."), so the script continues with the runtime's warning. Each
+such package file is a warning [player notice](#player-notices), once per session and authored path, for example
+"Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
+video also name the file and line of the play that started them. A video that does resolve gets no notice, since only
+video playback itself is missing; captured photos and chosen images are no package files and are never reported. An
+authored Stage image has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage
+rendering are not yet implemented in the Player; the development preview's Stage media picker can override the Stage
+for layout comparison.
 
 Standard image/video-like presentation:
 
@@ -599,6 +669,19 @@ Invalid submissions show a short red notice anchored to the composer input witho
 In a tight layout the floating notice may temporarily cover a choice. It clears when typing resumes, the interaction
 changes, after a brief delay, or when the player taps outside it.
 
+While Debug runs ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)), one small muted status line below the foreground
+controls counts down the current foreground wait, also while the Debug panel is closed: **Debug · Continues in 4 s**,
+**Debug · Press within 4 s**, or **Debug · Pacing: 4 s remaining**. It is not a timer: it has no card, ring, or
+right-rail entry, takes no input, is not announced each second, and never enters the transcript.
+
+Debug's [rewind](../DEBUGGER.md#rewind) works in the chat. While Debug runs, each of the player's answers to an
+interaction before the state shown has a 44 px **Back to here** button beside its bubble. While a restored state is
+inspected, the transcript ends at that state, the messages of the later state Forward restores follow it grey, under
+**Future · Forward restores it**, without Back to here or Explain values, and the interaction of the state shown is
+offered again after them. A bar above the composer, below a failure card when the inspected state failed, shows a **Debug fork** badge,
+what the interaction shown was answered before, and **Forward**, **Resume**, and **Return to session**, each a 44 px
+button with a tooltip; it wraps on a narrow screen. New input or Resume removes the bar and the grey messages.
+
 ### Wide presentation
 
 At normal wide presentation the composer is one integrated component shell containing the expanding input and primary
@@ -678,10 +761,10 @@ which the player submits unchanged or edits first; a cleared composer stays empt
 composer shows the default again, and unsent edits are not kept.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
-request's message as the input's hint. The paperclip opens the browser's native file picker for one image, with the
-request's `types` and `mime` as its `accept` hint. A file dragged over the composer marks it as a drop target ("Drop
-the image here") and answers when dropped; dragged text or links are not taken. Outside such a request there is no
-paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
+request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
+picker for one image, with the request's `types` and `mime` as its `accept` hint. A file dragged over the composer
+marks it as a drop target ("Drop the image here") and answers when dropped; dragged text or links are not taken.
+Outside such a request there is no paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
@@ -690,8 +773,8 @@ stored as session media and recorded in the transcript as the player message `Im
 
 An `askImage(...)` that allows the camera turns the camera on by itself as it asks, where the browser can capture. Its
 viewfinder opens over the Stage, or in the camera window when the script shows one, and draws on the picture the
-request's message as its question and a **Take photo** shutter in the material of the viewfinder's mirror button,
-both at the bottom so the top stays clear. The
+request's question, also said in the chat, or else "Take a photo", and a **Take photo** shutter in the material of the
+viewfinder's mirror button, both at the bottom so the top stays clear. The
 shutter starts a five-second countdown: a number from 5 to 1 as large as the viewfinder allows, each appearing large and
 settling over the live picture, without the motion when the player prefers reduced motion; a request that ends during
 the countdown takes no photo. The photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**
@@ -717,6 +800,24 @@ used, such as on a page that is not a secure context, a request that allows only
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
   without silently changing the deterministic choice, but that is outside the current POC contract.
+
+`askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
+by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
+viewport height (at most `24rem`), and the submit button, the cancel button of a form written with `cancel:`, and a
+polite status badge (`3 of 43 selected`, or `5 of 6 set` when not every field is a toggle) stay below it. A toggle is a Player action button with toggle semantics
+(`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it shows
+`label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next option.
+The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
+`label: value`, or `Set…` (`Not set` when optional) without one; activating it opens it in the composer, which takes the
+field's name, its `hint:` as the input hint (`label…` by default), and the numeric keyboard or the date or time control
+of its kind, with the field's text selected so typing replaces it and Enter keeps it. The edited field stays pressed in
+and is marked current. Enter commits it and returns focus to the field's button; a refused answer keeps the text with
+the composer notice. While a field is edited, **Back** (and Escape in the input) closes it and drops the text, and
+**Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every control keeps the
+action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and adds nothing to
+the transcript; submitting adds the summary line with the `›` response marker. Exact unambiguous text of one field
+label or of the submit or cancel button activates it from the composer, as for `choose`. A form with a time limit closes
+at it without a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.

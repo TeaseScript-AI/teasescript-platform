@@ -32,9 +32,11 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
 - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
 - Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation
-  builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation
-  liveness results for each validated active-loop variant. These are operation-local only; no caller-supplied plan or
-  snapshot data enters a global cache. Validation work may be measured diagnostically, but structural validity is not
+  uses one function/region and plan-fact index per plan plus local call-frame argument and temporary maps, and derives
+  what a suspended continuation needs from liveness over only the control flow it can reach with its active loops. The
+  index and the needs of accepted snapshots' continuations are kept in process only for an immutable plan that complete
+  validation registered, and only while that plan lives; any other plan is indexed per operation, and every snapshot is
+  still captured and validated in full. Validation work may be measured diagnostically, but structural validity is not
   conditioned on a generic validation-work budget.
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
@@ -44,6 +46,22 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Authored Standard-chat message markup crosses into the Player as validated typed blocks and spans. Angle-bracket HTML
   remains literal text, controlled style values cannot carry arbitrary CSS, and only canonical HTTP(S) targets become
   links. The Player renders this structure without a raw-HTML path and opens links with opener isolation.
+- A debug export ([`DEBUGGER.md`](DEBUGGER.md#debug-export)) is untrusted external data wherever it is read. The
+  offline tool bounds decompression (64 MiB by default) and parses it as plain data, validates every field, restores its
+  checkpoint and replay anchor only through checkpoint validation, passes recorded arguments only to the engine's public
+  operations, answers media-store questions only from recorded answers, and replays in a worker with a time limit; it
+  never evaluates, imports, or fetches anything the file names. Exports are neither encrypted nor signed. The Player
+  writes one only on the player's request and downloads it only from the player's press, with no upload; personal
+  content is off until chosen for that export. Cookies, browser credentials, storage outside the session, DOM, and host
+  objects are never read; text the player entered can still contain a secret. Recognizing credentials and paths in
+  free text is best effort: the export removes or leaves out what it recognizes, while the protection is the per-export
+  category choice and the preview the dialog asks the player to check.
+- Saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
+  an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
+  neither encrypted nor signed and can contain private photos, which the Player says when exporting. An import is
+  external data: it is decoded and validated completely, photos included, before the player confirms, writes each chosen
+  script only into the storage scope it names, turns into photos only the references that script lists as its own,
+  and gets media references only from the trusted media store.
 
 ## Accepted pending-action boundary
 

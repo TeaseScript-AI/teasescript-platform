@@ -24,3 +24,13 @@ switch (getRandom(4)) {
 def given = getBoolean("A number?") ? 5 : "five"
 if (given instanceof Number) show("A number")
 if (given instanceof String) show("A text")
+// Several conditional fragments in one text are computed first, so the text is written once.
+def leashed = getBoolean("Leashed?")
+def gagged = getBoolean("Gagged?")
+show("Crawl to me" + (leashed ? " with the leash" : "") + (gagged ? "" : ", mouth open") + ".")
+// An update of one variable by a conditional value is written per branch.
+def dare = "Crawl. "
+dare += leashed ? "On the leash." : "Free, " + (gagged ? "quiet." : "speaking.")
+show(dare)
+// A conditional used as a statement runs one call per branch.
+leashed ? show("Leashed.") : setImage("free.jpg")

@@ -129,11 +129,71 @@ through the provider and then reports it to the runtime, which keeps the previou
 loading fails, for example because the browser denies storage, the session plays session-local and nothing is kept for
 a later run. Script storage is separate from checkpoint persistence (#469).
 
-The browser-local provider keeps one local-storage item per key, named `player-storage:` plus the JSON array
-`[scope, key]`, holding `{ v: 1, value }`; it validates items as external input and skips unreadable ones. Providers
-treat values as ordinary TeaseScript values and never interpret them, for example as media references; a layer such
-as durable captured media wraps a provider instead. Clearing a scope removes only that script's stored values.
-Storage quotas are not enforced yet; all writes pass through the provider, so quota policy can be added there.
+The browser-local provider keeps one local-storage item per key, holding `{ v: 1, value }`; it validates items as
+external input and skips unreadable ones. Items are named `player-storage:` plus the JSON array `[scope, key]` until
+the scope is first replaced or cleared. A provider can replace all values of its scope at once, and clearing is an
+empty replacement: the browser-local provider stages the new values as a generation, named
+`player-storage-generation:` plus `[scope, generation, key]`, then publishes it by writing the head item
+`player-storage-head:` plus the JSON scope, holding `{ v: 1, generation }`. From then on only that generation holds
+the scope's values, so a replacement that fails, for example on quota, keeps every previous value; an unreadable head
+makes the scope unreadable rather than revealing older values, until a replacement repairs it. Each operation runs
+synchronously within one browser task; after publishing, a replacement attempts to remove only the generation it
+displaced. Tabs are not coordinated: a save from another open tab of the same script can still change replaced values,
+or land in a displaced generation and be lost.
+Providers treat values as ordinary TeaseScript values and never interpret them, for example as media references; a
+layer such as durable captured media wraps a provider instead and stores the media that written or replacing values
+reference before persisting them. Clearing or replacing a scope affects only that script's stored values, never a
+running session's own view. Debug's storage editor writes one key through the same provider and captured-media layer,
+as a script `save` does; only once that write succeeded does it change a running session's view
+([DEBUGGER.md](DEBUGGER.md#player-debug)). Adopting a state Debug's rewind restored replaces the scope's values with
+that state's view through the same provider and layer; the rewind history itself is temporary diagnostic data in an
+IndexedDB database of its own, deleted with the history ([DEBUGGER.md](DEBUGGER.md#rewind)). Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
+can be added there.
+
+### Saved-data transfer
+
+A player moves the saved data of every script this browser has played, or of the scripts they tick, with its saved
+photos, by hand and offline to another browser or device through Player Settings
+([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format and `player/saved-data.ts`
+lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
+state. The document is UTF-8 JSON with exactly these fields:
+
+```json
+{ "format": "teasescript-script-storage", "version": 2,
+  "scripts": [{ "scope": "<host storage scope>", "name": "<title or null>", "photos": ["captured-media:<uuid>:1"],
+                "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }] }],
+  "images": [{ "reference": "captured-media:<uuid>:1", "byteLength": 68, "data": "<unpadded base64url>" }] }
+```
+
+Each script's `entries` are its stored values in their `SerializableRuntimeValue` representation, one per line; its
+`name` is the title of its `main.tease` header when a Player showed it, remembered in browser storage, or `null`; its
+`photos` are the references in its values that resolved to its own stored photos. `images` holds the original bytes of
+each such photo, once per reference, also when scripts share it. Any other reference, including one naming another
+script's photo, stays ordinary text and is only counted. An export reads each scope
+freshly, the shown script's after the saves its session issued, so saves stored during a running session count and its
+unsaved photos do not. A file (`<script>-saved-data.teasestorage.json.gz` for one script, otherwise
+`teasescript-saved-data.teasestorage.json.gz`) is the document compressed with gzip; text is `TSST1.gzip.` plus the gzip
+bytes in unpadded base64url. Where the browser cannot compress (native `CompressionStream`), both are the plain JSON
+(`.teasestorage.json`). A version 1 document, of one script's `scope`, `entries`, and `images`, reads as a bundle of one whose photos are
+the images its values reference.
+
+Reading treats the data as external input: the contents, not a file's name or type, select gzip or plain JSON; text
+may also be the plain JSON and may be wrapped across lines. Gzip's checksum, strict base64url, UTF-8 and JSON decoding,
+the exact field sets, a scope listed once, the storage-entry validation used for runtime storage for every script, the
+reference shape, a photo's `byteLength`, and the rules that each script's photos are used by its values and present in
+`images` and that each image is a photo of a script detect damage; any of them
+refuses the whole document. There is no signature: a value or photo edited by hand is accepted when it is valid, a
+replaced photo with its `byteLength` updated.
+
+An import writes each ticked script into its own scope and no other. Each photo is first checked like an image chosen
+for `askImage(...)`: its type is read from its bytes and the browser must decode it. After the player confirms, a
+session of the shown script ends when that script is ticked. For each script, each of its `photos` becomes new media of its
+scope with a fresh reference, and every value that held that exported reference, as text, list or set item, object
+property name or value, or dict key or value, gets the new one. The values then replace the scope's saved data all at
+once, with key order kept; the photos are stored first, under the scope's live lock as a Player of it holds, so a
+failure leaves that scope's previous data. Scripts replace one after another, and a failure of one
+leaves the others to continue, so the import reports which scripts kept their previous data. Earlier media records are never overwritten, and photos left unreferenced are reclaimed
+later.
 
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose

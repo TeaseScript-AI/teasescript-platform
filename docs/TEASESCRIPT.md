@@ -15,6 +15,7 @@ Accepted post-V30 additions:
 - ADR 0021 defines static types: enforcement, implicit conversions, union types, type tests, and narrowing.
 - ADR 0022 defines multi-file scripts: `goto` and `call` across files, globs, `script(...)` references, globals, and
   explicit endings with `end` and `exit`.
+- ADR 0024 lets timer, media, and button blocks share the function and block variables of the code that creates them.
 - `specifications/message-markup.md` defines the accepted constrained presentation markup for authored Standard-chat
   `say` output and the `escapeMarkup()` literal-insertion helper.
 
@@ -77,13 +78,16 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the compact interaction forms in this section through explicit versioned
-interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
-parameters remain deferred, except `askImage(...)`, which is implemented in its V30 call form
-(`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)); this slice does not treat
-compact syntax as a runtime library call. A parenthesized
-interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
-it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the same diagnostic.
+The current compiler implements the compact interaction forms in this section, and the parenthesized form of the basic
+asks as the same interactions, through explicit versioned interaction instructions and the canonical resumable runtime.
+The broader parenthesized V30 APIs and their advanced parameters remain deferred, except `askImage(...)`, which is
+implemented in its V30 call form (`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)),
+and `askForm`, which is an ask in both forms, with `askBooleans(...)` on the same form
+([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
+this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
+such as `showButton(...)` or `choose(...)`, is never interpreted as compact syntax; until those APIs are implemented,
+the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
+same diagnostic.
 
 ### Basic interactions
 
@@ -93,23 +97,32 @@ showButton as mistress "Ready"
 let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
-let text = askText as mistress "Type your answer"
-let name = askText "Your name?", default: "Ada"
+let text = askText as mistress "What do you say?"
+let name = askText "Your name?", default: "Ada", hint: "Type your name"
 
 let amount = askNumber
-let amount = askNumber as mistress "Enter a number"
+let amount = askNumber as mistress "How many?"
 let minutes = askNumber default: 10
 let count = askInteger "How many?", default: 3
 
 let day = askDate "Which day?"
 let start = askTime as mistress "What time?", default: toTime("20:00")
 let moment = askDateTime "When are you free?"
+
+let name = askText("Your name?", default: "Ada")
+let more = askInteger as mistress ("How many?", default: 3) + 1
 ```
 
-For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional string is Standard UI field text or a hint. It is not automatically spoken
-into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
-player still submits it, and a cleared field does not fall back to it. See
-[default answers](specifications/accepted-syntaxes-v30.md#default-answers).
+The basic asks also take their arguments in parentheses, with the same meaning; the `)` ends the ask inside a larger
+expression, and `as speaker` comes before the parentheses
+([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)).
+
+For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
+speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
+only; in a text or number field it shows only while the field is empty, so a default usually hides it
+([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
+optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
+it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askDate`, `askTime`, and
@@ -230,8 +243,10 @@ in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in brow
 Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
 and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
 asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
-restore, and permanent buttons whose clicks run their blocks like expiry interrupts. Accepted forms and current limits
-are defined in specification [§27](specifications/accepted-syntaxes-v30.md#27-timers),
+restore, and permanent buttons whose clicks run their blocks like expiry interrupts. Timer, media, and button blocks
+share the variables of the code that creates them
+([§14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)). Accepted forms and current
+limits are defined in specification [§27](specifications/accepted-syntaxes-v30.md#27-timers),
 [§28](specifications/accepted-syntaxes-v30.md#28-permanent-buttons), and
 [§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
 

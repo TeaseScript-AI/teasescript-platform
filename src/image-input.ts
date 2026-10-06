@@ -3,8 +3,9 @@
  * the Player share: which file extensions and MIME types it may restrict to, and what the transcript shows for an answer.
  */
 
-/** The named arguments of `askImage` besides the message. */
+/** The named arguments of `askImage` besides the message, its question. */
 export const IMAGE_REQUEST_OPTIONS: ReadonlySet<string> = new Set([
+  "hint",
   "allowCamera",
   "allowFile",
   "types",

@@ -61,6 +61,8 @@ export interface FeasibilityFileReport {
   pendingCapabilities: string[];
   /** Compiler diagnostics that remain after the pending-capability placeholders. */
   compilerDiagnostics: TeaseCompileDiagnostic[];
+  /** The script's backward legacy-line jumps (FeasibilityReport.backwardLineJumps); 0 for other files. */
+  backwardLineJumps: number;
   /** Whether a package smoke run executed this script; null when no runner was supplied. */
   smokeRunReached: boolean | null;
 }
@@ -153,6 +155,30 @@ export interface FeasibilityReport {
   rootMigrationErrors: number;
   diagnosticsByCode: Record<string, number>;
   rootDiagnosticsByCode: Record<string, number>;
+  /**
+   * Texts that repeated the text just before them because the legacy display replaced it (repeated-text.ts): dropped,
+   * shortened to what they add, kept because their interpolated values differ, dropped before a transfer to a script
+   * that shows them again first, and kept as an animation that only adds punctuation, such as growing dots.
+   */
+  repeatedText: {
+    dropped: number;
+    shortened: number;
+    kept: number;
+    acrossChain: number;
+    animation: number;
+  };
+  /** Literal image and sound paths that no file of the package matches (`SX_MEDIA_MISSING`). */
+  missingMedia: number;
+  /** Asks that took the text said right before them as their question (`SX_ASK_QUESTION`, #634). */
+  askQuestions: number;
+  /** Empty texts dropped, which only cleared the legacy display (`SX_BLANK_TEXT`). */
+  blankTexts: number;
+  /**
+   * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
+   * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
+   * legacy code order, so a jump marks code that moved.
+   */
+  backwardLineJumps: number;
   /**
    * Compiler diagnostics that remain after pending-capability placeholders, grouped by code and message.
    * These point at importer output rather than at known TeaseScript implementation gaps.
@@ -273,6 +299,11 @@ export function analyzeFeasibility(
     rootMigrationErrors: 0,
     diagnosticsByCode: emptyCounts(),
     rootDiagnosticsByCode: emptyCounts(),
+    repeatedText: { dropped: 0, shortened: 0, kept: 0, acrossChain: 0, animation: 0 },
+    missingMedia: 0,
+    askQuestions: 0,
+    blankTexts: 0,
+    backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
     blockingPendingCapabilityFileCounts: emptyCounts(),
@@ -367,6 +398,19 @@ export function analyzeFeasibility(
     report.rootMigrationErrors += roots.length;
     for (const diagnostic of errors) increment(report.diagnosticsByCode, diagnostic.code);
     for (const diagnostic of roots) increment(report.rootDiagnosticsByCode, diagnostic.code);
+    const backwardLineJumps = isScriptBody ? lineOrderJumps(emitTease(packageProgram)) : 0;
+    report.backwardLineJumps += backwardLineJumps;
+    for (const { code } of program.diagnostics) {
+      if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
+      else if (code === "SX_REPEATED_TEXT_SHORTENED") report.repeatedText.shortened += 1;
+      else if (code === "SX_REPEATED_TEXT_KEPT") report.repeatedText.kept += 1;
+      else if (code === "SX_REPEATED_TEXT_ANIMATION") report.repeatedText.animation += 1;
+      else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
+      else if (code === "SX_ASK_QUESTION") report.askQuestions += 1;
+      else if (code === "SX_BLANK_TEXT") report.blankTexts += 1;
+    }
+    for (const { code } of packageProgram.diagnostics)
+      if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;
 
     report.files.push({
       sourceName: file.sourceName,
@@ -383,6 +427,7 @@ export function analyzeFeasibility(
       compilerCleanExceptPending,
       pendingCapabilities,
       compilerDiagnostics,
+      backwardLineJumps,
       smokeRunReached: options.runner === undefined ? null : false,
     });
   }
@@ -710,4 +755,19 @@ function sortCounts(counts: Record<string, number>): Record<string, number> {
       return leftName.localeCompare(rightName);
     }),
   );
+}
+
+/**
+ * The NOTE and TODO comments of a converted file that name a legacy line more than 20 lines before the line the
+ * previous such comment names: code the conversion moved, where the output otherwise follows the legacy order.
+ */
+export function lineOrderJumps(source: string): number {
+  let previous: number | null = null;
+  let jumps = 0;
+  for (const match of source.matchAll(/\/\/ (?:NOTE|TODO) \w+ line (\d+)/gu)) {
+    const line = Number(match[1]);
+    if (previous !== null && line < previous - 20) jumps += 1;
+    previous = line;
+  }
+  return jumps;
 }

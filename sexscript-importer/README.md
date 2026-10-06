@@ -69,7 +69,8 @@ itself: from `main.tease`, then each runnable script no run reached in isolation
 from `main.tease` left (setup that only a script no run reached saves can still be missing). A file runs where the
 project compiles it, also with unconverted statements kept as TODO comments; a file that does not compile becomes a
 stub in the run's project, and a run that reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
-option, text and number inputs cycle through fixed values, `takePhoto()` returns null as in a Player without a camera,
+option, text and number inputs cycle through fixed values, forms are submitted with their starting values, `takePhoto()`
+returns null as in a Player without a camera,
 and time and media advance in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Accepted
 forms selected with `--accepted` use host stand-ins with the same answer rotation. A run proves one path executes;
 `stepLimit` is inconclusive (for example a loop that waits until the typed text matches), while `TSR037` means the work
@@ -77,9 +78,10 @@ between two events exceeds the product's instruction budget, which fails in the 
 With a single directory argument, the sibling `images/` folder holds the package's images.
 
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
-`// NOTE` at every site, so that converted packages play natively: `askBooleans` a yes/no choice per item and a
-confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, and an image
-composition its base image. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile,layeredScene`
+`// NOTE` at every site, so that converted packages play natively: `showPopup` the message and an OK button, `openUrl`
+the link in the chat and a button, and an image composition its base image. Legacy `getBooleans` becomes native
+`askBooleans(message:, texts:, defaults:)`, with `cancel:` where the script tests the answers for null, as the legacy
+dialog's Cancel gave null. `--accepted` (every form) or `--accepted=showPopup,openUrl,chooseFile,layeredScene`
 emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
 stand-ins.
 
@@ -234,6 +236,64 @@ which `catalog` hard-links under `source/` next to the page; earlier versions th
 `earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites in `localStorage` and lists
 them at the top.
 
+## Branch explorer
+
+```sh
+# from sexscript-importer/, after npm run build:typescript in the repository root:
+node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] <unit-dir>... --out <dir>
+node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --error)
+```
+
+`explore` plays each package headlessly in the real runtime (`src/explorer.ts`), without the Player, through every
+branch it can reach within the budget, and replaces playing converted packages by hand to find crashes. Each pending
+action is a branch point. The options are every button and choice option, a form submitted with its starting values or
+cancelled where it offers that, and the default answer of a typed ask with
+boundary values of its type: `0`, `1`, `-1`, `1000000` (and `0.5` for `askNumber`), the text `x`, and dates and times
+at both ends of a day or year. Each constant that the code compares with near the ask adds a candidate, or `c - 1`,
+`c`, and `c + 1` for a number. A button whose result the script keeps (`(showButton …) / 1 s`) can also be pressed
+after the player thinks for just over each compared number of seconds (60 s without one). Waiting for the next
+deadline (a timer, a timeout, or the end of awaited media), and each shown permanent button, are options too. Media
+loads succeed with one second per pass, `takePhoto` finds no camera, `askImage` gets one stored image, pacing is
+instant, and the clock starts at 2026-10-02 12:00 UTC with empty storage.
+
+States are deduplicated by a hash of the snapshot that leaves out what no script can observe: event sequence numbers,
+the next free IDs, and the last settlement record. The runtime's own IDs (actions, scopes, call frames, timers, media,
+buttons) are renumbered by rank, because only their equality and order matter. The clock and the random state stay
+in. The search first expands states whose step reached new instructions, then states that look new apart from clock,
+random state, and settled handles (their loop key), and then the repeats, least repeated first; within each group
+the newest state goes first. It stops when every state is expanded, or at the time or state budget.
+
+Coverage counts executed plan instructions and maps them to the lines they start on. Steps run instruction by
+instruction with `executeInstruction` to record them. After 200 instructions in a row that were all reached before,
+a step finishes with `run` and the rest of the product's instruction budget. What the step executes after that point
+is not recorded: its lines can show as unvisited, and its conditions as left only one way although play took both
+(for example the code after a long setup loop). Each operation copies and checks the whole snapshot, so this
+recording is what limits the speed on large packages, and on packages with large lists or dicts in their state.
+
+The report `<out>/<unit>.json` has these parts:
+
+- per file: the lines that hold instructions, the visited ones, the percentage, and the unvisited line ranges, each
+  with a `reach` label (only `unknown` so far; `seededState` and `unreachable` are reserved);
+- each condition and loop that play reached but left only one way, with its source, the missed way, and its first
+  line: the targets for a directed search;
+- one crash per runtime failure code and source span, with the shortest input list found from the start;
+- the traps;
+- the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out.
+
+`summary.md` has one table row per unit. `--replay` plays the input list of a crash or trap again with the run's seed,
+prints the transcript, and for a crash exits 0 only when the same failure returns. A runtime operation that throws,
+such as a runtime that rejects a snapshot it produced (`TSR101`), is no crash of the package: the report counts these
+under `search.engineErrors` with the input list of the first, which `--error` replays.
+
+A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
+escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
+future is unknown. A group that leads to an escaping group escapes too. Each strongly connected part of the
+remaining groups that no explored input leaves is one trap. A state where the player can do nothing and nothing
+happens is a `stuck` trap. A loop that waits for a word or number the candidates miss, or for a clock time, is also
+reported as a trap.
+
+The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.
+
 ## Tests
 
 ```sh
@@ -243,7 +303,7 @@ node --test tests/*.test.ts
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler, as the `main.tease` of a project with a stub for each file it transfers to.
 `tests/fixtures/conversion-accepted/` holds output converted with `--accepted`, which uses accepted but not yet
-implemented TeaseScript (`showPopup`, `askBooleans`, `openUrl`, `chooseFile`); it must compile once those capabilities
+implemented TeaseScript (`showPopup`, `openUrl`, `chooseFile`); it must compile once those capabilities
 are replaced by placeholder calls. Both groups must also run to the
 end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.

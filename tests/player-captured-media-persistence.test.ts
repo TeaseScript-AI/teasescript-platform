@@ -40,6 +40,11 @@ class FakeProvider implements ScriptStorageProvider {
     if (value === null) this.entries.delete(key);
     else this.entries.set(key, value);
   }
+  async replace(entries: readonly RuntimeScriptStorageEntrySnapshot[]) {
+    this.log.push(`replace ${entries.map((entry) => entry.key).join(" ")}`);
+    this.entries.clear();
+    for (const { key, value } of entries) this.entries.set(key, value);
+  }
   async clear() {
     this.log.push("clear");
     this.entries.clear();
@@ -389,4 +394,87 @@ test("a save whose photo cannot be stored fails atomically and the script keeps 
   assert.equal(provider.entries.get("photo"), "previous");
   const seen = finished.frames[0]?.bindings.find((binding) => binding.name === "seen")?.value;
   assert.equal(seen, "previous");
+});
+
+test("a replacement stores every photo its values reference before any value is replaced", async () => {
+  const repository = new FakeMediaRepository();
+  const media = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  provider.entries.set("previous", "kept until replaced");
+  const storage = withCapturedMedia(provider, media);
+  const first = media.add("image", png("first")).reference;
+  const second = media.add("image", png("second")).reference;
+  const unsaved = media.add("image", png("not saved")).reference;
+  const entries = [
+    { key: "album", value: { kind: "list", items: [first, first] } },
+    { key: "named", value: { kind: "dict", entries: [{ key: second, value: "a photo" }] } },
+  ] satisfies RuntimeScriptStorageEntrySnapshot[];
+  const storedBefore: number[] = [];
+  const replace = provider.replace.bind(provider);
+  provider.replace = async (next) => {
+    storedBefore.push(repository.size);
+    await replace(next);
+  };
+  await storage.replace(entries);
+  assert.deepEqual(storedBefore, [2], "both referenced photos, and only those, before the values");
+  assert.deepEqual(provider.log, ["replace album named"]);
+  assert.equal(provider.entries.has("previous"), false);
+  assert.ok((await repository.get("package", unsaved)) === null);
+
+  // When a photo cannot be stored, the replacement is not persisted at all.
+  const failing = media.add("image", png("failing")).reference;
+  repository.failWrites = true;
+  await assert.rejects(
+    storage.replace([{ key: "other", value: failing }]),
+    CapturedMediaNotStoredError,
+  );
+  assert.deepEqual(provider.log, ["replace album named"]);
+  assert.deepEqual([...provider.entries.keys()], ["album", "named"]);
+});
+
+test("without the live lease a replacement with photos is refused, and the sweep stays deferred", async () => {
+  const repository = new FakeMediaRepository();
+  const provider = new FakeProvider();
+  provider.entries.set("answer", 41);
+  const media = new CapturedMediaStore(repository, urls, "package");
+  let sweeps = 0;
+  const locks: CapturedMediaLocks = {
+    holdLive: () => ({ granted: Promise.resolve("failed"), release: () => {} }),
+    whenIdle: async () => (sweeps++, false),
+  };
+  const storage = capturedMediaStorage(provider, media, locks);
+  const photo = media.add("image", png("photo")).reference;
+  await assert.rejects(
+    storage.replace([{ key: "photo", value: photo }]),
+    CapturedMediaNotStoredError,
+  );
+  assert.equal(repository.size, 0);
+  assert.deepEqual(provider.entries, new Map([["answer", 41]]));
+  // Values without photos need no durable media.
+  await storage.replace([{ key: "answer", value: 42 }]);
+  assert.deepEqual(provider.entries, new Map([["answer", 42]]));
+  // The only sweep attempt is the one before the live lock; replacing never sweeps.
+  assert.equal(sweeps, 1);
+});
+
+test("flushing waits for issued storage work and keeps storage open", async () => {
+  const provider = new FakeProvider();
+  const media = new CapturedMediaStore(new FakeMediaRepository(), urls, "package");
+  const storage = capturedMediaStorage(provider, media, idle);
+  let releaseWrite = () => {};
+  const write = provider.write.bind(provider);
+  provider.write = async (key, value) => {
+    await new Promise<void>((resolve) => (releaseWrite = resolve));
+    await write(key, value);
+  };
+  const saving = storage.write("answer", 42);
+  let flushed = false;
+  const flushing = storage.flush().then(() => (flushed = true));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(flushed, false);
+  releaseWrite();
+  await Promise.all([saving, flushing]);
+  assert.deepEqual(provider.entries, new Map([["answer", 42]]));
+  await storage.replace([{ key: "after", value: 1 }]);
+  assert.deepEqual(provider.log.slice(-2), ["write answer", "replace after"]);
 });

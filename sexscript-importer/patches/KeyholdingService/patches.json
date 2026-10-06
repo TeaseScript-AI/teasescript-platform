@@ -20,6 +20,13 @@
       "category": "e",
       "reason": "The distraction message closes show(...) after its first line and adds the next two lines to show's null result, so only the first line appeared. Close show after the last line.",
       "diff": "distraction-text.diff"
+    },
+    {
+      "id": "likemale-before-def",
+      "layer": "source",
+      "category": "e",
+      "reason": "The default image is chosen from likemale before the script's def of likemale further down, so the legacy script stopped there with a missing property when no image was installed. The test reads the setting the def reads, intro.likemale.",
+      "diff": "likemale-before-def.diff"
     }
   ]
 }

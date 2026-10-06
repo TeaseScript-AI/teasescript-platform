@@ -88,6 +88,8 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "askImage",
   "askInteger",
   "askBoolean",
+  "askBooleans",
+  "askForm",
   "askDate",
   "askTime",
   "askDateTime",

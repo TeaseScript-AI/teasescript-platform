@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { ref, type ShallowRef } from "vue";
-import { Activity, Bug, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
+import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
+import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
-import DebugPanel from "./DebugPanel.vue";
-import DebugStatus from "./DebugStatus.vue";
 import { prepareHostedScript, type ScriptHost } from "./hostedScript";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
@@ -31,19 +30,16 @@ import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { browserStorage } from "./usePlayerPreference";
-import { useDebugLog } from "./useDebugLog";
-import { useDevelopmentTime } from "./useDevelopmentTime";
-import { usePlayerSession } from "./usePlayerSession";
+import { usePlayerSession, type PlayerSessionStart } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 // Development preview root; main.ts loads it on the development server or with `?dev`.
 // Visual Lab holds temporary Owner A/B settings only; runtime content comes from a real script.
 const query = new URLSearchParams(window.location.search);
-// The Debug tool exists only with the explicit `?dev` opt-in, also on the development server; `time=skip` starts its
-// time controls with auto-skip on.
-const debugTool = query.has("dev");
+// The explicit `?dev` opt-in starts with the Debug menu on, also on the development server; `time=skip` starts Debug
+// with auto-skip on.
+const debug = { menu: query.has("dev"), autoSkip: query.get("time") === "skip" };
 const tools: readonly PlayerTool[] = [
-  ...(debugTool ? [{ name: "Debug", icon: Bug }] : []),
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
   // Panels that exercise multi-panel arrangement and drawer behavior; Playback Diagnostics also lists the Player's
@@ -80,6 +76,8 @@ const player = usePlayerSession(
         scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
         // As in the default build: an image the script saves a reference to stays in this browser for later runs.
         capturedMedia: { repository: props.capturedMediaRepository ?? null },
+        savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
+        debugPackage: { id: packageHost.storageScope, version: null },
       }
     : {
         // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
@@ -91,13 +89,10 @@ const player = usePlayerSession(
         ...(cameraScenario && {
           scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
           capturedMedia: { repository: props.capturedMediaRepository ?? null },
+          savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
         }),
       },
 );
-const log = debugTool ? useDebugLog() : null;
-const time = log
-  ? useDevelopmentTime(player, { autoSkip: query.get("time") === "skip" }, log.add)
-  : null;
 
 // Notice preview: the Player's own wording for real conditions, plus an error sample that no condition reports yet.
 const sampleNotices: readonly PlayerNotice[] = [
@@ -112,7 +107,11 @@ function showSampleNotices() {
 function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
-const startOptions = () => ({ temporalContext: playerTemporalContext(), wallClockMs: Date.now() });
+const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
+  ...recording,
+  temporalContext: playerTemporalContext(),
+  wallClockMs: Date.now(),
+});
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
 let failure: ShallowRef<ScriptFailure | null> | null = null;
 if (packageHost !== null) failure = prepareHostedScript(player, packageHost);
@@ -120,18 +119,25 @@ else if (cameraScenario)
   void player
     .loadScriptStorage()
     .then(() =>
-      player.prepare(() =>
+      player.prepare((recording) =>
         createPlayerRuntimeSession(cameraScenarioSource, {
           ...player.scriptStorageOptions(),
-          ...startOptions(),
+          ...startOptions(recording),
         }),
       ),
     );
 else if (viewfinderScenario)
-  player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource, startOptions()));
+  player.prepare((recording) =>
+    createPlayerRuntimeSession(viewfinderScenarioSource, startOptions(recording)),
+  );
 else if (buttonsScenario)
-  player.prepare(() => createPlayerRuntimeSession(permanentButtonsScenarioSource, startOptions()));
-else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
+  player.prepare((recording) =>
+    createPlayerRuntimeSession(permanentButtonsScenarioSource, startOptions(recording)),
+  );
+else
+  player.prepare((recording) =>
+    createPlayerRuntimeSession(openingScenario, startOptions(recording)),
+  );
 </script>
 
 <template>
@@ -142,12 +148,9 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptio
     :title="packageHost === null ? 'Evening by the coast' : ''"
     :failure="failure ?? null"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
+    :debug="debug"
   >
-    <template #overlay>
-      <DebugStatus v-if="time && log" :time="time" :log="log" />
-    </template>
     <template #tool="{ tool, player: playerElement }">
-      <DebugPanel v-if="tool === 'Debug' && time && log" :time="time" :log="log" />
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
       <ul
         v-if="tool === 'Playback Diagnostics' && player.diagnostics.value.length > 0"

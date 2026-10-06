@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "information-record",
+      "layer": "source",
+      "category": "b",
+      "reason": "The information record is kept in the legacy online storage. setInformation(id, information, key, value) wrote into the caller's map, which Groovy shares by reference; TeaseScript copies records and cannot index one by a key, so the calls become direct writes. The record starts with maxPoints 1000, the value the first start sets, so its comparisons see a number, and firstStart, which nothing reads, is saved as yyyy-MM-dd text instead of a Date. The maxPoints comparison also tests the copied value for null again, since TeaseScript does not carry the field's null test to the copy; it is always true there.",
+      "diff": "information-record.diff"
+    }
+  ]
+}

@@ -32,6 +32,7 @@ accept syntax, architecture, or implementation details.
 - **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   permanent buttons (`showPermanentButton`, `removePermanentButton`) whose clicks run their blocks like expiry interrupts;
+  timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
@@ -54,7 +55,10 @@ accept syntax, architecture, or implementation details.
   time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links;
   authored runtime timers render in its timer rail on a session-owned scene clock (#444), and permanent buttons below
   them, inactive while their block runs (#610).
-  It also has the tools framework and browser-local Player Settings. It shows the runtime Stage image and plays authored
+  It also has the tools framework, browser-local Player Settings, and the Debug panel that Settings' Debug menu offers,
+  with time controls, countdowns, and a Now view (`docs/DEBUGGER.md#player-debug`), and a debug export a player
+  downloads with their consent from the failure card, Settings, or the Debug panel, which `tools/debug-export.mjs`
+  inspects and replays offline (`docs/DEBUGGER.md#debug-export`). It shows the runtime Stage image and plays authored
   audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
   repository demo `examples/demo/demo.tease` (#448), or with `?package=<id>` a package of the playground's development
   package root as one project, listing its diagnostics when it does not compile (#570); the development server or

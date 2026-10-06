@@ -1,0 +1,5 @@
+say "Maintenance", instant
+call "Domme3/spanking.tease"
+say "Back", instant
+let done = showButton "Done"
+exit

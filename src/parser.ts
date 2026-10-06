@@ -33,6 +33,7 @@ import type {
   SayStatement,
   ShowButtonParts,
   ShowButtonStatement,
+  FormArgument,
   InteractionExpression,
   InteractionChoiceOption,
   WaitStatement,
@@ -151,6 +152,7 @@ const parserDiagnosticCode = {
   symbolicOperator: "TSP037",
   invalidSwitchForm: "TSP038",
   expectedLabelName: "TSP039",
+  invalidLoadForm: "TSP040",
   invalidTagQuery: "TST001",
 } as const;
 
@@ -171,8 +173,29 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDate", "date"],
   ["askTime", "time"],
   ["askDateTime", "datetime"],
+  ["askForm", "form"],
 ]);
+/** The named arguments of each basic ask and of `askForm`, in the order the message suggests them. */
+const ASK_OPTIONS: readonly string[] = ["default", "hint"];
+const FORM_OPTIONS: readonly string[] = [
+  "fields",
+  "hint",
+  "submit",
+  "cancel",
+  "outro",
+  "timeout",
+  "onTimeout",
+];
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
+/** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
+const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([
+  "stringLiteral",
+  "identifier",
+  "parenthesizedExpression",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+]);
 const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
 /** Parses the accepted core-language milestone. */
@@ -1079,8 +1102,8 @@ class Parser {
   }
 
   /**
-   * `showPermanentButton <text> { ... }`: the text is followed by the required block with the click action, whose first
-   * line may be `persist: true`.
+   * `showPermanentButton <text>[, persist: true|false] { ... }`: the text and its options are followed by the required
+   * block with the click action.
    */
   *#parseShowPermanentButtonParts(): ParseTask<ShowPermanentButtonParts | null> {
     const command = this.#advance();
@@ -1096,7 +1119,10 @@ class Parser {
     }
     const enclosing = this.#blockEndsCompactInteraction;
     this.#blockEndsCompactInteraction = true;
+    const textStart = this.#current;
     const text = yield* parseChild(this.#parseOr());
+    const textEnd = this.#current;
+    const options = text === null ? null : yield* parseChild(this.#parsePermanentButtonOptions());
     this.#blockEndsCompactInteraction = enclosing;
     if (text === null) {
       this.#reportInsertion(
@@ -1114,36 +1140,96 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const block = yield* parseChild(this.#asStatements(this.#parsePermanentButtonBlock()));
-    if (block === null) return null;
+    const handler = yield* parseChild(
+      this.#asStatements(this.#parsePermanentButtonBlock(text, textStart, textEnd)),
+    );
+    if (handler === null || options === null) return null;
     return {
       text,
-      persist: block.persist,
-      handler: block.handler,
+      persist: options.persist,
+      handler,
       commandSpan: copySpan(command.span),
-      span: spanFrom(command.span, block.handler.span),
+      span: spanFrom(command.span, handler.span),
     };
   }
 
-  /** The click action of a permanent button; only its first line may be `persist: true`. */
-  *#parsePermanentButtonBlock(): ParseTask<{ persist: boolean; handler: Block } | null> {
+  /** The named options after the button text, each after a comma; `null` reports an already diagnosed failure. */
+  *#parsePermanentButtonOptions(): ParseTask<{ persist: boolean } | null> {
+    let persist = false;
+    let valid = true;
+    const seen = new Set<string>();
+    for (
+      let offset = this.#offsetAfterComma();
+      offset !== null &&
+      this.#peek(offset).kind === TokenKind.Identifier &&
+      this.#peek(offset + 1).kind === TokenKind.Colon;
+      offset = this.#offsetAfterComma()
+    ) {
+      for (let skipped = 0; skipped < offset; skipped += 1) this.#advance();
+      const name = this.#advance();
+      this.#advance();
+      // A missing value leaves the block, also one on the next line, to the button.
+      let blockOffset = 0;
+      while (this.#peek(blockOffset).kind === TokenKind.Newline) blockOffset += 1;
+      const atBlock = this.#peek(blockOffset).kind === TokenKind.LeftBrace;
+      if (atBlock) this.#skipNewlines();
+      const value = atBlock ? null : yield* parseChild(this.#parseColonValueTask(false));
+      if (value === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          `Expected true or false after '${name.lexeme}:'.`,
+        );
+        valid = false;
+      } else if (seen.has(name.lexeme)) {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          `Duplicate showPermanentButton option '${name.lexeme}'.`,
+          name.span,
+        );
+        valid = false;
+      } else if (name.lexeme !== "persist") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          `Unknown showPermanentButton option '${name.lexeme}'; the only option is 'persist'.`,
+          name.span,
+        );
+        valid = false;
+      } else if (value.kind !== "booleanLiteral") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          "showPermanentButton option 'persist' must be the literal true or false.",
+          value.span,
+        );
+        valid = false;
+      } else {
+        persist = value.value;
+      }
+      seen.add(name.lexeme);
+    }
+    return valid ? { persist } : null;
+  }
+
+  /**
+   * The click action of a permanent button. A first line `persist: ...`, the earlier spelling of the option, is reported
+   * with the command that replaces it; `text` is the button text, written by the tokens from `textStart` to `textEnd`.
+   */
+  *#parsePermanentButtonBlock(
+    text: Expression,
+    textStart: number,
+    textEnd: number,
+  ): ParseTask<Block | null> {
     const leftBrace = this.#advance();
     this.#skipNewlines();
-    let persist = false;
     if (this.#checkIdentifier("persist") && this.#peek(1).kind === TokenKind.Colon) {
-      this.#advance();
-      this.#advance();
-      if (this.#check(TokenKind.KeywordTrue)) {
-        this.#advance();
-        persist = true;
-      } else {
-        this.#reportToken(
-          parserDiagnosticCode.expectedExpression,
-          "A button block's 'persist:' takes the literal true; leave the line out for a button that its file entry owns.",
-          this.#peek(),
-        );
-        this.#synchronizeStatement(true);
-      }
+      let written = this.#sourceText(textStart, textEnd);
+      // Text such as a compact `choose` would take the option as its own, so it is grouped.
+      if (!SELF_DELIMITED_EXPRESSIONS.has(text.kind)) written = `(${written})`;
+      this.#reportToken(
+        parserDiagnosticCode.invalidMediaForm,
+        `Write 'persist:' on the command instead of in the block: 'showPermanentButton ${written}, persist: true {'.`,
+        this.#peek(),
+      );
+      this.#synchronizeStatement(true);
       this.#finishStatement(true);
       this.#skipNewlines();
     }
@@ -1168,10 +1254,19 @@ class Parser {
       return null;
     }
     const span = spanFrom(leftBrace.span, this.#previous().span);
-    return {
-      persist,
-      handler: Object.freeze({ kind: "block", statements: Object.freeze(statements), span }),
-    };
+    return Object.freeze({ kind: "block", statements: Object.freeze(statements), span });
+  }
+
+  /** The source of the tokens from `start` up to `end`, with one space where the source separates two of them. */
+  #sourceText(start: number, end: number): string {
+    let text = "";
+    for (let index = start; index < end; index += 1) {
+      const token = this.tokens[index]!;
+      if (index > start && token.span.start.offset > this.tokens[index - 1]!.span.end.offset)
+        text += " ";
+      text += token.lexeme;
+    }
+    return text;
   }
 
   /** `showImage <file>` uses command syntax; the V30 parenthesized layered-image form is not supported. */
@@ -1457,12 +1552,39 @@ class Parser {
   }
 
   /**
-   * `load <key>[, default: <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
-   * Like the default answer of an ask, the `, default:` binds to the nearest `load` before it. The default is
-   * evaluated only when the key is absent.
+   * `load(<key>[, default: <value>])`, or the compact `load <key>[, default: <value>]`, whose operands are full
+   * expressions, so `(load "k") == null` needs parentheses. Like the default answer of an ask, the compact `, default:`
+   * binds to the nearest `load` before it. The default is evaluated only when the key is absent.
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
+    // Whitespace does not matter: `load ("k")` is the bounded form too, so its `)` ends the load.
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      const call = yield* parseChild(
+        this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+      );
+      const parts = this.#boundedArguments(
+        command,
+        call,
+        ["default"],
+        parserDiagnosticCode.invalidLoadForm,
+      );
+      if (parts === null) return null;
+      if (parts.value === null) {
+        this.#reportSpan(
+          parserDiagnosticCode.expectedStorageKey,
+          "Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+          call.span,
+        );
+        return null;
+      }
+      return Object.freeze({
+        kind: "loadExpression",
+        key: parts.value,
+        defaultValue: parts.options.get("default") ?? null,
+        span: copySpan(call.span),
+      });
+    }
     // The key ends at a bare `default`, the earlier fallback form, so that the message below names the fix.
     const enclosing = this.#storageDelimiters;
     this.#storageDelimiters = new Set([...enclosing, "default"]);
@@ -1508,6 +1630,53 @@ class Parser {
       defaultValue,
       span: spanFrom(command.span, (defaultValue ?? key).span),
     });
+  }
+
+  /**
+   * The arguments of a bounded command form such as `load("k", default: 0)`: at most one unnamed value, which comes
+   * first, and each option of `names` at most once. `null` reports an already diagnosed failure.
+   */
+  #boundedArguments(
+    command: Token,
+    call: CallExpression,
+    names: readonly string[],
+    code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
+  ): { value: Expression | null; options: ReadonlyMap<string, Expression> } | null {
+    let value: Expression | null = null;
+    const options = new Map<string, Expression>();
+    let valid = true;
+    let sawNamed = false;
+    for (const argument of call.arguments) {
+      if (argument.kind === "positionalArgument") {
+        // An unnamed value after a named one is already reported.
+        if (!sawNamed && value !== null) {
+          this.#reportSpan(
+            code,
+            `${command.lexeme}(...) takes one unnamed value; name the others, such as '${names[0]}:'.`,
+            argument.span,
+          );
+        }
+        if (sawNamed || value !== null) valid = false;
+        else value = argument.value;
+        continue;
+      }
+      sawNamed = true;
+      const name = argument.name.name;
+      if (!names.includes(name)) {
+        this.#reportSpan(
+          code,
+          `Unknown ${command.lexeme} option '${name}'; use ${names.map((known) => `'${known}:'`).join(" or ")}.`,
+          argument.name.span,
+        );
+        valid = false;
+      } else if (options.has(name)) {
+        this.#reportSpan(code, `Duplicate ${command.lexeme} option '${name}'.`, argument.name.span);
+        valid = false;
+      } else {
+        options.set(name, argument.value);
+      }
+    }
+    return valid ? { value, options } : null;
   }
 
   /** `showCamera [stage]`: the contextual word `stage` directly after the command places the view over the Stage. */
@@ -2382,10 +2551,34 @@ class Parser {
       return null;
     }
     const variable = this.#identifier(this.#advance());
+    // `for key, value in dict`: the second name receives each entry's value.
+    let valueVariable: Identifier | null = null;
+    if (this.#match(TokenKind.Comma)) {
+      // A line may break after the comma (V30 §1) before `value in`; another next line stays for recovery.
+      let offset = 0;
+      while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+      const next = this.#peek(offset).kind;
+      if (
+        (next === TokenKind.Identifier || next === TokenKind.KeywordSet) &&
+        this.#peek(offset + 1).kind === TokenKind.KeywordIn
+      )
+        this.#skipNewlines();
+      if (!this.#checkDeclarationName()) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedIdentifier,
+          "Expected a value-variable identifier after ',', as in 'for key, value in dict'.",
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+      valueVariable = this.#identifier(this.#advance());
+    }
     if (!this.#match(TokenKind.KeywordIn)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIn,
-        "Expected 'in' after the loop variable.",
+        valueVariable === null
+          ? "Expected 'in' after the loop variable."
+          : "Expected 'in' after the loop variables.",
       );
       this.#synchronizeStatement();
       return null;
@@ -2401,6 +2594,7 @@ class Parser {
     return Object.freeze({
       kind: "forStatement",
       variable,
+      valueVariable,
       iterable,
       body,
       span: spanFrom(keyword.span, body.span),
@@ -3140,6 +3334,7 @@ class Parser {
       this.#checkIdentifier("askDate") ||
       this.#checkIdentifier("askTime") ||
       this.#checkIdentifier("askDateTime") ||
+      this.#checkIdentifier("askForm") ||
       this.#checkIdentifier("choose")
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
@@ -3228,6 +3423,9 @@ class Parser {
 
   *#parseInteractionExpression(): ParseTask<InteractionExpression | null> {
     const command = this.#advance();
+    const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
+    if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
+      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, null, null));
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -3237,7 +3435,6 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
     if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
@@ -3251,6 +3448,8 @@ class Parser {
       }
       speaker = this.#identifier(this.#advance());
     }
+    if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
+      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, asSpan, speaker));
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -3262,33 +3461,70 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const hint =
+      const names = interactionKind === "form" ? FORM_OPTIONS : ASK_OPTIONS;
+      const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
         !this.#atStorageDelimiter() &&
-        !this.#atInteractionDefault(0)
+        this.#askOptionAt(0, names) === null
           ? yield* parseChild(this.#parseOr())
           : null;
-      let defaultValue: Expression | null = null;
-      let defaultOffset = hint === null ? 0 : this.#offsetAfterComma();
-      if (defaultOffset === null && this.#atInteractionDefault(0)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedDelimiter,
-          "Expected ',' between the hint and 'default:'.",
-        );
-        defaultOffset = 0;
-      }
-      if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
-        for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
-        defaultValue = yield* parseChild(this.#parseColonValueTask(false));
-        if (defaultValue === null) {
+      // The named options follow in any order, each after a comma, or first without a question.
+      const named: FormArgument[] = [];
+      let end = question?.span ?? speaker?.span ?? command.span;
+      let offset = question === null ? 0 : this.#offsetAfterComma();
+      for (;;) {
+        if (offset === null && this.#askOptionAt(0, names) !== null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedDelimiter,
+            `Expected ',' before '${this.#peek().lexeme}:'.`,
+          );
+          offset = 0;
+        }
+        const option = offset === null ? null : this.#askOptionAt(offset, names);
+        if (option === null) {
+          // A form names every argument, so another `name:` after a comma is a misspelled one.
+          const unknown = offset === null ? null : this.#peek(offset);
+          if (
+            interactionKind === "form" &&
+            unknown?.kind === TokenKind.Identifier &&
+            this.#peek(offset! + 1).kind === TokenKind.Colon
+          ) {
+            this.#reportSpan(
+              parserDiagnosticCode.unsupportedInteractionForm,
+              `Unknown askForm option '${unknown.lexeme}'; use ${names.map((known) => `'${known}:'`).join(", ")}.`,
+              unknown.span,
+            );
+            this.#synchronizeStatement();
+          }
+          break;
+        }
+        for (let skipped = 0; skipped < offset!; skipped += 1) this.#advance();
+        const name = this.#advance();
+        this.#advance();
+        const value = yield* parseChild(this.#parseColonValueTask(false));
+        if (value === null) {
           this.#reportInsertion(
             parserDiagnosticCode.expectedInteractionText,
-            "Expected a default answer after 'default:'.",
+            option === "default"
+              ? "Expected a default answer after 'default:'."
+              : option === "hint"
+                ? "Expected hint text after 'hint:'."
+                : `Expected a value after '${option}:'.`,
           );
           if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
             this.#recoveredAtStatementBoundary = true;
+          break;
         }
+        if (named.some((argument) => argument.name.name === option)) {
+          this.#reportSpan(
+            parserDiagnosticCode.unsupportedInteractionForm,
+            `Duplicate ${command.lexeme} option '${option}'.`,
+            name.span,
+          );
+        } else named.push(Object.freeze({ name: this.#identifier(name), value }));
+        end = value.span;
+        offset = this.#offsetAfterComma();
       }
       if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
@@ -3298,18 +3534,15 @@ class Parser {
         );
         this.#synchronizeStatement();
       }
-      const end = defaultValue?.span ?? hint?.span ?? speaker?.span ?? command.span;
-      return Object.freeze({
-        kind: "interactionExpression",
+      return this.#askExpression(
+        command,
         interactionKind,
-        commandSpan: copySpan(command.span),
         asSpan,
         speaker,
-        hint,
-        defaultValue,
-        options: Object.freeze([]),
-        span: spanFrom(command.span, end),
-      });
+        question,
+        named,
+        spanFrom(command.span, end),
+      );
     }
 
     const options: InteractionChoiceOption[] = [];
@@ -3405,11 +3638,58 @@ class Parser {
       commandSpan: copySpan(command.span),
       asSpan,
       speaker,
+      question: null,
       hint: null,
       defaultValue: null,
       options: Object.freeze(options),
+      formArguments: Object.freeze([]),
       span: spanFrom(command.span, end),
     });
+  }
+
+  /**
+   * `askText [as speaker] ([question][, hint: text][, default: value])` and the other basic asks: the parentheses hold
+   * the arguments of the compact form, so `)` ends the ask and both forms give the same interaction.
+   */
+  *#parseBoundedAsk(
+    command: Token,
+    interactionKind: Exclude<InteractionExpression["interactionKind"], "choice">,
+    asSpan: SourceSpan | null,
+    speaker: Identifier | null,
+  ): ParseTask<InteractionExpression | null> {
+    const call = yield* parseChild(
+      this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+    );
+    const parts = this.#boundedArguments(
+      command,
+      call,
+      interactionKind === "form" ? FORM_OPTIONS : ASK_OPTIONS,
+      parserDiagnosticCode.unsupportedInteractionForm,
+    );
+    if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        `The 'as speaker' clause must appear immediately after '${command.lexeme}'.`,
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+    }
+    if (parts === null) return null;
+    // The arguments were checked to be known and unique, so the named ones are the options in written order.
+    const named = call.arguments.flatMap((argument) =>
+      argument.kind === "namedArgument"
+        ? [Object.freeze({ name: argument.name, value: argument.value })]
+        : [],
+    );
+    return this.#askExpression(
+      command,
+      interactionKind,
+      asSpan,
+      speaker,
+      parts.value,
+      named,
+      spanFrom(command.span, call.span),
+    );
   }
 
   #isInteractionChoiceTerminator(): boolean {
@@ -3422,6 +3702,51 @@ class Parser {
       this.#check(TokenKind.InterpolationEnd) ||
       this.#atStorageDelimiter()
     );
+  }
+
+  /** The named option of an ask among `names`, such as `hint:` or `default:`, at `offset` tokens ahead, or `null`. */
+  #askOptionAt(offset: number, names: readonly string[]): string | null {
+    const token = this.#peek(offset);
+    if (token.kind !== TokenKind.Identifier || this.#peek(offset + 1).kind !== TokenKind.Colon)
+      return null;
+    return names.includes(token.lexeme) ? token.lexeme : null;
+  }
+
+  /**
+   * A basic ask or `askForm` from its question and named options in written order. A basic ask keeps `hint:` and
+   * `default:`; a form keeps every option and needs `fields:`, or `texts:` and `defaults:` for `askBooleans`.
+   */
+  #askExpression(
+    command: Token,
+    interactionKind: Exclude<InteractionExpression["interactionKind"], "choice">,
+    asSpan: SourceSpan | null,
+    speaker: Identifier | null,
+    question: Expression | null,
+    named: readonly FormArgument[],
+    span: SourceSpan,
+  ): InteractionExpression {
+    const form = interactionKind === "form";
+    if (form && !named.some((argument) => argument.name.name === "fields"))
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "askForm needs its fields, as in 'fields: { enabled: false }'.",
+        command.span,
+      );
+    const option = (name: string) =>
+      form ? null : (named.find((argument) => argument.name.name === name)?.value ?? null);
+    return Object.freeze({
+      kind: "interactionExpression",
+      interactionKind,
+      commandSpan: copySpan(command.span),
+      asSpan,
+      speaker,
+      question,
+      hint: option("hint"),
+      defaultValue: option("default"),
+      options: Object.freeze([]),
+      formArguments: Object.freeze(form ? [...named] : []),
+      span,
+    });
   }
 
   /** `default:` at `offset` tokens ahead, the named default answer of `askText` or `askNumber`. */

@@ -27,6 +27,7 @@ import {
   photoCopy,
   withGuardedInputs,
 } from "./lower.ts";
+import { withoutRepeatedChainText } from "./repeated-text.ts";
 import {
   helperDefinitionOrder,
   SYSTEM_SPEAKER,
@@ -707,6 +708,7 @@ export function lowerPackage(
   const mixinModules = moduleInfos.flatMap((info) => info ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
+  const nonTextKeys = packageNonTextKeys(files);
   const copiedImages = new Set(
     files.flatMap((file) => {
       const paths: string[] = [];
@@ -750,6 +752,7 @@ export function lowerPackage(
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
       storageLiterals,
+      nonTextKeys,
       copiedImages,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
@@ -804,8 +807,7 @@ export function lowerPackage(
   );
   const scriptResults = functionResultTypes(
     scriptFunctions.filter(
-      (statement) =>
-        scriptFunctions.filter((other) => other.name === statement.name).length === 1,
+      (statement) => scriptFunctions.filter((other) => other.name === statement.name).length === 1,
     ),
   );
   const composed = lowered.map((program, index) => {
@@ -850,7 +852,6 @@ export function lowerPackage(
   const scriptIndexes = noted.flatMap((program, index) =>
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
-  const accepted = options.accepted ?? new Set();
   const moduleFiles = withModuleFiles(noted, files);
   const withClasses = noted.map(
     (program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program,
@@ -860,7 +861,7 @@ export function lowerPackage(
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
     const programs = withNullableParameters(
       withClasses.map((program, index) =>
-        index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+        index === entryIndex ? withProfile(program, withClasses) : program,
       ),
     );
     return {
@@ -877,7 +878,7 @@ export function lowerPackage(
     legacyMain !== null
       ? null
       : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
-  const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses, accepted);
+  const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses);
   const outputIndexes = [
     ...new Set([...scriptIndexes, ...classOutputs.keys(), ...moduleFiles.keys()]),
   ].filter((index) => index !== legacyMain);
@@ -911,18 +912,20 @@ export function lowerPackage(
   // Calls in any file may pass null for a parameter whose default gives it a type.
   const nullable = withNullableParameters([apartMain, ...apartPrograms]);
   const main = nullable[0]!;
-  const programs = nullable.slice(1);
+  const paths = files.map(
+    (file, index) =>
+      scripts.pathOf.get(index) ??
+      (classOutputs.has(index) || (moduleFiles.has(index) && !scripts.pathOf.has(index))
+        ? packagePath(file.sourceName, scripts.root)
+        : null),
+  );
+  // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
+  const programs = withoutRepeatedChainText(nullable.slice(1), paths);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
     main: legacyMain !== null ? { file: legacyMain } : { menu: main },
-    paths: files.map(
-      (file, index) =>
-        scripts.pathOf.get(index) ??
-        (classOutputs.has(index) || (moduleFiles.has(index) && !scripts.pathOf.has(index))
-          ? packagePath(file.sourceName, scripts.root)
-          : null),
-    ),
+    paths,
   };
 }
 
@@ -1381,13 +1384,41 @@ function packageStorageLiterals(
   );
 }
 
+/**
+ * The storage keys under which the package saves a number or a boolean, `save("toy.version", 1.4)`: legacy
+ * `loadString()` read such a value as text.
+ */
+function packageNonTextKeys(files: readonly ParsedGroovyFile[]): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      if (node.kind !== "methodCall" || node.implicitThis !== true) return;
+      const name = constantString(node.method);
+      if (name !== "save" && name !== "send") return;
+      const argumentList = isAstNode(node.arguments) ? node.arguments.items : undefined;
+      const [keyNode, valueNode]: Array<AstNode | undefined> = Array.isArray(argumentList)
+        ? argumentList.filter(isAstNode)
+        : [];
+      const key = keyNode === undefined ? null : constantString(keyNode);
+      const inner = valueNode?.kind === "unaryMinus" ? valueNode.value : valueNode;
+      const value = isAstNode(inner) ? inner : null;
+      if (
+        key !== null &&
+        value?.kind === "constant" &&
+        (typeof value.value === "number" || typeof value.value === "boolean")
+      )
+        keys.add(key);
+    });
+  }
+  return keys;
+}
+
 /** A generated entry menu that first asks the legacy player's profile the package reads but never saves. */
 function withProfile(
   menu: MigrationProgram,
   programs: readonly MigrationProgram[],
-  accepted: ReadonlySet<AcceptedForm>,
 ): MigrationProgram {
-  const profile = legacyProfilePrompt(programs, menu, accepted);
+  const profile = legacyProfilePrompt(programs, menu);
   return profile.length === 0
     ? menu
     : renameConflictingIdentifiers(

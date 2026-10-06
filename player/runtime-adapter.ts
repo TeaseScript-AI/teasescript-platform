@@ -1,4 +1,7 @@
 import {
+  applyExternalStorageEdit,
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
   captureTemporalContext,
   compileProject,
   completeAction,
@@ -14,11 +17,13 @@ import {
   pressPermanentButton,
   recordContinueCapture,
   reportMediaLoad,
+  restoreCheckpoint,
   stageProjection,
   run,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
+  type ExternalStorageEditOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
   type InterpreterEvent,
@@ -38,10 +43,21 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
+  updateInteraction,
+  type InteractionUpdateOutcome,
 } from "../src/index.js";
-import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
+import type {
+  RuntimeChatPacingGateActionSnapshot,
+  RuntimeFormValue,
+} from "../src/runtime/actions/model.js";
+import { currentTemporalContext } from "../src/runtime/state.js";
+import { presentDate, presentDateTime, presentTime } from "../src/temporal.js";
+import { numberAnswerText } from "../src/interaction-answers.js";
+import { instructionSourcePath } from "../src/plan/model.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { runValidatedState } from "../src/runtime/engine.js";
 import {
   mediaTerminalProgressMs,
@@ -50,7 +66,12 @@ import {
   type RuntimeMediaSnapshot,
 } from "../src/runtime/media.js";
 import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
+import type { DebugRecorder } from "./debug-recorder.js";
+import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 import type {
+  PlayerFormEditorPresentation,
+  PlayerFormFieldPresentation,
+  PlayerFormPresentation,
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
   PlayerTimerPresentation,
@@ -75,6 +96,13 @@ export interface PlayerRuntimeSession {
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   readonly transcriptRevision: number;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+  /** Records the session's engine calls for a debug export; it never changes them. */
+  readonly recorder: DebugRecorder | null;
+  /**
+   * The host's opt-in value trace, which every engine call of the session receives (`docs/RUNTIME.md#debug-trace`); it
+   * never changes them and is in no snapshot, checkpoint, restore point, or recorded call. `null` when Debug is off.
+   */
+  readonly debugTrace: RuntimeDebugContext | null;
 }
 
 export interface PlayerRuntimeSessionOptions {
@@ -89,6 +117,10 @@ export interface PlayerRuntimeSessionOptions {
   readonly temporalContext?: TemporalContext;
   /** The UTC wall clock when the session starts, in epoch milliseconds. */
   readonly wallClockMs?: number;
+  /** Records the session's engine calls, from before its first run, for a debug export. */
+  readonly recorder?: DebugRecorder;
+  /** Traces the session from Start; the trace begins a new epoch. */
+  readonly debugTrace?: RuntimeDebugContext;
 }
 
 /**
@@ -120,7 +152,9 @@ export interface PlayerRuntimeRestorePoint {
   readonly events: readonly InterpreterEvent[];
 }
 
-export interface PlayerRuntimeControlResult<T = ActionCompletionOutcome | TimeObservationOutcome> {
+export interface PlayerRuntimeControlResult<
+  T = ActionCompletionOutcome | TimeObservationOutcome | InteractionUpdateOutcome,
+> {
   readonly session: PlayerRuntimeSession;
   readonly outcome: T;
 }
@@ -188,8 +222,19 @@ export function createPlayerRuntimeSession(
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
   });
-  const operation = run(plan, snapshot);
-  return applyOperation(emptySession(plan, snapshot), operation.snapshot, operation.events, false);
+  const recorder = options.recorder ?? null;
+  recorder?.begin(plan, snapshot);
+  const debugTrace = options.debugTrace ?? null;
+  debugTrace?.reset("start");
+  const operation = recorded(recorder, "run", snapshot, [{}], () =>
+    run(plan, snapshot, {}, traceOptions(debugTrace)),
+  );
+  return applyOperation(
+    emptySession(plan, snapshot, recorder, debugTrace),
+    operation.snapshot,
+    operation.events,
+    false,
+  );
 }
 
 function isInstructionPlan(
@@ -220,12 +265,60 @@ export function createPlayerRuntimeRestorePoint(
 
 export function restorePlayerRuntimeSession(
   restorePoint: PlayerRuntimeRestorePoint,
+  recorder: DebugRecorder | null = null,
+  debugTrace: RuntimeDebugContext | null = null,
 ): PlayerRuntimeSession {
   const checkpoint = deserializeCheckpoint(restorePoint.checkpointJson);
+  recorder?.begin(checkpoint.plan, checkpoint.snapshot);
+  // Restored values are trustworthy, but their history is not part of the checkpoint.
+  debugTrace?.reset("restore");
   return appendRuntimeEvents(
-    emptySession(checkpoint.plan, checkpoint.snapshot),
+    emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
     restorePoint.events,
   );
+}
+
+/** The session's state as JSON, validated first, for Debug's rewind history to keep. */
+export function playerRuntimeSnapshotJson(session: PlayerRuntimeSession): string {
+  return serializeValidatedRuntimeJson(createCheckpoint(session.plan, session.snapshot).snapshot);
+}
+
+/**
+ * Restores Debug's rewind history position: the state `snapshotJson` holds, validated against `plan`, with the
+ * transcript rebuilt from the `events` that led to it. Nothing runs; the recorder and the value trace begin anew there.
+ */
+export function restorePlayerRuntimeSessionAt(
+  plan: InstructionPlan,
+  snapshotJson: string,
+  events: readonly InterpreterEvent[],
+  recorder: DebugRecorder | null = null,
+  debugTrace: RuntimeDebugContext | null = null,
+): PlayerRuntimeSession {
+  const checkpoint = restoreCheckpoint({
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan,
+    snapshot: JSON.parse(snapshotJson),
+  });
+  recorder?.begin(checkpoint.plan, checkpoint.snapshot);
+  debugTrace?.reset("restore");
+  return appendRuntimeEvents(
+    emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
+    events,
+  );
+}
+
+/**
+ * The session with Debug's value trace turned on (`context`) or off (`null`). A trace turned on mid-session attaches
+ * at its next operation, so values from before read as not recorded.
+ */
+export function withPlayerRuntimeDebugTrace(
+  session: PlayerRuntimeSession,
+  context: RuntimeDebugContext | null,
+): PlayerRuntimeSession {
+  return session.debugTrace === context
+    ? session
+    : Object.freeze({ ...session, debugTrace: context });
 }
 
 export function playerRuntimeForeground(
@@ -235,6 +328,13 @@ export function playerRuntimeForeground(
   if (action === null) return null;
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
+    // The fields change with each edit; `playerRuntimeForm` presents them.
+    case "form":
+      return Object.freeze({
+        kind: "form",
+        accessibleName,
+        hint: action.ui.hint ?? "Type your response…",
+      });
     case "button":
       return Object.freeze({
         kind: "show-button",
@@ -400,6 +500,257 @@ export function activePlayerRuntimePacingGate(
   return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
 }
 
+/** What a Debug countdown counts down to: a `wait`, a `showButton` timeout, or chat pacing. */
+export interface PlayerRuntimeDebugCountdown {
+  readonly kind: "wait" | "button" | "pacing";
+  readonly deadlineMs: number;
+}
+
+/**
+ * The deadline of the current foreground wait for Player Debug countdowns, from canonical state only: an authored
+ * `wait` (not a blocking `timer`, which lowers to the same delay), a presented `showButton` with a timeout, or chat
+ * pacing while no other foreground action owns progress or input. Suspended actions behind a running block never
+ * count; that block's own foreground work does. A countdown ends only when its action settles or loses the foreground.
+ */
+export function playerRuntimeDebugCountdown(
+  session: Pick<PlayerRuntimeSession, "plan" | "snapshot">,
+): PlayerRuntimeDebugCountdown | null {
+  const { snapshot } = session;
+  if (snapshot.status !== "running" && snapshot.status !== "waiting") return null;
+  const foreground = snapshot.foregroundAction;
+  let countdown: PlayerRuntimeDebugCountdown | null = null;
+  if (foreground === null) {
+    const gate = activePlayerRuntimePacingGate(snapshot);
+    if (gate !== null) countdown = { kind: "pacing", deadlineMs: gate.deadlineMs };
+  } else if (foreground.kind === "interaction") {
+    const deadlineMs = interactionDeadlineMs(foreground);
+    if (deadlineMs !== null) countdown = { kind: "button", deadlineMs };
+  } else if (foreground.kind === "delay") {
+    const owner = session.plan.instructions[foreground.owningInstruction];
+    if (owner?.kind === "wait" && owner.command === "wait")
+      countdown = { kind: "wait", deadlineMs: foreground.deadlineMs };
+  } else if (foreground.kind === "chatPacingGate") {
+    countdown = { kind: "pacing", deadlineMs: foreground.deadlineMs };
+  }
+  return countdown === null ? null : Object.freeze(countdown);
+}
+
+/** A script position as Player Debug shows it: the file's package path and its one-based line. */
+export interface PlayerDebugSourceLocation {
+  readonly path: string;
+  readonly line: number;
+}
+
+/** What the foreground action waits for, as Player Debug names it. */
+export type PlayerDebugWaitKind =
+  | "wait"
+  | "timer"
+  | "button"
+  | "choice"
+  | "input"
+  | "image"
+  | "pacing"
+  | "media"
+  | "save"
+  | "photo";
+
+/** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
+export interface PlayerDebugCall {
+  readonly kind: "function" | "file" | "timer" | "media" | "button";
+  /** The function or block name, or the called file's path. */
+  readonly name: string;
+  /** Where it was called, or for a block, the position it interrupted. */
+  readonly from: PlayerDebugSourceLocation;
+}
+
+/** One timer of the session, hidden ones included. */
+export interface PlayerDebugTimer {
+  readonly actionId: number;
+  /** A blocking `timer` runs in the foreground; an async timer in the background. */
+  readonly blocking: boolean;
+  readonly display: "hidden" | "visible" | "mystery";
+  readonly label: string | null;
+  readonly repeat: boolean;
+  /** `suspended`: a blocking timer whose time runs on while a block interrupts it. */
+  readonly state: "running" | "paused" | "suspended";
+  readonly remainingMs: number;
+  readonly startedAt: PlayerDebugSourceLocation;
+}
+
+/** One active audio or video instance, with the statement that started it. */
+export interface PlayerDebugMedia {
+  readonly mediaId: number;
+  readonly media: "audio" | "video";
+  readonly source: string;
+  /** `false` until the Player reported its load. */
+  readonly loaded: boolean;
+  readonly state: "running" | "paused";
+  readonly playheadMs: number;
+  readonly startedAt: PlayerDebugSourceLocation;
+}
+
+/** Player Debug's view of where the session is, derived on demand from canonical state; see `playerRuntimeDebugNow`. */
+export interface PlayerRuntimeDebugNow {
+  /** Where execution continues, or `null` once the session ended or failed. */
+  readonly next: PlayerDebugSourceLocation | null;
+  /** The foreground action the script waits for and the statement that requested it. */
+  readonly waitingAt: {
+    readonly kind: PlayerDebugWaitKind;
+    readonly at: PlayerDebugSourceLocation;
+  } | null;
+  readonly calls: readonly PlayerDebugCall[];
+  readonly timers: readonly PlayerDebugTimer[];
+  readonly media: readonly PlayerDebugMedia[];
+}
+
+function debugLocation(
+  plan: InstructionPlan,
+  instruction: number,
+  line = plan.instructions[instruction]!.span.sl + 1,
+): PlayerDebugSourceLocation {
+  return Object.freeze({ path: instructionSourcePath(plan, instruction), line });
+}
+
+function debugWaitKind(
+  plan: InstructionPlan,
+  action: RuntimeSnapshot["foregroundAction"] & object,
+) {
+  switch (action.kind) {
+    case "delay": {
+      const owner = plan.instructions[action.owningInstruction];
+      return owner?.kind === "wait" && owner.command === "wait" ? "wait" : "timer";
+    }
+    case "interaction":
+      return action.interactionKind === "button" ||
+        action.interactionKind === "choice" ||
+        action.interactionKind === "image"
+        ? action.interactionKind
+        : "input";
+    case "chatPacingGate":
+      return "pacing";
+    case "mediaPlayback":
+      return "media";
+    case "storageWrite":
+      return "save";
+    case "capture":
+      return "photo";
+  }
+}
+
+/**
+ * Where the session is, for Player Debug's Now view at display scene time `nowMs`: the next statement, the statement
+ * whose foreground action it waits for, the active calls, every timer, hidden ones included, and the active media. Paths are package
+ * paths, relative to the folder of the entry script. Read-only and derived on demand; it adds nothing to the session.
+ */
+export function playerRuntimeDebugNow(
+  session: Pick<PlayerRuntimeSession, "plan" | "snapshot">,
+  nowMs: number,
+): PlayerRuntimeDebugNow {
+  const { plan, snapshot } = session;
+  const now = Math.max(snapshot.observedSessionTimeMs, nowMs);
+  const active = snapshot.status === "running" || snapshot.status === "waiting";
+  const foreground = snapshot.foregroundAction;
+
+  // Each frame runs in the file that the next inner frame was called from, the innermost in the next statement's file.
+  const calls: PlayerDebugCall[] = [];
+  let runningIn = instructionSourcePath(plan, snapshot.nextInstruction);
+  for (const frame of [...snapshot.callFrames].reverse()) {
+    const interruption = frame.kind === "function" ? frame.timerInterruption : null;
+    const from =
+      interruption === null
+        ? debugLocation(plan, frame.returnInstruction, frame.callSiteSpan.start.line + 1)
+        : debugLocation(plan, frame.returnInstruction);
+    calls.push(
+      Object.freeze({
+        kind:
+          frame.kind === "file"
+            ? "file"
+            : interruption === null
+              ? "function"
+              : "timerId" in interruption
+                ? "timer"
+                : "mediaId" in interruption
+                  ? "media"
+                  : "button",
+        name: frame.kind === "file" ? runningIn : frame.functionName,
+        from,
+      }),
+    );
+    runningIn = from.path;
+  }
+
+  const timers: PlayerDebugTimer[] = [];
+  const delays = [
+    ...(foreground === null ? [] : [{ action: foreground, suspended: false }]),
+    ...snapshot.callFrames.flatMap((frame) =>
+      frame.kind === "function" && frame.timerInterruption?.suspendedAction
+        ? [{ action: frame.timerInterruption.suspendedAction, suspended: true }]
+        : [],
+    ),
+  ];
+  for (const { action, suspended } of delays) {
+    if (action.kind !== "delay" || debugWaitKind(plan, action) !== "timer") continue;
+    timers.push({
+      actionId: action.actionId,
+      blocking: true,
+      display: action.display,
+      label: action.label,
+      repeat: false,
+      state: suspended ? "suspended" : "running",
+      remainingMs: Math.max(0, action.deadlineMs - now),
+      startedAt: debugLocation(plan, action.owningInstruction),
+    });
+  }
+  for (const action of snapshot.backgroundActions) {
+    if (action.kind !== "timer") continue;
+    const timer = action.timer;
+    timers.push({
+      actionId: action.actionId,
+      blocking: false,
+      display: timer.display,
+      label: timer.label,
+      repeat: timer.repeat,
+      state: timer.deadlineMs === null ? "paused" : "running",
+      remainingMs:
+        timer.deadlineMs === null ? (timer.remainingMs ?? 0) : Math.max(0, timer.deadlineMs - now),
+      startedAt: debugLocation(plan, action.owningInstruction),
+    });
+  }
+
+  const mediaOwners = new Map<number, number>();
+  for (const action of snapshot.backgroundActions)
+    if (action.kind === "media") mediaOwners.set(action.media.mediaId, action.owningInstruction);
+  const media = mediaPlaybackProjection(snapshot).map((projection) =>
+    Object.freeze({
+      mediaId: projection.mediaId,
+      media: projection.media,
+      source: projection.source,
+      loaded: projection.loaded,
+      state: projection.state,
+      playheadMs: projection.playheadMs,
+      startedAt: debugLocation(plan, mediaOwners.get(projection.mediaId)!),
+    }),
+  );
+
+  return Object.freeze({
+    next: active ? debugLocation(plan, snapshot.nextInstruction) : null,
+    waitingAt:
+      active && foreground !== null
+        ? Object.freeze({
+            kind: debugWaitKind(plan, foreground),
+            at: debugLocation(plan, foreground.owningInstruction),
+          })
+        : null,
+    calls: Object.freeze(active ? calls : []),
+    timers: Object.freeze(
+      active
+        ? timers.sort((left, right) => left.actionId - right.actionId).map((t) => Object.freeze(t))
+        : [],
+    ),
+    media: Object.freeze(active ? media : []),
+  });
+}
+
 /** How the Player answers a pending `takePhoto()`. */
 export type PlayerCaptureAnswer =
   | { readonly kind: "captured"; readonly reference: string }
@@ -427,11 +778,21 @@ export function answerPlayerRuntimeCapture(
     answer.kind === "captured"
       ? { kind: "captured", media: { kind: "image", reference: answer.reference } }
       : { kind: "unavailable", reason: answer.reason };
-  const operation = completeAction(
-    session.plan,
+  const request = { actionId, actionKind: "capture", payload };
+  const operation = recorded(
+    session.recorder,
+    "completeAction",
     session.snapshot,
-    { actionId, actionKind: "capture", payload },
-    capturedMedia === undefined ? {} : { capturedMedia },
+    [request],
+    (admission) =>
+      completeAction(
+        session.plan,
+        session.snapshot,
+        request,
+        capturedMedia === undefined
+          ? traceOptions(session.debugTrace)
+          : { ...traceOptions(session.debugTrace), capturedMedia: admission(capturedMedia) },
+      ),
   );
   return Object.freeze({
     session: applyOperation(
@@ -450,23 +811,44 @@ export function completePlayerRuntimeAction(
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
-  return completeAction(plan, snapshot, {
+  return completeAction(plan, snapshot, actionRequest(action, payload));
+}
+
+function actionRequest(
+  action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
+  payload: Record<string, unknown>,
+) {
+  return {
     actionId: action.actionId,
     actionKind: action.kind,
     ...(action.kind === "interaction" ? { interactionKind: action.interactionKind } : {}),
     payload,
-  });
+  };
 }
 
 export function submitPlayerRuntimeComposer(
   session: PlayerRuntimeSession,
   submittedText: string,
-): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+): PlayerRuntimeControlResult<ActionCompletionOutcome | InteractionUpdateOutcome> | null {
   const action = activeInteraction(session.snapshot);
   if (action?.ui.kind === "button") {
     return submittedText !== "" && submittedText === action.ui.buttonLabel
       ? completePlayerAction(session, action, { kind: "activate" })
       : null;
+  }
+  // While a form field is edited, the composer's text is its answer. Otherwise the composer takes the exact text of
+  // one visible button: a field's label steps it, the submit label submits.
+  if (action?.ui.kind === "form") {
+    if (action.form?.editor != null) return commitPlayerRuntimeFormField(session, submittedText);
+    const fields = action.ui.fields.filter((field) => field.text === submittedText);
+    const submits = action.ui.submit.text === submittedText ? 1 : 0;
+    const cancels = action.ui.cancel?.text === submittedText ? 1 : 0;
+    if (submittedText === "" || fields.length + submits + cancels !== 1) return null;
+    return submits === 1
+      ? submitPlayerRuntimeForm(session)
+      : cancels === 1
+        ? cancelPlayerRuntimeForm(session)
+        : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
   if (
     action === null ||
@@ -491,16 +873,22 @@ export function answerPlayerRuntimeImage(
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
   const action = activeInteraction(session.snapshot);
   if (action?.ui.kind !== "image") return null;
-  const operation = completeAction(
-    session.plan,
+  const request = {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "image",
+    payload: { kind: "image", reference },
+  };
+  const operation = recorded(
+    session.recorder,
+    "completeAction",
     session.snapshot,
-    {
-      actionId: action.actionId,
-      actionKind: "interaction",
-      interactionKind: "image",
-      payload: { kind: "image", reference },
-    },
-    { capturedMedia },
+    [request],
+    (admission) =>
+      completeAction(session.plan, session.snapshot, request, {
+        ...traceOptions(session.debugTrace),
+        capturedMedia: admission(capturedMedia),
+      }),
   );
   return Object.freeze({
     session: applyOperation(
@@ -509,6 +897,303 @@ export function answerPlayerRuntimeImage(
       operation.events,
       operation.outcome.kind === "completed",
     ),
+    outcome: operation.outcome,
+  });
+}
+
+/** One presentation per form state: an edit replaces the state, and nothing else re-renders the form. */
+const formPresentations = new WeakMap<object, PlayerFormPresentation>();
+
+/** The controls of the pending form as its answers stand, or `null` without a pending form. */
+export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPresentation | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form" || action.form === undefined) return null;
+  const cached = formPresentations.get(action.form);
+  if (cached !== undefined) return cached;
+  const { ui, form } = action;
+  const presentation = currentTemporalContext(session.snapshot).presentation;
+  const fields = ui.fields.map((field, index): PlayerFormFieldPresentation => {
+    const value = form.values[index] ?? null;
+    const editing = form.editor?.fieldId === field.id;
+    if (field.kind !== "boolean" && field.kind !== "cycle")
+      return Object.freeze({
+        id: field.id,
+        label: field.text,
+        kind: "value",
+        pressed: false,
+        state: value === null ? null : formValueText(value, presentation),
+        optional: field.optional,
+        editing,
+        ...(field.background === undefined ? {} : { authoredFill: field.background }),
+      });
+    const option =
+      field.kind === "cycle"
+        ? typeof value === "number"
+          ? field.options[value]
+          : undefined
+        : field.options?.find((candidate) => candidate.value === value);
+    const authoredFill = option?.background ?? field.background;
+    return Object.freeze({
+      id: field.id,
+      label: field.text,
+      kind: field.kind === "boolean" ? "toggle" : "cycle",
+      pressed: value === true,
+      state: option?.text ?? null,
+      optional: false,
+      editing: false,
+      ...(authoredFill === undefined ? {} : { authoredFill }),
+    });
+  });
+  const total = ui.fields.length;
+  const status = ui.fields.every((field) => field.kind === "boolean")
+    ? `${form.values.filter((value) => value === true).length} of ${total} selected`
+    : `${form.values.filter((value) => value !== null).length} of ${total} set`;
+  const edited = ui.fields.find((field) => field.id === form.editor?.fieldId);
+  const result = Object.freeze({
+    actionId: action.actionId,
+    fields: Object.freeze(fields),
+    submit: Object.freeze({
+      label: ui.submit.text,
+      ...(ui.submit.background === undefined ? {} : { authoredFill: ui.submit.background }),
+    }),
+    cancel:
+      ui.cancel === null
+        ? null
+        : Object.freeze({
+            label: ui.cancel.text,
+            ...(ui.cancel.background === undefined ? {} : { authoredFill: ui.cancel.background }),
+          }),
+    status,
+    editor:
+      edited === undefined ||
+      form.editor === null ||
+      edited.kind === "boolean" ||
+      edited.kind === "cycle"
+        ? null
+        : Object.freeze({
+            fieldId: edited.id,
+            label: edited.text,
+            // A date or time control shows its hint beside it, so it has none by default.
+            hint:
+              edited.hint ??
+              (edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
+                ? ""
+                : `${edited.text}…`),
+            optional: edited.optional,
+            text: form.editor.text,
+            inputMode:
+              edited.kind === "integer" ? "numeric" : edited.kind === "number" ? "decimal" : "text",
+            // A native date control has no year 0000, so such a value is edited as ISO text.
+            inputType:
+              edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
+                ? form.editor.text.startsWith("0000")
+                  ? "text"
+                  : edited.kind === "datetime"
+                    ? "datetime-local"
+                    : edited.kind
+                : "text",
+          } satisfies PlayerFormEditorPresentation),
+  });
+  formPresentations.set(action.form, result);
+  return result;
+}
+
+/** A typed field's value as its button shows it: a number as typed, a date or time as `say` shows it. */
+function formValueText(
+  value: NonNullable<RuntimeFormValue>,
+  presentation: TemporalContext["presentation"],
+): string {
+  if (typeof value === "number") return numberAnswerText(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return value.kind === "date"
+    ? presentDate(presentation, value)
+    : value.kind === "time"
+      ? presentTime(presentation, value)
+      : presentDateTime(presentation, value);
+}
+
+type FormControlResult = PlayerRuntimeControlResult<
+  InteractionUpdateOutcome | ActionCompletionOutcome
+>;
+
+/**
+ * Brings the form's draft up to the composer's text before another edit, so the edit commits what the player typed.
+ * Returns the refusal when the draft is not taken, or the session to continue with.
+ */
+function withComposerDraft(
+  session: PlayerRuntimeSession,
+  draft: string | undefined,
+): { readonly session: PlayerRuntimeSession } | FormControlResult {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (action === null || editor === null || draft === undefined || draft === editor.text)
+    return { session };
+  const result = updatePlayerRuntimeForm(session, action, {
+    kind: "draft",
+    fieldId: editor.fieldId,
+    text: draft,
+  });
+  return result.outcome.kind === "updated" || result.outcome.kind === "unchanged"
+    ? { session: result.session }
+    : result;
+}
+
+/** Runs `next` on the session after the composer's draft is taken, or returns the draft's refusal. */
+function afterDraft(
+  session: PlayerRuntimeSession,
+  draft: string | undefined,
+  next: (session: PlayerRuntimeSession) => FormControlResult | null,
+): FormControlResult | null {
+  const drafted = withComposerDraft(session, draft);
+  return "outcome" in drafted ? drafted : next(drafted.session);
+}
+
+/**
+ * Advances a form field one step: a toggle switches, a cycle shows its next option, wrapping around, and a typed field
+ * opens in the composer. Each edit names what it selects, so a repeated report changes nothing more. `draft` is the
+ * composer's text, which the field being edited takes first.
+ */
+export function stepPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+  fieldId: string,
+  draft?: string,
+): FormControlResult | null {
+  return afterDraft(session, draft, (current) => {
+    const action = activeInteraction(current.snapshot);
+    if (action?.ui.kind !== "form" || action.form === undefined) return null;
+    const index = action.ui.fields.findIndex((field) => field.id === fieldId);
+    const field = action.ui.fields[index];
+    const value = action.form.values[index];
+    if (field === undefined) return null;
+    if (field.kind !== "boolean" && field.kind !== "cycle")
+      return updatePlayerRuntimeForm(current, action, { kind: "edit", fieldId });
+    let optionIndex: number;
+    if (field.kind === "cycle" && typeof value === "number")
+      optionIndex = (value + 1) % field.options.length;
+    else if (field.kind === "boolean" && typeof value === "boolean")
+      optionIndex =
+        field.options === null
+          ? value
+            ? 0
+            : 1
+          : field.options.findIndex((option) => option.value === !value);
+    else return null;
+    return updatePlayerRuntimeForm(current, action, { kind: "select", fieldId, optionIndex });
+  });
+}
+
+/** Commits the composer's text as the edited field's value; blank text unsets an optional field. */
+export function commitPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+  draft: string,
+): FormControlResult | null {
+  return afterDraft(session, draft, (current) => {
+    const action = activeInteraction(current.snapshot);
+    const editor = action?.form?.editor ?? null;
+    if (action === null || editor === null) return null;
+    return updatePlayerRuntimeForm(current, action, { kind: "commit", fieldId: editor.fieldId });
+  });
+}
+
+/** Back or Escape: closes the composer's field and drops its text, keeping the field's value. */
+export function dismissPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (action === null || editor === null) return null;
+  return updatePlayerRuntimeForm(session, action, { kind: "dismiss", fieldId: editor.fieldId });
+}
+
+/** Clear: leaves the edited optional field without a value. */
+export function clearPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (action === null || editor === null) return null;
+  return updatePlayerRuntimeForm(session, action, { kind: "clear", fieldId: editor.fieldId });
+}
+
+/** The forms that can still be answered: the presented one and one that a running block suspended. */
+export function playerRuntimeFormActionIds(snapshot: RuntimeSnapshot): readonly number[] {
+  return [
+    snapshot.foregroundAction,
+    ...snapshot.callFrames.map((frame) =>
+      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
+    ),
+  ].flatMap((action) =>
+    action?.kind === "interaction" && action.ui.kind === "form" ? [action.actionId] : [],
+  );
+}
+
+/**
+ * Keeps the form's draft equal to the composer's text, so a checkpoint or debug export holds what was typed. The text
+ * belongs to one action's field: while another form or field is presented, such as one a block opened, nothing changes.
+ */
+export function draftPlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  target: { readonly actionId: number; readonly fieldId: string },
+  draft: string,
+): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (
+    action === null ||
+    editor === null ||
+    action.actionId !== target.actionId ||
+    editor.fieldId !== target.fieldId ||
+    draft === editor.text
+  )
+    return null;
+  return updatePlayerRuntimeForm(session, action, {
+    kind: "draft",
+    fieldId: editor.fieldId,
+    text: draft,
+  });
+}
+
+/** Submits the pending form with its answers, after the composer's draft, then continues the session. */
+export function submitPlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  draft?: string,
+): FormControlResult | null {
+  return afterDraft(session, draft, (current) => {
+    const action = activeInteraction(current.snapshot);
+    if (action?.ui.kind !== "form") return null;
+    return completePlayerAction(current, action, { kind: "submit" });
+  });
+}
+
+/** Cancels the whole form, dropping every edit and the text being typed; the form returns `null`. */
+export function cancelPlayerRuntimeForm(session: PlayerRuntimeSession): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form" || action.ui.cancel === null) return null;
+  return completePlayerAction(session, action, { kind: "cancel" });
+}
+
+function updatePlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  action: RuntimeInteractionActionSnapshot,
+  update: Record<string, unknown>,
+): PlayerRuntimeControlResult<InteractionUpdateOutcome> {
+  const request = {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    update,
+  };
+  const operation = recorded(
+    session.recorder,
+    "updateInteraction",
+    session.snapshot,
+    [request],
+    () =>
+      updateInteraction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
     outcome: operation.outcome,
   });
 }
@@ -551,7 +1236,19 @@ export function continuePlayerRuntimeSession(
   session: PlayerRuntimeSession,
   capture: { readonly wallClockMs: number; readonly temporalContext: TemporalContext },
 ): PlayerRuntimeControlResult<ContinueCaptureOutcome> {
-  const operation = recordContinueCapture(session.plan, session.snapshot, capture);
+  const operation = recorded(
+    session.recorder,
+    "recordContinueCapture",
+    session.snapshot,
+    [capture],
+    () =>
+      recordContinueCapture(
+        session.plan,
+        session.snapshot,
+        capture,
+        traceOptions(session.debugTrace),
+      ),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -572,7 +1269,20 @@ export function observePlayerRuntimeTime(
   currentSessionTimeMs: number,
   mediaReports: readonly MediaProgressReport[] = [],
 ): PlayerRuntimeControlResult<TimeObservationOutcome> {
-  const operation = observeTime(session.plan, session.snapshot, currentSessionTimeMs, mediaReports);
+  const operation = recorded(
+    session.recorder,
+    "observeTime",
+    session.snapshot,
+    [currentSessionTimeMs, mediaReports],
+    () =>
+      observeTime(
+        session.plan,
+        session.snapshot,
+        currentSessionTimeMs,
+        mediaReports,
+        traceOptions(session.debugTrace),
+      ),
+  );
   // A settlement or a queued timer expiry block may make execution eligible; `run` returns at once otherwise.
   return Object.freeze({
     session: applyOperation(
@@ -691,7 +1401,20 @@ export function reportPlayerRuntimeMediaLoad(
   mediaId: number,
   report: MediaLoadReport,
 ): PlayerRuntimeControlResult<MediaReportOutcome> {
-  const operation = reportMediaLoad(session.plan, session.snapshot, mediaId, report);
+  const operation = recorded(
+    session.recorder,
+    "reportMediaLoad",
+    session.snapshot,
+    [mediaId, report],
+    () =>
+      reportMediaLoad(
+        session.plan,
+        session.snapshot,
+        mediaId,
+        report,
+        traceOptions(session.debugTrace),
+      ),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -715,12 +1438,51 @@ export function playerRuntimePermanentButtons(
   );
 }
 
+/**
+ * Applies a debugging tool's edit of one script-storage key to the session's view (`applyExternalStorageEdit`):
+ * `value: null` removes the key. It runs no instruction, so nothing continues; the host persists the edit first.
+ */
+export function applyPlayerRuntimeStorageEdit(
+  session: PlayerRuntimeSession,
+  edit: { readonly key: string; readonly value: SerializableRuntimeValue },
+): PlayerRuntimeControlResult<ExternalStorageEditOutcome> {
+  const operation = recorded(
+    session.recorder,
+    "applyExternalStorageEdit",
+    session.snapshot,
+    [edit],
+    () =>
+      applyExternalStorageEdit(
+        session.plan,
+        session.snapshot,
+        edit,
+        traceOptions(session.debugTrace),
+      ),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
+    outcome: operation.outcome,
+  });
+}
+
 /** Clicks a permanent button, then runs the session, which starts the button's block. */
 export function pressPlayerRuntimePermanentButton(
   session: PlayerRuntimeSession,
   buttonId: number,
 ): PlayerRuntimeControlResult<PermanentButtonPressOutcome> {
-  const operation = pressPermanentButton(session.plan, session.snapshot, buttonId);
+  const operation = recorded(
+    session.recorder,
+    "pressPermanentButton",
+    session.snapshot,
+    [buttonId],
+    () =>
+      pressPermanentButton(
+        session.plan,
+        session.snapshot,
+        buttonId,
+        traceOptions(session.debugTrace),
+      ),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -748,12 +1510,42 @@ export function playerRuntimeMedia(snapshot: RuntimeSnapshot): {
   });
 }
 
+/**
+ * The authored source of an active media instance and the script file and line of the `playMedia` that started it, or
+ * `null` when no such media is active.
+ */
+export function playerRuntimeMediaOrigin(
+  session: PlayerRuntimeSession,
+  mediaId: number,
+): {
+  readonly media: "audio" | "video";
+  readonly source: string;
+  readonly location: { readonly path: string; readonly line: number };
+} | null {
+  for (const action of session.snapshot.backgroundActions) {
+    if (action.kind !== "media" || action.media.mediaId !== mediaId) continue;
+    const instruction = session.plan.instructions[action.owningInstruction]!;
+    return Object.freeze({
+      media: action.media.media,
+      source: action.media.source,
+      location: Object.freeze({
+        path: instructionSourcePath(session.plan, action.owningInstruction),
+        line: instruction.span.sl + 1,
+      }),
+    });
+  }
+  return null;
+}
+
 function completePlayerAction(
   session: PlayerRuntimeSession,
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
-  const operation = completePlayerRuntimeAction(session.plan, session.snapshot, action, payload);
+  const request = actionRequest(action, payload);
+  const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
+    completeAction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -782,11 +1574,14 @@ export function completePlayerRuntimeStorageWrite(
   actionId: number,
   stored: boolean,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
-  const operation = completeAction(session.plan, session.snapshot, {
+  const request = {
     actionId,
     actionKind: "storageWrite",
     payload: { kind: stored ? "stored" : "failed" },
-  });
+  };
+  const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
+    completeAction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -809,19 +1604,107 @@ function applyOperation(
   if (!continueRun) return Object.freeze(next);
   // The operation just captured and validated this snapshot against the session's plan, and nothing has published it,
   // so the continuation runs on it without a second capture. It returns at once when nothing is runnable.
-  const continuation = runValidatedState(next.plan, next.snapshot);
+  const continuation = recorded(
+    session.recorder,
+    "run",
+    next.snapshot,
+    [{}],
+    () => runValidatedState(next.plan, next.snapshot, {}, traceOptions(session.debugTrace)),
+    true,
+  );
   return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
 }
 
-function emptySession(plan: InstructionPlan, snapshot: RuntimeSnapshot): PlayerRuntimeSession {
+function emptySession(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  recorder: DebugRecorder | null,
+  debugTrace: RuntimeDebugContext | null,
+): PlayerRuntimeSession {
   return Object.freeze({
     plan,
     snapshot,
+    recorder,
+    debugTrace,
     events: [],
     transcriptEntries: [],
     transcriptRevision: 0,
     speakers: { ...DEFAULT_SPEAKERS },
   });
+}
+
+/** The prefix of a transcript entry ID the adapter derives from its runtime event. */
+const TRANSCRIPT_EVENT_ID = "runtime-event-";
+
+/** The runtime event sequence of a transcript entry this adapter appended, or `null` for any other entry ID. */
+export function playerRuntimeTranscriptEventSequence(entryId: string): number | null {
+  if (!entryId.startsWith(TRANSCRIPT_EVENT_ID)) return null;
+  const digits = entryId.slice(TRANSCRIPT_EVENT_ID.length);
+  return /^[1-9]\d*$/u.test(digits) && Number.isSafeInteger(Number(digits)) ? Number(digits) : null;
+}
+
+/**
+ * The transcript that `events` present, from the start of a session: its entries and the speakers they name. Debug's
+ * rewind shows with it the messages of a state the shown one has not reached yet.
+ */
+export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
+  readonly entries: readonly PlayerTranscriptEntryPresentation[];
+  readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+} {
+  const entries: PlayerTranscriptEntryPresentation[] = [];
+  const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
+  appendTranscript(entries, speakers, events);
+  return { entries, speakers };
+}
+
+// Appends the entries `events` present, in order, and the speakers they name. A choice, button, or form answer is
+// marked by its settlement, which the same operation emits.
+function appendTranscript(
+  transcriptEntries: PlayerTranscriptEntryPresentation[],
+  speakers: Record<string, PlayerSpeakerPresentation>,
+  events: readonly InterpreterEvent[],
+) {
+  const responseKinds = new Map<number, "choice" | "button" | "form">();
+  for (const event of events) {
+    if (
+      event.kind === "actionCompleted" &&
+      event.settlement.actionKind === "interaction" &&
+      event.settlement.transcriptEventSequence !== null &&
+      (event.settlement.interactionKind === "choice" ||
+        event.settlement.interactionKind === "button" ||
+        event.settlement.interactionKind === "form")
+    ) {
+      responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
+    }
+  }
+  for (const event of events) {
+    if (event.kind === "say") {
+      const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
+      if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
+      transcriptEntries.push(
+        Object.freeze({
+          kind: "message",
+          id: `${TRANSCRIPT_EVENT_ID}${event.sequence}`,
+          speakerId,
+          text: event.text,
+          content: event.content,
+          presentation: event.presentation,
+        }),
+      );
+    } else if (event.kind === "playerTranscript") {
+      transcriptEntries.push(
+        Object.freeze({
+          kind: "message",
+          id: `${TRANSCRIPT_EVENT_ID}${event.sequence}`,
+          speakerId: "user",
+          text: event.text,
+          ...(responseKinds.has(event.sequence)
+            ? { responseKind: responseKinds.get(event.sequence)! }
+            : {}),
+        }),
+      );
+    }
+  }
 }
 
 function appendRuntimeEvents(
@@ -836,46 +1719,7 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   for (const event of events) retainedEvents.push(event);
-  const responseKinds = new Map<number, "choice" | "button">();
-  for (const event of events) {
-    if (
-      event.kind === "actionCompleted" &&
-      event.settlement.actionKind === "interaction" &&
-      event.settlement.transcriptEventSequence !== null &&
-      (event.settlement.interactionKind === "choice" ||
-        event.settlement.interactionKind === "button")
-    ) {
-      responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
-    }
-  }
-  for (const event of events) {
-    if (event.kind === "say") {
-      const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
-      if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
-      transcriptEntries.push(
-        Object.freeze({
-          kind: "message",
-          id: `runtime-event-${event.sequence}`,
-          speakerId,
-          text: event.text,
-          content: event.content,
-          presentation: event.presentation,
-        }),
-      );
-    } else if (event.kind === "playerTranscript") {
-      transcriptEntries.push(
-        Object.freeze({
-          kind: "message",
-          id: `runtime-event-${event.sequence}`,
-          speakerId: "user",
-          text: event.text,
-          ...(responseKinds.has(event.sequence)
-            ? { responseKind: responseKinds.get(event.sequence)! }
-            : {}),
-        }),
-      );
-    }
-  }
+  appendTranscript(transcriptEntries, speakers, events);
   return Object.freeze({
     ...session,
     events: retainedEvents,
@@ -883,6 +1727,29 @@ function appendRuntimeEvents(
     transcriptRevision: session.transcriptRevision + 1,
     speakers,
   });
+}
+
+const NO_TRACE = Object.freeze({});
+
+/** The engine options that pass the session's value trace, or none while Debug is off. */
+function traceOptions(debugTrace: RuntimeDebugContext | null): {
+  readonly debugTrace?: RuntimeDebugContext;
+} {
+  return debugTrace === null ? NO_TRACE : { debugTrace };
+}
+
+/** Makes an engine call through the session's recorder, or directly without one. */
+function recorded<R extends { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[] }>(
+  recorder: DebugRecorder | null,
+  kind: Parameters<DebugRecorder["call"]>[0],
+  input: RuntimeSnapshot,
+  args: readonly unknown[],
+  invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
+  continuation = false,
+): R {
+  return recorder === null
+    ? invoke((store) => store)
+    : recorder.call(kind, input, args, invoke, continuation);
 }
 
 function activeInteraction(snapshot: RuntimeSnapshot): RuntimeInteractionActionSnapshot | null {

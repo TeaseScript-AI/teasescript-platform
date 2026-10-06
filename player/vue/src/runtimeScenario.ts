@@ -101,8 +101,7 @@ let hint = showPermanentButton "Give me a hint" {
     removePermanentButton(hint)
     say "Count out loud. That was your only hint.", instant
 }
-showPermanentButton "Pause" {
-    persist: true
+showPermanentButton "Pause", persist: true {
     say "Catch your breath. Tell me when you are ready.", instant
     showButton "Ready, Mistress"
 }

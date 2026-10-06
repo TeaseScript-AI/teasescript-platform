@@ -1,0 +1,20 @@
+--- a/scripts/ShockYourselfMacroMaker.groovy
++++ b/scripts/ShockYourselfMacroMaker.groovy
+@@ -104,7 +104,6 @@
+ }
+ 
+ while (true) {
+-    try {
+         showInputs()
+ 
+         waveforms.each { String waveform ->
+@@ -149,8 +148,5 @@
+                 "\n\n\n" + helpTextMacro +
+                 "\n\n\nSelect new eStim sound files in Shock Yourself under Change Variables!"
+         show(text)
+-        showButton("->")
+-    } catch (e) {
+-        show("ERROR: " + e)
+-    }
++        if (getSelectedValue(null, ["->", "End session"]) == 1) break
+ }

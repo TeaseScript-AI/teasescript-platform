@@ -248,16 +248,16 @@ test("nested compact choices report missing options once per affected invocation
   );
 });
 
-// V30 accepts parenthesized interaction APIs (accepted-syntaxes-v30.md sections 20-21) and ADR 0018 leaves their
-// compatibility mapping to later work. The spelling must not be parsed as a compact form whose payload is the
-// parenthesized text, grouped or unwrapped, which would silently decide that mapping.
-test("a parenthesized interaction spelling is never silently given compact semantics", () => {
+// Parenthesized button and choice spellings remain outside the implemented forms and must not silently receive compact
+// semantics: a compact form whose payload is the parenthesized text, grouped or unwrapped, would decide their mapping.
+// The basic asks have their own parenthesized form (tests/parenthesized-asks.test.ts).
+test("a parenthesized button or choice spelling is never silently given compact semantics", () => {
   // The statement and expression commands each have one parenthesis check before and after `as speaker`.
   for (const source of [
     'showButton("Continue")',
     'showButton as mistress ("Continue")',
-    'let answer = askText("Type here")',
-    'let answer = askText as mistress ("Type here")',
+    'let answer = choose("Yes", "No")',
+    'let answer = choose as mistress ("Yes", "No")',
   ]) {
     const parsed = parse(`${source}\nsay "recovered"`);
     const opening = source.indexOf("(");
@@ -268,7 +268,7 @@ test("a parenthesized interaction spelling is never silently given compact seman
         statement.kind === "letStatement" &&
         statement.initializer.kind === "interactionExpression"
       )
-        return [statement.initializer.hint];
+        return statement.initializer.options.map((option) => option.expression);
       return [];
     });
     assert.equal(
@@ -630,10 +630,10 @@ test("a list in a text field is a compile error when the compiler can see it", (
   // `at` is the last source occurrence the diagnostic must span.
   const cases = [
     ['let labels = ["Go"]\nshowButton labels\nexit', "a button label", "labels"],
-    ['let hints = ["Name?"]\nlet answer = askText hints\nexit', "an input hint", "hints"],
+    ['let hints = ["Name?"]\nlet answer = askText hints\nexit', "an ask question", "hints"],
     ['showButton ["Go", "Run"]\nexit', "a button label", '["Go", "Run"]'],
-    ['let answer = askText ["Name?"]\nexit', "an input hint", '["Name?"]'],
-    ['let answer = askNumber ["Count?"]\nexit', "an input hint", '["Count?"]'],
+    ['let answer = askText ["Name?"]\nexit', "an ask question", '["Name?"]'],
+    ['let answer = askNumber hint: ["Count?"]\nexit', "an input hint", '["Count?"]'],
     ['let answer = choose first: { text: ["A"] }\nexit', "the text of a choice option", '["A"]'],
     ['timer(duration: 1, label: ["Beat"])\nexit', "a timer label", '["Beat"]'],
     ['speaker coach { title: ["Coach"] }\nexit', "the speaker's title", '["Coach"]'],
@@ -671,7 +671,16 @@ test("a text field rejects other values it cannot show when the compiler can see
   const cases = [
     ["showButton { bad: 1 }\nexit", "A button label cannot be an object.", "{ bad: 1 }"],
     ["showButton 1..2\nexit", "A button label cannot be a range.", "1..2"],
-    ["let answer = askText set[1]\nexit", "An input hint cannot be a set (integer set).", "set[1]"],
+    [
+      "let answer = askText set[1]\nexit",
+      "An ask question cannot be a set (integer set).",
+      "set[1]",
+    ],
+    [
+      'let answer = askText "Name?", hint: set[1]\nexit',
+      "An input hint cannot be a set (integer set).",
+      "set[1]",
+    ],
   ] as const;
   for (const [source, message, at] of cases) {
     const result = compileSource(source);
@@ -1253,7 +1262,7 @@ test("every compact interaction survives pending checkpoint restore and source-t
 });
 
 test("an authored empty hint remains distinct from an omitted hint", () => {
-  const emptyPlan = compiled('let answer = askText ""\nexit');
+  const emptyPlan = compiled('let answer = askText hint: ""\nexit');
   const emptyPending = run(emptyPlan, createFreshRuntimeSnapshot(emptyPlan));
   const emptyAction = emptyPending.snapshot.foregroundAction;
   assert.ok(

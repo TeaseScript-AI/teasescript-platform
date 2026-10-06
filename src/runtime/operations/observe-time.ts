@@ -35,6 +35,12 @@ import {
   timerSpan,
 } from "./timer-lifecycle.js";
 import { timeOutButton } from "./complete-action.js";
+import {
+  closeDebugTrace,
+  openDebugTrace,
+  type RuntimeDebugContext,
+  type TraceStore,
+} from "../debug-trace.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
 /** One Player sample of media playback: the active playback time of `segment` so far. */
@@ -54,9 +60,28 @@ export function observeTime(
   snapshot: RuntimeSnapshot,
   suppliedNowMs: unknown,
   mediaReports: unknown = [],
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const current = captured.snapshot;
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const observed = observeCapturedTime(
+    captured.plan,
+    captured.snapshot,
+    suppliedNowMs,
+    mediaReports,
+    trace,
+  );
+  closeDebugTrace(trace, observed);
+  return observed;
+}
+
+function observeCapturedTime(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  suppliedNowMs: unknown,
+  mediaReports: unknown,
+  trace: TraceStore | null,
+): PendingActionOperationResult<TimeObservationOutcome> {
   if (!isValidSessionTime(suppliedNowMs))
     return pendingResult(current, [], {
       kind: "invalidObservation",
@@ -82,7 +107,7 @@ export function observeTime(
     }
   }
   const events: InterpreterEvent[] = [];
-  processDueWork(captured.plan, current, events);
+  processDueWork(plan, current, events, trace);
   return pendingResult(current, events, {
     kind: "observed",
     currentSessionTimeMs: current.currentSessionTimeMs,
@@ -99,6 +124,7 @@ export function processDueWork(
   plan: InstructionPlan,
   current: RuntimeSnapshot,
   events: InterpreterEvent[],
+  trace: TraceStore | null = null,
 ): void {
   // A failed session is terminal: later observations record time but settle nothing.
   if (current.status === "failed") return;
@@ -125,12 +151,14 @@ export function processDueWork(
         current.currentSessionTimeMs,
         due.action.timer.deadlineMs!,
       );
+      trace?.at(due.action.owningInstruction, current.currentSessionTimeMs);
       expireTimerAction(
         current,
         due.action,
         due.action.timer.deadlineMs!,
         timerSpan(plan, due.action.owningInstruction),
         events,
+        trace,
       );
     } else if (due.kind === "media") {
       // One timeline event per iteration, so a queued cue block holds catch-up like a timer expiry.
@@ -152,7 +180,8 @@ export function processDueWork(
     } else if (due.kind === "suspended") {
       settleSuspendedDelay(plan, current, due.frame, due.action, events);
     } else if (due.action.kind === "interaction") {
-      timeOutButton(plan, current, due.action, events);
+      trace?.at(due.action.owningInstruction, current.currentSessionTimeMs);
+      timeOutButton(plan, current, due.action, events, trace);
     } else if (
       due.action.kind === "chatPacingGate" &&
       current.backgroundActions.includes(due.action)

@@ -8,3 +8,6 @@ def countdown = { n ->
 	twice(1)
 }
 countdown(2)
+// A closure called where it is written calls its function directly.
+def limits = { -> return [low: 1, high: 3] }()
+show("Up to " + limits.high)

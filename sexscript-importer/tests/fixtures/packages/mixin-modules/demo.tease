@@ -54,7 +54,7 @@ function greet {
 function setupLaterModule(times = 2) {
   say "Setup ${times}"
 }
-// NOTE SX_BINDING_VARIABLE: Groovy kept lastPause, which functions assign without a declaration, in the script's binding that every function shares; it is declared at the top of the script with an empty value.
+// NOTE SX_BINDING_VARIABLE: Groovy kept lastPause, which functions assign without a declaration, in the script's binding that every function shares; it is declared here, before the script first uses it, with an empty value.
 let lastPause = 0
 function loadPauseModule {
   // A variable that the module's methods assign without a declaration lives in the module's binding.

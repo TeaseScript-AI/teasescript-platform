@@ -156,10 +156,14 @@ export type IrStatement =
     })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
   | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
-  /** `dict` marks a loop over the keys of a dict (#536). */
+  /**
+   * `dict` marks a loop over the keys of a dict (#536); `valueVariable` names each key's value too,
+   * `for key, value in dict` (#639).
+   */
   | (IrBase & {
       kind: "for";
       variable: string;
+      valueVariable?: string;
       collection: IrExpression;
       body: IrStatement[];
       dict?: true;
@@ -249,13 +253,17 @@ export type IrExpression =
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**
-   * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` prefills the
-   * field, written `askText default: value` (V30 §20).
+   * Single-field input. `question` is said in the chat before the field opens (#634); a lowered prompt is a preceding
+   * `say` until withAskQuestions moves it here. `defaultValue` prefills the field, written
+   * `askText "Name?", default: value` (V30 §20).
    */
   | {
       kind: "input";
-      input: "askText" | "askNumber" | "askInteger";
+      input: "askText" | "askNumber" | "askInteger" | "askForm";
+      question?: IrExpression;
       defaultValue?: IrExpression;
+      /** The fields of an `askForm` (V30 §20 Forms): an object or a dict of fields. */
+      fields?: IrExpression;
       /** Asks `as` this speaker. */
       speaker?: string;
     }

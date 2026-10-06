@@ -1,0 +1,16 @@
+---
+title: "Debug rewind"
+---
+save 1 as "k"
+let first = choose "One", "Two"
+save first as "pick"
+say "first ${first}", instant
+let second = choose "Red", "Fail"
+save second as "color"
+say "second ${second}", instant
+if second == "Fail" {
+    let zero = 0
+    let broken = 1 / zero
+}
+let third = choose "A", "B"
+exit

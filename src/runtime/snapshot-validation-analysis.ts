@@ -11,6 +11,8 @@ import { recordValidationTestWork } from "../validation-testing.js";
 export interface PlannedLoop {
   readonly kind: "repeat" | "for" | "while";
   readonly variable?: string;
+  /** A pair loop's value variable. */
+  readonly valueVariable?: string;
   readonly start: number;
   readonly continueStart: number;
   readonly target: number;
@@ -32,11 +34,8 @@ export interface SnapshotValidationAnalysis {
   readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
-  /**
-   * The temporaries that continuations of accepted snapshots need, by the key of their innermost loop (see
-   * `continuationLivenessKey`) and their start; never a whole instruction-sized liveness.
-   */
-  readonly continuationLiveness: Map<number | null, Map<number, ReadonlySet<number>>>;
+  /** The temporaries that continuations of accepted snapshots need, by where they resume and the loops they run in. */
+  readonly continuationRequirements: Map<string, ReadonlySet<number>>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
   readonly preparedReferenceTemporaryIds: ReadonlySet<number>;
@@ -48,6 +47,8 @@ export interface SnapshotValidationAnalysis {
   readonly computedFallback: boolean;
   /** Where an activation of each file may start: its entry and its labels. */
   readonly fileEntries: readonly ReadonlySet<number>[];
+  /** The variables each timer, media, or button block shares, as the instruction that creates its resource names them. */
+  readonly handlerCaptures: ReadonlyMap<number, readonly string[]>;
 }
 
 /**
@@ -86,19 +87,6 @@ export function functionHoldingInstruction(
   return functionId == null ? undefined : analysis.functionsById.get(functionId);
 }
 
-/**
- * The key of the continuation liveness for a context whose innermost loop frame is `activeLoopId`. Only a repeat or
- * for loop of the plan changes which temporaries an instruction reads, so every other loop ID, including one that no
- * loop of the plan has, shares the liveness of no loop.
- */
-export function continuationLivenessKey(
-  analysis: SnapshotValidationAnalysis,
-  activeLoopId: number | null,
-): number | null {
-  const loop = activeLoopId === null ? undefined : analysis.loops.get(activeLoopId);
-  return loop === undefined || loop.kind === "while" ? null : activeLoopId;
-}
-
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
   recordValidationTestWork("snapshotValidationAnalyses");
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
@@ -119,14 +107,30 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   const loops = new Map<number, PlannedLoop>();
   const fallbackDestinations: PlanTransferDestination[] = [];
   let computedFallback = false;
+  const handlerCaptures = new Map<number, readonly string[]>();
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
+    if (instruction?.kind === "startTimer" || instruction?.kind === "showPermanentButton") {
+      if (instruction.handlerFunctionId !== null)
+        handlerCaptures.set(instruction.handlerFunctionId, instruction.captures);
+    } else if (instruction?.kind === "playMedia") {
+      for (const cue of instruction.cues) handlerCaptures.set(cue.functionId, instruction.captures);
+      if (instruction.finishFunctionId !== null)
+        handlerCaptures.set(instruction.finishFunctionId, instruction.captures);
+    }
     if (instruction?.kind === "bindDefaultParameter") {
       defaultBindingPositions.set(`${instruction.functionId}:${instruction.parameterIndex}`, index);
     } else if (instruction?.kind === "loopStart") {
       loops.set(instruction.loopId, {
         kind: instruction.loopKind,
-        ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
+        ...(instruction.loopKind === "for"
+          ? {
+              variable: instruction.variable,
+              ...(instruction.valueVariable === undefined
+                ? {}
+                : { valueVariable: instruction.valueVariable }),
+            }
+          : {}),
         start: index,
         continueStart: instruction.continueTarget,
         target: instruction.target,
@@ -152,7 +156,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     functionsById,
     regionEnds,
     functionIdsByInstruction,
-    continuationLiveness: new Map(),
+    continuationRequirements: new Map(),
     defaultBindingPositions,
     parameterNames,
     preparedReferenceTemporaryIds: collectPreparedReferenceTemporaryIds(plan),
@@ -163,6 +167,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     fileEntries: plan.files.map(
       (file) => new Set([file.entryInstruction, ...file.labels.map((label) => label.instruction)]),
     ),
+    handlerCaptures,
   };
 }
 

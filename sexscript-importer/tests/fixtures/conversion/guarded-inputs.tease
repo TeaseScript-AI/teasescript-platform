@@ -11,8 +11,7 @@ while true {
   if not answered {
     break
   }
-  say "What is your name?"
-  name = askText default: "slave"
+  name = askText "What is your name?", default: "slave"
 }
 let conditional = name.length > 3
 if conditional {

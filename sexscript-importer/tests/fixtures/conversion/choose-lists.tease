@@ -74,10 +74,41 @@ let menuTexts2 = []
 for it in resets {
   menuTexts2.add(it.lbl)
 }
-let reset = resets[(choose sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
+let reset: integer? = resets[(choose sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
 say "Reset ${reset}"
 // Records put in front of a list by concatenation count too.
 let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
 choices = [{ lbl: "Nothing", act: null }] + choices
 say "Choices ${choices.length}"
+// A menu over a list that a loop builds asks its question after the loop, also one that a ternary computes.
+say "Strict?"
+let strict = (choose yes: "Yes", no: "No") == "yes"
+let tasks = [
+  { name: "Kneel" },
+  { name: "Crawl" }
+]
+let conditional = "Pick one"
+if strict {
+  conditional = "Pick, now."
+}
+let menuTexts3 = []
+for it in tasks {
+  menuTexts3.add(it.name)
+}
+say conditional
+let task = choose sexscriptLegacyMenuOptions(menuTexts3, 0)
+say "Task ${task}"
+// A field that some records leave null may be null where it is read, and its truth is a plain test.
+let picked: integer? = 1
+while picked != null and picked != 0 {
+  let menuTexts4 = []
+  for it in resets {
+    menuTexts4.add(it.lbl)
+  }
+  say "Again?"
+  picked = resets[(choose sexscriptLegacyMenuOptions(menuTexts4, 0))].ID
+  if picked != null and picked != 0 {
+    say "Reset ${picked}"
+  }
+}
 exit

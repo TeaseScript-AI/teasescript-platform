@@ -15,3 +15,6 @@ def ask = { prompt ->
   return connection.inputStream.text
 }
 show("Reply: " + ask("Hello"))
+// A request whose address the function declared shows that address.
+def ping = { -> def address = "http://localhost:1234/ping"; def c = new URL(address).openConnection(); return c.responseCode == 200 }
+show("Ping " + ping())

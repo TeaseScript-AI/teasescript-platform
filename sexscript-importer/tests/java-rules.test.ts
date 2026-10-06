@@ -377,7 +377,7 @@ test("keeps reads of files that any write of the package may change", { skip }, 
   assert.match(
     stored,
     // Text with a line break is a block string (V30 §8), except inside an interpolation.
-    /^let lines = sexscriptLegacyTextLines\(\(load "file:quiz\.txt", default: """\n {2}first\n\n"""\)\)$/mu,
+    /^let lines = sexscriptLegacyTextLines\(load\("file:quiz\.txt", default: """\n {2}first\n\n"""\)\)$/mu,
   );
 });
 
@@ -455,7 +455,7 @@ test("keeps written text files in storage and shows viewed files as prose", { sk
   assert.match(source, /^save "first" as "file:logs\/session\.txt"$/mu);
   assert.match(
     source,
-    /^say as system prose "\$\{\(load "file:readme\.txt", default: "Read me"\)\}"$/mu,
+    /^say as system prose "\$\{load\("file:readme\.txt", default: "Read me"\)\}"$/mu,
   );
   assert.doesNotMatch(source, /TODO/u);
   const files = [{ path: "main.tease", source }];

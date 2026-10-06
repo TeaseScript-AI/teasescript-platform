@@ -13,16 +13,14 @@ function sexscriptLegacyShowSwitch(command) {
     if sexscriptLegacySwitchButton != null {
       removePermanentButton(sexscriptLegacySwitchButton)
     }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: ON" {
-      persist: true
+    sexscriptLegacySwitchButton = showPermanentButton "Power: ON", persist: true {
     }
   }
   if ["off", "aus"].contains(last) {
     if sexscriptLegacySwitchButton != null {
       removePermanentButton(sexscriptLegacySwitchButton)
     }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF" {
-      persist: true
+    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF", persist: true {
     }
   }
 }
@@ -43,7 +41,7 @@ let code = sexscriptLegacySendImage(photo)
 save code as "game.photo"
 // NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 // NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let back = load "sexscript.image.${load "game.photo"}"
+let back = load "sexscript.image.${load("game.photo")}"
 if back != null {
   showImage back
 }
@@ -61,7 +59,7 @@ sexscriptLegacyShowSwitch("SwitchBox.exe 7 aus")
 say "Best score ${best}"
 // Deleting the file of a photo the script took clears the reference.
 // NOTE SX_CAMERA_FALLBACK line 19: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
-let selfie = takePhoto()
+let selfie: string? = takePhoto()
 if selfie != null {
   showImage selfie
 }
@@ -74,8 +72,7 @@ playVideo async "videos/intro.mp4"
 playVideo async "clips/scene.mp4"
 // A prefill that may be blank opens the input without a default then, as the legacy empty field did.
 let draft = ""
-say "Your name?"
-let answer = askText default: draft
+let answer = askText "Your name?", default: draft
 say "Hello ${answer}"
 // A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
 function checkPhoto(snapfile) {
@@ -110,9 +107,9 @@ delete "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 46: Legacy code copied this photo to images/proof/photo.jpg, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.
 save proof as "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 47: A script copied the player's photo to images/proof/photo.jpg; showing the path shows that photo.
-showImage (load "sexscript.image.images/proof/photo.jpg", default: "proof/photo.jpg")
+showImage load("sexscript.image.images/proof/photo.jpg", default: "proof/photo.jpg")
 // getImage() and getFile() without a message take the photo without a title.
-let bare = takePhoto()
+let bare: string? = takePhoto()
 if bare != null {
   showImage bare
 }

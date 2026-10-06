@@ -35,6 +35,13 @@ This is a local inspection route, not the production cross-origin Player/host pr
   images chosen for `askImage(...)` as session media and durable while saved script storage references them;
   `image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
   than an accepted author-facing API.
+- `transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
+  (`storage-transfer.ts`) and debug exports (`debug-export.ts`, read offline by `tools/debug-export.mjs`; see
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)). `debug-recorder.ts` records each session's engine calls, and
+  `debug-export-assembly.ts` builds an export from the player's choices. `debug-history.ts` keeps Debug's rewind
+  history and `debug-history-indexeddb.ts` the database it spills to (see
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#rewind)); `restorePlayerRuntimeSessionAt` in `runtime-adapter.ts` restores its
+  states.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,
@@ -115,21 +122,60 @@ resolves the scenario's Stage images to the development illustrations and its ch
 surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
 the opening scenario still uses the shared canonical runtime adapter.
 
-With the explicit `?dev` opt-in, also on the development server, the preview adds the **Debug** tool for testing long
-scripts; its time controls (#615) are always active there. **Skip event** advances scene time to the next wait, timer
+Player Settings' **Debug menu** adds the **Debug** panel for testing long scripts in every build
+([`docs/DEBUGGER.md`](../docs/DEBUGGER.md#player-debug)); it starts off on every load, and on with the explicit `?dev`
+opt-in. The panel's **Debug** switch starts on and pauses its time controls (#615) and countdowns. **Skip event** advances scene time to the next wait, timer
 expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer without an expiry block
 and passes of looping audio without cues are no stops), and **+10 s** and **+1 min** apply only while the script waits
 for player input. The **Auto-skip** switch skips event after event while no input is pending and no media is loading, so
 a player's think time and the background timers running meanwhile stay real time; a badge over the Stage shows it while
-it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off. Jumps are ordinary observations (see
+it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off; Debug turned on again later starts with
+it off. Jumps are ordinary observations (see
 [`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the Player stays responsive;
 playing audio seeks along, and browser video seeking waits for video playback. Each jump adds a line to the panel's
 **Debug log** ("⏩ 30 s skipped", newest first), which an invisible live region also announces while the panel is
 closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
-Auto-skip and the jumps open from their labels. Automation finds the controls by role and name (the Debug launcher, the
-`Auto-skip` switch, the `Skip event`, `+10 s` and `+1 min` buttons) or by `data-development-time-action`
-(`skip`, `advance-10s`, `advance-1min`), the log lines under `[data-debug-log]`, and the latest announcement in
-`[data-debug-announcement]`.
+Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntimeDebugCountdown` selects the foreground
+wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
+for it. The **Now** tab (`DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
+timers, and media with their start statements) with the Stage's load reports for its current image element
+(`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Automation finds the
+controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
+the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
+`[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
+`advance-1min`), the countdown in `[data-debug-countdown]`, the Now tab's `[data-debug-now]` with `-next`, `-waiting`,
+`-calls` (and `-calls-toggle`), `-image` (its badge's `data-status`), `-image-path`, `-media`, and `-timers` (and
+`-timers-toggle`), the tabs by `[data-debug-tab]`, the Storage tab's `[data-debug-storage]` with `-summary`, `-row`
+(`-key`), `-photos` and `-refresh`, each value's `[data-storage-preview]`, `[data-storage-expand]` and
+`[data-storage-more]`, the editor's `-add`, `-edit` and `-delete` buttons, its `[data-storage-editor]` dialog with
+`-key`, `-type`, `-value`, `-flag`, `-problem` and `-save`, the result in `[data-debug-storage-saved]`, the
+`[data-debug-storage-edited]` mark, a thumbnail's
+`[data-storage-photo]` with its `data-state` (`loading`, `ready`, `missing`), the Variables tab's `[data-debug-variables]`
+with `[data-debug-trace-status]`, each derivation list `[data-debug-trace]` with rows `[data-trace-row]` (their
+`data-trace-kind` and enclosing `data-trace-depth`), toggles `[data-trace-toggle]`, `[data-trace-value]`,
+`[data-trace-more]`, `[data-trace-expired]` and `[data-trace-reference]`, `[data-debug-background-toggle]`,
+`[data-debug-variable-filter]`, `[data-debug-variable-group]` and `[data-debug-variable]`, the selected message's
+`[data-debug-selected-message]` with `[data-debug-selected-dismiss]` and `[data-debug-selected-unavailable]`, each chat
+message's `[data-explain-values]`, the log lines under
+`[data-debug-log]` in
+the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
+the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision` and on `storage`
+events for its `savedDataScope`, renders each value as the flat, paged outline of `storageOutline`
+(`player/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
+keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
+the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`. It refuses an edit (`busy`)
+while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
+the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark,
+which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`. While Debug runs, `usePlayerDebug`
+turns the session host's value trace on (`setDebugTracing`), which every session operation then records into; the
+Variables tab (`DebugVariables.vue`,
+`DebugTraceRows.vue`) projects it with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
+`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. `PlayerApp`
+provides Explain values (`explainValues.ts`) to the transcript: a message offers it while Debug runs if
+`playerRuntimeTranscriptEventSequence` reads a runtime event sequence from its entry ID, and choosing it stores the
+selection in `usePlayerDebug` with the trace and epoch it belongs to, selects the Variables tab, and opens the panel
+through `PlayerToolsShell`'s exposed `showTool`. `playerDebugMessageOrigin` gives the message's output record or why
+there is none, from the trace status's `firstEventSequence`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

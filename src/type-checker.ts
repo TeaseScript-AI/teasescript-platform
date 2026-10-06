@@ -1,10 +1,12 @@
 import type {
+  ObjectLiteral,
   AssignmentStatement,
   Block,
   CallArgument,
   CallExpression,
   Expression,
   FunctionDeclaration,
+  ForStatement,
   FunctionParameter,
   GlobalStatement,
   Identifier,
@@ -34,6 +36,7 @@ import {
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
+  askOperands,
   expressionChildren,
   mediaHandlerBlocks,
   mediaOperands,
@@ -44,8 +47,23 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import type {
+  FormFieldKind,
+  FormNumericKind,
+  PlanImage,
+  PlanTag,
+  PreparedFormShape,
+  TypeCheckPlan,
+  TypePlan,
+} from "./plan/model.js";
+import {
+  FORM_FIELD_PROPERTIES,
+  FORM_FIELD_PROPERTIES_TEXT,
+  isFormFieldKind,
+  unknownFormTypeMessage,
+} from "./form-fields.js";
+import type { VariableSite } from "./semantic.js";
+import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
   emptyImageFilterMessage,
   IMAGE_NO_SOURCE_MESSAGE,
@@ -57,7 +75,9 @@ import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js
 import {
   builtinCallProblems,
   builtinShapeProblems,
+  COLLECTION_CHANGES,
   COLLECTION_METHODS,
+  rootName,
   collectionMethodProblems,
   expressionLabel,
   memberProblems,
@@ -145,6 +165,12 @@ import {
   assignedType,
   widenedType,
   widenPath,
+  decidePath,
+  observe,
+  placedSlots,
+  nextDecision,
+  mayBeUnknown,
+  type OpenType,
   numberPaths,
   integerParts,
   ownPartOrigins,
@@ -171,6 +197,8 @@ export interface TypeCheckOptions {
     readonly path: string;
     readonly tags: readonly PlanTag[] | null;
   }[];
+  /** The declarations of the variables that a timer, media, or button block shares and assigns, from name checking. */
+  readonly sharedWrites?: ReadonlySet<VariableSite>;
 }
 
 export interface TypeCheckResult {
@@ -178,6 +206,8 @@ export interface TypeCheckResult {
   readonly diagnostics: readonly (readonly Diagnostic[])[];
   /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  /** The result shape the runtime needs for each `askForm`. */
+  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   /** Whether a file of the project has an `exit` that execution can reach; a project needs one (ADR 0022). */
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
@@ -240,12 +270,25 @@ export function checkTypes(
   const lines = lineNamer(files);
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
-  // the last check, which finds none, sees every variable with its final type and alone reports.
+  // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
+  // that starts as null and that a read saw before its first other value, also one in another file, starts again with
+  // the type that value gives it.
   const widened: Widened = new Map();
+  const decided: Decided = new Map();
+  const copies: Copies = new Map();
   for (;;) {
-    const checker = new TypeChecker(options, widened, programs.length, onFile, lines);
+    const checker = new TypeChecker(
+      options,
+      widened,
+      decided,
+      copies,
+      programs.length,
+      onFile,
+      lines,
+    );
     checker.check(programs);
-    if (!checker.widenedMore) {
+    checker.recordDecisions();
+    if (!checker.widenedMore && !checker.decidedMore) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
@@ -254,6 +297,7 @@ export function checkTypes(
           ),
         ),
         runtimeChecks: checker.runtimeChecks(),
+        formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
         flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
@@ -267,6 +311,116 @@ export function checkTypes(
  * assignment: by the declaration of the variable that holds them, then by their path in it (see {@link PlacePath}).
  */
 type Widened = Map<Declaration, Map<string, SourceSpan>>;
+
+/**
+ * The places still undecided when a read saw them, such as a property that so far took only null, with the type and
+ * site of the store that later decided them: by the declaration of the variable that holds them, then by their path.
+ */
+type Decided = Map<Declaration, Map<string, Decision>>;
+
+/**
+ * The places that are a copy of another variable's place taken while that place was undecided, with that variable's
+ * name: by the declaration of the variable that holds them, then by their path.
+ */
+type Copies = Map<Declaration, Map<string, string>>;
+
+/** The type that decided a slot, and the store that decided it. */
+interface Decision {
+  readonly type: StaticType;
+  readonly at: SourceSpan;
+}
+
+/**
+ * For each given slot, the slot whose own first value decided it by the end of a check, or `null`. A slot shares the decision of the slot it was copied from, since it may hold what that slot held (ADR 0021
+ * rule 1.2), and of a still undecided place stored in it, such as `a = b` while `b` took only null. Of all decisions it
+ * shares this way, the first in checking order decides, also around a cycle of copies. Every slot is visited once, so a
+ * whole chain of copies and stores needs no check per step.
+ */
+function decidingSlots(slots: readonly OpenType[]): {
+  readonly deciding: Map<OpenType, OpenType | null>;
+  /** For a slot that shares no decision, where a value the compiler cannot know reached it, if one did. */
+  readonly unknown: Map<OpenType, SourceSpan>;
+} {
+  const starts = [...new Set(slots)];
+  // The slots each one shares decisions with, found from the given ones, and those a value of their own decided.
+  const sharers = new Map<OpenType, OpenType[]>();
+  const own: OpenType[] = [];
+  const seen = new Set<OpenType>(starts);
+  const work = [...starts];
+  while (work.length > 0) {
+    const slot = work.pop()!;
+    const shared: OpenType[] = [];
+    if (slot.copiedFrom !== undefined) shared.push(slot.copiedFrom);
+    if (slot.resolved !== null) {
+      const stored = storedPlace(slot);
+      if (stored === undefined) own.push(slot);
+      else shared.push(stored);
+    }
+    for (const next of shared) {
+      const list = sharers.get(next) ?? [];
+      list.push(slot);
+      sharers.set(next, list);
+      if (!seen.has(next)) {
+        seen.add(next);
+        work.push(next);
+      }
+    }
+  }
+  const deciding = new Map<OpenType, OpenType | null>();
+  own.sort((left, right) => (left.order ?? Infinity) - (right.order ?? Infinity));
+  for (const decider of own) {
+    const reached = [decider];
+    while (reached.length > 0) {
+      const slot = reached.pop()!;
+      if (deciding.has(slot)) continue;
+      deciding.set(slot, decider);
+      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
+    }
+  }
+  for (const slot of starts) if (!deciding.has(slot)) deciding.set(slot, null);
+  // A value the compiler cannot know reaches what shares the slot it was stored in, as a decision would.
+  const unknown = new Map<OpenType, SourceSpan>();
+  for (const holder of seen) {
+    if (holder.heldUnknown === undefined) continue;
+    const reached = [holder];
+    while (reached.length > 0) {
+      const slot = reached.pop()!;
+      if (unknown.has(slot)) continue;
+      unknown.set(slot, holder.heldUnknown);
+      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
+    }
+  }
+  return { deciding, unknown };
+}
+
+/** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
+function storedIn(slot: OpenType): Set<OpenType> {
+  const chain = new Set<OpenType>();
+  for (let current: OpenType | undefined = slot; current !== undefined && !chain.has(current);) {
+    chain.add(current);
+    current = storedPlace(current);
+  }
+  return chain;
+}
+
+/**
+ * The still undecided place whose value a decided slot holds, such as `b` after `a = b` while `b` took only null, or
+ * `undefined` when a value of its own decided it.
+ */
+function storedPlace(slot: OpenType): OpenType | undefined {
+  if (slot.resolved === null) return undefined;
+  const parts = slot.resolved.kind === "union" ? slot.resolved.members : [slot.resolved];
+  const open = parts.find((part): part is OpenType => part.kind === "open");
+  return open !== undefined && parts.every((part) => part.kind === "open" || part.kind === "null")
+    ? open
+    : undefined;
+}
+
+/** The name of the variable a declaration creates. */
+function declaredName(declaration: Declaration): string {
+  if (declaration.kind === "identifier") return declaration.name;
+  return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
+}
 
 /**
  * Where a place is inside a variable without a type annotation: the steps from the variable, each a property name or `[]`
@@ -316,6 +470,23 @@ interface Branches {
   readonly type: StaticType;
   readonly whenTrue: Changes | null;
   readonly whenFalse: Changes | null;
+  /**
+   * For an outcome that no value produces, the tested variable as `never` there, so that the code that cannot run is
+   * still checked (rule 1.8) without what the test rules out, such as `x` being null inside `if x != null`.
+   */
+  readonly unreachedTrue?: Changes;
+  readonly unreachedFalse?: Changes;
+}
+
+/** The outcomes of a condition's opposite, as of `not`, `!=`, or `is not`. */
+function negatedBranches(branches: Branches): Branches {
+  return {
+    type: BOOLEAN_TYPE,
+    whenTrue: branches.whenFalse,
+    whenFalse: branches.whenTrue,
+    ...(branches.unreachedFalse === undefined ? {} : { unreachedTrue: branches.unreachedFalse }),
+    ...(branches.unreachedTrue === undefined ? {} : { unreachedFalse: branches.unreachedTrue }),
+  };
 }
 
 /**
@@ -351,6 +522,18 @@ class Scope {
 
   public declare(name: string, entry: Entry): void {
     this.#entries.set(name, entry);
+  }
+
+  /**
+   * The names visible here down to `boundary`, not those of `boundary` and the scopes around it, in a new scope under
+   * `boundary`: the same variables, so their types stay one.
+   */
+  public visibleAbove(boundary: Scope): Scope {
+    const copy = new Scope(boundary);
+    for (let scope: Scope | null = this; scope !== null && scope !== boundary; scope = scope.parent)
+      for (const [name, entry] of scope.#entries)
+        if (!copy.#entries.has(name)) copy.#entries.set(name, entry);
+    return copy;
   }
 }
 
@@ -452,11 +635,14 @@ class TypeChecker {
   /** The names each function's parameters and body mention, found when first needed. */
   readonly #namesUsed = new Map<FunctionType, ReadonlySet<string>>();
 
-  /** Timer and media blocks to check after their file's functions, with the scope and file they belong to. */
+  /** Timer, media, and button blocks to check after their file's functions, with the scope and file they belong to. */
   readonly #handlers: {
     readonly block: Block;
     readonly selfHandle: string | null;
+    /** The locals the block shares with the code that created it, under {@link outer} (V30 §14). */
     readonly scope: Scope;
+    /** The file's names, or the project's alone. */
+    readonly outer: Scope;
     readonly file: number;
   }[] = [];
 
@@ -478,6 +664,9 @@ class TypeChecker {
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
   #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
+
+  /** The declarations of the variables that a block shares and assigns (see {@link VariableSite}). */
+  readonly #sharedWrites: ReadonlySet<VariableSite>;
 
   /** The globals that a function or a timer or media block of any file assigns. */
   #sharedGlobals: ReadonlySet<string> = new Set();
@@ -507,6 +696,23 @@ class TypeChecker {
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
 
+  /**
+   * The fields of each `askForm` with the type of the number that decides a field's kind, kept until every type is
+   * decided, as for the runtime checks below.
+   */
+  readonly #forms = new Map<
+    InteractionExpression,
+    | {
+        readonly kind: "object";
+        readonly fields: readonly {
+          readonly name: string;
+          readonly start: StaticType | null;
+          readonly answer: StaticType;
+        }[];
+      }
+    | { readonly kind: "dict"; readonly start: StaticType | null; readonly answer: StaticType }
+  >();
+
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
   readonly #runtimeChecks: {
     readonly site: RuntimeCheckSite;
@@ -516,6 +722,72 @@ class TypeChecker {
 
   /** Whether this check found a variable to widen that earlier checks did not. */
   widenedMore = false;
+
+  /** Whether this check found a place decided after a read that earlier checks did not (see {@link Decided}). */
+  decidedMore = false;
+
+  /**
+   * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
+   * variable it was copied from, which a mismatch in the copy names.
+   */
+  public recordDecisions(): void {
+    const places = new Map<OpenType, PlacePath>();
+    for (const [root, variable] of this.#declared)
+      for (const { slot, path } of placedSlots(variable.type))
+        if (!places.has(slot)) places.set(slot, { root, path });
+    const observed = [...places.keys()].filter((slot) => slot.observed === true);
+    const copied = [...places.keys()].filter((slot) => slot.copiedFrom !== undefined);
+    const { deciding, unknown } = decidingSlots([...observed, ...copied]);
+    // A decision that still leaves a part undecided, such as a list that holds itself, is not taken over: it would only
+    // give the next check another part to decide.
+    const settled = (decider: OpenType | null | undefined): decider is OpenType =>
+      decider !== null &&
+      decider !== undefined &&
+      !containsType(decider.resolved!, (part) => part.kind === "open");
+    for (const slot of observed) {
+      const decider = deciding.get(slot);
+      // Without a decision, a value the compiler cannot know that reached the slot is replayed instead: it decides
+      // nothing, but earlier reads then know that the slot may hold such a value.
+      const held = unknown.get(slot);
+      const decision: Decision | undefined = settled(decider)
+        ? { type: decider.resolved!, at: slot.resolvedAt ?? decider.resolvedAt! }
+        : held !== undefined && decider === null
+          ? { type: UNKNOWN_TYPE, at: held }
+          : undefined;
+      if (decision === undefined) continue;
+      const place = places.get(slot)!;
+      const paths = this.#decided.get(place.root) ?? new Map<string, Decision>();
+      const key = place.path.join(".");
+      const recorded = paths.get(key);
+      // A decision recorded once is final; only a value the compiler cannot know may give way to a later decision.
+      if (
+        recorded !== undefined &&
+        (recorded.type.kind !== "unknown" || decision.type.kind === "unknown")
+      )
+        continue;
+      paths.set(key, decision);
+      this.#decided.set(place.root, paths);
+      this.decidedMore = true;
+    }
+    for (const [slot, place] of places) {
+      let source = slot.copiedFrom;
+      while (source !== undefined && (places.get(source)?.root ?? place.root) === place.root)
+        source = source.copiedFrom;
+      // A copy is named after its source only when the source's type does not come from the copy's own first value.
+      const decider = source === undefined ? undefined : deciding.get(source);
+      if (source === undefined || !settled(decider) || storedIn(slot).has(decider)) continue;
+      const copies = this.#copies.get(place.root) ?? new Map<string, string>();
+      copies.set(place.path.join("."), declaredName(places.get(source)!.root));
+      this.#copies.set(place.root, copies);
+    }
+  }
+
+  readonly #decided: Decided;
+
+  readonly #copies: Copies;
+
+  /** For each variable, the paths of {@link #decided} that its type does not have yet. */
+  readonly #pendingDecisions = new Map<Declaration, Set<string>>();
 
   /** Widens every place that follows a widened one (see {@link #followers}). */
   public widenFollowers(): void {
@@ -554,13 +826,18 @@ class TypeChecker {
   public constructor(
     options: TypeCheckOptions,
     widened: Widened,
+    decided: Decided,
+    copies: Copies,
     files: number,
     private readonly onFile: (file: number) => void,
     private readonly lines: LineNamer,
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
+    this.#decided = decided;
+    this.#copies = copies;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
+    this.#sharedWrites = options.sharedWrites ?? new Set();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
@@ -692,7 +969,7 @@ class TypeChecker {
             variable: { name: handler.selfHandle, type: { kind: "media" }, shared: false },
           });
         this.#function = null;
-        this.#outer = handler.scope;
+        this.#outer = handler.outer;
         // A block does not inherit narrowed facts from the code around it (rule 5.5).
         this.#flow = new Flow();
         runCompileTask(this.#statementsTask(handler.block.statements, scope));
@@ -779,6 +1056,42 @@ class TypeChecker {
    * The recorded runtime checks in plan form. Call it after {@link check}: a place can still be decided after a store
    * into it was checked, as by a later first value or a property that assignment adds.
    */
+  /** The result shape of each `askForm`, with whether each numeric field is an integer or a number field. */
+  public formShapes(): ReadonlyMap<InteractionExpression, PreparedFormShape> {
+    const shapes = new Map<InteractionExpression, PreparedFormShape>();
+    const numericKind = (start: StaticType | null): FormNumericKind | null => {
+      const type = start === null ? null : resolved(nonNullType(start));
+      return type === null
+        ? null
+        : isScalar(type, "integer")
+          ? "integer"
+          : isScalar(type, "number")
+            ? "number"
+            : null;
+    };
+    for (const [expression, form] of this.#forms) {
+      if (form.kind === "dict") {
+        shapes.set(expression, {
+          kind: "dict",
+          numericKind: numericKind(form.start),
+          answer: typePlan(form.answer),
+        });
+        continue;
+      }
+      const numericKinds: { readonly name: string; readonly numericKind: FormNumericKind }[] = [];
+      const answers: { readonly name: string; readonly type: TypePlan }[] = [];
+      for (const { name, start, answer } of form.fields) {
+        const kind = numericKind(start);
+        if (kind !== null) numericKinds.push({ name, numericKind: kind });
+        // The form checks when it opens that each field answers within the type given here.
+        const checked = typePlan(answer);
+        if (checked !== null) answers.push({ name, type: checked });
+      }
+      shapes.set(expression, { kind: "object", numericKinds, answers });
+    }
+    return shapes;
+  }
+
   public runtimeChecks(): ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> {
     const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
     for (const check of this.#runtimeChecks) {
@@ -895,13 +1208,13 @@ class TypeChecker {
       case "ifStatement": {
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
         const start = this.#flow.mark();
-        this.#flow.apply(condition.whenTrue);
+        this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         const thenContinues = yield* compileChild(
           this.#pathTask(statement.thenBlock, scope, condition.whenTrue !== null),
         );
         const thenEnd = this.#flow.mark();
         this.#flow.restore(start);
-        this.#flow.apply(condition.whenFalse);
+        this.#flow.apply(condition.whenFalse ?? condition.unreachedFalse ?? null);
         const elseContinues =
           statement.elseBlock === null ||
           (yield* compileChild(
@@ -1032,7 +1345,7 @@ class TypeChecker {
         this.#widen(statement.body);
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
         const start = this.#flow.mark();
-        this.#flow.apply(condition.whenTrue);
+        this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         this.#loops.push({ start, breaks: [], continued: false });
         yield* compileChild(this.#pathTask(statement.body, scope, condition.whenTrue !== null));
         const { breaks } = this.#loops.pop()!;
@@ -1059,13 +1372,17 @@ class TypeChecker {
           );
         const times = staticNumber(statement.count);
         const ends = yield* compileChild(
-          this.#loopBodyTask(statement.body, scope, null, times === undefined || times >= 1),
+          this.#loopBodyTask(statement.body, scope, [], times === undefined || times >= 1),
         );
         // A loop that certainly runs once ends normally only when its body or a `break` does.
         return times === undefined || times < 1 || ends;
       }
       case "forStatement": {
         const iterable = yield* compileChild(this.#expressionTask(statement.iterable, scope));
+        if (statement.valueVariable !== null)
+          return yield* compileChild(
+            this.#pairLoopTask(statement, statement.valueVariable, iterable, scope),
+          );
         // A loop over a dict goes through its keys.
         const element = elementType(iterable, true);
         this.#reportUnless(
@@ -1080,12 +1397,17 @@ class TypeChecker {
         const variable: Variable = {
           name: statement.variable.name,
           type: this.#ownType(statement, loopType),
-          shared: false,
+          shared: this.#sharedLocal(statement),
           declaration: statement,
         };
         this.#declared.set(statement, variable);
         const ends = yield* compileChild(
-          this.#loopBodyTask(statement.body, scope, variable, !isEmptyLiteral(statement.iterable)),
+          this.#loopBodyTask(
+            statement.body,
+            scope,
+            [variable],
+            !isEmptyLiteral(statement.iterable),
+          ),
         );
         return !isNonEmptyLiteral(statement.iterable) || ends;
       }
@@ -1166,6 +1488,45 @@ class TypeChecker {
   }
 
   /**
+   * `for key, value in dict`: the key is text, and the value a variable of its own with the dict's value type, so each
+   * keeps its own type and widening.
+   */
+  *#pairLoopTask(
+    statement: ForStatement,
+    valueName: Identifier,
+    iterable: StaticType,
+    scope: Scope,
+  ): CompileTask<boolean> {
+    this.#reportUnless(
+      iterable,
+      (member) => dictValueType(member) !== undefined,
+      statement.iterable,
+      "A for-loop with a key and a value goes through a dict",
+    );
+    const key: Variable = {
+      name: statement.variable.name,
+      type: this.#ownType(statement, copyType(STRING_TYPE)),
+      shared: this.#sharedLocal(statement),
+      declaration: statement,
+    };
+    const element = dictValueType(iterable);
+    const valueType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+    this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
+    const value: Variable = {
+      name: valueName.name,
+      type: this.#ownType(valueName, valueType),
+      shared: this.#sharedLocal(valueName),
+      declaration: valueName,
+    };
+    this.#declared.set(statement, key);
+    this.#declared.set(valueName, value);
+    const ends = yield* compileChild(
+      this.#loopBodyTask(statement.body, scope, [key, value], !isEmptyLiteral(statement.iterable)),
+    );
+    return !isNonEmptyLiteral(statement.iterable) || ends;
+  }
+
+  /**
    * The body of a `repeat` or `for` loop, which may run any number of times, including none. Returns whether the body
    * can end normally or leave through a `break`. A body that certainly runs no time is checked, but nothing in it can
    * be reached.
@@ -1173,7 +1534,7 @@ class TypeChecker {
   *#loopBodyTask(
     body: Block,
     scope: Scope,
-    variable: Variable | null,
+    variables: readonly Variable[],
     reached: boolean,
   ): CompileTask<boolean> {
     const reachable = this.#reachable;
@@ -1181,7 +1542,8 @@ class TypeChecker {
     this.#widen(body);
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
-    if (variable !== null) loopScope.declare(variable.name, { kind: "variable", variable });
+    for (const variable of variables)
+      loopScope.declare(variable.name, { kind: "variable", variable });
     this.#loops.push({ start, breaks: [], continued: false });
     const continues = yield* compileChild(this.#statementsTask(body.statements, loopScope));
     const { breaks, continued } = this.#loops.pop()!;
@@ -1249,13 +1611,23 @@ class TypeChecker {
       shared:
         statement.kind === "globalStatement"
           ? this.#sharedGlobals.has(name)
-          : scope === this.#root && this.#effects.shared.has(name),
+          : scope === this.#root
+            ? this.#effects.shared.has(name)
+            : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
+  }
+
+  /**
+   * Whether a timer, media, or button block shares and assigns the variable of this declaration, so that a suspension
+   * may change it (rule 5.5, V30 §14).
+   */
+  #sharedLocal(site: VariableSite): boolean {
+    return this.#sharedWrites.has(site);
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -1485,13 +1857,14 @@ class TypeChecker {
           second.element,
           [target],
           statement.value.span,
+          this.#copyNote(extendPath(place.widening, "[]"), first.element),
         );
         return;
       }
       const subject = place.subject;
       this.#report(
         typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), value, statement)}`,
+        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(kept), value, statement)}`,
         statement.value.span,
       );
       return;
@@ -1501,7 +1874,7 @@ class TypeChecker {
     if (!isAssignable(place.type, result))
       this.#report(
         typeCode.typeMismatch,
-        `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${place.fix(result, null)}`,
+        `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${this.#copyNote(place.widening, place.type)}${place.fix(result, null)}`,
         statement.value.span,
       );
     else {
@@ -1631,16 +2004,32 @@ class TypeChecker {
     if (property !== undefined) {
       this.#report(
         typeCode.typeMismatch,
-        `${place.subject}, so its property '${property.name}', which holds ${describeValue(property.kept)}, cannot be set to ${describeValue(property.value)}. Use a separate property for a value of another type.`,
+        `${place.subject}, so its property '${property.name}', which holds ${describeValue(property.kept)}, cannot be set to ${describeValue(property.value)}.${this.#copyNote(place.widening, place.type)} Use a separate property for a value of another type.`,
         expression.span,
       );
       return;
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${this.#copyNote(place.widening, place.type)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
       expression.span,
     );
+  }
+
+  /**
+   * Why a place of type `type` has its type when it is, or is inside, a copy of another variable's place that was still
+   * undecided (see `Copies`). A part that a value of its own decided, such as a property added to the copy later, has
+   * its own reason.
+   */
+  #copyNote(owner: PlacePath | undefined, type: StaticType): string {
+    const copies = owner === undefined ? undefined : this.#copies.get(owner.root);
+    if (owner === undefined || copies === undefined || findDecidedSlot(type) !== null) return "";
+    for (let length = owner.path.length; length >= 0; length -= 1) {
+      const source = copies.get(owner.path.slice(0, length).join("."));
+      if (source !== undefined)
+        return ` '${declaredName(owner.root)}' was copied from '${source}' before its type was decided, so the first value stored in '${source}' decided it.`;
+    }
+    return "";
   }
 
   /**
@@ -1707,6 +2096,15 @@ class TypeChecker {
     for (const path of paths?.keys() ?? []) if (path !== "") own = widenPath(own, path.split("."));
     own = ownOrigins(own, declaration);
     ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
+    const decisions = this.#decided.get(declaration);
+    if (decisions !== undefined) {
+      this.#pendingDecisions.set(declaration, new Set(decisions.keys()));
+      // A decided part may bring elements or properties that earlier checks widened.
+      if (this.#decide(declaration, own)) {
+        for (const path of paths?.keys() ?? []) if (path !== "") widenPath(own, path.split("."));
+        ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
+      }
+    }
     return own;
   }
 
@@ -1718,9 +2116,29 @@ class TypeChecker {
     const variable = this.#declared.get(root);
     if (variable === undefined) return;
     this.#unappliedWidening.delete(root);
+    this.#decide(root, variable.type);
     for (const path of this.#widened.get(root)?.keys() ?? [])
       if (path !== "") widenPath(variable.type, path.split("."));
     ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
+  }
+
+  /**
+   * Decides in a variable's type what earlier checks found decided after a read (see {@link Decided}), for the parts
+   * it has: a property that a store adds later is decided when it is added.
+   */
+  #decide(root: Declaration, type: StaticType): boolean {
+    const pending = this.#pendingDecisions.get(root);
+    if (pending === undefined || pending.size === 0) return false;
+    const decisions = this.#decided.get(root)!;
+    let decided = false;
+    for (const path of pending) {
+      const { type: value, at } = decisions.get(path)!;
+      if (decidePath(type, path === "" ? [] : path.split("."), value, at)) {
+        pending.delete(path);
+        decided = true;
+      }
+    }
+    return decided;
   }
 
   /** The type a variable keeps at a path in it, or `undefined` when that part does not exist. */
@@ -2112,10 +2530,10 @@ class TypeChecker {
     this.#outer = fn.scope;
     const scope = new Scope(fn.scope);
     // The body works on its own copies, so checking an argument never changes what the body assumes.
-    const accepted: Variable[] = parameters.map((parameter) => ({
+    const accepted: Variable[] = parameters.map((parameter, index) => ({
       ...parameter,
       type: copyType(parameter.type),
-      shared: false,
+      shared: this.#sharedLocal(declaration.parameters[index]!),
     }));
     fn.accepted = accepted;
     for (const parameter of accepted) {
@@ -2199,6 +2617,9 @@ class TypeChecker {
     const outerFlow = this.#flow;
     this.#flow = new Flow();
     const outerFile = this.#enterFile(fn.file);
+    const outerScope = this.#outer;
+    // A default runs in the function, so a block it creates shares the parameters before it.
+    this.#outer = fn.scope;
     for (const parameter of fn.declaration.parameters) {
       const name = parameter.name.name;
       let type: StaticType = UNKNOWN_TYPE;
@@ -2240,7 +2661,7 @@ class TypeChecker {
       const variable: Variable = {
         name,
         type,
-        shared: false,
+        shared: this.#sharedLocal(parameter),
         declaration,
         annotated: parameter.typeAnnotation !== null,
       };
@@ -2250,6 +2671,7 @@ class TypeChecker {
     }
     this.#reportMixedLiterals();
     this.#flow = outerFlow;
+    this.#outer = outerScope;
     this.#enterFile(outerFile);
     return parameters;
   }
@@ -2361,7 +2783,11 @@ class TypeChecker {
   *#expressionTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
     const result = yield* compileChild(this.#expressionTypeTask(expression, scope));
     const type = result.kind === "placeRead" ? result.type : result;
-    if (result.kind === "placeRead") this.#placeReads.add(expression);
+    if (result.kind === "placeRead") {
+      this.#placeReads.add(expression);
+      // A store that decides the place later in the check decides it for this read too (see `Decided`).
+      observe(type);
+    }
     this.#types.set(expression, type);
     return type;
   }
@@ -2581,7 +3007,442 @@ class TypeChecker {
   }
 
   /**
-   * The message of `askImage` is shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
+   * `askForm` (V30 §20): the question, `hint:`, and `outro:` are shown text, `submit:` is text or a button object, and
+   * `fields:` is an object of fields. The result has a property per field, typed as the field's kind gives it, and the
+   * shape the runtime needs is recorded for the lowering.
+   */
+  *#formTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
+    const answers = yield* compileChild(this.#formAnswersTask(expression, scope));
+    const argument = (name: string) =>
+      expression.formArguments.find((candidate) => candidate.name.name === name)?.value;
+    const timeout = argument("timeout");
+    const onTimeout = argument("onTimeout");
+    if ((timeout === undefined) !== (onTimeout === undefined))
+      this.#report(
+        typeCode.invalidOperand,
+        timeout === undefined
+          ? "askForm onTimeout: needs timeout:, such as 'timeout: 30 s'."
+          : 'askForm timeout: needs onTimeout: "submit" or onTimeout: "cancel".',
+        expression.span,
+      );
+    const action = onTimeout === undefined ? undefined : staticText(onTimeout);
+    if (action !== undefined && action !== "submit" && action !== "cancel")
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm onTimeout: takes "submit" or "cancel", not ${JSON.stringify(action)}.`,
+        onTimeout!.span,
+      );
+    if (action === "submit") this.#checkFormStarts(expression);
+    // With `cancel:`, or a time limit that may cancel, the whole form may return `null`.
+    const cancellable =
+      argument("cancel") !== undefined || (onTimeout !== undefined && action !== "submit");
+    return cancellable && isKnown(answers) ? optional(answers) : answers;
+  }
+
+  /**
+   * `onTimeout: "submit"` returns the answers as they stand, so every field needs a value from the start. Fields written
+   * where the form is asked are checked here; others are checked when the form opens.
+   */
+  #checkFormStarts(expression: InteractionExpression): void {
+    const fields = expression.formArguments.find((argument) => argument.name.name === "fields");
+    const literal = fields === undefined ? undefined : unwrap(fields.value);
+    const written =
+      literal?.kind === "objectLiteral"
+        ? literal.properties.map((property) => ({
+            name: property.name.name,
+            value: property.value,
+          }))
+        : literal?.kind === "dictLiteral"
+          ? literal.entries.map((entry) => ({
+              name: staticText(entry.key) ?? "?",
+              value: entry.value,
+            }))
+          : [];
+    for (const property of written) {
+      const descriptor = unwrap(property.value);
+      if (descriptor.kind === "nullLiteral" || descriptor.kind === "objectLiteral") {
+        const start =
+          descriptor.kind === "objectLiteral"
+            ? descriptor.properties.find((candidate) => candidate.name.name === "value")?.value
+            : descriptor;
+        const finite =
+          descriptor.kind === "objectLiteral" &&
+          descriptor.properties.some((candidate) => candidate.name.name === "options");
+        const tag =
+          descriptor.kind === "objectLiteral"
+            ? descriptor.properties.find((candidate) => candidate.name.name === "type")
+            : undefined;
+        const toggle = tag !== undefined && staticText(tag.value) === "boolean";
+        if (!finite && !toggle && (start === undefined || unwrap(start).kind === "nullLiteral"))
+          this.#report(
+            typeCode.invalidOperand,
+            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
+            property.value.span,
+          );
+      }
+    }
+  }
+
+  *#formAnswersTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
+    if (expression.question !== null) {
+      const type = yield* compileChild(this.#expressionTask(expression.question, scope));
+      this.#checkShownText(expression.question, type, "an ask question");
+    }
+    let fields: { readonly expression: Expression; readonly type: StaticType } | null = null;
+    for (const { name, value } of expression.formArguments) {
+      const type = yield* compileChild(this.#expressionTask(value, scope));
+      if (name.name === "fields") fields = { expression: value, type };
+      else if (name.name === "submit" || name.name === "cancel") {
+        if (unwrap(value).kind !== "objectLiteral")
+          this.#reportUnless(
+            type,
+            (member) => isShowable(member) || resolved(member).kind === "object",
+            value,
+            `'${name.name}:' takes text or a button object { text, background? }`,
+          );
+      } else if (name.name === "timeout")
+        this.#reportUnless(
+          type,
+          (member) => isNumeric(member) || isScalar(member, "duration"),
+          value,
+          "'timeout:' takes a number of seconds or a duration, such as 30 s",
+        );
+      else if (name.name === "onTimeout")
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          value,
+          `'onTimeout:' takes "submit" or "cancel"`,
+        );
+      else
+        this.#checkShownText(value, type, name.name === "hint" ? "an input hint" : "a form outro");
+    }
+    if (fields === null) return UNKNOWN_TYPE;
+    const container = resolved(nonNullType(fields.type));
+    if (container.kind === "dict") {
+      // A written dict shows every field, so its answers are typed field by field.
+      const literal = unwrap(fields.expression);
+      if (literal.kind === "dictLiteral" && literal.entries.length > 0) {
+        const entries = literal.entries.map((entry) => ({
+          entry,
+          field: this.#formField(
+            staticText(entry.key) ?? "?",
+            this.#typeOf(entry.value),
+            entry.value,
+          ),
+        }));
+        // The form has one number kind for the dict's fields without `type:`.
+        const starts = entries.filter(({ field }) => field.start !== null);
+        const kinds = new Set(
+          starts.map(({ field }) =>
+            isScalar(resolved(nonNullType(field.start!)), "integer") ? "integer" : "number",
+          ),
+        );
+        if (kinds.size > 1)
+          for (const { entry } of starts)
+            this.#report(
+              typeCode.invalidOperand,
+              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+              entry.value.span,
+            );
+        const element = union(entries.map(({ field }) => field.result));
+        this.#forms.set(expression, {
+          kind: "dict",
+          start: kinds.size === 1 ? starts[0]!.field.start : null,
+          answer: element,
+        });
+        return { kind: "dict", element };
+      }
+      // Otherwise every field has the type of the dict's values.
+      const field = this.#formField("?", container.element, undefined);
+      this.#forms.set(expression, { kind: "dict", start: field.start, answer: field.result });
+      return { kind: "dict", element: field.result };
+    }
+    if (container.kind !== "object") {
+      if (isKnown(container))
+        this.#report(
+          typeCode.invalidOperand,
+          `'fields:' takes an object or dict of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
+          fields.expression.span,
+        );
+      this.#forms.set(expression, { kind: "object", fields: [] });
+      return UNKNOWN_TYPE;
+    }
+    const literal = unwrap(fields.expression);
+    const written = new Map(
+      literal.kind === "objectLiteral"
+        ? literal.properties.map((property) => [property.name.name, property.value] as const)
+        : [],
+    );
+    const result: PropertyTable = new Map();
+    const recorded: {
+      readonly name: string;
+      readonly start: StaticType | null;
+      readonly answer: StaticType;
+    }[] = [];
+    for (const [name, type] of container.properties ?? []) {
+      const field = this.#formField(name, type, written.get(name));
+      result.set(name, field.result);
+      recorded.push({ name, start: field.start, answer: field.result });
+    }
+    this.#forms.set(expression, { kind: "object", fields: recorded });
+    return container.properties === null ? UNKNOWN_TYPE : { kind: "object", properties: result };
+  }
+
+  /**
+   * The answer type of one field of `askForm`, and the type of the number that decides its kind when it has no
+   * `type:`: its start, or its descriptor's `value:`, `min:`, or `max:`. Only what is written where the form is asked
+   * proves a descriptor's properties: a computed descriptor's type merges the properties of all its values, so one
+   * that may say `type:` or mix kinds answers in the generic union.
+   */
+  #formField(
+    name: string,
+    type: StaticType,
+    written: Expression | undefined,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const value = resolved(nonNullType(type));
+    const literal = written === undefined ? null : unwrap(written);
+    if (value.kind === "object")
+      return literal?.kind === "objectLiteral"
+        ? this.#writtenFormField(name, literal)
+        : this.#computedFormField(value);
+    const kind = formKindOfStart(value);
+    if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
+    return {
+      result:
+        kind === "cycle"
+          ? this.#cycleAnswerType(value, literal ?? undefined)
+          : kind === "boolean"
+            ? BOOLEAN_TYPE
+            : formAnswerType(kind),
+      start: kind === "integer" || kind === "number" ? value : null,
+    };
+  }
+
+  /** A descriptor written where the form is asked: its properties are exactly the written ones. */
+  #writtenFormField(
+    name: string,
+    descriptor: ObjectLiteral,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const written = new Map(
+      descriptor.properties.map((property) => [property.name.name, property.value] as const),
+    );
+    for (const property of descriptor.properties)
+      if (!FORM_FIELD_PROPERTIES.includes(property.name.name))
+        this.#report(
+          typeCode.invalidOperand,
+          `askForm field '${name}': unknown property '${property.name.name}'. ${FORM_FIELD_PROPERTIES_TEXT}`,
+          property.name.span,
+        );
+    const typeOf = (property: string) => {
+      const expression = written.get(property);
+      return expression === undefined ? undefined : resolved(nonNullType(this.#typeOf(expression)));
+    };
+    let tag: FormFieldKind | null | undefined;
+    const typeExpression = written.get("type");
+    if (typeExpression !== undefined) {
+      const text = staticText(typeExpression);
+      tag = text !== undefined && isFormFieldKind(text) ? text : null;
+      if (text !== undefined && !isFormFieldKind(text))
+        this.#report(
+          typeCode.invalidOperand,
+          `askForm field '${name}': ${unknownFormTypeMessage(text)}`,
+          typeExpression.span,
+        );
+    }
+    const valueType = typeOf("value");
+    const kind =
+      tag !== undefined
+        ? tag
+        : written.has("options")
+          ? valueType !== undefined && isScalar(valueType, "boolean")
+            ? "boolean"
+            : "cycle"
+          : valueType === undefined
+            ? null
+            : formKindOfStart(valueType);
+    // A written `optional: false` keeps the answer required; any other value may make it optional.
+    const optionalExpression = written.get("optional");
+    const optionalLiteral =
+      optionalExpression === undefined ? undefined : unwrap(optionalExpression);
+    const required =
+      optionalLiteral === undefined ||
+      (optionalLiteral.kind === "booleanLiteral" && !optionalLiteral.value);
+    // Only an integer turns into a number; a number does not start an integer field.
+    if (tag === "integer" && valueType !== undefined && isScalar(valueType, "number"))
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm field '${name}': an integer field starts with a whole number (integer), not ${describeValue(valueType)}.`,
+        written.get("value")!.span,
+      );
+    // With a written type, the runtime needs no number kind.
+    const start =
+      tag !== undefined
+        ? null
+        : ([valueType, typeOf("min"), typeOf("max")].find(
+            (part) => part !== undefined && isNumeric(part),
+          ) ?? null);
+    if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start };
+    const result =
+      kind === "cycle"
+        ? this.#cycleAnswerType(typeOf("options"), written.get("options"))
+        : kind === "boolean"
+          ? BOOLEAN_TYPE
+          : formAnswerType(kind);
+    return {
+      result: !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
+      // Only a number typed in the composer needs the form's number kind.
+      start: kind === "integer" || kind === "number" ? start : null,
+    };
+  }
+
+  /**
+   * A computed descriptor: its type merges every value it may hold, so a property in it may be missing from some of
+   * them, and a value may also hold properties its type does not show. It gives one kind only without `type:`, and with
+   * `options:` only when no `value:` other than a toggle's beside it can make some fields typed. The form checks when
+   * it opens that each field answers within the type given here.
+   */
+  #computedFormField(descriptor: Extract<StaticType, { kind: "object" }>): {
+    readonly result: StaticType;
+    readonly start: StaticType | null;
+  } {
+    const properties = descriptor.properties;
+    if (properties === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
+    const part = (key: string) => {
+      const found = properties.get(key);
+      return found === undefined ? undefined : resolved(nonNullType(found));
+    };
+    const valueType = part("value");
+    const start =
+      [valueType, part("min"), part("max")].find((type) => type !== undefined && isNumeric(type)) ??
+      null;
+    const options = part("options");
+    let result: StaticType | null;
+    if (properties.has("type")) result = null;
+    else if (options !== undefined) {
+      const cycle = this.#cycleAnswerType(options, undefined);
+      // Toggles with options and cycles of booleans answer booleans alike; another `value:` may be any field's.
+      result =
+        valueType === undefined
+          ? cycle
+          : isScalar(valueType, "boolean") && isScalar(resolved(cycle), "boolean")
+            ? BOOLEAN_TYPE
+            : null;
+    } else {
+      const kind = valueType === undefined ? null : formKindOfStart(valueType);
+      result =
+        kind === null
+          ? null
+          : kind === "boolean"
+            ? BOOLEAN_TYPE
+            : kind === "cycle"
+              ? null
+              : properties.has("optional")
+                ? optional(formAnswerType(kind))
+                : formAnswerType(kind);
+    }
+    // A toggle or a cycle does not take a number in the composer, so it needs no number kind.
+    const finite =
+      options !== undefined || (valueType !== undefined && isScalar(valueType, "boolean"));
+    return {
+      result: result ?? optional(GENERIC_FORM_ANSWER_TYPE),
+      start: result !== null && finite ? null : start,
+    };
+  }
+
+  /**
+   * What a cycle returns: each option's value, or the text of a choice object without one, as a `choose` button
+   * returns it. Written choice objects are read one by one; for a computed one, whether it has a `value` is not
+   * known, so either may be returned.
+   */
+  #cycleAnswerType(type: StaticType | undefined, written: Expression | undefined): StaticType {
+    const computedOption = (member: StaticType): StaticType => {
+      const option = resolved(member);
+      if (option.kind !== "object") return plainType(option);
+      const returned = [option.properties?.get("value"), option.properties?.get("text")].filter(
+        (part): part is StaticType => part !== undefined,
+      );
+      return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
+    };
+    const list = written === undefined ? undefined : unwrap(written);
+    if (list?.kind === "listLiteral")
+      return union(
+        list.elements.map((element) => {
+          const option = unwrap(element);
+          if (option.kind !== "objectLiteral")
+            return union(members(this.#typeOf(element)).map(computedOption));
+          const returned =
+            option.properties.find((property) => property.name.name === "value") ??
+            option.properties.find((property) => property.name.name === "text");
+          return returned === undefined ? UNKNOWN_TYPE : plainType(this.#typeOf(returned.value));
+        }),
+      );
+    const options = type === undefined ? undefined : resolved(nonNullType(type));
+    if (options?.kind !== "list") return UNKNOWN_TYPE;
+    return union(members(resolved(options.element)).map(computedOption));
+  }
+
+  /**
+   * `askBooleans(...)`: the message is shown text, `texts:` a list of texts, `defaults:` a list of booleans of the same
+   * length when both are written, and `cancel:` a button. Returns whether the form may be cancelled.
+   */
+  *#askBooleansTask(expression: CallExpression, scope: Scope): CompileTask<boolean> {
+    let cancellable = false;
+    const written = new Map<string, Expression>();
+    for (const argument of expression.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      written.set(name, argument.value);
+      if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
+      else if (name === "texts")
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" && (!isKnown(member.element) || isShowable(member.element)),
+          argument.value,
+          "'texts:' takes a list of texts",
+        );
+      else if (name === "defaults")
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" &&
+            (!isKnown(member.element) || isScalar(member.element, "boolean")),
+          argument.value,
+          "'defaults:' takes a list of true or false",
+        );
+      else if (name === "cancel") {
+        cancellable = true;
+        if (unwrap(argument.value).kind !== "objectLiteral")
+          this.#reportUnless(
+            type,
+            (member) => isShowable(member) || resolved(member).kind === "object",
+            argument.value,
+            "'cancel:' takes text or a button object { text, background? }",
+          );
+      }
+    }
+    const texts = written.get("texts");
+    const defaults = written.get("defaults");
+    const textsList = texts === undefined ? undefined : unwrap(texts);
+    const defaultsList = defaults === undefined ? undefined : unwrap(defaults);
+    if (textsList?.kind === "listLiteral" && textsList.elements.length === 0)
+      this.#report(typeCode.invalidOperand, "askBooleans needs at least one text.", textsList.span);
+    else if (
+      textsList?.kind === "listLiteral" &&
+      defaultsList?.kind === "listLiteral" &&
+      textsList.elements.length !== defaultsList.elements.length
+    )
+      this.#report(
+        typeCode.invalidOperand,
+        `askBooleans has ${textsList.elements.length} texts but ${defaultsList.elements.length} defaults; give one default for each text.`,
+        defaultsList.span,
+      );
+    return cancellable;
+  }
+
+  /**
+   * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
    * values must be valid, and written sources must leave the player a way to answer.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
@@ -2589,7 +3450,8 @@ class TypeChecker {
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
       const name = argument.kind === "namedArgument" ? argument.name.name : "message";
-      if (name === "message") this.#checkShownText(argument.value, type, "an input hint");
+      if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
+      else if (name === "hint") this.#checkShownText(argument.value, type, "an input hint");
       else if (name === "allowCamera" || name === "allowFile") {
         this.#reportUnless(
           type,
@@ -2786,7 +3648,7 @@ class TypeChecker {
         if (node.operator !== "not") break;
         const operand = yield* compileChild(this.#branchTask(node.operand, scope));
         this.#requireBoolean(operand.type, node.operand, "'not' needs true or false (boolean)");
-        return { type: BOOLEAN_TYPE, whenTrue: operand.whenFalse, whenFalse: operand.whenTrue };
+        return negatedBranches(operand);
       }
       case "binaryExpression": {
         if (node.operator === "and" || node.operator === "or") {
@@ -2803,17 +3665,31 @@ class TypeChecker {
             reached && right.whenTrue !== null ? this.#flow.since(start, right.whenTrue) : null;
           const rightFalse =
             reached && right.whenFalse !== null ? this.#flow.since(start, right.whenFalse) : null;
+          // The outcome that only the right operand gives is not reached when either operand rules it out.
+          const unreached = (
+            leftOutcome: Changes | undefined,
+            rightOutcome: Changes | undefined,
+          ): Changes | undefined =>
+            !reached
+              ? leftOutcome
+              : rightOutcome === undefined
+                ? undefined
+                : this.#flow.since(start, rightOutcome);
+          const unreachedTrue = unreached(left.unreachedTrue, right.unreachedTrue);
+          const unreachedFalse = unreached(left.unreachedFalse, right.unreachedFalse);
           this.#flow.undo(start);
           return node.operator === "and"
             ? {
                 type: BOOLEAN_TYPE,
                 whenTrue: rightTrue,
                 whenFalse: this.#flow.join([left.whenFalse, rightFalse]),
+                ...(rightTrue === null && unreachedTrue !== undefined ? { unreachedTrue } : {}),
               }
             : {
                 type: BOOLEAN_TYPE,
                 whenTrue: this.#flow.join([left.whenTrue, rightTrue]),
                 whenFalse: rightFalse,
+                ...(rightFalse === null && unreachedFalse !== undefined ? { unreachedFalse } : {}),
               };
         }
         if (node.operator !== "==" && node.operator !== "!=") break;
@@ -2828,18 +3704,14 @@ class TypeChecker {
         const right = yield* compileChild(this.#expressionTask(node.right, scope));
         this.#warnImpossibleComparison(node, left, right);
         const tested = this.#narrowTest(nullTest, scope, NULL_TYPE, start);
-        return node.operator === "=="
-          ? tested
-          : { type: BOOLEAN_TYPE, whenTrue: tested.whenFalse, whenFalse: tested.whenTrue };
+        return node.operator === "==" ? tested : negatedBranches(tested);
       }
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expressionTask(node.value, scope));
         const test = this.#annotationType(node.type);
         this.#warnConstantTest(node, value, test);
         const tested = this.#narrowTest(node.value, scope, test, start);
-        return node.negated
-          ? { type: BOOLEAN_TYPE, whenTrue: tested.whenFalse, whenFalse: tested.whenTrue }
-          : tested;
+        return node.negated ? negatedBranches(tested) : tested;
       }
       default:
         break;
@@ -2861,16 +3733,14 @@ class TypeChecker {
     const passed = narrowTo(current, test);
     const failed = excludeType(current, test);
     // An outcome that no value of the variable can produce is not reached, such as the end of exhaustive tests.
+    const passes = this.#flow.since(start, new Map([[entry.variable, passed]]));
+    const fails = this.#flow.since(start, new Map([[entry.variable, failed]]));
     return {
       type: BOOLEAN_TYPE,
-      whenTrue:
-        passed.kind === "never"
-          ? null
-          : this.#flow.since(start, new Map([[entry.variable, passed]])),
-      whenFalse:
-        failed.kind === "never"
-          ? null
-          : this.#flow.since(start, new Map([[entry.variable, failed]])),
+      whenTrue: passed.kind === "never" ? null : passes,
+      whenFalse: failed.kind === "never" ? null : fails,
+      ...(passed.kind === "never" ? { unreachedTrue: passes } : {}),
+      ...(failed.kind === "never" ? { unreachedFalse: fails } : {}),
     };
   }
 
@@ -3322,6 +4192,13 @@ class TypeChecker {
       this.#suspend();
       return optional(STRING_TYPE);
     }
+    if (isAskBooleansCall(expression)) {
+      const cancellable = yield* compileChild(this.#askBooleansTask(expression, scope));
+      // A form of toggles: one boolean per text, or `null` when the player cancels it.
+      this.#suspend();
+      const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
+      return cancellable ? optional(answers) : answers;
+    }
     if (isAskImageCall(expression)) {
       yield* compileChild(this.#askImageTask(expression, scope));
       // Like an interaction, it waits for the player, and its answer is always an image reference.
@@ -3675,6 +4552,7 @@ class TypeChecker {
     other: StaticType,
     targets: readonly Expression[],
     span: SourceSpan,
+    note = "",
   ): void {
     const target = targets.map(unwrap).find((node) => node.kind === "identifier");
     const name = target?.kind === "identifier" ? target.name : "values";
@@ -3688,7 +4566,7 @@ class TypeChecker {
           `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
-      `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
+      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type; ${fix}.`,
       span,
     );
   }
@@ -4084,16 +4962,19 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
-    if (expression.hint !== null)
-      this.#checkShownText(
-        expression.hint,
-        yield* compileChild(this.#expressionTask(expression.hint, scope)),
-        "an input hint",
-      );
+    if (expression.interactionKind === "form")
+      return yield* compileChild(this.#formTask(expression, scope));
     if (expression.interactionKind !== "choice") {
-      if (expression.defaultValue !== null) {
-        const type = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
-        this.#checkInteractionDefault(expression.interactionKind, expression.defaultValue, type);
+      for (const operand of askOperands(expression)) {
+        const type = yield* compileChild(this.#expressionTask(operand, scope));
+        if (operand === expression.defaultValue)
+          this.#checkInteractionDefault(expression.interactionKind, operand, type);
+        else
+          this.#checkShownText(
+            operand,
+            type,
+            operand === expression.hint ? "an input hint" : "an ask question",
+          );
       }
       return interactionResultType(expression.interactionKind);
     }
@@ -4645,13 +5526,18 @@ class TypeChecker {
         yield* compileChild(this.#expressionTask(timer.label, scope)),
         "a timer label",
       );
-    if (timer.handler !== null)
-      this.#handlers.push({
-        block: timer.handler,
-        selfHandle: null,
-        scope: this.#outer,
-        file: this.#file,
-      });
+    if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
+  }
+
+  /** A block runs later, with the variables visible where it is created. */
+  #pendHandler(block: Block, selfHandle: string | null, scope: Scope): void {
+    this.#handlers.push({
+      block,
+      selfHandle,
+      scope: scope.visibleAbove(this.#outer),
+      outer: this.#outer,
+      file: this.#file,
+    });
   }
 
   /** A button's text is shown text; its block runs later, when the player clicks it, like a timer expiry block. */
@@ -4661,12 +5547,7 @@ class TypeChecker {
       yield* compileChild(this.#expressionTask(button.text, scope)),
       "a button label",
     );
-    this.#handlers.push({
-      block: button.handler,
-      selfHandle: null,
-      scope: this.#outer,
-      file: this.#file,
-    });
+    this.#pendHandler(button.handler, null, scope);
   }
 
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
@@ -4703,12 +5584,7 @@ class TypeChecker {
       } else yield* compileChild(this.#timeTask(operand, false, scope));
     }
     for (const block of mediaHandlerBlocks(media))
-      this.#handlers.push({
-        block,
-        selfHandle: media.async ? selfHandle : null,
-        scope: this.#outer,
-        file: this.#file,
-      });
+      this.#pendHandler(block, media.async ? selfHandle : null, scope);
     this.#suspend();
     return media.async ? { kind: "media" } : UNKNOWN_TYPE;
   }
@@ -4765,8 +5641,7 @@ class TypeChecker {
     label: string,
     value: StaticType,
   ): void {
-    if (containsType(value, (part) => part.kind === "unknown"))
-      this.#runtimeChecks.push({ site, place, label });
+    if (mayBeUnknown(value)) this.#runtimeChecks.push({ site, place, label });
   }
 
   // Reports ----------------------------------------------------------------------------------------------------------
@@ -5410,16 +6285,6 @@ function hasUndecidedElements(type: StaticType): boolean {
 /** The methods of a dict. */
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "clear",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-]);
-
 /**
  * The members of a variable's own type that hold what it is known to hold, such as `integer[]` of `integer[] | string[]`
  * for a list of integers. Every list type holds the empty list, so an overlap decides only when no member holds it.
@@ -5435,14 +6300,6 @@ function ownMembers(variable: Variable, known: StaticType): StaticType[] {
       kept.add(member);
   }
   return all.filter((member) => kept.has(member));
-}
-
-/** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
-function rootName(expression: Expression): string | null {
-  let node = unwrap(expression);
-  while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
-    node = unwrap(node.object);
-  return node.kind === "identifier" ? node.name : null;
 }
 
 /**
@@ -5545,11 +6402,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
 /** The direct subexpressions of an expression, including interaction operands. */
 function expressionParts(expression: Expression): readonly Expression[] {
   if (expression.kind === "interactionExpression")
-    return [
-      ...(expression.hint === null ? [] : [expression.hint]),
-      ...(expression.defaultValue === null ? [] : [expression.defaultValue]),
-      ...expression.options.map((option) => option.expression),
-    ];
+    return [...askOperands(expression), ...expression.options.map((option) => option.expression)];
   if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
   return expressionChildren(expression);
 }
@@ -6090,7 +6943,20 @@ const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "
 
 /** The name of the variable a declaration declares. */
 function declarationName(declaration: Declaration): string {
+  if (declaration.kind === "identifier") return declaration.name;
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
+}
+
+/** The type of the values of a dict type, of each member's values for a union of dicts; `undefined` for another. */
+function dictValueType(type: StaticType): StaticType | undefined {
+  const values: StaticType[] = [];
+  for (const member of members(nonNullType(type))) {
+    const value = resolved(member);
+    if (value.kind === "dict") values.push(value.element);
+    else if (value.kind === "unknown") values.push(UNKNOWN_TYPE);
+    else return undefined;
+  }
+  return values.length === 1 ? values[0] : union(values);
 }
 
 /**
@@ -6345,6 +7211,7 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   const slot = openType();
   slot.resolved = type;
   slot.resolvedAt = at;
+  slot.order = nextDecision();
   return slot;
 }
 
@@ -6749,9 +7616,54 @@ function textResultType(member: TextMember): StaticType {
     : scalarType(member.result);
 }
 
+/** The answer of an `askForm` field whose kind only the runtime knows. */
+const GENERIC_FORM_ANSWER_TYPE = union([
+  BOOLEAN_TYPE,
+  NUMBER_TYPE,
+  STRING_TYPE,
+  DATE_TYPE,
+  TIME_TYPE,
+  DATETIME_TYPE,
+  // A cycle may return any choice value but `null`.
+  DURATION_TYPE,
+  TIMESTAMP_TYPE,
+]);
+
+/** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */
+function formKindOfStart(type: StaticType): FormFieldKind | null {
+  if (type.kind === "list") return "cycle";
+  if (type.kind !== "scalar") return null;
+  switch (type.name) {
+    case "boolean":
+      return "boolean";
+    case "integer":
+    case "number":
+    case "date":
+    case "time":
+    case "datetime":
+      return type.name;
+    case "string":
+      return "text";
+    default:
+      return null;
+  }
+}
+
+function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
+  return kind === "text" ? STRING_TYPE : interactionResultType(kind);
+}
+
+/** The text of a string literal without interpolation, or `undefined`. */
+function staticText(expression: Expression): string | undefined {
+  const literal = unwrap(expression);
+  if (literal.kind !== "stringLiteral" || literal.parts.some((part) => part.kind !== "stringText"))
+    return undefined;
+  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
+}
+
 /** The type of the answer an `ask...` interaction returns. */
 function interactionResultType(
-  kind: Exclude<InteractionExpression["interactionKind"], "choice">,
+  kind: Exclude<InteractionExpression["interactionKind"], "choice" | "form">,
 ): StaticType {
   switch (kind) {
     case "number":

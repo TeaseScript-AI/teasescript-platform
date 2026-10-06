@@ -45,12 +45,13 @@ import type {
   TypeCheckPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
+  PreparedFormShape,
   PlanSourceLocation,
   PlanLabel,
   TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
+import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralParts, storedDuration } from "../../duration.js";
@@ -59,7 +60,9 @@ import { typeFromAnnotation } from "../../static-types.js";
 import { typePlan } from "../../type-plans.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
+  askOperands,
   expressionChildren as instructionEmissionChildren,
+  mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
   tagQueryOperands,
@@ -191,6 +194,10 @@ export class InstructionCompiler {
     private readonly path: string = MAIN_FILE_PATH,
     /** The files each glob target may pick, from semantic validation. */
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
+    /** The variables each timer, media, or button block shares with the code that created it. */
+    private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
+    /** The result shape of each `askForm`, from the type check. */
+    private readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -650,6 +657,7 @@ export class InstructionCompiler {
             statement.body,
             statement.variable.name,
             statement.span,
+            statement.valueVariable?.name,
           ),
         );
         return;
@@ -837,6 +845,7 @@ export class InstructionCompiler {
     body: Block,
     variable: string | null,
     span: SourceSpan,
+    valueVariable?: string,
   ): CompileTask<void> {
     const loopId = this.counters.nextLoopId;
     this.counters.nextLoopId += 1;
@@ -851,6 +860,7 @@ export class InstructionCompiler {
             loopKind,
             loopId,
             variable: variable!,
+            ...(valueVariable === undefined ? {} : { valueVariable }),
             expression: lowered.plan,
             continueTarget: loopContinueTarget,
             target: -1,
@@ -945,6 +955,7 @@ export class InstructionCompiler {
       persist: timer.persist,
       handlerFunctionId:
         timer.handler === null ? null : this.#registerHandler(timer.handler, "timer", null),
+      captures: this.#capturesOf(timer.handler === null ? [] : [timer.handler]),
       destinationTemporary,
       span: copySpan(timer.span),
     });
@@ -977,6 +988,7 @@ export class InstructionCompiler {
       text: text.plan,
       persist: button.persist,
       handlerFunctionId: this.#registerHandler(button.handler, "button", null),
+      captures: this.#capturesOf([button.handler]),
       destinationTemporary,
       span: copySpan(span),
     });
@@ -1065,6 +1077,7 @@ export class InstructionCompiler {
       volume: media.volume === null ? null : plan(media.volume),
       cues: cuePlans,
       finishFunctionId,
+      captures: this.#capturesOf(mediaHandlerBlocks(media)),
       destinationTemporary,
       span: copySpan(media.span),
     });
@@ -1109,6 +1122,13 @@ export class InstructionCompiler {
    */
   #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
     this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
+  }
+
+  /** The variables that blocks of one resource share with the code that creates it, in the order of first use. */
+  #capturesOf(blocks: readonly Block[]): string[] {
+    const names = new Set<string>();
+    for (const block of blocks) for (const name of this.captures.get(block) ?? []) names.add(name);
+    return [...names];
   }
 
   /** Reserves the next function ID; the region is compiled after all user functions. */
@@ -1281,6 +1301,9 @@ export class InstructionCompiler {
     }
     if (isAskImageCall(expression) && expression.kind === "callExpression") {
       return yield* compileChild(this.#lowerAskImageTask(expression));
+    }
+    if (isAskBooleansCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerAskBooleansTask(expression));
     }
     if (isTakePhotoCall(expression)) {
       // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
@@ -1635,13 +1658,18 @@ export class InstructionCompiler {
     return lowered;
   }
 
+  /**
+   * A basic ask says its question, then opens its field; `choose` opens its buttons. The question, the hint, and the
+   * default are evaluated once, in that written order, before the question is said, so a default that asks itself
+   * comes first. The question is said by the requesting speaker, captured before any operand.
+   */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
+    if (expression.interactionKind === "form")
+      return yield* compileChild(this.#lowerFormTask(expression));
     const values =
       expression.interactionKind === "choice"
         ? expression.options.map((option) => option.expression)
-        : expression.hint === null
-          ? []
-          : [expression.hint];
+        : [];
     const expectedResult =
       expression.interactionKind === "choice"
         ? ("choice" as const)
@@ -1652,7 +1680,25 @@ export class InstructionCompiler {
             : ("temporal" as const);
 
     const ui = staticInteractionUi(expression);
-    if (ui !== undefined) {
+    const staticQuestion =
+      expression.question === null ? null : staticVisibleText(expression.question);
+    if (ui !== undefined && staticQuestion !== undefined) {
+      if (staticQuestion !== null) {
+        // Said and asked by the same speaker: nothing runs between the two instructions.
+        this.instructions.push({
+          kind: "say",
+          presentation: null,
+          speaker: expression.speaker?.name ?? null,
+          value: {
+            kind: "literal",
+            value: staticQuestion,
+            span: copySpan(expression.question!.span),
+          },
+          skipPolicy: null,
+          pacing: "smart",
+          span: copySpan(expression.span),
+        });
+      }
       return this.#emitResultInteraction(
         {
           interactionKind: planInteractionKind(expression),
@@ -1673,27 +1719,59 @@ export class InstructionCompiler {
     let preparedUi: PreparedInteractionUiPayload;
     const preparedTemporaryIds: number[] = [speakerTemporary];
 
+    let question: Extract<Instruction, { kind: "say" }> | null = null;
     if (expression.interactionKind !== "choice") {
-      const hint =
-        expression.hint === null
-          ? null
-          : this.#materializeDedicatedInteractionValue(
-              yield* compileChild(
-                this.#lowerInteractionPayloadTask(expression.hint, speakerTemporary),
-              ),
-              expression.hint.span,
-            );
-      if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
-      const prefill =
-        expression.defaultValue === null
-          ? null
-          : this.#materializeDedicatedInteractionValue(
-              yield* compileChild(
-                this.#lowerInteractionPayloadTask(expression.defaultValue, speakerTemporary),
-              ),
-              expression.defaultValue.span,
-            );
-      if (prefill !== null) preparedTemporaryIds.push(prefill.temporaryId);
+      let questionTemporaryIds: number[] = [];
+      if (expression.question !== null) {
+        const sayTemporaries = this.#prepareQuestionSpeaker(
+          expression.speaker?.name ?? null,
+          expression.asSpan ?? expression.commandSpan,
+        );
+        const lowered = yield* compileChild(
+          this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
+        );
+        const textTemporary = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "prepareSayText",
+          value: lowered.plan,
+          destinationTemporary: textTemporary,
+          field: true,
+          span: copySpan(expression.question.span),
+        });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
+        question = {
+          kind: "say",
+          presentation: null,
+          speaker: expression.speaker?.name ?? null,
+          value: lowered.plan,
+          ...sayTemporaries,
+          textTemporary,
+          skipPolicy: null,
+          pacing: "smart",
+          span: copySpan(expression.span),
+        };
+        questionTemporaryIds = [
+          sayTemporaries.speakerTemporary,
+          sayTemporaries.contextualSpeakerTemporary,
+          textTemporary,
+        ];
+      }
+      let hint: { readonly temporaryId: number } | null = null;
+      let prefill: { readonly temporaryId: number } | null = null;
+      for (const operand of askOperands(expression)) {
+        if (operand === expression.question) continue;
+        const materialized = this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
+          operand.span,
+        );
+        preparedTemporaryIds.push(materialized.temporaryId);
+        if (operand === expression.hint) hint = materialized;
+        else prefill = materialized;
+      }
+      if (question !== null) {
+        this.instructions.push(question);
+        this.#emitTemporaryCleanup(questionTemporaryIds, expression.span);
+      }
       preparedUi =
         expression.interactionKind === "text"
           ? {
@@ -1760,13 +1838,207 @@ export class InstructionCompiler {
   }
 
   /**
+   * `askForm`: after the requesting speaker, the question and the named arguments are evaluated once, in written order,
+   * into one object that the form reads when it opens. Like a basic ask, it then says its question, read from that
+   * object, and the form opens with the shape the type check found.
+   */
+  *#lowerFormTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
+    const speaker = expression.speaker?.name ?? null;
+    const speakerSpan = expression.asSpan ?? expression.commandSpan;
+    const speakerTemporary = this.#prepareInteractionSpeaker(speaker, speakerSpan);
+    const sayTemporaries =
+      expression.question === null ? null : this.#prepareQuestionSpeaker(speaker, speakerSpan);
+    const named = [
+      ...(expression.question === null ? [] : [{ name: "message", value: expression.question }]),
+      ...expression.formArguments.map((argument) => ({
+        name: argument.name.name,
+        value: argument.value,
+      })),
+    ];
+    const values = yield* compileChild(
+      this.#lowerInteractionPayloadsTask(
+        named.map((argument) => argument.value),
+        speakerTemporary,
+      ),
+    );
+    const requestTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: requestTemporary,
+      value: {
+        kind: "object",
+        properties: named.map((argument, index) => ({
+          name: argument.name,
+          value: values[index]!.plan,
+          span: copySpan(argument.value.span),
+        })),
+        span: copySpan(expression.span),
+      },
+      expectBoolean: false,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(
+      values.flatMap((value) => value.temporaryIds),
+      expression.span,
+    );
+    if (sayTemporaries !== null) {
+      const question: ExpressionPlan = {
+        kind: "property",
+        object: {
+          kind: "temporary",
+          temporaryId: requestTemporary,
+          span: copySpan(expression.span),
+        },
+        name: "message",
+        span: copySpan(expression.span),
+      };
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: question,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.span),
+      });
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker,
+        value: question,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "smart",
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        expression.span,
+      );
+    }
+    const lowered = this.#emitPreparedResultInteraction(
+      "form",
+      "form",
+      speakerTemporary,
+      {
+        kind: "form",
+        requestTemporary,
+        shape: this.formShapes.get(expression) ?? { kind: "object", numericKinds: [], answers: [] },
+        accessibleName: { kind: "localizedDefault", key: "answer" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
+    return lowered;
+  }
+
+  /**
+   * `askBooleans(...)`: a form of one toggle per text that returns their states as a list. Like `askImage(...)`, its
+   * written arguments are evaluated once, in source order, into one object, from which it says its message as the
+   * question; the form reads its texts, defaults, and cancel button when it opens.
+   */
+  *#lowerAskBooleansTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
+    const asksQuestion = expression.arguments.some(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    const sayTemporaries = asksQuestion
+      ? this.#prepareQuestionSpeaker(null, expression.span)
+      : null;
+    const values = yield* compileChild(
+      this.#lowerInteractionPayloadsTask(
+        expression.arguments.map((argument) => argument.value),
+        speakerTemporary,
+      ),
+    );
+    const requestTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: requestTemporary,
+      value: {
+        kind: "object",
+        properties: expression.arguments.map((argument, index) => ({
+          name: argument.kind === "namedArgument" ? argument.name.name : "message",
+          value: values[index]!.plan,
+          span: copySpan(argument.span),
+        })),
+        span: copySpan(expression.span),
+      },
+      expectBoolean: false,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(
+      values.flatMap((value) => value.temporaryIds),
+      expression.span,
+    );
+    if (sayTemporaries !== null) {
+      const question: ExpressionPlan = {
+        kind: "property",
+        object: {
+          kind: "temporary",
+          temporaryId: requestTemporary,
+          span: copySpan(expression.span),
+        },
+        name: "message",
+        span: copySpan(expression.span),
+      };
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: question,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.span),
+      });
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker: null,
+        value: question,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "smart",
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        expression.span,
+      );
+    }
+    const lowered = this.#emitPreparedResultInteraction(
+      "form",
+      "form",
+      speakerTemporary,
+      {
+        kind: "form",
+        requestTemporary,
+        shape: { kind: "booleanList" },
+        accessibleName: { kind: "localizedDefault", key: "answer" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
+    return lowered;
+  }
+
+  /**
    * `askImage(...)`: the written arguments are evaluated once, in source order, into one object, which the interaction
-   * reads when it opens. It is always prepared: its request is checked then.
+   * reads when it opens. It is always prepared: its request is checked then. Like a basic ask, it first says its
+   * question, the message, read from that object.
    */
   *#lowerAskImageTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
   ): CompileTask<LoweredExpression> {
     const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
+    const asksQuestion = expression.arguments.some(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    const sayTemporaries = asksQuestion
+      ? this.#prepareQuestionSpeaker(null, expression.span)
+      : null;
     const values = yield* compileChild(
       this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
     );
@@ -1790,6 +2062,41 @@ export class InstructionCompiler {
       values.flatMap((value) => value.temporaryIds),
       expression.span,
     );
+    if (sayTemporaries !== null) {
+      const question: ExpressionPlan = {
+        kind: "property",
+        object: {
+          kind: "temporary",
+          temporaryId: requestTemporary,
+          span: copySpan(expression.span),
+        },
+        name: "message",
+        span: copySpan(expression.span),
+      };
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: question,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.span),
+      });
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker: null,
+        value: question,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "smart",
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        expression.span,
+      );
+    }
     const lowered = this.#emitPreparedResultInteraction(
       "image",
       "string",
@@ -1863,6 +2170,31 @@ export class InstructionCompiler {
       plan: { kind: "temporary", temporaryId: ordinaryTemporary, span: copySpan(span) },
       temporaryIds: [ordinaryTemporary],
     };
+  }
+
+  /**
+   * The output speaker of an ask question, captured right after the requesting speaker, which it therefore matches:
+   * both are the named speaker or else the default one.
+   */
+  #prepareQuestionSpeaker(
+    speaker: string | null,
+    span: SourceSpan,
+  ): { readonly speakerTemporary: number; readonly contextualSpeakerTemporary: number } {
+    const speakerTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSaySpeaker",
+      speaker,
+      destinationTemporary: speakerTemporary,
+      span: copySpan(span),
+    });
+    const contextualSpeakerTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSayContextualSpeaker",
+      speakerTemporary,
+      destinationTemporary: contextualSpeakerTemporary,
+      span: copySpan(span),
+    });
+    return { speakerTemporary, contextualSpeakerTemporary };
   }
 
   #prepareInteractionSpeaker(speaker: string | null, span: SourceSpan): number {
@@ -2307,6 +2639,7 @@ export class InstructionCompiler {
       if (
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
+        isAskBooleansCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -2464,8 +2797,10 @@ function planInteractionKind(expression: InteractionExpression): InteractionKind
   }
 }
 
-/** The UI of an interaction whose text, values, and default answer are all known at compile time. */
+/** The UI of an interaction whose hint, values, and default answer are all known at compile time. */
 function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
+  // A form reads its fields when it opens.
+  if (expression.interactionKind === "form") return undefined;
   if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.defaultValue === null ? null : staticInteractionPrefill(expression);
@@ -2620,6 +2955,8 @@ function assembleExpression(
         throw new TypeError("takePhoto() reached pure expression assembly.");
       if (isAskImageCall(expression))
         throw new TypeError("askImage() reached pure expression assembly.");
+      if (isAskBooleansCall(expression))
+        throw new TypeError("askBooleans() reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),
