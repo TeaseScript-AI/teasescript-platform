@@ -313,6 +313,7 @@ test("replay data is judged by its actual text: escaped whitespace hides nothing
     "https://example.com/a/b C:/private/notes.txt",
     "https://example.com/a/b \\\\server\\share\\private.txt",
     "https://example.com/a/b /srv/private/notes.txt",
+    "\\server\\share\\private.txt",
   ]) {
     const exported = await exportOf(saved);
     assert.equal(exported.checkpoint, null, JSON.stringify(saved));
@@ -381,4 +382,24 @@ test("a wide list a script saved is checked and replays", async () => {
   const { exported } = await assembleDebugExport(frozen, all(frozen));
   assert.notEqual(exported.checkpoint, null);
   assert.equal(replayDebugExport(parseDebugExport(await fileText(exported))).kind, "reproduced");
+});
+
+test("a network path the script says, as message markup shows it, is removed from session text", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession('let name = askText "Name"\nsay "${name}"\nexit', {
+    recorder,
+  });
+  session = submitPlayerRuntimeComposer(
+    session,
+    "\\\\server\\share\\marker-in-a-path.txt",
+  )!.session;
+  const said = session.transcriptEntries.at(-1);
+  assert.equal(
+    said?.kind === "message" ? said.text : null,
+    "\\server\\share\\marker-in-a-path.txt",
+  );
+  const frozen = candidate(session, recorder);
+  const choices = chooseDebugCategory(NO_PERSONAL_CONTENT, frozen, "sessionText", true);
+  const text = await fileText((await assembleDebugExport(frozen, choices)).exported);
+  assert.ok(!text.includes("marker-in-a-path"), "the path is in the file");
 });

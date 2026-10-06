@@ -104,8 +104,9 @@ is incomplete), or of its anchor as the last good state when that state cannot b
 answer or capture, or a saved value); Player and browser details add the presentation settings, screen geometry,
 pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path or a file
 URL outside another URL, is replaced in every readable section, and replay data containing it is left out entirely,
-since changing it would change the replay; such detection cannot prove text safe, so the export is never called
-anonymous.
+since changing it would change the replay; such detection in free text is best effort and cannot prove text safe, so the
+export is never called anonymous: the protection is that each category is the player's choice, and the dialog asks the
+player to check its preview before sharing.
 
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
 values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from

@@ -169,8 +169,9 @@ function uses(photo: (typeof photos.value)[number]): string {
 
         <Alert>
           <AlertDescription>
-            The file is not encrypted. Credentials and file paths found in the chosen text are
-            removed, but that cannot catch everything: check the preview before sharing.
+            The file is not encrypted. Only what you turn on is included. Removing credentials and
+            file paths from text is best effort and cannot catch everything: check the preview
+            before sharing.
           </AlertDescription>
         </Alert>
 

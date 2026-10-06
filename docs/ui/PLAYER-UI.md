@@ -446,10 +446,11 @@ The card, its notice, and Player Settings open one **Download debug export** dia
 labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
 saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed
 with a thumbnail, size, and where they were used, each with its own checkbox. The dialog warns that the file is not
-encrypted, states the file's size and whether the error can be replayed exactly, and previews what the file contains;
-every change prepares the file again, and **Download debug export** saves exactly that file from the player's press. An
-export larger than an issue attachment allows is not offered. The dialog fits narrow screens and scrolls, and its rows
-and buttons are at least 44px tall.
+encrypted and that removing credentials and paths from text is best effort, so the player checks the preview; it states
+the file's size and whether the error can be replayed exactly, and previews what the file contains; every change
+prepares the file again, and **Download debug export** saves exactly that file from the player's press. An export larger
+than an issue attachment allows is not offered. The dialog fits narrow screens and scrolls, and its rows and buttons are
+at least 44px tall.
 
 ## Player notices
 
