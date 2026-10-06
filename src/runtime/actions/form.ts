@@ -128,9 +128,10 @@ export function materializeForm(
     if (!isList(texts) || !isList(defaults))
       throw fault("askBooleans takes a list of texts and a list of defaults.", span);
     if (texts.items.length !== defaults.items.length)
-      throw fault(
+      throw new RuntimeFault(
+        "TSR058",
         `askBooleans has ${texts.items.length} texts but ${defaults.items.length} defaults; give one default for each text.`,
-        span,
+        copySpan(span),
       );
     texts.items.forEach((text, index) => {
       const start = defaults.items[index]!;

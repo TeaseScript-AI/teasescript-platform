@@ -576,6 +576,7 @@ class SemanticValidator {
           "askTime",
           "askDateTime",
           "askForm",
+          "askBooleans",
           "choose",
           "takePhoto",
           "showCamera",

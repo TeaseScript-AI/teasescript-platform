@@ -607,8 +607,17 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   const computed = compileValidPlan(
     'let texts = ["A", "B"]\nlet defaults = [true]\nlet a = askBooleans(texts: texts, defaults: defaults)\nexit',
   );
-  assert.equal(
-    run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure?.message,
-    "askBooleans has 2 texts but 1 defaults; give one default for each text.",
+  const failure = run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure;
+  assert.deepEqual(
+    [failure?.code, failure?.message],
+    ["TSR058", "askBooleans has 2 texts but 1 defaults; give one default for each text."],
   );
+  // A host cannot configure the engine's name as its own.
+  for (const option of ["builtins", "globals"] as const)
+    assert.ok(
+      compileSource('let a = askBooleans(texts: ["A"], defaults: [true])\nexit', {
+        [option]: ["askBooleans"],
+      }).diagnostics.some((diagnostic) => diagnostic.code === "TSV001"),
+      option,
+    );
 });
