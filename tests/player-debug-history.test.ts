@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   DebugHistory,
+  rewindFutureTranscript,
   type DebugHistoryMarks,
   type DebugHistoryRestore,
   type DebugHistorySpill,
@@ -229,4 +230,23 @@ test("a state that cannot be read back is reported, and the history stays as it 
   rows.set(1, JSON.stringify({ status: "waiting" }));
   const damaged = await history.back(0, () => ({ session: second, marks: unmarked }));
   assert.throws(() => restored(history, damaged));
+});
+
+test("the grey future is the transcript of the state Forward restores after the shown state's own", async () => {
+  const first = createPlayerRuntimeSession(twoChoices);
+  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  history.follow(first, unmarked);
+  const second = choose(first, "One");
+  history.follow(second, unmarked);
+  const shownTranscript = second.transcriptEntries.map((entry) => entry.id);
+  await history.back(0, () => ({ session: second, marks: unmarked }));
+  const future = rewindFutureTranscript(history.shown!, history.future!);
+  assert.deepEqual(
+    future.entries.map((entry) => [entry.id, entry.text, entry.kind === "message" && entry.future]),
+    second.transcriptEntries.map((entry) => [`future-${entry.id}`, entry.text, true]),
+  );
+  // Its rows are keyed apart from the session's, whose sequences new input may reuse.
+  assert.ok(future.entries.every((entry) => !shownTranscript.includes(entry.id)));
+  // The answer keeps its mark as a choice.
+  assert.equal(future.entries[0]?.kind === "message" && future.entries[0].responseKind, "choice");
 });

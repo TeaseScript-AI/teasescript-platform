@@ -141,6 +141,7 @@ async function main() {
       await debugStorageScenario(cdp, origin, profile);
       await debugStorageEditScenario(cdp, origin);
       await debugHistoryStorageScenario(cdp, origin);
+      await debugRewindScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
@@ -151,7 +152,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -4057,6 +4058,150 @@ async function debugHistoryStorageScenario(cdp, origin) {
     result.afterSweep.includes(crashed)
   )
     throw new Error(`Debug history IndexedDB store: ${JSON.stringify(result)}`);
+}
+
+/**
+ * Debug's rewind in the chat, on the `debug-rewind` package: Back to here on an answer shows the earlier state with its
+ * later messages grey and the inspection bar; Forward restores the later state and Return the session; a different
+ * answer adopts the earlier state, with its saved data, and discards the grey messages. A failed state that is
+ * inspected shows its failure above the bar, and the bar fits a narrow screen.
+ */
+async function debugRewindScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  // The text of each message itself, without its speaker header, choice marker, or text for screen readers only.
+  const texts = (selector) =>
+    `[...document.querySelectorAll(${JSON.stringify(selector)})].map((element) => { const copy = element.cloneNode(true); copy.querySelectorAll('[data-slot="message-header"], .choice-marker, .sr-only').forEach((part) => part.remove()); return copy.textContent.trim(); })`;
+  // A narrator's message is prose, the player's a bubble.
+  const message = ":is([data-slot='bubble-content'], .prose)";
+  const activeText = texts(`.transcript-entry:not([data-future]) ${message}`);
+  const futureText = texts(`.transcript-entry[data-future] ${message}`);
+  const options = texts("[data-foreground-controls] button");
+  const answer = async (label) => {
+    await waitFor(cdp, `${options}.includes(${JSON.stringify(label)})`);
+    await evaluate(
+      cdp,
+      `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).setAttribute('data-smoke-answer', '')`,
+    );
+    await physicalClick(cdp, "[data-smoke-answer]");
+  };
+  // Back to here on the player's answer with this text, scrolled into view first.
+  const backToHere = async (text) => {
+    await waitFor(
+      cdp,
+      `[...document.querySelectorAll('.transcript-entry:not([data-future])')].some((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]'))`,
+      5_000,
+      `No Back to here on ${text}`,
+    );
+    await evaluate(
+      cdp,
+      `document.querySelectorAll('[data-smoke-back]').forEach((button) => button.removeAttribute('data-smoke-back')); const button = [...document.querySelectorAll('.transcript-entry:not([data-future])')].find((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]')).querySelector('[data-back-to-here]'); button.setAttribute('data-smoke-back', ''); button.scrollIntoView({ block: 'center' });`,
+    );
+    await physicalClick(cdp, "[data-smoke-back]");
+    await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
+  };
+  const json = (expression) => `JSON.stringify(${expression})`;
+
+  await navigate(cdp, `${origin}/player/?dev&package=debug-rewind`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await answer("One");
+  await waitFor(cdp, `${activeText}.includes('first One')`);
+
+  // Back: the earlier choice again, the later messages grey, and what was answered before.
+  await backToHere("One");
+  await waitFor(
+    cdp,
+    `${json(futureText)} === ${JSON.stringify(JSON.stringify(["One", "first One"]))} && !${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["One", "Two"]))}`,
+    5_000,
+    "Back did not show the earlier choice with a grey future",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([!!document.querySelector('[data-future-label]'), document.querySelector('[data-rewind-earlier]')?.textContent.trim(), document.querySelectorAll('.transcript-entry[data-future] [data-back-to-here], .transcript-entry[data-future] [data-explain-values]').length])`,
+    ),
+    JSON.stringify([true, "Answered before: One", 0]),
+    "The grey future, its label, or the earlier answer",
+  );
+  // Forward restores the later state, still inspected; Return reinstates the session.
+  await physicalClick(cdp, "[data-rewind-forward]");
+  await waitFor(
+    cdp,
+    `${futureText}.length === 0 && ${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["Red", "Fail"]))} && !!document.querySelector('[data-rewind-inspection]') && document.querySelector('[data-rewind-forward]').disabled`,
+    5_000,
+    "Forward did not restore the later state",
+  );
+  await physicalClick(cdp, "[data-rewind-return]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]') && ${activeText}.includes('first One')`,
+    5_000,
+    "Return did not reinstate the session",
+  );
+
+  // A different answer adopts the earlier state: the grey messages go, and the saved data follow the new branch.
+  await backToHere("One");
+  await answer("Two");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]') && ${futureText}.length === 0 && ${activeText}.includes('first Two') && !${activeText}.includes('first One')`,
+    5_000,
+    "A different answer did not adopt the earlier state",
+  );
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await physicalClick(cdp, '[data-debug-tab="storage"]');
+  await waitFor(
+    cdp,
+    `JSON.stringify([...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])) === ${JSON.stringify(
+      JSON.stringify([
+        ['"k"', "1"],
+        ['"pick"', '"Two"'],
+      ]),
+    )}`,
+    5_000,
+    "The adopted branch's saved data",
+  );
+
+  // A failed state that is inspected shows its failure, then the bar closest to the composer.
+  await answer("Fail");
+  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`);
+  await backToHere("Fail");
+  await physicalClick(cdp, "[data-rewind-forward]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-runtime-failure]') && !!document.querySelector('[data-rewind-inspection]')`,
+    5_000,
+    "The inspected failed state lost its failure or the bar",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `!!(document.querySelector('[data-runtime-failure]').compareDocumentPosition(document.querySelector('[data-rewind-inspection]')) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+    ),
+    true,
+    "The bar does not follow the failure",
+  );
+  // On a narrow screen, the bar fits and its controls stay touch-sized.
+  await setViewport(cdp, 390, 844);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-rewind-inspection]').getBoundingClientRect().width > 0`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const bar = document.querySelector('[data-rewind-inspection]').getBoundingClientRect(); const buttons = [...document.querySelectorAll('[data-rewind-inspection] button')]; return JSON.stringify([bar.left >= 0 && bar.right <= window.innerWidth, buttons.length, buttons.every((button) => button.getBoundingClientRect().height >= 44)]); })()`,
+    ),
+    JSON.stringify([true, 3, true]),
+    "The bar on a narrow screen",
+  );
+  // The narrow tools drawer may cover the chat, so this press goes to the control itself.
+  await evaluate(cdp, `document.querySelector('[data-rewind-return]').click()`);
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-failure]')`,
+  );
+  await setViewport(cdp, 1440, 900);
 }
 
 async function navigate(cdp, url) {
