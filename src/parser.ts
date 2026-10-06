@@ -3632,7 +3632,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      ["hint", "default"],
+      ["default", "hint"],
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {

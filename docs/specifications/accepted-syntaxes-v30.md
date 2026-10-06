@@ -1724,20 +1724,22 @@ Rules:
 `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` are implemented in this parenthesized
 form with the arguments of their compact form
 ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional question,
-an optional `hint:`, and an optional `default:`. Both forms mean the same: `askText()` is `askText`, and
+an optional `default:`, and an optional `hint:`. Both forms mean the same: `askText()` is `askText`, and
 `askText as mistress ("Name?", default: "Ada")` is `askText as mistress "Name?", default: "Ada"`. The speaker clause
 comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
 other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
 
 The question is said in the chat by the asking speaker, as by `say`, right before the field opens; `hint:` is help
 text shown in the field only
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)):
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). The hint shows only
+while the field is empty, so with a default it is usually not visible:
 
 ```text
-let name = askText "What is your name?", hint: "Type your name", default: "Slave"
+let name = askText "What is your name?", default: "Slave", hint: "Type your name"
 ```
 
-The question, `hint:`, and `default:` are evaluated once, in the order they are written, before the question is said.
+The question, `default:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
+the two options may be written in either order.
 The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
 accepts what a field text accepts, so a list is an error. Without a question nothing is said.
 
@@ -1835,7 +1837,7 @@ let count = askInteger("Enter a whole number")
 ```
 
 `askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
-`askInteger [as speaker] [question] [, hint: text] [, default: integer]` is implemented as the whole-number counterpart
+`askInteger [as speaker] [question] [, default: integer] [, hint: text]` is implemented as the whole-number counterpart
 of `askNumber` ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an
 optional sign and digits within the safe integer range.
 
@@ -1911,7 +1913,7 @@ askDateTime(...)  // datetime
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
-The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, hint: text] [, default: value]` are
+The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, default: value] [, hint: text]` are
 implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
 control submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone
 skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and

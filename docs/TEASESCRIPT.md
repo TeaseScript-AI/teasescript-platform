@@ -95,7 +95,7 @@ let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
 let text = askText as mistress "What do you say?"
-let name = askText "Your name?", hint: "Type your name", default: "Ada"
+let name = askText "Your name?", default: "Ada", hint: "Type your name"
 
 let amount = askNumber
 let amount = askNumber as mistress "How many?"
@@ -116,7 +116,8 @@ expression, and `as speaker` comes before the parentheses
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
 speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
-only ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
+only, while it is empty, so with a default it is usually not visible
+([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
 optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
 it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 

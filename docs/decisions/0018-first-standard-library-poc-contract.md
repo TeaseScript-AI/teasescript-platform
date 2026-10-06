@@ -160,7 +160,7 @@ after completion; `askInteger` below is the whole-number counterpart.
 ### `askInteger`
 
 Owner-approved extension (2026-10-04, #539): `askInteger` copies the compact `askNumber` forms, including `as speaker`,
-the question, `hint:`, and `default:`, and returns `integer`.
+the question, `default:`, and `hint:`, and returns `integer`.
 
 ```tease
 let count = askInteger "How many repetitions?"
@@ -177,7 +177,7 @@ interaction whose UI only accepts whole numbers, so completion, prefill, checkpo
 ### `askDate`, `askTime`, and `askDateTime`
 
 Owner-approved extension (2026-10-04, #532): `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
-forms, including `as speaker`, the question, `hint:`, and `default:`, and return `date`, `time`, and `datetime`.
+forms, including `as speaker`, the question, `default:`, and `hint:`, and return `date`, `time`, and `datetime`.
 
 ```tease
 let day = askDate "Which day?"
@@ -219,7 +219,7 @@ Owner decision (2026-10-05, #627): `askText`, `askNumber`, `askInteger`, `askDat
 take their compact arguments inside parentheses, as V30 §20 writes them. Both forms give the same interaction:
 `askText()` is `askText`, and `askText as mistress ("Type here", default: "Ada")` is
 `askText as mistress "Type here", default: "Ada"`. The speaker clause stays before the parentheses, and the `)` ends the
-ask inside a larger expression. The parentheses accept only the optional question, `hint:`, and `default:`.
+ask inside a larger expression. The parentheses accept only the optional question, `default:`, and `hint:`.
 
 ### Ask questions and hints
 
@@ -228,12 +228,12 @@ text and not a transcript question: one ask is one complete author action. Its t
 requesting speaker says in the chat before the field opens; `hint:` is help shown in the field only.
 
 ```tease
-let name = askText as mistress "What is your name?", hint: "Type your name", default: "Ada"
+let name = askText as mistress "What is your name?", default: "Ada", hint: "Type your name"
 let count = askInteger("How many?", default: 3)
 let day = askDate hint: "Pick a day"
 ```
 
-- The requesting speaker is captured first, then the question, `hint:`, and `default:` are evaluated once, the options
+- The requesting speaker is captured first, then the question, `default:`, and `hint:` are evaluated once, the options
   in the order they are written. A default that asks itself therefore asks first. Then the question is said and the
   field opens. The question and the field have the same speaker; a nested ask without `as` uses the default speaker,
   as before.
@@ -247,7 +247,8 @@ let day = askDate hint: "Pick a day"
 - `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
   question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
 - `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
-  hint shows none while the control keeps its accessible name. Neither the question nor the hint becomes the
+  hint shows none while the control keeps its accessible name. The hint shows only while the field is empty, so with a
+  default it is usually not visible; examples write `default:` first. Neither the question nor the hint becomes the
   accessible name.
 
 ### `choose`
