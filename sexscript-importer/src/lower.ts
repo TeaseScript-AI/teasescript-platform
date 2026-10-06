@@ -1340,6 +1340,14 @@ export function lowerParsedFile(
     context,
     stripsTags,
   );
+  // The truth helper goes where variable typing wrote all its tests plainly.
+  if (context.syntheticHelpers.has("truth")) {
+    const others = helperStatements(
+      new Set([...context.syntheticHelpers].filter((name) => name !== "truth")),
+    );
+    if (!callsFunction([typedStatements, others], "sexscriptLegacyTruth"))
+      context.syntheticHelpers.delete("truth");
+  }
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
@@ -16371,4 +16379,12 @@ function stringOrNull(value: unknown): string | null {
 
 function migrateScriptPath(value: string): string {
   return value.toLowerCase().endsWith(".groovy") ? `${value.slice(0, -7)}.tease` : `${value}.tease`;
+}
+
+/** Whether any call in the values names the function. */
+function callsFunction(value: unknown, name: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => callsFunction(item, name));
+  if (!isRecord(value)) return false;
+  if (value.kind === "call" && value.name === name) return true;
+  return Object.values(value).some((child) => callsFunction(child, name));
 }

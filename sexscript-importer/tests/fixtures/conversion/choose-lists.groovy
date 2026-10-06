@@ -46,3 +46,9 @@ def strict = getBoolean("Strict?")
 def tasks = [[name: "Kneel"], [name: "Crawl"]]
 def task = getSelectedValue(strict ? "Pick, now." : "Pick one", tasks.collect { it.name })
 show("Task " + task)
+// A field that some records leave null may be null where it is read, and its truth is a plain test.
+def picked = 1
+while (picked) {
+  picked = resets[getSelectedValue("Again?", resets.collect { it.lbl })].ID
+  if (picked) show("Reset " + picked)
+}
