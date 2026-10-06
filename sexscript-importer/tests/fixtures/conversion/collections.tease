@@ -186,5 +186,11 @@ seats[1] = "Ann"
 if sexscriptLegacyItemAt(seats, 0) == null {
   say "Seat 0 is free"
 }
+// A write that reads the same position first needs no padding: the position exists already.
+k = 0
+while k < 3 {
+  slots[k] = slots[k] + 1
+  k += 1
+}
 say "Slots ${slots.length} ${seats.length}"
 exit

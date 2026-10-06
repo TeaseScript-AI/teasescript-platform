@@ -10276,6 +10276,30 @@ function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): 
   return receiver !== null && sameReference(receiver, list);
 }
 
+/** Whether `value` reads `list` at a position written the same way as `index`. */
+function readsPosition(value: AstNode, list: AstNode, index: AstNode): boolean {
+  const same = (left: AstNode | null, right: AstNode | null): boolean => {
+    if (left === null || right === null || left.kind !== right.kind) return false;
+    if (left.kind === "variable") return variableName(left) === variableName(right);
+    if (left.kind === "constant") return constantValue(left) === constantValue(right);
+    if (left.kind === "binary")
+      return (
+        text(left.operator) === text(right.operator) &&
+        same(asNode(left.left), asNode(right.left)) &&
+        same(asNode(left.right), asNode(right.right))
+      );
+    return false;
+  };
+  let found = false;
+  walkAst(value, (node) => {
+    if (node.kind !== "binary" || text(node.operator) !== "[") return;
+    const target = asNode(node.left);
+    if (target !== null && sameReference(target, list) && same(asNode(node.right), index))
+      found = true;
+  });
+  return found;
+}
+
 function sameReference(left: AstNode, right: AstNode): boolean {
   if (left.kind === "variable" && right.kind === "variable") {
     return variableName(left) === variableName(right);
@@ -11990,6 +12014,8 @@ function growingListWrite(
     indexNode === null ||
     !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
     !(startsEmpty || pastLiteral) ||
+    // A write that reads the same position first, `map[i] = map[i] % 1000`, needs the position to exist already.
+    (listNode !== null && readsPosition(valueNode, listNode, indexNode)) ||
     !listGrowthIndex(indexNode, context)
   )
     return null;
