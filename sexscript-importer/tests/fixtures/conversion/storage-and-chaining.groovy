@@ -34,4 +34,8 @@ if (getBoolean("Keep the streak?")) {
 // loadString() read a stored number as text.
 save("training.version", 2)
 if (loadString("training.version") == "2") show("Version 2")
+// An online read with a default for a missing value reads with that default.
+def best = receiveInteger("training.best")
+if (best == null) best = 0
+show("Best ${best + 1}")
 return null

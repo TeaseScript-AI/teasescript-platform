@@ -84,4 +84,9 @@ save 2 as "training.version"
 if sexscriptLegacyText(load("training.version")) == "2" {
   say "Version 2"
 }
+// An online read with a default for a missing value reads with that default.
+// NOTE SX_ONLINE_STORAGE line 38: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let best = load "training.best", default: 0
+// NOTE SX_PLUS_OPERAND_TYPE line 40: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Best ${best + 1}"
 exit

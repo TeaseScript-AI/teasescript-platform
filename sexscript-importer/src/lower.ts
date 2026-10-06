@@ -296,6 +296,7 @@ const TYPED_STORAGE_LOADS = new Set(["loadBoolean", "loadFloat", "loadInteger", 
 
 /** Reads of the legacy online service, which kept values on a server for every player and session. */
 const ONLINE_LOADS = new Set(["receive", "receiveBoolean", "receiveInteger", "receiveString"]);
+const TYPED_ONLINE_LOADS = new Set(["receiveBoolean", "receiveInteger", "receiveString"]);
 
 const ONLINE_STORAGE_NOTE =
   "The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.";
@@ -9419,7 +9420,9 @@ function readThenDefault(
     mayReadDestination(fallback, asNode(expression!.left)!, context) ||
     !(
       dictLookupParts(read, context) !== null ||
-      TYPED_STORAGE_LOADS.has(legacyApiCall(read, context)?.name ?? "")
+      TYPED_STORAGE_LOADS.has(legacyApiCall(read, context)?.name ?? "") ||
+      // The online service's typed reads are storage reads too (SX_ONLINE_STORAGE).
+      TYPED_ONLINE_LOADS.has(legacyApiCall(read, context)?.name ?? "")
     ) ||
     // A dict's default has its value type, as for `?:` (dictDefaultFits).
     (dictLookupParts(read, context) !== null &&
