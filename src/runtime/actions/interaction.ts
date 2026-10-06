@@ -52,8 +52,20 @@ export function resolveInteractionCompletion(
   }
   // A form is submitted with the answers its edits gave it; the payload carries none.
   if (action.ui.kind === "form") {
-    if (payload.kind !== "submit" || Object.keys(payload).length !== 1 || action.form === undefined)
-      return { ok: false, message: "Form completion payload must be { kind: 'submit' }." };
+    if (
+      (payload.kind !== "submit" && payload.kind !== "cancel") ||
+      Object.keys(payload).length !== 1 ||
+      action.form === undefined
+    )
+      return {
+        ok: false,
+        message: "Form completion payload must be { kind: 'submit' } or { kind: 'cancel' }.",
+      };
+    // Cancelling drops every edit, also text that is not an answer, and returns `null`.
+    if (payload.kind === "cancel")
+      return action.ui.cancel === null
+        ? { ok: false, message: "This form has no cancel button; it must be submitted." }
+        : { ok: true, result: null, transcriptText: action.ui.cancel.text };
     return submitForm(action.ui, action.form);
   }
   if (action.interactionKind === "button") {

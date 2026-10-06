@@ -568,3 +568,56 @@ test("restore rejects form answers that its definition cannot hold", () => {
   (wrongResult.lastSettlement as any).result.properties[4].value = 40;
   assert.equal(validateRuntimeSnapshot(wrongResult, plan).valid, false);
 });
+
+test("a form with a cancel button cancels as a whole, dropping its edits, and returns null once", () => {
+  const plan = formPlan(
+    `{ fields: { impact: { value: 5, min: 1, max: 10 }, on: false }, cancel: { text: "Back", background: "gray" } }`,
+    OBJECT,
+  );
+  const opened = started(plan);
+  assert.deepEqual(pendingForm(opened).ui.cancel, {
+    text: "Back",
+    background: normalizeOpaqueColor("gray"),
+  });
+  // Even text that is not an answer does not hold back the cancellation.
+  const drafted = edited(plan, opened, [
+    { kind: "select", fieldId: "on", optionIndex: 1 },
+    { kind: "edit", fieldId: "impact" },
+    { kind: "draft", fieldId: "impact", text: "x" },
+  ]);
+  const cancel = (snapshot: RuntimeSnapshot) =>
+    completeAction(plan, snapshot, {
+      actionId: pendingForm(opened).actionId,
+      actionKind: "interaction",
+      interactionKind: "form",
+      payload: { kind: "cancel" },
+    });
+  const cancelled = cancel(drafted);
+  assert.equal(cancelled.outcome.kind, "completed");
+  assert.deepEqual(
+    cancelled.events.map((event) => (event.kind === "playerTranscript" ? event.text : event.kind)),
+    ["Back", "actionCompleted"],
+  );
+  assert.equal(cancel(cancelled.snapshot).outcome.kind, "alreadySettled");
+  const finished = runUntilExit(plan, roundTrip(plan, cancelled.snapshot)).snapshot;
+  assert.equal(binding(finished, "result"), null);
+  // A settlement that claims a cancellation the form did not offer is rejected.
+  const noCancel = formPlan(`{ fields: { on: false } }`, OBJECT);
+  const pending = started(noCancel);
+  assert.deepEqual(
+    completeAction(noCancel, pending, {
+      actionId: pendingForm(pending).actionId,
+      actionKind: "interaction",
+      interactionKind: "form",
+      payload: { kind: "cancel" },
+    }).outcome,
+    { kind: "invalidPayload", message: "This form has no cancel button; it must be submitted." },
+  );
+  const submittedNoCancel = submit(noCancel, pending).snapshot;
+  const forged = structuredClone(submittedNoCancel);
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
+  const settlement = forged.lastSettlement as any;
+  settlement.result = null;
+  settlement.transcriptText = "Back";
+  assert.equal(validateRuntimeSnapshot(forged, noCancel).valid, false);
+});

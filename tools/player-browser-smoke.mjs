@@ -3831,6 +3831,14 @@ async function formsScenario(cdp, origin) {
   await evaluate(cdp, `${submit}.click()`);
   await waitFor(cdp, `document.body.innerText.includes("2 of 43 selected")`);
   await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-form-actions] button')].map((button) => button.textContent.trim()).join("|")`,
+    ),
+    "Continue|Skip",
+    "The form written with cancel: shows no cancel button",
+  );
   const intensity = `${fields}.find((button) => button.textContent.includes("Intensity"))`;
   const fill = `getComputedStyle(${intensity}).backgroundImage`;
   const low = await value(cdp, fill);

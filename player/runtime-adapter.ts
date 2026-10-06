@@ -842,10 +842,13 @@ export function submitPlayerRuntimeComposer(
     if (action.form?.editor != null) return commitPlayerRuntimeFormField(session, submittedText);
     const fields = action.ui.fields.filter((field) => field.text === submittedText);
     const submits = action.ui.submit.text === submittedText ? 1 : 0;
-    if (submittedText === "" || fields.length + submits !== 1) return null;
+    const cancels = action.ui.cancel?.text === submittedText ? 1 : 0;
+    if (submittedText === "" || fields.length + submits + cancels !== 1) return null;
     return submits === 1
       ? submitPlayerRuntimeForm(session)
-      : stepPlayerRuntimeFormField(session, fields[0]!.id);
+      : cancels === 1
+        ? cancelPlayerRuntimeForm(session)
+        : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
   if (
     action === null ||
@@ -953,6 +956,13 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
       label: ui.submit.text,
       ...(ui.submit.background === undefined ? {} : { authoredFill: ui.submit.background }),
     }),
+    cancel:
+      ui.cancel === null
+        ? null
+        : Object.freeze({
+            label: ui.cancel.text,
+            ...(ui.cancel.background === undefined ? {} : { authoredFill: ui.cancel.background }),
+          }),
     status,
     editor:
       edited === undefined ||
@@ -1154,6 +1164,13 @@ export function submitPlayerRuntimeForm(
     if (action?.ui.kind !== "form") return null;
     return completePlayerAction(current, action, { kind: "submit" });
   });
+}
+
+/** Cancels the whole form, dropping every edit and the text being typed; the form returns `null`. */
+export function cancelPlayerRuntimeForm(session: PlayerRuntimeSession): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form" || action.ui.cancel === null) return null;
+  return completePlayerAction(session, action, { kind: "cancel" });
 }
 
 function updatePlayerRuntimeForm(

@@ -1941,7 +1941,7 @@ button is chosen.
 ### Forms
 
 **Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object or a dict of fields of
-every kind, with descriptions and `outro:` ([RUNTIME.md](../RUNTIME.md#forms)); `cancel:`, `askBooleans`, and
+every kind, with descriptions, `outro:`, and `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)); `askBooleans` and
 `timeout:` are not yet, and the compiler reports them.
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
@@ -2034,7 +2034,7 @@ for id in selected { save selected[id] as "toys.${id}" }
 ```
 
 A dict written where the form is asked combines the answer types its entries prove. For a computed dict, when its value
-type proves one kind, from a `type:` or `value:` known where its values are created, the result is a dict of that answer
+type proves one kind, from a `value:` known where its values are created, the result is a dict of that answer
 type, such as an `integer dict`, or an `integer? dict` when a field may be `optional:`. Otherwise, as for an
 `object dict` of descriptors of different kinds with explicit `type:`, the result is a
 `(boolean | number | string | date | time | datetime | duration | timestamp | null) dict` (a cycle may return any

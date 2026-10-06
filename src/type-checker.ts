@@ -3012,6 +3012,15 @@ class TypeChecker {
    * shape the runtime needs is recorded for the lowering.
    */
   *#formTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
+    const answers = yield* compileChild(this.#formAnswersTask(expression, scope));
+    // With `cancel:` the player may cancel the whole form, which then returns `null`.
+    return expression.formArguments.some((argument) => argument.name.name === "cancel") &&
+      isKnown(answers)
+      ? optional(answers)
+      : answers;
+  }
+
+  *#formAnswersTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
     if (expression.question !== null) {
       const type = yield* compileChild(this.#expressionTask(expression.question, scope));
       this.#checkShownText(expression.question, type, "an ask question");
@@ -3020,13 +3029,13 @@ class TypeChecker {
     for (const { name, value } of expression.formArguments) {
       const type = yield* compileChild(this.#expressionTask(value, scope));
       if (name.name === "fields") fields = { expression: value, type };
-      else if (name.name === "submit") {
+      else if (name.name === "submit" || name.name === "cancel") {
         if (unwrap(value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
             (member) => isShowable(member) || resolved(member).kind === "object",
             value,
-            "'submit:' takes text or a button object { text, background? }",
+            `'${name.name}:' takes text or a button object { text, background? }`,
           );
       } else
         this.#checkShownText(value, type, name.name === "hint" ? "an input hint" : "a form outro");

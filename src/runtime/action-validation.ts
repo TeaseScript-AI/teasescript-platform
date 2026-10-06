@@ -1164,11 +1164,13 @@ function validInteractionResultForInstruction(
       instruction.expectedResult === "form" &&
       "preparedUi" in instruction &&
       instruction.preparedUi.kind === "form" &&
-      isFormResult(result) &&
-      result.kind ===
-        (instruction.preparedUi.shape.kind === "booleanList"
-          ? "list"
-          : instruction.preparedUi.shape.kind)
+      // A cancelled form returns `null`; its settlement shows it had a cancel button.
+      (result === null ||
+        (isFormResult(result) &&
+          result.kind ===
+            (instruction.preparedUi.shape.kind === "booleanList"
+              ? "list"
+              : instruction.preparedUi.shape.kind)))
     );
   return (
     instruction.expectedResult === "string" &&
@@ -1564,7 +1566,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
               "mime",
             ]
           : kind === "form"
-            ? ["kind", "shape", "fields", "hint", "submit", "accessibleName"]
+            ? ["kind", "shape", "fields", "hint", "submit", "cancel", "accessibleName"]
             : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(value, expectedUiKeys) ||

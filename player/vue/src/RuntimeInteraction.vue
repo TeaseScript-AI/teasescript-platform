@@ -12,6 +12,7 @@ import {
   playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  cancelPlayerRuntimeForm,
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
@@ -561,6 +562,7 @@ function submit(source: "input" | "button") {
                   )
               "
               @submit="complete((session) => submitPlayerRuntimeForm(session, formDraft()))"
+              @cancel="complete(cancelPlayerRuntimeForm)"
               @dismiss="complete(dismissPlayerRuntimeFormField, false)"
               @clear="complete(clearPlayerRuntimeFormField, false)"
             />

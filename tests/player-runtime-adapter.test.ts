@@ -43,6 +43,7 @@ import {
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   playerRuntimeForm,
+  cancelPlayerRuntimeForm,
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
@@ -1102,4 +1103,35 @@ test("a typed form field opens in the composer, keeps its draft through a restor
     "2 of 3 fields set",
     "7 null 2026-10-05",
   ]);
+});
+
+test("a form's cancel button and its exact text cancel the form", () => {
+  const source = [
+    'let answers = askForm fields: { on: false }, cancel: { text: "Back", background: "gray" }',
+    'if answers == null { say "none", instant }',
+    'showButton "Done"',
+    "exit",
+  ].join("\n");
+  const session = createPlayerRuntimeSession(source);
+  assert.deepEqual(playerRuntimeForm(session)!.cancel, {
+    label: "Back",
+    authoredFill: normalizeColor("gray"),
+  });
+  // A session's transcript grows in place, so each way starts from its own session.
+  for (const cancelled of [
+    cancelPlayerRuntimeForm(session)!,
+    submitPlayerRuntimeComposer(createPlayerRuntimeSession(source), "Back")!,
+  ]) {
+    assert.equal(cancelled.outcome.kind, "completed");
+    assert.deepEqual(
+      cancelled.session.transcriptEntries.map((entry) => entry.text),
+      ["Back", "none"],
+    );
+  }
+  assert.equal(
+    cancelPlayerRuntimeForm(
+      createPlayerRuntimeSession("let a = askForm fields: { on: false }\nexit"),
+    ),
+    null,
+  );
 });

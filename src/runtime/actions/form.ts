@@ -93,6 +93,7 @@ export function materializeForm(
   let hint: string | null = null;
   let outro: string | null = null;
   let submit: FormUi["submit"] = { text: DEFAULT_SUBMIT_TEXT };
+  let cancel: FormUi["cancel"] = null;
   for (const { name, value } of request.properties) {
     if (name === "message") continue;
     if (name === "fields") fieldsValue = value;
@@ -101,6 +102,7 @@ export function materializeForm(
     else if (name === "hint") hint = fieldText(value, span, context);
     else if (name === "outro") outro = fieldText(value, span, context);
     else if (name === "submit") submit = formButton(name, value, context, span);
+    else if (name === "cancel") cancel = formButton(name, value, context, span);
     else throw fault("The prepared form request is malformed.", span);
   }
 
@@ -183,7 +185,7 @@ export function materializeForm(
     );
   const prose = [descriptions.join("\n"), outro ?? ""].filter((part) => part !== "").join("\n\n");
   return {
-    ui: { kind: "form", shape: prepared.kind, fields, hint, submit, accessibleName },
+    ui: { kind: "form", shape: prepared.kind, fields, hint, submit, cancel, accessibleName },
     state: { values, editor: null },
     prose: prose === "" ? null : prose,
   };
@@ -495,6 +497,15 @@ export function formRequestValue(ui: FormUi): SerializableRuntimeValue {
         ["text", ui.submit.text],
         ["background", ui.submit.background],
       ]),
+    ],
+    [
+      "cancel",
+      ui.cancel === null
+        ? null
+        : object([
+            ["text", ui.cancel.text],
+            ["background", ui.cancel.background],
+          ]),
     ],
     [
       "fields",
@@ -847,6 +858,13 @@ export function cloneFormUi(ui: FormUi, accessibleName: InteractionAccessibleNam
       text: ui.submit.text,
       ...(ui.submit.background === undefined ? {} : { background: ui.submit.background }),
     },
+    cancel:
+      ui.cancel === null
+        ? null
+        : {
+            text: ui.cancel.text,
+            ...(ui.cancel.background === undefined ? {} : { background: ui.cancel.background }),
+          },
     accessibleName,
   };
 }
@@ -854,6 +872,7 @@ export function cloneFormUi(ui: FormUi, accessibleName: InteractionAccessibleNam
 /** Every text a form definition retains, for the interaction's aggregate byte limit. */
 export function formUiTexts(ui: FormUi): string[] {
   const texts: string[] = [ui.submit.text];
+  if (ui.cancel !== null) texts.push(ui.cancel.text);
   if (ui.hint !== null) texts.push(ui.hint);
   for (const field of ui.fields) {
     texts.push(field.id);
@@ -887,16 +906,19 @@ export function validFormUi(
   count: (text: unknown) => text is string,
 ): boolean {
   if (
-    !hasExactKeys(value, ["kind", "shape", "fields", "hint", "submit", "accessibleName"]) ||
+    !hasExactKeys(value, [
+      "kind",
+      "shape",
+      "fields",
+      "hint",
+      "submit",
+      "cancel",
+      "accessibleName",
+    ]) ||
     (value.shape !== "object" && value.shape !== "dict" && value.shape !== "booleanList") ||
     (value.hint !== null && !count(value.hint)) ||
-    !isPlainRecord(value.submit) ||
-    !hasExactKeys(value.submit, [
-      "text",
-      ...("background" in value.submit ? ["background"] : []),
-    ]) ||
-    !count(value.submit.text) ||
-    ("background" in value.submit && !isNormalizedOpaqueColor(value.submit.background)) ||
+    !validButton(value.submit, count) ||
+    (value.cancel !== null && !validButton(value.cancel, count)) ||
     !Array.isArray(value.fields) ||
     value.fields.length === 0 ||
     value.fields.length > MAX_INTERACTION_OPTION_ENTRIES
@@ -964,6 +986,16 @@ export function validFormUi(
     const { min, max } = field;
     return validBound(min) && validBound(max) && (min === null || max === null || min <= max);
   });
+}
+
+/** A submit or cancel button: its text and an optional background. */
+function validButton(value: unknown, count: (text: unknown) => text is string): boolean {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ["text", ...("background" in value ? ["background"] : [])]) &&
+    count(value.text) &&
+    (!("background" in value) || isNormalizedOpaqueColor(value.background))
+  );
 }
 
 function validOptions(
@@ -1052,6 +1084,8 @@ function validFieldValue(field: FormField, value: unknown, unset: boolean): bool
  * field, by ID and in order, with only optional fields `null`.
  */
 export function validFormResult(ui: FormUi, result: unknown, transcriptText: unknown): boolean {
+  // A cancelled form returns `null`, with its cancel button's text.
+  if (result === null) return ui.cancel !== null && transcriptText === ui.cancel.text;
   if (!isPlainRecord(result)) return false;
   let answers: readonly unknown[];
   if (ui.shape === "object") {

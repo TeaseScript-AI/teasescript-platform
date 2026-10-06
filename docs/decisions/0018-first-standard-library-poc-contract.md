@@ -446,7 +446,8 @@ Retries are built into the interaction contract. An ordinary author does not nee
 
 ## Mandatory completion and pause policy
 
-`askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result:
+`askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result (a form written with
+`cancel:` is the exception: cancelling it returns `null`; see [V30 §20](../specifications/accepted-syntaxes-v30.md#forms)):
 
 - they never complete with `null` as a cancellation result (`choose` returns `null` only as the value of a selected
   option);

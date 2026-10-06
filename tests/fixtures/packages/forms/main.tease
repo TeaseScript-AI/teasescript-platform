@@ -19,7 +19,9 @@ let settings = askForm as mistress "Adjust your settings", fields: {
     enabled: { value: false, text: "Access", options: [{ value: false, text: "Off", background: "firebrick" }, { value: true, text: "On", background: "seagreen" }] },
     intensity: { text: "Intensity", options: [{ text: "Low", background: "seagreen" }, { text: "Medium", background: "orange" }, { text: "High", background: "red" }] },
     pace: ["Slow", "Steady", "Fast"]
-}, submit: { text: "Continue", background: "seagreen" }
-say as mistress "Rope: ${toys.rope}. Access: ${settings.enabled}. Intensity: ${settings.intensity}, pace ${settings.pace}."
+}, submit: { text: "Continue", background: "seagreen" }, cancel: "Skip"
+if settings != null {
+    say as mistress "Rope: ${toys.rope}. Access: ${settings.enabled}. Intensity: ${settings.intensity}, pace ${settings.pace}."
+}
 showButton "Done"
 exit
