@@ -34,6 +34,7 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
+import { DebugRecorder } from "../../debug-recorder.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
 import {
   checkStorageTransferImages,
@@ -102,6 +103,11 @@ type Activation = {
   readonly begin: () => PlayerRuntimeSession;
 };
 
+/** Creates a new session at Start; pass `recording` on to `createPlayerRuntimeSession` so a debug export can replay it. */
+export type PlayerSessionStart = (recording: {
+  readonly recorder: DebugRecorder;
+}) => PlayerRuntimeSession;
+
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
@@ -112,6 +118,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     console.warn(`[player] ${diagnostic.code}: ${diagnostic.message}`);
     diagnostics.value = [...diagnostics.value, diagnostic];
   };
+  // Records every session's engine calls from Start, in every build, for a debug export (DEBUGGER.md "Debug export").
+  const recorder = new DebugRecorder();
   // Bumped when a stored photo finished loading, so presentation resolves its reference again.
   const mediaRevision = ref(0);
   const capturedMedia = new CapturedMediaStore(
@@ -357,7 +365,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
   let activationToken = 0;
   // The latest Start, offered again after an import replaced the saved data.
-  let lastStart: (() => PlayerRuntimeSession) | null = null;
+  let lastStart: PlayerSessionStart | null = null;
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
@@ -623,13 +631,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
    * on page load and the click is the user activation later audible playback relies on.
    */
-  function prepare(create: () => PlayerRuntimeSession) {
+  function prepare(create: PlayerSessionStart) {
     lastStart = create;
     activationToken++;
     openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
     camera.release();
-    activation.value = { kind: "start", begin: create };
+    activation.value = { kind: "start", begin: () => create({ recorder }) };
   }
   /**
    * What Start and Continue record about the player now: the zone and presentation, then the wall clock, sampled last so
@@ -649,7 +657,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     activation.value = {
       kind: "continue",
-      begin: () => continuePlayerRuntimeSession(restored, temporalCapture()).session,
+      begin: () => {
+        // The recording of a restored session starts from the state it continues.
+        recorder.begin(restored.plan, restored.snapshot);
+        return continuePlayerRuntimeSession(
+          Object.freeze({ ...restored, recorder }),
+          temporalCapture(),
+        ).session;
+      },
     };
   }
   /**
@@ -748,6 +763,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     sessionInProgress,
     reviewScriptStorageImport,
     importScriptStorage,
+    /** The current or last session's recorded engine calls for a debug export, or `null` before any Start. */
+    debugRecording: () => recorder.recording(),
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,

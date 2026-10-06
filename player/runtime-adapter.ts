@@ -1,4 +1,5 @@
 import {
+  applyExternalStorageEdit,
   captureTemporalContext,
   compileProject,
   completeAction,
@@ -19,6 +20,7 @@ import {
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
+  type ExternalStorageEditOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
   type InterpreterEvent,
@@ -38,6 +40,7 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
 } from "../src/index.js";
@@ -51,6 +54,7 @@ import {
   type RuntimeMediaSnapshot,
 } from "../src/runtime/media.js";
 import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
+import type { DebugRecorder } from "./debug-recorder.js";
 import type {
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
@@ -76,6 +80,8 @@ export interface PlayerRuntimeSession {
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   readonly transcriptRevision: number;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+  /** Records the session's engine calls for a debug export; it never changes them. */
+  readonly recorder: DebugRecorder | null;
 }
 
 export interface PlayerRuntimeSessionOptions {
@@ -90,6 +96,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly temporalContext?: TemporalContext;
   /** The UTC wall clock when the session starts, in epoch milliseconds. */
   readonly wallClockMs?: number;
+  /** Records the session's engine calls, from before its first run, for a debug export. */
+  readonly recorder?: DebugRecorder;
 }
 
 /**
@@ -189,8 +197,15 @@ export function createPlayerRuntimeSession(
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
   });
-  const operation = run(plan, snapshot);
-  return applyOperation(emptySession(plan, snapshot), operation.snapshot, operation.events, false);
+  const recorder = options.recorder ?? null;
+  recorder?.begin(plan, snapshot);
+  const operation = recorded(recorder, "run", snapshot, [{}], () => run(plan, snapshot));
+  return applyOperation(
+    emptySession(plan, snapshot, recorder),
+    operation.snapshot,
+    operation.events,
+    false,
+  );
 }
 
 function isInstructionPlan(
@@ -221,10 +236,12 @@ export function createPlayerRuntimeRestorePoint(
 
 export function restorePlayerRuntimeSession(
   restorePoint: PlayerRuntimeRestorePoint,
+  recorder: DebugRecorder | null = null,
 ): PlayerRuntimeSession {
   const checkpoint = deserializeCheckpoint(restorePoint.checkpointJson);
+  recorder?.begin(checkpoint.plan, checkpoint.snapshot);
   return appendRuntimeEvents(
-    emptySession(checkpoint.plan, checkpoint.snapshot),
+    emptySession(checkpoint.plan, checkpoint.snapshot, recorder),
     restorePoint.events,
   );
 }
@@ -679,11 +696,19 @@ export function answerPlayerRuntimeCapture(
     answer.kind === "captured"
       ? { kind: "captured", media: { kind: "image", reference: answer.reference } }
       : { kind: "unavailable", reason: answer.reason };
-  const operation = completeAction(
-    session.plan,
+  const request = { actionId, actionKind: "capture", payload };
+  const operation = recorded(
+    session.recorder,
+    "completeAction",
     session.snapshot,
-    { actionId, actionKind: "capture", payload },
-    capturedMedia === undefined ? {} : { capturedMedia },
+    [request],
+    (admission) =>
+      completeAction(
+        session.plan,
+        session.snapshot,
+        request,
+        capturedMedia === undefined ? {} : { capturedMedia: admission(capturedMedia) },
+      ),
   );
   return Object.freeze({
     session: applyOperation(
@@ -702,12 +727,19 @@ export function completePlayerRuntimeAction(
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
-  return completeAction(plan, snapshot, {
+  return completeAction(plan, snapshot, actionRequest(action, payload));
+}
+
+function actionRequest(
+  action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
+  payload: Record<string, unknown>,
+) {
+  return {
     actionId: action.actionId,
     actionKind: action.kind,
     ...(action.kind === "interaction" ? { interactionKind: action.interactionKind } : {}),
     payload,
-  });
+  };
 }
 
 export function submitPlayerRuntimeComposer(
@@ -743,16 +775,21 @@ export function answerPlayerRuntimeImage(
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
   const action = activeInteraction(session.snapshot);
   if (action?.ui.kind !== "image") return null;
-  const operation = completeAction(
-    session.plan,
+  const request = {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "image",
+    payload: { kind: "image", reference },
+  };
+  const operation = recorded(
+    session.recorder,
+    "completeAction",
     session.snapshot,
-    {
-      actionId: action.actionId,
-      actionKind: "interaction",
-      interactionKind: "image",
-      payload: { kind: "image", reference },
-    },
-    { capturedMedia },
+    [request],
+    (admission) =>
+      completeAction(session.plan, session.snapshot, request, {
+        capturedMedia: admission(capturedMedia),
+      }),
   );
   return Object.freeze({
     session: applyOperation(
@@ -803,7 +840,13 @@ export function continuePlayerRuntimeSession(
   session: PlayerRuntimeSession,
   capture: { readonly wallClockMs: number; readonly temporalContext: TemporalContext },
 ): PlayerRuntimeControlResult<ContinueCaptureOutcome> {
-  const operation = recordContinueCapture(session.plan, session.snapshot, capture);
+  const operation = recorded(
+    session.recorder,
+    "recordContinueCapture",
+    session.snapshot,
+    [capture],
+    () => recordContinueCapture(session.plan, session.snapshot, capture),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -824,7 +867,13 @@ export function observePlayerRuntimeTime(
   currentSessionTimeMs: number,
   mediaReports: readonly MediaProgressReport[] = [],
 ): PlayerRuntimeControlResult<TimeObservationOutcome> {
-  const operation = observeTime(session.plan, session.snapshot, currentSessionTimeMs, mediaReports);
+  const operation = recorded(
+    session.recorder,
+    "observeTime",
+    session.snapshot,
+    [currentSessionTimeMs, mediaReports],
+    () => observeTime(session.plan, session.snapshot, currentSessionTimeMs, mediaReports),
+  );
   // A settlement or a queued timer expiry block may make execution eligible; `run` returns at once otherwise.
   return Object.freeze({
     session: applyOperation(
@@ -943,7 +992,13 @@ export function reportPlayerRuntimeMediaLoad(
   mediaId: number,
   report: MediaLoadReport,
 ): PlayerRuntimeControlResult<MediaReportOutcome> {
-  const operation = reportMediaLoad(session.plan, session.snapshot, mediaId, report);
+  const operation = recorded(
+    session.recorder,
+    "reportMediaLoad",
+    session.snapshot,
+    [mediaId, report],
+    () => reportMediaLoad(session.plan, session.snapshot, mediaId, report),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -967,12 +1022,39 @@ export function playerRuntimePermanentButtons(
   );
 }
 
+/**
+ * Applies a debugging tool's edit of one script-storage key to the session's view (`applyExternalStorageEdit`):
+ * `value: null` removes the key. It runs no instruction, so nothing continues; the host persists the edit first.
+ */
+export function applyPlayerRuntimeStorageEdit(
+  session: PlayerRuntimeSession,
+  edit: { readonly key: string; readonly value: SerializableRuntimeValue },
+): PlayerRuntimeControlResult<ExternalStorageEditOutcome> {
+  const operation = recorded(
+    session.recorder,
+    "applyExternalStorageEdit",
+    session.snapshot,
+    [edit],
+    () => applyExternalStorageEdit(session.plan, session.snapshot, edit),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
+    outcome: operation.outcome,
+  });
+}
+
 /** Clicks a permanent button, then runs the session, which starts the button's block. */
 export function pressPlayerRuntimePermanentButton(
   session: PlayerRuntimeSession,
   buttonId: number,
 ): PlayerRuntimeControlResult<PermanentButtonPressOutcome> {
-  const operation = pressPermanentButton(session.plan, session.snapshot, buttonId);
+  const operation = recorded(
+    session.recorder,
+    "pressPermanentButton",
+    session.snapshot,
+    [buttonId],
+    () => pressPermanentButton(session.plan, session.snapshot, buttonId),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -1032,7 +1114,10 @@ function completePlayerAction(
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
-  const operation = completePlayerRuntimeAction(session.plan, session.snapshot, action, payload);
+  const request = actionRequest(action, payload);
+  const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
+    completeAction(session.plan, session.snapshot, request),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -1061,11 +1146,14 @@ export function completePlayerRuntimeStorageWrite(
   actionId: number,
   stored: boolean,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
-  const operation = completeAction(session.plan, session.snapshot, {
+  const request = {
     actionId,
     actionKind: "storageWrite",
     payload: { kind: stored ? "stored" : "failed" },
-  });
+  };
+  const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
+    completeAction(session.plan, session.snapshot, request),
+  );
   return Object.freeze({
     session: applyOperation(
       session,
@@ -1088,14 +1176,26 @@ function applyOperation(
   if (!continueRun) return Object.freeze(next);
   // The operation just captured and validated this snapshot against the session's plan, and nothing has published it,
   // so the continuation runs on it without a second capture. It returns at once when nothing is runnable.
-  const continuation = runValidatedState(next.plan, next.snapshot);
+  const continuation = recorded(
+    session.recorder,
+    "run",
+    next.snapshot,
+    [{}],
+    () => runValidatedState(next.plan, next.snapshot),
+    true,
+  );
   return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
 }
 
-function emptySession(plan: InstructionPlan, snapshot: RuntimeSnapshot): PlayerRuntimeSession {
+function emptySession(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  recorder: DebugRecorder | null,
+): PlayerRuntimeSession {
   return Object.freeze({
     plan,
     snapshot,
+    recorder,
     events: [],
     transcriptEntries: [],
     transcriptRevision: 0,
@@ -1162,6 +1262,20 @@ function appendRuntimeEvents(
     transcriptRevision: session.transcriptRevision + 1,
     speakers,
   });
+}
+
+/** Makes an engine call through the session's recorder, or directly without one. */
+function recorded<R extends { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[] }>(
+  recorder: DebugRecorder | null,
+  kind: Parameters<DebugRecorder["call"]>[0],
+  input: RuntimeSnapshot,
+  args: readonly unknown[],
+  invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
+  continuation = false,
+): R {
+  return recorder === null
+    ? invoke((store) => store)
+    : recorder.call(kind, input, args, invoke, continuation);
 }
 
 function activeInteraction(snapshot: RuntimeSnapshot): RuntimeInteractionActionSnapshot | null {

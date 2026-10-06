@@ -29,7 +29,7 @@ import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { browserStorage } from "./usePlayerPreference";
-import { usePlayerSession } from "./usePlayerSession";
+import { usePlayerSession, type PlayerSessionStart } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 // Development preview root; main.ts loads it on the development server or with `?dev`.
@@ -103,7 +103,11 @@ function showSampleNotices() {
 function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
-const startOptions = () => ({ temporalContext: playerTemporalContext(), wallClockMs: Date.now() });
+const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
+  ...recording,
+  temporalContext: playerTemporalContext(),
+  wallClockMs: Date.now(),
+});
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
 let failure: ShallowRef<ScriptFailure | null> | null = null;
 if (packageHost !== null) failure = prepareHostedScript(player, packageHost);
@@ -111,18 +115,25 @@ else if (cameraScenario)
   void player
     .loadScriptStorage()
     .then(() =>
-      player.prepare(() =>
+      player.prepare((recording) =>
         createPlayerRuntimeSession(cameraScenarioSource, {
           ...player.scriptStorageOptions(),
-          ...startOptions(),
+          ...startOptions(recording),
         }),
       ),
     );
 else if (viewfinderScenario)
-  player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource, startOptions()));
+  player.prepare((recording) =>
+    createPlayerRuntimeSession(viewfinderScenarioSource, startOptions(recording)),
+  );
 else if (buttonsScenario)
-  player.prepare(() => createPlayerRuntimeSession(permanentButtonsScenarioSource, startOptions()));
-else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
+  player.prepare((recording) =>
+    createPlayerRuntimeSession(permanentButtonsScenarioSource, startOptions(recording)),
+  );
+else
+  player.prepare((recording) =>
+    createPlayerRuntimeSession(openingScenario, startOptions(recording)),
+  );
 </script>
 
 <template>

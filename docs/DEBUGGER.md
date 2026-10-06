@@ -82,6 +82,14 @@ with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButto
 `applyExternalStorageEdit` with the edit, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name. It adds no plan, snapshot, or checkpoint revision.
 
+In every build, the Player's `player/debug-recorder.ts` records each session from its Start or Continue: the anchor
+before its first call and copies of every call's plain arguments and results, beside the session and outside its state.
+When the record would outgrow its retention (4,096 calls or 2 Mi characters of argument JSON, diagnostic tuning rather
+than a script limit), it starts again from the state before the Player's next call, never dropping a call in between. A
+call that fails the session or throws freezes the record, which keeps the state that call reached as the export's
+checkpoint, so that later observations, such as on hiding the page, cannot evict or outdate it; a call the recorder
+cannot copy, or a media store that throws during a call, marks it incomplete.
+
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
 values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from
 the anchor in a worker and compares each result and the final state. It reports a reproduced engine failure (exit 0),

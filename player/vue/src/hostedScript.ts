@@ -39,8 +39,9 @@ export function prepareHostedScript(
         };
         return;
       }
-      player.prepare(() =>
+      player.prepare((recording) =>
         createPlayerRuntimeSession(plan, {
+          ...recording,
           ...player.scriptStorageOptions(),
           // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
           ...player.temporalCapture(),
