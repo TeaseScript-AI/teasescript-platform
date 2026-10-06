@@ -10,5 +10,6 @@ implement = loadFirstTrue("toys.paddle", "toys.crop")
 show("You get the ${implement}")
 // One list of keys, passed as a Java array, is the list of keys itself.
 def paddles = ["toys.paddle", "toys.hairbrush"]
-def spanker = loadFirstTrue(paddles.toArray(new String[0]))
+def noKeys = new String[0]
+def spanker = loadFirstTrue(paddles.toArray(noKeys))
 show("Spanker ${spanker}")
