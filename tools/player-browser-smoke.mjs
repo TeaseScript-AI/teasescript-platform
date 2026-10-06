@@ -3925,7 +3925,8 @@ async function formFieldsScenario(cdp, origin) {
   await physicalClick(cdp, '[data-form-field="name"]');
   await waitFor(cdp, `${composer}.value === "Ada" && document.activeElement === ${composer}`);
   await cdp.call("Input.insertText", { text: "Bea" });
-  await delay(600);
+  // Sooner than the form takes the text from the composer.
+  await delay(100);
   await physicalClick(cdp, "[data-permanent-button]");
   await waitFor(
     cdp,

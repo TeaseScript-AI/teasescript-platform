@@ -284,53 +284,73 @@ test("a cycle answer has the type of every option it may return", () => {
   );
 });
 
-test("only what the form can see proves a field's answer type", () => {
-  const diagnostics = (source: string) =>
-    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
-  // A computed choice object in a written list may return its value or its text.
+test("a form checks when it opens that each field answers within the type the compiler gave it", () => {
+  /** Runs the script, submitting each form as it opens, until it ends or fails. */
+  const outcome = (source: string) => {
+    const plan = compileValidPlan(source);
+    let current = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+    while (current.status === "waiting" && current.foregroundAction?.kind === "interaction")
+      current = run(plan, submitted(plan, current).snapshot).snapshot;
+    return current;
+  };
+  const failure = (source: string) => {
+    const ended = outcome(source);
+    assert.equal(ended.status, "failed", source);
+    return [ended.failure?.code, ended.failure?.message];
+  };
+  // A descriptor that gains `type:` later opens a number field where the compiler saw an integer one.
   assert.deepEqual(
-    diagnostics(
-      'let option = { text: "One", value: 1 }\nlet answers = askForm fields: { x: [option] }\nlet n: integer | string = answers.x',
-    ),
-    [],
-  );
-  assert.equal(
-    diagnostics(
-      'let option = { text: "One", value: 1 }\nlet answers = askForm fields: { x: [option] }\nlet n: object = answers.x',
-    ).length,
-    1,
-  );
-  // A computed descriptor whose values may be a toggle or a cycle of text answers in the generic union.
-  assert.equal(
-    diagnostics(
-      'let f = { value: false }\nf = { options: ["x", "y"] }\nlet r = askForm fields: { a: f }\nlet n: boolean = r.a',
-    ).length,
-    1,
-  );
-  // Metadata added after the form reads a descriptor is an error at the form.
-  assert.deepEqual(
-    diagnostics(
-      'let observed: integer = 0\nlet d = { a: { value: 1 } }\nfor i in [1, 2] {\n  let r = askForm fields: d\n  observed = r.a\n  d.a = { type: "number", value: 1 }\n}',
+    failure(
+      'let f = { value: 1 }\nfor i in [1, 2] {\n  let a = askForm fields: { x: f }\n  let n: integer = a.x\n  repeat n {}\n  f.type = "number"\n}\nexit',
     ),
     [
-      "askForm field 'a': a later assignment gives its descriptor 'type:', which this form cannot see when it opens. Write 'type:' in the descriptor where it is first created, before the form is asked.",
+      "TSR058",
+      "askForm field 'x' was checked to answer a whole number (integer), but it can answer a number. Write type: where the field's starting object is created, so the compiler sees its kind.",
     ],
   );
-  // A computed descriptor that keeps its metadata from the start types its answer.
+  // A parameter may bring properties its default does not show.
+  assert.equal(
+    failure(
+      'function ask(desc = { value: 1 }) {\n  let a = askForm fields: { x: desc }\n  let n: integer = a.x\n}\nask({ value: 1, type: "number" })\nexit',
+    )[0],
+    "TSR058",
+  );
+  // A cycle that becomes a text field, and a choice object that brings a value its type does not show.
+  assert.equal(
+    failure(
+      'let f = { x: { options: [1, 2] } }\nfor i in [1, 2] {\n  let a = askForm fields: f\n  let n: integer = a.x\n  repeat n {}\n  f.x = { value: "Ada" }\n}\nexit',
+    )[0],
+    "TSR058",
+  );
+  assert.equal(
+    failure(
+      'function edit(opt = { text: "One" }) {\n  let a = askForm fields: { x: [opt] }\n  let n: string = a.x\n  say n.length, instant\n}\nedit({ text: "One", value: 1 })\nexit',
+    )[0],
+    "TSR058",
+  );
+  // Data that matches what the compiler saw opens and answers as typed.
+  const matching = outcome(
+    'let f = { value: false, text: "Owned" }\nlet a = askForm fields: { x: f, y: [{ text: "One", value: 1 }, { text: "Two", value: 2 }] }\nlet owned: boolean = a.x\nlet n: integer = a.y\nexit',
+  );
+  assert.equal(matching.status, "halted", matching.failure?.message);
+  // A computed choice object in a written list may return its value or its text.
   assert.deepEqual(
-    diagnostics(
-      'let f = { value: false, text: "Owned" }\nlet r = askForm fields: { a: f }\nlet n: boolean = r.a',
-    ),
+    compileSource(
+      'let option = { text: "One", value: 1 }\nlet answers = askForm fields: { x: [option] }\nlet n: integer | string = answers.x\nexit',
+    ).diagnostics,
     [],
   );
   // A parenthesized `optional: false` is still false, and an integer field does not start with a decimal number.
   assert.deepEqual(
-    diagnostics(
-      'let a = askForm fields: { x: { type: "text", value: "A", optional: (false) } }\nlet n: string = a.x',
-    ),
+    compileSource(
+      'let a = askForm fields: { x: { type: "text", value: "A", optional: (false) } }\nlet n: string = a.x\nexit',
+    ).diagnostics,
     [],
   );
-  assert.deepEqual(diagnostics('let a = askForm fields: { x: { type: "integer", value: 5.0 } }'), [
-    "askForm field 'x': an integer field starts with a whole number (integer), not a number.",
-  ]);
+  assert.deepEqual(
+    compileSource(
+      'let a = askForm fields: { x: { type: "integer", value: 5.0 } }\nexit',
+    ).diagnostics.map((diagnostic) => diagnostic.message),
+    ["askForm field 'x': an integer field starts with a whole number (integer), not a number."],
+  );
 });

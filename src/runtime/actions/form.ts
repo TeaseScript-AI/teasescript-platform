@@ -23,6 +23,7 @@ import type {
   InteractionChoiceValue,
   PlanSourceLocation,
   PreparedFormShape,
+  TypePlan,
 } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import type { TemporalContext } from "../../temporal.js";
@@ -45,6 +46,7 @@ import {
   isTime,
 } from "../value-predicates.js";
 import { fieldText } from "../value-text.js";
+import { describeType, describeValue, matchesValueType } from "../value-types.js";
 import { escapeMarkup } from "../../message-markup.js";
 import {
   FORM_FIELD_PROPERTIES,
@@ -172,6 +174,13 @@ export function materializeForm(
     }
   }
   if (fields.length === 0) throw fault("A form needs at least one field.", span);
+  const mismatch = formAnswerMismatch(fields, prepared);
+  if (mismatch !== null)
+    throw new RuntimeFault(
+      "TSR058",
+      `askForm field '${mismatch.field.id}' was checked to answer ${describeType(mismatch.type)}, but it can answer ${describeValue(mismatch.answer)}. Write type: where the field's starting object is created, so the compiler sees its kind.`,
+      copySpan(span),
+    );
   const prose = [descriptions.join("\n"), outro ?? ""].filter((part) => part !== "").join("\n\n");
   return {
     ui: { kind: "form", shape: prepared.kind, fields, hint, submit, accessibleName },
@@ -179,6 +188,59 @@ export function materializeForm(
     prose: prose === "" ? null : prose,
   };
 }
+
+/**
+ * The first field that can answer outside the type the compiler gave it, with that answer, or `null`. Each kind is
+ * checked by its possible answers: a toggle's two states, each option of a cycle, a value of its kind for a typed
+ * field, and `null` for an optional one. The compiler infers what a computed descriptor shows, which a value may not
+ * keep, so this check keeps every answer within its checked type.
+ */
+export function formAnswerMismatch(
+  fields: readonly FormField[],
+  prepared: PreparedFormShape,
+): {
+  readonly field: FormField;
+  readonly type: TypePlan;
+  readonly answer: SerializableRuntimeValue;
+} | null {
+  const answers =
+    prepared.kind === "object"
+      ? new Map(prepared.answers.map((answer) => [answer.name, answer.type] as const))
+      : null;
+  for (const field of fields) {
+    const type =
+      prepared.kind === "dict"
+        ? prepared.answer
+        : prepared.kind === "object"
+          ? (answers!.get(field.id) ?? null)
+          : null;
+    if (type === null) continue;
+    const answer = possibleFormAnswers(field).find((value) => !matchesValueType(value, type));
+    if (answer !== undefined) return { field, type, answer };
+  }
+  return null;
+}
+
+/** One answer of each type a field can give. */
+function possibleFormAnswers(field: FormField): readonly SerializableRuntimeValue[] {
+  if (field.kind === "boolean") return [false, true];
+  if (field.kind === "cycle") return field.options.map((option) => option.value);
+  const sample: SerializableRuntimeValue =
+    field.kind === "integer"
+      ? 0
+      : field.kind === "number"
+        ? 0.5
+        : field.kind === "text"
+          ? "text"
+          : temporalAnswer(field.kind, SAMPLE_TEMPORAL_TEXT[field.kind])!;
+  return field.optional ? [sample, null] : [sample];
+}
+
+const SAMPLE_TEMPORAL_TEXT = {
+  date: "2000-01-01",
+  time: "00:00",
+  datetime: "2000-01-01T00:00",
+} as const;
 
 /** Names the field in a failure of its text or options, such as an invalid colour. */
 function fieldWithContext<T>(id: string, build: () => T): T {

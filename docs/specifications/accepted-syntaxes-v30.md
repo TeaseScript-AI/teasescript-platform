@@ -1977,8 +1977,9 @@ A descriptor has `value:` (the start), `text:` (the label, by default the field'
 `"number"`, `"text"`, `"date"`, `"time"`, or `"datetime"`. It is needed when no start shows the kind, as in
 `{ type: "date" }`; an unknown type is an error that suggests a likely one, such as `unknown type 'intger' (use 'integer')`.
 The compiler types each answer from what the form can see: a descriptor written where the form is asked is read as
-written; a descriptor built earlier gives one answer type only when its `type:`, `options:`, and `optional:` are
-written where it is created, since a value added later is an error at the form.
+written, and a descriptor built earlier by the properties its type shows. When the form opens, every field must answer
+within the type the compiler gave it; otherwise the form fails, and the error says to write `type:` where the field's
+starting object is created.
 
 ```text
 let access = askForm("Access?", fields: { enabled: { value: false, options: [{ value: false, text: "Off", background: "firebrick" }, { value: true, text: "On", background: "seagreen" }] } })

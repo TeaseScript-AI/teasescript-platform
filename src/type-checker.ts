@@ -54,6 +54,7 @@ import type {
   PlanTag,
   PreparedFormShape,
   TypeCheckPlan,
+  TypePlan,
 } from "./plan/model.js";
 import {
   FORM_FIELD_PROPERTIES,
@@ -703,18 +704,13 @@ class TypeChecker {
     InteractionExpression,
     {
       readonly kind: "object";
-      readonly fields: readonly { readonly name: string; readonly start: StaticType }[];
+      readonly fields: readonly {
+        readonly name: string;
+        readonly start: StaticType | null;
+        readonly answer: StaticType;
+      }[];
     }
   >();
-
-  /** The computed descriptors that forms typed their answers by, checked again once type checking ends. */
-  readonly #formDescriptors: {
-    readonly file: number;
-    readonly span: SourceSpan;
-    readonly name: string;
-    readonly properties: PropertyTable;
-    readonly seen: ReadonlySet<string>;
-  }[] = [];
 
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
   readonly #runtimeChecks: {
@@ -979,7 +975,6 @@ class TypeChecker {
       }
       this.#handlers.length = 0;
     }
-    this.#reportLaterFormMetadata();
   }
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionType {
@@ -1065,12 +1060,18 @@ class TypeChecker {
     const shapes = new Map<InteractionExpression, PreparedFormShape>();
     for (const [expression, form] of this.#forms) {
       const numericKinds: { readonly name: string; readonly numericKind: FormNumericKind }[] = [];
-      for (const { name, start } of form.fields) {
-        const type = resolved(nonNullType(start));
-        if (isScalar(type, "integer")) numericKinds.push({ name, numericKind: "integer" });
-        else if (isScalar(type, "number")) numericKinds.push({ name, numericKind: "number" });
+      const answers: { readonly name: string; readonly type: TypePlan }[] = [];
+      for (const { name, start, answer } of form.fields) {
+        const type = start === null ? null : resolved(nonNullType(start));
+        if (type !== null && isScalar(type, "integer"))
+          numericKinds.push({ name, numericKind: "integer" });
+        else if (type !== null && isScalar(type, "number"))
+          numericKinds.push({ name, numericKind: "number" });
+        // The form checks when it opens that each field answers within the type given here.
+        const checked = typePlan(answer);
+        if (checked !== null) answers.push({ name, type: checked });
       }
-      shapes.set(expression, { kind: form.kind, numericKinds });
+      shapes.set(expression, { kind: form.kind, numericKinds, answers });
     }
     return shapes;
   }
@@ -3041,16 +3042,15 @@ class TypeChecker {
         : [],
     );
     const result: PropertyTable = new Map();
-    const recorded: { readonly name: string; readonly start: StaticType }[] = [];
+    const recorded: {
+      readonly name: string;
+      readonly start: StaticType | null;
+      readonly answer: StaticType;
+    }[] = [];
     for (const [name, type] of container.properties ?? []) {
-      const field = this.#formField(
-        name,
-        type,
-        written.get(name),
-        written.get(name)?.span ?? fields.expression.span,
-      );
+      const field = this.#formField(name, type, written.get(name));
       result.set(name, field.result);
-      if (field.start !== null) recorded.push({ name, start: field.start });
+      recorded.push({ name, start: field.start, answer: field.result });
     }
     this.#forms.set(expression, { kind: "object", fields: recorded });
     return container.properties === null ? UNKNOWN_TYPE : { kind: "object", properties: result };
@@ -3066,14 +3066,13 @@ class TypeChecker {
     name: string,
     type: StaticType,
     written: Expression | undefined,
-    span: SourceSpan,
   ): { readonly result: StaticType; readonly start: StaticType | null } {
     const value = resolved(nonNullType(type));
     const literal = written === undefined ? null : unwrap(written);
     if (value.kind === "object")
       return literal?.kind === "objectLiteral"
         ? this.#writtenFormField(name, literal)
-        : this.#computedFormField(name, value, span);
+        : this.#computedFormField(value);
     const kind = formKindOfStart(value);
     if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
     return {
@@ -3165,24 +3164,16 @@ class TypeChecker {
 
   /**
    * A computed descriptor: its type merges every value it may hold, so a property in it may be missing from some of
-   * them. It proves one kind only without `type:`, and with `options:` only when no `value:` other than a toggle's
-   * beside it can make some fields typed. The descriptor's properties are checked again when type checking ends,
-   * because a later assignment may still add `type:`, `options:`, or `optional:`.
+   * them, and a value may also hold properties its type does not show. It gives one kind only without `type:`, and with
+   * `options:` only when no `value:` other than a toggle's beside it can make some fields typed. The form checks when
+   * it opens that each field answers within the type given here.
    */
-  #computedFormField(
-    name: string,
-    descriptor: Extract<StaticType, { kind: "object" }>,
-    span: SourceSpan,
-  ): { readonly result: StaticType; readonly start: StaticType | null } {
+  #computedFormField(descriptor: Extract<StaticType, { kind: "object" }>): {
+    readonly result: StaticType;
+    readonly start: StaticType | null;
+  } {
     const properties = descriptor.properties;
     if (properties === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
-    this.#formDescriptors.push({
-      file: this.#file,
-      span,
-      name,
-      properties,
-      seen: new Set(FORM_METADATA.filter((key) => properties.has(key))),
-    });
     const part = (key: string) => {
       const found = properties.get(key);
       return found === undefined ? undefined : resolved(nonNullType(found));
@@ -3249,26 +3240,6 @@ class TypeChecker {
     const options = type === undefined ? undefined : resolved(nonNullType(type));
     if (options?.kind !== "list") return UNKNOWN_TYPE;
     return union(members(resolved(options.element)).map(computedOption));
-  }
-
-  /**
-   * A computed descriptor that a form relied on must not gain `type:`, `options:`, or `optional:` later: the form
-   * typed its answer without them.
-   */
-  #reportLaterFormMetadata(): void {
-    for (const descriptor of this.#formDescriptors) {
-      const added = FORM_METADATA.find(
-        (key) => descriptor.properties.has(key) && !descriptor.seen.has(key),
-      );
-      if (added === undefined) continue;
-      const previous = this.#enterFile(descriptor.file);
-      this.#report(
-        typeCode.invalidOperand,
-        `askForm field '${descriptor.name}': a later assignment gives its descriptor '${added}:', which this form cannot see when it opens. Write '${added}:' in the descriptor where it is first created, before the form is asked.`,
-        descriptor.span,
-      );
-      this.#enterFile(previous);
-    }
   }
 
   /**
@@ -7438,9 +7409,6 @@ function textResultType(member: TextMember): StaticType {
     ? { kind: "list", element: STRING_TYPE }
     : scalarType(member.result);
 }
-
-/** The descriptor properties that decide a form field's kind or whether its answer may be `null`. */
-const FORM_METADATA = ["type", "options", "optional"] as const;
 
 /** The answer of an `askForm` field whose kind only the runtime knows. */
 const GENERIC_FORM_ANSWER_TYPE = union([

@@ -1920,7 +1920,7 @@ export class InstructionCompiler {
       {
         kind: "form",
         requestTemporary,
-        shape: this.formShapes.get(expression) ?? { kind: "object", numericKinds: [] },
+        shape: this.formShapes.get(expression) ?? { kind: "object", numericKinds: [], answers: [] },
         accessibleName: { kind: "localizedDefault", key: "answer" },
       },
       expression.span,

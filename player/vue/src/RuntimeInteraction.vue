@@ -90,8 +90,27 @@ const foreground = computed(() => {
 });
 // A form's answers change with each edit, unlike the rest of its presentation.
 const form = computed(() => (props.session ? playerRuntimeForm(props.session) : null));
+/**
+ * The composer's latest text for the field being edited, kept by its session, action, and field, so the form shows it
+ * again when it resumes after a block interrupted it, also before the text reached the form.
+ */
+let typed: {
+  readonly plan: PlayerRuntimeSession["plan"];
+  readonly reset: number;
+  readonly actionId: number;
+  readonly fieldId: string;
+  text: string;
+} | null = null;
 function playerRuntimeFormEditorText(): string | undefined {
-  return form.value?.editor?.text;
+  const editor = form.value?.editor;
+  if (editor == null) return undefined;
+  return typed !== null &&
+    typed.plan === props.session?.plan &&
+    typed.reset === props.reset &&
+    typed.actionId === form.value?.actionId &&
+    typed.fieldId === editor.fieldId
+    ? typed.text
+    : editor.text;
 }
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
@@ -172,11 +191,14 @@ watch(
   () => formEditor.value?.fieldId ?? null,
   async (fieldId, previous) => {
     if (fieldId !== null) {
-      draft.value = formEditor.value!.text;
+      draft.value = playerRuntimeFormEditorText() ?? formEditor.value!.text;
       composer.value?.selectInput();
       return;
     }
     if (previous === null) return;
+    // A closed field drops its typed text; a suspended form, which is not presented, keeps it for its return.
+    if (form.value === null) return;
+    typed = null;
     // The controls stay disabled until the edit that closed the field is published.
     if (submitting.value)
       await new Promise<void>((resolve) => {
@@ -196,7 +218,15 @@ watch(
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 watch(draft, (text) => {
   clearTimeout(draftTimer);
-  if (formEditor.value === null || text === formEditor.value.text) return;
+  if (formEditor.value === null || !props.session || form.value === null) return;
+  typed = {
+    plan: props.session.plan,
+    reset: props.reset,
+    actionId: form.value.actionId,
+    fieldId: formEditor.value.fieldId,
+    text,
+  };
+  if (text === formEditor.value.text) return;
   const fieldId = formEditor.value.fieldId;
   draftTimer = setTimeout(() => {
     if (!props.session || submitting.value || formEditor.value?.fieldId !== fieldId) return;
