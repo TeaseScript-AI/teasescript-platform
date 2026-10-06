@@ -225,7 +225,7 @@ export function legacyProfilePrompt(
     { kind: "function", name: PROFILE_HELPER, parameters: [], body, span: null },
     {
       kind: "comment",
-      text: `// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (${asked.join(", ")}) once; this package asks what is missing here and saves it under the same keys, so other packages reuse the answers.`,
+      text: `// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (${asked.join(", ")}) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.`,
       trailing: false,
       span: null,
     },

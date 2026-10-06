@@ -68,7 +68,7 @@ function sexscriptLegacyAskProfile {
     }
   }
 }
-// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (intro.female, intro.likemale, intro.name, toys.dildo) once; this package asks what is missing here and saves it under the same keys, so other packages reuse the answers.
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (intro.female, intro.likemale, intro.name, toys.dildo) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
 sexscriptLegacyAskProfile()
 // The legacy desktop intro asked the player's name and gender once; a package that only reads them asks once.
 let gender = "boy"

@@ -559,7 +559,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   (`system/...`, `welcome`, `exit`) ends the session (`SX_DESKTOP_SCRIPT`).
 - The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
   clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
-  of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`, 141 selected units).
+  of `main.tease`, with the distribution's questions, and saves them under the legacy keys; storage is per package, so
+  each package asks once (`SX_LEGACY_PROFILE`, 141 selected units).
 - `show("")` only cleared the legacy text area and is dropped, as is any other empty text, such as a question in a
   variable that only ever holds `""` (`SX_BLANK_TEXT`, counted as `blankTexts`, 56 in 13 selected units); an empty or
   blank image path clears the image.
