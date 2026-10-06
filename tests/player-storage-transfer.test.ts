@@ -7,7 +7,8 @@ import { createPlayerRuntimeSession } from "../player/runtime-adapter.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import {
   checkStorageTransferImages,
-  collectStorageTransfer,
+  bundleSavedScripts,
+  collectSavedScript,
   remapCapturedMediaReferences,
   parseStorageTransfer,
   readStorageTransferFile,
@@ -16,7 +17,7 @@ import {
   storageTransferFileName,
   storageTransferText,
   StorageTransferError,
-  type StorageTransfer,
+  type StorageBundle,
 } from "../player/storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
@@ -66,9 +67,8 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
   { key: "unresolved", value: "captured-media:33333333-3333-4333-8333-333333333333:1" },
 ];
 
-const transfer: StorageTransfer = {
-  scope: "development-package:Example",
-  entries,
+const transfer: StorageBundle = {
+  scripts: [{ scope: "development-package:Example", name: "Example", entries }],
   images: [
     { reference: photo, bytes: pngBytes },
     // Large enough to span several encoding slices, with every byte value.
@@ -81,14 +81,7 @@ const transfer: StorageTransfer = {
 
 const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
 
-/** The plain JSON document of a transfer, for editing like a player would. */
-async function plainDocument(): Promise<Record<string, unknown>> {
-  const parsed: unknown = JSON.parse(await (await storageTransferFile(transfer, false)).text());
-  assert.ok(parsed !== null && typeof parsed === "object" && !Array.isArray(parsed));
-  return { ...parsed };
-}
-
-async function rejects(read: Promise<StorageTransfer> | (() => StorageTransfer), message: RegExp) {
+async function rejects(read: Promise<StorageBundle> | (() => StorageBundle), message: RegExp) {
   await assert.rejects(
     async () => {
       await (typeof read === "function" ? read() : read);
@@ -134,32 +127,40 @@ test("the plain document keeps stored values readable, one saved value per line"
   const document: unknown = JSON.parse(plain);
   assert.deepEqual(document, {
     format: "teasescript-script-storage",
-    version: 1,
-    scope: transfer.scope,
-    entries,
+    version: 2,
+    scripts: [{ scope: "development-package:Example", name: "Example", entries }],
     images: [],
   });
 });
 
 test("values edited by hand and a replaced photo are accepted, without any signature", async () => {
-  const document = await plainDocument();
-  document["entries"] = [
-    { key: "player.score", value: 99 },
-    { key: "album", value: { kind: "list", items: [photo] } },
-  ];
   const replacement = Uint8Array.from([0xff, 0xd8, 0xff, 1, 2, 3]);
-  document["images"] = [
-    {
-      reference: photo,
-      byteLength: replacement.length,
-      data: Buffer.from(replacement).toString("base64url"),
-    },
-  ];
-  const edited = await readStorageTransferText(JSON.stringify(document));
-  assert.deepEqual(edited.entries, document["entries"]);
-  assert.deepEqual(edited.images, [{ reference: photo, bytes: replacement }]);
+  const edited = {
+    format: "teasescript-script-storage",
+    version: 2,
+    scripts: [
+      {
+        scope: "development-package:Example",
+        name: null,
+        entries: [
+          { key: "player.score", value: 99 },
+          { key: "album", value: { kind: "list", items: [photo] } },
+        ],
+      },
+    ],
+    images: [
+      {
+        reference: photo,
+        byteLength: replacement.length,
+        data: Buffer.from(replacement).toString("base64url"),
+      },
+    ],
+  };
+  const read = await readStorageTransferText(JSON.stringify(edited));
+  assert.deepEqual(read.scripts, edited.scripts);
+  assert.deepEqual(read.images, [{ reference: photo, bytes: replacement }]);
   // The same edit, compressed by another tool, reads as a file.
-  assert.deepEqual(await readStorageTransferFile(gzipSync(JSON.stringify(document))), edited);
+  assert.deepEqual(await readStorageTransferFile(gzipSync(JSON.stringify(edited))), read);
 });
 
 test("damaged files and text are refused with a message", async () => {
@@ -194,7 +195,14 @@ test("damaged files and text are refused with a message", async () => {
 });
 
 test("a document that is not valid saved data is refused with a message naming the problem", async () => {
-  const base = await plainDocument();
+  // A version 1 document of one script; its scope, values, and photos are checked as each script's in version 2.
+  const base = {
+    format: "teasescript-script-storage",
+    version: 1,
+    scope: "development-package:Example",
+    entries,
+    images: [],
+  };
   const image = (fields: Record<string, unknown>) => ({
     ...base,
     images: [
@@ -211,13 +219,16 @@ test("a document that is not valid saved data is refused with a message naming t
     [[], /not exported saved data/],
     [null, /not exported saved data/],
     [{ ...base, format: "teasescript-checkpoint" }, /not exported saved data/],
-    [{ ...base, version: 2 }, /format version/],
+    [{ ...base, version: 3 }, /format version/],
     [{ ...base, version: "1" }, /format version/],
     [{ ...base, extra: true }, /fields other than/],
     [{ format: base["format"], version: 1, scope: "s", entries: [] }, /fields other than/],
-    [{ ...base, scope: 7 }, /names no script/],
-    [{ ...base, entries: {} }, /saved value is invalid/],
-    [{ ...base, entries: [{ key: "a", value: null }] }, /saved value is invalid.*null/],
+    [{ ...base, scope: 7 }, /has no scope/],
+    [{ ...base, entries: {} }, /A saved value of development-package:Example is invalid/],
+    [
+      { ...base, entries: [{ key: "a", value: null }] },
+      /A saved value of development-package:Example is invalid.*null/,
+    ],
     [
       {
         ...base,
@@ -230,10 +241,16 @@ test("a document that is not valid saved data is refused with a message naming t
     ],
     [
       { ...base, entries: [{ key: "a", value: { kind: "timerHandle", timerId: 1 } }] },
-      /saved value is invalid/,
+      /A saved value of development-package:Example is invalid/,
     ],
-    [{ ...base, entries: [{ key: "a", value: { kind: "list" } }] }, /saved value is invalid/],
-    [{ ...base, entries: [{ key: "a", value: 1, extra: 2 }] }, /saved value is invalid/],
+    [
+      { ...base, entries: [{ key: "a", value: { kind: "list" } }] },
+      /A saved value of development-package:Example is invalid/,
+    ],
+    [
+      { ...base, entries: [{ key: "a", value: 1, extra: 2 }] },
+      /A saved value of development-package:Example is invalid/,
+    ],
     [{ ...base, images: {} }, /not a list/],
     [image({ extra: 1 }), /exactly reference, byteLength, and data/],
     [image({ reference: "captured-media:not-a-reference" }), /no valid photo reference/],
@@ -300,18 +317,27 @@ test("an export reads the saved values fresh with each stored photo once, never 
     replace: async () => {},
     clear: async () => {},
   };
-  const { transfer: collected, missingPhotos } = await collectStorageTransfer(provider, media);
-  assert.equal(collected.scope, "script");
-  assert.deepEqual(collected.entries, await provider.load());
-  assert.deepEqual(collected.images, [{ reference: saved, bytes: pngBytes }]);
-  assert.equal(missingPhotos, 3, "the unsaved, foreign, and forged references");
+  const collected = await collectSavedScript(provider, media, "Script");
+  assert.deepEqual(collected.script, {
+    scope: "script",
+    name: "Script",
+    entries: await provider.load(),
+  });
+  assert.deepEqual(
+    collected.photos.map((photo) => photo.reference),
+    [saved],
+  );
+  assert.equal(collected.missingPhotos, 3, "the unsaved, foreign, and forged references");
+  assert.ok(collected.size > pngBytes.length, "the values and the photo");
   // A later save is part of the next export, not of this one.
   values.set("later", 1);
-  assert.equal((await collectStorageTransfer(provider, media)).transfer.entries.length, 4);
+  assert.equal((await collectSavedScript(provider, media, null)).script.entries.length, 4);
   // The collected data is a valid export.
+  const bundle = await bundleSavedScripts([collected]);
+  assert.deepEqual(bundle.images, [{ reference: saved, bytes: pngBytes }]);
   assert.deepEqual(
-    await readStorageTransferFile(await bytesOf(await storageTransferFile(collected))),
-    collected,
+    await readStorageTransferFile(await bytesOf(await storageTransferFile(bundle))),
+    bundle,
   );
 });
 
@@ -371,22 +397,19 @@ test("an import's photos are checked by their bytes and decoded, one damaged pho
     assert.equal(data.type, "image/png", "the type comes from the bytes");
     return { width: 3, height: 2 };
   };
-  const [checked, ...rest] = await checkStorageTransferImages(
-    { ...transfer, images: transfer.images.slice(0, 1) },
-    decode,
-  );
+  const [checked, ...rest] = await checkStorageTransferImages(transfer.images.slice(0, 1), decode);
   assert.equal(rest.length, 0);
   assert.equal(checked?.reference, photo);
   assert.deepEqual([checked?.width, checked?.height], [3, 2]);
   assert.deepEqual(new Uint8Array(await checked!.data.arrayBuffer()), pngBytes);
   // The second photo's bytes are no image.
   await rejects(
-    checkStorageTransferImages(transfer, decode).then(() => transfer),
+    checkStorageTransferImages(transfer.images, decode).then(() => transfer),
     /Saved photo 2 is damaged/,
   );
   // An image the browser cannot decode.
   await rejects(
-    checkStorageTransferImages({ ...transfer, images: transfer.images.slice(0, 1) }, async () => {
+    checkStorageTransferImages(transfer.images.slice(0, 1), async () => {
       throw new Error("cannot decode");
     }).then(() => transfer),
     /Saved photo 1 is damaged/,
@@ -399,13 +422,12 @@ test("a deeply nested value a script saved moves as a file and as text", async (
     `let nested = ${"[".repeat(depth)}1${"]".repeat(depth)}\nsave nested as "deep"\nexit`,
   );
   assert.equal(session.snapshot.status, "halted");
-  const deep: StorageTransfer = {
-    scope: "script",
-    entries: session.snapshot.scriptStorage,
+  const deep: StorageBundle = {
+    scripts: [{ scope: "script", name: null, entries: session.snapshot.scriptStorage }],
     images: [],
   };
   // Compared as JSON text written without recursion, since a recursive comparison cannot reach the bottom.
-  const json = (data: StorageTransfer) => serializeValidatedRuntimeJson(data);
+  const json = (data: StorageBundle) => serializeValidatedRuntimeJson(data);
   for (const gzip of [true, false]) {
     const fromFile = await readStorageTransferFile(
       await bytesOf(await storageTransferFile(deep, gzip)),
@@ -416,4 +438,99 @@ test("a deeply nested value a script saved moves as a file and as text", async (
       json(deep),
     );
   }
+});
+
+test("several scripts move in one bundle, a shared photo once, and an older single-script file reads as one", async () => {
+  const shared = { reference: photo, bytes: pngBytes };
+  const bundle: StorageBundle = {
+    scripts: [
+      {
+        scope: "development-package:first",
+        name: "First",
+        entries: [{ key: "photo", value: photo }],
+      },
+      {
+        scope: "development-package:second",
+        name: null,
+        entries: [
+          { key: "album", value: { kind: "list", items: [photo] } },
+          { key: "score", value: 3 },
+        ],
+      },
+    ],
+    images: [shared],
+  };
+  for (const gzip of [true, false]) {
+    assert.deepEqual(
+      await readStorageTransferFile(await bytesOf(await storageTransferFile(bundle, gzip))),
+      bundle,
+    );
+    assert.deepEqual(
+      await readStorageTransferText(await storageTransferText(bundle, gzip)),
+      bundle,
+    );
+  }
+  // Collected scripts that share a photo carry it once.
+  const blob = new Blob([pngBytes], { type: "image/png" });
+  const collected = await bundleSavedScripts(
+    bundle.scripts.map((script) => ({
+      script,
+      photos: [{ reference: photo, data: blob }],
+      missingPhotos: 0,
+      size: 1,
+    })),
+  );
+  assert.deepEqual(collected.images, [shared]);
+  // Two different photos under one reference cannot share it.
+  await rejects(
+    bundleSavedScripts([
+      {
+        script: bundle.scripts[0]!,
+        photos: [{ reference: photo, data: blob }],
+        missingPhotos: 0,
+        size: 1,
+      },
+      {
+        script: bundle.scripts[1]!,
+        photos: [{ reference: photo, data: new Blob([Uint8Array.of(1, 2)]) }],
+        missingPhotos: 0,
+        size: 1,
+      },
+    ]),
+    /different photos under the same reference/,
+  );
+  // A version 1 file of one script.
+  const older = {
+    format: "teasescript-script-storage",
+    version: 1,
+    scope: "development-package:first",
+    entries: [{ key: "photo", value: photo }],
+    images: [
+      {
+        reference: photo,
+        byteLength: pngBytes.length,
+        data: Buffer.from(pngBytes).toString("base64url"),
+      },
+    ],
+  };
+  assert.deepEqual(await readStorageTransferFile(gzipSync(JSON.stringify(older))), {
+    scripts: [{ scope: "development-package:first", name: null, entries: older.entries }],
+    images: [shared],
+  });
+  // Any invalid script refuses the whole bundle.
+  const document = (scripts: unknown) =>
+    JSON.stringify({ format: "teasescript-script-storage", version: 2, scripts, images: [] });
+  const good = { scope: "a", name: "A", entries: [{ key: "k", value: 1 }] };
+  for (const [scripts, message] of [
+    [[], /contains no scripts/],
+    [{}, /contains no scripts/],
+    [[good, { ...good }], /a is listed twice/],
+    [[good, { scope: "b", name: 7, entries: [] }], /name of b is not text/],
+    [[good, { scope: "b", entries: [] }], /exactly scope, name, and entries/],
+    [
+      [good, { scope: "b", name: "Bee", entries: [{ key: "k", value: null }] }],
+      /A saved value of Bee is invalid/,
+    ],
+  ] as const)
+    await rejects(() => parseStorageTransfer(document(scripts)), message);
 });

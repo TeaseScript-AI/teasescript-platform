@@ -536,7 +536,7 @@ async function scriptStorageScenario(cdp, origin) {
       `(() => {
         const names = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
         const head = localStorage.getItem('player-storage-head:"repository-demo"') !== null;
-        const values = names.filter((name) => name.includes('"repository-demo"') && !name.startsWith('player-storage-head:'));
+        const values = names.filter((name) => name.includes('"repository-demo"') && !name.startsWith('player-storage-head:') && !name.startsWith('player-storage-name:'));
         return head + ' head, ' + values.length + ' values';
       })()`,
     ),
@@ -1557,6 +1557,14 @@ async function debugStorageScenario(cdp, origin, profile) {
   );
   // A later save shows at once; the photo row's new reference, out of view, is not read until it comes into view.
   await setViewport(cdp, 1440, 480);
+  // The Player lays out the new size a moment later; a physical click needs the button on screen.
+  await waitFor(
+    cdp,
+    `(() => { const rect = document.querySelector('[data-foreground-controls] button')?.getBoundingClientRect();
+      return !!rect && rect.top >= 0 && rect.bottom <= innerHeight; })()`,
+    5_000,
+    "The button did not come into view at the short height",
+  );
   await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(
@@ -2334,9 +2342,10 @@ async function savedDataExportScenario(cdp, origin, profile) {
     await physicalClick(cdp, "[data-export-saved-data]");
     await waitFor(
       cdp,
-      `document.querySelector('[data-export-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === '2 saved values · 1 photo'`,
+      `document.querySelector('[data-export-script="development-package:saved-photo"]')?.textContent.replace(/\\s+/g, ' ').includes('2 values · 1 photo') === true &&
+        !!document.querySelector('[data-export-download]')`,
       8_000,
-      "The export did not count the saved values and only the saved photo",
+      "The export did not list the script with its saved values and only its saved photo",
     );
   };
   const closeDialog = async (selector) => {
@@ -2361,15 +2370,28 @@ async function savedDataExportScenario(cdp, origin, profile) {
     true,
     "Clearing was offered during the session",
   );
+  // Every script this browser keeps is listed and ticked; Select none leaves nothing to download.
+  const listedScripts = await value(
+    cdp,
+    `[...document.querySelectorAll('[data-export-script]')].map((row) => [row.dataset.exportScript, row.querySelector('[role=checkbox]').getAttribute('aria-checked')])`,
+  );
+  assertEqual(
+    listedScripts.length >= 2 && listedScripts.every(([, checked]) => checked === "true"),
+    true,
+    `Every script with saved data is listed and ticked: ${JSON.stringify(listedScripts)}`,
+  );
+  await physicalClick(cdp, "[data-export-none]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-export-download]') && document.body.innerText.includes('Tick at least one script')`,
+  );
+  await physicalClick(cdp, "[data-export-all]");
+  await waitFor(cdp, `!!document.querySelector('[data-export-download]')`);
   const download = await value(
     cdp,
     `(() => { const link = document.querySelector('[data-export-download]'); return { href: link.href, name: link.download }; })()`,
   );
-  assertEqual(
-    download.name,
-    "development-package-saved-photo-saved-data.teasestorage.json.gz",
-    "Export file name",
-  );
+  assertEqual(download.name, "teasescript-saved-data.teasestorage.json.gz", "Export file name");
   await physicalClick(cdp, "[data-export-download]");
   let downloaded = null;
   const deadline = Date.now() + 8_000;
@@ -2381,18 +2403,27 @@ async function savedDataExportScenario(cdp, origin, profile) {
   if (downloaded === null) throw new Error("The export file was not downloaded");
   const document = JSON.parse(gunzipSync(downloaded).toString("utf8"));
   assertEqual(document.format, "teasescript-script-storage", "Downloaded export format");
-  assertEqual(document.scope, "development-package:saved-photo", "Downloaded export scope");
   assertEqual(
-    JSON.stringify(document.entries.map((entry) => entry.key).sort()),
+    JSON.stringify(document.scripts.map((script) => script.scope)),
+    JSON.stringify(listedScripts.map(([scope]) => scope)),
+    "Downloaded export scripts",
+  );
+  const savedPhotoScript = document.scripts.find(
+    (script) => script.scope === "development-package:saved-photo",
+  );
+  assertEqual(savedPhotoScript.name, "Saved photo", "The script's title names it");
+  assertEqual(
+    JSON.stringify(savedPhotoScript.entries.map((entry) => entry.key).sort()),
     JSON.stringify(["photo", "score"]),
     "Downloaded export values",
   );
-  assertEqual(document.images.length, 1, "Downloaded export photos");
+  const savedPhotoImage = document.images.find(
+    (image) =>
+      image.reference === savedPhotoScript.entries.find((entry) => entry.key === "photo").value,
+  );
   assertEqual(
-    Buffer.from(document.images[0].data, "base64url").equals(photoBytes) &&
-      document.images[0].byteLength === photoBytes.length &&
-      document.entries.find((entry) => entry.key === "photo").value ===
-        document.images[0].reference,
+    Buffer.from(savedPhotoImage.data, "base64url").equals(photoBytes) &&
+      savedPhotoImage.byteLength === photoBytes.length,
     true,
     "The downloaded photo is not the saved photo's exact bytes",
   );
@@ -2495,7 +2526,8 @@ async function savedDataExportScenario(cdp, origin, profile) {
 
 // Imports the export into a fresh browser profile, as on another device: a file chosen and reviewed, whose Cancel keeps
 // the running session; then a dropped file whose confirmation ends that session, after which Start shows the saved photo
-// again; pasted text into a reloaded Player; and text of this script refused by another script.
+// again with every other script of the bundle in its own scope; pasted text into a reloaded Player; and, while another
+// script runs, only the ticked script of the bundle replaced.
 async function savedDataImportScenario(debugPort, origin, exported) {
   const browser = await connectCdp(
     (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
@@ -2533,14 +2565,13 @@ async function savedDataImportScenario(debugPort, origin, exported) {
         });
       await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
     };
-    const summary = `document.querySelector('[data-import-summary]')?.textContent.replace(/\\s+/g, ' ').trim()`;
 
     await navigate(cdp, `${origin}/player/?package=saved-photo`);
     await waitFor(cdp, `!!document.querySelector('${start}')`);
     assertEqual(
       await value(
         cdp,
-        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo') && !name.startsWith('player-storage-name:')).length`,
       ),
       0,
       "The import profile starts without saved data",
@@ -2567,10 +2598,25 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       8_000,
       "The chosen file was not reviewed",
     );
+    // Every script of the bundle is listed, ticked, and new here; the shown one is marked.
+    const bundledScopes = JSON.parse(
+      gunzipSync(await readFile(exported.file)).toString("utf8"),
+    ).scripts.map((script) => script.scope);
     assertEqual(
-      await value(cdp, summary),
-      "Imports 2 saved values · 1 photo, replacing 0 saved values.",
-      "Import review summary",
+      await value(
+        cdp,
+        `JSON.stringify([...document.querySelectorAll('[data-import-script]')].map((row) => [row.dataset.importScript, row.querySelector('[role=checkbox]').getAttribute('aria-checked'), row.querySelector('[data-import-status]').textContent.trim()]))`,
+      ),
+      JSON.stringify(bundledScopes.map((scope) => [scope, "true", "New"])),
+      "Import review lists the bundle's scripts",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `document.querySelector('[data-import-script="development-package:saved-photo"]').textContent.includes('This script')`,
+      ),
+      true,
+      "The shown script is marked",
     );
     assertEqual(
       await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
@@ -2585,7 +2631,8 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     assertEqual(
       await value(
         cdp,
-        `[...document.querySelectorAll('[data-saved-data-import] button:not([data-slot="dialog-close"])')].filter((button) => button.offsetParent && button.getBoundingClientRect().height < 44).map((button) => button.textContent.trim() + ' ' + button.getBoundingClientRect().height).join('; ')`,
+        // A checkbox's touch target is its whole labelled row.
+        `[...document.querySelectorAll('[data-saved-data-import] button:not([data-slot="dialog-close"]):not([role=checkbox]), [data-saved-data-import] [data-import-script]')].filter((control) => control.offsetParent && control.getBoundingClientRect().height < 44).map((control) => control.textContent.trim() + ' ' + control.getBoundingClientRect().height).join('; ')`,
       ),
       "",
       "The import review's controls are not touch-sized",
@@ -2602,7 +2649,7 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     assertEqual(
       await value(
         cdp,
-        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo') && !name.startsWith('player-storage-name:')).length`,
       ),
       0,
       "Cancel changed the saved data",
@@ -2653,10 +2700,14 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       8_000,
       "The dropped file was not reviewed",
     );
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-import-confirm]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
     await physicalClick(cdp, "[data-import-confirm]");
     await waitFor(
       cdp,
-      text("Saved data imported. Start to use it."),
+      text("Saved data imported. Each script uses it from its next Start."),
       8_000,
       "The import did not finish",
     );
@@ -2712,13 +2763,26 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       "Without a session, confirming only replaces the data",
     );
     await physicalClick(cdp, "[data-import-confirm]");
-    await waitFor(cdp, text("Saved data imported. Start to use it."));
+    await waitFor(cdp, text("Saved data imported. Each script uses it from its next Start."));
     await escape("[data-saved-data-import]");
     await escape("[data-player-settings]");
+    // Every other script of the bundle went into its own saved data.
+    assertEqual(
+      await value(
+        cdp,
+        `${JSON.stringify(bundledScopes)}.every((scope) => localStorage.getItem('player-storage-head:' + JSON.stringify(scope)) !== null)`,
+      ),
+      true,
+      "Every script of the bundle was imported into its own scope",
+    );
 
-    // Another script refuses this script's data and keeps its own.
+    // While another script runs, ticking only one script of the bundle replaces just that one and keeps the session.
+    const heads = `JSON.stringify(Object.fromEntries(${JSON.stringify(bundledScopes)}.map((scope) => [scope, localStorage.getItem('player-storage-head:' + JSON.stringify(scope))])))`;
+    const before = JSON.parse(await value(cdp, heads));
     await navigate(cdp, `${origin}/player/?package=pictures`);
     await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await physicalClick(cdp, start);
+    await waitFor(cdp, visible("[data-composer-attach]"), 8_000, "The other script did not start");
     await openImport();
     await physicalClick(cdp, '[data-import-tab="text"]');
     await evaluate(
@@ -2730,17 +2794,60 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     await physicalClick(cdp, "[data-import-review]");
     await waitFor(
       cdp,
-      `document.querySelector('[data-import-problem]')?.textContent.includes('belongs to another script') === true`,
+      `!!document.querySelector('[data-import-confirm]')`,
       8_000,
-      "Another script's data was not refused",
+      "The text was not reviewed",
     );
+    assertEqual(
+      await value(cdp, `document.body.innerText.includes('This script')`),
+      false,
+      "The running script is not in the bundle",
+    );
+    for (const scope of bundledScopes)
+      if (scope !== "development-package:saved-photo") {
+        const box = `[data-import-script="${scope}"] [role=checkbox]`;
+        await evaluate(
+          cdp,
+          `document.querySelector(${JSON.stringify(box)}).scrollIntoView({ block: 'center', behavior: 'instant' })`,
+        );
+        await physicalClick(cdp, box);
+        await waitFor(
+          cdp,
+          `document.querySelector(${JSON.stringify(box)}).getAttribute('aria-checked') === 'false'`,
+        );
+      }
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
+      "Replace saved data",
+      "Importing scripts other than the running one keeps its session",
+    );
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-import-confirm]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(cdp, text("Saved data imported. Each script uses it from its next Start."));
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      true,
+      "The running script's session ended",
+    );
+    const after = JSON.parse(await value(cdp, heads));
+    for (const scope of bundledScopes)
+      assertEqual(
+        after[scope] === before[scope],
+        scope !== "development-package:saved-photo",
+        `Only the ticked script was replaced (${scope})`,
+      );
     assertEqual(
       await value(
         cdp,
-        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures'))`,
+        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures') && !name.startsWith('player-storage-name:'))`,
       ),
       false,
-      "The refused import changed the other script's data",
+      "The running script's saved data was changed",
     );
   } finally {
     cdp?.close();

@@ -3,61 +3,85 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { Download } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
 import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
+import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  bundleSavedScripts,
   storageTransferFile,
   storageTransferFileName,
   storageTransferText,
-  type StorageTransfer,
+  type SavedScript,
+  type StorageBundle,
 } from "../../storage-transfer.js";
 import { gzipSupported } from "../../transfer-encoding.js";
 
-// Exports this script's saved data, as one file or as text to copy, from a fresh read when the dialog opens. It is
-// prepared first, so Download and Copy stay direct player actions; everything stays in this browser until then.
+// Exports the saved data of every script this browser keeps, or of the scripts the player keeps ticked, as one file or
+// one text to copy (PLAYER-UI "Player Settings"). The list is read fresh when the dialog opens, and the file and text
+// are prepared for the current choice, so Download and Copy stay direct player actions; nothing leaves the browser
+// until then.
 const props = defineProps<{
-  /** The script's name for the file name; without one, the file is named after the storage scope. */
-  name: string;
-  read: () => Promise<{ readonly transfer: StorageTransfer; readonly missingPhotos: number }>;
+  read: () => Promise<readonly SavedScript[]>;
 }>();
 
 const open = ref(false);
 const tab = ref<"file" | "text">("file");
 const gzip = gzipSupported();
-type Prepared = {
-  readonly transfer: StorageTransfer;
-  readonly missingPhotos: number;
-  readonly url: string;
-  readonly size: number;
-};
-const state = shallowRef<"preparing" | "failed" | Prepared>("preparing");
+const scripts = shallowRef<readonly SavedScript[] | "reading" | "failed">("reading");
+const listed = computed(() => (typeof scripts.value === "object" ? scripts.value : []));
+const chosen = shallowRef<ReadonlySet<string>>(new Set());
+const chosenScripts = computed(() => listed.value.filter((saved) => chosen.value.has(saved.script.scope)));
+type Prepared = { readonly bundle: StorageBundle; readonly url: string; readonly size: number };
+const state = shallowRef<"none" | "preparing" | "failed" | Prepared>("none");
 const prepared = computed(() => (typeof state.value === "object" ? state.value : null));
 const fileName = computed(() =>
-  storageTransferFileName(props.name || (prepared.value?.transfer.scope ?? ""), gzip),
+  storageTransferFileName(
+    chosenScripts.value.length === 1 ? label(chosenScripts.value[0]!) : "teasescript",
+    gzip,
+  ),
 );
 const text = ref<string | null>(null);
 const copyStatus = ref<"" | "copied" | "failed">("");
 const textArea = ref<InstanceType<typeof Textarea> | null>(null);
-// Each opening gets its own preparation; a result for an earlier one is discarded.
+// Each opening and each choice gets its own preparation; a result for an earlier one is discarded.
 let preparation = 0;
 
+// Each opening reads the list once; a list read for an earlier opening is discarded.
+let opening = 0;
 watch(open, async (isOpen) => {
-  const current = ++preparation;
-  release();
+  const current = ++opening;
+  scripts.value = "reading";
+  chosen.value = new Set();
   if (!isOpen) return;
   tab.value = "file";
   try {
-    const { transfer, missingPhotos } = await props.read();
+    const read = await props.read();
+    if (current !== opening) return;
+    scripts.value = read;
+    // Everything is the default: every script is ticked.
+    chosen.value = new Set(read.map((saved) => saved.script.scope));
+  } catch {
+    if (current === opening) scripts.value = "failed";
+  }
+});
+watch(chosen, async () => {
+  const current = ++preparation;
+  release();
+  if (chosenScripts.value.length === 0) return;
+  state.value = "preparing";
+  try {
+    const bundle = await bundleSavedScripts(chosenScripts.value);
     if (current !== preparation) return;
-    const file = await storageTransferFile(transfer, gzip);
+    const file = await storageTransferFile(bundle, gzip);
     if (current !== preparation) return;
-    state.value = { transfer, missingPhotos, url: URL.createObjectURL(file), size: file.size };
+    state.value = { bundle, url: URL.createObjectURL(file), size: file.size };
   } catch {
     if (current === preparation) state.value = "failed";
   }
@@ -67,7 +91,7 @@ let encoding = -1;
 watch([tab, prepared], async ([selected, ready]) => {
   if (selected !== "text" || ready === null || text.value !== null || encoding === preparation) return;
   const current = (encoding = preparation);
-  const result = await storageTransferText(ready.transfer, gzip).catch(() => null);
+  const result = await storageTransferText(ready.bundle, gzip).catch(() => null);
   if (current !== preparation) return;
   if (result !== null) text.value = result;
   else {
@@ -76,16 +100,27 @@ watch([tab, prepared], async ([selected, ready]) => {
   }
 });
 onBeforeUnmount(() => {
+  opening++;
   preparation++;
   release();
 });
 
-// Frees the prepared file and text when the dialog closes, so private photos do not stay in memory.
+// Frees the prepared file and text, so private photos do not stay in memory longer than needed.
 function release() {
   if (prepared.value !== null) URL.revokeObjectURL(prepared.value.url);
-  state.value = "preparing";
+  state.value = "none";
   text.value = null;
   copyStatus.value = "";
+}
+
+function choose(scope: string, on: boolean) {
+  const next = new Set(chosen.value);
+  if (on) next.add(scope);
+  else next.delete(scope);
+  chosen.value = next;
+}
+function chooseAll(on: boolean) {
+  chosen.value = new Set(on ? listed.value.map((saved) => saved.script.scope) : []);
 }
 
 function textElement(): HTMLTextAreaElement | null {
@@ -108,18 +143,24 @@ async function copyText() {
   } catch {
     copied = false;
   }
-  // A copy that settles after the dialog closed says nothing about a later export.
+  // A copy that settles after the dialog closed or the choice changed says nothing about the current export.
   if (current !== preparation) return;
   copyStatus.value = copied ? "copied" : "failed";
   if (!copied) selectText();
 }
 
+function label(saved: SavedScript): string {
+  return saved.script.name ?? saved.script.scope;
+}
 const count = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`;
 function formatSize(bytes: number): string {
   if (bytes < 1024) return count(bytes, "byte", "bytes");
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+const missingPhotos = computed(() =>
+  chosenScripts.value.reduce((total, saved) => total + saved.missingPhotos, 0),
+);
 </script>
 
 <template>
@@ -131,27 +172,65 @@ function formatSize(bytes: number): string {
       <DialogHeader>
         <DialogTitle>Export saved data</DialogTitle>
         <DialogDescription>
-          Takes this script's saved data, with its saved photos, to another browser or device. It is not a session
-          checkpoint.
+          Takes the saved data of the scripts this browser has played, with their saved photos, to another browser or
+          device. It is not a session checkpoint.
         </DialogDescription>
       </DialogHeader>
-      <p v-if="state === 'preparing'" role="status" class="text-sm">Preparing the export…</p>
-      <Alert v-else-if="state === 'failed'" variant="destructive">
-        <AlertDescription>Could not read this script's saved data.</AlertDescription>
+      <p v-if="scripts === 'reading'" role="status" class="text-sm">Reading the saved data…</p>
+      <Alert v-else-if="scripts === 'failed'" variant="destructive">
+        <AlertDescription>Could not read the saved data in this browser.</AlertDescription>
       </Alert>
-      <template v-if="prepared">
-        <div class="grid gap-1 text-sm">
-          <p data-export-summary>
-            {{ count(prepared.transfer.entries.length, "saved value", "saved values") }} ·
-            {{ count(prepared.transfer.images.length, "photo", "photos") }}
-          </p>
-          <p v-if="prepared.missingPhotos > 0">
-            {{ count(prepared.missingPhotos, "saved photo reference has", "saved photo references have") }} no stored
-            photo; the export keeps them as text.
+      <p v-else-if="listed.length === 0" class="text-sm" data-export-empty>
+        No script has saved data in this browser yet.
+      </p>
+      <template v-else>
+        <fieldset class="grid gap-2 text-sm">
+          <legend class="sr-only">Scripts to export</legend>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p data-export-summary>{{ chosenScripts.length }} of {{ count(listed.length, "script", "scripts") }}</p>
+            <div class="flex gap-2">
+              <Button variant="outline" size="sm" class="min-h-11" data-export-all @click="chooseAll(true)">
+                Select all
+              </Button>
+              <Button variant="outline" size="sm" class="min-h-11" data-export-none @click="chooseAll(false)">
+                Select none
+              </Button>
+            </div>
+          </div>
+          <ScrollArea class="max-h-64 rounded-md border">
+            <ul class="grid p-1">
+              <li v-for="saved in listed" :key="saved.script.scope">
+                <label class="flex min-h-11 items-center gap-3 rounded-md px-2 py-1" :data-export-script="saved.script.scope">
+                  <Checkbox
+                    :model-value="chosen.has(saved.script.scope)"
+                    @update:model-value="(on) => choose(saved.script.scope, on === true)"
+                  />
+                  <span class="min-w-0">
+                    <span class="block break-all font-medium">{{ label(saved) }}</span>
+                    <span v-if="saved.script.name" class="block break-all text-muted-foreground">
+                      {{ saved.script.scope }}
+                    </span>
+                    <span class="block text-muted-foreground">
+                      {{ count(saved.script.entries.length, "value", "values") }} ·
+                      {{ count(saved.photos.length, "photo", "photos") }} · {{ formatSize(saved.size) }}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            </ul>
+          </ScrollArea>
+          <p v-if="missingPhotos > 0">
+            {{ count(missingPhotos, "saved photo reference has", "saved photo references have") }} no stored photo;
+            the export keeps them as text.
           </p>
           <p class="text-muted-foreground">The export can contain private photos; anyone who has it can see them.</p>
-        </div>
-        <Tabs v-model="tab">
+        </fieldset>
+        <p v-if="chosenScripts.length === 0" class="text-sm">Tick at least one script to export.</p>
+        <p v-else-if="state === 'preparing'" role="status" class="text-sm">Preparing the export…</p>
+        <Alert v-else-if="state === 'failed'" variant="destructive">
+          <AlertDescription>Could not prepare the export of these scripts.</AlertDescription>
+        </Alert>
+        <Tabs v-if="prepared" v-model="tab">
           <TabsList class="h-auto w-full">
             <TabsTrigger value="file" class="min-h-11" data-export-tab="file">File</TabsTrigger>
             <TabsTrigger value="text" class="min-h-11" data-export-tab="text">Text</TabsTrigger>
