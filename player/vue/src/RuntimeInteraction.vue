@@ -60,6 +60,11 @@ const props = defineProps<{
    * ahead when it returns or resolves to `true`.
    */
   prepareInput?: () => true | Promise<boolean>;
+  /**
+   * While true, text typed for a form field stays in the composer instead of reaching the form, as for a state Debug's
+   * rewind restored, which takes it with the next form input once that input adopted the state.
+   */
+  holdFormDrafts?: boolean;
   /** Answers `askImage` with a chosen file; without it an image request offers no file input. */
   images?: PlayerImageInput;
   /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
@@ -147,7 +152,8 @@ watch(
     const texts = typedTexts();
     if (!texts || !props.session) return;
     const pending = new Set(playerRuntimeFormActionIds(props.session.snapshot));
-    for (const key of texts.keys()) if (!pending.has(parseTypedKey(key).actionId)) texts.delete(key);
+    for (const key of texts.keys())
+      if (!pending.has(parseTypedKey(key).actionId)) texts.delete(key);
   },
 );
 const pacing = computed(() => {
@@ -269,6 +275,7 @@ watch(draft, (text) => {
   draftTimer = setTimeout(() => {
     // A replaced session, such as one Debug's rewind restored, takes no text typed for another.
     if (props.session?.plan !== plan || props.reset !== reset || submitting.value) return;
+    if (props.holdFormDrafts) return;
     // The text reaches only its own action's field; while another is presented it stays typed for the return.
     const result = draftPlayerRuntimeForm(props.session, target, text);
     if (result?.outcome.kind === "updated") emit("update:session", result.session);
@@ -320,7 +327,9 @@ watch(
     // A form field being edited, also one that resumes after an interruption, keeps the text typed for it.
     if (!loadFormEditor(form.value))
       draft.value =
-        presentedInput !== null && "prefill" in presentedInput ? (presentedInput.prefill ?? "") : "";
+        presentedInput !== null && "prefill" in presentedInput
+          ? (presentedInput.prefill ?? "")
+          : "";
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -546,7 +555,10 @@ function submit(source: "input" | "button") {
               :disabled="submitting"
               @step="
                 (fieldId) =>
-                  complete((session) => stepPlayerRuntimeFormField(session, fieldId, formDraft()), false)
+                  complete(
+                    (session) => stepPlayerRuntimeFormField(session, fieldId, formDraft()),
+                    false,
+                  )
               "
               @submit="complete((session) => submitPlayerRuntimeForm(session, formDraft()))"
               @dismiss="complete(dismissPlayerRuntimeFormField, false)"
@@ -610,14 +622,14 @@ function submit(source: "input" | "button") {
             formEditor
               ? formEditor.inputType
               : foreground && 'isoText' in foreground && foreground.isoText
-              ? 'text'
-              : foreground?.kind === 'ask-date'
-                ? 'date'
-                : foreground?.kind === 'ask-time'
-                  ? 'time'
-                  : foreground?.kind === 'ask-datetime'
-                    ? 'datetime-local'
-                    : 'text'
+                ? 'text'
+                : foreground?.kind === 'ask-date'
+                  ? 'date'
+                  : foreground?.kind === 'ask-time'
+                    ? 'time'
+                    : foreground?.kind === 'ask-datetime'
+                      ? 'datetime-local'
+                      : 'text'
           "
           :feedback="feedback"
           @submit="submit"
