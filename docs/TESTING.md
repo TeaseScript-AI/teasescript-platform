@@ -599,7 +599,10 @@ the request opened turns off after a photo or a file answered, and that a busy c
 paperclip stays. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
-wait, and the default build offers no Debug tool. With auto-skip, the `missing-media` package, which refers to a
+wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
+`debug-countdowns` package's countdown line with the Debug panel closed: for its wait, none for its blocking timer, then
+its pacing and its timed button after Skip event; the panel's Debug switch and the Debug menu hide and show it, an untimed
+button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. With auto-skip, the `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
 neither hides that image nor is reported.

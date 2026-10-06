@@ -122,6 +122,7 @@ async function main() {
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
+      await debugCountdownScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -129,7 +130,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -524,6 +525,20 @@ async function scriptStorageScenario(cdp, origin) {
 
   await reloadBeforeStart();
   await clearBeforeStart();
+  // Clearing publishes an empty generation and removes the values saved before it, in real browser storage.
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const names = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
+        const head = localStorage.getItem('player-storage-head:"repository-demo"') !== null;
+        const values = names.filter((name) => name.includes('"repository-demo"') && !name.startsWith('player-storage-head:'));
+        return head + ' head, ' + values.length + ' values';
+      })()`,
+    ),
+    "true head, 0 values",
+    "Clearing leaves only the scope's empty head",
+  );
   await reloadBeforeStart();
   await physicalClick(cdp, start);
   // Reach the introductory Session message so an absent returning-visit line is conclusive.
@@ -536,6 +551,15 @@ async function scriptStorageScenario(cdp, origin) {
     await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
     false,
     "Clearing saved data resets the demo's visit count",
+  );
+  // Saves after the clear persist in the published generation and load fresh after a reload.
+  await reloadBeforeStart();
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Back again. Visit 2.'))`,
+    15_000,
+    "A save after clearing must load after a reload",
   );
 
   // Leave the existing end-to-end demo scenario with its original first-visit state.
@@ -1313,6 +1337,122 @@ async function lateImageScenario(cdp, origin) {
     await value(cdp, `document.querySelectorAll('[data-player-notice]').length`),
     0,
     "A late failure of a removed image was reported",
+  );
+}
+
+/**
+ * Player Debug in the default build: the Debug menu starts off and Settings turns it on for this load. While Debug
+ * runs, one countdown line under the foreground names a wait, a timed button, or pacing, but never a blocking timer; it
+ * follows jumps, the panel's Debug switch and the Debug menu also while the panel is closed, and never reaches the
+ * transcript. `?dev` starts with the menu on.
+ */
+async function debugCountdownScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const countdown = `document.querySelector('[data-debug-countdown]')?.textContent.trim() ?? null`;
+  const shows = (pattern) =>
+    `${pattern}.test(document.querySelector('[data-debug-countdown]')?.textContent.trim() ?? '')`;
+  const none = `!document.querySelector('[data-debug-countdown]')`;
+  const launcher = '[data-launcher] button[aria-label="Debug"]';
+  const toggleDebugMenu = async () => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-setting="debug-menu"]')`);
+    await physicalClick(cdp, '[data-player-setting="debug-menu"]');
+    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  };
+  // Scene time runs on in real time between steps, so a countdown may have passed its first seconds.
+  const skip = async (expected, failure) => {
+    await physicalClick(cdp, '[data-development-time-action="skip"]');
+    await waitFor(cdp, expected, 5_000, failure);
+  };
+
+  await navigate(cdp, `${origin}/player/?package=debug-countdowns`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Start'))`,
+  );
+  assertEqual(
+    await value(cdp, `!document.querySelector(${JSON.stringify(launcher)}) && ${none}`),
+    true,
+    "A fresh load started with the Debug menu on",
+  );
+  // The menu on shows the wait's countdown at once, with the panel still closed.
+  await toggleDebugMenu();
+  await waitFor(
+    cdp,
+    shows("/^Debug · Continues in (30|2\\d) s$/"),
+    5_000,
+    "No countdown for the wait",
+  );
+  assertEqual(
+    await value(cdp, `!document.querySelector('[data-debug-panel]')`),
+    true,
+    "The panel opened",
+  );
+  await physicalClick(cdp, launcher);
+  await waitFor(cdp, `!!document.querySelector('[data-debug-panel]')`);
+  // Skip event ends the wait: the blocking timer is a timer, never a wait.
+  await skip(none, "A blocking timer showed a countdown");
+  await skip(shows("/^Debug · Pacing: (20|1\\d) s remaining$/"), "No countdown for pacing");
+  // The timed button consumes the pacing of the message before it.
+  await skip(shows("/^Debug · Press within (40|3\\d) s$/"), "No countdown for the timed button");
+  // The panel's Debug switch and the Debug menu hide and show it, also while the panel is closed.
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(cdp, none, 2_000, "Debug off left the countdown");
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(
+    cdp,
+    shows("/^Debug · Press within (40|3\\d) s$/"),
+    2_000,
+    "Debug on did not restore the countdown",
+  );
+  // Closed, the panel keeps its content parked out of view.
+  await physicalClick(cdp, launcher);
+  await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
+  await toggleDebugMenu();
+  await waitFor(
+    cdp,
+    `${none} && !document.querySelector(${JSON.stringify(launcher)})`,
+    2_000,
+    "The Debug menu off left Debug",
+  );
+  await toggleDebugMenu();
+  await waitFor(
+    cdp,
+    shows("/^Debug · Press within \\d+ s$/"),
+    2_000,
+    "The Debug menu on did not show the countdown",
+  );
+  // An untimed button has no countdown; Debug added nothing to the transcript.
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === 'Done')`,
+  );
+  assertEqual(await value(cdp, countdown), null, "An untimed button showed a countdown");
+  const entries = await value(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`,
+  );
+  assertEqual(
+    entries.some((text) => /Debug|elapsed|⏩/u.test(text)) ||
+      !["Start", "A", "B", "Pressed"].every(
+        (text, index, texts) =>
+          entries.findIndex((entry) => entry.endsWith(text)) >
+          (index === 0 ? -1 : entries.findIndex((entry) => entry.endsWith(texts[index - 1]))),
+      ),
+    false,
+    `Debug changed the transcript: ${JSON.stringify(entries)}`,
+  );
+
+  await navigate(cdp, `${origin}/player/?dev&package=debug-countdowns`);
+  await waitFor(
+    cdp,
+    `!!document.querySelector(${JSON.stringify(launcher)})`,
+    8_000,
+    "?dev did not start with the Debug menu on",
   );
 }
 

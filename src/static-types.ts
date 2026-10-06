@@ -71,6 +71,11 @@ export interface OpenType {
   observed?: boolean;
   /** When a value decided the slot, counted in checking order, so the first of several decisions can be found. */
   order?: number;
+  /**
+   * Where a value the compiler cannot know was first stored while the slot was undecided. Such a value decides nothing
+   * (ADR 0021 rule 1.7), but what the slot holds is then checked at runtime where a known type is required.
+   */
+  heldUnknown?: SourceSpan;
 }
 
 let decisions = 0;
@@ -329,6 +334,14 @@ export function isNumeric(type: StaticType): boolean {
 }
 
 /** Whether the compiler knows anything about values of this type. */
+/** Whether a value of this type may be one the compiler cannot know, which a known place checks at runtime. */
+export function mayBeUnknown(type: StaticType): boolean {
+  return containsType(
+    type,
+    (part) => part.kind === "unknown" || (part.kind === "open" && part.heldUnknown !== undefined),
+  );
+}
+
 export function isKnown(type: StaticType): boolean {
   const value = resolved(type);
   return value.kind !== "unknown" && value.kind !== "open" && value.kind !== "never";
@@ -644,7 +657,11 @@ function* settleTask(
   at: SourceSpan,
 ): CompileTask<void> {
   const source = canonical(sourceType);
-  if (source.kind === "unknown" || source.kind === "never") return;
+  if (source.kind === "unknown") {
+    yield* compileChild(heldUnknownTask(target, at));
+    return;
+  }
+  if (source.kind === "never") return;
   if (target.kind === "open") {
     if (target.resolved !== null) {
       yield* compileChild(settleTask(target.resolved, source, at));
@@ -691,6 +708,21 @@ function* settleTask(
 }
 
 /**
+ * Notes in every undecided slot of a place, also inside its elements and properties, that a value the compiler cannot
+ * know was stored at `at`: such a value may replace any of them (see {@link OpenType.heldUnknown}).
+ */
+function* heldUnknownTask(type: StaticType, at: SourceSpan): CompileTask<void> {
+  if (type.kind === "open") {
+    if (type.resolved === null) type.heldUnknown ??= at;
+    else yield* compileChild(heldUnknownTask(type.resolved, at));
+  } else if (type.kind === "union")
+    for (const member of type.members) yield* compileChild(heldUnknownTask(member, at));
+  else if (isCollection(type)) yield* compileChild(heldUnknownTask(type.element, at));
+  else if (type.kind === "object" && type.properties !== null)
+    for (const value of type.properties.values()) yield* compileChild(heldUnknownTask(value, at));
+}
+
+/**
  * A copy for a new place, such as a variable initialized from another variable: values are copied, so the new place
  * gets its own property tables and its own undecided slots.
  */
@@ -705,7 +737,12 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       // A copy keeps what the original saw: a first null stays a first null. It may hold what the original held when
       // it was taken, so it takes the type that decides the original, also when a later check finds it.
       type.observed = true;
-      return { ...openType(), sawNull: type.sawNull, copiedFrom: type };
+      return {
+        ...openType(),
+        sawNull: type.sawNull,
+        copiedFrom: type,
+        ...(type.heldUnknown === undefined ? {} : { heldUnknown: type.heldUnknown }),
+      };
     case "list":
     case "set":
     case "dict":
@@ -1150,12 +1187,26 @@ function* joinTask(
   if (left.kind === "unknown" || right.kind === "unknown") return UNKNOWN_TYPE;
   const leftValue = decidedValue(left);
   const rightValue = decidedValue(right);
+  // A slot that a value the compiler cannot know reached may hold any value, so with a known value it joins as unknown.
+  const reachedUnknown = (type: StaticType): boolean =>
+    members(type).some((member) => member.kind === "open" && member.heldUnknown !== undefined);
+  if (
+    (reachedUnknown(left) && rightValue.kind !== "never") ||
+    (reachedUnknown(right) && leftValue.kind !== "never")
+  )
+    return UNKNOWN_TYPE;
   const nullable = holdsNull(left) || holdsNull(right);
   if (leftValue.kind === "never" && rightValue.kind === "never") {
     // No value decided either side yet. An undecided place stays undecided and keeps whether null came first.
     if (left.kind === "never" && right.kind === "never") return NEVER_TYPE;
     if (!members(left).some(isOpen) && !members(right).some(isOpen)) return NULL_TYPE;
-    return nullable ? optional(openType()) : openType();
+    // A slot that a value the compiler cannot know reached keeps that, so a known place still checks what it holds.
+    const slot = openType();
+    const held = [...members(left), ...members(right)].find(
+      (member): member is OpenType => member.kind === "open" && member.heldUnknown !== undefined,
+    );
+    if (held !== undefined) slot.heldUnknown = held.heldUnknown!;
+    return nullable ? optional(slot) : slot;
   }
   const value =
     leftValue.kind === "never"
@@ -1362,6 +1413,9 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
     return restricted(stored) && isAssignable(kept, stored) ? restrict(kept, stored) : kept;
   const parts = members(stored).map((part) => {
     const accepting = kept.members.filter((member) => isAssignable(member, part));
+    // A slot that no value decided yet, such as a property that so far took only null or values the compiler cannot
+    // know, may hold any value: it narrows to nothing more precise.
+    if (resolved(part).kind === "open") return union(accepting);
     // A member that holds the value itself, such as the `null` of `let answer = choose null`, says more than a slot
     // that a later value decides.
     const precise = accepting.filter((member) => member.kind !== "open");

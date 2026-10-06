@@ -1,4 +1,4 @@
-import { computed, ref, watch, type ShallowRef } from "vue";
+import { computed, ref, shallowReactive, watch, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import type { MediaProgressReport } from "../../../src/index.js";
 import {
@@ -73,7 +73,9 @@ export function useRuntimeSceneClock(
   const timers = computed(() =>
     session.value ? playerRuntimeTimers(session.value.snapshot, displayTimeMs.value) : [],
   );
-  // Presentation estimates only; canonical scene time advances through observations.
+  // Presentation estimates only; canonical scene time advances through observations. Presented timers keep the estimate
+  // current, and so does any other presentation that asks while it is shown, such as a Debug countdown.
+  const refreshDemands = shallowReactive(new Set<() => boolean>());
   const refresh = useIntervalFn(
     () => {
       if (session.value) displayTimeMs.value = sceneTimeMs(session.value);
@@ -82,15 +84,32 @@ export function useRuntimeSceneClock(
     { immediate: false },
   );
   watch(
-    () => timers.value.length > 0,
-    (presented) => (presented ? refresh.resume() : refresh.pause()),
+    () => timers.value.length > 0 || [...refreshDemands].some((demand) => demand()),
+    (presented) => {
+      if (!presented) return refresh.pause();
+      // A stopped estimate may be long stale: sample at once rather than at the first interval.
+      if (session.value) displayTimeMs.value = sceneTimeMs(session.value);
+      refresh.resume();
+    },
     { immediate: true },
   );
+  /** Keeps the display estimate refreshing while `demand` holds, until the calling scope ends. */
+  function refreshWhile(demand: () => boolean) {
+    refreshDemands.add(demand);
+    tryOnScopeDispose(() => refreshDemands.delete(demand));
+  }
 
   // Visibility changes are observation opportunities in both directions; they never pause scene time.
   useEventListener(document, "visibilitychange", observe);
   useEventListener(window, "pagehide", observe);
   useEventListener(window, "pageshow", observe);
 
-  return { timers, observe, rebase };
+  return {
+    timers,
+    observe,
+    rebase,
+    /** The display estimate of scene time; it refreshes only while something presented needs it. */
+    displayTimeMs: computed(() => displayTimeMs.value),
+    refreshWhile,
+  };
 }

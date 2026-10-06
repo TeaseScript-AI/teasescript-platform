@@ -151,6 +151,7 @@ import {
   observe,
   placedSlots,
   nextDecision,
+  mayBeUnknown,
   type OpenType,
   numberPaths,
   integerParts,
@@ -312,7 +313,11 @@ interface Decision {
  * shares this way, the first in checking order decides, also around a cycle of copies. Every slot is visited once, so a
  * whole chain of copies and stores needs no check per step.
  */
-function decidingSlots(slots: readonly OpenType[]): Map<OpenType, OpenType | null> {
+function decidingSlots(slots: readonly OpenType[]): {
+  readonly deciding: Map<OpenType, OpenType | null>;
+  /** For a slot that shares no decision, where a value the compiler cannot know reached it, if one did. */
+  readonly unknown: Map<OpenType, SourceSpan>;
+} {
   const starts = [...new Set(slots)];
   // The slots each one shares decisions with, found from the given ones, and those a value of their own decided.
   const sharers = new Map<OpenType, OpenType[]>();
@@ -350,7 +355,19 @@ function decidingSlots(slots: readonly OpenType[]): Map<OpenType, OpenType | nul
     }
   }
   for (const slot of starts) if (!deciding.has(slot)) deciding.set(slot, null);
-  return deciding;
+  // A value the compiler cannot know reaches what shares the slot it was stored in, as a decision would.
+  const unknown = new Map<OpenType, SourceSpan>();
+  for (const holder of seen) {
+    if (holder.heldUnknown === undefined) continue;
+    const reached = [holder];
+    while (reached.length > 0) {
+      const slot = reached.pop()!;
+      if (unknown.has(slot)) continue;
+      unknown.set(slot, holder.heldUnknown);
+      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
+    }
+  }
+  return { deciding, unknown };
 }
 
 /** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
@@ -430,6 +447,23 @@ interface Branches {
   readonly type: StaticType;
   readonly whenTrue: Changes | null;
   readonly whenFalse: Changes | null;
+  /**
+   * For an outcome that no value produces, the tested variable as `never` there, so that the code that cannot run is
+   * still checked (rule 1.8) without what the test rules out, such as `x` being null inside `if x != null`.
+   */
+  readonly unreachedTrue?: Changes;
+  readonly unreachedFalse?: Changes;
+}
+
+/** The outcomes of a condition's opposite, as of `not`, `!=`, or `is not`. */
+function negatedBranches(branches: Branches): Branches {
+  return {
+    type: BOOLEAN_TYPE,
+    whenTrue: branches.whenFalse,
+    whenFalse: branches.whenTrue,
+    ...(branches.unreachedFalse === undefined ? {} : { unreachedTrue: branches.unreachedFalse }),
+    ...(branches.unreachedTrue === undefined ? {} : { unreachedFalse: branches.unreachedTrue }),
+  };
 }
 
 /**
@@ -645,7 +679,7 @@ class TypeChecker {
         if (!places.has(slot)) places.set(slot, { root, path });
     const observed = [...places.keys()].filter((slot) => slot.observed === true);
     const copied = [...places.keys()].filter((slot) => slot.copiedFrom !== undefined);
-    const deciding = decidingSlots([...observed, ...copied]);
+    const { deciding, unknown } = decidingSlots([...observed, ...copied]);
     // A decision that still leaves a part undecided, such as a list that holds itself, is not taken over: it would only
     // give the next check another part to decide.
     const settled = (decider: OpenType | null | undefined): decider is OpenType =>
@@ -654,12 +688,26 @@ class TypeChecker {
       !containsType(decider.resolved!, (part) => part.kind === "open");
     for (const slot of observed) {
       const decider = deciding.get(slot);
-      if (!settled(decider)) continue;
+      // Without a decision, a value the compiler cannot know that reached the slot is replayed instead: it decides
+      // nothing, but earlier reads then know that the slot may hold such a value.
+      const held = unknown.get(slot);
+      const decision: Decision | undefined = settled(decider)
+        ? { type: decider.resolved!, at: slot.resolvedAt ?? decider.resolvedAt! }
+        : held !== undefined && decider === null
+          ? { type: UNKNOWN_TYPE, at: held }
+          : undefined;
+      if (decision === undefined) continue;
       const place = places.get(slot)!;
       const paths = this.#decided.get(place.root) ?? new Map<string, Decision>();
       const key = place.path.join(".");
-      if (paths.has(key)) continue;
-      paths.set(key, { type: decider.resolved!, at: slot.resolvedAt ?? decider.resolvedAt! });
+      const recorded = paths.get(key);
+      // A decision recorded once is final; only a value the compiler cannot know may give way to a later decision.
+      if (
+        recorded !== undefined &&
+        (recorded.type.kind !== "unknown" || decision.type.kind === "unknown")
+      )
+        continue;
+      paths.set(key, decision);
       this.#decided.set(place.root, paths);
       this.decidedMore = true;
     }
@@ -1065,13 +1113,13 @@ class TypeChecker {
       case "ifStatement": {
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
         const start = this.#flow.mark();
-        this.#flow.apply(condition.whenTrue);
+        this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         const thenContinues = yield* compileChild(
           this.#pathTask(statement.thenBlock, scope, condition.whenTrue !== null),
         );
         const thenEnd = this.#flow.mark();
         this.#flow.restore(start);
-        this.#flow.apply(condition.whenFalse);
+        this.#flow.apply(condition.whenFalse ?? condition.unreachedFalse ?? null);
         const elseContinues =
           statement.elseBlock === null ||
           (yield* compileChild(
@@ -1202,7 +1250,7 @@ class TypeChecker {
         this.#widen(statement.body);
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
         const start = this.#flow.mark();
-        this.#flow.apply(condition.whenTrue);
+        this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         this.#loops.push({ start, breaks: [], continued: false });
         yield* compileChild(this.#pathTask(statement.body, scope, condition.whenTrue !== null));
         const { breaks } = this.#loops.pop()!;
@@ -3056,7 +3104,7 @@ class TypeChecker {
         if (node.operator !== "not") break;
         const operand = yield* compileChild(this.#branchTask(node.operand, scope));
         this.#requireBoolean(operand.type, node.operand, "'not' needs true or false (boolean)");
-        return { type: BOOLEAN_TYPE, whenTrue: operand.whenFalse, whenFalse: operand.whenTrue };
+        return negatedBranches(operand);
       }
       case "binaryExpression": {
         if (node.operator === "and" || node.operator === "or") {
@@ -3073,17 +3121,31 @@ class TypeChecker {
             reached && right.whenTrue !== null ? this.#flow.since(start, right.whenTrue) : null;
           const rightFalse =
             reached && right.whenFalse !== null ? this.#flow.since(start, right.whenFalse) : null;
+          // The outcome that only the right operand gives is not reached when either operand rules it out.
+          const unreached = (
+            leftOutcome: Changes | undefined,
+            rightOutcome: Changes | undefined,
+          ): Changes | undefined =>
+            !reached
+              ? leftOutcome
+              : rightOutcome === undefined
+                ? undefined
+                : this.#flow.since(start, rightOutcome);
+          const unreachedTrue = unreached(left.unreachedTrue, right.unreachedTrue);
+          const unreachedFalse = unreached(left.unreachedFalse, right.unreachedFalse);
           this.#flow.undo(start);
           return node.operator === "and"
             ? {
                 type: BOOLEAN_TYPE,
                 whenTrue: rightTrue,
                 whenFalse: this.#flow.join([left.whenFalse, rightFalse]),
+                ...(rightTrue === null && unreachedTrue !== undefined ? { unreachedTrue } : {}),
               }
             : {
                 type: BOOLEAN_TYPE,
                 whenTrue: this.#flow.join([left.whenTrue, rightTrue]),
                 whenFalse: rightFalse,
+                ...(rightFalse === null && unreachedFalse !== undefined ? { unreachedFalse } : {}),
               };
         }
         if (node.operator !== "==" && node.operator !== "!=") break;
@@ -3098,18 +3160,14 @@ class TypeChecker {
         const right = yield* compileChild(this.#expressionTask(node.right, scope));
         this.#warnImpossibleComparison(node, left, right);
         const tested = this.#narrowTest(nullTest, scope, NULL_TYPE, start);
-        return node.operator === "=="
-          ? tested
-          : { type: BOOLEAN_TYPE, whenTrue: tested.whenFalse, whenFalse: tested.whenTrue };
+        return node.operator === "==" ? tested : negatedBranches(tested);
       }
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expressionTask(node.value, scope));
         const test = this.#annotationType(node.type);
         this.#warnConstantTest(node, value, test);
         const tested = this.#narrowTest(node.value, scope, test, start);
-        return node.negated
-          ? { type: BOOLEAN_TYPE, whenTrue: tested.whenFalse, whenFalse: tested.whenTrue }
-          : tested;
+        return node.negated ? negatedBranches(tested) : tested;
       }
       default:
         break;
@@ -3131,16 +3189,14 @@ class TypeChecker {
     const passed = narrowTo(current, test);
     const failed = excludeType(current, test);
     // An outcome that no value of the variable can produce is not reached, such as the end of exhaustive tests.
+    const passes = this.#flow.since(start, new Map([[entry.variable, passed]]));
+    const fails = this.#flow.since(start, new Map([[entry.variable, failed]]));
     return {
       type: BOOLEAN_TYPE,
-      whenTrue:
-        passed.kind === "never"
-          ? null
-          : this.#flow.since(start, new Map([[entry.variable, passed]])),
-      whenFalse:
-        failed.kind === "never"
-          ? null
-          : this.#flow.since(start, new Map([[entry.variable, failed]])),
+      whenTrue: passed.kind === "never" ? null : passes,
+      whenFalse: failed.kind === "never" ? null : fails,
+      ...(passed.kind === "never" ? { unreachedTrue: passes } : {}),
+      ...(failed.kind === "never" ? { unreachedFalse: fails } : {}),
     };
   }
 
@@ -5037,8 +5093,7 @@ class TypeChecker {
     label: string,
     value: StaticType,
   ): void {
-    if (containsType(value, (part) => part.kind === "unknown"))
-      this.#runtimeChecks.push({ site, place, label });
+    if (mayBeUnknown(value)) this.#runtimeChecks.push({ site, place, label });
   }
 
   // Reports ----------------------------------------------------------------------------------------------------------

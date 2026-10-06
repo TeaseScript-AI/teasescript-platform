@@ -18,6 +18,24 @@ branches. Exact UI and source mapping remain presentation/tooling work.
   control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore. Debug mutations never merge
   back into the canonical session.
 
+## Player Debug
+
+The Standard Player's Debug panel is the first Debugger slice. Player Settings' **Debug menu** switch offers it in the
+tools menu; the switch is not stored, so every load starts with it off (the development preview's `?dev` starts it on).
+Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
+Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
+auto-skip and ends a jump at its next yield. The panel reserves a place for the saved-data overview and editor.
+
+- **Time controls** (Skip event, +10 s, +1 min, Auto-skip) advance the canonical session's own scene time through
+  ordinary observations ([`RUNTIME.md`](RUNTIME.md#timers-and-scene-time)). They are read-only inspection with
+  accelerated time, not an active-debug fork, and change no script semantics.
+- **Countdowns** show the deadline of the current foreground wait from canonical state: an authored `wait` (a blocking
+  `timer` stays a timer), a presented `showButton` with a timeout, or chat pacing while no other foreground action owns
+  progress or input. An action suspended behind a running timer, media, or permanent-button block does not count; that
+  block's own foreground work does. Seconds round up against the Player's display estimate of scene time. An elapsed
+  deadline whose action has not settled reads **Wait elapsed · waiting for script**; the line ends when its action
+  settles or loses the foreground, and does not show before Start or Continue or after the session ends.
+
 Debugger history may snapshot selected boundaries; this does not imply that production execution persists every internal
 instruction. Simulation is debugger tooling when execution uses disposable or test state, not an editor semantic.
 

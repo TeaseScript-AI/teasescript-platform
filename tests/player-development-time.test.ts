@@ -281,11 +281,14 @@ test("after a jump the device plays from the jumped playhead and measures on fro
 
 // The composable, loaded through the build tool like the Player loads it.
 interface DevelopmentTimeHost {
+  readonly autoSkip: Ref<boolean>;
   advanceBy(milliseconds: number): Promise<void>;
 }
 interface SessionHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   prepare(create: () => PlayerRuntimeSession): void;
+  prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
   loadScriptStorage(): Promise<void>;
@@ -297,6 +300,19 @@ let useDevelopmentTime: (
   initial: { autoSkip: boolean },
   log: (text: string) => void,
 ) => DevelopmentTimeHost;
+interface DebugHost {
+  readonly menu: Ref<boolean>;
+  readonly active: Ref<boolean>;
+  readonly log: Readonly<
+    Ref<{ readonly lines: Readonly<Ref<readonly { text: string }[]>> } | null>
+  >;
+  readonly time: Readonly<Ref<DevelopmentTimeHost | null>>;
+  readonly countdownText: Readonly<Ref<string | null>>;
+}
+let usePlayerDebug: (
+  player: SessionHost,
+  initial: { menu: boolean; autoSkip: boolean },
+) => DebugHost;
 
 before(async () => {
   const server = await createServer({
@@ -313,6 +329,12 @@ before(async () => {
     const time: Record<string, unknown> = await server.ssrLoadModule(
       "/player/vue/src/useDevelopmentTime.ts",
     );
+    const debug: Record<string, unknown> = await server.ssrLoadModule(
+      "/player/vue/src/usePlayerDebug.ts",
+    );
+    assert.equal(typeof debug.usePlayerDebug, "function");
+    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
+    usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
     assert.equal(typeof session.usePlayerSession, "function");
     assert.equal(typeof time.useDevelopmentTime, "function");
     // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their host API.
@@ -383,6 +405,7 @@ test("+10 s continues after the host stores a block's write, at the block's scen
       scope: "test",
       load: async () => [],
       write: async (key) => void writes.push(key),
+      replace: async () => {},
       clear: async () => {},
     },
   );
@@ -437,4 +460,76 @@ test("a long jump yields between tasks, and unmounting the Player stops it", asy
   const reachedMs = player.session.value!.snapshot.observedSessionTimeMs;
   assert.ok(reachedMs > fromMs && reachedMs < fromMs + 60_000, `${fromMs} → ${reachedMs}`);
   assert.equal(logged.length, 1, "the part that was jumped is logged");
+});
+
+async function mountDebug(
+  context: TestContext,
+  source: string,
+  initial: { menu: boolean; autoSkip: boolean },
+) {
+  stubBrowser(context);
+  const scope = effectScope();
+  const mounted = scope.run(() => {
+    const player = usePlayerSession({});
+    return { player, debug: usePlayerDebug(player, initial) };
+  });
+  assert.ok(mounted);
+  context.after(() => scope.stop());
+  mounted.player.prepare(() => createPlayerRuntimeSession(source));
+  await mounted.player.activate();
+  return mounted;
+}
+
+test("Debug off ends auto-skip and a running jump, and Debug on again starts with auto-skip off", async (context) => {
+  const { player, debug } = await mountDebug(
+    context,
+    'timer(duration: 1 ms, async: true, repeat: true) {\n  let x = 1\n}\nlet e = showButton "Done"\nexit',
+    { menu: true, autoSkip: true },
+  );
+  const timeNow = () => debug.time.value;
+  const time = timeNow();
+  assert.ok(time);
+  assert.equal(time.autoSkip.value, true);
+  const fromMs = player.session.value!.snapshot.observedSessionTimeMs;
+  setTimeout(() => (debug.active.value = false), 0);
+  await time.advanceBy(60_000);
+  const reachedMs = player.session.value!.snapshot.observedSessionTimeMs;
+  assert.ok(
+    reachedMs < fromMs + 60_000,
+    `the jump went on after Debug off: ${fromMs} → ${reachedMs}`,
+  );
+  assert.equal(timeNow(), null);
+  // The log stays while the menu is on, with the part that was jumped.
+  assert.equal(debug.log.value?.lines.value.length, 1);
+  debug.active.value = true;
+  assert.equal(timeNow()?.autoSkip.value, false);
+  // The menu off removes the log too; on again switches Debug on with an empty log.
+  debug.active.value = false;
+  debug.menu.value = false;
+  const logNow = () => debug.log.value;
+  assert.equal(logNow(), null);
+  debug.menu.value = true;
+  assert.equal(debug.active.value, true);
+  assert.deepEqual(logNow()?.lines.value, []);
+});
+
+test("a countdown shows while Debug runs, not before Continue, and follows display time", async (context) => {
+  const { player, debug } = await mountDebug(context, "wait 5 s\nexit", {
+    menu: false,
+    autoSkip: false,
+  });
+  assert.equal(debug.countdownText.value, null, "the Debug menu starts off");
+  debug.menu.value = true;
+  assert.equal(debug.countdownText.value, "Debug · Continues in 5 s");
+  player.update(observePlayerRuntimeTime(player.session.value!, 1_200).session);
+  assert.equal(debug.countdownText.value, "Debug · Continues in 4 s");
+  debug.active.value = false;
+  assert.equal(debug.countdownText.value, null);
+  debug.active.value = true;
+  // A restored session waits for Continue before its countdown shows.
+  player.prepareRestore(player.session.value!);
+  assert.equal(player.activation.value, "continue");
+  assert.equal(debug.countdownText.value, null);
+  await player.activate();
+  assert.equal(debug.countdownText.value, "Debug · Continues in 4 s");
 });

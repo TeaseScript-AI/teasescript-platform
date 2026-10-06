@@ -9,6 +9,7 @@ export interface PlayerTool {
 
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
+import Switch from "@/components/ui/switch/Switch.vue";
 import Sortable from "sortablejs";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
 import ToolPanelBody from "./ToolPanelBody.vue";
@@ -64,6 +65,8 @@ const props = defineProps<{
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
 const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
+// Testing: whether the tools menu offers the Debug panel. PlayerApp owns it; it is not a stored preference.
+const debugMenu = defineModel<boolean>("debugMenu", { required: true });
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = usePlayerPreference<LabelMode>("player-menu-label-mode", ["icons", "preview", "labels"], "icons");
 const hoverPreview = ref(false);
@@ -446,6 +449,32 @@ async function showToolMenu(event: MouseEvent) {
 }
 let pendingToolClose: { tool: Tool; timer: ReturnType<typeof setTimeout> } | null = null;
 let lastClosedTool: { tool: Tool; index: number; pinned: boolean } | null = null;
+// A tool the caller no longer supplies, such as Debug after the Debug menu is turned off, leaves every panel state and
+// unmounts its content. Focus inside its panel moves to the tools toggle.
+watch(
+  () => props.tools.map((tool) => tool.name),
+  async (names) => {
+    const removed = (tool: Tool) => !names.includes(tool);
+    const removedFocus = visitedTools.value.some(
+      (tool) =>
+        removed(tool) &&
+        !!toolContentTargets[tool]?.closest("[data-tool]")?.contains(document.activeElement),
+    );
+    if (pendingToolClose && removed(pendingToolClose.tool)) cancelPendingClose();
+    if (lastClosedTool && removed(lastClosedTool.tool)) lastClosedTool = null;
+    if (narrowTool.value !== null && removed(narrowTool.value)) {
+      narrowTool.value = null;
+      narrowMenuVisible.value = true;
+    }
+    if (temporaryTool.value !== null && removed(temporaryTool.value)) temporaryTool.value = null;
+    openTools.value = openTools.value.filter((tool) => !removed(tool));
+    pinnedTools.value = pinnedTools.value.filter((tool) => !removed(tool));
+    visitedTools.value = visitedTools.value.filter((tool) => !removed(tool));
+    if (!removedFocus) return;
+    await nextTick();
+    focusToolsToggle();
+  },
+);
 const toolStrip = ref<HTMLElement | null>(null);
 let revealRequest = 0;
 
@@ -869,6 +898,17 @@ async function updateSidebarVisibility(open: boolean) {
                         B · Auto-hide, controls right
                       </label>
                     </fieldset>
+                    <section class="grid gap-2 border-t pt-4 text-sm" data-player-setting="testing">
+                      <h3 class="font-medium">Testing</h3>
+                      <label class="flex min-h-11 items-center justify-between gap-4">
+                        Debug menu
+                        <Switch v-model="debugMenu" data-player-setting="debug-menu" />
+                      </label>
+                      <p class="text-muted-foreground">
+                        Adds the Debug panel to the tools menu until the page is reloaded. It shows how the script
+                        runs and may reveal what comes next.
+                      </p>
+                    </section>
                     <section
                       v-if="savedData"
                       class="grid gap-2 border-t pt-4 text-sm"

@@ -401,6 +401,41 @@ export function activePlayerRuntimePacingGate(
   return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
 }
 
+/** What a Debug countdown counts down to: a `wait`, a `showButton` timeout, or chat pacing. */
+export interface PlayerRuntimeDebugCountdown {
+  readonly kind: "wait" | "button" | "pacing";
+  readonly deadlineMs: number;
+}
+
+/**
+ * The deadline of the current foreground wait for Player Debug countdowns, from canonical state only: an authored
+ * `wait` (not a blocking `timer`, which lowers to the same delay), a presented `showButton` with a timeout, or chat
+ * pacing while no other foreground action owns progress or input. Suspended actions behind a running block never
+ * count; that block's own foreground work does. A countdown ends only when its action settles or loses the foreground.
+ */
+export function playerRuntimeDebugCountdown(
+  session: Pick<PlayerRuntimeSession, "plan" | "snapshot">,
+): PlayerRuntimeDebugCountdown | null {
+  const { snapshot } = session;
+  if (snapshot.status !== "running" && snapshot.status !== "waiting") return null;
+  const foreground = snapshot.foregroundAction;
+  let countdown: PlayerRuntimeDebugCountdown | null = null;
+  if (foreground === null) {
+    const gate = activePlayerRuntimePacingGate(snapshot);
+    if (gate !== null) countdown = { kind: "pacing", deadlineMs: gate.deadlineMs };
+  } else if (foreground.kind === "interaction") {
+    const deadlineMs = interactionDeadlineMs(foreground);
+    if (deadlineMs !== null) countdown = { kind: "button", deadlineMs };
+  } else if (foreground.kind === "delay") {
+    const owner = session.plan.instructions[foreground.owningInstruction];
+    if (owner?.kind === "wait" && owner.command === "wait")
+      countdown = { kind: "wait", deadlineMs: foreground.deadlineMs };
+  } else if (foreground.kind === "chatPacingGate") {
+    countdown = { kind: "pacing", deadlineMs: foreground.deadlineMs };
+  }
+  return countdown === null ? null : Object.freeze(countdown);
+}
+
 /** How the Player answers a pending `takePhoto()`. */
 export type PlayerCaptureAnswer =
   | { readonly kind: "captured"; readonly reference: string }
