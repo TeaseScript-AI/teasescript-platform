@@ -3921,34 +3921,52 @@ async function formFieldsScenario(cdp, origin) {
   await physicalClick(cdp, '[data-form-field="weight"]');
   await waitFor(cdp, `document.activeElement === ${composer}`);
   await cdp.call("Input.insertText", { text: "2.5" });
-  // Opening another field commits this one; the text typed for that one survives a block that interrupts the form.
+  const pressButton = (scope, text) =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(text)}).click()`,
+    );
+  const buttonShown = (scope, text) =>
+    `[...document.querySelectorAll(${JSON.stringify(scope)})].some((button) => button.textContent.trim() === ${JSON.stringify(text)})`;
+  const pressPermanentButton = async (text) => {
+    const id = await value(
+      cdp,
+      `[...document.querySelectorAll('[data-permanent-button]')].find((button) => button.textContent.trim() === ${JSON.stringify(text)})?.dataset.permanentButton`,
+    );
+    await physicalClick(cdp, `[data-permanent-button="${id}"]`);
+  };
+  // Opening another field commits this one; the text typed for that one survives a block that interrupts the form,
+  // also one that asks a form of its own.
   await physicalClick(cdp, '[data-form-field="name"]');
   await waitFor(cdp, `${composer}.value === "Ada" && document.activeElement === ${composer}`);
   await cdp.call("Input.insertText", { text: "Bea" });
   // Sooner than the form takes the text from the composer.
   await delay(100);
-  await physicalClick(cdp, "[data-permanent-button]");
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "Resume")`,
-  );
-  await evaluate(
-    cdp,
-    `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === "Resume").click()`,
-  );
+  await pressPermanentButton("Check");
+  await waitFor(cdp, `!!${field("ready")} && ${buttonShown("[data-form-actions] button", "OK")}`);
+  await pressButton("[data-form-actions] button", "OK");
   await waitFor(
     cdp,
     `!!${field("name")} && ${composer}.value === "Bea"`,
     8_000,
-    "The text being typed was lost after the interruption",
+    "The text being typed was lost after a block asked a form",
   );
-  await evaluate(
-    cdp,
-    `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
-  );
+  await evaluate(cdp, `${composer}.select()`);
+  await cdp.call("Input.insertText", { text: "Cy" });
+  await delay(100);
+  await pressPermanentButton("Pause");
+  await waitFor(cdp, buttonShown("button", "Resume"));
+  await pressButton("button", "Resume");
   await waitFor(
     cdp,
-    `document.body.innerText.includes("Impact 7, weight 2.5, Bea,")`,
+    `!!${field("name")} && ${composer}.value === "Cy"`,
+    8_000,
+    "The text being typed was lost after the interruption",
+  );
+  await pressButton("[data-form-actions] button", "Continue");
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Impact 7, weight 2.5, Cy,")`,
     15_000,
     "Submitting did not take the text being typed",
   );

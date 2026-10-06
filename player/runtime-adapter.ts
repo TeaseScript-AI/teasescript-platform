@@ -1106,14 +1106,37 @@ export function clearPlayerRuntimeFormField(
   return updatePlayerRuntimeForm(session, action, { kind: "clear", fieldId: editor.fieldId });
 }
 
-/** Keeps the form's draft equal to the composer's text, so a checkpoint or debug export holds what was typed. */
+/** The forms that can still be answered: the presented one and one that a running block suspended. */
+export function playerRuntimeFormActionIds(snapshot: RuntimeSnapshot): readonly number[] {
+  return [
+    snapshot.foregroundAction,
+    ...snapshot.callFrames.map((frame) =>
+      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
+    ),
+  ].flatMap((action) =>
+    action?.kind === "interaction" && action.ui.kind === "form" ? [action.actionId] : [],
+  );
+}
+
+/**
+ * Keeps the form's draft equal to the composer's text, so a checkpoint or debug export holds what was typed. The text
+ * belongs to one action's field: while another form or field is presented, such as one a block opened, nothing changes.
+ */
 export function draftPlayerRuntimeForm(
   session: PlayerRuntimeSession,
+  target: { readonly actionId: number; readonly fieldId: string },
   draft: string,
 ): FormControlResult | null {
   const action = activeInteraction(session.snapshot);
   const editor = action?.form?.editor ?? null;
-  if (action === null || editor === null || draft === editor.text) return null;
+  if (
+    action === null ||
+    editor === null ||
+    action.actionId !== target.actionId ||
+    editor.fieldId !== target.fieldId ||
+    draft === editor.text
+  )
+    return null;
   return updatePlayerRuntimeForm(session, action, {
     kind: "draft",
     fieldId: editor.fieldId,

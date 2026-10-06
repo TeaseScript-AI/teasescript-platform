@@ -15,6 +15,7 @@ import {
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
+  playerRuntimeFormActionIds,
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
@@ -91,27 +92,37 @@ const foreground = computed(() => {
 // A form's answers change with each edit, unlike the rest of its presentation.
 const form = computed(() => (props.session ? playerRuntimeForm(props.session) : null));
 /**
- * The composer's latest text for the field being edited, kept by its session, action, and field, so the form shows it
- * again when it resumes after a block interrupted it, also before the text reached the form.
+ * The composer's latest text for each field being edited, by action and field, for this session, so a form shows it
+ * again when it resumes after a block interrupted it, also before the text reached the form, and also when that block
+ * opened a form of its own.
  */
 let typed: {
   readonly plan: PlayerRuntimeSession["plan"];
   readonly reset: number;
-  readonly actionId: number;
-  readonly fieldId: string;
-  text: string;
+  readonly texts: Map<string, string>;
 } | null = null;
-function playerRuntimeFormEditorText(): string | undefined {
-  const editor = form.value?.editor;
-  if (editor == null) return undefined;
-  return typed !== null &&
-    typed.plan === props.session?.plan &&
-    typed.reset === props.reset &&
-    typed.actionId === form.value?.actionId &&
-    typed.fieldId === editor.fieldId
-    ? typed.text
-    : editor.text;
+function typedTexts(): Map<string, string> | null {
+  if (!props.session) return null;
+  if (typed?.plan !== props.session.plan || typed.reset !== props.reset)
+    typed = { plan: props.session.plan, reset: props.reset, texts: new Map() };
+  return typed.texts;
 }
+const typedKey = (actionId: number, fieldId: string) => `${actionId}:${fieldId}`;
+function playerRuntimeFormEditorText(): string | undefined {
+  const current = form.value;
+  if (!current?.editor) return undefined;
+  return typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text;
+}
+// Only the forms that can still be answered keep their text, so a script that asks again and again keeps no more.
+watch(
+  () => form.value?.actionId,
+  () => {
+    const texts = typedTexts();
+    if (!texts || !props.session) return;
+    const pending = new Set(playerRuntimeFormActionIds(props.session.snapshot));
+    for (const key of texts.keys()) if (!pending.has(Number(key.slice(0, key.indexOf(":"))))) texts.delete(key);
+  },
+);
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
@@ -196,9 +207,10 @@ watch(
       return;
     }
     if (previous === null) return;
-    // A closed field drops its typed text; a suspended form, which is not presented, keeps it for its return.
-    if (form.value === null) return;
-    typed = null;
+    // A closed field drops its typed text; a suspended form keeps it for its return, also while a block's form is
+    // presented.
+    if (!form.value) return;
+    typedTexts()?.delete(typedKey(form.value.actionId, previous));
     // The controls stay disabled until the edit that closed the field is published.
     if (submitting.value)
       await new Promise<void>((resolve) => {
@@ -219,18 +231,13 @@ let draftTimer: ReturnType<typeof setTimeout> | undefined;
 watch(draft, (text) => {
   clearTimeout(draftTimer);
   if (formEditor.value === null || !props.session || form.value === null) return;
-  typed = {
-    plan: props.session.plan,
-    reset: props.reset,
-    actionId: form.value.actionId,
-    fieldId: formEditor.value.fieldId,
-    text,
-  };
+  const target = { actionId: form.value.actionId, fieldId: formEditor.value.fieldId };
+  typedTexts()?.set(typedKey(target.actionId, target.fieldId), text);
   if (text === formEditor.value.text) return;
-  const fieldId = formEditor.value.fieldId;
   draftTimer = setTimeout(() => {
-    if (!props.session || submitting.value || formEditor.value?.fieldId !== fieldId) return;
-    const result = draftPlayerRuntimeForm(props.session, text);
+    if (!props.session || submitting.value) return;
+    // The text reaches only its own action's field; while another is presented it stays typed for the return.
+    const result = draftPlayerRuntimeForm(props.session, target, text);
     if (result?.outcome.kind === "updated") emit("update:session", result.session);
   }, 400);
 });

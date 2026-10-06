@@ -1052,7 +1052,14 @@ test("a typed form field opens in the composer, keeps its draft through a restor
     inputType: "text",
   });
   // The composer's text reaches the form before a checkpoint, and a restore shows it again.
-  const drafted = draftPlayerRuntimeForm(opened.session, "1")!;
+  const target = { actionId: playerRuntimeForm(opened.session)!.actionId, fieldId: "impact" };
+  // A draft for another action or field changes nothing.
+  assert.equal(
+    draftPlayerRuntimeForm(opened.session, { ...target, actionId: target.actionId + 1 }, "1"),
+    null,
+  );
+  assert.equal(draftPlayerRuntimeForm(opened.session, { ...target, fieldId: "day" }, "1"), null);
+  const drafted = draftPlayerRuntimeForm(opened.session, target, "1")!;
   assert.equal(drafted.outcome.kind, "updated");
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(drafted.session));
   assert.equal(playerRuntimeForm(restored)!.editor?.text, "1");
