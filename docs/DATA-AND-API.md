@@ -129,11 +129,22 @@ through the provider and then reports it to the runtime, which keeps the previou
 loading fails, for example because the browser denies storage, the session plays session-local and nothing is kept for
 a later run. Script storage is separate from checkpoint persistence (#469).
 
-The browser-local provider keeps one local-storage item per key, named `player-storage:` plus the JSON array
-`[scope, key]`, holding `{ v: 1, value }`; it validates items as external input and skips unreadable ones. Providers
-treat values as ordinary TeaseScript values and never interpret them, for example as media references; a layer such
-as durable captured media wraps a provider instead. Clearing a scope removes only that script's stored values.
-Storage quotas are not enforced yet; all writes pass through the provider, so quota policy can be added there.
+The browser-local provider keeps one local-storage item per key, holding `{ v: 1, value }`; it validates items as
+external input and skips unreadable ones. Items are named `player-storage:` plus the JSON array `[scope, key]` until
+the scope is first replaced or cleared. A provider can replace all values of its scope at once, and clearing is an
+empty replacement: the browser-local provider stages the new values as a generation, named
+`player-storage-generation:` plus `[scope, generation, key]`, then publishes it by writing the head item
+`player-storage-head:` plus the JSON scope, holding `{ v: 1, generation }`. From then on only that generation holds
+the scope's values, so a replacement that fails, for example on quota, keeps every previous value; an unreadable head
+makes the scope unreadable rather than revealing older values, until a replacement repairs it. Each operation runs
+synchronously within one browser task; after publishing, a replacement attempts to remove only the generation it
+displaced. Tabs are not coordinated: a save from another open tab of the same script can still change replaced values,
+or land in a displaced generation and be lost.
+Providers treat values as ordinary TeaseScript values and never interpret them, for example as media references; a
+layer such as durable captured media wraps a provider instead and stores the media that written or replacing values
+reference before persisting them. Clearing or replacing a scope affects only that script's stored values, never a
+running session's own view. Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
+can be added there.
 
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose

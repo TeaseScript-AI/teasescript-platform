@@ -127,6 +127,7 @@ test("Vue host writes each pending action once and continues only in a later tas
       writes.push({ key, value });
       return persistence.promise;
     },
+    replace: async () => {},
     clear: async () => {},
   });
   const pending = await start(host, 'save 1 as "first"\nsave 2 as "second"\nexit');
@@ -173,6 +174,7 @@ test("Vue host deduplicates by generation and ignores a replaced session's write
       writes.push({ key, value });
       return report.promise;
     },
+    replace: async () => {},
     clear: async () => {},
   });
   const original = await start(host, 'save 1 as "answer"\nexit');
@@ -204,6 +206,7 @@ test("Vue host reports rejected writes in a later task and preserves the previou
     scope: "test",
     load: async () => [{ key: "answer", value: "previous" }],
     write: () => persistence.promise,
+    replace: async () => {},
     clear: async () => {},
   });
   const pending = await start(
@@ -245,6 +248,7 @@ for (const settleBeforeDisposal of [false, true]) {
         writes++;
         return persistence.promise;
       },
+      replace: async () => {},
       clear: async () => {},
     });
     const pending = await start(host, 'save 1 as "answer"\nsave 2 as "next"\nexit');
@@ -274,6 +278,7 @@ test("Vue host reloads before each Start and falls back to session-local storage
     write: async () => {
       writes++;
     },
+    replace: async () => {},
     clear: async () => {},
   });
   const first = await start(host, 'let answer = load "answer"\nsay answer, instant\nexit');
@@ -321,6 +326,7 @@ test("Vue host clears once, and no Start begins until the clear settles", async 
     scope: "test",
     load: async () => [{ key: "answer", value: "old" }],
     write: async () => {},
+    replace: async () => {},
     clear: () => {
       clears++;
       return clearing.promise;
@@ -358,6 +364,7 @@ test("Vue host schedules no clock wake-ups while a pending write holds scene tim
     scope: "test",
     load: async () => [],
     write: () => persistence.promise,
+    replace: async () => {},
     clear: async () => {},
   });
   await start(
@@ -408,6 +415,7 @@ for (const [name, source, expected] of [
       scope: "test",
       load: async () => [],
       write: () => persistence.promise,
+      replace: async () => {},
       clear: async () => {},
     });
     await start(host, source);
@@ -434,7 +442,13 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   let resolved = 0;
   const { host } = createHost(
     context,
-    { scope: "test", load: async () => [], write: async () => {}, clear: async () => {} },
+    {
+      scope: "test",
+      load: async () => [],
+      write: async () => {},
+      replace: async () => {},
+      clear: async () => {},
+    },
     () => {
       resolved++;
       return account;
@@ -482,6 +496,7 @@ test("Vue host's Continue resumes a restored ready session within the activating
     scope: "test",
     load: async () => [],
     write: async () => {},
+    replace: async () => {},
     clear: async () => {},
   });
   const { plan } = compileSource('say "Resumed", instant\nexit');
@@ -515,6 +530,7 @@ test("Vue host scopes the write-failure notice to the run it happened in", async
       pendingWrites.push(write);
       return write.promise;
     },
+    replace: async () => {},
     clear: async () => {},
   });
   // A rejection reported after its session was replaced says nothing about the current run.
@@ -544,6 +560,7 @@ test("Vue host keeps a recovery notice until its condition resolves", async (con
     scope: "test",
     load: async () => [],
     write: async () => {},
+    replace: async () => {},
     clear: async () => {},
   });
   host.publishNotice({

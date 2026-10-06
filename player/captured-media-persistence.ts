@@ -27,16 +27,20 @@ export function capturedMediaReferences(value: SerializableRuntimeValue): Set<st
 
 /** A script-storage provider that keeps saved captured media durable; `drain` waits for issued work and stops it. */
 export interface CapturedMediaStorage extends ScriptStorageProvider {
+  /** Resolves once every operation issued so far finished; later operations still run. */
+  flush(): Promise<void>;
   /** Rejects later operations and resolves once every issued operation finished. */
   drain(): Promise<void>;
 }
 
 /**
- * Wraps the script-storage provider so saved captured media stays resolvable in later runs: every write first stores
- * the session media it references durably, then persists the value. When the media cannot be stored, the write is not
- * persisted at all, so no saved reference outlives its media: the write rejects with `CapturedMediaNotStoredError`, and
- * the host acknowledges the runtime's `storageWrite` as failed, which keeps the previous value. All operations run in issue order, so a clear cannot be refilled by an
- * earlier write of the same Player. Nothing is deleted here; unreferenced media is removed by `sweepCapturedMedia`.
+ * Wraps the script-storage provider so saved captured media stays resolvable in later runs: every write or replacement
+ * first stores the session media its values reference durably, then persists the values. When the media cannot be
+ * stored, nothing is persisted, so no saved reference outlives its media: the write rejects with
+ * `CapturedMediaNotStoredError`, and the host acknowledges the runtime's `storageWrite` as failed, which keeps the
+ * previous value; a replacement likewise keeps every previous value. All operations run in issue order, so a clear
+ * cannot be refilled by an earlier write of the same Player. Nothing is deleted here; unreferenced media is removed by
+ * `sweepCapturedMedia`.
  */
 export function withCapturedMedia(
   provider: ScriptStorageProvider,
@@ -58,7 +62,15 @@ export function withCapturedMedia(
         await media.promote(capturedMediaReferences(value));
         await provider.write(key, value);
       }),
+    replace: (entries) =>
+      enqueue(async () => {
+        for (const entry of entries) await media.promote(capturedMediaReferences(entry.value));
+        await provider.replace(entries);
+      }),
     clear: () => enqueue(() => provider.clear()),
+    async flush() {
+      await queue;
+    },
     async drain() {
       draining = true;
       await queue;
@@ -165,7 +177,9 @@ export function capturedMediaStorage(
     scope: provider.scope,
     load: async () => (await ready, storage.load()),
     write: async (key, value) => (await ready, storage.write(key, value)),
+    replace: async (entries) => (await ready, storage.replace(entries)),
     clear: async () => (await ready, storage.clear()),
+    flush: async () => (await ready, storage.flush()),
     drain: () => storage.drain(),
     async close() {
       await ready;
