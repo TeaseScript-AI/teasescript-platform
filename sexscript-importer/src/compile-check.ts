@@ -1,4 +1,5 @@
 import { isRecord } from "./ast.ts";
+import { repositoryBuildUrl } from "./repository-build.ts";
 
 export interface TeaseCompileDiagnostic {
   severity: string;
@@ -18,7 +19,7 @@ export interface TeaseCompileResult {
 /** `builtins` registers additional host function names, as the compiler's `builtins` option does. */
 export type TeaseCompiler = (source: string, builtins?: readonly string[]) => TeaseCompileResult;
 
-const repositoryCompilerUrl = new URL("../../dist/src/index.js", import.meta.url);
+const repositoryCompilerUrl = repositoryBuildUrl("src/index.js");
 
 /**
  * Loads the real TeaseScript compiler from the repository build.
@@ -84,10 +85,7 @@ export interface TeasePackageScan {
   problems: string[];
 }
 
-const repositoryPackageFolderUrl = new URL(
-  "../../dist/playground/package-folder.js",
-  import.meta.url,
-);
+const repositoryPackageFolderUrl = repositoryBuildUrl("playground/package-folder.js");
 
 /** Loads the playground server's package scan (`PackageFolder`) from the repository build. */
 export async function loadRepositoryPackageScanner(): Promise<

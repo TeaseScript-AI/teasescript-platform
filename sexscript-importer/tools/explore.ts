@@ -281,12 +281,13 @@ function withReplayCommands(result: ExploreResult, file: string) {
 
 /**
  * The compact view of a unit that the importer catalog shows in its own column: coverage by play, the coverable lines
- * by reach label, crashes (with how many need seeded state, and the first, a play one when there is), traps, completed
- * paths, why the search stopped, and what was explored with what.
+ * by reach label, crashes that play reaches (with the first) and how many more only seeded state reaches, traps,
+ * completed paths, why the search stopped, and what was explored with what.
  */
 function catalogBlock(header: ReportHeader, result: ExploreResult | null) {
-  const crashes = result?.crashes ?? [];
-  const first = crashes.find((crash) => !crash.seeded) ?? crashes[0];
+  // A crash that only seeded state reaches may need state no player makes, such as a value of another type.
+  const crashes = (result?.crashes ?? []).filter((crash) => !crash.seeded);
+  const first = crashes[0];
   const traps = result?.traps ?? [];
   return {
     compiled: result !== null,
@@ -294,7 +295,7 @@ function catalogBlock(header: ReportHeader, result: ExploreResult | null) {
     reach: result?.coverage.reach ?? null,
     crashes: {
       count: crashes.length,
-      seeded: crashes.filter((crash) => crash.seeded).length,
+      seeded: (result?.crashes ?? []).filter((crash) => crash.seeded).length,
       first:
         first === undefined
           ? null
@@ -434,7 +435,10 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     const reached = fields(directed.reached);
     const bySource = Object.entries(fields(directed.bySource))
       .filter(([, value]) => count(fields(value).targets) > 0)
-      .map(([kind, value]) => `${kind} ${count(fields(value).reached)}/${count(fields(value).targets)}`)
+      .map(
+        ([kind, value]) =>
+          `${kind} ${count(fields(value).reached)}/${count(fields(value).targets)}`,
+      )
       .join(", ");
     lines.push(
       `- Directed search: ${count(reached.play)} play and ${count(reached.seeded)} seeded of ` +

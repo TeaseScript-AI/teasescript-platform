@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
+import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
  * The session layer of the headless branch explorer: it runs a compiled TeaseScript project in the real runtime,
@@ -42,15 +43,14 @@ export interface Engine {
   project: (name: (typeof ENGINE_PROJECTIONS)[number], snapshot: Data) => Data[];
 }
 
-const repositoryIndexUrl = new URL("../../dist/src/index.js", import.meta.url);
+const repositoryIndexUrl = repositoryBuildUrl("src/index.js");
 
-/** Loads the runtime operations from the repository build (`npm run build:typescript`). */
+/** Loads the runtime operations from the repository build (`npm run build:typescript`, or `TEASESCRIPT_DIST`). */
 export async function loadEngine(): Promise<Engine> {
   const module: unknown = await import(repositoryIndexUrl.href);
   const exported = (name: string) => {
     const value = isRecord(module) ? module[name] : undefined;
-    if (typeof value !== "function")
-      throw new Error(`Repository build does not export ${name}().`);
+    if (typeof value !== "function") throw new Error(`Repository build does not export ${name}().`);
     return value;
   };
   const functions = new Map(
@@ -133,8 +133,8 @@ const EXPLORER_IMAGE = "explorer-image";
 /** The product's instruction budget per `run` (the runtime's default). */
 const INSTRUCTION_BUDGET = 1_000_000;
 /**
- * Instructions a step executes one by one, for coverage, without reaching one for the first time, before it finishes
- * with `run`: a long loop over known code is not recorded again instruction by instruction.
+ * Without the runtime's instruction trace: instructions an execution records one by one without reaching one for the
+ * first time, before it finishes with `run`, so that a long loop over known code is not stepped again.
  */
 const TRACE_PATIENCE = 200;
 /** How long the player thinks before pressing a timed button without a compared constant nearby. */
@@ -194,17 +194,19 @@ interface Execution {
 }
 
 /**
- * Records an execution instruction by instruction with `executeInstruction`; once {@link TRACE_PATIENCE}
- * instructions in a row were known (reached before, or earlier in this execution), it finishes with `run` and the rest
- * of the product's instruction budget, which keeps `TSR037` where the Player has it, and records nothing more. Every
- * operation copies and checks the whole snapshot, so this is what limits the speed on large packages.
- *
- * The runtime's instruction trace replaces this recorder through the same `execute`: one `run` with the trace option,
- * whose visited instructions and branch edges become {@link Execution.instructions} and {@link Execution.edges}.
+ * Records what an execution ran. With the runtime's instruction trace (`docs/RUNTIME.md#instruction-trace`) an
+ * execution is one `run` with `instructionTrace: true`, whose trace lists every instruction it executed, a failing one
+ * included, and the successor each condition, loop, transfer, and `end` took. A build without the trace ignores the
+ * option and returns no trace; then the recorder runs the execution again instruction by instruction with
+ * `executeInstruction` and keeps doing so. In that fallback, once {@link TRACE_PATIENCE} instructions in a row were
+ * known (reached before, or earlier in this execution), it finishes with `run` and records nothing more. Both keep the
+ * product's instruction budget per run, and so `TSR037` where the Player has it.
  */
-class StepRecorder {
-  /** Runs finished with `run`, without recording their instructions, after {@link TRACE_PATIENCE} known ones. */
+class Recorder {
+  /** Fallback runs finished with `run`, without recording their instructions, after {@link TRACE_PATIENCE} known ones. */
   untracedRuns = 0;
+  /** Whether the runtime returns an instruction trace; unknown until the first run. */
+  #traced: boolean | null = null;
   readonly #engine: Engine;
   readonly #plan: Data;
 
@@ -213,20 +215,51 @@ class StepRecorder {
     this.#plan = plan;
   }
 
-  /** An instruction boundary that only starts a queued timer, cue, or button block executes no instruction of its own. */
+  /** How executions are recorded: by the runtime's trace, or step by step without one. */
+  get recording(): "trace" | "steps" | null {
+    return this.#traced === null ? null : this.#traced ? "trace" : "steps";
+  }
+
   execute(start: Data, known: (index: number) => boolean): Execution {
+    if (!runnable(start)) return { snapshot: start, events: [], instructions: [], edges: [] };
+    if (this.#traced !== false) {
+      const result = this.#engine.call(
+        "run",
+        this.#plan,
+        start,
+        {},
+        { instructionBudget: INSTRUCTION_BUDGET, instructionTrace: true },
+      );
+      const trace = result.instructionTrace;
+      if (isRecord(trace)) {
+        this.#traced = true;
+        return {
+          snapshot: record(result.snapshot),
+          events: list(result.events),
+          instructions: Array.isArray(trace.instructions)
+            ? trace.instructions.filter((index): index is number => typeof index === "number")
+            : [],
+          edges: (Array.isArray(trace.branches) ? trace.branches : [])
+            .filter(
+              (edge): edge is [number, number] =>
+                Array.isArray(edge) && typeof edge[0] === "number" && typeof edge[1] === "number",
+            )
+            .map(([from, to]) => [from, to] as const),
+        };
+      }
+      this.#traced = false;
+    }
+    return this.#step(start, known);
+  }
+
+  /** An instruction boundary that only starts a queued timer, cue, or button block executes no instruction of its own. */
+  #step(start: Data, known: (index: number) => boolean): Execution {
     const events: Data[] = [];
     const executed = new Set<number>();
     const edges: (readonly [number, number])[] = [];
     let snapshot = start;
     let quiet = 0;
-    for (let steps = 0; ; ) {
-      // What `run` would find runnable; a waiting session runs only to start a queued block.
-      const runnable =
-        snapshot.status === "ready" ||
-        snapshot.status === "running" ||
-        (snapshot.status === "waiting" && list(snapshot.pendingTimerHandlers).length > 0);
-      if (!runnable) break;
+    for (let steps = 0; runnable(snapshot);) {
       if (quiet >= TRACE_PATIENCE) {
         this.untracedRuns += 1;
         const result = this.#engine.call(
@@ -243,7 +276,8 @@ class StepRecorder {
       const before = typeof snapshot.nextInstruction === "number" ? snapshot.nextInstruction : -1;
       const interrupts = interruptFrames(snapshot);
       const result = this.#engine.call("executeInstruction", this.#plan, snapshot, {});
-      const count = typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
+      const count =
+        typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
       // Nothing was runnable; `run` would not have executed this boundary, nor settled due work after it.
       if (count === 0 || !isRecord(result.snapshot)) break;
       const after = result.snapshot;
@@ -260,6 +294,15 @@ class StepRecorder {
     }
     return { snapshot, events, instructions: [...executed], edges };
   }
+}
+
+/** What `run` would find runnable: a waiting session runs only to start a queued block. */
+function runnable(snapshot: Data): boolean {
+  return (
+    snapshot.status === "ready" ||
+    snapshot.status === "running" ||
+    (snapshot.status === "waiting" && list(snapshot.pendingTimerHandlers).length > 0)
+  );
 }
 
 /**
@@ -281,7 +324,7 @@ export class Session {
   readonly #plan: Data;
   readonly #instructions: Data[];
   readonly #seed: number;
-  readonly #recorder: StepRecorder;
+  readonly #recorder: Recorder;
   /** Per instruction, the constants it compares with; computed at the first ask. */
   #literals: Literals[] | undefined;
 
@@ -290,7 +333,7 @@ export class Session {
     this.#plan = plan;
     this.#instructions = list(plan.instructions);
     this.#seed = seed;
-    this.#recorder = new StepRecorder(engine, plan);
+    this.#recorder = new Recorder(engine, plan);
     this.visited = new Uint8Array(this.#instructions.length);
     this.seededVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
@@ -299,6 +342,11 @@ export class Session {
 
   get untracedRuns(): number {
     return this.#recorder.untracedRuns;
+  }
+
+  /** How executions are recorded: by the runtime's instruction trace, or step by step on a build without it. */
+  get recording(): "trace" | "steps" | null {
+    return this.#recorder.recording;
   }
 
   /** A fresh session, run until the player is first asked; seeded unless `setup` is the play setup. */

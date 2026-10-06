@@ -71,9 +71,9 @@ const STORE_BYTES = 256 * 1024 * 1024;
 const OBSERVED_VALUES = 3;
 
 /** Wall clocks tried for a condition that reads the clock: times of day, weekdays, and later dates. */
-const CLOCK_VARIANTS = [
-  -11.5, -6, 6, 11.5, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400,
-].map((hours) => EPOCH_MS + hours * 3_600_000);
+const CLOCK_VARIANTS = [-11.5, -6, 6, 11.5, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400].map(
+  (hours) => EPOCH_MS + hours * 3_600_000,
+);
 
 type NodeStatus = "open" | "expanded" | "partial" | "completed" | "failed" | "stuck";
 
@@ -216,6 +216,9 @@ export interface ExploreResult {
      * of the explorer or the runtime, not of the package. `first` has the input list from the start that throws.
      */
     engineErrors: { count: number; first: { message: string; inputs: ExplorerInput[] } | null };
+    /** How executions were recorded: `trace` by the runtime's instruction trace, `steps` on a build without it. */
+    recording: "trace" | "steps" | null;
+    /** With `steps`: runs whose rest went unrecorded after a long stretch of known instructions. */
     untracedRuns: number;
     stoppedBy: "exhausted" | "budget" | "maxStates";
     elapsedMs: number;
@@ -307,7 +310,7 @@ class Frontier {
   push(node: number, rank: readonly number[]): void {
     const items = this.#items;
     items.push({ node, rank });
-    for (let index = items.length - 1; index > 0; ) {
+    for (let index = items.length - 1; index > 0;) {
       const parent = (index - 1) >> 1;
       if (!before(items[index]!.rank, items[parent]!.rank)) break;
       [items[index], items[parent]] = [items[parent]!, items[index]!];
@@ -321,7 +324,7 @@ class Frontier {
     const last = items.pop();
     if (top === undefined || last === undefined || items.length === 0) return top?.node;
     items[0] = last;
-    for (let index = 0; ; ) {
+    for (let index = 0; ;) {
       const left = index * 2 + 1;
       const right = left + 1;
       let best = index;
@@ -409,7 +412,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const setups: Setup[] = [PLAY_SETUP];
   const witnesses = new Map<number, Witness>();
   const targets = new Map<number, Target>();
-  const attempts: Attempt[] = [];
+  // Attempts that can reach a way by play (answers) go before seeded ones.
+  const playAttempts: Attempt[] = [];
+  const seededAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
   /** Waiting states by the ask instruction they wait at, a few each. */
   const askNodes = new Map<number, number[]>();
@@ -441,7 +446,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const seeded = (parent?.seeded ?? setup !== 0) || (input !== null && isSeeding(input));
     for (const way of step.ways) {
       const instruction = way >> 1;
-      if (!witnesses.has(instruction)) witnesses.set(instruction, { node: parent?.id ?? null, input });
+      if (!witnesses.has(instruction))
+        witnesses.set(instruction, { node: parent?.id ?? null, input });
       const target = targets.get(way);
       if (target === undefined) continue;
       const label = seeded ? "seeded" : "play";
@@ -452,7 +458,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         (known.label === "seeded" && label === "play") ||
         (known.label === label && repro.inputs.length < known.repro.inputs.length)
       )
-        target.reach = { label, via: directed > 0 || (parent?.directed ?? 0) > 0 ? "directed" : "search", repro };
+        target.reach = {
+          label,
+          via: directed > 0 || (parent?.directed ?? 0) > 0 ? "directed" : "search",
+          repro,
+        };
     }
     const keys = stateKeys(step.snapshot);
     const known = byState.get(keys.state);
@@ -490,8 +500,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         askNodes.set(ask, waiting);
       }
       const repeats = loopSeen.get(keys.loop) ?? 0;
-      const tier =
-        node.directed > 0 ? -1 : step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2;
+      const tier = node.directed > 0 ? -1 : step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2;
       frontier.push(node.id, [tier, seeded ? 1 : 0, repeats, -node.id]);
     }
     loopSeen.set(keys.loop, (loopSeen.get(keys.loop) ?? 0) + 1);
@@ -632,12 +641,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const add = (attempt: Attempt) => {
       if (plan.length < MAX_ATTEMPTS) plan.push(attempt);
     };
-    const witnessNode = witness?.node === null || witness === undefined ? null : nodes[witness.node]!;
+    const witnessNode =
+      witness?.node === null || witness === undefined ? null : nodes[witness.node]!;
     const fullPath = (): ExplorerInput[] => {
       const inputs = witnessNode === null ? [] : pathTo(nodes, witnessNode);
       if (witness?.input != null) inputs.push(witness.input);
       return inputs;
     };
+    const replayable = fullPath().length <= MAX_SUFFIX;
     for (const goal of target.goals) {
       const source = goal.source;
       if (source.kind === "ask") {
@@ -676,13 +687,19 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           for (const value of storedCandidates(goal.candidates, observed.get(key))) {
             const seed: ExplorerInput = { kind: "storage", key, value };
             if (witnessNode !== null && witness?.input != null)
-              add({ target: code, from: witnessNode.id, setup: null, inputs: [seed, witness.input] });
-            add({
-              target: code,
-              from: null,
-              setup: { storage: value === null ? [] : [{ key, value }], wallClockMs: EPOCH_MS },
-              inputs: fullPath(),
-            });
+              add({
+                target: code,
+                from: witnessNode.id,
+                setup: null,
+                inputs: [seed, witness.input],
+              });
+            if (replayable)
+              add({
+                target: code,
+                from: null,
+                setup: { storage: value === null ? [] : [{ key, value }], wallClockMs: EPOCH_MS },
+                inputs: fullPath(),
+              });
           }
         }
       } else if (source.kind === "clock") {
@@ -694,7 +711,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
               setup: null,
               inputs: [{ kind: "clock", wallClockMs }, witness.input],
             });
-          else add({ target: code, from: null, setup: { storage: [], wallClockMs }, inputs: fullPath() });
+          else if (replayable)
+            add({
+              target: code,
+              from: null,
+              setup: { storage: [], wallClockMs },
+              inputs: fullPath(),
+            });
         }
       } else if (goal.comparison !== null && distanceTargets.length < MAX_DISTANCE_TARGETS) {
         distanceTargets.push({
@@ -706,7 +729,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
     }
     target.attempts = plan.length;
-    attempts.push(...plan);
+    for (const attempt of plan)
+      (attempt.setup === null && !attempt.inputs.some(isSeeding)
+        ? playAttempts
+        : seededAttempts
+      ).push(attempt);
     return plan.length > 0;
   };
 
@@ -730,8 +757,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       analyze();
     }
     // Directed attempts and the rest of the search take turns, by steps.
-    if (attempts.length > 0 && (frontier.size === 0 || directedTransitions <= transitions - directedTransitions)) {
-      runAttempt(attempts.shift()!);
+    const pending = playAttempts.length > 0 ? playAttempts : seededAttempts;
+    if (
+      pending.length > 0 &&
+      (frontier.size === 0 || directedTransitions <= transitions - directedTransitions)
+    ) {
+      runAttempt(pending.shift()!);
       continue;
     }
     if (frontier.size === 0) {
@@ -771,7 +802,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
 
   const unreachable = unreachableInstructions(plan, instructions, constants);
-  const coverage = lineCoverage(instructions, files, session, options.sources, unreachable, constants, targets);
+  const coverage = lineCoverage(
+    instructions,
+    files,
+    session,
+    options.sources,
+    unreachable,
+    constants,
+    targets,
+  );
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
   return {
     search: {
@@ -780,6 +819,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       expanded,
       rejectedInputs,
       engineErrors,
+      recording: session.recording,
       untracedRuns: session.untracedRuns,
       stoppedBy,
       elapsedMs: Math.round(performance.now() - started),
@@ -792,7 +832,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       open: count("open") + count("partial"),
     },
     coverage,
-    directed: directedSummary(instructions, files, options.sources, targets, attemptCount, directedTransitions),
+    directed: directedSummary(
+      instructions,
+      files,
+      options.sources,
+      targets,
+      attemptCount,
+      directedTransitions,
+    ),
     crashes: [...crashes.values()],
     traps: findTraps(nodes, instructions, files, setups),
   };
@@ -813,7 +860,7 @@ function storedCandidates(
 
 function ancestry(nodes: readonly Node[], node: Node): Node[] {
   const chain: Node[] = [];
-  for (let current: Node | undefined = node; current !== undefined; ) {
+  for (let current: Node | undefined = node; current !== undefined;) {
     chain.push(current);
     current = current.parent === null ? undefined : nodes[current.parent];
   }
@@ -826,7 +873,12 @@ function pathTo(nodes: readonly Node[], node: Node): ExplorerInput[] {
     .filter((input): input is ExplorerInput => input !== null);
 }
 
-function recordCrash(crashes: Map<string, CrashReport>, step: Step, node: Node, repro: Repro): void {
+function recordCrash(
+  crashes: Map<string, CrashReport>,
+  step: Step,
+  node: Node,
+  repro: Repro,
+): void {
   const failure = failureOf(step.snapshot);
   const key = `${failure.code}@${failure.path}:${failure.line}:${failure.column}-${failure.endLine}:${failure.endColumn}`;
   const known = crashes.get(key);
@@ -886,7 +938,13 @@ export function instructionFiles(plan: Data): string[] {
 }
 
 /** Instructions that only open or close a block, which a way's first line should skip. */
-const STRUCTURAL = new Set(["enterScope", "leaveScope", "clearTemporary", "clearTemporaries", "jump"]);
+const STRUCTURAL = new Set([
+  "enterScope",
+  "leaveScope",
+  "clearTemporary",
+  "clearTemporaries",
+  "jump",
+]);
 
 /** The first instruction at or after `index` that is not structural, within a few steps. */
 function firstStatement(instructions: readonly Data[], index: number): number {
@@ -897,7 +955,13 @@ function firstStatement(instructions: readonly Data[], index: number): number {
 }
 
 function wayName(instruction: Data, way: number): "true" | "false" | "enter" | "exit" {
-  return instruction.kind === "jumpIfFalse" ? (way === 0 ? "true" : "false") : way === 0 ? "enter" : "exit";
+  return instruction.kind === "jumpIfFalse"
+    ? way === 0
+      ? "true"
+      : "false"
+    : way === 0
+      ? "enter"
+      : "exit";
 }
 
 function sourceKinds(goals: readonly Goal[]): SourceKind[] {
@@ -933,7 +997,10 @@ function lineCoverage(
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
   instructions.forEach((_, index) => {
-    if (unreachable[index] === 1 && (session.visited[index] === 1 || session.seededVisited[index] === 1))
+    if (
+      unreachable[index] === 1 &&
+      (session.visited[index] === 1 || session.seededVisited[index] === 1)
+    )
       contradictions += 1;
   });
   const claims = contradictions === 0;
@@ -1243,7 +1310,7 @@ function stronglyConnected(
         low.set(parent.vertex, Math.min(low.get(parent.vertex)!, low.get(frame.vertex)!));
       if (low.get(frame.vertex) === index.get(frame.vertex)) {
         const component: string[] = [];
-        for (let vertex: string | undefined; vertex !== frame.vertex; ) {
+        for (let vertex: string | undefined; vertex !== frame.vertex;) {
           vertex = stack.pop()!;
           onStack.delete(vertex);
           component.push(vertex);

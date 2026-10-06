@@ -19,7 +19,9 @@ async function fixture(engine: Engine) {
   });
   const { plan } = compiled;
   assert.ok(isRecord(plan));
-  const diagnostics: PlanDiagnostic[] = (Array.isArray(compiled.diagnostics) ? compiled.diagnostics : [])
+  const diagnostics: PlanDiagnostic[] = (
+    Array.isArray(compiled.diagnostics) ? compiled.diagnostics : []
+  )
     .filter(isRecord)
     .map((entry) => {
       const span = isRecord(entry.span) ? entry.span : {};
@@ -59,7 +61,10 @@ test(
     // One crash per code and span, with the path that reaches it; replaying the path fails the same way.
     assert.equal(result.crashes.length, 1);
     const crash = result.crashes[0]!;
-    assert.deepEqual([crash.code, crash.path, crash.line, crash.seeded], ["TSR025", "main.tease", 12, false]);
+    assert.deepEqual(
+      [crash.code, crash.path, crash.line, crash.seeded],
+      ["TSR025", "main.tease", 12, false],
+    );
     assert.deepEqual(crash.inputs, [{ kind: "option", index: 1, label: "Right" }]);
     const replayed = replay(engine, plan, 1, crash.inputs);
     assert.deepEqual(
@@ -78,18 +83,26 @@ test(
     // Directed search answers the ask with the compared number, far from the ask: reached by play.
     const ways = result.directed.ways;
     const secret = ways.find((way) => way.line === 76);
-    assert.deepEqual(
-      secret && [secret.way, secret.reach, secret.via, secret.sources],
-      ["true", "play", "directed", ["ask"]],
-    );
+    assert.deepEqual(secret && [secret.way, secret.reach, secret.via, secret.sources], [
+      "true",
+      "play",
+      "directed",
+      ["ask"],
+    ]);
     assert.ok(secret?.repro.inputs.some((input) => input.kind === "text" && input.text === "1234"));
     // A value only an earlier session could have stored: reached with seeded storage, and its repro replays there.
     const back = ways.find((way) => way.line === 79);
-    assert.deepEqual(
-      back && [back.way, back.reach, back.via, back.sources],
-      ["true", "seeded", "directed", ["storage"]],
+    assert.deepEqual(back && [back.way, back.reach, back.via, back.sources], [
+      "true",
+      "seeded",
+      "directed",
+      ["storage"],
+    ]);
+    assert.ok(
+      back?.repro.inputs.some(
+        (input) => input.kind === "storage" && input.key === "fixture.visited",
+      ),
     );
-    assert.ok(back?.repro.inputs.some((input) => input.kind === "storage" && input.key === "fixture.visited"));
     const seededReplay = replay(engine, plan, 1, back?.repro.inputs ?? [], back?.repro.setup);
     assert.equal(seededReplay.steps.at(-1)?.status, "halted");
     assert.ok(seededReplay.steps.some((step) => step.texts.includes("Welcome back.")));
@@ -101,7 +114,10 @@ test(
         const [from = 0, to = from] = range.lines.split("-").map(Number);
         return line >= from && line <= to;
       })?.reach ?? "play";
-    assert.deepEqual([labelOf(77), labelOf(80), labelOf(8), labelOf(4)], ["play", "seeded", "unreachable", "play"]);
+    assert.deepEqual(
+      [labelOf(77), labelOf(80), labelOf(8), labelOf(4)],
+      ["play", "seeded", "unreachable", "play"],
+    );
     assert.equal(result.coverage.staticContradictions, 0);
     const never = result.coverage.unvisitedBranches.find((entry) => entry.line === 7);
     assert.deepEqual(never && [never.missed, never.reach], ["true", "unreachable"]);

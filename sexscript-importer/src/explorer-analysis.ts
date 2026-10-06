@@ -42,7 +42,11 @@ function destinationTargets(destination: unknown, plan: Data): unknown[] {
  * entries of the timer, cue, and button blocks an instruction sets up. Interactions continue after their answer;
  * `exit` continues nowhere.
  */
-function successors(plan: Data, instructions: readonly Data[], dead: ReadonlyMap<number, boolean>): number[][] {
+function successors(
+  plan: Data,
+  instructions: readonly Data[],
+  dead: ReadonlyMap<number, boolean>,
+): number[][] {
   const functions = list(plan.functions);
   const entry = (id: unknown) => functions[Number(id) - 1]?.entryInstruction;
   const functionOf = new Map<number, number>();
@@ -76,7 +80,9 @@ function successors(plan: Data, instructions: readonly Data[], dead: ReadonlyMap
       case "loopStart":
         // A constant condition takes only one way: `true` continues with the next instruction.
         return numbers(
-          constant === undefined ? [index + 1, instruction.target] : [constant ? index + 1 : instruction.target],
+          constant === undefined
+            ? [index + 1, instruction.target]
+            : [constant ? index + 1 : instruction.target],
         );
       case "exit":
         return [];
@@ -141,7 +147,8 @@ export function constantConditions(
       : /always false\.?$/u.test(diagnostic.message)
         ? false
         : null;
-    if (value !== null) proven.set(`${diagnostic.path}:${diagnostic.start}:${diagnostic.end}`, value);
+    if (value !== null)
+      proven.set(`${diagnostic.path}:${diagnostic.start}:${diagnostic.end}`, value);
   }
   const constants = new Map<number, boolean>();
   instructions.forEach((instruction, index) => {
@@ -153,7 +160,8 @@ export function constantConditions(
       return;
     }
     const span = offsets(condition.span);
-    const value = span === null ? undefined : proven.get(`${files[index]}:${span.start}:${span.end}`);
+    const value =
+      span === null ? undefined : proven.get(`${files[index]}:${span.start}:${span.end}`);
     if (value !== undefined) constants.set(index, value);
   });
   return constants;
@@ -240,7 +248,9 @@ function keyText(expression: unknown): string | null {
   const value = record(expression);
   if (value.kind !== "template") return null;
   return list(value.parts)
-    .map((part) => (part.kind === "text" && typeof part.value === "string" ? part.value : KEY_PLACEHOLDER))
+    .map((part) =>
+      part.kind === "text" && typeof part.value === "string" ? part.value : KEY_PLACEHOLDER,
+    )
     .join("");
 }
 
@@ -276,7 +286,11 @@ export class DataFlow {
         functionOf.set(index, Number(definition.id));
     }
     instructions.forEach((instruction, index) => {
-      if (instruction.kind !== "interaction" || typeof instruction.destinationTemporary !== "number") return;
+      if (
+        instruction.kind !== "interaction" ||
+        typeof instruction.destinationTemporary !== "number"
+      )
+        return;
       const ui = record(instruction.ui);
       if (ui.kind === "text" || ui.kind === "number" || ui.kind === "temporal")
         this.#typedAsks.add(index);
@@ -289,8 +303,10 @@ export class DataFlow {
         switch (instruction.kind) {
           case "storeTemporary":
             changed =
-              merge(this.#temporary(Number(instruction.temporaryId)), this.flowOf(instruction.value)) ||
-              changed;
+              merge(
+                this.#temporary(Number(instruction.temporaryId)),
+                this.flowOf(instruction.value),
+              ) || changed;
             break;
           case "callFunction":
             if (typeof instruction.destinationTemporary === "number")
@@ -309,12 +325,14 @@ export class DataFlow {
           case "declareBinding":
           case "declareGlobal":
             if (typeof instruction.name === "string")
-              changed = merge(this.#variable(instruction.name), this.flowOf(instruction.value)) || changed;
+              changed =
+                merge(this.#variable(instruction.name), this.flowOf(instruction.value)) || changed;
             break;
           case "assign": {
             const name = targetName(instruction.target);
             if (name === null) break;
-            if (round === 0 && this.#addsToItself(name, instruction.value)) this.#counters.add(name);
+            if (round === 0 && this.#addsToItself(name, instruction.value))
+              this.#counters.add(name);
             changed = merge(this.#variable(name), this.flowOf(instruction.value)) || changed;
             break;
           }
@@ -355,7 +373,8 @@ export class DataFlow {
       } else if (value.kind === "call" && CLOCK_GETTERS.has(calleeName(value) ?? "")) {
         flow.clock = true;
       }
-      for (const [key, item] of Object.entries(value)) if (key !== "span" && key !== "typeCheck") walk(item);
+      for (const [key, item] of Object.entries(value))
+        if (key !== "span" && key !== "typeCheck") walk(item);
     };
     walk(expression);
     return flow;
@@ -365,7 +384,9 @@ export class DataFlow {
   sourcesOf(expression: unknown): Source[] {
     const flow = this.flowOf(expression);
     const sources: Source[] = [
-      ...[...flow.asks].filter((ask) => this.#typedAsks.has(ask)).map((instruction) => ({ kind: "ask" as const, instruction })),
+      ...[...flow.asks]
+        .filter((ask) => this.#typedAsks.has(ask))
+        .map((instruction) => ({ kind: "ask" as const, instruction })),
       ...[...flow.keys].map((key) => ({ kind: "storage" as const, key })),
       ...(flow.clock ? [{ kind: "clock" as const }] : []),
     ];
@@ -381,7 +402,8 @@ export class DataFlow {
     // A variable is a source of its own when the code assigns it: it counts, or no ask, key, or clock reaches it.
     for (const name of names) {
       const known = this.#variables.get(name);
-      const external = known !== undefined && (known.asks.size > 0 || known.keys.size > 0 || known.clock);
+      const external =
+        known !== undefined && (known.asks.size > 0 || known.keys.size > 0 || known.clock);
       const counter = this.#counters.has(name);
       if (counter || !external) sources.push({ kind: "variable", name, counter });
     }
@@ -390,9 +412,14 @@ export class DataFlow {
 
   #addsToItself(name: string, value: unknown): boolean {
     const expression = record(value);
-    if (expression.kind !== "binary" || (expression.operator !== "+" && expression.operator !== "-"))
+    if (
+      expression.kind !== "binary" ||
+      (expression.operator !== "+" && expression.operator !== "-")
+    )
       return false;
-    return [expression.left, expression.right].some((side) => record(side).kind === "identifier" && record(side).name === name);
+    return [expression.left, expression.right].some(
+      (side) => record(side).kind === "identifier" && record(side).name === name,
+    );
   }
 
   #variable(name: string): Flow {
@@ -431,7 +458,14 @@ interface Atom {
   readonly wanted: boolean;
 }
 
-const FLIP: Readonly<Record<string, string>> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!=" };
+const FLIP: Readonly<Record<string, string>> = {
+  "<": ">",
+  "<=": ">=",
+  ">": "<",
+  ">=": "<=",
+  "==": "==",
+  "!=": "!=",
+};
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
 
 /**
@@ -449,15 +483,34 @@ function atomsFor(expression: unknown, wanted: boolean): Atom[] {
     const right = record(value.right);
     const constant = (side: Data) =>
       side.kind === "literal" &&
-      (typeof side.value === "string" || typeof side.value === "number" || typeof side.value === "boolean" || side.value === null);
+      (typeof side.value === "string" ||
+        typeof side.value === "number" ||
+        typeof side.value === "boolean" ||
+        side.value === null);
     if (constant(right))
-      return [{ subject: value.left, operator: value.operator, constant: toConstant(right.value), wanted }];
+      return [
+        {
+          subject: value.left,
+          operator: value.operator,
+          constant: toConstant(right.value),
+          wanted,
+        },
+      ];
     if (constant(left))
-      return [{ subject: value.right, operator: FLIP[value.operator]!, constant: toConstant(left.value), wanted }];
+      return [
+        {
+          subject: value.right,
+          operator: FLIP[value.operator]!,
+          constant: toConstant(left.value),
+          wanted,
+        },
+      ];
     return [];
   }
   if (value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "")) {
-    const text = list(value.arguments).map((argument) => literalText(argument.value)).find((item) => item !== null);
+    const text = list(value.arguments)
+      .map((argument) => literalText(argument.value))
+      .find((item) => item !== null);
     const object = record(value.callee).object;
     return text === undefined || text === null || object === undefined
       ? []
@@ -469,7 +522,9 @@ function atomsFor(expression: unknown, wanted: boolean): Atom[] {
 }
 
 function toConstant(value: unknown): string | number | boolean | null {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null;
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? value
+    : null;
 }
 
 /** Values of `subject` that make `subject operator constant` come out `wanted`. */
@@ -504,7 +559,9 @@ function solve(atom: Atom): Candidate[] {
 }
 
 function negate(operator: string): string {
-  return { "==": "!=", "!=": "==", "<": ">=", "<=": ">", ">": "<=", ">=": "<" }[operator] ?? operator;
+  return (
+    { "==": "!=", "!=": "==", "<": ">=", "<=": ">", ">": "<=", ">=": "<" }[operator] ?? operator
+  );
 }
 
 /** What a missed way of a condition depends on, with the values that may take it. */
@@ -532,7 +589,11 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
         source.kind === "ask"
           ? values
               .filter((value) => typeof value !== "object")
-              .map((value) => (lengthOf && typeof value === "number" ? "x".repeat(Math.max(1, Math.min(value, 200))) : String(value)))
+              .map((value) =>
+                lengthOf && typeof value === "number"
+                  ? "x".repeat(Math.max(1, Math.min(value, 200)))
+                  : String(value),
+              )
           : values;
       // Closeness is measured only where the comparison reads the variable itself.
       const comparison =
@@ -553,7 +614,8 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     const known = goals.some(
       (goal) =>
         goal.source.kind === source.kind &&
-        (source.kind === "clock" || (goal.source.kind === "storage" && goal.source.key === source.key)),
+        (source.kind === "clock" ||
+          (goal.source.kind === "storage" && goal.source.key === source.key)),
     );
     if (!known) goals.push({ source, candidates: [], comparison: null });
   }
@@ -566,7 +628,9 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
  */
 export function concreteKeys(pattern: string, observed: Iterable<string>): string[] {
   if (!pattern.includes(KEY_PLACEHOLDER)) return [pattern];
-  const parts = pattern.split(KEY_PLACEHOLDER).map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
+  const parts = pattern
+    .split(KEY_PLACEHOLDER)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
   const matcher = new RegExp(`^${parts.join(".*")}$`, "u");
   const matching = [...observed].filter((key) => matcher.test(key));
   if (matching.length > 0) return matching.slice(0, 3);
