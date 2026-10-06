@@ -65,6 +65,8 @@ implemented):
 | `getSelectedValue(text, [...])` | `say text` plus `choose 0: ..., 1: ...` (numeric values return the index) |
 | `getSelectedValue(text, ["Back"] + list)` | `say text` plus `choose 0: "Back", sexscriptLegacyMenuOptions(list, 1)`, whose `{ value, text }` choice objects return the index (PR #515) |
 | `getBoolean(text, yes, no)` | `say text` plus `(choose yes: ..., no: ...) == "yes"` |
+| a settings run: `x = getBoolean(text, "on", "off")` or `n = getInteger(text, n)`, each followed by `save(key, x)`, two or more in a row | one `askForm` (#661) with a toggle (its options the two labels) or an integer field per ask, the ask's text as the field's description and the variable's value as its start; then each variable takes its answer and is saved as before (`SX_SETTINGS_FORM`, counted as `forms.sequences`) |
+| a settings menu: `while (flag) { switch (getSelectedValue(text, [labels])) { ... } }` whose cases each toggle one variable (`v = !v`), one leaves (sets the flag false, or the default) and at most one resets the toggles to constants | one `askForm` of toggles with the menu text as its question and the leave label as its submit button; a reset is a choice before the form, since it sets fixed values rather than the form's starting values (`SX_MENU_FORM`, counted as `forms.menus`). Other menus, such as ChastityRoulette's limits with their -1 "not set" values and a text ask for a fraction, stay loops |
 | `getString` / `getFloat` / `getInteger` with a default | `say text` plus `askText default: value` / `askNumber default: value` / `askInteger default: value` (#548) |
 | `Calendar.getInstance().get(Calendar.HOUR_OF_DAY)` and other fields | `getDateTime().hour`, with month and weekday-number conversions |
 | `getTime()` (Unix seconds) | `getTimestamp().toSeconds()`, a fixed moment (#532) |
@@ -101,6 +103,7 @@ implemented):
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
 | `x = loadInteger(k)` followed by `if (x == null) x = d`, also further down a settings block where the code between neither uses `x`, nor calls script code, nor leaves the block | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`, and the online `receive*` reads) |
 | `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
+| `loadBoolean(k)` of a key under which the package saves a number or a text (legacy read it as text, true only for "true") | a helper that reads the stored value the same way, a missing one as false, with a note (`SX_LOAD_BOOLEAN_TEXT`); keys match by shape, so `"p" + i + ".chosen"` matches a save under `"p" + 1 + ".chosen"` |
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
@@ -656,7 +659,6 @@ may be null, no property of null, null indexed, combined, or compared.
 - worstpicture (8): numbers added to a text list.
 
 **Script-specific, deferred** (left as they are until an owner or coordinator decision):
-- SpankingParty: null implements when the player owns fewer than six toys (see the failed runs).
 - Locker: a developer tool whose menu always returns to itself, with every action a call of its unconverted Locker
   helper class.
 - courtroom: variables that hold text and numbers in different places, nullable online texts that are indexed, and

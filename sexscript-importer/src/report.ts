@@ -174,6 +174,11 @@ export interface FeasibilityReport {
   /** Empty texts dropped, which only cleared the legacy display (`SX_BLANK_TEXT`). */
   blankTexts: number;
   /**
+   * Legacy settings flows asked as one `askForm`: runs of settings asks (`SX_SETTINGS_FORM`) and menus that toggle
+   * settings until the player leaves (`SX_MENU_FORM`).
+   */
+  forms: { sequences: number; menus: number };
+  /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
    * legacy code order, so a jump marks code that moved.
@@ -303,6 +308,7 @@ export function analyzeFeasibility(
     missingMedia: 0,
     askQuestions: 0,
     blankTexts: 0,
+    forms: { sequences: 0, menus: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -408,6 +414,8 @@ export function analyzeFeasibility(
       else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
       else if (code === "SX_ASK_QUESTION") report.askQuestions += 1;
       else if (code === "SX_BLANK_TEXT") report.blankTexts += 1;
+      else if (code === "SX_SETTINGS_FORM") report.forms.sequences += 1;
+      else if (code === "SX_MENU_FORM") report.forms.menus += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;

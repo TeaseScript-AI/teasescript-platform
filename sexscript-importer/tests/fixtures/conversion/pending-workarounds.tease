@@ -2,32 +2,36 @@ speaker system {
   title: "System"
 }
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
-// getBooleans: a form of toggles; its Cancel, which gave null, where the script tests the answers for null.
+// getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
 let toys = askBooleans(message: "Which toys do you have?", texts: ["Paddle", "Crop"], defaults: [true, false])
-let clothes = askBooleans(message: "What do you own?", texts: ["Collar"], defaults: [false], cancel: "Cancel")
-if clothes != null {
+let clothes = [false]
+let answers: boolean[]? = askBooleans(message: "What do you own?", texts: ["Collar"], defaults: clothes, cancel: "Cancel")
+if answers != null {
+  clothes = answers
   save clothes[0] as "clothes.collar"
+} else {
+  say "Nothing changed"
 }
 if toys[0] == true {
   say "Fetch the paddle"
 }
 // showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.
-// NOTE SX_POPUP_WORKAROUND line 8: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
+// NOTE SX_POPUP_WORKAROUND line 10: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
 say "Time for a break"
 showButton "OK"
-// NOTE SX_POPUP_ELAPSED line 9: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
-// NOTE SX_POPUP_WORKAROUND line 9: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
+// NOTE SX_POPUP_ELAPSED line 11: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_WORKAROUND line 11: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
 let popupStart = getTimestamp().toSeconds()
 say "Kneel until you close this"
 showButton "OK"
 let seconds = getTimestamp().toSeconds() - popupStart
 say "You knelt ${seconds} seconds"
 // useUrl: the link in the chat and a button to continue.
-// NOTE SX_OPEN_URL_WORKAROUND line 12: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.
+// NOTE SX_OPEN_URL_WORKAROUND line 14: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.
 say as system "Open this link: https://example.com/rules"
 showButton "Continue"
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
-// NOTE SX_FILE_PHOTO line 14: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+// NOTE SX_FILE_PHOTO line 16: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 let photo = askImage("Pick a photo of yourself")
 if photo == null {
   say "No photo, then"

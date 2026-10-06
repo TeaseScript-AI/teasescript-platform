@@ -25,6 +25,7 @@ import {
   packageStableNames,
   packageStopsBackgroundSounds,
   photoCopy,
+  storageKeyShape,
   withGuardedInputs,
 } from "./lower.ts";
 import { withoutRepeatedChainText } from "./repeated-text.ts";
@@ -708,7 +709,8 @@ export function lowerPackage(
   const mixinModules = moduleInfos.flatMap((info) => info ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
-  const nonTextKeys = packageNonTextKeys(files);
+  const nonTextKeys = packageSavedKeys(files, new Set(["number", "boolean"]));
+  const nonBooleanKeys = packageSavedKeys(files, new Set(["number", "string"]));
   const copiedImages = new Set(
     files.flatMap((file) => {
       const paths: string[] = [];
@@ -753,6 +755,7 @@ export function lowerPackage(
       stableNames,
       storageLiterals,
       nonTextKeys,
+      nonBooleanKeys,
       copiedImages,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
@@ -1385,10 +1388,14 @@ function packageStorageLiterals(
 }
 
 /**
- * The storage keys under which the package saves a number or a boolean, `save("toy.version", 1.4)`: legacy
- * `loadString()` read such a value as text.
+ * The storage keys under which the package saves a constant of one of `kinds`, as key shapes (storageKeyShape):
+ * `save("toy.version", 1.4)` saves a number. Legacy `loadString()` read a number or a boolean as text, and
+ * `loadBoolean()` read a number or a text as text, true only for "true".
  */
-function packageNonTextKeys(files: readonly ParsedGroovyFile[]): ReadonlySet<string> {
+function packageSavedKeys(
+  files: readonly ParsedGroovyFile[],
+  kinds: ReadonlySet<"number" | "boolean" | "string">,
+): ReadonlySet<string> {
   const keys = new Set<string>();
   for (const file of files) {
     walkAst(file.root, (node) => {
@@ -1399,13 +1406,14 @@ function packageNonTextKeys(files: readonly ParsedGroovyFile[]): ReadonlySet<str
       const [keyNode, valueNode]: Array<AstNode | undefined> = Array.isArray(argumentList)
         ? argumentList.filter(isAstNode)
         : [];
-      const key = keyNode === undefined ? null : constantString(keyNode);
+      const key = keyNode === undefined ? null : storageKeyShape(keyNode);
       const inner = valueNode?.kind === "unaryMinus" ? valueNode.value : valueNode;
       const value = isAstNode(inner) ? inner : null;
+      const kind = value?.kind === "constant" ? typeof value.value : null;
       if (
         key !== null &&
-        value?.kind === "constant" &&
-        (typeof value.value === "number" || typeof value.value === "boolean")
+        (kind === "number" || kind === "boolean" || kind === "string") &&
+        kinds.has(kind)
       )
         keys.add(key);
     });

@@ -113,8 +113,10 @@ export interface LowerOptions {
    * (packageStorageLiterals); a branch for any other value of such a key never runs.
    */
   storageLiterals?: ReadonlyMap<string, ReadonlySet<string>>;
-  /** The storage keys under which the package saves a number or a boolean (packageNonTextKeys). */
+  /** The storage keys under which the package saves a number or a boolean (packageNonTextKeys), as key shapes. */
   nonTextKeys?: ReadonlySet<string>;
+  /** The storage keys under which the package saves a number or a text (packageNonBooleanKeys), as key shapes. */
+  nonBooleanKeys?: ReadonlySet<string>;
   /** Image paths below `images/` that some script of the package copies a photo to (packageCopiedImages). */
   copiedImages?: ReadonlySet<string>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
@@ -188,6 +190,7 @@ interface LowerContext {
   stableNames: ReadonlySet<string>;
   storageLiterals: ReadonlyMap<string, ReadonlySet<string>>;
   nonTextKeys: ReadonlySet<string>;
+  nonBooleanKeys: ReadonlySet<string>;
   copiedImages: ReadonlySet<string>;
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
@@ -230,6 +233,8 @@ interface LowerContext {
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
   /** Lists whose elements the code compares with null (nullElementLists), by binding. */
   nullElementLists: ReadonlySet<string>;
+  /** Set while a getBooleans whose null result the next statement tests is lowered (cancelledBooleans). */
+  cancelBooleans?: true;
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
@@ -1128,6 +1133,48 @@ function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]
   return values;
 }
 
+/**
+ * The shape of a storage key: its literal text, with `*` for each computed part (`prefix + ".punishment" + i` as
+ * `*.punishment*`), so a computed read and a computed save of the same form match. Null when no part is literal.
+ */
+export function storageKeyShape(node: AstNode): string | null {
+  const parts: string[] = [];
+  let literal = false;
+  const visit = (part: AstNode): void => {
+    const text = constantString(part);
+    if (text !== null) {
+      parts.push(text);
+      literal = true;
+      return;
+    }
+    if (
+      part.kind === "binary" &&
+      part.operator === "+" &&
+      isAstNode(part.left) &&
+      isAstNode(part.right)
+    ) {
+      visit(part.left);
+      visit(part.right);
+      return;
+    }
+    if (part.kind === "gstring") {
+      const strings = Array.isArray(part.strings) ? part.strings : [];
+      const values = nodeArray(part.values);
+      strings.forEach((piece, position) => {
+        if (typeof piece === "string" && piece !== "") {
+          parts.push(piece);
+          literal = true;
+        }
+        if (position < values.length) parts.push("*");
+      });
+      return;
+    }
+    parts.push("*");
+  };
+  visit(node);
+  return literal ? parts.join("").replace(/\*+/gu, "*") : null;
+}
+
 /** The binding a variable reference names (see `bindingKeys`); null for any other expression. */
 function bindingKey(node: unknown, keys: BindingKeys): string | null {
   const name = variableName(node);
@@ -1180,6 +1227,7 @@ export function lowerParsedFile(
     stableNames: options.stableNames ?? new Set(),
     storageLiterals: options.storageLiterals ?? new Map(),
     nonTextKeys: options.nonTextKeys ?? new Set(),
+    nonBooleanKeys: options.nonBooleanKeys ?? new Set(),
     copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
@@ -1997,6 +2045,7 @@ function lowerHelperMethod(
     stableNames: baseContext.stableNames,
     storageLiterals: baseContext.storageLiterals,
     nonTextKeys: baseContext.nonTextKeys,
+    nonBooleanKeys: baseContext.nonBooleanKeys,
     copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
@@ -2105,6 +2154,33 @@ function lowerStatementList(
   const consumed = new Set<number>();
   for (let index = 0; index < statements.length; index += 1) {
     if (consumed.has(index)) continue;
+    // A getBooleans whose null result the next statement tests offers the dialog's Cancel (cancelledBooleans).
+    const booleansStart = context.diagnostics.length;
+    const cancelled = cancelledBooleans(statements, index, context);
+    if (cancelled !== null) {
+      const first = statementSpan(statements[index]!);
+      emitComments(takeCommentsBefore(context, first));
+      if (first !== null) result.push(...paragraphBreak(context, previousEndLine, first.line));
+      result.push(...diagnosticNotes(context, booleansStart), ...cancelled);
+      const last = statementSpan(statements[index + 1]!);
+      if (last !== null) previousEndLine = last.endLine;
+      index += 1;
+      continue;
+    }
+    // A run of settings asks, each saved right away, becomes one form (lowerSettingsForm).
+    const run = settingsRun(statements, index, context);
+    const formStart = context.diagnostics.length;
+    const form = run === null ? null : lowerSettingsForm(run.asks, context);
+    if (run !== null && form !== null) {
+      const first = statementSpan(statements[index]!);
+      emitComments(takeCommentsBefore(context, first));
+      if (first !== null) result.push(...paragraphBreak(context, previousEndLine, first.line));
+      result.push(...diagnosticNotes(context, formStart), ...form);
+      const last = statementSpan(statements[index + run.count - 1]!);
+      if (last !== null) previousEndLine = last.endLine;
+      index += run.count - 1;
+      continue;
+    }
     // Read-then-default code becomes one read with a default; the `if` is consumed.
     let merged = consumed.has(index + 1)
       ? null
@@ -6425,6 +6501,471 @@ function imageNameFilter(
   ];
 }
 
+/** A form field's label from a variable name: `TakePics` and `maxTime` as "Take pics" and "Max time". */
+function fieldLabel(name: string): string {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .replace(/_/gu, " ")
+    .trim()
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * `x = getBooleans(...)` followed by `if (x != null) { ... } else { ... }`, or `x == null` with the branches the other
+ * way round: the legacy dialog's Cancel gave null, so the form offers Cancel (V30 §20), and x takes the answers only
+ * when the player did not cancel, so it keeps its list type. Null for other statements.
+ */
+function cancelledBooleans(
+  statements: readonly AstNode[],
+  index: number,
+  context: LowerContext,
+): IrStatement[] | null {
+  const statement = statements[index]!;
+  const next = statements[index + 1];
+  const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  if (expression?.kind !== "binary" || text(expression.operator) !== "=" || next?.kind !== "if")
+    return null;
+  const name = variableName(asNode(expression.left));
+  const right = asNode(expression.right);
+  const call = right === null ? null : legacyApiCall(right, context);
+  if (
+    name === null ||
+    right === null ||
+    call?.name !== "getBooleans" ||
+    call.arguments.length !== 3
+  )
+    return null;
+  const condition = asNode(next.condition);
+  const operator = condition?.kind === "binary" ? text(condition.operator) : null;
+  const left = asNode(condition?.left);
+  const other = asNode(condition?.right);
+  const tested =
+    operator !== "!=" && operator !== "=="
+      ? null
+      : isNullConstant(other ?? undefined)
+        ? left
+        : isNullConstant(left ?? undefined)
+          ? other
+          : null;
+  if (variableName(tested) !== name) return null;
+  context.cancelBooleans = true;
+  let asked: IrExpression | null;
+  try {
+    asked = lowerExpression(right, context);
+  } finally {
+    delete context.cancelBooleans;
+  }
+  if (asked === null) return null;
+  const answers = freshName("answers", context);
+  const answered = asNode(operator === "!=" ? next.then : next.else);
+  const cancelled = asNode(operator === "!=" ? next.else : next.then);
+  return [
+    { kind: "let", name: answers, value: asked, span: statement.span ?? null },
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "!=",
+        left: { kind: "variable", name: answers },
+        right: { kind: "literal", value: null },
+      },
+      then: [
+        {
+          kind: "assign",
+          target: { kind: "variable", name },
+          operator: "=",
+          value: { kind: "variable", name: answers },
+          span: statement.span ?? null,
+        },
+        ...(answered === null ? [] : lowerBranch(answered, context)),
+      ],
+      else: cancelled === null ? [] : lowerBranch(cancelled, context),
+      span: next.span ?? null,
+    },
+  ];
+}
+
+/** One ask of a legacy settings run (settingsRun): the variable it sets, the ask's text, and the saves after it. */
+interface SettingsAsk {
+  target: AstNode;
+  name: string;
+  text: AstNode;
+  /** The true and false labels of a getBoolean; absent for a getInteger. */
+  labels?: readonly [string, string];
+  saves: AstNode[];
+  first: AstNode;
+}
+
+/**
+ * A legacy settings run, which asks one setting after another and saves each right away: `x = getBoolean(text, "on",
+ * "off")` or `n = getInteger(text, n)`, each followed by `save(key, x)`. Two or more such asks become one form
+ * (lowerSettingsForm). Null for other statements.
+ */
+function settingsRun(
+  statements: readonly AstNode[],
+  index: number,
+  context: LowerContext,
+): { asks: SettingsAsk[]; count: number } | null {
+  const expressionOf = (statement: AstNode): AstNode | null =>
+    statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  const ask = (statement: AstNode): Omit<SettingsAsk, "saves"> | null => {
+    const expression = expressionOf(statement);
+    if (expression?.kind !== "binary" || text(expression.operator) !== "=") return null;
+    const target = asNode(expression.left);
+    const name = variableName(target);
+    const right = asNode(expression.right);
+    const call = right === null ? null : legacyApiCall(right, context);
+    if (target?.kind !== "variable" || name === null || call === null) return null;
+    const [question, first, second] = call.arguments;
+    if (question === undefined) return null;
+    if (call.name === "getBoolean" && call.arguments.length === 3) {
+      const yes = constantString(first);
+      const no = constantString(second);
+      return yes === null || no === null
+        ? null
+        : { target, name, text: question, labels: [yes, no], first: statement };
+    }
+    if (call.name === "getInteger" && call.arguments.length === 2 && first?.kind === "variable")
+      return variableName(first) === name
+        ? { target, name, text: question, first: statement }
+        : null;
+    return null;
+  };
+  const saves = (statement: AstNode, name: string): boolean => {
+    const expression = expressionOf(statement);
+    const call = expression === null ? null : legacyApiCall(expression, context);
+    const value = call?.arguments[1];
+    return (
+      call?.name === "save" &&
+      call.arguments.length === 2 &&
+      value?.kind === "variable" &&
+      variableName(value) === name
+    );
+  };
+  const asks: SettingsAsk[] = [];
+  let position = index;
+  while (position < statements.length) {
+    const found = ask(statements[position]!);
+    if (found === null) break;
+    let next = position + 1;
+    const saved: AstNode[] = [];
+    while (next < statements.length && saves(statements[next]!, found.name)) {
+      saved.push(statements[next]!);
+      next += 1;
+    }
+    if (saved.length === 0) break;
+    asks.push({ ...found, saves: saved });
+    position = next;
+  }
+  if (asks.length < 2 || new Set(asks.map((item) => item.name)).size !== asks.length) return null;
+  return { asks, count: position - index };
+}
+
+/**
+ * A legacy settings run as one form (V30 §20 Forms): a toggle with the ask's labels for each getBoolean, an integer
+ * field for each getInteger, each with the ask's text as its description and its variable's value as its start; then
+ * each variable takes its answer and is saved as before. Null when a part cannot be lowered.
+ */
+function lowerSettingsForm(
+  asks: readonly SettingsAsk[],
+  context: LowerContext,
+): IrStatement[] | null {
+  const properties: Array<{ name: string; value: IrExpression }> = [];
+  const before: IrStatement[] = [];
+  const firstDiagnostic = context.diagnostics.length;
+  for (const ask of asks) {
+    const description = formText(ask.text, "description", before, context);
+    const start =
+      ask.labels === undefined
+        ? lowerExpression(ask.target, context)
+        : lowerCondition(ask.target, context);
+    if (description === null || start === null) {
+      context.diagnostics.splice(firstDiagnostic);
+      return null;
+    }
+    const literal = (value: string | boolean): IrExpression => ({ kind: "literal", value });
+    const descriptor: Array<{ name: string; value: IrExpression }> = [
+      { name: "type", value: literal(ask.labels === undefined ? "integer" : "boolean") },
+      { name: "value", value: start },
+      { name: "text", value: literal(fieldLabel(ask.name)) },
+      ...(ask.labels === undefined
+        ? []
+        : [
+            {
+              name: "options",
+              value: {
+                kind: "list" as const,
+                items: [
+                  {
+                    kind: "object" as const,
+                    properties: [
+                      { name: "value", value: literal(true) },
+                      { name: "text", value: literal(ask.labels[0]) },
+                    ],
+                  },
+                  {
+                    kind: "object" as const,
+                    properties: [
+                      { name: "value", value: literal(false) },
+                      { name: "text", value: literal(ask.labels[1]) },
+                    ],
+                  },
+                ],
+              },
+            },
+          ]),
+      { name: "description", value: description },
+    ];
+    properties.push({ name: ask.name, value: { kind: "object", properties: descriptor } });
+  }
+  addDiagnostic(
+    context,
+    "SX_SETTINGS_FORM",
+    "warning",
+    `The legacy script asked these ${asks.length} settings one after the other and saved each; one form asks them together, with each question as the field's description.`,
+    asks[0]!.first.span,
+  );
+  const form = freshName("settings", context);
+  const statements: IrStatement[] = [
+    ...before,
+    {
+      kind: "let",
+      name: form,
+      value: { kind: "input", input: "askForm", fields: { kind: "object", properties } },
+      span: asks[0]!.first.span ?? null,
+    },
+  ];
+  for (const ask of asks) {
+    statements.push({
+      kind: "assign",
+      target: { kind: "variable", name: ask.name },
+      operator: "=",
+      value: { kind: "property", target: { kind: "variable", name: form }, name: ask.name },
+      span: ask.first.span ?? null,
+    });
+    statements.push(...lowerStatementList(ask.saves, null, context));
+  }
+  return statements;
+}
+
+/** Constant assignments, also chained (`a = b = 1`), as one assignment per variable. */
+function resetAssignments(statements: readonly AstNode[], span: SourceSpan | null): IrStatement[] {
+  const result: IrStatement[] = [];
+  for (const statement of statements) {
+    const names: string[] = [];
+    let expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    while (expression?.kind === "binary" && text(expression.operator) === "=") {
+      const name = variableName(asNode(expression.left));
+      if (name !== null) names.push(name);
+      expression = asNode(expression.right);
+    }
+    const value = expression === null ? undefined : constantValue(expression);
+    if (value === undefined) continue;
+    for (const name of names)
+      result.push({
+        kind: "assign",
+        target: { kind: "variable", name },
+        operator: "=",
+        value: { kind: "literal", value },
+        span,
+      });
+  }
+  return result;
+}
+
+/**
+ * A form's question or a field's description; a text with a part that needs its own statement, such as a ternary, is
+ * computed into a temporary first, whose statements go to `before`.
+ */
+function formText(
+  node: AstNode,
+  base: string,
+  before: IrStatement[],
+  context: LowerContext,
+): IrExpression | null {
+  if (findDeferred(node, context) === null) return lowerExpression(node, context);
+  const temporary = freshName(base, context);
+  const variables = new Map(context.types.variables);
+  variables.set(temporary, inferType(node, context.types));
+  context.types = { ...context.types, variables };
+  const span = node.span ?? null;
+  before.push(
+    ...lowerStatement(
+      syntheticAssignment(true, syntheticVariable(temporary, span), node, span),
+      context,
+    ),
+  );
+  return { kind: "variable", name: temporary };
+}
+
+/**
+ * A legacy settings menu, `while (menu) { switch (getSelectedValue(text, [labels])) { ... } }`, whose cases each
+ * toggle one variable (`v = !v`), except one that leaves (sets the loop's variable to a false value, or the default)
+ * and at most one that resets the toggled variables to constants. It becomes one form of toggles with the menu text as
+ * its question and the leave label as its submit button; a reset is a separate choice before the form, since it sets
+ * constants, not the form's starting values. Null for other loops.
+ */
+function lowerMenuForm(node: AstNode, context: LowerContext): IrStatement[] | null {
+  const condition = asNode(node.condition);
+  const flag = condition?.kind === "variable" ? variableName(condition) : null;
+  const body = switchBodyStatements(asNode(node.body))?.filter((item) => item.kind !== "empty");
+  const menu = body?.length === 1 ? body[0]! : null;
+  if (flag === null || menu?.kind !== "switch") return null;
+  const subject = asNode(menu.expression);
+  const call = subject === null ? null : legacyApiCall(subject, context);
+  const options = call?.arguments[1];
+  const question = call?.arguments[0];
+  if (call?.name !== "getSelectedValue" || options?.kind !== "list" || question === undefined)
+    return null;
+  const labels = nodeArray(options.items).map((item) => constantString(item));
+  if (labels.some((label) => label === null)) return null;
+  const caseNodes = nodeArray(menu.cases);
+  const defaultSource = switchBodyStatements(asNode(menu.default));
+  if (defaultSource === null) return null;
+  const expressionOf = (statement: AstNode): AstNode | null =>
+    statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  const toggled = (statements: AstNode[]): string | null => {
+    const expression = statements.length === 1 ? expressionOf(statements[0]!) : null;
+    const target =
+      expression?.kind === "binary" && text(expression.operator) === "="
+        ? asNode(expression.left)
+        : null;
+    const value = expression === null ? null : asNode(expression.right);
+    const name = target?.kind === "variable" ? variableName(target) : null;
+    return name !== null && value?.kind === "not" && variableName(asNode(value.value)) === name
+      ? name
+      : null;
+  };
+  // Constant assignments, also chained (`a = b = 1`), as their targets.
+  const constants = (statements: AstNode[]): string[] | null => {
+    const names: string[] = [];
+    for (const statement of statements) {
+      let expression = expressionOf(statement);
+      while (expression?.kind === "binary" && text(expression.operator) === "=") {
+        const target = asNode(expression.left);
+        const name = target?.kind === "variable" ? variableName(target) : null;
+        if (name === null) return null;
+        names.push(name);
+        expression = asNode(expression.right);
+      }
+      if (expression === null || constantValue(expression) === undefined) return null;
+    }
+    return names.length > 0 ? names : null;
+  };
+  const leaves = (statements: AstNode[]): boolean => {
+    const names = constants(statements);
+    const value = statements.length === 1 ? asNode(expressionOf(statements[0]!)?.right) : null;
+    return names?.length === 1 && names[0] === flag && (value === null || !constantValue(value));
+  };
+  const fields: Array<{ name: string; label: string }> = [];
+  let leave: { label: string; statements: AstNode[] } | null = null;
+  let reset: { label: string; statements: AstNode[] } | null = null;
+  for (let index = 0; index < caseNodes.length; index += 1) {
+    const position = constantValue(asNode(caseNodes[index]!.expression) ?? undefined);
+    const path = collectSwitchPath(caseNodes, index, defaultSource);
+    if (typeof position !== "number" || path === null || labels[position] === undefined)
+      return null;
+    const label = labels[position]!;
+    const name = toggled(path);
+    if (name !== null) fields.push({ name, label });
+    else if (leaves(path) && leave === null) leave = { label, statements: path };
+    else if (constants(path) !== null && reset === null) reset = { label, statements: path };
+    else return null;
+  }
+  // The default path leaves for the one label no case names, "Back" after the cases.
+  const named = new Set(
+    caseNodes.map((item) => constantValue(asNode(item.expression) ?? undefined)),
+  );
+  const unnamed = labels.flatMap((label, position) => (named.has(position) ? [] : [label!]));
+  const defaultPath = withoutTerminalBreak(defaultSource);
+  if (leave === null && unnamed.length === 1 && leaves(defaultPath))
+    leave = { label: unnamed[0]!, statements: defaultPath };
+  else if (unnamed.length > 0) return null;
+  if (leave === null || fields.length < 2) return null;
+  if (
+    reset !== null &&
+    !constants(reset.statements)!.every((name) => fields.some((field) => field.name === name))
+  )
+    return null;
+  const firstDiagnostic = context.diagnostics.length;
+  const before: IrStatement[] = [];
+  const asked = formText(question, "question", before, context);
+  const fail = (): null => {
+    context.diagnostics.splice(firstDiagnostic);
+    return null;
+  };
+  if (asked === null) return fail();
+  const properties: Array<{ name: string; value: IrExpression }> = [];
+  for (const field of fields) {
+    const variable = syntheticVariable(field.name, node.span ?? null);
+    const start = lowerCondition(variable, context);
+    if (start === null) return fail();
+    properties.push({
+      name: field.name,
+      value: {
+        kind: "object",
+        properties: [
+          { name: "type", value: { kind: "literal", value: "boolean" } },
+          { name: "value", value: start },
+          { name: "text", value: { kind: "literal", value: field.label } },
+        ],
+      },
+    });
+  }
+  addDiagnostic(
+    context,
+    "SX_MENU_FORM",
+    "warning",
+    `The legacy menu switched ${fields.length} settings one click at a time until "${leave.label}"; one form of toggles asks them together${reset === null ? "" : `, after a choice that offers "${reset.label}" first, since that sets fixed values`}.`,
+    node.span,
+  );
+  const form = freshName("settings", context);
+  const statements: IrStatement[] = [];
+  if (reset !== null)
+    statements.push({
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: {
+          kind: "choice",
+          options: [
+            { kind: "literal", value: "Change" },
+            { kind: "literal", value: reset.label },
+          ],
+          labels: ["change", "reset"],
+        },
+        right: { kind: "literal", value: "reset" },
+      },
+      then: resetAssignments(reset.statements, node.span ?? null),
+      else: [],
+      span: node.span ?? null,
+    });
+  statements.push(...before, {
+    kind: "let",
+    name: form,
+    value: {
+      kind: "input",
+      input: "askForm",
+      question: asked,
+      fields: { kind: "object", properties },
+      submit: { kind: "literal", value: leave.label },
+    },
+    span: node.span ?? null,
+  });
+  for (const field of fields)
+    statements.push({
+      kind: "assign",
+      target: { kind: "variable", name: field.name },
+      operator: "=",
+      value: { kind: "property", target: { kind: "variable", name: form }, name: field.name },
+      span: node.span ?? null,
+    });
+  statements.push(...lowerStatementList(leave.statements, null, context));
+  return statements;
+}
+
 function closureArgument(args: AstNode[]): { closure: AstNode; parameters: string[] } | null {
   const closure = args.length === 1 && args[0]!.kind === "closure" ? args[0]! : null;
   if (closure === null || asNode(closure.body)?.kind !== "block") return null;
@@ -7000,6 +7541,9 @@ function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
 }
 
 function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
+  // A legacy settings menu becomes one form of toggles (lowerMenuForm).
+  const menuForm = lowerMenuForm(node, context);
+  if (menuForm !== null) return menuForm;
   const conditionNode = asNode(node.condition);
   const body = asNode(node.body);
   const always: IrExpression = { kind: "literal", value: true };
@@ -10407,21 +10951,6 @@ function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): 
   return receiver !== null && sameReference(receiver, list);
 }
 
-/** Whether the call's result is assigned to a variable that the code compares with null. */
-function nullTestedResult(node: AstNode, context: LowerContext): boolean {
-  const at = (other: AstNode): boolean =>
-    other === node ||
-    (other.span !== null &&
-      other.span !== undefined &&
-      node.span !== null &&
-      node.span !== undefined &&
-      other.span.line === node.span.line &&
-      other.span.column === node.span.column);
-  for (const [key, values] of context.assignedValues)
-    if (context.mapUses.nullTested.has(key) && values.some(at)) return true;
-  return false;
-}
-
 /** Whether `value` reads `list` at a position written the same way as `index`. */
 function readsPosition(value: AstNode, list: AstNode, index: AstNode): boolean {
   const same = (left: AstNode | null, right: AstNode | null): boolean => {
@@ -13627,8 +14156,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     if (key === null) return null;
     if (call.name === "loadInteger" || call.name === "receiveInteger")
       return { kind: "load", key, integer: true };
-    const literalKey = constantString(call.arguments[0]!);
-    if (call.name === "loadString" && literalKey !== null && context.nonTextKeys.has(literalKey)) {
+    const shape = storageKeyShape(call.arguments[0]!);
+    if (call.name === "loadString" && shape !== null && context.nonTextKeys.has(shape)) {
       addDiagnostic(
         context,
         "SX_LOAD_STRING_TEXT",
@@ -13637,6 +14166,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         node.span,
       );
       return useHelper(context, "text", [{ kind: "load", key }]);
+    }
+    if (call.name === "loadBoolean" && shape !== null && context.nonBooleanKeys.has(shape)) {
+      addDiagnostic(
+        context,
+        "SX_LOAD_BOOLEAN_TEXT",
+        "warning",
+        'loadBoolean() read the stored value as text, true only for "true", and the package saves a number or a text under this key, so the value is read the same way; a missing value, null in Groovy, reads as false.',
+        node.span,
+      );
+      return useHelper(context, "booleanText", [{ kind: "load", key }]);
     }
     return { kind: "load", key };
   }
@@ -13780,7 +14319,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           message: args[0]!,
           texts: args[1]!,
           defaults: args[2]!,
-          ...(nullTestedResult(node, context)
+          ...(context.cancelBooleans === true
             ? { cancel: { kind: "literal", value: "Cancel" } }
             : {}),
         },

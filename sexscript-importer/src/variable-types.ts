@@ -666,6 +666,9 @@ function analyse(
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
   const nullTested = nullTestedNames(statements);
+  // Names that some statement assigns after their declaration; a script variable that none assigns keeps a null test's
+  // narrowing in a branch, as a local does.
+  const reassigned = assignedNames(statements);
   const localNullTested = blockNullTests(statements);
   for (const item of bindings.values()) item.inferred = undefined;
   const root = new Scope(null);
@@ -694,6 +697,22 @@ function analyse(
   };
   const nullFields = recordNullFields(statements);
   const typeOf = (value: IrExpression, scope: Scope): TeaseType => {
+    // The answer of a form field written where the form is asked has its descriptor's type (V30 §20 Forms).
+    if (value.kind === "property" && value.target.kind === "variable") {
+      const asked = scope.resolve(value.target.name)?.declaration?.value;
+      const fields =
+        asked?.kind === "input" && asked.input === "askForm" ? asked.fields : undefined;
+      const field =
+        fields?.kind === "object" && fields.dict !== true
+          ? fields.properties.find((property) => property.name === value.name)?.value
+          : undefined;
+      const kind =
+        field?.kind === "object"
+          ? field.properties.find((property) => property.name === "type")?.value
+          : undefined;
+      if (kind?.kind === "literal" && (kind.value === "boolean" || kind.value === "integer"))
+        return scalar(kind.value);
+    }
     const type = expressionType(
       value,
       (name) => {
@@ -1039,7 +1058,11 @@ function analyse(
             ? test.left.name
             : null;
         const local = variable === null ? undefined : scope.resolve(variable);
-        if (variable !== null && local !== undefined && root.names.get(variable) !== local) {
+        if (
+          variable !== null &&
+          local !== undefined &&
+          (root.names.get(variable) !== local || !reassigned.has(variable))
+        ) {
           const branch = test!.operator === "==" ? item.else : item.then;
           if (!assignsVariable(branch, variable))
             (test!.operator === "==" ? elseScope : thenScope).nonNull.add(local);
@@ -1295,6 +1318,19 @@ function blockNullTests(statements: readonly IrStatement[]): Map<IrStatement, Se
 }
 
 /** Names of the variables the program compares with null (`x == null`, `x != null`). */
+/** The variable names that assignments anywhere in the statements target. */
+function assignedNames(value: unknown, names = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) assignedNames(item, names);
+    return names;
+  }
+  if (!isRecord(value)) return names;
+  if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+    names.add(String(value.target.name));
+  for (const child of Object.values(value)) assignedNames(child, names);
+  return names;
+}
+
 function nullTestedNames(value: unknown, names = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
     for (const item of value) nullTestedNames(item, names);
@@ -1977,6 +2013,11 @@ export function expressionType(
       if (value.local === true) return UNKNOWN;
       const temporal = TEMPORAL_GETTERS.get(value.name);
       if (temporal !== undefined) return { kind: "temporal", name: temporal };
+      // askBooleans returns the toggles' states, or null when the player cancels a form that offers it (V30 §20).
+      if (value.name === "askBooleans") {
+        const states: TeaseType = { kind: "list", element: scalar("boolean") };
+        return value.named.cancel === undefined ? states : { kind: "optional", value: states };
+      }
       return CALL_RESULTS.get(value.name) ?? UNKNOWN;
     }
   }
@@ -2236,6 +2277,7 @@ export function mapChildren(
         ...value,
         ...(value.question === undefined ? {} : { question: map(value.question) }),
         ...(value.fields === undefined ? {} : { fields: map(value.fields) }),
+        ...(value.submit === undefined ? {} : { submit: map(value.submit) }),
         ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
       };
     case "range":

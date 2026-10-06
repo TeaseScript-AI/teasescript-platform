@@ -1,8 +1,10 @@
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
-// getBooleans: a form of toggles; its Cancel, which gave null, where the script tests the answers for null.
+// getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
 def toys = getBooleans("Which toys do you have?", ["Paddle", "Crop"], [true, false])
-def clothes = getBooleans("What do you own?", ["Collar"], [false])
+def clothes = [false]
+clothes = getBooleans("What do you own?", ["Collar"], clothes)
 if (clothes != null) save("clothes.collar", clothes[0])
+else show("Nothing changed")
 if (toys[0] == true) show("Fetch the paddle")
 // showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.
 showPopup("Time for a break")

@@ -186,6 +186,7 @@ export type HelperName =
   | "plainText"
   | "listPart"
   | "listMinus"
+  | "booleanText"
   | "textMinus"
   | "repeatList"
   | "compare"
@@ -290,6 +291,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "plainText",
   "listPart",
   "listMinus",
+  "booleanText",
   "textMinus",
   "repeatList",
   "compare",
@@ -1051,6 +1053,29 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       );
     },
+  },
+  // Legacy loadBoolean(): a stored value read as text is true only as "true" in any case; a missing one is false here.
+  booleanText: {
+    name: "sexscriptLegacyBooleanText",
+    build: () =>
+      fn(
+        "sexscriptLegacyBooleanText",
+        ["value"],
+        [
+          ret(
+            bin(
+              "==",
+              {
+                kind: "methodCall",
+                target: template(v("value")),
+                name: "lowercase",
+                arguments: [],
+              },
+              lit("true"),
+            ),
+          ),
+        ],
+      ),
   },
   // A value stored in a Groovy String variable: its text, and null stays null.
   text: {

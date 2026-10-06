@@ -13,6 +13,13 @@
       "category": "b",
       "reason": "The intro menu loops forever; the legacy player ended the script by closing it, and its only exit was the error for missing sound files, which the sound sets written out make unreachable. A TeaseScript session needs an end, so the menu also offers End session.",
       "diff": "end-session.diff"
+    },
+    {
+      "id": "macro-maker-end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "The package also holds ShockYourselfMacroMaker, whose loop runs forever and which the legacy player ended by closing the script; its try/catch kept the whole loop body unconverted, so the loop ran without a wait. As in the ShockYourselfMacroMaker package, the button after each macro also offers End session, and the try/catch, which only showed an unexpected error, goes.",
+      "diff": "macro-maker-end-session.diff"
     }
   ]
 }
