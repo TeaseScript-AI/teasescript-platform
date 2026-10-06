@@ -36,7 +36,12 @@ import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
-import { isMessageMarkup } from "../message-markup.js";
+import {
+  cloneMessageMarkup,
+  isMessageMarkup,
+  parseMessageMarkup,
+  type MessageMarkup,
+} from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
@@ -805,23 +810,40 @@ export function validPreparedSayOutput(
   if (!validPreparedSaySpeaker(value.speaker)) return false;
   const owningInstruction = value.owningInstruction;
   if (!nonNegativeSafeInteger(owningInstruction)) return false;
-  if (plan !== undefined && plan.instructions[owningInstruction]?.kind !== "say") return false;
+  if (plan !== undefined) {
+    const owner = plan.instructions[owningInstruction];
+    if (owner?.kind !== "say") return false;
+    // A result-bearing say keeps the source its content was parsed from, for the handle it gives once it is shown.
+    if ((owner.destinationTemporary !== undefined) !== (value.sourceText !== undefined))
+      return false;
+    if (
+      typeof value.sourceText === "string" &&
+      isMessageMarkup(value.content) &&
+      !sameMessageMarkup(parseMessageMarkup(value.sourceText), value.content)
+    )
+      return false;
+  }
   return snapshot.nextInstruction === owningInstruction;
 }
 
+function sameMessageMarkup(left: MessageMarkup, right: MessageMarkup): boolean {
+  return JSON.stringify(cloneMessageMarkup(left)) === JSON.stringify(cloneMessageMarkup(right));
+}
+
 function isPreparedSayOutputShape(value: unknown): value is Record<string, unknown> {
+  const keys = [
+    "owningInstruction",
+    "continuationInstruction",
+    "presentation",
+    "speaker",
+    "content",
+    "text",
+    "durationMs",
+    "skippable",
+  ];
   return (
     isPlainRecord(value) &&
-    hasExactKeys(value, [
-      "owningInstruction",
-      "continuationInstruction",
-      "presentation",
-      "speaker",
-      "content",
-      "text",
-      "durationMs",
-      "skippable",
-    ])
+    hasExactKeys(value, "sourceText" in value ? [...keys, "sourceText"] : keys)
   );
 }
 
@@ -834,6 +856,7 @@ function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
     isMessagePresentation(value.presentation) &&
     typeof value.text === "string" &&
     value.content.visibleText === value.text &&
+    (value.sourceText === undefined || typeof value.sourceText === "string") &&
     validPreparedSayDuration(value.durationMs) &&
     typeof value.skippable === "boolean"
   );

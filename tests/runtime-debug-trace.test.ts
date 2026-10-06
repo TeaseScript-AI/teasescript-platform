@@ -44,6 +44,7 @@ import {
 } from "../player/runtime-adapter.js";
 import { TraceStore } from "../src/runtime/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { MESSAGE_TEXT_FUNCTIONS, withMessageSays } from "./helpers/message-says.js";
 
 /*
  * The opt-in debug trace (docs/RUNTIME.md#debug-trace) explains values with what execution actually computed. Every
@@ -161,9 +162,12 @@ function play(plan: InstructionPlan, options: PlayOptions = {}): Played {
 /** Plays traced and untraced; the trace must not change any state, event, or checkpoint. */
 function traced(
   source: string | readonly ProjectSourceFile[],
-  options: Omit<PlayOptions, "trace"> = {},
+  options: Omit<PlayOptions, "trace"> & {
+    /** Turns the compiled plan into the trusted plan that runs. */
+    readonly transformPlan?: (plan: InstructionPlan) => InstructionPlan;
+  } = {},
 ): Played & { readonly trace: RuntimeDebugContext; readonly plan: InstructionPlan } {
-  const plan = compile(source);
+  const plan = options.transformPlan?.(compile(source)) ?? compile(source);
   const trace = new RuntimeDebugContext();
   const withTrace = play(plan, { ...options, trace });
   const withoutTrace = play(plan, options);
@@ -1419,4 +1423,51 @@ test("a deserialized checkpoint traced from its restore matches the untraced con
   assert.deepEqual(withTrace.events, withoutTrace.events);
   assert.equal(trace.status().origin, "restore");
   assert.equal(trace.status().rngAnchorState, waiting.rng.state);
+});
+
+test("a message's text is state of its message: aliases share it, an append builds on it, a replacement does not", () => {
+  const played = traced(
+    [
+      MESSAGE_TEXT_FUNCTIONS,
+      'let line = timer(duration: 1 ms, async: true, label: "Waiting")',
+      "let alias = line",
+      'let first = "!"',
+      "appendText(alias, first)",
+      'let second = "?"',
+      "appendText(line, second)",
+      'let fresh = "Ready"',
+      "setText(alias, fresh)",
+      "say textOf(line), instant",
+      "exit",
+    ].join("\n"),
+    { transformPlan: withMessageSays },
+  );
+  const updates = played.events.filter((event) => event.kind === "messageUpdated");
+  const [appended, again, replaced] = updates.map((event) =>
+    record(played.trace, played.trace.outputRecord(event.sequence)),
+  );
+  assert.deepEqual(
+    [appended, again, replaced].map((update) => [update!.kind, update!.target, update!.preview]),
+    [
+      ["assignment", "message.text", '"Waiting!"'],
+      ["assignment", "message.text", '"Waiting!?"'],
+      ["assignment", "message.text", '"Ready"'],
+    ],
+  );
+  const named = (update: RuntimeDebugRecord) =>
+    lineage(played.trace, update.id).map((cause) => cause.target);
+  // The second append reads the text the first one wrote, through the other name for the message.
+  assert.ok(lineage(played.trace, again!.id).some((cause) => cause.id === appended!.id));
+  assert.ok(named(again!).includes("second"));
+  // A replacement depends on its value only.
+  assert.ok(named(replaced!).includes("fresh"));
+  assert.ok(!lineage(played.trace, replaced!.id).some((cause) => cause.id === again!.id));
+  // Reading the text later finds its latest change.
+  const shown = outputOf(played, "Ready");
+  assert.ok(lineage(played.trace, shown.id).some((cause) => cause.id === replaced!.id));
+  // A change is no message of its own.
+  assert.deepEqual(
+    played.trace.outputs().map((id) => record(played.trace, id).kind),
+    ["output", "output"],
+  );
 });

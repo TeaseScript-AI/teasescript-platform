@@ -104,6 +104,7 @@ import {
   createCapturedSerializableList,
   createCapturedSerializableObject,
   getSerializableProperty,
+  type SerializableMessageHandle,
   type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeRange,
@@ -2135,7 +2136,7 @@ function executeSayAtomically(
   events: InterpreterEvent[],
 ): void {
   const stagedSnapshot = sayEvaluatesNoExpression(instruction, snapshot)
-    ? expressionFreeSayStagingClone(snapshot)
+    ? expressionFreeSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
     : stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
@@ -2183,10 +2184,14 @@ function sayEvaluatesNoExpression(
 
 /**
  * Staging for a say that evaluates no expression. Such a say replaces root fields and changes only the speaker
- * warning list and the background actions in place, so it copies those and shares everything else read-only. Every
- * field is listed so that a new snapshot field must be classified here.
+ * warning list and the background actions in place, and a result-bearing say also its temporaries and live messages, so
+ * it copies those and shares everything else read-only. Every field is listed so that a new snapshot field must be
+ * classified here.
  */
-function expressionFreeSayStagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+function expressionFreeSayStagingClone(
+  snapshot: RuntimeSnapshot,
+  givesHandle: boolean,
+): RuntimeSnapshot {
   const staged: Required<RuntimeSnapshot> = {
     format: snapshot.format,
     version: snapshot.version,
@@ -2200,7 +2205,10 @@ function expressionFreeSayStagingClone(snapshot: RuntimeSnapshot): RuntimeSnapsh
     rng: { ...snapshot.rng },
     warnedSpeakerIds: [...snapshot.warnedSpeakerIds],
     loopFrames: snapshot.loopFrames,
-    temporaries: snapshot.temporaries,
+    // The handle is set as a new temporary or replaces an earlier one's value, so each temporary is copied.
+    temporaries: givesHandle
+      ? snapshot.temporaries.map((temporary) => ({ ...temporary }))
+      : snapshot.temporaries,
     callFrames: snapshot.callFrames,
     retainedScopes: snapshot.retainedScopes,
     fallback: snapshot.fallback,
@@ -2229,6 +2237,8 @@ function expressionFreeSayStagingClone(snapshot: RuntimeSnapshot): RuntimeSnapsh
     nextMediaId: snapshot.nextMediaId,
     cameraView: snapshot.cameraView,
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
+    // Records are never changed in place; a shown message adds one.
+    liveMessages: givesHandle ? [...snapshot.liveMessages] : snapshot.liveMessages,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure: snapshot.failure,
@@ -2280,6 +2290,18 @@ function executeSay(
       prepared.presentation,
     );
     evaluator.trace?.releaseOutput(sequence, prepared.owningInstruction, prepared.text);
+    if (instruction.destinationTemporary !== undefined) {
+      // Snapshot validation keeps the source of every result-bearing say's prepared output.
+      if (prepared.sourceText === undefined)
+        throw new TypeError("Prepared output of a result-bearing say lacks its source.");
+      giveMessageHandle(
+        snapshot,
+        evaluator,
+        instruction.destinationTemporary,
+        sequence,
+        prepared.sourceText,
+      );
+    }
     establishPacingAfterSay(
       snapshot,
       events,
@@ -2361,6 +2383,14 @@ function executeSay(
         presentation,
       );
       if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
+      if (instruction.destinationTemporary !== undefined)
+        giveMessageHandle(
+          snapshot,
+          evaluator,
+          instruction.destinationTemporary,
+          sequence,
+          authoredText,
+        );
       advance(snapshot);
       return;
     }
@@ -2370,6 +2400,8 @@ function executeSay(
       speaker: output === null ? null : { ...output },
       content,
       text,
+      // Shown later, so the handle it gives then is made from this source.
+      ...(instruction.destinationTemporary === undefined ? {} : { sourceText: authoredText }),
       presentation,
       durationMs,
       skippable,
@@ -2384,9 +2416,34 @@ function executeSay(
   if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
   const sequence = emitSay(snapshot, events, instruction.span, output, content, text, presentation);
   if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
+  if (instruction.destinationTemporary !== undefined)
+    giveMessageHandle(
+      snapshot,
+      evaluator,
+      instruction.destinationTemporary,
+      sequence,
+      authoredText,
+    );
   if (durationMs > 0)
     establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
+}
+
+/**
+ * The message a result-bearing say just showed becomes live with its markup source, and its handle goes to the say's
+ * result temporary. Its ID is the say event's sequence, the newest, so the records stay in ascending order.
+ */
+function giveMessageHandle(
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  destinationTemporary: number,
+  messageId: number,
+  sourceText: string,
+): void {
+  snapshot.liveMessages.push({ messageId, sourceText });
+  const handle: SerializableMessageHandle = { kind: "messageHandle", messageId };
+  setCapturedTemporary(snapshot.temporaries, destinationTemporary, handle);
+  evaluator.trace?.writeTemporary(evaluator.callFrameId(), destinationTemporary, handle);
 }
 
 function preparedOutputSpeaker(

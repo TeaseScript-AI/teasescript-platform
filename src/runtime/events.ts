@@ -27,6 +27,19 @@ export interface SayEvent {
   readonly span: SourceSpan;
 }
 
+/**
+ * A `.text` write gave a shown message new text: the message of the `say` event `messageId` now shows `content`, in
+ * place, with its speaker and presentation unchanged.
+ */
+export interface MessageUpdatedEvent {
+  readonly kind: "messageUpdated";
+  readonly sequence: number;
+  readonly messageId: number;
+  readonly content: MessageMarkup;
+  readonly text: string;
+  readonly span: SourceSpan;
+}
+
 export interface ExitEvent {
   readonly kind: "exit";
   readonly sequence: number;
@@ -104,6 +117,7 @@ export interface ScriptStorageEditedEvent {
 
 export type InterpreterEvent =
   | SayEvent
+  | MessageUpdatedEvent
   | ExitEvent
   | ActionRequestedEvent
   | ActionCompletedEvent

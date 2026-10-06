@@ -29,6 +29,7 @@ import {
   isDuration,
   isList,
   isMediaHandle,
+  isMessageHandle,
   isPermanentButton,
   isCameraView,
   isObject,
@@ -260,6 +261,8 @@ function writeNotation(
       );
     else if (isSpeakerReference(current))
       output.push(`<speaker ${prefix(current.identifier, limit)}>`);
+    // A message handle shows its identity, not its text, so a message never shows another one within it.
+    else if (isMessageHandle(current)) output.push(`<message ${current.messageId}>`);
     else if (
       isTimerHandle(current) ||
       isMediaHandle(current) ||

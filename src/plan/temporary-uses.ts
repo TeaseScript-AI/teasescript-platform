@@ -167,6 +167,10 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
       return new Set([instruction.destinationTemporary]);
     case "capture":
       return new Set([instruction.destinationTemporary]);
+    case "say":
+      return instruction.destinationTemporary === undefined
+        ? new Set<number>()
+        : new Set([instruction.destinationTemporary]);
     case "interaction":
     case "startTimer":
     case "playMedia":
