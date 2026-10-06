@@ -330,8 +330,13 @@ interface Decision {
   readonly sceneTimeMs: number;
   readonly value: boolean;
   readonly deps: DebugDependencies;
-  /** The decision it was made inside of, in the same call. */
-  readonly parent: Decision | null;
+  /**
+   * The decision it was made inside of, in the same call, while that one is kept: a dropped decision is unlinked from
+   * the ones it enclosed, so the kept decisions are all that stays reachable.
+   */
+  parent: Decision | null;
+  /** Whether it is still kept. */
+  kept: boolean;
   /** Its record, once a write names it. */
   id: number | null;
 }
@@ -347,7 +352,10 @@ const CONTROLLED: ReadonlySet<RuntimeDebugRecordKind> = new Set([
   "image",
 ]);
 
-/** Decisions kept at once; nesting beyond it, or decisions of calls that never returned to them, drop the oldest. */
+/**
+ * Decisions kept at once, with everything they reach; deeper nesting, a long chain of unmatched cases, or decisions of
+ * calls that never returned to them drop the oldest.
+ */
 const MAX_DECISIONS = 256;
 
 interface Stage {
@@ -513,7 +521,10 @@ export class TraceStore {
         (decision.frame === frame && decision.start <= instruction && instruction < decision.end)
       )
         decisions[kept++] = decision;
+      else decision.kept = false;
+    if (kept === decisions.length) return;
     decisions.length = kept;
+    this.#unlinkDropped();
   }
 
   /**
@@ -563,9 +574,19 @@ export class TraceStore {
       value,
       deps: copyDependencies(this.acc),
       parent: this.#innermost(),
+      kept: true,
       id: null,
     });
-    if (this.#decisions.length > MAX_DECISIONS) this.#decisions.shift();
+    if (this.#decisions.length > MAX_DECISIONS) {
+      this.#decisions.shift()!.kept = false;
+      this.#unlinkDropped();
+    }
+  }
+
+  /** Unlinks kept decisions from dropped ones, which leaves the dropped ones unreachable and unrecordable. */
+  #unlinkDropped(): void {
+    for (const decision of this.#decisions)
+      if (decision.parent !== null && !decision.parent.kept) decision.parent = null;
   }
 
   /** The innermost decision of the running call; `at` keeps only those whose taken side holds the instruction. */
@@ -1106,12 +1127,12 @@ export class TraceStore {
         this.#bytes -= this.#records.pop()!.bytes;
       this.#nextId = stage.nextId;
       // Staged decisions are undone with the state they steered; a decision recorded meanwhile is recorded anew.
-      this.#decisions = this.#decisions.filter(
-        (decision) => decision.serial <= stage.decisionSerial,
-      );
       for (const decision of this.#decisions)
-        for (let item: Decision | null = decision; item !== null; item = item.parent)
-          if (item.id !== null && item.id >= stage.nextId) item.id = null;
+        if (decision.serial > stage.decisionSerial) decision.kept = false;
+      this.#decisions = this.#decisions.filter((decision) => decision.kept);
+      this.#unlinkDropped();
+      for (const decision of this.#decisions)
+        if (decision.id !== null && decision.id >= stage.nextId) decision.id = null;
       this.#draws = stage.draws;
       this.pendingOutput = stage.pendingOutput;
       this.pendingStorage = stage.pendingStorage;

@@ -1326,8 +1326,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   instructions, or a `load` default. A `decision` record holds the condition's value and causes and names the decision
   it was made inside of; it is recorded when a write first names it, so a decision that governs no write leaves no
   record. Code of another call, such as a called function or a timer or button block, names its own decisions only. A
-  decision is kept while execution is on its taken side, at most 256 at once; one dropped beyond that leaves its later
-  writes without a `control`, never with another's.
+  decision is kept while execution is on its taken side, at most 256 at once, the newest; one dropped beyond that,
+  such as an early case of a long chain of unmatched cases, leaves its later writes, and the decisions it enclosed,
+  without a link to it, never with another's.
 
 ## Checkpoint boundary
 

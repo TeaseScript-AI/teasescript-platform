@@ -935,6 +935,39 @@ test("and, or, and load defaults decide too, and blocks keep their own decisions
   assert.ok(said?.kind === "say" && !said.text.endsWith(" 0"), "the timer block ran");
 });
 
+test("a long chain of unmatched cases keeps only the newest decisions it can name", () => {
+  const cases = 600;
+  const played = traced(
+    [
+      "switch 0 {",
+      ...Array.from({ length: cases }, (_, index) => `    case ${index + 1} { }`),
+      "    default {",
+      "        wait 1",
+      '        say "done", instant',
+      "    }",
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  // The message, shown after a pause in the default, names the last case; the oldest cases were dropped while the
+  // session waited and are neither kept nor recorded.
+  const output = outputOf(played, "done");
+  const chain: RuntimeDebugRecord[] = [];
+  for (let decision = output.control; decision !== null;) {
+    const found = record(played.trace, decision.id);
+    chain.push(found);
+    decision = found.control;
+  }
+  assert.equal(chain[0]!.location?.line, cases + 1);
+  assert.ok(chain.every((decision) => decision.preview === "false"));
+  assert.ok(chain.length <= 256, `${chain.length} decisions recorded`);
+  assert.equal(
+    records(played.trace).filter((candidate) => candidate.kind === "decision").length,
+    chain.length,
+  );
+});
+
 test("a rejected say inside a branch leaves no decision behind", () => {
   const played = traced(
     ["let pace = -1", "if pace < 0 {", '    say "${["a", "b"]}", pace', "}", "exit"].join("\n"),
