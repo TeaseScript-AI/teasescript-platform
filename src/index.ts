@@ -163,6 +163,7 @@ export { observeTime, type MediaProgressReport } from "./runtime/operations/obse
 export {
   RUNTIME_DEBUG_TRACE_LIMITS,
   RuntimeDebugContext,
+  runtimeDebugPreview,
   type RuntimeDebugDependency,
   type RuntimeDebugLocation,
   type RuntimeDebugRandomOperation,

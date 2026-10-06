@@ -88,6 +88,16 @@ const media = computed(() =>
   })),
 );
 const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
+// The statement that set the Stage image, from the value trace; unknown when it ran before the trace began or was
+// dropped from its history.
+const imageOrigin = computed(() => {
+  const trace = props.player.debugTrace.value;
+  if (trace === null || props.player.session.value === null) return null;
+  const id = trace.stageImageRecord();
+  const location = id === null ? null : (trace.record(id)?.location ?? null);
+  if (location === null && stage.value.path === null) return null;
+  return { location: location === null ? null : `${location.path}:${location.line}` };
+});
 </script>
 
 <template>
@@ -139,7 +149,11 @@ const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
             {{ imageLabels[stage.status] }}
           </Badge>
         </div>
-        <p v-if="stage.path" class="text-muted-foreground">Set by: not recorded yet</p>
+        <p v-if="imageOrigin" class="text-muted-foreground" data-debug-now-image-origin>
+          Set by
+          <span v-if="imageOrigin.location" class="break-all font-mono">{{ imageOrigin.location }}</span>
+          <template v-else>: earlier history unavailable</template>
+        </p>
       </section>
 
       <section aria-labelledby="debug-now-media" class="grid gap-1">

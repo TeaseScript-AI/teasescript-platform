@@ -157,6 +157,8 @@ export interface RuntimeDebugRecord {
   /** Further causes beyond the dependency limit, which were not kept. */
   readonly omittedDependencies: number;
   readonly detail: RuntimeDebugRecordDetail | null;
+  /** The variable whose version the record is, for `variableRecord`: a scope ID or `"global"`, and its name. */
+  readonly variable: { readonly scope: number | "global"; readonly name: string } | null;
 }
 
 /** How the current epoch began: from Start, from a restored checkpoint, or by attaching to a running session. */
@@ -261,8 +263,9 @@ export function openDebugTrace(
   snapshot: RuntimeSnapshot,
 ): TraceStore | null {
   if (context === undefined) return null;
-  const store = context[STORE];
-  return store.open(plan, snapshot) ? store : null;
+  // A context of another copy of this module is not this trace; the operation runs untraced rather than failing.
+  const store: unknown = context[STORE];
+  return store instanceof TraceStore && store.open(plan, snapshot) ? store : null;
 }
 
 /** Ends an operation: its result snapshot is the one the next operation continues from. */
@@ -1122,6 +1125,7 @@ export class TraceStore {
       ),
       omittedDependencies: record.omitted,
       detail: record.detail,
+      variable: variableOf(record.key),
     });
   }
 
@@ -1223,6 +1227,30 @@ const PREVIEW_SPAN: PlanSourceLocation = Object.freeze({
   el: 0,
   ec: 0,
 });
+
+/** The variable a binding key names, or `null` for any other key. */
+function variableOf(
+  key: string | null,
+): { readonly scope: number | "global"; readonly name: string } | null {
+  if (key === null || !key.startsWith("b")) return null;
+  const separator = key.indexOf(":");
+  const scope = Number(key.slice(1, separator));
+  return Object.freeze({
+    scope: scope === GLOBAL_SCOPE_ID ? ("global" as const) : scope,
+    name: key.slice(separator + 1),
+  });
+}
+
+/**
+ * A value as the trace previews it: `say` notation cut at `RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters` while it is
+ * written, so a debugger can show a live value the same way as a recorded one.
+ */
+export function runtimeDebugPreview(value: SerializableRuntimeValue): {
+  readonly text: string;
+  readonly truncated: boolean;
+} {
+  return previewOf(value);
+}
 
 function previewOf(value: SerializableRuntimeValue): { text: string; truncated: boolean } {
   return valueNotationPrefix(

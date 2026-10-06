@@ -32,6 +32,7 @@ import {
   playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
+  withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
@@ -41,6 +42,7 @@ import {
   type DebugPhotoCandidate,
 } from "../../debug-export-assembly.js";
 import { DebugRecorder } from "../../debug-recorder.js";
+import { RuntimeDebugContext } from "../../../src/index.js";
 import type { SavedDataHost } from "../../saved-data.js";
 import { playerBuildIdentity } from "./buildIdentity";
 import type { ScriptStorageProvider } from "../../script-storage.js";
@@ -123,9 +125,13 @@ type Activation = {
   readonly begin: () => PlayerRuntimeSession;
 };
 
-/** Creates a new session at Start; pass `recording` on to `createPlayerRuntimeSession` so a debug export can replay it. */
+/**
+ * Creates a new session at Start; pass `recording` on to `createPlayerRuntimeSession`, so a debug export can replay it
+ * and, while Debug runs, its value trace records it from the start.
+ */
 export type PlayerSessionStart = (recording: {
   readonly recorder: DebugRecorder;
+  readonly debugTrace?: RuntimeDebugContext;
 }) => PlayerRuntimeSession;
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
@@ -146,6 +152,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     hostError.value = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
   }
+  // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: every session operation records into it.
+  const debugTrace = shallowRef<RuntimeDebugContext | null>(null);
   // Bumped when a stored photo finished loading, so presentation resolves its reference again.
   const mediaRevision = ref(0);
   const capturedMedia = new CapturedMediaStore(
@@ -832,7 +840,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
     camera.release();
-    activation.value = { kind: "start", begin: () => create({ recorder }) };
+    activation.value = {
+      kind: "start",
+      begin: () =>
+        create(
+          debugTrace.value === null ? { recorder } : { recorder, debugTrace: debugTrace.value },
+        ),
+    };
   }
   /**
    * What Start and Continue record about the player now: the zone and presentation, then the wall clock, sampled last so
@@ -853,10 +867,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activation.value = {
       kind: "continue",
       begin: () => {
-        // The recording of a restored session starts from the state it continues.
+        // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         recorder.begin(restored.plan, restored.snapshot);
+        debugTrace.value?.reset("restore");
         return continuePlayerRuntimeSession(
-          Object.freeze({ ...restored, recorder }),
+          Object.freeze({ ...restored, recorder, debugTrace: debugTrace.value }),
           temporalCapture(),
         ).session;
       },
@@ -1033,6 +1048,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         });
       }
       return { ...frozen, photos };
+    },
+    /** Debug's value trace while Debug runs, else `null`; it changes in place, with each published session. */
+    debugTrace: computed(() => debugTrace.value),
+    /**
+     * Turns Debug's value trace on or off. A new trace attaches to a running session at its next operation, so earlier
+     * values read as not recorded; Start and Continue begin a new epoch; off drops the trace and all its history.
+     */
+    setDebugTracing(on: boolean) {
+      if (on === (debugTrace.value !== null)) return;
+      debugTrace.value = on ? new RuntimeDebugContext() : null;
+      if (session.value !== null)
+        session.value = withPlayerRuntimeDebugTrace(session.value, debugTrace.value);
     },
     loadScriptStorage,
     scriptStorageOptions,

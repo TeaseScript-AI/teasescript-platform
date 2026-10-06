@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { ChevronDown, ChevronUp, Download } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
@@ -8,13 +9,14 @@ import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import Switch from "@/components/ui/switch/Switch.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DebugNow from "./DebugNow.vue";
+import DebugVariables from "./DebugVariables.vue";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and the debug export, and, while Debug is on, the time
-// controls (#615) above the tabs: Now, the Debug log, newest line first, and Storage when the host persists script
-// storage. An explanation opens from its label, by click, tap or keyboard; any number may be open.
+// controls (#615) above the tabs: Now, Variables, the Debug log, newest line first, and Storage when the host persists
+// script storage. An explanation opens from its label, by click, tap or keyboard; any number may be open.
 defineProps<{
   time: DevelopmentTime | null;
   log: DebugLog;
@@ -28,6 +30,7 @@ defineProps<{
 }>();
 const emit = defineEmits<{ export: [] }>();
 const active = defineModel<boolean>("active", { required: true });
+const tab = ref("now");
 </script>
 
 <template>
@@ -43,14 +46,14 @@ const active = defineModel<boolean>("active", { required: true });
         <Switch v-model="active" aria-label="Debug" data-debug-active />
       </div>
       <CollapsibleContent class="text-muted-foreground">
-        Countdowns and time controls for testing this script. Turn Debug off to play normally for a
-        while; Debug menu in Settings removes this panel.
+        Countdowns, time controls, and why values have their values, for testing this script. Turn
+        Debug off to play normally for a while; Debug menu in Settings removes this panel.
       </CollapsibleContent>
     </Collapsible>
     <Button
       variant="outline"
       size="sm"
-      class="min-h-11 justify-self-start"
+      class="h-auto min-h-11 max-w-full justify-self-start whitespace-normal text-start"
       :disabled="!exportAvailable"
       data-debug-export-open
       @click="emit('export')"
@@ -128,11 +131,13 @@ const active = defineModel<boolean>("active", { required: true });
         </Button>
       </div>
     </section>
-    <Tabs default-value="now">
-      <TabsList class="h-auto w-full">
-        <TabsTrigger value="now" class="min-h-11" data-debug-tab="now">Now</TabsTrigger>
-        <TabsTrigger value="log" class="min-h-11" data-debug-tab="log">Log</TabsTrigger>
-        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11" data-debug-tab="storage"
+    <Tabs v-model="tab">
+      <!-- The tabs wrap to a second row in the narrowest panel; each keeps its own 44 px height. -->
+      <TabsList class="h-auto w-full min-w-0 flex-wrap">
+        <TabsTrigger value="now" class="h-auto min-h-11" data-debug-tab="now">Now</TabsTrigger>
+        <TabsTrigger value="variables" class="h-auto min-h-11" data-debug-tab="variables">Variables</TabsTrigger>
+        <TabsTrigger value="log" class="h-auto min-h-11" data-debug-tab="log">Log</TabsTrigger>
+        <TabsTrigger v-if="$slots.storage" value="storage" class="h-auto min-h-11" data-debug-tab="storage"
           >Storage</TabsTrigger
         >
       </TabsList>
@@ -143,6 +148,11 @@ const active = defineModel<boolean>("active", { required: true });
           :stage-covered="stageCovered"
           :stage-overridden="stageOverridden"
         />
+        <p v-else class="text-muted-foreground">Debug is off.</p>
+      </TabsContent>
+      <!-- Kept mounted, so opened rows, the filter, and pages survive another tab; it computes only while shown. -->
+      <TabsContent value="variables" force-mount class="data-[state=inactive]:hidden">
+        <DebugVariables v-if="time" :player="player" :active="tab === 'variables'" />
         <p v-else class="text-muted-foreground">Debug is off.</p>
       </TabsContent>
       <!-- Kept mounted, so new lines arrive while another tab shows. -->
