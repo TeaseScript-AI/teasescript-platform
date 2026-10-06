@@ -3,8 +3,8 @@
  * opening the package in the TeaseScript Player, and hard-links the packages' legacy Groovy and converted `.tease`
  * files next to it under `source/`, for `serve-catalog.ts` to show as plain text.
  *
- * Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>] [--verified <dir>] [--approved <file>]
- *   <converted-root> <output.html>
+ * Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>]... [--explorer <dir>]... [--verified <dir>]
+ *   [--approved <file>] <converted-root> <output.html>
  *
  * `--player https://host:port` makes the Player links absolute, for a page served from another origin than the
  * Player; without it they are `/player/?package=<id>`. A package is read and compiled as the Player does: the
@@ -12,7 +12,9 @@
  * build required). The status comes from, in this order: the owner-approved list (`--approved`, a Markdown table
  * whose first column names the package), the frozen verified copies (`--verified`, which replace the converted
  * package in the list), the Player checks of `play-check.ts` (`--play-checks`) for the package's current `.tease`
- * files, and otherwise the compiler and the importer's report in `.report.json`.
+ * files, and otherwise the compiler and the importer's report in `.report.json`. The Explorer column shows the latest
+ * report of `explore.ts` (`--explorer`, folders of `<unit>.json` or `<unit>/<unit>.json`) for the package's current
+ * files, or for a verified copy of the unit's newer conversion, else its latest report of other files, marked stale.
  */
 import { createHash } from "node:crypto";
 import { copyFile, link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -44,6 +46,14 @@ export interface CatalogEntry {
   readonly earlier: readonly EarlierVersion[];
   readonly images: number;
   readonly audio: number;
+  /**
+   * The latest explorer report of the listed files; for a verified copy, else of the unit's current conversion, which
+   * the explorer explores; else the latest report of other files, which is stale.
+   */
+  readonly explored: {
+    readonly report: ExplorerReport;
+    readonly of: "listed" | "conversion" | "stale";
+  } | null;
 }
 
 export interface Status {
@@ -161,10 +171,50 @@ export interface PlayCheck {
   readonly rawMarkup: readonly string[];
 }
 
+/**
+ * The fields of a headless `explore.ts` report the Explorer column uses. A report's `catalog` block, when present, is
+ * read first: `{ coveragePercent, crashes, traps, firstCrash: { code, path, line, message } | null }`, the counts as
+ * numbers; a field it lacks comes from the full report.
+ */
+export interface ExplorerReport {
+  readonly contentHash: string;
+  readonly exploredAt: string;
+  readonly explorer: string | null;
+  readonly budgetSeconds: number | null;
+  /** False when the unit did not compile and was not explored. */
+  readonly compiles: boolean;
+  /** Why the search stopped: `budget`, or `exhausted` when it reached every state. */
+  readonly stoppedBy: string | null;
+  readonly states: number | null;
+  /** Runtime operations that threw: an explorer or runtime problem, not a script failure. */
+  readonly engineErrors: number;
+  readonly endStates: {
+    readonly completed: number;
+    readonly failed: number;
+    readonly stuck: number;
+    readonly open: number;
+  } | null;
+  readonly coverage: {
+    readonly percent: number;
+    readonly visited: number | null;
+    readonly coverable: number | null;
+  } | null;
+  readonly crashes: number;
+  readonly traps: number;
+  readonly firstCrash: {
+    readonly code: string;
+    readonly where: string | null;
+    readonly message: string;
+  } | null;
+  readonly firstTrap: { readonly kind: string; readonly where: string | null } | null;
+}
+
 /** Where the status beyond the compiler comes from; see the module comment. */
 export interface StatusSources {
   /** Folders of `play-check.ts` results; for each package the latest check of its current files counts. */
   readonly playChecks?: readonly string[];
+  /** Folders of `explore.ts` reports; for each package the latest report of its current files counts. */
+  readonly explorer?: readonly string[];
   readonly verified?: string;
   readonly approved?: ReadonlySet<string>;
 }
@@ -188,13 +238,14 @@ async function main(rawArgs: string[]): Promise<void> {
     options: {
       player: { type: "string", default: "" },
       "play-checks": { type: "string", multiple: true },
+      explorer: { type: "string", multiple: true },
       verified: { type: "string" },
       approved: { type: "string" },
     },
   });
   if (positionals.length !== 2) {
     process.stderr.write(
-      "Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>] [--verified <dir>] [--approved <file>] <converted-root> <output.html>\n",
+      "Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>]... [--explorer <dir>]... [--verified <dir>] [--approved <file>] <converted-root> <output.html>\n",
     );
     process.exit(2);
   }
@@ -209,6 +260,9 @@ async function main(rawArgs: string[]): Promise<void> {
     ...(values["play-checks"] === undefined
       ? {}
       : { playChecks: values["play-checks"].map((folder) => path.resolve(folder)) }),
+    ...(values.explorer === undefined
+      ? {}
+      : { explorer: values.explorer.map((folder) => path.resolve(folder)) }),
     ...(values.verified === undefined ? {} : { verified: path.resolve(values.verified) }),
     approved,
   });
@@ -409,6 +463,35 @@ async function readEntry(
   // The latest check of the current files, else the latest check of any files (a newer conversion of a verified copy).
   const current = checks.find((check) => check.contentHash === hash) ?? null;
   const play = current ?? checks[0] ?? null;
+  // An explorer folder holds `<unit>.json`, or `<unit>/<unit>.json` when each unit was explored into its own folder.
+  const explorerReports = (
+    await Promise.all(
+      (statusSources.explorer ?? []).flatMap((reportsFolder) =>
+        [path.join(reportsFolder, `${id}.json`), path.join(reportsFolder, id, `${id}.json`)].map(
+          (file) =>
+            readFile(file, "utf8").then(
+              (text) => parseExplorerReport(JSON.parse(text)),
+              () => null,
+            ),
+        ),
+      ),
+    )
+  )
+    .filter((report) => report !== null)
+    .sort((left, right) => right.exploredAt.localeCompare(left.exploredAt));
+  // A verified copy is frozen, while the explorer explores the unit's current conversion: the one other current hash.
+  const conversionHash =
+    isVerified && explorerReports.some((report) => report.contentHash !== hash)
+      ? await tools.scan(path.join(convertedRoot, id)).then(
+          (conversionScan) => packageContentHash(conversionScan.sources),
+          () => null,
+        )
+      : null;
+  const explorerReport =
+    explorerReports.find((report) => report.contentHash === hash) ??
+    explorerReports.find((report) => report.contentHash === conversionHash) ??
+    explorerReports[0] ??
+    null;
   const verifiedRecord = isVerified ? await readJson(".verified.json") : null;
   const compileStatus = packageStatus(
     sources.some((file) => file.path === MAIN),
@@ -464,6 +547,18 @@ async function readEntry(
     images: scan.images.length,
     audio: scan.media.filter((file) => AUDIO_EXTENSIONS.has(path.extname(file).toLowerCase()))
       .length,
+    explored:
+      explorerReport === null
+        ? null
+        : {
+            report: explorerReport,
+            of:
+              explorerReport.contentHash === hash
+                ? "listed"
+                : explorerReport.contentHash === conversionHash
+                  ? "conversion"
+                  : "stale",
+          },
   };
 }
 
@@ -582,6 +677,68 @@ export function parsePlayCheck(value: unknown): PlayCheck | null {
     missingImages: strings(value.missingImages),
     missingMedia: strings(value.missingMedia),
     rawMarkup: strings(value.rawMarkup),
+  };
+}
+
+/** An `explore.ts` report, or `null` when the value does not have its shape; see {@link ExplorerReport}. */
+export function parseExplorerReport(value: unknown): ExplorerReport | null {
+  if (!isRecord(value) || typeof value.contentHash !== "string") return null;
+  if (typeof value.exploredAt !== "string") return null;
+  const record = (item: unknown): Record<string, unknown> => (isRecord(item) ? item : {});
+  const number = (item: unknown): number | null =>
+    typeof item === "number" && Number.isFinite(item) ? item : null;
+  const text = (item: unknown): string | null => (typeof item === "string" ? item : null);
+  const crash = (item: unknown): ExplorerReport["firstCrash"] => {
+    const fields = record(item);
+    if (typeof fields.code !== "string") return null;
+    const line = number(fields.line);
+    const file = text(fields.path);
+    return {
+      code: fields.code,
+      where: file === null ? null : `${file}${line === null ? "" : `:${line}`}`,
+      message: text(fields.message) ?? "",
+    };
+  };
+  const block = record(value.catalog);
+  const search = record(value.search);
+  const coverage = record(value.coverage);
+  const ends = record(value.endStates);
+  const crashes = Array.isArray(value.crashes) ? value.crashes : [];
+  const traps = Array.isArray(value.traps) ? value.traps : [];
+  const percent = number(block.coveragePercent) ?? number(coverage.percent);
+  const completed = number(ends.completed);
+  const failed = number(ends.failed);
+  const stuck = number(ends.stuck);
+  const open = number(ends.open);
+  const trap = record(traps[0]);
+  return {
+    contentHash: value.contentHash,
+    exploredAt: value.exploredAt,
+    explorer: text(value.explorer),
+    budgetSeconds: number(value.budgetSeconds),
+    compiles: record(value.compile).ok !== false,
+    stoppedBy: text(search.stoppedBy),
+    states: number(search.states),
+    engineErrors: number(record(search.engineErrors).count) ?? 0,
+    endStates:
+      completed === null || failed === null || stuck === null || open === null
+        ? null
+        : { completed, failed, stuck, open },
+    coverage:
+      percent === null
+        ? null
+        : {
+            percent,
+            visited: number(coverage.visitedLines),
+            coverable: number(coverage.coverableLines),
+          },
+    crashes: number(block.crashes) ?? crashes.length,
+    traps: number(block.traps) ?? traps.length,
+    firstCrash: block.firstCrash === undefined ? crash(crashes[0]) : crash(block.firstCrash),
+    firstTrap:
+      typeof trap.kind === "string"
+        ? { kind: trap.kind, where: Array.isArray(trap.locations) ? text(trap.locations[0]) : null }
+        : null,
   };
 }
 
@@ -803,6 +960,10 @@ export function renderCatalogPage(
     ...(measuredAt === null ? [] : [`Measured ${measuredAt.slice(0, 10)}`]),
     ...commitText,
   ].join(" with ");
+  // Units whose current files the explorer explored; a stale report is counted apart.
+  const explored = entries.flatMap((entry) =>
+    entry.explored === null || entry.explored.of === "stale" ? [] : [entry.explored],
+  );
   const summary: Array<[string, number]> = [
     ["Listed", entries.length],
     ["Convert fully", entries.filter((entry) => entry.partial === null).length],
@@ -817,9 +978,13 @@ export function renderCatalogPage(
     ["Verified", count("verified")],
     ["Owner-approved", count("approved")],
     ["Unfinished stubs", count("stub")],
+    ["Explored", explored.length],
+    ["Explorer found crashes", explored.filter(({ report }) => report.crashes > 0).length],
+    ["Explorer found traps", explored.filter(({ report }) => report.traps > 0).length],
+    ["Explorer result stale", entries.filter((entry) => entry.explored?.of === "stale").length],
   ];
   const head =
-    "<thead><tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th>Status</th><th>Source</th></tr></thead>";
+    "<thead><tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th>Status</th><th>Explorer</th><th>Source</th></tr></thead>";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -827,13 +992,14 @@ export function renderCatalogPage(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Converted SexScript teases</title>
 <style>
-body { margin: 2rem auto; padding: 0 1rem; max-width: 84rem; font: 15px/1.45 system-ui, sans-serif; color: #222; }
+body { margin: 2rem auto; padding: 0 1rem; max-width: 96rem; font: 15px/1.45 system-ui, sans-serif; color: #222; }
 table { width: 100%; border-collapse: collapse; }
 th { position: sticky; top: 0; background: #fff; text-align: left; border-bottom: 2px solid #ccc; }
 th, td { padding: 0.4rem 0.5rem; vertical-align: top; }
 td { border-bottom: 1px solid #eee; }
 td.description { min-width: 14rem; max-width: 26rem; }
 td.keywords { max-width: 12rem; font-size: 0.9em; }
+td.explorer { min-width: 11.5rem; }
 td.author, td.keywords, td.source, .meta { color: #666; }
 td.source { font-size: 0.9em; }
 dl.summary { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; margin: 0 0 0.3rem; }
@@ -845,13 +1011,13 @@ dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
 .status.stops, .status.partial { background: #fff1cc; color: #6b4e00; }
 .status.unbuilt { background: #e6e3fb; color: #3c2f86; }
 .status.parked { background: #e3eefb; color: #24508a; }
-.status.stub { background: #eee; color: #555; font-style: italic; }
+.status.stub, .status.stale { background: #eee; color: #555; font-style: italic; }
 .status.error, .status.nostart { background: #fde2e1; color: #8a1c1c; }
 details summary { cursor: pointer; }
-td.status-cell details summary { list-style: none; }
+td.status-cell details summary, td.explorer details summary { list-style: none; }
 details.earlier { margin-top: 0.3rem; font-size: 0.85em; color: #555; }
 details.earlier ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
-td.status-cell details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
+td.status-cell details p, td.explorer details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
 button[data-pin] { font-size: 0.8em; }
 @media (max-width: 60rem) {
   table.packages thead { display: none; }
@@ -859,6 +1025,7 @@ button[data-pin] { font-size: 0.8em; }
   table.packages tr { border-bottom: 1px solid #ddd; padding: 0.5rem 0; }
   table.packages td { border: 0; padding: 0.1rem 0; max-width: none; }
   td.keywords:not(:empty)::before { content: "Keywords: "; }
+  td.explorer:not(:empty)::before { content: "Explorer: "; }
   td.pin { float: right; }
 }
 </style>
@@ -870,7 +1037,10 @@ Player; click a status for its details.</p>
 <dl class="summary">${summary.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl>
 <p class="meta">${measured}${measured === "" ? "" : ". "}"Play to the end" means that automated play in the real
 Player, on several paths through buttons, choices, and typed answers, with waits skipped, ended normally every time.
-"Verified" packages also passed a manual check and are served as frozen copies. MIDI music does not play.</p>
+"Verified" packages also passed a manual check and are served as frozen copies. "Explorer" is the headless explorer:
+it tries every button, choice, and answer it can within a time budget, and shows the share of script lines it reached,
+crashes (runtime failures), and traps (loops the player cannot leave). For a verified package it may show the newer
+conversion; "stale" results explored other files than the listed ones. MIDI music does not play.</p>
 <h2>Pinned</h2>
 <p id="pinned-none" class="meta">Nothing pinned yet. Use a Pin button to keep a tease here.</p>
 <table class="packages" hidden>
@@ -934,9 +1104,72 @@ function renderRow(entry: CatalogEntry, playerOrigin: string): string {
     ["keywords", entry.keywords.map(escapeHtml).join(", ")],
     ["description", escapeHtml(entry.description ?? "") + renderEarlier(entry)],
     ["status-cell", statuses],
+    ["explorer", renderExplorer(entry)],
     ["source", renderSource(entry)],
   ];
   return `<tr data-id="${id}">${cells.map(([name, html]) => `<td class="${name}">${html}</td>`).join("")}</tr>`;
+}
+
+/** The explorer's line coverage, crashes, and traps; its details name the first crash and trap and the search. */
+function renderExplorer(entry: CatalogEntry): string {
+  if (entry.explored === null) return "";
+  const { report, of } = entry.explored;
+  const count = (value: number, one: string, many: string) =>
+    `${value} ${value === 1 ? one : many}`;
+  const label = report.compiles
+    ? [
+        report.coverage === null ? "coverage unknown" : `${report.coverage.percent}%`,
+        count(report.crashes, "crash", "crashes"),
+        count(report.traps, "trap", "traps"),
+      ].join(" &middot; ")
+    : "does not compile";
+  const { coverage, endStates, firstCrash, firstTrap } = report;
+  const detail = [
+    ...(of === "stale" ? ["Stale: explored other files than the listed ones."] : []),
+    ...(of === "conversion"
+      ? ["Explored the unit's newer conversion, not the verified copy listed here."]
+      : []),
+    `Explored ${report.exploredAt.slice(0, 10)}${report.explorer === null ? "" : ` with explorer ${report.explorer}`}${report.budgetSeconds === null ? "" : `, ${report.budgetSeconds} s budget`}.`,
+    ...(report.compiles ? [] : ["The unit did not compile, so it was not explored."]),
+    ...(report.states === null
+      ? []
+      : [
+          `The search ${report.stoppedBy === "exhausted" ? "reached every state" : "stopped at its budget"} after ${report.states} states.`,
+        ]),
+    ...(coverage === null || coverage.visited === null || coverage.coverable === null
+      ? []
+      : [`It reached ${coverage.visited} of ${coverage.coverable} lines (${coverage.percent}%).`]),
+    ...(endStates === null
+      ? []
+      : [
+          `Paths: ${endStates.completed} ended normally, ${endStates.failed} failed, ${endStates.stuck} stuck, ${endStates.open} still open.`,
+        ]),
+    ...(firstCrash === null
+      ? []
+      : [
+          `First crash: ${firstCrash.code}${firstCrash.where === null ? "" : ` at ${firstCrash.where}`}.${firstCrash.message === "" ? "" : ` ${firstCrash.message}`}`,
+        ]),
+    ...(firstTrap === null
+      ? []
+      : [
+          `First trap: ${firstTrap.kind}${firstTrap.where === null ? "" : ` at ${firstTrap.where}`}.`,
+        ]),
+    ...(report.engineErrors === 0
+      ? []
+      : [
+          `${count(report.engineErrors, "runtime operation", "runtime operations")} threw: an explorer or runtime problem.`,
+        ]),
+  ].join(" ");
+  const kind =
+    of === "stale"
+      ? "stale"
+      : !report.compiles || report.crashes > 0
+        ? "error"
+        : report.traps > 0
+          ? "stops"
+          : "plays";
+  const suffix = { listed: "", conversion: " (newer conversion)", stale: " (stale)" }[of];
+  return `<details title="${escapeHtml(detail)}"><summary><span class="status ${kind}">${label}${suffix}</span></summary><p>${escapeHtml(detail)}</p></details>`;
 }
 
 /** A collapsed list of the tease's earlier versions, each with its title, status, date, and original Groovy. */

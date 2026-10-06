@@ -97,11 +97,53 @@ test(
         date: "2026-10-05",
         importerCommit: "abc1234",
       });
+      // Explorer reports: one folder per unit or flat; the report of the current files wins over a newer stale one.
+      const explored = (source: string, exploredAt: string) => ({
+        unit: "x",
+        contentHash: packageContentHash([{ path: "main.tease", source }]),
+        explorer: "6d0902c4",
+        budgetSeconds: 30,
+        exploredAt,
+        compile: { ok: true, errors: [] },
+        search: { states: 40, stoppedBy: "budget", engineErrors: { count: 0, first: null } },
+        endStates: { completed: 1, failed: 0, stuck: 0, open: 3 },
+        coverage: { coverableLines: 2, visitedLines: 2, percent: 100, files: [] },
+        crashes: [],
+        traps: [],
+      });
+      await write("explore/Night Walk/Night Walk.json", {
+        ...explored(walk, "2026-10-06T01:00:00.000Z"),
+        coverage: { coverableLines: 2, visitedLines: 1, percent: 50, files: [] },
+        crashes: [
+          {
+            code: "TSR025",
+            message: "List index 0 is outside the valid range.",
+            path: "main.tease",
+            line: 7,
+          },
+        ],
+        traps: [{ kind: "loop", states: 4, locations: ["main.tease:6"] }],
+      });
+      await write(
+        "explore-newer/Night Walk.json",
+        explored("say 1\nexit\n", "2026-10-07T01:00:00.000Z"),
+      );
+      await write("explore/broken.json", explored("say 1\nexit\n", "2026-10-06T01:00:00.000Z"));
+      // For a verified copy, a report of the unit's newer conversion is current too.
+      const newerGarden = '---\ntitle: "Garden"\n---\nsay "Greener"\nexit\n';
+      await write("converted/garden/main.tease", newerGarden);
+      await write("explore/garden.json", explored(newerGarden, "2026-10-06T01:00:00.000Z"));
+      // A report's compact catalog block counts before its full fields.
+      await write("explore/popup.json", {
+        ...explored('---\ntitle: "Popup"\n---\nshowPopup "Hi"\nexit\n', "2026-10-06T01:00:00.000Z"),
+        catalog: { coveragePercent: 75, crashes: 0, traps: 2, firstCrash: null },
+      });
 
       // EVIDENCE: the test is skipped unless the tools loaded, so toolsResult holds them here.
       const tools = (toolsResult as { tools: CatalogTools }).tools;
       const entries = await readCatalogEntries(path.join(work, "converted"), tools, {
         playChecks: [path.join(work, "checks")],
+        explorer: [path.join(work, "explore"), path.join(work, "explore-newer")],
         verified: path.join(work, "verified"),
         approved: approvedPackages("| Package | Date |\n| --- | --- |\n| `popup` | 2026-10-05 |\n"),
       });
@@ -139,8 +181,25 @@ test(
       );
       assert.ok(
         page.includes(
-          '<dl class="summary"><div><dt>Listed</dt><dd>8</dd></div><div><dt>Convert fully</dt><dd>7</dd></div><div><dt>Compile</dt><dd>5</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Parked (step limit)</dt><dd>1</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div></dl>',
+          '<dl class="summary"><div><dt>Listed</dt><dd>8</dd></div><div><dt>Convert fully</dt><dd>7</dd></div><div><dt>Compile</dt><dd>5</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Parked (step limit)</dt><dd>1</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div><div><dt>Explored</dt><dd>3</dd></div><div><dt>Explorer found crashes</dt><dd>1</dd></div><div><dt>Explorer found traps</dt><dd>2</dd></div><div><dt>Explorer result stale</dt><dd>1</dd></div></dl>',
         ),
+      );
+      assert.ok(
+        page.includes(
+          '<td class="explorer"><details title="Explored 2026-10-06 with explorer 6d0902c4, 30 s budget. The search stopped at its budget after 40 states. It reached 1 of 2 lines (50%). Paths: 1 ended normally, 0 failed, 0 stuck, 3 still open. First crash: TSR025 at main.tease:7. List index 0 is outside the valid range. First trap: loop at main.tease:6."><summary><span class="status error">50% &middot; 1 crash &middot; 1 trap</span></summary>',
+        ),
+      );
+      assert.match(
+        page,
+        /<td class="explorer"><details title="Stale: explored other files than the listed ones\. [^"]*"><summary><span class="status stale">100% &middot; 0 crashes &middot; 0 traps \(stale\)<\/span>/u,
+      );
+      assert.match(
+        page,
+        /<span class="status stops">75% &middot; 0 crashes &middot; 2 traps<\/span>/u,
+      );
+      assert.match(
+        page,
+        /<details title="Explored the unit&#39;s newer conversion, not the verified copy listed here\. [^"]*"><summary><span class="status plays">100% &middot; 0 crashes &middot; 0 traps \(newer conversion\)<\/span>/u,
       );
       assert.match(
         page,
