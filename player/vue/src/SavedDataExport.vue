@@ -12,12 +12,12 @@ import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  gzipSupported,
   storageTransferFile,
   storageTransferFileName,
   storageTransferText,
   type StorageTransfer,
 } from "../../storage-transfer.js";
+import { gzipSupported } from "../../transfer-encoding.js";
 
 // Exports this script's saved data, as one file or as text to copy, from a fresh read when the dialog opens. It is
 // prepared first, so Download and Copy stay direct player actions; everything stays in this browser until then.
