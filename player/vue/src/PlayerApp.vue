@@ -419,6 +419,7 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
+          :prepare-input="player.prepareInput"
           :images="player.images"
           :debug-countdown="debug.countdownText.value"
           @update:session="player.update"

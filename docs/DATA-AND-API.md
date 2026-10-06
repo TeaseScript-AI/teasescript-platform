@@ -145,7 +145,9 @@ layer such as durable captured media wraps a provider instead and stores the med
 reference before persisting them. Clearing or replacing a scope affects only that script's stored values, never a
 running session's own view. Debug's storage editor writes one key through the same provider and captured-media layer,
 as a script `save` does; only once that write succeeded does it change a running session's view
-([DEBUGGER.md](DEBUGGER.md#player-debug)). Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
+([DEBUGGER.md](DEBUGGER.md#player-debug)). Adopting a state Debug's rewind restored replaces the scope's values with
+that state's view through the same provider and layer; the rewind history itself is temporary diagnostic data in an
+IndexedDB database of its own, deleted with the history ([DEBUGGER.md](DEBUGGER.md#rewind)). Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
 can be added there.
 
 ### Saved-data transfer

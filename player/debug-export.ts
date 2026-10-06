@@ -48,6 +48,12 @@ export interface DebugExport {
    * replay anchor is not among the recorded calls, so only this says so.
    */
   readonly editedWhileDebugging: DebugEditedWhileDebugging | null;
+  /**
+   * Whether Debug's rewind (DEBUGGER.md "Rewind") restored an earlier state of the session, which makes it a
+   * diagnostic fork: the scene time of the state the latest rewind restored and how many rewinds led to the session;
+   * `null` when none. The replay anchor is at or after that restored state.
+   */
+  readonly rewoundWhileDebugging: DebugRewoundWhileDebugging | null;
   /** The player's choices; `replay` requires `savedValues`, `answers`, and `sessionText`, because state copies them. */
   readonly selection: DebugSelection;
   /** Why parts are missing, in words for the developer. */
@@ -85,6 +91,11 @@ export interface DebugPackage {
 export interface DebugEditedWhileDebugging {
   readonly firstEditSceneTimeMs: number;
   readonly editCount: number;
+}
+
+export interface DebugRewoundWhileDebugging {
+  readonly restoredSceneTimeMs: number;
+  readonly rewindCount: number;
 }
 
 export interface DebugIncident {
@@ -263,6 +274,7 @@ function* pieces(exported: DebugExport): Generator<string> {
     "package",
     "incident",
     "editedWhileDebugging",
+    "rewoundWhileDebugging",
     "selection",
     "omissions",
   ] as const)
@@ -337,6 +349,7 @@ function parseDocument(json: string): DebugExport {
     "package",
     "incident",
     "editedWhileDebugging",
+    "rewoundWhileDebugging",
     "selection",
     "omissions",
     "checkpoint",
@@ -372,6 +385,7 @@ function parseDocument(json: string): DebugExport {
     package: parsePackage(root["package"]),
     incident: parseIncident(root["incident"]),
     editedWhileDebugging: parseEditedWhileDebugging(root["editedWhileDebugging"]),
+    rewoundWhileDebugging: parseRewoundWhileDebugging(root["rewoundWhileDebugging"]),
     selection,
     omissions: strings(root["omissions"], "$.omissions"),
     checkpoint,
@@ -424,6 +438,19 @@ function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | 
       "$.editedWhileDebugging.firstEditSceneTimeMs",
     ),
     editCount: count(edited["editCount"], "$.editedWhileDebugging.editCount"),
+  };
+}
+
+function parseRewoundWhileDebugging(value: unknown): DebugRewoundWhileDebugging | null {
+  if (value === null) return null;
+  const rewound = record(value, "$.rewoundWhileDebugging");
+  exactly(rewound, "$.rewoundWhileDebugging", ["restoredSceneTimeMs", "rewindCount"]);
+  return {
+    restoredSceneTimeMs: sceneTime(
+      rewound["restoredSceneTimeMs"],
+      "$.rewoundWhileDebugging.restoredSceneTimeMs",
+    ),
+    rewindCount: count(rewound["rewindCount"], "$.rewoundWhileDebugging.rewindCount"),
   };
 }
 

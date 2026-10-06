@@ -41,6 +41,13 @@ import {
   type DebugExportCandidate,
   type DebugPhotoCandidate,
 } from "../../debug-export-assembly.js";
+import type { DebugRewoundWhileDebugging } from "../../debug-export.js";
+import {
+  DEBUG_HISTORY_MEMORY_BUDGET,
+  type DebugHistoryMarks,
+  type DebugHistorySpill,
+} from "../../debug-history.js";
+import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
 import { DebugRecorder } from "../../debug-recorder.js";
 import { RuntimeDebugContext } from "../../../src/index.js";
 import type { SavedDataHost } from "../../saved-data.js";
@@ -118,6 +125,10 @@ export interface PlayerSessionOptions {
    * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
    */
   temporalContext?: () => TemporalContext;
+  /** Opens where Debug's rewind history spills snapshots; IndexedDB by default, `null` keeps them in memory. */
+  debugHistorySpill?: () => Promise<DebugHistorySpill | null>;
+  /** Characters of state JSON a rewind history keeps in memory before it spills; diagnostic tuning for tests. */
+  debugHistoryMemoryBudget?: number;
 }
 
 type Activation = {
@@ -146,6 +157,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   // Records every session's engine calls from Start, in every build, for a debug export (DEBUGGER.md "Debug export").
   const recorder = new DebugRecorder();
+  // Rewind histories that pages which ended without deleting theirs left behind go now.
+  if (options.debugHistorySpill === undefined) void sweepDebugHistories();
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start.
   const hostError = ref<string | null>(null);
   function reportHostError(error: unknown) {
@@ -193,6 +206,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   const session = shallowRef<PlayerRuntimeSession | null>(null);
+  // Counts the times this script's saved data were replaced outside Debug's rewind, which ends its history.
+  const rewindRetirements = ref(0);
+  // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
+  // hold their position, and load reports and capture requests wait, until new input adopts the state as the session.
+  const inspecting = ref(false);
+  // Whether Debug's rewind restored an earlier state of the session; for its debug export.
+  const rewound = shallowRef<DebugRewoundWhileDebugging | null>(null);
+  // The session as other parts of the Player service it: none while a restored state is inspected.
+  const servicedSession = computed(() => (inspecting.value ? null : session.value));
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
@@ -241,6 +263,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (mediaId, report) => {
       const current = session.value;
       if (!current) return "delivered";
+      if (inspecting.value) return "pending";
       const result = reportPlayerRuntimeMediaLoad(current, mediaId, report);
       if (result.outcome.kind === "executionPending") return "pending";
       if (result.outcome.kind === "accepted") session.value = result.session;
@@ -265,7 +288,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
-  const clock = useRuntimeSceneClock(session, () => device.sample());
+  const clock = useRuntimeSceneClock(session, () => device.sample(), inspecting);
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.snapshot).stage.image,
   );
@@ -284,9 +307,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
 
   watch(
-    session,
-    (current) => {
-      device.reconcile(current ? playerRuntimeMedia(current.snapshot).media : []);
+    [session, inspecting],
+    ([current, paused]) => {
+      const media = current ? playerRuntimeMedia(current.snapshot).media : [];
+      // An inspected state shows its media where they were, without playing them.
+      device.reconcile(
+        paused ? media.map((projection) => ({ ...projection, state: "paused" as const })) : media,
+      );
       loads.retry();
       pendingLoadCount.value = loads.size;
     },
@@ -301,7 +328,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     { immediate: true },
   );
   const captures = new CaptureService(() => camera.answer(), {
-    session: () => session.value,
+    session: () => servicedSession.value,
     generation: () => generation.value,
     observe: () => clock.observe(),
     publish: (next) => (session.value = next),
@@ -310,7 +337,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     later: (task) => setTimeout(task, 0),
   });
   const serviceCapture = () => captures.request();
-  watch(session, () => void serviceCapture());
+  watch(servicedSession, () => void serviceCapture());
   // A session that ended releases its camera.
   watch(
     () => session.value?.snapshot.status,
@@ -338,7 +365,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     () => {},
   );
   const imageCapture = useImageCapture({
-    session,
+    session: servicedSession,
     generation,
     sessionCamera: camera,
     captureCamera,
@@ -546,6 +573,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const owner = generation.value;
     const result = editChain.then(() => applySavedDataEdit(edit, owner));
     editChain = result.catch(() => undefined);
+    // Debug's rewind waits until the edit is stored and the session took it.
+    editsInFlight.value++;
+    void editChain.then(() => editsInFlight.value--);
     return result;
   }
   async function applySavedDataEdit(
@@ -570,6 +600,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       importing.value ||
       clearing.value ||
       openingCamera.value ||
+      inspecting.value ||
       activation.value?.kind === "continue"
     )
       return failed("Saved data cannot be changed right now.");
@@ -634,6 +665,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       !clearing.value &&
       !importing.value &&
       !openingCamera.value &&
+      !inspecting.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
         session.value.snapshot.status === "halted" ||
@@ -647,6 +679,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       await scriptStorage.clear();
       storedEntries.value = [];
       savedDataRevision.value++;
+      // Debug's rewind could restore the saved data cleared now, so its history ends.
+      rewindRetirements.value++;
       return true;
     } catch {
       return false;
@@ -728,7 +762,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     importing.value = true;
     const failed: string[] = [];
     try {
-      if (ownChosen && sessionInProgress.value) endSession();
+      // Debug's rewind could restore this script's earlier saved data over the import, so its history ends too, and so
+      // does an inspected state, also one that ended.
+      if (ownChosen) {
+        if (sessionInProgress.value || inspecting.value) endSession();
+        rewindRetirements.value++;
+      }
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
@@ -789,16 +828,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingLoadCount.value = 0;
     generation.value++;
     interactionReset.value++;
+    inspecting.value = false;
+    rewound.value = null;
     session.value = null;
   }
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a
-  // gap while no Player ran is not consumed.
-  function start(next: PlayerRuntimeSession) {
+  // gap while no Player ran is not consumed. A state Debug's rewind restored is published `paused` for inspection.
+  function start(next: PlayerRuntimeSession, paused = false) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
     debugEdits.value = null;
+    inspecting.value = paused;
+    rewound.value = null;
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -807,15 +850,104 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value = next;
     clock.rebase();
   }
-  // Publishes the result of a completed runtime action.
+  // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
+  // `prepareInput` adopted it, so a result for the inspected state itself is never published.
   function update(next: PlayerRuntimeSession) {
-    session.value = next;
+    if (!inspecting.value) session.value = next;
+  }
+  /**
+   * Readies the session for input before the input is evaluated: an inspected state Debug's rewind restored is adopted
+   * first. `true` when input may go ahead at once, else whether it may once the state is adopted; a state that could
+   * not be adopted, or one being adopted for other input, takes none, and stays as it was.
+   */
+  function prepareInput(): true | Promise<boolean> {
+    return inspecting.value ? adoptRewound() : true;
+  }
+
+  /**
+   * Shows a state Debug's rewind restored (DEBUGGER.md "Rewind") as a new generation of the session, with the marks it
+   * had: paused for inspection, or running, as when Return reinstates the session Back left. `create` gets the recorder
+   * to begin anew at the state.
+   */
+  function publishRewound(
+    create: PlayerSessionStart,
+    state: { readonly paused: boolean; readonly marks: DebugHistoryMarks },
+  ) {
+    // An unmounted Player publishes nothing.
+    if (disposed) return;
+    const next = create({ recorder });
+    start(next, state.paused);
+    debugEdits.value = state.marks.editedWhileDebugging;
+    rewound.value = state.marks.rewoundWhileDebugging;
+  }
+  // Debug's rewind does one thing at a time: restoring a state (a step, which may read a spilled snapshot) or adopting
+  // the inspected one (which replaces the saved data). Each holds this until it is done, and neither starts meanwhile.
+  const rewindWork = ref<"step" | "adopt" | null>(null);
+  let adoption: Promise<boolean> | null = null;
+  const editsInFlight = ref(0);
+  /** Whether the session may be left for a restored state now: nothing waits for the host or the player. */
+  const rewindReady = computed(
+    () =>
+      session.value !== null &&
+      activation.value === null &&
+      !importing.value &&
+      !clearing.value &&
+      !openingCamera.value &&
+      editsInFlight.value === 0 &&
+      pendingPlayerRuntimeStorageWrite(session.value.snapshot) === null,
+  );
+  /** Whether Debug's rewind may begin a step now: the session may be left, and no other rewind work runs. */
+  const canRewind = computed(() => rewindReady.value && rewindWork.value === null);
+  /** Begins a rewind step, if one may begin now; call the returned function once the step is done. */
+  function beginRewindStep(): (() => void) | null {
+    if (!canRewind.value) return null;
+    rewindWork.value = "step";
+    let held = true;
+    return () => {
+      if (held && rewindWork.value === "step") rewindWork.value = null;
+      held = false;
+    };
+  }
+  let rewindAdopted: (() => void) | null = null;
+  /**
+   * Adopts the inspected state as the session: the saved data are replaced by the state's own, as one validated
+   * replacement that also keeps the photos they use, and the state runs from then on, saving as any session. When the
+   * saved data cannot be replaced, the state stays inspected and nothing changes. Resolves to whether it was adopted.
+   */
+  function adoptRewound(): Promise<boolean> {
+    if (!inspecting.value || rewindWork.value !== null || session.value === null)
+      return Promise.resolve(false);
+    adoption = adoptShown(session.value).finally(() => (adoption = null));
+    return adoption;
+  }
+  async function adoptShown(shown: PlayerRuntimeSession): Promise<boolean> {
+    const owner = generation.value;
+    rewindWork.value = "adopt";
+    try {
+      if (scriptStorage && shown.snapshot.scriptStoragePersistent)
+        await scriptStorage.replace(shown.snapshot.scriptStorage);
+    } catch {
+      if (!disposed) notices.publish(playerNotices.rewindNotAdopted());
+      return false;
+    } finally {
+      rewindWork.value = null;
+    }
+    // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
+    if (disposed || generation.value !== owner || !inspecting.value) return false;
+    notices.dismiss(playerNoticeKeys.rewindNotAdopted);
+    storedEntries.value = shown.snapshot.scriptStorage;
+    savedDataRevision.value++;
+    rewindAdopted?.();
+    inspecting.value = false;
+    clock.rebase();
+    return true;
   }
   /**
    * Publishes a session that development time jumps (#615) advanced from the current one: playing media seek to the
    * progress the jumps reported, and the scene clock continues from the new observed time.
    */
   function publishJump(next: PlayerRuntimeSession) {
+    if (inspecting.value) return;
     session.value = next;
     device.jumped(playerRuntimeMedia(next.snapshot).media);
     clock.rebase();
@@ -824,11 +956,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value === null ? [] : playerRuntimePermanentButtons(session.value.snapshot),
   );
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
-  function pressPermanentButton(buttonId: number) {
+  async function pressPermanentButton(buttonId: number) {
+    if (!(await prepareInput())) return;
     const current = clock.observe();
     if (current === null) return;
     const result = pressPlayerRuntimePermanentButton(current, buttonId);
-    if (result.outcome.kind === "pressed") session.value = result.session;
+    if (result.outcome.kind === "pressed") update(result.session);
   }
   /**
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
@@ -971,6 +1104,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         !importing.value &&
         !clearing.value &&
         !openingCamera.value &&
+        !inspecting.value &&
         activation.value?.kind !== "continue",
       live: liveSession(),
       /** The running session's own write waits for the host; Debug edits wait until it settled. */
@@ -1029,6 +1163,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         recording: recorder.recording(),
         hostError: hostError.value,
         editedWhileDebugging: debugEdits.value,
+        rewoundWhileDebugging: rewound.value,
         ...shown,
       };
       const storage =
@@ -1128,6 +1263,36 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     publishJump,
     start,
     update,
+    prepareInput,
+    /** Debug's rewind (DEBUGGER.md "Rewind"): how the session host shows the states it restores. */
+    rewind: {
+      /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
+      inspecting: computed(() => inspecting.value),
+      /** Whether a restored state is being adopted: its saved data are being replaced. */
+      adopting: computed(() => rewindWork.value === "adopt"),
+      /** Changes whenever this script's saved data were cleared or imported, which ends the rewind history. */
+      retirements: computed(() => rewindRetirements.value),
+      /** Whether a rewind step or an adoption runs now. */
+      working: computed(() => rewindWork.value !== null),
+      /** Whether the session may be left for a restored state, apart from rewind work under way. */
+      ready: rewindReady,
+      beginStep: beginRewindStep,
+      /** Whether the session is a restored state: when, and how many rewinds led to it; for its debug export. */
+      rewound: computed(() => rewound.value),
+      canRewind,
+      /** Opens a new spill store for a rewind history. */
+      openSpill: options.debugHistorySpill ?? (() => openDebugHistorySpill()),
+      memoryBudget: options.debugHistoryMemoryBudget ?? DEBUG_HISTORY_MEMORY_BUDGET,
+      publish: publishRewound,
+      /** Adopts the inspected state without new input, so it runs on; resolves to whether it was adopted. */
+      resume: () => adoptRewound(),
+      /** The adoption under way, which resolves to whether the state was adopted, or `null`. */
+      adoption: () => adoption,
+      /** Calls `listener` whenever an inspected state is adopted as the session, before it runs on. */
+      onAdopted(listener: (() => void) | null) {
+        rewindAdopted = listener;
+      },
+    },
     prepare,
     prepareRestore,
     activate,

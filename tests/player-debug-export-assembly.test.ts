@@ -75,6 +75,7 @@ function candidate(
     recording,
     hostError: null,
     editedWhileDebugging: null,
+    rewoundWhileDebugging: null,
     photos: [...uses].map(([photo, usedBy]) => ({
       reference: photo,
       mimeType: "image/png",
@@ -161,17 +162,17 @@ test("by default an export holds the technical report and no personal content", 
   assert.equal(parseDebugExport(text).selection.replay, false);
 });
 
-test("a session Debug's storage editor changed is marked in the export, without personal content", async () => {
+test("a session Debug's storage editor changed or its rewind restored is marked in the export, without personal content", async () => {
   const { session, recorder } = failedSession();
   const editedWhileDebugging = { firstEditSceneTimeMs: 123.5, editCount: 2 };
+  const rewoundWhileDebugging = { restoredSceneTimeMs: 40.5, rewindCount: 1 };
   const { exported } = await assembleDebugExport(
-    { ...candidate(session, recorder), editedWhileDebugging },
+    { ...candidate(session, recorder), editedWhileDebugging, rewoundWhileDebugging },
     NO_PERSONAL_CONTENT,
   );
-  assert.deepEqual(parseDebugExport(await fileText(exported)).editedWhileDebugging, {
-    firstEditSceneTimeMs: 123.5,
-    editCount: 2,
-  });
+  const parsed = parseDebugExport(await fileText(exported));
+  assert.deepEqual(parsed.editedWhileDebugging, editedWhileDebugging);
+  assert.deepEqual(parsed.rewoundWhileDebugging, rewoundWhileDebugging);
 });
 
 test("replay data needs its prerequisites, and turning one off turns it off", () => {

@@ -12,6 +12,7 @@ import {
   debugBuildRevisions,
   type DebugBuild,
   type DebugEditedWhileDebugging,
+  type DebugRewoundWhileDebugging,
   type DebugExport,
   type DebugIncident,
   type DebugPackage,
@@ -42,6 +43,8 @@ export interface DebugExportCandidate {
   readonly hostError: string | null;
   /** The session's "Edited while debugging" mark from Debug's storage editor; `null` when it was not edited. */
   readonly editedWhileDebugging: DebugEditedWhileDebugging | null;
+  /** The session's "Rewound while debugging" mark from Debug's rewind; `null` when it was not rewound. */
+  readonly rewoundWhileDebugging: DebugRewoundWhileDebugging | null;
   readonly photos: readonly DebugPhotoCandidate[];
   /** Player settings, geometry, and browser details, exported only when chosen. */
   readonly player: Readonly<Record<string, string | number | boolean | null>>;
@@ -304,6 +307,7 @@ export async function assembleDebugExport(
     package: { ...candidate.package, contentHash: plan === null ? null : await planHash(plan) },
     incident,
     editedWhileDebugging: candidate.editedWhileDebugging,
+    rewoundWhileDebugging: candidate.rewoundWhileDebugging,
     selection: {
       savedValues: choices.savedValues,
       answers: choices.answers,

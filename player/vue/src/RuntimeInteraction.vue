@@ -43,14 +43,17 @@ const props = defineProps<{
   transcriptKey: string;
   /** Brings scene time up to date before input and returns the published session. */
   observeTime?: () => PlayerRuntimeSession | null;
+  /**
+   * Readies the session before input is evaluated, such as by adopting a state Debug's rewind restored; input goes
+   * ahead when it returns or resolves to `true`.
+   */
+  prepareInput?: () => true | Promise<boolean>;
   /** Answers `askImage` with a chosen file; without it an image request offers no file input. */
   images?: PlayerImageInput;
   /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
   debugCountdown?: string | null;
 }>();
-const emit = defineEmits<{
-  "update:session": [session: PlayerRuntimeSession];
-}>();
+const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
@@ -228,7 +231,11 @@ async function complete(
         ? playerRuntimePacingGate(current)?.actionId
         : activePlayerRuntimeInteraction(current.snapshot)?.actionId;
     const presented = expectedActionId ?? targetId(props.session);
+    // Ordinary input is evaluated at once; a session that must be readied first is evaluated once it is.
+    const ready = props.prepareInput?.() ?? true;
+    if (ready !== true && !(await ready)) return;
     const session = props.observeTime?.() ?? props.session;
+    if (!session) return;
     // Elapsed time may have ended or replaced the presented action; input never targets another action.
     if (targetId(session) !== presented) {
       // A skipped message that already finished needs no feedback.

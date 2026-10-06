@@ -18,10 +18,11 @@ branches. Exact UI and source mapping remain presentation/tooling work. Value pr
 - **Active debug** runs a disposable fork of a selected session/checkpoint. It may Run, Step, Pause, change variables,
   control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore. Debug mutations never merge
   back into the canonical session.
-- **Storage edits** of a local Player session are the exception: an edit through `applyExternalStorageEdit`
-  ([`RUNTIME.md`](RUNTIME.md#script-storage)) turns the active session into a diagnostic fork in place, without a
-  separate fork object. The Player marks the session edited while debugging, in its own session data rather than the
-  checkpoint, keeps the mark with its debug export and restore, and never treats it as normal play.
+- **Storage edits and adopted rewinds** of a local Player session are the exception: an edit through
+  `applyExternalStorageEdit` ([`RUNTIME.md`](RUNTIME.md#script-storage)), or new input to a state Debug's
+  [rewind](#rewind) restored, turns the active session into a diagnostic fork in place, without a separate fork object.
+  The Player marks the session edited or rewound while debugging, in its own session data rather than the checkpoint,
+  keeps the mark with its debug export and restore, and never treats it as normal play.
 
 ## Player Debug
 
@@ -32,6 +33,7 @@ Debug log lives while the menu is on; the other features run only while both are
 auto-skip, ends a jump at its next yield, and drops the value trace with its history. The time controls stand above the
 tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears when the host persists script storage.
 **Download debug export…** in the panel opens the [debug export](#debug-export) dialog from any tab, also with Debug off.
+[Rewind](#rewind) keeps the session's history while both switches are on.
 
 - **Time controls** (Skip event, +10 s, +1 min, Auto-skip) advance the canonical session's own scene time through
   ordinary observations ([`RUNTIME.md`](RUNTIME.md#timers-and-scene-time)). They are read-only inspection with
@@ -93,6 +95,41 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   - The first applied edit marks the session **Edited while debugging** (with the scene time of the first edit and
     the number of edits) in the Player's own session data, which a debug export carries.
 
+### Rewind
+
+While the Debug features run, Debug's rewind (`player/debug-history.ts`) keeps a **point** for every interaction the
+session newly presents (`choose`, a button, an ask, or `askImage`), the one shown when Debug is turned on included; an
+ask that a timer, media, or permanent-button block suspended and shows again is the same point. A point holds the
+validated state as checkpoint JSON, which includes the session's storage view, and the events that led to it, which
+rebuild its transcript; the plan is shared, and photos stay in the Player's captured-media store, which keeps every
+photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,
+in memory and the older ones in an IndexedDB database of its own (`teasescript-debug-history-<UUID>`). Without
+IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has. Turning
+either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
+Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
+its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
+where the browser lists its databases; one that another open Player still uses is deleted only once that Player is done
+with it.
+
+- **Back** restores a point that leads to the state shown as a new generation of the session: its state with its storage
+  view, Stage, and media, its transcript, and its marks. The restored state is **inspected**: nothing runs on its own,
+  its clock stands, media keep their position without playing, load reports, camera requests, and auto-skip wait, and
+  the browser's saved data stay as they are, without the Storage editor or clearing them. The first Back parks the
+  session it left; every Back keeps the state it left for **Forward**, which restores it exactly. Back waits while a
+  save, a Storage editor change, Start, Continue, import, clear, or camera opening waits for the host or the player.
+- **Return** reinstates the parked session as it was, and so does turning Debug off while a state is inspected; time
+  spent inspecting is no scene time.
+- New input to the inspected state (an answer, a button, a permanent button, or a time skip), or **Resume**, **adopts**
+  it as the session before the input is evaluated: the browser's saved data are first replaced by the state's storage
+  view, as one replacement through the provider and its captured-media layer, and then the input applies and the
+  session runs and saves as any session. The parked session, the states kept for Forward, and the points after the
+  adopted state are gone; earlier points stay for a later Back. When the saved data cannot be replaced, for example on
+  quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
+  step restores a state or a state is being adopted, input to an inspected state, Return, and another step are refused.
+- Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
+  rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
+  begin anew at every restored state, so a replay never mixes branches.
+
 ## Debug export
 
 A debug export (`<script>-debug.teasedebug.json.gz`, or `.teasedebug.json` where the browser cannot compress) lets a
@@ -107,7 +144,8 @@ copies saved values, answers, and session text, so it requires all three.
 `version: 2`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
-covers edits before the replay anchor and which `inspect` prints; the selection and omissions; the canonical checkpoint
+covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
+and `rewindCount`, or `null`), both of which `inspect` prints; the selection and omissions; the canonical checkpoint
 and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
@@ -125,8 +163,8 @@ cannot copy, or a media store that throws during a call, marks it incomplete.
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The
 technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
-where the browser can hash, the incident as the session's actual state shows it, the storage editor's mark, the sequence
-and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
+where the browser can hash, the incident as the session's actual state shows it, the storage editor's and the rewind's
+marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
 Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
 reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions; session
