@@ -539,6 +539,29 @@ function forUse(type: StaticType): StaticType {
   return value.kind === "never" ? resolved(type) : value;
 }
 
+/** The methods that change the list, set, or dict they are called on, and so the variable that holds it. */
+export const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
+  "add",
+  "addAll",
+  "remove",
+  "clear",
+  "removeAt",
+  "removeFirst",
+  "removeLast",
+]);
+
+/** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
+export function rootName(expression: Expression): string | null {
+  let node = expression;
+  while (
+    node.kind === "parenthesizedExpression" ||
+    node.kind === "propertyAccessExpression" ||
+    node.kind === "indexExpression"
+  )
+    node = node.kind === "parenthesizedExpression" ? node.expression : node.object;
+  return node.kind === "identifier" ? node.name : null;
+}
+
 /** The list methods that reorder a list in place, and the set operations of lists and sets (V30 §16, ADR 0013). */
 export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "sort",

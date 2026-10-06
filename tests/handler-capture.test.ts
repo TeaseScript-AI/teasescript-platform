@@ -485,6 +485,34 @@ test("the compiler shares the variables visible where a block is created, and ch
     ]).diagnostics.map((diagnostic) => diagnostic.code),
     ["TSV043"],
   );
+  // A variable of the same name that no block shares keeps its narrowing: a block's own one, or one in another block.
+  for (const shared of [
+    "        timer async 1 s {\n            let value = 1\n            value += 1\n        }",
+    '        let value = "x"\n        timer async 1 s {\n            value = "y"\n        }',
+  ])
+    assert.deepEqual(
+      codes(
+        [
+          "function optional(value: string?): string? {",
+          "    return value",
+          "}",
+          "function f {",
+          "    if true {",
+          shared,
+          "    }",
+          "    if true {",
+          '        let value = optional("abc")',
+          "        if value != null {",
+          "            wait 2 s",
+          "            say value.length",
+          "        }",
+          "    }",
+          "}",
+          "f()",
+        ].join("\n"),
+      ),
+      [],
+    );
   // A block that only reads it does not.
   assert.deepEqual(
     codes(

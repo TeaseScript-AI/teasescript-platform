@@ -23,7 +23,10 @@ import type {
   SpeakerDeclaration,
   Statement,
   FileTarget,
+  ForStatement,
+  FunctionParameter,
   LabelTarget,
+  LetStatement,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
@@ -55,6 +58,7 @@ import {
   isExactDuration,
 } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
+import { COLLECTION_CHANGES, rootName } from "./operation-checks.js";
 import {
   globMatches,
   isPathGlob,
@@ -95,7 +99,15 @@ interface Binding {
   readonly declaration?: FunctionDeclaration;
   /** Where the project declares a global, a speaker, or a global function, which every file sees. */
   readonly project?: ProjectDeclaration;
+  /** The declaration of a function, loop, or block variable. */
+  site?: VariableSite;
 }
+
+/**
+ * The declaration of a function, loop, or block variable: its `let`, its `for` (the key of a pair loop), the value name
+ * of a pair loop, or its parameter.
+ */
+export type VariableSite = LetStatement | ForStatement | Identifier | FunctionParameter;
 
 interface ProjectDeclaration {
   readonly file: number;
@@ -208,6 +220,8 @@ export interface FileSemanticResult {
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
   /** The variables each timer, media, or button block shares with the code that created it (V30 §14). */
   readonly captures: ReadonlyMap<Block, readonly string[]>;
+  /** The declarations of the shared variables that a block assigns or changes. */
+  readonly sharedWrites: ReadonlySet<VariableSite>;
   /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
   checkInitialization(freshLabels: ReadonlySet<string>, flow: StatementFlow): readonly Diagnostic[];
 }
@@ -268,6 +282,7 @@ export function validateProjectSemantics(
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
+      sharedWrites: validators[index]?.sharedWrites ?? new Set<VariableSite>(),
       reachableEntries: (flow: StatementFlow) =>
         validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
       checkInitialization: (freshLabels: ReadonlySet<string>, flow: StatementFlow) =>
@@ -430,6 +445,15 @@ class SemanticScope {
         return binding;
       }
       scope = scope.parent;
+    }
+    return undefined;
+  }
+
+  /** The declaration of the variable `name` when it is one that a block shares with the code that created it. */
+  public sharedSite(name: string): VariableSite | undefined {
+    for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent) {
+      const binding = scope.bindings.get(name);
+      if (binding !== undefined) return scope.captured === null ? undefined : binding.site;
     }
     return undefined;
   }
@@ -726,6 +750,15 @@ class SemanticValidator {
 
   /** The variables each block shares with the code that created it, by its block, for the lowering. */
   readonly captures = new Map<Block, readonly string[]>();
+
+  /** The declarations of the variables that a block shares and assigns, so a suspension may change them (V30 §13). */
+  readonly sharedWrites = new Set<VariableSite>();
+
+  /** Records that the running block assigns or changes `name`, when that is a variable it shares. */
+  #recordSharedWrite(name: string | null, scope: SemanticScope): void {
+    const site = name === null ? undefined : scope.sharedSite(name);
+    if (site !== undefined) this.sharedWrites.add(site);
+  }
 
   /**
    * A block that creates another one also shares the variables the inner block uses from outside the outer one. Inner
@@ -1200,7 +1233,9 @@ class SemanticValidator {
           this.#validateExpression(statement.initializer, scope, null);
         }
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
-          scope.bindings.get(statement.name.name)!.handle = handleKind(statement.initializer);
+          const binding = scope.bindings.get(statement.name.name)!;
+          binding.handle = handleKind(statement.initializer);
+          binding.site = statement;
         }
         return;
       }
@@ -1421,14 +1456,18 @@ class SemanticValidator {
           );
         }
         const loopScope = new SemanticScope(scope);
-        this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope);
-        if (statement.valueVariable !== null)
+        if (this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope))
+          loopScope.bindings.get(statement.variable.name)!.site = statement;
+        if (
+          statement.valueVariable !== null &&
           this.#declare(
             statement.valueVariable.name,
             "variable",
             statement.valueVariable.span,
             loopScope,
-          );
+          )
+        )
+          loopScope.bindings.get(statement.valueVariable.name)!.site = statement.valueVariable;
         yield* compileChild(
           this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
         );
@@ -1709,8 +1748,11 @@ class SemanticValidator {
         );
       }
       sawDefault ||= parameter.defaultValue !== null;
-      if (!duplicate) {
-        this.#declare(parameter.name.name, "variable", parameter.name.span, bodyScope);
+      if (
+        !duplicate &&
+        this.#declare(parameter.name.name, "variable", parameter.name.span, bodyScope)
+      ) {
+        bodyScope.bindings.get(parameter.name.name)!.site = parameter;
       }
     }
 
@@ -1746,7 +1788,7 @@ class SemanticValidator {
         this.#reportLaterParameterReferences(parameter.defaultValue, laterNameCounts);
         this.#validateExpression(parameter.defaultValue, defaultScope, null);
       }
-      defaultScope.declare(name, { kind: "variable" });
+      defaultScope.declare(name, { kind: "variable", site: parameter });
     }
 
     this.#functionDepth += 1;
@@ -1764,6 +1806,7 @@ class SemanticValidator {
   }
 
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
+    this.#recordSharedWrite(rootName(target), scope);
     if (target.kind === "identifier") {
       const binding = scope.resolve(target.name);
       this.#recordRootAccess(target.name, binding, target.span);
@@ -1958,6 +2001,11 @@ class SemanticValidator {
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
+        if (
+          method.kind === "propertyAccessExpression" &&
+          COLLECTION_CHANGES.has(method.property.name)
+        )
+          this.#recordSharedWrite(rootName(method.object), scope);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);

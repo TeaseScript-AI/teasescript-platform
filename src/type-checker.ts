@@ -47,6 +47,7 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
+import type { VariableSite } from "./semantic.js";
 import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
   emptyImageFilterMessage,
@@ -59,7 +60,9 @@ import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js
 import {
   builtinCallProblems,
   builtinShapeProblems,
+  COLLECTION_CHANGES,
   COLLECTION_METHODS,
+  rootName,
   collectionMethodProblems,
   expressionLabel,
   memberProblems,
@@ -179,6 +182,8 @@ export interface TypeCheckOptions {
     readonly path: string;
     readonly tags: readonly PlanTag[] | null;
   }[];
+  /** The declarations of the variables that a timer, media, or button block shares and assigns, from name checking. */
+  readonly sharedWrites?: ReadonlySet<VariableSite>;
 }
 
 export interface TypeCheckResult {
@@ -621,8 +626,6 @@ class TypeChecker {
     /** The file's names, or the project's alone. */
     readonly outer: Scope;
     readonly file: number;
-    /** The function or file whose code created the block. */
-    readonly unit: EffectUnit | null;
   }[] = [];
 
   #function: FunctionContext | null = null;
@@ -644,11 +647,8 @@ class TypeChecker {
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
   #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
 
-  /** The names that timer, media, and button blocks assign, by the function or file whose code creates them. */
-  #handlerAssigned: ReadonlyMap<EffectUnit, ReadonlySet<string>> = new Map();
-
-  /** The function or file whose locals the checked code declares. */
-  #unit: EffectUnit | null = null;
+  /** The declarations of the variables that a block shares and assigns (see {@link VariableSite}). */
+  readonly #sharedWrites: ReadonlySet<VariableSite>;
 
   /** The globals that a function or a timer or media block of any file assigns. */
   #sharedGlobals: ReadonlySet<string> = new Set();
@@ -802,6 +802,7 @@ class TypeChecker {
     this.#decided = decided;
     this.#copies = copies;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
+    this.#sharedWrites = options.sharedWrites ?? new Set();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
@@ -872,10 +873,6 @@ class TypeChecker {
             this.#declareFunction(statement, file, this.#project),
           );
     this.#effects = { shared: new Set(), loops };
-    // A global function may be checked first from another file, so these effects belong to the whole project.
-    this.#handlerAssigned = new Map(
-      effects.flatMap((fileEffects) => [...fileEffects.handlerAssigned]),
-    );
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -891,7 +888,6 @@ class TypeChecker {
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
       this.#effects = { shared: effects[file]!.shared, loops };
-      this.#unit = program;
       this.#root = new Scope(this.#project);
       this.#outer = this.#root;
       this.#scriptVariables = new Set(
@@ -939,7 +935,6 @@ class TypeChecker {
           });
         this.#function = null;
         this.#outer = handler.outer;
-        this.#unit = handler.unit;
         // A block does not inherit narrowed facts from the code around it (rule 5.5).
         this.#flow = new Flow();
         runCompileTask(this.#statementsTask(handler.block.statements, scope));
@@ -1331,7 +1326,7 @@ class TypeChecker {
         const variable: Variable = {
           name: statement.variable.name,
           type: this.#ownType(statement, loopType),
-          shared: this.#sharedLocal(statement.variable.name),
+          shared: this.#sharedLocal(statement),
           declaration: statement,
         };
         this.#declared.set(statement, variable);
@@ -1440,7 +1435,7 @@ class TypeChecker {
     const key: Variable = {
       name: statement.variable.name,
       type: this.#ownType(statement, copyType(STRING_TYPE)),
-      shared: this.#sharedLocal(statement.variable.name),
+      shared: this.#sharedLocal(statement),
       declaration: statement,
     };
     const element = dictValueType(iterable);
@@ -1449,7 +1444,7 @@ class TypeChecker {
     const value: Variable = {
       name: valueName.name,
       type: this.#ownType(valueName, valueType),
-      shared: this.#sharedLocal(valueName.name),
+      shared: this.#sharedLocal(valueName),
       declaration: valueName,
     };
     this.#declared.set(statement, key);
@@ -1547,7 +1542,7 @@ class TypeChecker {
           ? this.#sharedGlobals.has(name)
           : scope === this.#root
             ? this.#effects.shared.has(name)
-            : this.#sharedLocal(name),
+            : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
     };
@@ -1557,11 +1552,11 @@ class TypeChecker {
   }
 
   /**
-   * Whether a local of this name may be one that a timer, media, or button block shares with the code that created it
-   * and assigns, so that a suspension may change it (rule 5.5, V30 §14).
+   * Whether a timer, media, or button block shares and assigns the variable of this declaration, so that a suspension
+   * may change it (rule 5.5, V30 §14).
    */
-  #sharedLocal(name: string): boolean {
-    return this.#unit !== null && this.#handlerAssigned.get(this.#unit)?.has(name) === true;
+  #sharedLocal(site: VariableSite): boolean {
+    return this.#sharedWrites.has(site);
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -2455,8 +2450,6 @@ class TypeChecker {
     // are checked against it; meanwhile a call sees the declared result, or an unknown one, as a recursive call does.
     if (!this.#scriptChecked && this.#usesLaterVariable(fn)) return declared ?? UNKNOWN_TYPE;
     fn.checking = true;
-    const outerUnit = this.#unit;
-    this.#unit = declaration;
     // A call in the middle of a statement checks the function; the statement's own literals are reported after it.
     const outerLiterals = this.#mixedLiterals;
     this.#mixedLiterals = new Map();
@@ -2466,10 +2459,10 @@ class TypeChecker {
     this.#outer = fn.scope;
     const scope = new Scope(fn.scope);
     // The body works on its own copies, so checking an argument never changes what the body assumes.
-    const accepted: Variable[] = parameters.map((parameter) => ({
+    const accepted: Variable[] = parameters.map((parameter, index) => ({
       ...parameter,
       type: copyType(parameter.type),
-      shared: this.#sharedLocal(parameter.name),
+      shared: this.#sharedLocal(declaration.parameters[index]!),
     }));
     fn.accepted = accepted;
     for (const parameter of accepted) {
@@ -2490,7 +2483,6 @@ class TypeChecker {
     this.#reachable = outerReachable;
     this.#flow = outerFlow;
     this.#outer = outerScope;
-    this.#unit = outerUnit;
     this.#loops.push(...outerLoops);
     for (const { call, values, literals, file } of fn.pending.splice(0)) {
       this.#mixedLiterals = new Map(literals);
@@ -2555,10 +2547,8 @@ class TypeChecker {
     this.#flow = new Flow();
     const outerFile = this.#enterFile(fn.file);
     const outerScope = this.#outer;
-    const outerUnit = this.#unit;
     // A default runs in the function, so a block it creates shares the parameters before it.
     this.#outer = fn.scope;
-    this.#unit = fn.declaration;
     for (const parameter of fn.declaration.parameters) {
       const name = parameter.name.name;
       let type: StaticType = UNKNOWN_TYPE;
@@ -2600,7 +2590,7 @@ class TypeChecker {
       const variable: Variable = {
         name,
         type,
-        shared: this.#sharedLocal(name),
+        shared: this.#sharedLocal(parameter),
         declaration,
         annotated: parameter.typeAnnotation !== null,
       };
@@ -2611,7 +2601,6 @@ class TypeChecker {
     this.#reportMixedLiterals();
     this.#flow = outerFlow;
     this.#outer = outerScope;
-    this.#unit = outerUnit;
     this.#enterFile(outerFile);
     return parameters;
   }
@@ -5033,7 +5022,6 @@ class TypeChecker {
       scope: scope.visibleAbove(this.#outer),
       outer: this.#outer,
       file: this.#file,
-      unit: this.#unit,
     });
   }
 
@@ -5467,11 +5455,6 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
 interface ProgramEffects {
   /** Names that function bodies and timer or media blocks assign. */
   readonly shared: ReadonlySet<string>;
-  /**
-   * Names that timer, media, or button blocks assign, by the function or file whose code creates them. A local of that
-   * name may be one the blocks share with that code (V30 §14).
-   */
-  readonly handlerAssigned: ReadonlyMap<EffectUnit, ReadonlySet<string>>;
   /** Names that the file's top level assigns, which another file's `call` may run (ADR 0022 §5). */
   readonly rootAssigned: ReadonlySet<string>;
   /** Whether the file calls a file, so another file's top level may run during the call. */
@@ -5489,20 +5472,9 @@ interface LoopNode {
   suspends: boolean;
 }
 
-/** The code whose locals blocks may share: a function, or a file's top level. */
-type EffectUnit = FunctionDeclaration | Program;
-
-/** Where a node stands: in a function or block, the function or file whose code it is part of, and in a block. */
-interface EffectPlace {
-  readonly loop: LoopNode | null;
-  readonly inside: boolean;
-  readonly unit: EffectUnit;
-  readonly handler: boolean;
-}
-
 type EffectWork =
-  | ({ readonly statement: Statement } & EffectPlace)
-  | ({ readonly expression: Expression } & EffectPlace);
+  | { readonly statement: Statement; readonly loop: LoopNode | null; readonly inside: boolean }
+  | { readonly expression: Expression; readonly loop: LoopNode | null; readonly inside: boolean };
 
 /**
  * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
@@ -5511,39 +5483,30 @@ type EffectWork =
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
   const rootAssigned = new Set<string>();
-  const handlerAssigned = new Map<EffectUnit, Set<string>>();
   let callsFiles = false;
   let entersMain = false;
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
-  const enter = (statements: readonly Statement[], place: EffectPlace): void => {
+  const enter = (
+    statements: readonly Statement[],
+    loop: LoopNode | null,
+    inside: boolean,
+  ): void => {
     for (let index = statements.length - 1; index >= 0; index -= 1)
-      work.push({ statement: statements[index]!, ...place });
+      work.push({ statement: statements[index]!, loop, inside });
   };
   const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
     const node: LoopNode = { body, parent, assigned: new Set(), suspends: false };
     nodes.push(node);
     return node;
   };
-  const handlers = (node: Statement | Expression, unit: EffectUnit): void => {
-    for (const block of handlerBlocks(node))
-      enter(block.statements, { loop: null, inside: true, unit, handler: true });
+  const handlers = (node: Statement | Expression): void => {
+    for (const block of handlerBlocks(node)) enter(block.statements, null, true);
   };
-  const assigns = (root: string, place: EffectPlace): void => {
-    if (place.inside) shared.add(root);
-    else rootAssigned.add(root);
-    place.loop?.assigned.add(root);
-    if (place.handler) {
-      const names = handlerAssigned.get(place.unit) ?? new Set<string>();
-      names.add(root);
-      handlerAssigned.set(place.unit, names);
-    }
-  };
-  enter(program.statements, { loop: null, inside: false, unit: program, handler: false });
+  enter(program.statements, null, false);
   while (work.length > 0) {
     const item = work.pop()!;
-    const { loop, inside, unit, handler } = item;
-    const place: EffectPlace = { loop, inside, unit, handler };
+    const { loop, inside } = item;
     if ("expression" in item) {
       const expression = item.expression;
       if (
@@ -5563,10 +5526,14 @@ function programEffects(program: Program): ProgramEffects {
         COLLECTION_CHANGES.has(callee.property.name)
       ) {
         const root = rootName(callee.object);
-        if (root !== null) assigns(root, place);
+        if (root !== null) {
+          if (inside) shared.add(root);
+          else rootAssigned.add(root);
+          loop?.assigned.add(root);
+        }
       }
-      handlers(expression, unit);
-      for (const part of expressionParts(expression)) work.push({ expression: part, ...place });
+      handlers(expression);
+      for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
       continue;
     }
     const statement = item.statement;
@@ -5586,35 +5553,38 @@ function programEffects(program: Program): ProgramEffects {
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it, too.
       const root = rootName(statement.target);
-      if (root !== null) assigns(root, place);
+      if (root !== null) {
+        if (inside) shared.add(root);
+        else rootAssigned.add(root);
+        loop?.assigned.add(root);
+      }
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }
-    handlers(statement, unit);
+    handlers(statement);
     switch (statement.kind) {
-      case "functionDeclaration": {
-        const body: EffectPlace = { loop: null, inside: true, unit: statement, handler: false };
-        enter(statement.body.statements, body);
+      case "functionDeclaration":
+        enter(statement.body.statements, null, true);
         // A parameter default runs in the function too, and the blocks it shows run later.
         for (const parameter of statement.parameters)
           if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, ...body });
+            work.push({ expression: parameter.defaultValue, loop: null, inside: true });
         continue;
-      }
       case "whileStatement": {
         const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, { ...place, loop: node });
-        work.push({ expression: statement.condition, ...place, loop: node });
+        enter(statement.body.statements, node, inside);
+        work.push({ expression: statement.condition, loop: node, inside });
         continue;
       }
       case "repeatStatement":
       case "forStatement":
-        enter(statement.body.statements, { ...place, loop: loopNode(statement.body, loop) });
+        enter(statement.body.statements, loopNode(statement.body, loop), inside);
         break;
       default:
-        enter(nestedStatements(statement), place);
+        enter(nestedStatements(statement), loop, inside);
     }
-    for (const expression of statementExpressions(statement)) work.push({ expression, ...place });
+    for (const expression of statementExpressions(statement))
+      work.push({ expression, loop, inside });
   }
   // Inner loops come after the loops around them, so walking backwards adds each loop's effects to its parent.
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
@@ -5626,7 +5596,6 @@ function programEffects(program: Program): ProgramEffects {
   return {
     shared,
     rootAssigned,
-    handlerAssigned,
     callsFiles,
     entersMain,
     loops: new Map(
@@ -5801,16 +5770,6 @@ function hasUndecidedElements(type: StaticType): boolean {
 /** The methods of a dict. */
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "clear",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-]);
-
 /**
  * The members of a variable's own type that hold what it is known to hold, such as `integer[]` of `integer[] | string[]`
  * for a list of integers. Every list type holds the empty list, so an overlap decides only when no member holds it.
@@ -5826,14 +5785,6 @@ function ownMembers(variable: Variable, known: StaticType): StaticType[] {
       kept.add(member);
   }
   return all.filter((member) => kept.has(member));
-}
-
-/** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
-function rootName(expression: Expression): string | null {
-  let node = unwrap(expression);
-  while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
-    node = unwrap(node.object);
-  return node.kind === "identifier" ? node.name : null;
 }
 
 /**
