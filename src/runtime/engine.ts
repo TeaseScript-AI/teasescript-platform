@@ -81,6 +81,7 @@ import {
   createCapturedSerializableList,
   createCapturedSerializableObject,
   getSerializableProperty,
+  type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
@@ -1058,13 +1059,15 @@ function imageInteractionUi(
   span: SourceSpan,
 ): Extract<InteractionUiPayload, { kind: "image" }> {
   if (!isObject(value)) throw fault("TSR052", "The prepared image request is malformed.", span);
+  let question: string | null = null;
   let hint: string | null = null;
   let allowCamera = true;
   let allowFile = true;
   let types: readonly string[] | null = null;
   let mime: readonly string[] | null = null;
   for (const { name, value: argument } of value.properties) {
-    if (name === "message") hint = fieldText(argument, span, temporalContext);
+    if (name === "message") question = fieldText(argument, span, temporalContext);
+    else if (name === "hint") hint = fieldText(argument, span, temporalContext);
     else if (name === "allowCamera" || name === "allowFile") {
       if (typeof argument !== "boolean")
         throw fault(
@@ -1081,7 +1084,7 @@ function imageInteractionUi(
     } else throw fault("TSR052", "The prepared image request is malformed.", span);
   }
   if (!allowCamera && !allowFile) throw fault("TSR052", IMAGE_NO_SOURCE_MESSAGE, span);
-  return { kind: "image", hint, allowCamera, allowFile, types, mime, accessibleName };
+  return { kind: "image", question, hint, allowCamera, allowFile, types, mime, accessibleName };
 }
 
 function imageFilterTexts(
@@ -1194,6 +1197,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
   else if (ui.kind === "image") {
+    if (ui.question !== null) strings.push(ui.question);
     if (ui.hint !== null) strings.push(ui.hint);
     // Item by item: a long computed filter must reach the limit below, not the native argument limit of a spread.
     for (const text of ui.types ?? []) strings.push(text);
@@ -1519,11 +1523,20 @@ function executeLoopStart(
       };
     } else {
       const evaluated = evaluator.evaluate(instruction.expression);
-      // A loop over a dict goes through its keys as they are when the loop starts.
-      const source = isDict(evaluated)
-        ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
-        : evaluated;
-      if (!isList(source) && !isSet(source) && !isRange(source)) {
+      const pair = instruction.valueVariable !== undefined;
+      if (pair && !isDict(evaluated)) {
+        throw fault(
+          "TSR044",
+          "for key, value requires a dict source.",
+          instruction.expression.span,
+        );
+      }
+      // A loop over a dict goes through its keys, or with a value variable its entries, as they are when it starts.
+      const source =
+        isDict(evaluated) && !pair
+          ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
+          : evaluated;
+      if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
         throw fault(
           "TSR044",
           "for requires a list, set, dict, or range source.",
@@ -1536,7 +1549,8 @@ function executeLoopStart(
         loopId: instruction.loopId,
         scopeDepth,
         variable: instruction.variable,
-        // EVIDENCE: the guards above narrow source to the three iterable runtime collection variants.
+        ...(pair ? { valueVariable: instruction.valueVariable } : {}),
+        // EVIDENCE: the guards above narrow source to the four iterable runtime collection variants.
         source: cloneCapturedSerializableValue(source) as Extract<
           RuntimeLoopFrameSnapshot,
           { kind: "for" }
@@ -1591,6 +1605,17 @@ function executeLoopStart(
     snapshot.nextInstruction = instruction.target;
     return;
   }
+  if (isDict(frame.source)) {
+    // Each iteration binds the key and its own copy of the value, so changes to either never reach the snapshot.
+    const entry = frame.source.entries[frame.position]!;
+    frame.position += 1;
+    pushIterationScope(snapshot, [
+      { name: frame.variable, value: entry.key },
+      { name: frame.valueVariable!, value: cloneCapturedSerializableValue(entry.value) },
+    ]);
+    advance(snapshot);
+    return;
+  }
   const value = iterationValue(frame.source, frame.position);
   frame.position += 1;
   pushIterationScope(snapshot, [
@@ -1629,8 +1654,13 @@ function pushIterationScope(snapshot: RuntimeSnapshot, bindings: RuntimeBindingS
 }
 
 function iterationLength(
-  source: SerializableRuntimeList | SerializableRuntimeSet | SerializableRuntimeRange,
+  source:
+    | SerializableRuntimeList
+    | SerializableRuntimeSet
+    | SerializableRuntimeRange
+    | SerializableRuntimeDict,
 ): number {
+  if (isDict(source)) return source.entries.length;
   return isRange(source) ? rangeLength(source) : source.items.length;
 }
 

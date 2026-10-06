@@ -208,6 +208,7 @@ export function cloneImageUi(
 ): ImageInteractionUi {
   return {
     kind: "image",
+    question: ui.question,
     hint: ui.hint,
     allowCamera: ui.allowCamera,
     allowFile: ui.allowFile,
@@ -218,11 +219,14 @@ export function cloneImageUi(
 }
 
 /**
- * What an open image request keeps in its request temporary: its arguments as they apply, with the message as text and
- * no message, `types`, or `mime` when there is none. Reading it again gives the same request.
+ * What an open image request keeps in its request temporary: its arguments as they apply, with the question (`message`)
+ * and hint as text and no question, hint, `types`, or `mime` when there is none. Reading it again gives the same request.
  */
 export function imageRequestValue(
-  ui: Pick<ImageInteractionUi, "hint" | "allowCamera" | "allowFile" | "types" | "mime">,
+  ui: Pick<
+    ImageInteractionUi,
+    "question" | "hint" | "allowCamera" | "allowFile" | "types" | "mime"
+  >,
 ): SerializableRuntimeValue {
   const texts = (items: readonly string[]): SerializableRuntimeValue => ({
     kind: "list",
@@ -231,7 +235,8 @@ export function imageRequestValue(
   return {
     kind: "object",
     properties: [
-      ...(ui.hint === null ? [] : [{ name: "message", value: ui.hint }]),
+      ...(ui.question === null ? [] : [{ name: "message", value: ui.question }]),
+      ...(ui.hint === null ? [] : [{ name: "hint", value: ui.hint }]),
       { name: "allowCamera", value: ui.allowCamera },
       { name: "allowFile", value: ui.allowFile },
       ...(ui.types === null ? [] : [{ name: "types", value: texts(ui.types) }]),

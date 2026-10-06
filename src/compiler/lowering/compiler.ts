@@ -651,6 +651,7 @@ export class InstructionCompiler {
             statement.body,
             statement.variable.name,
             statement.span,
+            statement.valueVariable?.name,
           ),
         );
         return;
@@ -838,6 +839,7 @@ export class InstructionCompiler {
     body: Block,
     variable: string | null,
     span: SourceSpan,
+    valueVariable?: string,
   ): CompileTask<void> {
     const loopId = this.counters.nextLoopId;
     this.counters.nextLoopId += 1;
@@ -852,6 +854,7 @@ export class InstructionCompiler {
             loopKind,
             loopId,
             variable: variable!,
+            ...(valueVariable === undefined ? {} : { valueVariable }),
             expression: lowered.plan,
             continueTarget: loopContinueTarget,
             target: -1,
@@ -1699,7 +1702,10 @@ export class InstructionCompiler {
     if (expression.interactionKind !== "choice") {
       let questionTemporaryIds: number[] = [];
       if (expression.question !== null) {
-        const sayTemporaries = this.#prepareQuestionSpeaker(expression);
+        const sayTemporaries = this.#prepareQuestionSpeaker(
+          expression.speaker?.name ?? null,
+          expression.asSpan ?? expression.commandSpan,
+        );
         const lowered = yield* compileChild(
           this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
         );
@@ -1812,12 +1818,19 @@ export class InstructionCompiler {
 
   /**
    * `askImage(...)`: the written arguments are evaluated once, in source order, into one object, which the interaction
-   * reads when it opens. It is always prepared: its request is checked then.
+   * reads when it opens. It is always prepared: its request is checked then. Like a basic ask, it first says its
+   * question, the message, read from that object.
    */
   *#lowerAskImageTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
   ): CompileTask<LoweredExpression> {
     const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
+    const asksQuestion = expression.arguments.some(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    const sayTemporaries = asksQuestion
+      ? this.#prepareQuestionSpeaker(null, expression.span)
+      : null;
     const values = yield* compileChild(
       this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
     );
@@ -1841,6 +1854,41 @@ export class InstructionCompiler {
       values.flatMap((value) => value.temporaryIds),
       expression.span,
     );
+    if (sayTemporaries !== null) {
+      const question: ExpressionPlan = {
+        kind: "property",
+        object: {
+          kind: "temporary",
+          temporaryId: requestTemporary,
+          span: copySpan(expression.span),
+        },
+        name: "message",
+        span: copySpan(expression.span),
+      };
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: question,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.span),
+      });
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker: null,
+        value: question,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "smart",
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        expression.span,
+      );
+    }
     const lowered = this.#emitPreparedResultInteraction(
       "image",
       "string",
@@ -1920,15 +1968,14 @@ export class InstructionCompiler {
    * The output speaker of an ask question, captured right after the requesting speaker, which it therefore matches:
    * both are the named speaker or else the default one.
    */
-  #prepareQuestionSpeaker(expression: InteractionExpression): {
-    readonly speakerTemporary: number;
-    readonly contextualSpeakerTemporary: number;
-  } {
-    const span = expression.asSpan ?? expression.commandSpan;
+  #prepareQuestionSpeaker(
+    speaker: string | null,
+    span: SourceSpan,
+  ): { readonly speakerTemporary: number; readonly contextualSpeakerTemporary: number } {
     const speakerTemporary = this.#allocateTemporary();
     this.instructions.push({
       kind: "prepareSaySpeaker",
-      speaker: expression.speaker?.name ?? null,
+      speaker,
       destinationTemporary: speakerTemporary,
       span: copySpan(span),
     });

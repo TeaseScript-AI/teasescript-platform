@@ -963,6 +963,10 @@ picks.add("three")    // compile error
   session sets them up. A package checks its files in turn, `main.tease` first and then the others by path; a global
   function's body is checked where a call first needs its result, otherwise after its own file. The message for a later
   contradiction names the line of the first value, and its file when that is another one.
+- The decided type holds wherever the place is read, also before that first value in checking order, such as in a
+  function body checked earlier or in another file. A copy taken while no value decided its source yet, such as
+  `let b = a`, `a.toSet()`, or a property read into a variable, holds what the source held then, so it shares the
+  source's type: after `let a = []` and `let b = a.toSet()`, a later `a.add(1)` makes `b.add("x")` a compile error.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time.
 
@@ -2016,10 +2020,11 @@ let folder = askFolder("Select a folder")
 
 ### Image input
 
-By default, camera and file upload are both available:
+By default, camera and file upload are both available. Like the basic asks, the message is the question, which the
+asking speaker says in the chat before the request opens, and `hint:` is help shown in the composer only:
 
 ```text
-let image = askImage("Add an image")
+let image = askImage("Show me your setup", hint: "Attach a photo")
 ```
 
 Explicit source permissions:
@@ -2046,18 +2051,19 @@ let image = askImage(
 
 `askImage(...)` returns one engine-managed image reference as `string`.
 
-`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route:
-while the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped
-onto the composer answers the request; outside such a request there is neither. A chosen image stays in the browser
-and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage
-references it. When the request allows the camera and the browser can capture, the camera turns on by itself as the
-request asks (owner round 5): the session camera when it is already open, otherwise one the request opens, which turns
-off again after the answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a
-script shows, with the request's message as its question and the shutter on the picture; the shutter counts down five
-seconds, as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with
-"Use this" and "Retake", and only "Use this" gives the script the photo. These are Player controls, not transcript
-messages. A camera that is denied or broken offers "Try again", and the paperclip keeps working. After a reload while
-the request waits, the camera is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not implemented yet.
+`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route: while
+the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped onto
+the composer answers the request; outside such a request there is neither. A chosen image stays in the browser and is
+session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage references it.
+When the request allows the camera and the browser can capture, the camera turns on by itself as the request asks (owner
+round 5): the session camera when it is already open, otherwise one the request opens, which turns off again after the
+answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a script shows, with the
+request's question (or "Take a photo" without one) and the shutter on the picture; the shutter counts down five seconds,
+as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with "Use this" and "Retake",
+and only "Use this" gives the script the photo. These are Player controls, not transcript messages. A camera that is
+denied or broken offers "Try again", and the paperclip keeps working. After a reload while the request waits, the camera
+is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not
+implemented yet.
 
 ### Video input
 
@@ -2604,7 +2610,7 @@ showBackgroundImage(
 ```
 
 ## 23. Loops
-**Status:** Accepted
+**Status:** Accepted (`for key, value`: Owner decision on #627, 2026-10-05)
 
 ```text
 repeat 5 {
@@ -2620,6 +2626,19 @@ for item in items {
 
 `for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
 a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
+
+With two variables, `for` goes through the entries of a dict, giving each key and its value:
+
+```text
+for key, value in toys {
+    say "${key}: ${value}"
+}
+```
+
+The entries are taken when the loop starts, and each value is a copy: changing it, or adding, changing, or removing
+entries of the dict inside the loop, changes neither the dict's other entries nor what the loop visits. The key is text
+and the value has the dict's value type. The two names must differ. Another source is an error: a compile error when the
+compiler can see it, and runtime error `TSR044` otherwise. A list has no two-variable `for`.
 
 ```text
 while player.health > 0 {
@@ -4496,6 +4515,7 @@ toys.length                             // the number of entries
 toys.keys                               // a new list of the keys, in entry order
 toys.values                             // a new list of the values, in the same order
 for name in toys { ... }                // the keys
+for name, toy in toys { ... }           // the keys with a copy of each value
 ```
 
 - **Keys** are text. In a literal, `collar:` is the key `"collar"`, quoted text is any key, and `[expr]:` computes one.
@@ -4515,8 +4535,8 @@ for name in toys { ... }                // the keys
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
   is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
   its result has the value type. Like any argument, the default is evaluated before the lookup.
-- **Iteration:** `for key in toys` goes through the keys as they were when the loop started
-  ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
+- **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
+  each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
   object are never equal.
 - **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
@@ -4527,7 +4547,7 @@ for name in toys { ... }                // the keys
   with its entry order.
 - **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
 
-Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
+Deferred: keys other than text, merging dicts, and sorted dicts.
 
 ## 41. Headers and tags
 **Status:** Accepted ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md))

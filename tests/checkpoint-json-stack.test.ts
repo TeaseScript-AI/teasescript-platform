@@ -6,10 +6,58 @@ import {
   CheckpointError,
   createCheckpoint,
   createFreshRuntimeSnapshot,
+  deserializeCheckpoint,
   restoreCheckpoint,
+  run,
   serializeCheckpoint,
+  type RuntimeCheckpoint,
 } from "../src/index.js";
+import {
+  createPlayerRuntimeRestorePoint,
+  createPlayerRuntimeSession,
+  restorePlayerRuntimeSession,
+} from "../player/runtime-adapter.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+
+/**
+ * Runs `write` while `Object.prototype` has a `toJSON` getter and `Array.prototype` a `toJSON` method, which make
+ * checkpoint serialization use its iterative writer. Both count every use and are removed afterwards.
+ */
+function withInheritedToJson<T>(write: () => T): { readonly result: T; readonly uses: number } {
+  let uses = 0;
+  Object.defineProperty(Object.prototype, "toJSON", {
+    configurable: true,
+    get() {
+      uses += 1;
+      return undefined;
+    },
+  });
+  Object.defineProperty(Array.prototype, "toJSON", {
+    configurable: true,
+    writable: true,
+    value() {
+      uses += 1;
+      return "hooked";
+    },
+  });
+  try {
+    return { result: write(), uses };
+  } finally {
+    Reflect.deleteProperty(Object.prototype, "toJSON");
+    Reflect.deleteProperty(Array.prototype, "toJSON");
+  }
+}
+
+/** Checkpoint JSON from both writers: native, and iterative while inherited hooks are present. */
+function bothWriters(checkpoint: RuntimeCheckpoint): {
+  readonly native: string;
+  readonly iterative: string;
+} {
+  const native = serializeCheckpoint(checkpoint);
+  const hooked = withInheritedToJson(() => serializeCheckpoint(checkpoint));
+  assert.equal(hooked.uses, 0, "serialization must not consult an inherited toJSON");
+  return { native, iterative: hooked.result };
+}
 
 test("checkpoint JSON matches native ordering, escaping, and numeric representation", () => {
   const plan = compileValidPlan("exit");
@@ -30,7 +78,67 @@ test("checkpoint JSON matches native ordering, escaping, and numeric representat
     snapshot.frames[0]!.bindings.push({ name: `value${index}`, value }),
   );
   const checkpoint = createCheckpoint(plan, snapshot);
-  assert.equal(serializeCheckpoint(checkpoint), JSON.stringify(restoreCheckpoint(checkpoint)));
+  const expected = JSON.stringify(restoreCheckpoint(checkpoint));
+  const { native, iterative } = bothWriters(checkpoint);
+  assert.equal(native, expected);
+  assert.equal(iterative, expected);
+});
+
+test("both checkpoint writers give the same bytes for a suspended session and its restore point", () => {
+  const source = [
+    'speaker vera { title: "Miss" }',
+    'let record = { items: [1, 2.5, -0], note: "line\\nbreak" }',
+    "function pause(seconds = 1) {\n  wait seconds\n  return seconds\n}",
+    "repeat 2 {",
+    '  say as vera "round ${pause()}"',
+    "}",
+    "exit",
+  ].join("\n");
+  const plan = compileValidPlan(source);
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
+  assert.equal(waiting.status, "waiting");
+  assert.ok(waiting.callFrames.length > 0 && waiting.loopFrames.length > 0);
+  const checkpoint = createCheckpoint(plan, waiting);
+  const { native, iterative } = bothWriters(checkpoint);
+  assert.equal(iterative, native);
+  assert.equal(serializeCheckpoint(deserializeCheckpoint(native)), native);
+
+  // The Player adapter's restore points carry the same checkpoint JSON and restore the session.
+  const session = createPlayerRuntimeSession(plan);
+  const nativePoint = createPlayerRuntimeRestorePoint(session);
+  const hooked = withInheritedToJson(() => createPlayerRuntimeRestorePoint(session));
+  assert.equal(hooked.uses, 0);
+  assert.equal(hooked.result.checkpointJson, nativePoint.checkpointJson);
+  assert.equal(
+    JSON.stringify(restorePlayerRuntimeSession(nativePoint).snapshot),
+    JSON.stringify(session.snapshot),
+  );
+});
+
+test("a toJSON hook that captured arrays copied when the runtime loaded is not consulted", () => {
+  const moduleUrl = new URL("../src/index.js", import.meta.url).href;
+  const source = 'let values = [[1, 2], [3]]\nlet words = ["a", "b"]\nexit';
+  // Captured arrays copy Array.prototype as it was when the runtime loaded, so the hook outlives its removal there.
+  const script = `
+    import assert from 'node:assert/strict';
+    let uses = 0;
+    Array.prototype.toJSON = function () { uses += 1; return 'hooked'; };
+    const m = await import(${JSON.stringify(moduleUrl)});
+    delete Array.prototype.toJSON;
+    const plan = m.compileSource(${JSON.stringify(source)}).plan;
+    const ended = m.run(plan, m.createFreshRuntimeSnapshot(plan)).snapshot;
+    const encoded = m.serializeCheckpoint(m.createCheckpoint(plan, ended));
+    assert.equal(uses, 0);
+    process.stdout.write(encoded);
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(child.status, 0, child.stderr || String(child.error));
+  const plan = compileValidPlan(source);
+  const ended = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
+  assert.equal(child.stdout, serializeCheckpoint(createCheckpoint(plan, ended)));
 });
 
 test("serialization retains checkpoint validation and rejects malformed data before traversal", () => {
@@ -93,6 +201,8 @@ test("deep source-produced lists and objects serialize and resume with a constra
         assert.equal(boundary.snapshot.status, 'running');
         const checkpoint = m.createCheckpoint(compiled.plan, boundary.snapshot);
         m.restoreCheckpoint(checkpoint);
+        // Too deep for native JSON on this stack, so serialization falls back to its iterative writer.
+        if (depth === 2048) assert.throws(() => JSON.stringify(checkpoint), RangeError);
         const encoded = m.serializeCheckpoint(checkpoint);
         const restored = m.deserializeCheckpoint(encoded);
         assert.equal(m.serializeCheckpoint(restored), encoded);

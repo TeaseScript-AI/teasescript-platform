@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 58;
+export const INSTRUCTION_PLAN_VERSION = 60;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -257,6 +257,8 @@ export type LoopStartInstruction =
       readonly loopKind: "for";
       readonly loopId: number;
       readonly variable: string;
+      /** `for key, value in dict`: the value variable; `variable` then receives each key. */
+      readonly valueVariable?: string;
       readonly expression: ExpressionPlan;
       readonly continueTarget: number;
       readonly target: number;
@@ -579,6 +581,8 @@ export type InteractionUiPayload =
     }
   | ({
       readonly kind: "image";
+      /** The question, which the asking speaker said; the Player also shows it on the camera viewfinder. */
+      readonly question: string | null;
       readonly hint: string | null;
       readonly accessibleName: InteractionAccessibleName;
     } & ImageRequest);
@@ -640,8 +644,8 @@ export type PreparedInteractionUiPayload =
   | {
       readonly kind: "image";
       /**
-       * An object holding the written arguments of `askImage`, by name and in source order, with the message as
-       * `message`. When the request opens, it holds every argument, with the message as text or `null`.
+       * An object holding the written arguments of `askImage`, by name and in source order, with the question as
+       * `message`. When the request opens, it holds the arguments as they apply, with the question and hint as text.
        */
       readonly requestTemporary: number;
       readonly accessibleName: InteractionAccessibleName;

@@ -307,15 +307,97 @@ test("a mutated external plan is validated against its new content", () => {
   );
 });
 
-test("rejected snapshots add nothing to the kept continuation liveness", () => {
+test("a malformed loop context cannot enlarge the continuation analysis", () => {
+  const source = [
+    "function pause {\n  wait 1\n}",
+    "let total = 0",
+    "while total < 1 {",
+    "  repeat 1 {",
+    "    pause()",
+    "  }",
+    "  total += 1",
+    "}",
+    "exit",
+  ].join("\n");
+  const nodes = (snapshot: unknown) =>
+    withValidationTestStatistics((finish) => {
+      const validation = validateRuntimeSnapshot(snapshot, compileValidPlan(source));
+      return { valid: validation.valid, nodes: finish().counts.continuationLivenessNodes };
+    });
+  const waiting = run(
+    compileValidPlan(source),
+    createFreshRuntimeSnapshot(compileValidPlan(source)),
+  ).snapshot;
+  const valid = nodes(waiting);
+  assert.equal(valid.valid, true);
+
+  // A session's loops are planned and nested; copies of the inner loop's frame are neither.
+  const corrupted = mutableCopy(waiting);
+  const [outer, inner] = corrupted.loopFrames;
+  corrupted.loopFrames = [outer!, ...Array.from({ length: 64 }, () => ({ ...inner! }))];
+  corrupted.callFrames[0]!.loopBaseDepth = corrupted.loopFrames.length;
+  const malformed = nodes(corrupted);
+  assert.equal(malformed.valid, false);
+  // Scoped regression oracle: the query of a context with one planned loop is no larger than that of the session's
+  // two, rather than growing with the number of copies.
+  assert.ok(malformed.nodes! <= valid.nodes!);
+});
+
+test("impossible loop contexts of one snapshot share one continuation analysis", () => {
+  const source = [
+    "function pause {\n  wait 1\n}",
+    "repeat 1 {",
+    "  repeat 1 {",
+    "    repeat 1 {",
+    "      repeat 1 {",
+    "        pause()",
+    "      }",
+    "    }",
+    "  }",
+    "}",
+    "exit",
+  ].join("\n");
+  const waiting = run(
+    compileValidPlan(source),
+    createFreshRuntimeSnapshot(compileValidPlan(source)),
+  ).snapshot;
+  const template = mutableCopy(waiting);
+  const loops = template.loopFrames;
+  const call = template.callFrames[0]!;
+  assert.equal(loops.length, 4);
+  // Eight calls stand at the same position, each in a context of the innermost loop and its own subset of the outer
+  // three; only the context with all four is one that a session can have there.
+  const corrupted = mutableCopy(waiting);
+  corrupted.loopFrames = [];
+  corrupted.callFrames = [];
+  for (let subset = 0; subset < 8; subset += 1) {
+    const owner = subset === 0 ? null : subset;
+    for (const [index, loop] of loops.entries()) {
+      if (index === 3 || (subset & (1 << index)) !== 0) {
+        corrupted.loopFrames.push({ ...loop, callFrameId: owner });
+      }
+    }
+    corrupted.callFrames.push({
+      ...call,
+      id: subset + 1,
+      loopBaseDepth: corrupted.loopFrames.length,
+    });
+  }
+  corrupted.nextCallFrameId = 9;
+  const counts = withValidationTestStatistics((finish) => {
+    assert.equal(validateRuntimeSnapshot(corrupted, compileValidPlan(source)).valid, false);
+    return finish().counts;
+  });
+  // Scoped regression oracle: one analysis for the possible context and one shared by every impossible one, rather
+  // than one per listed context.
+  assert.ok(counts.continuationLivenessAnalyses! <= 2);
+});
+
+test("rejected snapshots add nothing to the kept continuation requirements", () => {
   const plan = compileValidPlan(LOOPS_SOURCE);
   const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   assert.equal(validateRuntimeSnapshot(waiting, plan).valid, true);
-  const kept = () =>
-    [...snapshotValidationAnalysis(plan).continuationLiveness].map(([key, starts]) => [
-      key,
-      [...starts.keys()],
-    ]);
+  const kept = () => [...snapshotValidationAnalysis(plan).continuationRequirements.keys()];
   const before = kept();
   assert.equal(before.length, 1);
 

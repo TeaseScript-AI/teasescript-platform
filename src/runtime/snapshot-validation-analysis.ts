@@ -11,6 +11,8 @@ import { recordValidationTestWork } from "../validation-testing.js";
 export interface PlannedLoop {
   readonly kind: "repeat" | "for" | "while";
   readonly variable?: string;
+  /** A pair loop's value variable. */
+  readonly valueVariable?: string;
   readonly start: number;
   readonly continueStart: number;
   readonly target: number;
@@ -32,11 +34,8 @@ export interface SnapshotValidationAnalysis {
   readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
-  /**
-   * The temporaries that continuations of accepted snapshots need, by the key of their innermost loop (see
-   * `continuationLivenessKey`) and their start; never a whole instruction-sized liveness.
-   */
-  readonly continuationLiveness: Map<number | null, Map<number, ReadonlySet<number>>>;
+  /** The temporaries that continuations of accepted snapshots need, by where they resume and the loops they run in. */
+  readonly continuationRequirements: Map<string, ReadonlySet<number>>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
   readonly preparedReferenceTemporaryIds: ReadonlySet<number>;
@@ -86,19 +85,6 @@ export function functionHoldingInstruction(
   return functionId == null ? undefined : analysis.functionsById.get(functionId);
 }
 
-/**
- * The key of the continuation liveness for a context whose innermost loop frame is `activeLoopId`. Only a repeat or
- * for loop of the plan changes which temporaries an instruction reads, so every other loop ID, including one that no
- * loop of the plan has, shares the liveness of no loop.
- */
-export function continuationLivenessKey(
-  analysis: SnapshotValidationAnalysis,
-  activeLoopId: number | null,
-): number | null {
-  const loop = activeLoopId === null ? undefined : analysis.loops.get(activeLoopId);
-  return loop === undefined || loop.kind === "while" ? null : activeLoopId;
-}
-
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
   recordValidationTestWork("snapshotValidationAnalyses");
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
@@ -126,7 +112,14 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     } else if (instruction?.kind === "loopStart") {
       loops.set(instruction.loopId, {
         kind: instruction.loopKind,
-        ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
+        ...(instruction.loopKind === "for"
+          ? {
+              variable: instruction.variable,
+              ...(instruction.valueVariable === undefined
+                ? {}
+                : { valueVariable: instruction.valueVariable }),
+            }
+          : {}),
         start: index,
         continueStart: instruction.continueTarget,
         target: instruction.target,
@@ -152,7 +145,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     functionsById,
     regionEnds,
     functionIdsByInstruction,
-    continuationLiveness: new Map(),
+    continuationRequirements: new Map(),
     defaultBindingPositions,
     parameterNames,
     preparedReferenceTemporaryIds: collectPreparedReferenceTemporaryIds(plan),

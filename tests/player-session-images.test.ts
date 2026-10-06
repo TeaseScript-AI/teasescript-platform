@@ -17,8 +17,10 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 interface ImageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
-  readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
+  readonly notices: Readonly<Ref<readonly { readonly key: string; readonly message: string }[]>>;
   dismissNotice(key: string): void;
+  resolveAsset(path: string): string | null;
+  stageImageFailure(src: string | null): void;
   readonly images: {
     store(
       file: File,
@@ -34,6 +36,7 @@ interface ImageHost {
   update(session: PlayerRuntimeSession): void;
 }
 let usePlayerSession: (options: {
+  resolveAsset?: (path: string) => string | null;
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
   decodeImage?: (data: Blob) => Promise<{ width: number; height: number }>;
@@ -60,13 +63,20 @@ before(async () => {
   }
 });
 
+// Audio elements the Player host created, so a test can make one fail to load.
+const audioElements: EventTarget[] = [];
+
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.
 function stubBrowser(context: TestContext) {
   const values = {
     document: new EventTarget(),
     window: new EventTarget(),
     navigator: {},
-    Audio: class {
+    Audio: class extends EventTarget {
+      constructor() {
+        super();
+        audioElements.push(this);
+      }
       src = "";
       play = async () => {};
       pause() {}
@@ -214,4 +224,101 @@ test("each image request that allows only the camera is reported as a Player not
   host.prepare(() => createPlayerRuntimeSession('let pick = askImage("Add an image")\nexit'));
   await host.activate();
   await until(() => !keys().includes("image-needs-camera"), "the notice was not withdrawn");
+});
+
+test("media the script refers to but the Player cannot use is a warning, once per session and path", async (context) => {
+  stubBrowser(context);
+  const packageFiles = new Set(["sounds/broken.wav", "videos/intro.mp4"]);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      resolveAsset: (path) => (packageFiles.has(path) ? `/files/${path}` : null),
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  const messages = () => host.notices.value.map((notice) => notice.message).sort();
+  const script = [
+    'showImage "images/missing.png"',
+    'playAudio async "sounds/missing.wav"',
+    'playAudio async "sounds/broken.wav"',
+    'playVideo async "videos/intro.mp4"',
+    'playVideo async "videos/missing.mp4"',
+    "let first = askImage()",
+    "showImage first",
+    "let second = askImage()",
+    'showImage "images/missing.png"',
+    "let third = askImage()",
+    "exit",
+  ].join("\n");
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  // An async play waits for its load: the missing sound is reported while the run waits for the next one.
+  await until(() => messages().length === 2, "the missing image and sound were not reported");
+  audioElements.at(-1)!.dispatchEvent(new Event("error"));
+  // The video that exists is not reported: the Player cannot play video yet.
+  await until(
+    () => messages().length === 4,
+    "the failed sound and missing video were not reported",
+  );
+  assert.deepEqual(messages(), [
+    "Audio could not be loaded: sounds/broken.wav (main.tease, line 3)",
+    "Audio not found: sounds/missing.wav (main.tease, line 2)",
+    "Image not found: images/missing.png",
+    "Video not found: videos/missing.mp4 (main.tease, line 5)",
+  ]);
+  assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "ask-image");
+  for (const notice of host.notices.value) host.dismissNotice(notice.key);
+
+  // A captured image is no package file, so neither showing it nor a failure to load it is reported.
+  answer(host, await chosen(host, "photo.png"));
+  await nextTick();
+  host.stageImageFailure(host.resolveAsset(host.session.value!.snapshot.stageImage!)!);
+  // The same missing image shown again in this session is not reported again.
+  answer(host, await chosen(host, "other.png"));
+  await nextTick();
+  assert.equal(host.session.value!.snapshot.stageImage, "images/missing.png");
+  assert.deepEqual(messages(), []);
+
+  // A new session reports it again.
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await until(() => messages().length === 2, "the new session did not report the missing media");
+});
+
+test("a package image the Stage cannot load is reported while the Stage shows it", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({ resolveAsset: (path) => `/files/${path}` }));
+  assert.ok(host);
+  context.after(() => scope.stop());
+  const script = 'showImage "images/corrupt.png"\nlet pick = askImage()\nexit';
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  // A late failure of an image the Stage no longer shows is not reported.
+  host.stageImageFailure("/files/images/replaced.png");
+  assert.equal(host.notices.value.length, 0);
+  host.stageImageFailure("/files/images/corrupt.png");
+  host.stageImageFailure("/files/images/corrupt.png");
+  assert.deepEqual(
+    host.notices.value.map((notice) => [notice.key, notice.message]),
+    [["unusable-media:images/corrupt.png", "Image could not be loaded: images/corrupt.png"]],
+  );
+  // A new session showing it on the same Stage gets no new browser error, but is reported again.
+  host.dismissNotice("unusable-media:images/corrupt.png");
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await nextTick();
+  assert.deepEqual(
+    host.notices.value.map((notice) => notice.message),
+    ["Image could not be loaded: images/corrupt.png"],
+  );
+  // Once the Stage shows another source, such as a development override, the failure no longer describes it.
+  host.dismissNotice("unusable-media:images/corrupt.png");
+  host.stageImageFailure(null);
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await nextTick();
+  assert.equal(host.notices.value.length, 0);
 });
