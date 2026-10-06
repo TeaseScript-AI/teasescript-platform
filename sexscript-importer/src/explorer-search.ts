@@ -451,17 +451,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const target = targets.get(way);
       if (target === undefined) continue;
       const label = seeded ? "seeded" : "play";
-      const repro = reproOf(parent, input);
+      const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
       const known = target.reach;
       if (
         known === null ||
         (known.label === "seeded" && label === "play") ||
-        (known.label === label && repro.inputs.length < known.repro.inputs.length)
+        (known.label === label && length < known.repro.inputs.length)
       )
         target.reach = {
           label,
           via: directed > 0 || (parent?.directed ?? 0) > 0 ? "directed" : "search",
-          repro,
+          repro: reproOf(parent, input),
         };
     }
     const keys = stateKeys(step.snapshot);
@@ -663,12 +663,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const chain = witnessNode === null ? [] : ancestry(nodes, witnessNode);
         const at = chain.findLastIndex((node) => node.prompt.instruction === source.instruction);
         if (at >= 0) {
-          // The answer replaces the input after the ask: the next state's, or the witness input itself.
-          const suffix = [
-            ...pathTo(nodes, witnessNode!).slice(at + 1),
-            ...(witness?.input == null ? [] : [witness.input]),
-          ]
-            .slice(1)
+          // The path's input `at` answered the ask; the new answer replaces it, and the inputs after it follow.
+          const suffix = fullPath()
+            .slice(at + 1)
             .slice(0, MAX_SUFFIX);
           for (const answer of answers)
             add({

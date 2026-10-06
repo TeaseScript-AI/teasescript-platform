@@ -13,6 +13,7 @@ if pick == "right" {
 }
 if pick == "count" {
   let n = askInteger default: 0
+  showButton "Go on"
   say "Counting 1."
   say "Counting 2."
   say "Counting 3."

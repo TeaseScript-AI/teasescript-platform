@@ -76,22 +76,26 @@ test(
     assert.equal(result.traps.length, 1);
     const trap = result.traps[0]!;
     assert.equal(trap.kind, "loop");
-    assert.deepEqual(trap.locations, ["main.tease:86"]);
+    assert.deepEqual(trap.locations, ["main.tease:87"]);
     assert.deepEqual(trap.sampleTexts, ["You are stuck."]);
     assert.deepEqual(trap.inputs, [{ kind: "option", index: 2, label: "Stay" }]);
 
     // Directed search answers the ask with the compared number, far from the ask: reached by play.
     const ways = result.directed.ways;
-    const secret = ways.find((way) => way.line === 76);
+    const secret = ways.find((way) => way.line === 77);
     assert.deepEqual(secret && [secret.way, secret.reach, secret.via, secret.sources], [
       "true",
       "play",
       "directed",
       ["ask"],
     ]);
-    assert.ok(secret?.repro.inputs.some((input) => input.kind === "text" && input.text === "1234"));
+    // The new answer replaces the one on the path that first evaluated the condition, and the button after it follows.
+    assert.deepEqual(secret?.repro.inputs.slice(-2), [
+      { kind: "text", text: "1234" },
+      { kind: "button", label: "Go on" },
+    ]);
     // A value only an earlier session could have stored: reached with seeded storage, and its repro replays there.
-    const back = ways.find((way) => way.line === 79);
+    const back = ways.find((way) => way.line === 80);
     assert.deepEqual(back && [back.way, back.reach, back.via, back.sources], [
       "true",
       "seeded",
@@ -115,13 +119,13 @@ test(
         return line >= from && line <= to;
       })?.reach ?? "play";
     assert.deepEqual(
-      [labelOf(77), labelOf(80), labelOf(8), labelOf(4)],
+      [labelOf(78), labelOf(81), labelOf(8), labelOf(4)],
       ["play", "seeded", "unreachable", "play"],
     );
     assert.equal(result.coverage.staticContradictions, 0);
     const never = result.coverage.unvisitedBranches.find((entry) => entry.line === 7);
     assert.deepEqual(never && [never.missed, never.reach], ["true", "unreachable"]);
-    const stored = result.coverage.unvisitedBranches.find((entry) => entry.line === 79);
+    const stored = result.coverage.unvisitedBranches.find((entry) => entry.line === 80);
     assert.deepEqual(stored && [stored.reach, stored.sources], ["seeded", ["storage"]]);
   },
 );
