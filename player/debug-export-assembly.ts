@@ -45,6 +45,37 @@ export interface DebugExportCandidate {
   readonly photos: readonly DebugPhotoCandidate[];
   /** Player settings, geometry, and browser details, exported only when chosen. */
   readonly player: Readonly<Record<string, string | number | boolean | null>>;
+  /** What the Player itself observed: the Stage, media, notices, and the Debug log. */
+  readonly host: DebugHostDiagnostics;
+}
+
+/**
+ * The Player's own observations, as Debug's Now view and the notices show them. Its states and kinds are part of the
+ * technical report; paths, sources, notice messages, and Debug log lines can repeat script text, so they come with
+ * session text only. They describe this browser, which a replay of the engine calls does not reproduce.
+ */
+export interface DebugHostDiagnostics {
+  readonly stage: {
+    /** As Debug's Now view reports it, such as `unresolved` for a path the package lacks or `failed` to load. */
+    readonly status: string;
+    /** The authored path, or `null` for no image or a captured or chosen photo, whose reference stays private. */
+    readonly path: string | null;
+  };
+  readonly media: readonly {
+    readonly mediaId: number;
+    readonly media: "audio" | "video";
+    readonly loaded: boolean;
+    readonly state: "running" | "paused";
+    readonly source: string;
+  }[];
+  /** The current notices, such as blocked audio or a media file that could not be loaded. */
+  readonly notices: readonly {
+    readonly key: string;
+    readonly level: string;
+    readonly message: string;
+  }[];
+  /** The Debug log's lines, newest first, or `null` while the Debug menu is off. */
+  readonly debugLog: readonly string[] | null;
 }
 
 /** A photo the session used, read only when the player includes it. */
@@ -155,7 +186,7 @@ export async function assembleDebugExport(
   );
   parts.push({
     name: "Technical report",
-    detail: `Build, versions, ${incident.code ?? incident.hostError ?? "no error"}${incident.path === null ? "" : ` at ${incident.path}:${incident.line}`}, and the kinds of the last events`,
+    detail: `Build, versions, ${incident.code ?? incident.hostError ?? "no error"}${incident.path === null ? "" : ` at ${incident.path}:${incident.line}`}, the kinds of the last events, and the Stage, media, and notice states`,
   });
 
   const sections: Record<string, unknown> = {};
@@ -175,6 +206,27 @@ export async function assembleDebugExport(
       name: "Session text",
       detail: `${transcript.length} recent message(s) and ${events.length} event(s) with their text`,
     });
+  }
+  const { host } = candidate;
+  // The kind of a notice is its key up to any detail, such as the path in `unusable-media:<path>`.
+  const noticeKind = (key: string) => key.split(":", 1)[0]!;
+  sections["media"] = choices.sessionText
+    ? removeSecrets({ stage: host.stage, media: host.media })
+    : {
+        stage: { status: host.stage.status },
+        media: host.media.map(({ mediaId, media, loaded, state }) => ({
+          mediaId,
+          media,
+          loaded,
+          state,
+        })),
+      };
+  sections["errors"] = choices.sessionText
+    ? removeSecrets(host.notices)
+    : host.notices.map((notice) => ({ kind: noticeKind(notice.key), level: notice.level }));
+  if (choices.sessionText && host.debugLog !== null) {
+    sections["debugLog"] = removeSecrets(host.debugLog);
+    parts.push({ name: "Debug log", detail: `${host.debugLog.length} line(s)` });
   }
   if (choices.savedValues && snapshot !== null) {
     sections["storage"] = removeSecrets(snapshot.scriptStorage);

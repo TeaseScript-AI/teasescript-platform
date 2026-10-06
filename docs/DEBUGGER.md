@@ -30,7 +30,8 @@ tools menu; the switch is not stored, so every load starts with it off (the deve
 Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
 Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
 auto-skip and ends a jump at its next yield. The time controls stand above the tabs **Now** (first), **Log**, and
-**Storage**, which appears when the host persists script storage.
+**Storage**, which appears when the host persists script storage. **Download debug export…** in the panel opens the
+[debug export](#debug-export) dialog from any tab, also with Debug off.
 
 - **Time controls** (Skip event, +10 s, +1 min, Auto-skip) advance the canonical session's own scene time through
   ordinary observations ([`RUNTIME.md`](RUNTIME.md#timers-and-scene-time)). They are read-only inspection with
@@ -104,21 +105,25 @@ checkpoint, so that later observations, such as on hiding the page, cannot evict
 cannot copy, or a media store that throws during a call, marks it incomplete.
 
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
-session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile.
-The technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
-where the browser can hash, the incident as the session's actual state shows it, the storage editor's mark, and the
-sequence and kind of the last 256 events. Saved values add the session's
-storage view; answers add the recorded interaction completions; session text adds the last 50 transcript messages and
-the events with their content: messages, the player's own transcript text, and button labels always, but the details of
-requests, settlements, warnings, failures, and storage edits, which can hold saved values, answers, or storage keys,
-only when saved values and answers are chosen too; replay data adds the checkpoint of the state a complete record reaches (of the actual state when the record
-is incomplete), or of its anchor as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a recorded image
-answer or capture, or a saved value); Player and browser details add the presentation settings, screen geometry,
-pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path or a file
-URL outside another URL, is replaced in every readable section, and replay data containing it is left out entirely,
-since changing it would change the replay; such detection in free text is best effort and cannot prove text safe, so the
-export is never called anonymous: the protection is that each category is the player's choice, and the dialog asks the
-player to check its preview before sharing.
+session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The
+technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
+where the browser can hash, the incident as the session's actual state shows it, the storage editor's mark, the sequence
+and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
+Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
+each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
+reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions; session
+text adds the last 50 transcript messages, the Stage image's authored path, media sources, notice messages, and the
+Debug log while the Debug menu is on, and the events with their content: messages, the player's own transcript text, and
+button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
+saved values, answers, or storage keys, only when saved values and answers are chosen too; replay data adds the
+checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
+as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a
+recorded image answer or capture, or a saved value); Player and browser details add the presentation settings, screen
+geometry, pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path
+or a file URL outside another URL, is replaced in every readable section, and replay data containing it is left out
+entirely, since changing it would change the replay; such detection in free text is best effort and cannot prove text
+safe, so the export is never called anonymous: the protection is that each category is the player's choice, and the
+dialog asks the player to check its preview before sharing.
 
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
 values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from

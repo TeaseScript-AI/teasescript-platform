@@ -34,7 +34,9 @@ interface ImageHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
-  debugExportCandidate(player: Record<string, never>): Promise<DebugExportCandidate>;
+  debugExportCandidate(
+    shown: Pick<DebugExportCandidate, "player" | "host">,
+  ): Promise<DebugExportCandidate>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
@@ -201,7 +203,10 @@ test("a debug export candidate is the state when it was asked for, while play co
   // The Player's event and transcript lists grow with play, so the state asked for is their length then.
   const events = [...asked.events];
   const transcriptEntries = [...asked.transcriptEntries];
-  const pending = host.debugExportCandidate({});
+  const pending = host.debugExportCandidate({
+    player: {},
+    host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+  });
   // The player answers before the candidate has read the photo the session used.
   host.update(submitPlayerRuntimeComposer(asked, "later answer")!.session);
   assert.equal(host.session.value?.snapshot.status, "halted");
