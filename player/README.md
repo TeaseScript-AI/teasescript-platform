@@ -131,8 +131,9 @@ closed; these lines are local UI state, never transcript entries, notices, or ch
 Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntimeDebugCountdown` selects the foreground
 wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
 for it. The **Now** tab (`DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
-timers), the media projection with `playerRuntimeMediaOrigin`, and the Stage's load reports for its current image
-element (`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Automation finds the controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
+timers, and media with their start statements) with the Stage's load reports for its current image element
+(`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Automation finds the
+controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
 the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
 `[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
 `advance-1min`), the countdown in `[data-debug-countdown]`, the Now tab's `[data-debug-now]` with `-next`, `-waiting`,
