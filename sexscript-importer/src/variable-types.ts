@@ -666,6 +666,9 @@ function analyse(
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
   const nullTested = nullTestedNames(statements);
+  // Names that some statement assigns after their declaration; a script variable that none assigns keeps a null test's
+  // narrowing in a branch, as a local does.
+  const reassigned = assignedNames(statements);
   const localNullTested = blockNullTests(statements);
   for (const item of bindings.values()) item.inferred = undefined;
   const root = new Scope(null);
@@ -1055,7 +1058,11 @@ function analyse(
             ? test.left.name
             : null;
         const local = variable === null ? undefined : scope.resolve(variable);
-        if (variable !== null && local !== undefined && root.names.get(variable) !== local) {
+        if (
+          variable !== null &&
+          local !== undefined &&
+          (root.names.get(variable) !== local || !reassigned.has(variable))
+        ) {
           const branch = test!.operator === "==" ? item.else : item.then;
           if (!assignsVariable(branch, variable))
             (test!.operator === "==" ? elseScope : thenScope).nonNull.add(local);
@@ -1311,6 +1318,19 @@ function blockNullTests(statements: readonly IrStatement[]): Map<IrStatement, Se
 }
 
 /** Names of the variables the program compares with null (`x == null`, `x != null`). */
+/** The variable names that assignments anywhere in the statements target. */
+function assignedNames(value: unknown, names = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) assignedNames(item, names);
+    return names;
+  }
+  if (!isRecord(value)) return names;
+  if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+    names.add(String(value.target.name));
+  for (const child of Object.values(value)) assignedNames(child, names);
+  return names;
+}
+
 function nullTestedNames(value: unknown, names = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
     for (const item of value) nullTestedNames(item, names);

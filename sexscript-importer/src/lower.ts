@@ -113,8 +113,10 @@ export interface LowerOptions {
    * (packageStorageLiterals); a branch for any other value of such a key never runs.
    */
   storageLiterals?: ReadonlyMap<string, ReadonlySet<string>>;
-  /** The storage keys under which the package saves a number or a boolean (packageNonTextKeys). */
+  /** The storage keys under which the package saves a number or a boolean (packageNonTextKeys), as key shapes. */
   nonTextKeys?: ReadonlySet<string>;
+  /** The storage keys under which the package saves a number or a text (packageNonBooleanKeys), as key shapes. */
+  nonBooleanKeys?: ReadonlySet<string>;
   /** Image paths below `images/` that some script of the package copies a photo to (packageCopiedImages). */
   copiedImages?: ReadonlySet<string>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
@@ -188,6 +190,7 @@ interface LowerContext {
   stableNames: ReadonlySet<string>;
   storageLiterals: ReadonlyMap<string, ReadonlySet<string>>;
   nonTextKeys: ReadonlySet<string>;
+  nonBooleanKeys: ReadonlySet<string>;
   copiedImages: ReadonlySet<string>;
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
@@ -230,6 +233,8 @@ interface LowerContext {
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
   /** Lists whose elements the code compares with null (nullElementLists), by binding. */
   nullElementLists: ReadonlySet<string>;
+  /** Set while a getBooleans whose null result the next statement tests is lowered (cancelledBooleans). */
+  cancelBooleans?: true;
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
@@ -1128,6 +1133,48 @@ function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]
   return values;
 }
 
+/**
+ * The shape of a storage key: its literal text, with `*` for each computed part (`prefix + ".punishment" + i` as
+ * `*.punishment*`), so a computed read and a computed save of the same form match. Null when no part is literal.
+ */
+export function storageKeyShape(node: AstNode): string | null {
+  const parts: string[] = [];
+  let literal = false;
+  const visit = (part: AstNode): void => {
+    const text = constantString(part);
+    if (text !== null) {
+      parts.push(text);
+      literal = true;
+      return;
+    }
+    if (
+      part.kind === "binary" &&
+      part.operator === "+" &&
+      isAstNode(part.left) &&
+      isAstNode(part.right)
+    ) {
+      visit(part.left);
+      visit(part.right);
+      return;
+    }
+    if (part.kind === "gstring") {
+      const strings = Array.isArray(part.strings) ? part.strings : [];
+      const values = nodeArray(part.values);
+      strings.forEach((piece, position) => {
+        if (typeof piece === "string" && piece !== "") {
+          parts.push(piece);
+          literal = true;
+        }
+        if (position < values.length) parts.push("*");
+      });
+      return;
+    }
+    parts.push("*");
+  };
+  visit(node);
+  return literal ? parts.join("").replace(/\*+/gu, "*") : null;
+}
+
 /** The binding a variable reference names (see `bindingKeys`); null for any other expression. */
 function bindingKey(node: unknown, keys: BindingKeys): string | null {
   const name = variableName(node);
@@ -1180,6 +1227,7 @@ export function lowerParsedFile(
     stableNames: options.stableNames ?? new Set(),
     storageLiterals: options.storageLiterals ?? new Map(),
     nonTextKeys: options.nonTextKeys ?? new Set(),
+    nonBooleanKeys: options.nonBooleanKeys ?? new Set(),
     copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
@@ -1997,6 +2045,7 @@ function lowerHelperMethod(
     stableNames: baseContext.stableNames,
     storageLiterals: baseContext.storageLiterals,
     nonTextKeys: baseContext.nonTextKeys,
+    nonBooleanKeys: baseContext.nonBooleanKeys,
     copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
@@ -2105,6 +2154,19 @@ function lowerStatementList(
   const consumed = new Set<number>();
   for (let index = 0; index < statements.length; index += 1) {
     if (consumed.has(index)) continue;
+    // A getBooleans whose null result the next statement tests offers the dialog's Cancel (cancelledBooleans).
+    const booleansStart = context.diagnostics.length;
+    const cancelled = cancelledBooleans(statements, index, context);
+    if (cancelled !== null) {
+      const first = statementSpan(statements[index]!);
+      emitComments(takeCommentsBefore(context, first));
+      if (first !== null) result.push(...paragraphBreak(context, previousEndLine, first.line));
+      result.push(...diagnosticNotes(context, booleansStart), ...cancelled);
+      const last = statementSpan(statements[index + 1]!);
+      if (last !== null) previousEndLine = last.endLine;
+      index += 1;
+      continue;
+    }
     // A run of settings asks, each saved right away, becomes one form (lowerSettingsForm).
     const run = settingsRun(statements, index, context);
     const formStart = context.diagnostics.length;
@@ -6447,6 +6509,81 @@ function fieldLabel(name: string): string {
     .trim()
     .toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * `x = getBooleans(...)` followed by `if (x != null) { ... } else { ... }`, or `x == null` with the branches the other
+ * way round: the legacy dialog's Cancel gave null, so the form offers Cancel (V30 §20), and x takes the answers only
+ * when the player did not cancel, so it keeps its list type. Null for other statements.
+ */
+function cancelledBooleans(
+  statements: readonly AstNode[],
+  index: number,
+  context: LowerContext,
+): IrStatement[] | null {
+  const statement = statements[index]!;
+  const next = statements[index + 1];
+  const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  if (expression?.kind !== "binary" || text(expression.operator) !== "=" || next?.kind !== "if")
+    return null;
+  const name = variableName(asNode(expression.left));
+  const right = asNode(expression.right);
+  const call = right === null ? null : legacyApiCall(right, context);
+  if (
+    name === null ||
+    right === null ||
+    call?.name !== "getBooleans" ||
+    call.arguments.length !== 3
+  )
+    return null;
+  const condition = asNode(next.condition);
+  const operator = condition?.kind === "binary" ? text(condition.operator) : null;
+  const left = asNode(condition?.left);
+  const other = asNode(condition?.right);
+  const tested =
+    operator !== "!=" && operator !== "=="
+      ? null
+      : isNullConstant(other ?? undefined)
+        ? left
+        : isNullConstant(left ?? undefined)
+          ? other
+          : null;
+  if (variableName(tested) !== name) return null;
+  context.cancelBooleans = true;
+  let asked: IrExpression | null;
+  try {
+    asked = lowerExpression(right, context);
+  } finally {
+    delete context.cancelBooleans;
+  }
+  if (asked === null) return null;
+  const answers = freshName("answers", context);
+  const answered = asNode(operator === "!=" ? next.then : next.else);
+  const cancelled = asNode(operator === "!=" ? next.else : next.then);
+  return [
+    { kind: "let", name: answers, value: asked, span: statement.span ?? null },
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "!=",
+        left: { kind: "variable", name: answers },
+        right: { kind: "literal", value: null },
+      },
+      then: [
+        {
+          kind: "assign",
+          target: { kind: "variable", name },
+          operator: "=",
+          value: { kind: "variable", name: answers },
+          span: statement.span ?? null,
+        },
+        ...(answered === null ? [] : lowerBranch(answered, context)),
+      ],
+      else: cancelled === null ? [] : lowerBranch(cancelled, context),
+      span: next.span ?? null,
+    },
+  ];
 }
 
 /** One ask of a legacy settings run (settingsRun): the variable it sets, the ask's text, and the saves after it. */
@@ -10814,21 +10951,6 @@ function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): 
   return receiver !== null && sameReference(receiver, list);
 }
 
-/** Whether the call's result is assigned to a variable that the code compares with null. */
-function nullTestedResult(node: AstNode, context: LowerContext): boolean {
-  const at = (other: AstNode): boolean =>
-    other === node ||
-    (other.span !== null &&
-      other.span !== undefined &&
-      node.span !== null &&
-      node.span !== undefined &&
-      other.span.line === node.span.line &&
-      other.span.column === node.span.column);
-  for (const [key, values] of context.assignedValues)
-    if (context.mapUses.nullTested.has(key) && values.some(at)) return true;
-  return false;
-}
-
 /** Whether `value` reads `list` at a position written the same way as `index`. */
 function readsPosition(value: AstNode, list: AstNode, index: AstNode): boolean {
   const same = (left: AstNode | null, right: AstNode | null): boolean => {
@@ -14034,8 +14156,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     if (key === null) return null;
     if (call.name === "loadInteger" || call.name === "receiveInteger")
       return { kind: "load", key, integer: true };
-    const literalKey = constantString(call.arguments[0]!);
-    if (call.name === "loadString" && literalKey !== null && context.nonTextKeys.has(literalKey)) {
+    const shape = storageKeyShape(call.arguments[0]!);
+    if (call.name === "loadString" && shape !== null && context.nonTextKeys.has(shape)) {
       addDiagnostic(
         context,
         "SX_LOAD_STRING_TEXT",
@@ -14044,6 +14166,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         node.span,
       );
       return useHelper(context, "text", [{ kind: "load", key }]);
+    }
+    if (call.name === "loadBoolean" && shape !== null && context.nonBooleanKeys.has(shape)) {
+      addDiagnostic(
+        context,
+        "SX_LOAD_BOOLEAN_TEXT",
+        "warning",
+        'loadBoolean() read the stored value as text, true only for "true", and the package saves a number or a text under this key, so the value is read the same way; a missing value, null in Groovy, reads as false.',
+        node.span,
+      );
+      return useHelper(context, "booleanText", [{ kind: "load", key }]);
     }
     return { kind: "load", key };
   }
@@ -14187,7 +14319,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           message: args[0]!,
           texts: args[1]!,
           defaults: args[2]!,
-          ...(nullTestedResult(node, context)
+          ...(context.cancelBooleans === true
             ? { cancel: { kind: "literal", value: "Cancel" } }
             : {}),
         },

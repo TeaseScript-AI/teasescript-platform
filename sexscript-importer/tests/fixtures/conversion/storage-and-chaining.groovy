@@ -48,4 +48,10 @@ if (tempo == null) tempo = 0.5
 def keyed = loadString("training.key." + suffix)
 if (suffix == null) suffix = "a"
 show("Settings ${shocks} ${tempo} ${suffix} ${keyed}")
+// loadBoolean() read a stored value as text, true only for "true"; where the package saves a number under a key of the
+// same form, the read keeps that rule.
+def chosen = [false, false]
+for (int p = 0; p < 2; p++) chosen[p] = loadBoolean("training.punishment" + p + ".chosen")
+save("training.punishment" + 1 + ".chosen", 0)
+show("Chosen ${chosen[0]}")
 return null
