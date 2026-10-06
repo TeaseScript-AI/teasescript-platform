@@ -517,7 +517,10 @@ export interface RepeatStatement {
 
 export interface ForStatement {
   readonly kind: "forStatement";
+  /** The element, or with {@link valueVariable} the key of each dict entry. */
   readonly variable: Identifier;
+  /** `for key, value in dict`: each entry's value, a copy taken when the loop starts. */
+  readonly valueVariable: Identifier | null;
   readonly iterable: Expression;
   readonly body: Block;
   readonly span: SourceSpan;

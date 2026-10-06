@@ -651,6 +651,7 @@ export class InstructionCompiler {
             statement.body,
             statement.variable.name,
             statement.span,
+            statement.valueVariable?.name,
           ),
         );
         return;
@@ -838,6 +839,7 @@ export class InstructionCompiler {
     body: Block,
     variable: string | null,
     span: SourceSpan,
+    valueVariable?: string,
   ): CompileTask<void> {
     const loopId = this.counters.nextLoopId;
     this.counters.nextLoopId += 1;
@@ -852,6 +854,7 @@ export class InstructionCompiler {
             loopKind,
             loopId,
             variable: variable!,
+            ...(valueVariable === undefined ? {} : { valueVariable }),
             expression: lowered.plan,
             continueTarget: loopContinueTarget,
             target: -1,

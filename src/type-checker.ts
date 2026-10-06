@@ -5,6 +5,7 @@ import type {
   CallExpression,
   Expression,
   FunctionDeclaration,
+  ForStatement,
   FunctionParameter,
   GlobalStatement,
   Identifier,
@@ -377,6 +378,7 @@ function storedPlace(slot: OpenType): OpenType | undefined {
 
 /** The name of the variable a declaration creates. */
 function declaredName(declaration: Declaration): string {
+  if (declaration.kind === "identifier") return declaration.name;
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
 }
 
@@ -1227,13 +1229,17 @@ class TypeChecker {
           );
         const times = staticNumber(statement.count);
         const ends = yield* compileChild(
-          this.#loopBodyTask(statement.body, scope, null, times === undefined || times >= 1),
+          this.#loopBodyTask(statement.body, scope, [], times === undefined || times >= 1),
         );
         // A loop that certainly runs once ends normally only when its body or a `break` does.
         return times === undefined || times < 1 || ends;
       }
       case "forStatement": {
         const iterable = yield* compileChild(this.#expressionTask(statement.iterable, scope));
+        if (statement.valueVariable !== null)
+          return yield* compileChild(
+            this.#pairLoopTask(statement, statement.valueVariable, iterable, scope),
+          );
         // A loop over a dict goes through its keys.
         const element = elementType(iterable, true);
         this.#reportUnless(
@@ -1253,7 +1259,12 @@ class TypeChecker {
         };
         this.#declared.set(statement, variable);
         const ends = yield* compileChild(
-          this.#loopBodyTask(statement.body, scope, variable, !isEmptyLiteral(statement.iterable)),
+          this.#loopBodyTask(
+            statement.body,
+            scope,
+            [variable],
+            !isEmptyLiteral(statement.iterable),
+          ),
         );
         return !isNonEmptyLiteral(statement.iterable) || ends;
       }
@@ -1334,6 +1345,45 @@ class TypeChecker {
   }
 
   /**
+   * `for key, value in dict`: the key is text, and the value a variable of its own with the dict's value type, so each
+   * keeps its own type and widening.
+   */
+  *#pairLoopTask(
+    statement: ForStatement,
+    valueName: Identifier,
+    iterable: StaticType,
+    scope: Scope,
+  ): CompileTask<boolean> {
+    this.#reportUnless(
+      iterable,
+      (member) => dictValueType(member) !== undefined,
+      statement.iterable,
+      "A for-loop with a key and a value goes through a dict",
+    );
+    const key: Variable = {
+      name: statement.variable.name,
+      type: this.#ownType(statement, copyType(STRING_TYPE)),
+      shared: false,
+      declaration: statement,
+    };
+    const element = dictValueType(iterable);
+    const valueType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+    this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
+    const value: Variable = {
+      name: valueName.name,
+      type: this.#ownType(valueName, valueType),
+      shared: false,
+      declaration: valueName,
+    };
+    this.#declared.set(statement, key);
+    this.#declared.set(valueName, value);
+    const ends = yield* compileChild(
+      this.#loopBodyTask(statement.body, scope, [key, value], !isEmptyLiteral(statement.iterable)),
+    );
+    return !isNonEmptyLiteral(statement.iterable) || ends;
+  }
+
+  /**
    * The body of a `repeat` or `for` loop, which may run any number of times, including none. Returns whether the body
    * can end normally or leave through a `break`. A body that certainly runs no time is checked, but nothing in it can
    * be reached.
@@ -1341,7 +1391,7 @@ class TypeChecker {
   *#loopBodyTask(
     body: Block,
     scope: Scope,
-    variable: Variable | null,
+    variables: readonly Variable[],
     reached: boolean,
   ): CompileTask<boolean> {
     const reachable = this.#reachable;
@@ -1349,7 +1399,8 @@ class TypeChecker {
     this.#widen(body);
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
-    if (variable !== null) loopScope.declare(variable.name, { kind: "variable", variable });
+    for (const variable of variables)
+      loopScope.declare(variable.name, { kind: "variable", variable });
     this.#loops.push({ start, breaks: [], continued: false });
     const continues = yield* compileChild(this.#statementsTask(body.statements, loopScope));
     const { breaks, continued } = this.#loops.pop()!;
@@ -6307,7 +6358,20 @@ const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "
 
 /** The name of the variable a declaration declares. */
 function declarationName(declaration: Declaration): string {
+  if (declaration.kind === "identifier") return declaration.name;
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
+}
+
+/** The type of the values of a dict type, of each member's values for a union of dicts; `undefined` for another. */
+function dictValueType(type: StaticType): StaticType | undefined {
+  const values: StaticType[] = [];
+  for (const member of members(nonNullType(type))) {
+    const value = resolved(member);
+    if (value.kind === "dict") values.push(value.element);
+    else if (value.kind === "unknown") values.push(UNKNOWN_TYPE);
+    else return undefined;
+  }
+  return values.length === 1 ? values[0] : union(values);
 }
 
 /**
