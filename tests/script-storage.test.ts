@@ -24,16 +24,23 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 
 const keyMessage = "Storage key must be a string.";
 const loadKeyMessage =
-  "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
 const unstorableMessage =
   "save cannot store a timer, media, or message handle or a speaker reference; they exist only in the current session.";
 
-/** The compact and the bounded spelling of `load`, which behave the same. */
+/**
+ * The compact and the bounded spelling of `load`, which behave the same. Without a fallback, the default is `null` and
+ * the key is computed, so the load reads stored data of any type.
+ */
 const loadSpellings = [
   (key: string, fallback?: string) =>
-    fallback === undefined ? `load ${key}` : `load ${key}, default: ${fallback}`,
+    fallback === undefined
+      ? `load ${key} + "", default: null`
+      : `load ${key}, default: ${fallback}`,
   (key: string, fallback?: string) =>
-    fallback === undefined ? `load(${key})` : `load(${key}, default: ${fallback})`,
+    fallback === undefined
+      ? `load(${key} + "", default: null)`
+      : `load(${key}, default: ${fallback})`,
 ] as const;
 
 function binding(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
@@ -101,7 +108,10 @@ test("host-acknowledged saves seed a new session without losing stored value typ
   );
 
   const reader = plan(
-    [...expected.map(({ key }, index) => `let loaded${index} = load "${key}"`), "exit"].join("\n"),
+    [
+      ...expected.map(({ key }, index) => `let loaded${index} = load "${key}" + "", default: null`),
+      "exit",
+    ].join("\n"),
   );
   const read = run(reader, createFreshRuntimeSnapshot(reader, { scriptStorage: recorded }));
   assert.equal(read.snapshot.status, "halted");
@@ -118,7 +128,9 @@ test("persistent writes wait with the old view until stored acknowledges the eva
     ['save null as "${key}"', null, [{ key: "k", value: 1 }]],
     ['delete "${key}"', null, []],
   ] as const) {
-    const compiled = plan(`let key = "k"\n${command}\nlet loaded = load "k"\nexit`);
+    const compiled = plan(
+      `let key = "k"\n${command}\nlet loaded = load "k" + "", default: null\nexit`,
+    );
     const pending = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, {
@@ -179,9 +191,9 @@ test("failed persistent saves and deletes keep the old value or absence and allo
           "let calls = 0",
           "function backup { calls += 1\nreturn 9 }",
           command,
-          'let plain = load "k"',
+          'let plain = load "k" + "", default: null',
           'let withDefault = load "k", default: backup()',
-          'let stillMissing = load "k"',
+          'let stillMissing = load "k" + "", default: null',
           "exit",
         ].join("\n"),
       );
@@ -278,7 +290,7 @@ test("storage write completion rejects invalid payloads and wrong action kinds, 
 
 test("default session-local storage changes immediately without actions, events, or warnings", () => {
   const compiled = plan(
-    'save 1 as "z"\nsave 2 as "a"\nlet saved = load "z"\ndelete "z"\nlet deleted = load "z"\nexit',
+    'save 1 as "z"\nsave 2 as "a"\nlet saved = load "z" + "", default: null\ndelete "z"\nlet deleted = load "z" + "", default: null\nexit',
   );
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(result.snapshot.status, "halted");
@@ -295,7 +307,9 @@ test("default session-local storage changes immediately without actions, events,
 });
 
 test("pending persistent writes complete identically after a JSON checkpoint round trip", () => {
-  const compiled = plan('save [1, null] as "list"\nlet loaded = load "list"\nexit');
+  const compiled = plan(
+    'save [1, null] as "list"\nlet loaded = load "list" + "", default: null\nexit',
+  );
   const pending = run(
     compiled,
     createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
@@ -328,7 +342,7 @@ test("a due timer block waits for the write and reads the acknowledged value at 
       "let seen = null",
       "let elapsed = null",
       "let clock = timer async 20 s",
-      'timer async 1 s { seen = load "k"\nelapsed = clock.elapsed }',
+      'timer async 1 s { seen = load "k" + "", default: null\nelapsed = clock.elapsed }',
       'save 2 as "k"',
       "wait 10 s",
       "exit",
@@ -508,9 +522,9 @@ test("same-session loads see saves and copy nested collections in both direction
       "let original = [{ items: [1] }]",
       'save original as "k"',
       "original[0].items.add(2)",
-      'let loaded = load "k"',
+      'let loaded = load "k" + "", default: null',
       "loaded[0].items.add(3)",
-      'let reloaded = load("k")',
+      'let reloaded = load("k" + "", default: null)',
       "exit",
     ].join("\n"),
   );
@@ -538,7 +552,7 @@ test("same-session loads see saves and copy nested collections in both direction
 
 test("session-local save null and delete remove keys, including an absent key", () => {
   const result = assertRuntimeResumeEquivalent(
-    'save 1 as "k"\nsave null as "k"\nlet afterNull = load "k"\nsave 2 as "k"\nlet replaced = load "k"\ndelete "k"\ndelete "absent"\nlet missing = load "k"\nexit',
+    'save 1 as "k"\nsave null as "k"\nlet afterNull = load "k" + "", default: null\nsave 2 as "k"\nlet replaced = load "k" + "", default: null\ndelete "k"\ndelete "absent"\nlet missing = load "k" + "", default: null\nexit',
   );
   assert.equal(binding(result.finalSnapshot, "afterNull"), null);
   assert.equal(binding(result.finalSnapshot, "replaced"), 2);
@@ -568,16 +582,17 @@ test("storage operands evaluate in source order and present loads skip their def
 
 test("a bounded or grouped load compares the loaded value; a compact comparison gets TSV038 and its hint", () => {
   const result = assertRuntimeResumeEquivalent(
-    'let absent = load("k") == null\nlet grouped = (load "k") == null\nexit',
+    'let absent = load("k" + "", default: null) == null\nlet grouped = (load "k" + "", default: null) == null\nexit',
   );
   assert.equal(binding(result.finalSnapshot, "absent"), true);
   assert.equal(binding(result.finalSnapshot, "grouped"), true);
   const invalid = compileSource('let absent = load "k" == null');
   assert.equal(invalid.plan, null);
   assert.deepEqual(
-    invalid.diagnostics.map(({ code, message }) => [code, message]),
-    [["TSV038", loadKeyMessage]],
+    invalid.diagnostics.map(({ code }) => code),
+    ["TSV038", "TSV020"],
   );
+  assert.equal(invalid.diagnostics[0]?.message, loadKeyMessage);
 });
 
 test("a bounded load ends at its ')', also with a space before '(' and options on several lines", () => {
@@ -589,15 +604,15 @@ test("a bounded load ends at its ')', also with a space before '(' and options o
       'function key(prefix) { return "${prefix}st" }',
       'let total = load ("n", default: 0) + 1',
       'let fallbackSum = load("missing", default: 3) * 2',
-      'let second = load(key("li"))[1]',
-      'let name = load("record").name',
-      'let nested = load("missing", default: load("list"))[0]',
+      'let second = load(key("li"), default: null)[1]',
+      'let name = load("record" + "", default: null).name',
+      'let nested = load("missing", default: load("list" + "", default: null))[0]',
       "let multiline = load(",
       '    "missing",',
-      '    default: load("n")',
+      '    default: load("n" + "", default: null)',
       ")",
-      'let record = { value: load("missing"), default: 1 }',
-      'let text = "${load("record", default: "none").name}"',
+      'let record = { value: load("missing" + "", default: null), default: 1 }',
+      'let text = "${load("record", default: { name: "none" }).name}"',
       "exit",
     ].join("\n"),
   );
@@ -629,11 +644,11 @@ test("a bounded load takes one key and the option 'default:', and names what is 
   for (const [source, error] of [
     [
       "let v = load()",
-      "TSP036 0:8 Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+      "TSP036 0:8 Expected a storage key in 'load(...)', such as 'load(\"name\", default: \"\")'.",
     ],
     [
       "let v = load(default: 1)",
-      "TSP036 0:8 Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+      "TSP036 0:8 Expected a storage key in 'load(...)', such as 'load(\"name\", default: \"\")'.",
     ],
     [
       'let v = load("k", "j")',
@@ -675,7 +690,7 @@ test("statically non-string storage keys get TSV038 after unwrapping parentheses
     'playAudio async "a.mp3"',
   ]) {
     for (const [source, message] of [
-      [`let value = load ((${key}))`, loadKeyMessage],
+      [`let value = load(((${key})), default: null)`, loadKeyMessage],
       [`save 0 as ((${key}))`, keyMessage],
       [`delete ((${key}))`, keyMessage],
     ] as const) {
@@ -700,7 +715,7 @@ test("string-producing keys compile and run for save, load, and delete", () => {
       'function keyFunction { return "function" }',
       ...keys.flatMap((key, index) => [
         `save 7 as ${key}`,
-        `let loaded${index} = load ${key}`,
+        `let loaded${index} = load ${key}, default: null`,
         `delete ${key}`,
       ]),
       "exit",
@@ -713,7 +728,7 @@ test("string-producing keys compile and run for save, load, and delete", () => {
 test("dynamic non-string keys fail with TSR054 and the command's message", () => {
   // `dynamic` hides the key's type from the compiler, which rejects a known non-string key before runtime.
   for (const [command, message] of [
-    ["let value = load key", loadKeyMessage],
+    ["let value = load key, default: null", loadKeyMessage],
     ["save 7 as key", keyMessage],
     ["delete key", keyMessage],
   ]) {
@@ -759,54 +774,45 @@ test("save rejects session handles and speaker references at the top level and n
   }
 });
 
-test("typed load initializers reject incompatible stored values with TSR058", () => {
-  for (const [type, value, message] of [
-    ["number", "stored", "holds a number, so it cannot take text (string)"],
-    ["integer", 1.5, "holds a whole number (integer), so it cannot take a number"],
-    [
-      "string[]",
-      { kind: "list", items: ["a", 1] },
-      "holds a list (string[]), so it cannot take a list with a whole number (integer) at [1]",
-    ],
-    [
-      "integer set",
-      { kind: "set", items: [1, 1.5] },
-      "holds a set (integer set), so it cannot take a set with a number at [1]",
-    ],
-    // These types have no runtime values yet, so no stored value fits them.
-    ["date", "2026-10-02", "holds a date, so it cannot take text (string)"],
-    ["time", "12:00", "holds a time, so it cannot take text (string)"],
-    ["datetime", "2026-10-02T12:00:00Z", "holds a date and time, so it cannot take text (string)"],
-  ] satisfies readonly (readonly [string, SerializableRuntimeValue, string])[]) {
-    const compiled = plan(`let value: ${type} = load "k"\nexit`);
+test("a declared load ignores a stored value of another type and uses its default", () => {
+  for (const [type, fallback, value, saved] of [
+    ["number", "0", "stored", "is text (string)"],
+    ["integer", "0", 1.5, "is a number"],
+    ["string[]", "[]", { kind: "list", items: ["a", 1] }, "has a whole number (integer) at [1]"],
+    ["integer set", "set[]", { kind: "set", items: [1, 1.5] }, "has a number at [1]"],
+    ["date", 'toDate("2026-01-01")', "2026-10-02", "is text (string)"],
+    ["time", 'toTime("12:00")', "12:00", "is text (string)"],
+    ["datetime", 'toDateTime("2026-01-01T12:00")', "2026-10-02T12:00:00Z", "is text (string)"],
+  ] satisfies readonly (readonly [string, string, SerializableRuntimeValue, string])[]) {
+    const compiled = plan(`let value: ${type} = load "k", default: ${fallback}\nexit`);
     const result = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value }] }),
     );
-    assert.equal(result.snapshot.status, "failed", type);
-    assert.equal(result.snapshot.failure?.code, "TSR058", type);
-    assert.equal(result.snapshot.failure?.message, `'value' ${message}.`);
+    assert.equal(result.snapshot.status, "halted", type);
+    const warning = result.events.find((event) => event.kind === "developerWarning");
+    assert.equal(warning?.kind === "developerWarning" && warning.code, "TSW016", type);
+    assert.match(
+      warning?.kind === "developerWarning" ? warning.message : "",
+      new RegExp(`but the saved value ${saved.replace(/[()[\]]/gu, "\\$&")}\\.`, "u"),
+      type,
+    );
+    assert.deepEqual(result.snapshot.scriptStorage, [{ key: "k", value }], type);
   }
-  const compiled = plan('let value: number = ((load "k"))\nexit');
-  const result = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value: "stored" }] }),
-  );
-  assert.equal(result.snapshot.failure?.code, "TSR058");
 });
 
 test("typed load initializers accept matching scalars, collections, integers, and optional types", () => {
-  for (const [type, value] of [
-    ["string", "stored"],
-    ["boolean", false],
-    ["number", 1.5],
-    ["integer", 2],
-    ["duration", { kind: "duration", milliseconds: 1_500 }],
-    ["string[]", { kind: "list", items: ["a", "b"] }],
-    ["integer set", { kind: "set", items: [1, 2] }],
-    ["number?", 3],
-  ] satisfies readonly (readonly [string, SerializableRuntimeValue])[]) {
-    const compiled = plan(`let value: ${type} = load "k"\nexit`);
+  for (const [type, fallback, value] of [
+    ["string", '""', "stored"],
+    ["boolean", "true", false],
+    ["number", "0", 1.5],
+    ["integer", "0", 2],
+    ["duration", "0 s", { kind: "duration", milliseconds: 1_500 }],
+    ["string[]", "[]", { kind: "list", items: ["a", "b"] }],
+    ["integer set", "set[]", { kind: "set", items: [1, 2] }],
+    ["number?", "null", 3],
+  ] satisfies readonly (readonly [string, string, SerializableRuntimeValue])[]) {
+    const compiled = plan(`let value: ${type} = load "k", default: ${fallback}\nexit`);
     const result = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value }] }),
@@ -816,32 +822,28 @@ test("typed load initializers accept matching scalars, collections, integers, an
   }
 });
 
-test("loaded values are checked against the variable's type, including missing keys, defaults, and indirect loads", () => {
+test("a load the compiler cannot type is checked where its value is stored", () => {
   const storage = [{ key: "k", value: "stored" }];
   const failure = (source: string) => {
     const compiled = plan(`function identity(value) { return value }\n${source}\nexit`);
     const result = run(compiled, createFreshRuntimeSnapshot(compiled, { scriptStorage: storage }));
     return [result.snapshot.failure?.code, result.snapshot.failure?.message];
   };
-  assert.deepEqual(failure('let missing: number = load "missing"'), [
-    "TSR058",
-    "'missing' holds a number, so it cannot take null.",
-  ]);
   assert.deepEqual(failure('let backup: number = load("missing", default: identity("backup"))'), [
     "TSR058",
     "'backup' holds a number, so it cannot take text (string).",
   ]);
-  assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k"'), [
+  assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k" + "", default: 0'), [
     "TSR058",
     "'assigned' holds a number, so it cannot take text (string).",
   ]);
-  assert.deepEqual(failure('let indirect: number = identity(load "k")'), [
+  assert.deepEqual(failure('let indirect: number = identity(load "k" + "", default: null)'), [
     "TSR058",
     "'indirect' holds a number, so it cannot take text (string).",
   ]);
 
   const optional = plan(
-    'let missing: number? = load("missing")\nlet text: string = load "k"\nexit',
+    'let missing: number? = load("missing" + "", default: null)\nlet text: string = load "k", default: ""\nexit',
   );
   const result = run(optional, createFreshRuntimeSnapshot(optional, { scriptStorage: storage }));
   assert.equal(result.snapshot.status, "halted");
@@ -925,10 +927,10 @@ test("deleting a key keeps every other stored key readable and writable", () => 
       'delete "a"',
       'save 4 as "d"',
       'save 20 as "b"',
-      'let a = load "a"',
-      'let b = load "b"',
-      'let c = load "c"',
-      'let d = load "d"',
+      'let a = load "a" + "", default: null',
+      'let b = load "b" + "", default: null',
+      'let c = load "c" + "", default: null',
+      'let d = load "d" + "", default: null',
       "exit",
     ].join("\n"),
   );
@@ -1047,13 +1049,10 @@ test("compact interactions parse in every storage operand position", () => {
   const positions: readonly (readonly [(value: string) => string, boolean])[] = [
     [(value) => `save ${value} as "k"`, false],
     [(value) => `save [${value}] as "k"`, false],
-    [(value) => `let v = load ${value}`, true],
-    [(value) => `let v = load(${value})`, true],
     // A `, default:` after an ungrouped interaction would belong to the interaction, so these keys are grouped.
     [(value) => `let v = load((${value}), default: "d")`, true],
     [(value) => `let v = load "k", default: ${value}`, false],
     [(value) => `save load "k", default: ${value} as "k"`, false],
-    [(value) => `save load ${value} as "k"`, true],
     [(value) => `save load((${value}), default: "d") as "k"`, true],
   ];
   for (const value of values) {
@@ -1072,8 +1071,8 @@ test("compact interactions parse in every storage operand position", () => {
 
 test("save keeps the value it evaluated before its key expression runs", () => {
   for (const source of [
-    'let items = [1]\nsave items as "k${items.clear()}"\nlet stored = load "knull"\nexit',
-    'let items = [1]\nfunction clearItems { items.clear()\nreturn "knull" }\nsave items as clearItems()\nlet stored = load "knull"\nexit',
+    'let items = [1]\nsave items as "k${items.clear()}"\nlet stored = load "knull" + "", default: null\nexit',
+    'let items = [1]\nfunction clearItems { items.clear()\nreturn "knull" }\nsave items as clearItems()\nlet stored = load "knull" + "", default: null\nexit',
   ]) {
     const result = assertRuntimeResumeEquivalent(source);
     const kept = { kind: "list", items: [1] };
@@ -1131,7 +1130,7 @@ test("a write reserves the completion events of every active action", () => {
 
 test("load operands may be quoted strings inside interpolation", () => {
   const result = assertRuntimeResumeEquivalent(
-    'save "Ada" as "k"\nlet key = "missing"\nlet present = "${load "k"}"\nlet absent = "${load key, default: "fallback"}"\nexit',
+    'save "Ada" as "k"\nlet key = "missing"\nlet present = "${load "k" + "", default: null}"\nlet absent = "${load key, default: "fallback"}"\nexit',
   );
   assert.equal(binding(result.finalSnapshot, "present"), "Ada");
   assert.equal(binding(result.finalSnapshot, "absent"), "fallback");

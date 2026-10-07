@@ -79,6 +79,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
   validatePlanImages(value.images, errors);
+  validateStorageTypes(value.storageTypes, errors);
   const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
     errors.push(
@@ -266,7 +267,33 @@ const PLAN_FIELDS = [
   "temporaryCount",
   "functions",
   "instructions",
+  "storageTypes",
 ];
+
+/** The types of storage keys: unique keys in UTF-16 code-unit order, each with a valid type (ADR 0021 §6). */
+function validateStorageTypes(value: unknown, errors: PlanValidationError[]): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Plan storage types must be an array.", "$.storageTypes"));
+    return;
+  }
+  let previousKey: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const entry: unknown = value[index];
+    const path = `$.storageTypes[${index}]`;
+    if (!isRecord(entry) || !hasExactKeys(entry, ["key", "type"])) {
+      errors.push(planError("TSC002", "A storage type has a key and a type.", path));
+      continue;
+    }
+    if (typeof entry.key !== "string") {
+      errors.push(planError("TSC002", "A storage type's key is a string.", `${path}.key`));
+    } else if (previousKey !== null && !(previousKey < entry.key)) {
+      errors.push(planError("TSC002", "Storage types are unique and in key order.", `${path}.key`));
+    } else {
+      previousKey = entry.key;
+    }
+    validateTypePlan(entry.type, `${path}.type`, errors);
+  }
+}
 
 /** The image catalog: unique package paths in order, each with canonical tags in name order (ADR 0023). */
 function validatePlanImages(value: unknown, errors: PlanValidationError[]): void {
@@ -2307,8 +2334,10 @@ function validateExpressionNode(
       return;
     }
     case "storageLoad":
-      if (!hasExactKeys(value, ["kind", "key", "default", "span"])) {
+      if (!hasExactKeys(value, ["kind", "key", "default", "type", "span"])) {
         errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
+      } else if (value.type !== null) {
+        validateTypePlan(value.type, `${path}.type`, errors);
       }
       if (value.default !== null) {
         pending.push({ value: value.default, path: `${path}.default`, assignmentTarget: false });

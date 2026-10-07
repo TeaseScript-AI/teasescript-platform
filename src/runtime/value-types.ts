@@ -49,6 +49,24 @@ export function matchesValueType(value: SerializableRuntimeValue, type: TypePlan
   return findTypeMismatch(value, type) === null;
 }
 
+/**
+ * The developer warning for a stored value that does not fit the type a `load` reads it as, which the load ignores
+ * (V30 §25), or `null` when the value fits.
+ */
+export function storedValueMismatch(
+  key: string,
+  value: SerializableRuntimeValue,
+  type: TypePlan,
+): string | null {
+  const mismatch = findTypeMismatch(value, type);
+  if (mismatch === null) return null;
+  const saved =
+    mismatch.path === ""
+      ? `is ${describeValue(value)}`
+      : `has ${describeValue(mismatch.value)} at ${mismatch.path}`;
+  return `Storage key ${JSON.stringify(key)} is loaded as ${describeType(type)} here, but the saved value ${saved}. This load ignores it; it stays saved until a save replaces it.`;
+}
+
 interface TypeMismatch {
   readonly value: SerializableRuntimeValue;
   /** The path from the checked value to the part that does not fit, such as `[2].locked`; empty for the value. */

@@ -679,7 +679,7 @@ test("answers, loads, and saves explain values, and refused or repeated reports 
       'let visits = load "visits", default: 0',
       'save visits + 1 as "visits"',
       'save name as "lost"',
-      'let again = load "visits"',
+      'let again: integer? = load "visits", default: null',
       'let kept = load "lost", default: "none"',
       'say "${name} ${again} ${kept}"',
       "exit",
@@ -756,7 +756,7 @@ test("a debugging tool's storage edit explains the next load instead of the scri
     [
       'save 1 as "level"',
       'let first = askText "Edit now?"',
-      'let level = load "level"',
+      'let level: integer? = load "level", default: null',
       'say "${level}"',
       "exit",
     ].join("\n"),
@@ -1075,7 +1075,7 @@ function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSessi
       "}",
       'let music = playAudio async "x.mp3"',
       "wait 2",
-      'let saved = load "who"',
+      'let saved: string? = load "who", default: null',
       'say "${pick} ${name} ${saved} ${["x", "y"]}"',
       "wait 1",
       "exit",
@@ -1327,7 +1327,7 @@ test("oversized values, wide staged messages, and rollbacks stay within the boun
 });
 
 test("previews cut long property names before writing them", () => {
-  const plan = compile(['let row = load "row"', "exit"].join("\n"));
+  const plan = compile(['let row: object? = load "row", default: null', "exit"].join("\n"));
   const longest = { length: 0 };
   const join = Array.prototype.join;
   // Observe the longest text notation assembles while the traced run writes its preview.
@@ -1354,7 +1354,9 @@ test("previews cut long property names before writing them", () => {
 });
 
 test("previews cut long keys and labels before writing them", () => {
-  const plan = compile(['let key = load "key"', "let table = dict{ [key]: 1 }", "exit"].join("\n"));
+  const plan = compile(
+    ['let key = load "key", default: ""', "let table = dict{ [key]: 1 }", "exit"].join("\n"),
+  );
   const longest = { length: 0 };
   const replace = String.prototype.replace;
   // Observe how much text escaping handles while the traced run writes its previews.

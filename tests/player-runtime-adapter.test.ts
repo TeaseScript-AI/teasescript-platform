@@ -787,7 +787,7 @@ test("runtime adapter leaves evaluated persistent writes pending until acknowled
 let suffix = 2
 let replacement = "new"
 save "\${replacement} value" as "answer.\${suffix}"
-let answer = load "answer.\${suffix}"
+let answer = load "answer.\${suffix}", default: null
 say answer, instant
 exit
 `,
@@ -816,7 +816,7 @@ exit
 
 test("runtime adapter retains the previous value and emits TSW014 after a failed write acknowledgement", () => {
   const session = createPlayerRuntimeSession(
-    'save "replacement" as "answer"\nlet answer = load "answer"\nsay answer, instant\nexit',
+    'save "replacement" as "answer"\nlet answer: string? = load "answer", default: null\nsay answer, instant\nexit',
     { scriptStorage: [{ key: "answer", value: "previous" }], persistentScriptStorage: true },
   );
   const write = pendingPlayerRuntimeStorageWrite(session.state);
@@ -842,7 +842,7 @@ test("runtime adapter retains the previous value and emits TSW014 after a failed
 
 test("runtime adapter keeps storage session-local by default without pending writes or warnings", () => {
   const session = createPlayerRuntimeSession(
-    'save "local" as "answer"\nlet answer = load "answer"\nsay answer, instant\ndelete "old"\nexit',
+    'save "local" as "answer"\nlet answer: string? = load "answer", default: null\nsay answer, instant\ndelete "old"\nexit',
     { scriptStorage: [{ key: "old", value: "initial" }] },
   );
   assert.equal(playerRuntimeSnapshot(session).scriptStoragePersistent, false);
@@ -892,7 +892,7 @@ test("runtime adapter ignores unknown and stale storage action IDs", () => {
 
 test("runtime adapter leaves writes reached after interaction and time observation pending", () => {
   let session = createPlayerRuntimeSession(
-    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered", default: "deleted"\nsay answer, instant\nexit',
+    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered", default: 0\nsay answer, instant\nexit',
     { persistentScriptStorage: true },
   );
   assert.equal(pendingPlayerRuntimeStorageWrite(session.state), null);
@@ -932,7 +932,7 @@ test("runtime adapter leaves writes reached after interaction and time observati
   assert.equal(session.state.status, "halted");
   assert.equal(pendingPlayerRuntimeStorageWrite(session.state), null);
   assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, [{ key: "observed", value: 3 }]);
-  assert.equal(session.transcriptEntries.at(-1)?.text, "deleted");
+  assert.equal(session.transcriptEntries.at(-1)?.text, "0");
 });
 
 test("a session records the account's zone and presentation, falling back to the browser's", () => {

@@ -256,10 +256,12 @@ deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, cond
 loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
-session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
-specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys); the host boundary is defined
-in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in browser local storage
-([data boundary](DATA-AND-API.md#script-storage-in-the-browser)).
+session view and host-acknowledged atomic writes. Every `load` has a default and reads the stored value as the type a
+load of the key declares, or its default's type; it ignores a stored value of another type with developer warning
+`TSW016`, and the loads and saves of a key written as a string literal must agree. Accepted semantics are defined in
+specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys); the host boundary is
+defined in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in browser local storage ([data
+boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
 Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
 and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
@@ -308,8 +310,8 @@ available, and tests, `!= null`, and assignments narrow plain variables; using a
 type is required is a compile error that names the check. A mismatch is `TSV041`, an unsupported operand `TSV043`,
 returns of different types, list elements of different types, or a `choose` of different value types outside a declared
 union `TSV044`, and a provably constant type test or comparison warning `TSV046`. When a value the compiler cannot know,
-such as untyped storage, host data, or an unknown parameter, is stored in a place whose type is at least partly known,
-the plan carries that type and the runtime checks the value before storing it (`TSR058`).
+such as storage under a computed key, host data, or an unknown parameter, is stored in a place whose type is at least
+partly known, the plan carries that type and the runtime checks the value before storing it (`TSR058`).
 
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 

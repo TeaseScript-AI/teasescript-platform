@@ -286,7 +286,7 @@ test("tag lists and bounds are checked for their types, and runtime values are v
   for (const [source, code] of [
     ['let names = load "names", default: ["Bed Room"]\nsay findImages(all: names)\nexit', "TSR081"],
     [
-      'let bound = load "bound", default: "high"\nsay findImages(where: "punishment" > bound)\nexit',
+      'let bound = load "bo" + "und", default: "high"\nsay findImages(where: "punishment" > bound)\nexit',
       "TSR080",
     ],
   ] as const) {

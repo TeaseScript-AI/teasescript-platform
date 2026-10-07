@@ -9,7 +9,7 @@ import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { PlanImage, PreparedFormShape, TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, PreparedFormShape, StorageTypePlan, TypeCheckPlan } from "./plan/model.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
@@ -122,7 +122,13 @@ function compileProjectFiles(
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
-      plan = lowerProject(files, checked.typeChecks, catalog.images, checked.formShapes);
+      plan = lowerProject(
+        files,
+        checked.typeChecks,
+        catalog.images,
+        checked.formShapes,
+        checked.storageTypes,
+      );
     } else {
       const main = files[0]!.result;
       const noExit = createDiagnostic(
@@ -263,6 +269,7 @@ function checkProject(
   readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
   readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   readonly reachesExit: boolean;
+  readonly storageTypes: readonly StorageTypePlan[];
 } | null {
   let current = 0;
   const track = (file: number): void => {
@@ -326,6 +333,7 @@ function checkProject(
           typeChecks: types.runtimeChecks,
           formShapes: types.formShapes,
           reachesExit: types.reachesExit,
+          storageTypes: types.storageTypes,
         };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
@@ -363,6 +371,7 @@ function lowerProject(
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   images: readonly PlanImage[],
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>,
+  storageTypes: readonly StorageTypePlan[],
 ): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
@@ -381,6 +390,7 @@ function lowerProject(
       },
       images,
       formShapes,
+      storageTypes,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);

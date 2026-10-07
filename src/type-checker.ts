@@ -12,6 +12,7 @@ import type {
   Identifier,
   InteractionExpression,
   LetStatement,
+  LoadExpression,
   MediaParts,
   Program,
   ScalarTypeName,
@@ -186,6 +187,14 @@ import {
 } from "./static-types.js";
 import { typePlan } from "./type-plans.js";
 import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import {
+  detachedType,
+  sameStorageKeyTypes,
+  sameType,
+  storageKeyTypes,
+  type StorageKeyType,
+  type StorageLoad,
+} from "./storage-types.js";
 
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
@@ -217,6 +226,11 @@ export interface TypeCheckResult {
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
   readonly flow: StatementFlow;
+  /**
+   * For each storage key written as a string literal that a load gives a type, the type that every load of it accepts,
+   * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
+   */
+  readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
 }
 
 /** The statements that never run, and the top-level statements that run and after which execution continues. */
@@ -237,7 +251,8 @@ export type RuntimeCheckSite =
   | CallExpression
   | CallArgument
   | FunctionParameter
-  | Extract<Statement, { kind: "returnStatement" }>;
+  | Extract<Statement, { kind: "returnStatement" }>
+  | LoadExpression;
 
 const typeCode = {
   argumentCount: "TSV020",
@@ -281,19 +296,39 @@ export function checkTypes(
   const widened: Widened = new Map();
   const decided: Decided = new Map();
   const copies: Copies = new Map();
+  // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
+  // types the previous check found, and starts again until they stay the same. A load's own type never depends on
+  // them, so they settle at once; the bound only guards against a load type that changes with variable types.
+  let storage: ReadonlyMap<string, StorageKeyType> = new Map();
+  let storageRounds = 0;
   for (;;) {
     const checker = new TypeChecker(
       options,
       widened,
       decided,
       copies,
+      storage,
       programs.length,
       onFile,
       lines,
     );
     checker.check(programs);
     checker.recordDecisions();
-    if (!checker.widenedMore && !checker.decidedMore) {
+    let storageChanged = false;
+    if (storageRounds < MAX_STORAGE_ROUNDS) {
+      // A key whose type the runtime cannot check has none.
+      const found = new Map(
+        [...storageKeyTypes(checker.storageLoads)].filter(
+          ([, kept]) => typePlan(kept.type) !== null,
+        ),
+      );
+      if (!sameStorageKeyTypes(storage, found)) {
+        storage = found;
+        storageChanged = true;
+        storageRounds += 1;
+      }
+    }
+    if (!checker.widenedMore && !checker.decidedMore && !storageChanged) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
@@ -305,10 +340,27 @@ export function checkTypes(
         formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
         flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
+        storageTypes: storageTypePlans(storage),
       });
     }
     checker.widenFollowers();
   }
+}
+
+/** How many checks may still change the storage key types (see {@link checkTypes}). */
+const MAX_STORAGE_ROUNDS = 8;
+
+/** The runtime checks of the storage keys, sorted by key; a type the runtime cannot check has none. */
+function storageTypePlans(
+  storage: ReadonlyMap<string, StorageKeyType>,
+): readonly { readonly key: string; readonly type: TypePlan }[] {
+  const plans: { readonly key: string; readonly type: TypePlan }[] = [];
+  for (const [key, kept] of storage) {
+    const type = typePlan(kept.type);
+    if (type !== null) plans.push(Object.freeze({ key, type }));
+  }
+  plans.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
+  return Object.freeze(plans);
 }
 
 /**
@@ -825,6 +877,18 @@ class TypeChecker {
   /** The variable each declaration created most recently, whose type later widenings change. */
   readonly #declared = new Map<Declaration, Variable>();
 
+  /** The storage key types that the previous check found from the loads (ADR 0021 §6), which saves must fit. */
+  readonly #storage: ReadonlyMap<string, StorageKeyType>;
+
+  /** The loads of storage keys written as string literals that have a type, in checking order. */
+  readonly storageLoads: StorageLoad[] = [];
+
+  /**
+   * The declared type of the variable that a `load` starts or is assigned to, which the load reads the stored value as
+   * (rule 6.2).
+   */
+  readonly #loadReceivers = new Map<Expression, StaticType>();
+
   /** One origin for each element or property inside a variable, so equal parts are one origin. */
   readonly #parts = new Map<Declaration, Map<string, PartOrigin>>();
 
@@ -833,11 +897,13 @@ class TypeChecker {
     widened: Widened,
     decided: Decided,
     copies: Copies,
+    storage: ReadonlyMap<string, StorageKeyType>,
     files: number,
     private readonly onFile: (file: number) => void,
     private readonly lines: LineNamer,
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
+    this.#storage = storage;
     this.#widened = widened;
     this.#decided = decided;
     this.#copies = copies;
@@ -1192,19 +1258,20 @@ class TypeChecker {
         return true;
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-        if (
-          containsType(value, (part) =>
-            ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(
-              part.kind,
-            ),
-          )
-        )
+        const unsaveable = containsType(value, (part) =>
+          ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(
+            part.kind,
+          ),
+        );
+        if (unsaveable)
           this.#report(
             typeCode.invalidOperand,
             `Speakers, camera views, permanent buttons, and timer, media, or message handles cannot be saved, but this is ${describeValue(value)}.${containsType(value, (part) => part.kind === "messageHandle") ? " Save a message's text with its text property, as in 'save line.text as \"status\"'." : ""}`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
+        if (!unsaveable)
+          yield* compileChild(this.#savedValueTask(statement.key, statement.value, value));
         this.#suspend();
         return true;
       }
@@ -1579,6 +1646,10 @@ class TypeChecker {
     const written = statement.kind === "letStatement" ? statement.initializer : statement.initial;
     const initializer = unwrap(written);
     if (statement.typeAnnotation === null) this.#declaredBy.set(initializer, name);
+    const declared =
+      statement.typeAnnotation === null ? null : this.#annotationType(statement.typeAnnotation);
+    if (declared !== null && initializer.kind === "loadExpression")
+      this.#loadReceivers.set(initializer, declared);
     const value =
       initializer.kind === "playMediaExpression"
         ? yield* compileChild(this.#mediaTask(initializer, scope, name))
@@ -1596,7 +1667,7 @@ class TypeChecker {
           `to keep both, declare a union type, as in '${keyword} ${name}: ${type} = choose ...'`,
       );
     } else {
-      type = this.#annotationType(statement.typeAnnotation);
+      type = declared!;
       const place: Place = {
         type,
         label: name,
@@ -1824,6 +1895,13 @@ class TypeChecker {
           this.#checkMessageText(object, statement);
       }
     }
+    const loaded = unwrap(statement.value);
+    if (
+      statement.operator === "=" &&
+      variable?.annotated === true &&
+      loaded.kind === "loadExpression"
+    )
+      this.#loadReceivers.set(loaded, variable.type);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
     // A mixed `choose` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
@@ -3007,13 +3085,79 @@ class TypeChecker {
         return { kind: "permanentButton" };
       case "loadExpression": {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
-        if (expression.defaultValue === null) return UNKNOWN_TYPE;
-        // The default runs only for a missing key, so what it changes may or may not have happened afterwards.
-        const start = this.#flow.mark();
-        yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
-        const changes = this.#flow.undo(start);
-        this.#flow.apply(this.#flow.join([new Map(), changes]));
-        return UNKNOWN_TYPE;
+        let fallback: StaticType = UNKNOWN_TYPE;
+        if (expression.defaultValue !== null) {
+          // The default runs only for a missing key, so what it changes may or may not have happened afterwards.
+          const start = this.#flow.mark();
+          fallback = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
+          const changes = this.#flow.undo(start);
+          this.#flow.apply(this.#flow.join([new Map(), changes]));
+        }
+        // A key computed at runtime has no type: its load gives a value the compiler cannot know (rule 6.2).
+        const key = staticText(expression.key);
+        if (key === undefined) return UNKNOWN_TYPE;
+        // A load reads the stored value as the declared type of the variable that receives it, or else as the type
+        // another load of the key declares, or else as its default's type (rule 6.2).
+        const own = this.#loadReceivers.get(expression);
+        const kept = this.#storage.get(key);
+        const given = nonNullType(fallback);
+        const givenKind = resolved(given).kind;
+        let read: StaticType;
+        if (own !== undefined) {
+          read = nonNullType(own);
+          if (kept?.declared === true && kept.at !== expression.span && !sameType(kept.type, read))
+            this.#report(
+              typeCode.typeMismatch,
+              `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load; the others take it.`,
+              expression.span,
+            );
+        } else if (kept?.declared === true) {
+          read = detachedType(kept.type);
+          if (givenKind !== "never" && !isAssignable(read, given))
+            this.#report(
+              typeCode.typeMismatch,
+              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(kept.at)}, so its default cannot be ${describeValue(given)}. Use a default of that type, or null.`,
+              expression.defaultValue!.span,
+            );
+        } else {
+          // Without a declared type, a default of null says nothing about the stored value.
+          if (givenKind === "never") {
+            this.#report(
+              typeCode.typeMismatch,
+              `default: null needs a declared type, as in 'let value: string? = load(${JSON.stringify(key)}, default: null)'.`,
+              expression.span,
+            );
+            return UNKNOWN_TYPE;
+          }
+          // A default of a type the compiler cannot know, or that no value decided yet, gives a value it cannot know.
+          if (givenKind === "unknown" || givenKind === "open") return UNKNOWN_TYPE;
+          read = given;
+          if (
+            kept !== undefined &&
+            !isAssignable(kept.type, read) &&
+            !isAssignable(read, kept.type)
+          ) {
+            const both = union([kept.type, read]);
+            this.#report(
+              typeCode.typeMismatch,
+              `${storageLabel(key)} is loaded as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` Load it as one type, or declare its type once, as in 'let value: ${typeName(both)} = load(...)'.` : " Load it as one type."}`,
+              expression.span,
+            );
+          }
+        }
+        this.storageLoads.push({
+          key,
+          type: read,
+          at: expression.span,
+          declared: own !== undefined,
+        });
+        this.#runtimeChecks.push({ site: expression, place: read, label: storageLabel(key) });
+        // A default the compiler cannot know is checked where a variable with a declared type takes it.
+        if (mayBeUnknown(fallback)) return UNKNOWN_TYPE;
+        if (own !== undefined) return own;
+        // A part that no value decided is checked by nothing when the script runs.
+        const type = detachedType(read, expression.span);
+        return isNullable(fallback) ? optional(type) : type;
       }
       case "typeTestExpression":
         return yield* compileChild(this.#valueOfConditionTask(expression, scope));
@@ -5745,6 +5889,25 @@ class TypeChecker {
     );
   }
 
+  /**
+   * A saved value under a storage key written as a string literal (ADR 0021 §6): it must fit the type that every load
+   * of the key reads, as the previous check found it. A key that no load reads is not checked.
+   */
+  *#savedValueTask(
+    keyExpression: Expression,
+    expression: Expression,
+    value: StaticType,
+  ): CompileTask<void> {
+    const key = staticText(keyExpression);
+    const kept = key === undefined ? undefined : this.#storage.get(key);
+    // Saving null removes the key.
+    const stored = nonNullType(value);
+    if (kept === undefined || stored.kind === "never") return;
+    yield* compileChild(
+      this.#storeTask(storagePlace(key!, kept, this.#text), expression, stored, false),
+    );
+  }
+
   /** Checks a condition: it must be true or false; there is no truthiness. */
   *#conditionTask(expression: Expression, scope: Scope): CompileTask<Branches> {
     const branches = yield* compileChild(this.#branchTask(expression, scope));
@@ -6591,6 +6754,28 @@ function checkedValue(expression: Expression): Expression {
   return value.kind === "loadExpression" && value.defaultValue !== null
     ? value.defaultValue
     : expression;
+}
+
+/** A storage key as the place that a saved value must fit: the type every load of the key reads (ADR 0021 §6). */
+function storagePlace(key: string, kept: StorageKeyType, text: PlaceText): Place {
+  const type = detachedType(kept.type);
+  return {
+    type,
+    label: null,
+    subject: `${storageLabel(key)} is ${kept.declared ? "declared" : "loaded"} as ${describeValue(type)} on ${text.line(kept.at)}`,
+    verb: "save",
+    fix: (value) => {
+      const both = union([type, value]);
+      return isAnnotatable(both)
+        ? ` Convert the value, use another key, or declare a type that takes both, as in 'let value: ${typeName(both)} = load(...)'.`
+        : " Convert the value or use another key.";
+    },
+  };
+}
+
+/** How a message names a storage key, as in `Storage key "level"`. */
+function storageLabel(key: string): string {
+  return `Storage key ${JSON.stringify(key)}`;
 }
 
 function variablePlace(variable: Variable, text: PlaceText): Place {

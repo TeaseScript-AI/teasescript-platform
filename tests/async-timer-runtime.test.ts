@@ -313,17 +313,21 @@ test("a blocking timer evaluates a named display expression like an async timer"
 test("static handle hints do not leak from untaken paths, and a variable keeps its handle type", () => {
   // A `load` value has no static type, so `o` may hold a handle on one path and an object on another.
   const untaken = compileSource(
-    'let o = load "o"\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nexit',
+    'let o = load "" + "o", default: null\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nexit',
   );
   assert.deepEqual(untaken.diagnostics, []);
-  // `t` keeps its timer type, so a loaded value must be a timer too, and timers have no property `x`.
-  const reassigned = 'let t = timer async 1\nt = load "t"\nsay "${t.x}"\nexit';
+  // `t` keeps its timer type, so a loaded value must be a timer too, which a default of null is not, and timers have
+  // no property `x`.
+  const reassigned = 'let t = timer async 1\nt = load "" + "t", default: null\nsay "${t.x}"\nexit';
   assert.deepEqual(
     compileSource(reassigned).diagnostics.map((diagnostic) => [
       diagnostic.code,
       reassigned.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
     ]),
-    [["TSV043", "x"]],
+    [
+      ["TSV041", "null"],
+      ["TSV043", "x"],
+    ],
   );
 });
 

@@ -16,6 +16,7 @@ import {
   type PlanTag,
   type TypeCheckPlan,
   type PreparedFormShape,
+  type StorageTypePlan,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
@@ -66,6 +67,7 @@ export function compileStableProject(
   onFile: (fileIndex: number) => void = () => {},
   images: readonly PlanImage[] = [],
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
+  storageTypes: readonly StorageTypePlan[] = [],
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
@@ -168,5 +170,6 @@ export function compileStableProject(
     temporaryCount: counters.nextTemporaryId - 1,
     functions,
     instructions,
+    storageTypes: storageTypes.map((entry) => ({ key: entry.key, type: entry.type })),
   });
 }

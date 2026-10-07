@@ -391,7 +391,7 @@ test("typed storage keeps a dict and its entry order, and a typed load checks ev
     says(
       [
         'save dict{ cuffs: "wrist", collar: "leather" } as "toys"',
-        'let toys: string dict = load "toys"',
+        'let toys: string dict = load "toys", default: dict{}',
         "say toys",
         'say toys == dict{ collar: "leather", cuffs: "wrist" }',
         "exit",
@@ -400,7 +400,10 @@ test("typed storage keeps a dict and its entry order, and a typed load checks ev
     ['dict{ "cuffs": "wrist", "collar": "leather" }', "true"],
   );
   assert.deepEqual(
-    failure('save dict{ a: "x" } as "k"\nlet counts: integer dict = load "k"\nexit'),
+    // A key computed at runtime has no type, so its value is checked where it is stored.
+    failure(
+      'save dict{ a: "x" } as "k"\nlet counts: integer dict = load "" + "k", default: dict{}\nexit',
+    ),
     [
       "TSR058",
       `'counts' holds a dict (integer dict), so it cannot take a dict with text (string) at ["a"].`,

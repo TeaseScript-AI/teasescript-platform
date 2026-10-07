@@ -88,12 +88,12 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
     Advanced: the stored JSON form), checked before it is stored. A value changed meanwhile is reported, not
     overwritten. The edit is stored in this browser first, showing Saving…; only once that succeeded does a running
-    session take it through `applyExternalStorageEdit`, so its next `load` returns it while values it already loaded
-    stay; when storing fails, nothing changes. While the script's own save waits for the browser, Save is disabled
-    ("The script is saving… try again in a moment"). A script save made while the edit is being stored settles first;
-    the session then takes the value the browser kept, and when that is the script's, the editor says so. Without a
-    running session, the edit is for the next Start. Editing waits while the session waits for Continue, the camera
-    opens, or an import or clear runs.
+    session take it through `applyExternalStorageEdit`, so its next `load` reads it like any saved value, which ignores
+    a value of another type than the load's (V30 §25), while values it already loaded stay; when storing fails, nothing
+    changes. While the script's own save waits for the browser, Save is disabled ("The script is saving… try again in
+    a moment"). A script save made while the edit is being stored settles first; the session then takes the value the
+    browser kept, and when that is the script's, the editor says so. Without a running session, the edit is for the
+    next Start. Editing waits while the session waits for Continue, the camera opens, or an import or clear runs.
   - The first applied edit marks the session **Edited while debugging** (with the scene time of the first edit and
     the number of edits) in the Player's own session data, which a debug export carries.
 
