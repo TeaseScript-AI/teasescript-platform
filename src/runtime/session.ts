@@ -437,6 +437,15 @@ export class RuntimeSession {
     return this.#read((state) => captureExecutableData(this.#plan, state).snapshot);
   }
 
+  /**
+   * The snapshot `exportSnapshot()` returns, as the same JSON, copied without capture and validation in work
+   * proportional to the state: for a trusted host that keeps it itself, such as a search frontier. It is no boundary;
+   * wherever the snapshot crosses one later, such as `createRuntimeSession`, it is captured and validated there.
+   */
+  public exportTrustedSnapshot(): RuntimeSnapshot {
+    return this.#read((state) => copyPlainData(state, "export"));
+  }
+
   /** A self-contained checkpoint of the plan and a freshly captured and validated snapshot. */
   public exportCheckpoint(): RuntimeCheckpoint {
     return this.#read((state) => createCheckpoint(this.#plan, state));
@@ -444,13 +453,15 @@ export class RuntimeSession {
 
   /**
    * An independent session with a trusted copy of this session's state, which keeps every record's property order and
-   * so its checkpoint bytes. It shares only the immutable plan and deeply frozen temporal contexts.
+   * so its checkpoint bytes. It shares only the immutable plan and deeply frozen temporal contexts, and keeps each of
+   * this session's capabilities that `options` do not give.
    */
   public fork(options?: RuntimeSessionOptions): RuntimeSession {
     return this.#read((state) => {
+      const given = options === undefined ? undefined : sessionCapabilities(options);
       const capabilities =
-        (options === undefined ? undefined : sessionCapabilities(options)) ?? this.#capabilities;
-      return new RuntimeSession(CREATE, this.#plan, copyPlainData(state, false), capabilities);
+        given === undefined ? this.#capabilities : { ...this.#capabilities, ...given };
+      return new RuntimeSession(CREATE, this.#plan, copyPlainData(state, "fork"), capabilities);
     });
   }
 
@@ -687,20 +698,21 @@ type PlainRecord = { [key: string]: PlainValue };
 
 /** A deeply frozen copy of plain engine output, so that nothing a session publishes shares an object with its state. */
 function published<T>(value: T): T {
-  return copyPlainData(value, true);
+  return copyPlainData(value, "publish");
 }
 
 /**
  * Copies JSON-safe engine data without recursion, keeping each record's property order, in work proportional to the
- * data. `publish` freezes every copy; otherwise the copy is a trusted state copy, which shares the deeply frozen
- * temporal contexts.
+ * data. `publish` freezes every copy; `fork` makes a state copy for another session, which shares the deeply frozen
+ * temporal contexts; `export` makes a copy that shares nothing.
  */
-function copyPlainData<T>(value: T, publish: boolean): T {
+function copyPlainData<T>(value: T, use: "publish" | "fork" | "export"): T {
+  const publish = use === "publish";
   const work: Array<readonly [PlainValue[], PlainValue[]] | readonly [PlainRecord, PlainRecord]> =
     [];
   const enter = (nested: PlainValue): PlainValue => {
     if (typeof nested !== "object" || nested === null) return nested;
-    if (!publish && isFrozenTemporalContext(nested)) return nested;
+    if (use === "fork" && isFrozenTemporalContext(nested)) return nested;
     if (Array.isArray(nested)) {
       const copy = new Array<PlainValue>(nested.length);
       work.push([nested, copy]);
