@@ -129,7 +129,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   becomes the question of its ask, which the Player says before the field opens (#634): `askInteger "How many?",
   default: 3`, also inside an expression as `askInteger("How many?", default: 3)`, where the text is said right before
   the ask with the ask's speaker; otherwise it stays a `say` before the statement. The report counts the asks that
-  took their question (`askQuestions`, `SX_ASK_QUESTION`; 890 in 108 selected units). The same holds for the photo
+  took their question (`askQuestions`, `SX_ASK_QUESTION`; 892 in 108 selected units). The same holds for the photo
   that `askImage` asks for (#636): a text said right before it fills a missing message, and one that its message
   repeats goes. A text is not folded into an ask across something with an effect that the statement runs first, as in
   `n = before() + getInteger(null)`.
@@ -151,8 +151,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
   whose blank lines lay them out stay whole: two aligned lines, a ruled line, an empty box (`[  ]`), a table row, or a
   block of value rows (`Score: 12`, `Time unit = ${unit}`; three, or two that make up half the text). A unit whose
-  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). Corpus: 10,585 says split in 172 units,
-  172 questions in 50 units, 254 single paragraphs trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
+  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). Corpus: 10,635 says split in 172 units,
+  172 questions in 50 units (71 that ask, 49 with remarks after them, 52 by the fallback), 263 single paragraphs
+  trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
   outros (no form question in the corpus has a literal blank line); report counter `paragraphs`.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
@@ -627,7 +628,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   callers. The report counts the dropped, shortened, and kept texts, the animations, and those dropped across a chain
   (`repeatedText`; `SX_REPEATED_TEXT_DROPPED`, `SX_REPEATED_TEXT_SHORTENED`, `SX_REPEATED_TEXT_KEPT` where the
   interpolated values differ, `SX_REPEATED_TEXT_ANIMATION`, `SX_REPEATED_TEXT_ACROSS_CHAIN`): in the selected units 38
-  dropped and 171 shortened in 39 units, 68 animations in 11, and 5 across a chain in 4.
+  dropped and 159 shortened in 39 units, no animation (updatable messages take them: 22 in 11 units, and 34 counters
+  in 14), and 5 across a chain in 4.
 - Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
   (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
@@ -677,7 +679,7 @@ counts are those measured at importer `c83f938a`, which no later rule changed.
     versions and are not converted.
   - Two units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, and jewell and
     JewellMistressMiley. Lines v2 counts as a revision of Lines.
-- **Script-specific fixes** are unit patches (52 units), not converter rules.
+- **Script-specific fixes** are unit patches (54 units), not converter rules.
 
 | Result | Units of 210 |
 | --- | ---: |
