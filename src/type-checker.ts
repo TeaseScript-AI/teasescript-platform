@@ -1390,6 +1390,7 @@ class TypeChecker {
           return yield* compileChild(
             this.#pairLoopTask(statement, statement.valueVariable, iterable, scope),
           );
+        this.#checkWholeRangeBounds(statement.iterable, "A for-loop range bound");
         // A loop over a dict goes through its keys.
         const element = elementType(iterable, true);
         this.#reportUnless(
@@ -2809,6 +2810,24 @@ class TypeChecker {
     }
     this.#types.set(expression, type);
     return type;
+  }
+
+  /**
+   * A range that `for` goes through or `randomInteger` draws from has whole-number bounds (V30 §6): a bound of type
+   * `number` is an error rather than a truncation. A bound the compiler cannot know is checked at runtime.
+   */
+  #checkWholeRangeBounds(expression: Expression, bound: string): void {
+    const range = unwrap(expression);
+    if (range.kind !== "rangeExpression") return;
+    for (const part of [range.start, range.end]) {
+      const type = this.#typeOf(part);
+      if (isScalar(type, "number"))
+        this.#report(
+          typeCode.invalidOperand,
+          `${bound} must be a whole number (integer), but this is ${describeValue(type)}.${this.#widenedNote(part)}${ROUND_FIX}.`,
+          part.span,
+        );
+    }
   }
 
   /** The type of an expression that {@link #expressionTask} already checked. */
@@ -4718,13 +4737,15 @@ class TypeChecker {
           );
         return BOOLEAN_TYPE;
       case "randomInteger":
-        if (argument !== undefined && value !== undefined)
+        if (argument !== undefined && value !== undefined) {
           this.#reportUnless(
             value,
             (member) => member.kind === "range",
             argument.value,
             "randomInteger(...) takes a range such as 1..=6",
           );
+          this.#checkWholeRangeBounds(argument.value, "A randomInteger range bound");
+        }
         return INTEGER_TYPE;
       case "removePermanentButton":
         if (argument !== undefined && value !== undefined)

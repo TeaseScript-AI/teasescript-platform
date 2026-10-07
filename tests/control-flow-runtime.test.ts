@@ -128,8 +128,11 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
 test("invalid random built-in arguments fail with source-associated errors", () => {
   for (const [source, call] of [
     ["say chance(101)\nexit", "chance(101)"],
-    // A fractional bound held in a variable reaches the runtime; a literal one is rejected statically below.
-    ["let low = 1.5\nsay randomInteger(low..=3)\nexit", "randomInteger(low..=3)"],
+    // A fractional bound the compiler cannot know reaches the runtime; a literal one is rejected statically below.
+    [
+      "function draw(low) {\n    return randomInteger(low..=3)\n}\nsay draw(1.5)\nexit",
+      "randomInteger(low..=3)",
+    ],
     ["say randomInteger(3..3)\nexit", "randomInteger(3..3)"],
   ] as const) {
     const compiled = plan(source);
