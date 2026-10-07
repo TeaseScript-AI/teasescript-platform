@@ -87,7 +87,7 @@ implemented):
 | a variable that receives a function result that may be absent, or a storage read that the script then tests for null; `def b = a` where `a` may be null | `let x: integer? = 7`, since a possibly null value fits only an optional place (ADR 0021 rule 1.9); `let b: string? = a`, since the compiler narrows `a` at the declaration. Other storage reads are checked at runtime when stored |
 | `text += value` | `text = "${text}${value}"` |
 | a list literal mixing types, such as Groovy pairs `[["late", 2], ["rude", 4]]` | `let pairs: (string \| integer)[][] = [["late", 2], ["rude", 4]]` (ADR 0021 rule 1.3), with a note when later elements add a type |
-| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = sexscriptLegacyLoadInteger(k)` (below) |
+| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = sexscriptLegacyLoadInteger(k, 0)` (below) |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
 | `setInfos(version, title, summary, author, status, color, language, tags)` | the `---` file header (V30 §41, #575): `title`, `author`, `description`, and the legacy tags, which named a script in the legacy catalog, as `keywords` rather than the selection `tags`; the version, status, color, and language have no header field and stay a comment after it, as does a value the script computed (`SX_METADATA_DYNAMIC`, 0 corpus sites); text joined from literals with `+` counts as written. All 23 corpus calls convert |
@@ -323,9 +323,8 @@ unannotated integer widens to `number` by itself (option B). Measured on the fou
   guards (`if (loadInteger(k) != null) p = loadInteger(k)`) rely on.
 - **Groovy integer declarations coerce:** an `int` stores whole numbers, so every value not known to be an integer
   truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`). The 53 `int`
-  declarations initialized with `loadInteger()` become `let x: integer = sexscriptLegacyLoadInteger(k)`, which `main`
-  checks when the value is stored (#520); in isolated smoke runs with empty storage four Domme3 scripts fail there (`TSR058`), where
-  Groovy's `int` rejected null too. Groovy stored a one-character text in an `int` as its character code (`"3"` became
+  declarations initialized with `loadInteger()` become `let x: integer = sexscriptLegacyLoadInteger(k, 0)`: a missing
+  key reads 0, where Groovy's `int` rejected null and a check of the stored null failed with `TSR058` (Domme, Domme3). Groovy stored a one-character text in an `int` as its character code (`"3"` became
   51), so a value proven to be text is reported and a truncated value that may be text gets a note
   (`SX_INTEGER_FROM_TEXT`; 0 corpus sites).
 - **Text `+=`:** Groovy appended any value to text with `+=`; TeaseScript `+=` joins text only with text (V30 §4), so

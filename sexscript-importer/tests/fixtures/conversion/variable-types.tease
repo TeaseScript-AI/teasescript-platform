@@ -63,7 +63,7 @@ function fraction {
 let whole = toInteger(fraction())
 whole = toInteger(fraction() + 1)
 save 4 as "x.count"
-let stored: integer = sexscriptLegacyLoadInteger("x.count")
+let stored: integer = sexscriptLegacyLoadInteger("x.count", 0)
 // Another storage read may hold a fraction, which Groovy truncated.
 save 2.5 as "x.ratio"
 let ratio = toInteger(sexscriptLegacyLoadFloat("x.ratio"))

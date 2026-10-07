@@ -82,9 +82,28 @@ export function withParsedLoads(
     const key: IrStatement = { kind: "let", name, value: read.key, span: item.span };
     return [key, { ...item, value: withKey(item.value, { kind: "variable", name }) }];
   };
+  // A whole-number variable that a read starts reads 0 for a missing key, where legacy's `int` failed on null.
+  const counted = (item: IrStatement): IrStatement =>
+    item.kind === "let" &&
+    (item.type === "integer" || item.type === "number") &&
+    item.value.kind === "load" &&
+    (item.value.integer === true || item.value.number === true) &&
+    item.value.defaultValue === undefined
+      ? {
+          ...item,
+          value: {
+            ...item.value,
+            defaultValue: {
+              kind: "literal",
+              value: 0,
+              ...(item.type === "number" ? { decimal: true as const } : {}),
+            },
+          },
+        }
+      : item;
   const block = (items: IrStatement[]): IrStatement[] =>
     items.flatMap(keyed).map((item) => {
-      const statement = mapOwnExpressions(withNestedBlocks(item, block), parse);
+      const statement = mapOwnExpressions(withNestedBlocks(counted(item), block), parse);
       return statement.kind === "function"
         ? {
             ...statement,
