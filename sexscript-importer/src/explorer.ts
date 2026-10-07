@@ -18,9 +18,9 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  * list ({@link replay}).
  *
  * Each path runs in an engine-owned runtime session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between
- * operations. The explorer handles the whole state only where it needs it: one checked export per step for the
- * search's state hash and store, a checked import to go on from a stored state, and a trusted copy (a fork) for each
- * input tried from one state but the last.
+ * operations. The explorer handles the whole state only where it needs it: one trusted export per step for the
+ * search's state hash and store (`exportTrustedSnapshot`, as the explorer keeps the snapshot itself), a checked import
+ * to go on from a stored state, and a trusted copy (a fork) for each input tried from one state but the last.
  */
 
 /** A runtime result read field by field. */
@@ -36,7 +36,7 @@ const RUNTIME_OPERATIONS = [
   "recordContinueCapture",
 ] as const;
 const RUNTIME_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
-const RUNTIME_READS = ["view", "callReturnInstructions", "exportSnapshot", "fork"] as const;
+const RUNTIME_READS = ["view", "callReturnInstructions", "exportTrustedSnapshot", "fork"] as const;
 
 /**
  * One runtime session, as the explorer drives it. Its results, view, and projections are detached frozen data. An
@@ -51,8 +51,11 @@ export interface Runtime {
   view: () => Data;
   /** Where each active call continues when it returns, outermost first. */
   callReturnInstructions: () => number[];
-  /** The complete state as plain data, checked by the runtime, which later operations do not change. */
-  exportSnapshot: () => Data;
+  /**
+   * The complete state as plain data that later operations do not change, copied without the runtime's check
+   * (`exportTrustedSnapshot`): the explorer keeps it itself, and the runtime checks it when a session restores it.
+   */
+  exportTrustedSnapshot: () => Data;
   /** An independent session with a copy of the state. */
   fork: () => Runtime;
 }
@@ -107,7 +110,7 @@ function runtimeOf(session: unknown): Runtime {
     }),
   );
   const result = (
-    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportSnapshot",
+    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportTrustedSnapshot",
     ...args: unknown[]
   ): Data => {
     const value: unknown = methods.get(name)!.apply(session, args);
@@ -124,7 +127,7 @@ function runtimeOf(session: unknown): Runtime {
         ? value.filter((position): position is number => typeof position === "number")
         : [];
     },
-    exportSnapshot: () => result("exportSnapshot"),
+    exportTrustedSnapshot: () => result("exportTrustedSnapshot"),
     fork: () => runtimeOf(methods.get("fork")!.apply(session, [])),
   };
 }
@@ -480,7 +483,7 @@ export class Session {
   }
 
   #reached(runtime: Runtime, settled: Settled): Step {
-    return { ...settled, snapshot: runtime.exportSnapshot(), runtime };
+    return { ...settled, snapshot: runtime.exportTrustedSnapshot(), runtime };
   }
 
   /** Gives the session in the state `view` shows one input; whether the runtime accepted it. */
@@ -552,7 +555,7 @@ export class Session {
       case "later":
         if (!(input.afterMs > 0 && Number.isSafeInteger(input.afterMs))) return false;
         result = runtime.call("recordContinueCapture", {
-          wallClockMs: Math.round(wallClockOf(runtime.exportSnapshot()) + input.afterMs),
+          wallClockMs: Math.round(wallClockOf(runtime.exportTrustedSnapshot()) + input.afterMs),
         });
         accepted = "recorded";
         break;

@@ -323,8 +323,10 @@ Coverage counts executed plan instructions and maps them to the lines they start
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
 `instructionTrace: true`, and the condition ways come from the trace's branch edges. A path runs in one runtime
 session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between operations: the explorer exports the state
-once per step, for its hash and the snapshot store, restores a stored state once to expand it, and tries each input on
-its own copy: a fork of it for all inputs but the last, which goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
+once per step, for its hash and the snapshot store, as a trusted export without the runtime's check (it keeps the
+snapshot itself), restores a stored state once to expand it, which the runtime checks (a snapshot it refuses is counted
+under `search.engineErrors`), and tries each input on its own copy: a fork of it for all inputs but the last, which
+goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
 from, for comparisons. Each line has
 a label: `play` when a play step executed it, in any session; `clock` when only steps after the wall clock was set did;
 `unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control

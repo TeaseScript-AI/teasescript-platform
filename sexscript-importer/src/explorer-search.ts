@@ -1160,9 +1160,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         current = current.parent === null ? undefined : nodes[current.parent];
       }
     }
-    if (snapshot === null) return null;
+    if (snapshot === null || current === undefined) return null;
     replays += 1;
-    const runtime = session.restore(snapshot);
+    const runtime = restore(current, snapshot);
+    if (runtime === null) return null;
     for (const step of chain.reverse()) {
       if (step.input === null || !session.advance(runtime, step.input, step.clock)) return null;
     }
@@ -1172,12 +1173,28 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** A runtime session in a node's state: from its stored snapshot, or replayed. */
   const runtimeOf = (node: Node): Runtime | null => {
     const stored = store.get(node.id);
-    return stored === null ? replayTo(node) : session.restore(stored);
+    return stored === null ? replayTo(node) : restore(node, stored);
   };
 
   /** A node's snapshot: stored, or exported after a replay. */
   const snapshotOf = (node: Node): Data | null =>
-    store.get(node.id) ?? replayTo(node)?.exportSnapshot() ?? null;
+    store.get(node.id) ?? replayTo(node)?.exportTrustedSnapshot() ?? null;
+
+  /**
+   * A runtime session in the state of a node's snapshot. The snapshots are trusted exports (`docs/RUNTIME.md#runtime-
+   * sessions`), which the runtime checks here, where they cross into it again: a snapshot it refuses
+   * (`RuntimeDataError`) is a problem of the explorer or the runtime, counted with the engine errors; null then.
+   */
+  const restore = (node: Node, snapshot: Data): Runtime | null => {
+    try {
+      return session.restore(snapshot);
+    } catch (error) {
+      if (error instanceof Error && error.name === "RuntimeSessionError") throw error;
+      engineErrors.count += 1;
+      engineErrors.first ??= { message: String(error), ...reproOf(node, null, node.start) };
+      return null;
+    }
+  };
 
   /**
    * Applies one input in `runtime`, which goes on in place; null when the runtime rejects the input or throws. Either
@@ -1734,7 +1751,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (leading && node.lead !== null) node.lead.remaining -= 1;
     // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
     const stored = store.get(node.id);
-    const base = stored === null ? replayTo(node) : session.restore(stored);
+    const base = stored === null ? replayTo(node) : restore(node, stored);
     if (base === null) {
       node.status = "expanded";
       continue;
@@ -1754,7 +1771,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     else at.expansions += 1;
     node.status = "partial";
     const closeness =
-      distanceTargets.length === 0 ? [] : distances(stored ?? base.exportSnapshot());
+      distanceTargets.length === 0 ? [] : distances(stored ?? base.exportTrustedSnapshot());
     for (const [index, input] of inputs.entries()) {
       const stop = spent();
       if (stop !== null) {

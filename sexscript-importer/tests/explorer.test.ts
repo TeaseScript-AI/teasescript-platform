@@ -255,7 +255,7 @@ test(
 function exhaustedAtStay(engine: Engine, plan: Data, runtime: Runtime): Runtime {
   let inner = runtime;
   const exhausted = (): Runtime => {
-    const snapshot = inner.exportSnapshot();
+    const snapshot = inner.exportTrustedSnapshot();
     // The runtime refuses a state without room for the events its pending actions still need.
     for (let left = 1; left < 100; left += 1) {
       try {
@@ -284,7 +284,7 @@ function exhaustedAtStay(engine: Engine, plan: Data, runtime: Runtime): Runtime 
     project: (name) => inner.project(name),
     view: () => inner.view(),
     callReturnInstructions: () => inner.callReturnInstructions(),
-    exportSnapshot: () => inner.exportSnapshot(),
+    exportTrustedSnapshot: () => inner.exportTrustedSnapshot(),
     fork: () => exhaustedAtStay(engine, plan, inner.fork()),
   };
 }
@@ -327,6 +327,42 @@ test(
       });
     assert.equal(unvisited('say "Secret number."'), false);
     assert.equal(unvisited('say "You are stuck."'), true);
+  },
+);
+
+test(
+  "a stored state the runtime refuses to restore is an engine error with its path, and the search goes on beside it",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const { plan, diagnostics } = await fixture(engine);
+    // The explorer keeps trusted exports, which the runtime checks only when a session restores one; here it refuses
+    // every state that waits at "Go on".
+    let refused = 0;
+    const refusing: Engine = {
+      ...engine,
+      createRuntimeSession: (target, snapshot) => {
+        if (JSON.stringify(snapshot).includes('"Go on"')) {
+          refused += 1;
+          throw Object.assign(new Error("refused"), { name: "RuntimeDataError" });
+        }
+        return engine.createRuntimeSession(target, snapshot);
+      },
+    };
+    const result = explore(refusing, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 5000,
+      sources: new Map(),
+      diagnostics,
+    });
+    assert.equal(result.search.stoppedBy, "exhausted");
+    assert.ok(refused > 0);
+    assert.equal(result.search.engineErrors.count, refused);
+    assert.equal(result.search.engineErrors.first?.message, "RuntimeDataError: refused");
+    assert.equal(result.search.engineErrors.first?.inputs[0]?.kind, "option");
+    assert.ok(result.endStates.completed >= 1);
   },
 );
 
