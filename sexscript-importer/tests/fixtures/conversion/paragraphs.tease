@@ -24,6 +24,32 @@ say """
 
   Fight!
 """
+say """
+  ROUND OVER
+
+  Score: ${strokes}.
+
+  Rounds left = 2
+"""
+// A list of links is no block of values, and a single paragraph loses the blank lines around it.
+say "Links:"
+say """
+  http://example.com/a
+  http://example.com/b
+"""
+say "Hello."
+// What the statement runs before its ask stays before the ask's question.
+function warmUp {
+  say "Stretch first."
+  return 1
+}
+say "Next round."
+say "How many more?"
+let more = warmUp() + askInteger()
+// The photo an ask asks for keeps its last paragraph as its message.
+// NOTE SX_FILE_PHOTO line 22: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+say "Smile."
+let photo = askImage("Take a photo of yourself.")
 // A blank line in a value built at runtime stays.
 let note = """
   first
@@ -37,7 +63,7 @@ let rounds = load "game.rounds"
 if rounds == null or rounds == 0 {
   rounds = 3
 }
-// NOTE SX_SETTINGS_FORM line 19: The legacy script asked these 2 settings one after the other and saved each; one form asks them together, with each question as the field's description.
+// NOTE SX_SETTINGS_FORM line 30: The legacy script asked these 2 settings one after the other and saved each; one form asks them together, with each question as the field's description.
 let settings = askForm "Settings", fields: {
   pics: { type: "boolean", value: pics, text: "Pics", options: [
     { value: true, text: "Yes" },
@@ -54,4 +80,26 @@ save pics as "game.pics"
 rounds = settings.rounds
 save rounds as "game.rounds"
 say "Pictures ${pics}, rounds ${rounds}"
+// A form whose later paragraphs are computed with an effect keeps its question whole: the outro would be computed after
+// the fields.
+function mood {
+  pics = false
+  return "Be honest."
+}
+// NOTE SX_SETTINGS_FORM line 39: The legacy script asked these 2 settings one after the other and saved each; one form asks them together, with each question as the field's description.
+let settings2 = askForm """
+  More settings
+
+  ${mood()}
+""", fields: {
+  pics: { type: "boolean", value: pics, text: "Pics", options: [
+    { value: true, text: "Yes" },
+    { value: false, text: "No" }
+  ], description: "Take pictures now?" },
+  rounds: { type: "integer", value: rounds, text: "Rounds", description: "Rounds now?" }
+}
+pics = settings2.pics
+save pics as "game.pics"
+rounds = settings2.rounds
+save rounds as "game.rounds"
 exit

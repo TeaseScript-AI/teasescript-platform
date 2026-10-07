@@ -182,9 +182,17 @@ export interface FeasibilityReport {
   forms: { sequences: number; menus: number };
   /**
    * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph, form
-   * questions whose later paragraphs became the outro, and texts left whole as layout or by the unit's keepParagraphs.
+   * questions whose later paragraphs became the outro, single paragraphs without the blank lines around them, and texts
+   * left whole as layout or by the unit's keepParagraphs.
    */
-  paragraphs: { says: number; questions: number; outros: number; layout: number; kept: number };
+  paragraphs: {
+    says: number;
+    questions: number;
+    outros: number;
+    trimmed: number;
+    layout: number;
+    kept: number;
+  };
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
@@ -317,7 +325,7 @@ export function analyzeFeasibility(
     askQuestions: 0,
     blankTexts: 0,
     forms: { sequences: 0, menus: 0 },
-    paragraphs: { says: 0, questions: 0, outros: 0, layout: 0, kept: 0 },
+    paragraphs: { says: 0, questions: 0, outros: 0, trimmed: 0, layout: 0, kept: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -428,6 +436,7 @@ export function analyzeFeasibility(
       else if (code === "SX_PARAGRAPHS") report.paragraphs.says += 1;
       else if (code === "SX_PARAGRAPH_QUESTION") report.paragraphs.questions += 1;
       else if (code === "SX_FORM_OUTRO") report.paragraphs.outros += 1;
+      else if (code === "SX_PARAGRAPH_TRIMMED") report.paragraphs.trimmed += 1;
       else if (code === "SX_PARAGRAPHS_LAYOUT") report.paragraphs.layout += 1;
       else if (code === "SX_PARAGRAPHS_KEPT") report.paragraphs.kept += 1;
     }

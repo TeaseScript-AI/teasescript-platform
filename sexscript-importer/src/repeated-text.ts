@@ -437,6 +437,100 @@ export function withoutRepeatedChainText<
   });
 }
 
+/** An ask that says a question before it opens: a single-field input or a form, or `askImage`. */
+export function isAsk(value: IrExpression): boolean {
+  return value.kind === "input" || (value.kind === "call" && value.name === "askImage");
+}
+
+/** Built-ins and generated helpers whose calls only compute a value. */
+const PURE_CALLS: ReadonlySet<string> = new Set([
+  "toInteger",
+  "toNumber",
+  "toString",
+  "floor",
+  "ceil",
+  "round",
+  "min",
+  "max",
+  "randomInteger",
+  "getTimestamp",
+  "sexscriptLegacyAbs",
+  "sexscriptLegacyCompare",
+  "sexscriptLegacyIndexOf",
+  "sexscriptLegacyItemAt",
+  "sexscriptLegacyItems",
+  "sexscriptLegacyPlainText",
+  "sexscriptLegacyTruth",
+]);
+
+/** Text and list methods that only read their receiver. */
+const PURE_METHODS: ReadonlySet<string> = new Set([
+  "contains",
+  "endsWith",
+  "indexOf",
+  "join",
+  "lastIndexOf",
+  "lowercase",
+  "replace",
+  "split",
+  "startsWith",
+  "substring",
+  "toSeconds",
+  "trim",
+  "uppercase",
+  "uppercaseFirst",
+]);
+
+/** Whether evaluating this node itself, apart from its children, may have an effect: a call, a change, or an interaction. */
+function ownEffect(value: IrExpression): boolean {
+  switch (value.kind) {
+    case "call":
+      return !PURE_CALLS.has(value.name);
+    case "methodCall":
+      return !PURE_METHODS.has(value.name);
+    case "input":
+    case "choice":
+    case "listChoice":
+    case "button":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Whether evaluating the value may have an effect anywhere in it. */
+export function hasEffect(value: IrExpression): boolean {
+  let found = ownEffect(value);
+  mapChildren(value, (child) => {
+    found ||= hasEffect(child);
+    return child;
+  });
+  return found;
+}
+
+/** Whether the statement runs something with an effect before it reaches `target`, in evaluation order. */
+export function effectBefore(statement: IrStatement, target: IrExpression): boolean {
+  let effect = false;
+  let reached = false;
+  const visit = (value: IrExpression): void => {
+    if (reached) return;
+    if (value === target) {
+      reached = true;
+      return;
+    }
+    mapChildren(value, (child) => {
+      visit(child);
+      return child;
+    });
+    if (!reached && ownEffect(value)) effect = true;
+  };
+  mapOwnExpressions(statement, (value) => {
+    visit(value);
+    return value;
+  });
+  return reached && effect;
+}
+
 export const ASKING_STATEMENTS: ReadonlySet<string> = new Set([
   "let",
   "assign",
@@ -496,8 +590,10 @@ function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | 
   if (!ASKING_STATEMENTS.has(statement.kind)) return null;
   let asks = 0;
   let sure = true;
+  let found: IrExpression | null = null;
   const said = textTokens(say.value);
   const count = (value: IrExpression, guarded: boolean): void => {
+    if (isAsk(value)) found = value;
     if (value.kind === "input") {
       asks += 1;
       if (guarded || value.question !== undefined || value.speaker !== say.speaker) sure = false;
@@ -528,7 +624,8 @@ function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | 
     count(value, false);
     return value;
   });
-  if (asks !== 1 || !sure) return null;
+  // The text is said where the ask opens, so nothing with an effect may run in the statement before it.
+  if (asks !== 1 || !sure || found === null || effectBefore(statement, found)) return null;
   const ask = (value: IrExpression): IrExpression => {
     if (value.kind === "input") return { ...value, question: say.value };
     if (value.kind === "call" && value.name === "askImage") {

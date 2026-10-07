@@ -1,6 +1,12 @@
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
-import { ASKING_STATEMENTS, withNestedBlocks } from "./repeated-text.ts";
+import {
+  ASKING_STATEMENTS,
+  effectBefore,
+  hasEffect,
+  isAsk,
+  withNestedBlocks,
+} from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 type Part = { text: string } | { value: IrExpression };
@@ -45,6 +51,12 @@ export function withParagraphs(
           "This unit keeps texts with blank lines as one message (its patches.json sets keepParagraphs).",
           statement,
         );
+  const trimmed = (statement: IrStatement): void =>
+    report(
+      "SX_PARAGRAPH_TRIMMED",
+      "The blank lines around this text's only paragraph showed nothing, so they go.",
+      statement,
+    );
   const block = (items: IrStatement[]): IrStatement[] =>
     items.flatMap((item): IrStatement[] => {
       const statement = withNestedBlocks(item, block);
@@ -52,9 +64,13 @@ export function withParagraphs(
         if (statement.prose === true || statement.speaker === SYSTEM_SPEAKER) return [statement];
         const split = paragraphs(statement.value);
         if (split === null) return [statement];
-        if (keep || split.layout) {
+        if (keep || (split.layout && split.paragraphs.length > 1)) {
           left(split.layout, statement);
           return [statement];
+        }
+        if (split.paragraphs.length === 1) {
+          trimmed(statement);
+          return [{ ...statement, value: split.paragraphs[0]! }];
         }
         report(
           "SX_PARAGRAPHS",
@@ -65,15 +81,28 @@ export function withParagraphs(
         return split.paragraphs.map((value) => ({ ...paced, value }));
       }
       const ask = ASKING_STATEMENTS.has(statement.kind) ? soleAsk(statement) : null;
-      const split = ask?.question === undefined ? null : paragraphs(ask.question);
+      const question = ask === null ? undefined : questionOf(ask);
+      const split = question === undefined ? null : paragraphs(question);
       if (ask === null || split === null) return [statement];
-      if (keep || (split.layout && ask.input !== "askForm")) {
+      const form = ask.kind === "input" && ask.input === "askForm";
+      if (keep || (split.layout && split.paragraphs.length > 1 && !form)) {
         left(split.layout, statement);
         return [statement];
       }
       const [first, ...rest] = split.paragraphs;
-      if (ask.input === "askForm") {
-        if (ask.outro !== undefined) return [statement];
+      if (rest.length === 0) {
+        trimmed(statement);
+        return [withAsk(statement, asked(ask, first!))];
+      }
+      if (form) {
+        // The outro is evaluated after the fields and the submit button, the question before them, so the paragraphs
+        // move there only where nothing in them or in between can tell the difference.
+        if (
+          ask.kind !== "input" ||
+          ask.outro !== undefined ||
+          [ask.fields, ask.submit, ...rest].some((value) => value !== undefined && hasEffect(value))
+        )
+          return [statement];
         report(
           "SX_FORM_OUTRO",
           "The form's question keeps its first paragraph; the form says the others after it, as its outro.",
@@ -86,33 +115,36 @@ export function withParagraphs(
         "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question.",
         statement,
       );
+      const speaker = ask.kind === "input" ? ask.speaker : undefined;
       return [
         ...split.paragraphs
           .slice(0, -1)
           .map((value): IrStatement => ({
             kind: "say",
             value,
-            ...(ask.speaker === undefined ? {} : { speaker: ask.speaker }),
+            ...(speaker === undefined ? {} : { speaker }),
             span: statement.span,
           })),
-        withAsk(statement, { ...ask, question: split.paragraphs.at(-1)! }),
+        withAsk(statement, asked(ask, split.paragraphs.at(-1)!)),
       ];
     });
   return block(statements);
 }
 
-type Input = Extract<IrExpression, { kind: "input" }>;
+type Ask = Extract<IrExpression, { kind: "input" | "call" }>;
 
-/** The statement's one ask, where no condition may skip it; null for none or several. */
-function soleAsk(statement: IrStatement): Input | null {
-  const found: Input[] = [];
+/**
+ * The statement's one ask, where no condition may skip it and nothing with an effect runs before it, so that what it
+ * says may be said before the statement; null for none or several.
+ */
+function soleAsk(statement: IrStatement): Ask | null {
+  const found: Ask[] = [];
   let sure = true;
   const visit = (value: IrExpression, guarded: boolean): void => {
-    if (value.kind === "input") {
+    if ((value.kind === "input" || value.kind === "call") && isAsk(value)) {
       found.push(value);
       if (guarded) sure = false;
     }
-    if (value.kind === "call" && value.name === "askImage") sure = false;
     if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
       visit(value.left, guarded);
       visit(value.right, true);
@@ -127,13 +159,30 @@ function soleAsk(statement: IrStatement): Input | null {
     visit(value, false);
     return value;
   });
-  return found.length === 1 && sure ? found[0]! : null;
+  const ask = found.length === 1 && sure ? found[0]! : null;
+  return ask === null || effectBefore(statement, ask) ? null : ask;
+}
+
+/** An ask's question, or the message `askImage` says; undefined for none. */
+function questionOf(ask: Ask): IrExpression | undefined {
+  if (ask.kind === "input") return ask.question;
+  const message = ask.positional[0];
+  return message?.kind === "literal" && message.value === null ? undefined : message;
+}
+
+/** The ask with another question or message. */
+function asked(ask: Ask, question: IrExpression): Ask {
+  return ask.kind === "input"
+    ? { ...ask, question }
+    : { ...ask, positional: [question, ...ask.positional.slice(1)] };
 }
 
 /** The statement with its one ask replaced. */
-function withAsk(statement: IrStatement, ask: Input): IrStatement {
+function withAsk(statement: IrStatement, ask: Ask): IrStatement {
   const replace = (value: IrExpression): IrExpression =>
-    value.kind === "input" ? ask : mapChildren(value, replace);
+    (value.kind === "input" || value.kind === "call") && isAsk(value)
+      ? ask
+      : mapChildren(value, replace);
   return mapOwnExpressions(statement, replace);
 }
 
@@ -149,8 +198,9 @@ function joined(paragraphs: readonly IrExpression[]): IrExpression {
 
 /**
  * The paragraphs of a shown text, split at the blank lines of its literal parts, each without its surrounding blank
- * lines and with its common indentation removed; null for a text with fewer than two paragraphs or one built at runtime.
- * `layout` tells whether the blank lines lay the text out rather than separate paragraphs.
+ * lines and with its common indentation removed; null for a text without a blank line in its literal parts, one built
+ * at runtime, or one without words. A single paragraph is the text without the blank lines around it. `layout` tells
+ * whether the blank lines lay the text out rather than separate paragraphs.
  */
 export function paragraphs(
   value: IrExpression,
@@ -172,14 +222,16 @@ export function paragraphs(
     .split(BLANK_LINES)
     .map(dedent)
     .filter((piece) => piece !== "");
-  if (pieces.length < 2) return null;
+  if (pieces.length === 0) return null;
   const decode = (piece: string): IrExpression => {
     const decoded: Part[] = [];
     for (const segment of piece.split(/([\u{F0000}-\u{FFFFD}])/u)) {
       if (segment === "") continue;
       const index = segment.codePointAt(0)! - FIRST_VALUE;
       decoded.push(
-        segment.length <= 2 && index >= 0 ? { value: values[index]! } : { text: segment },
+        VALUES.test(segment) && [...segment].length === 1 && index < values.length
+          ? { value: values[index]! }
+          : { text: segment },
       );
     }
     return expressionOf(decoded);
@@ -205,7 +257,8 @@ function dedent(piece: string): string {
 /**
  * Whether a text's blank lines lay it out rather than separate paragraphs: two or more lines with columns aligned by
  * runs of spaces or tabs, a ruled line of `-`, `=`, `*`, and the like, an empty box, a table row with two or more `|`,
- * or three or more short `label: value` lines, as in a block of scores or settings.
+ * or a block of value rows (isValueRow), three or more, or two that make up half of the text, as in a heading over
+ * scores or settings.
  */
 function isLayout(text: string): boolean {
   const lines = text
@@ -225,8 +278,25 @@ function isLayout(text: string): boolean {
   // An empty box, `[  ]`, stands for a place on the screen.
   const box = lines.some((line) => /^[[(]\s*[\])]$/u.test(line));
   if (ruled || box || lines.some((line) => (line.match(/\|/gu) ?? []).length >= 2)) return true;
-  const labelled = lines.filter((line) => /^[^\s:.!?][^:.!?]{0,29}:[ \t]*\S.{0,40}$/u.test(line));
-  return labelled.length >= 3;
+  const rows = lines.filter(isValueRow).length;
+  return rows >= 3 || (rows >= 2 && rows * 2 >= lines.length);
+}
+
+/**
+ * Whether a line shows one value under a short label, `label: value` or `label = value`, as in `Score: 12`, `Players:
+ * ${list}.`, or `Your time unit = ${unit}`: a label of at most six words, with a letter or a value and no sentence
+ * before it, and a value that is a value, a number, or at most three words. A URL is no such row.
+ */
+function isValueRow(line: string): boolean {
+  if (/\w:\/\//u.test(line)) return false;
+  const row = /^(?<label>[^:=]{1,40}?)[ \t]*[:=][ \t]*(?<value>\S.{0,59})$/u.exec(line);
+  if (row === null) return false;
+  const label = row.groups!.label!.trim();
+  const value = row.groups!.value!.trim();
+  if (!/\p{L}/u.test(label) && !VALUES.test(label)) return false;
+  if (label.split(/\s+/u).length > 6 || /[.!?]\s+\S/u.test(label)) return false;
+  if (!/[\p{L}\p{N}]/u.test(value) && !VALUES.test(value)) return false;
+  return VALUES.test(value) || /^[-+]?\d/u.test(value) || value.split(/\s+/u).length <= 3;
 }
 
 function partsOf(value: IrExpression): Part[] | null {
