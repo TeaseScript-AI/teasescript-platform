@@ -1371,6 +1371,27 @@ async function titleBarScenario(cdp, origin) {
     "A tap did not show the full title",
   );
 
+  // A title without spaces wraps inside the popover rather than running off the screen.
+  await open("package=title-unbroken");
+  await touchTap(cdp, "[data-player-title-full]");
+  await waitFor(cdp, `!!document.querySelector('[data-player-title-popover]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const popover = document.querySelector('[data-player-title-popover]'); return popover.scrollWidth <= popover.clientWidth && popover.getBoundingClientRect().right <= innerWidth; })()`,
+    ),
+    true,
+    "An unbroken title ran out of its popover",
+  );
+  // A bar too narrow for the title hides it visually and keeps it plain text, never an invisible control.
+  await setViewport(cdp, 180, 760);
+  await open("package=title-long");
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
+    false,
+    "A visually hidden title became a control",
+  );
+
   // The auto-hide bar on a short screen: the first tap reveals it, the next opens the title.
   await evaluate(cdp, `localStorage.setItem('player-titlebar-variant', 'overlap')`);
   try {

@@ -42,9 +42,16 @@ function cancelHide() {
 const titleText = ref<HTMLElement | null>(null);
 const truncated = ref(false);
 const fullTitleOpen = ref(false);
+// Below the bar width that hides the title visually, it stays plain text for assistive technology, never a control.
 function measureTitle() {
   const text = titleText.value;
-  truncated.value = text !== null && text.scrollWidth > text.clientWidth;
+  const heading = text?.closest("h1");
+  truncated.value =
+    text !== null &&
+    heading !== null &&
+    heading !== undefined &&
+    heading.getBoundingClientRect().width > 1 &&
+    text.scrollWidth > text.clientWidth;
 }
 useResizeObserver(titleText, measureTitle);
 watch(
@@ -110,7 +117,7 @@ onBeforeUnmount(cancelHide);
         <PopoverTrigger as-child>
           <button type="button" data-player-title-full><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
         </PopoverTrigger>
-        <PopoverContent align="start" class="w-auto max-w-[calc(100vw-2rem)] p-3 text-sm" data-player-title-popover>
+        <PopoverContent align="start" class="w-auto max-w-[calc(100vw-2rem)] p-3 text-sm wrap-anywhere" data-player-title-popover>
           {{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span>
         </PopoverContent>
       </Popover>
