@@ -268,9 +268,10 @@ conditions need (below). The explorer never makes up a stored value.
 States are deduplicated by a hash of the snapshot that leaves out what no script can observe: event sequence numbers,
 the next free IDs, and the last settlement record. The runtime's own IDs (actions, scopes, call frames, timers, media,
 buttons) are renumbered by rank, because only their equality and order matter. The clock and the random state stay
-in. The search first expands directed states (below), then states whose step reached new instructions, then states
-that look new apart from clock, random state, and settled handles (their loop key), and then the repeats, least
-repeated first; within each group play before clock states (below) and the newest state first. Waiting states keep their snapshots
+in. The search first expands directed states (below), then states whose step reached new instructions in any
+session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
+loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
+first. Waiting states keep their snapshots
 as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time or state budget.
 

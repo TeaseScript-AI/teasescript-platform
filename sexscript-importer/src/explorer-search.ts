@@ -36,9 +36,9 @@ import {
  * - Sessions: the first starts with empty storage; a later one starts from the storage an explored state left, as the
  *   player's next session would after playing to that point. No stored value is made up.
  * - Search order: play states of a directed attempt first ({@link Lead}), then play states, then clock ones; within
- *   each, states whose step reached new instructions first, then states that differ from every explored one in more
- *   than clock, random state, and settled handles (their loop key), then the rest, least repeated first; and the
- *   newest first.
+ *   each, states whose step reached new instructions first, in any session; then, earlier sessions first, states that
+ *   differ from every explored one in more than clock, random state, and settled handles (their loop key), then the
+ *   rest, least repeated first; and the newest first.
  * - Directed search (see {@link explore}) aims at each condition that a step reached but left only one way.
  * - Traps are described at {@link findTraps}.
  * - Coverage labels: a line is `play` when a step of play executed it, in any session; `clock` when only steps after
@@ -552,14 +552,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const active = (lead: Lead | null): lead is Lead =>
     lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
   /**
-   * The order of a state: play states with a lead first, then play, then clock; within those by tier, repeats, and
-   * newest. A clock attempt takes its own steps but no first place after them, so that play goes first.
+   * The order of a state: play states with a lead first, then play, then clock. Within those, states whose step reached
+   * new instructions first, in any session; otherwise earlier sessions first, so that next sessions do not crowd out
+   * the ones before them; then by tier, repeats, and newest. A clock attempt takes its own steps but no first place
+   * after them, so that play goes first.
    */
   const leads = (node: Node): boolean => !node.clock && active(node.lead);
-  const order = (node: Node): readonly number[] => [
-    leads(node) ? 0 : node.clock ? 2 : 1,
-    ...node.rank,
-  ];
+  const order = (node: Node): readonly number[] => {
+    const [tier = 0, ...rest] = node.rank;
+    return [
+      leads(node) ? 0 : node.clock ? 2 : 1,
+      tier === 0 ? 0 : 1,
+      starts[node.start]!.session,
+      tier,
+      ...rest,
+    ];
+  };
 
   /** Adds the state a step reached, or finds it among the explored ones; records witnesses, targets, and crashes. */
   const transition = (
