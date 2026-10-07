@@ -11,6 +11,8 @@ return new Object() {
 	boolean enabled = false
 	// A field that only a module uses is the object's field there too.
 	def boost = 1.5
+	// A read of a field that a module may test for null keeps its null.
+	def title = loadString("demo.title")
 	def pauseCycle = { int delay, int cycle = 60 -> wait(delay / cycle) }
 
 	def main() {

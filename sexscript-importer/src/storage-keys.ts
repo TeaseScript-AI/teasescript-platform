@@ -26,6 +26,7 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 export function withFillableLoads(
   statements: IrStatement[],
   helpers: Set<HelperName>,
+  shared: boolean,
 ): IrStatement[] {
   const passed = new Set<string>();
   const usedUp = new Set<IrExpression>();
@@ -47,7 +48,9 @@ export function withFillableLoads(
   const mark = (value: IrExpression): IrExpression => {
     const next = mapChildren(value, mark);
     if (!fillable(next)) return next;
-    const target = into.get(value);
+    // Variables that other files use too (`shared`: a mixin module's, a script's that loads modules, or a helper
+    // class's) may be tested there, so only a read used up where it is gets a default.
+    const target = shared ? undefined : into.get(value);
     if (usedUp.has(value) || (target !== undefined && !passed.has(target)))
       return { ...next, fill: true };
     // A read that keeps its null gets an open one; withStorageDefaults adds the helper for a marked read that needs it.

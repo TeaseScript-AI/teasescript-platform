@@ -11,4 +11,7 @@ global function sexscriptLegacyRandom(limit) {
   }
   return 0
 }
+global function sexscriptLegacyValue(value) {
+  return value
+}
 goto "demo.tease"

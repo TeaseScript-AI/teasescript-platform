@@ -39,6 +39,9 @@ global rounds = 2
 global enabled = false
 // A field that only a module uses is the object's field there too.
 global boost = 1.5
+// A read of a field that a module may test for null keeps its null.
+global title = null
+title = load "demo.title", default: sexscriptLegacyValue(null)
 function pauseCycle(delay, cycleValue = 60) {
   wait delay / cycleValue
 }

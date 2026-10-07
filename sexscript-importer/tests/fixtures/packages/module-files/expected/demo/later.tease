@@ -3,6 +3,9 @@ global function loadLaterModule {
 }
 global function greet {
   say "Hello again"
+  if title == null {
+    save "Guest" as "demo.title"
+  }
   pause()
 }
 global function setupLaterModule(times = 2) {

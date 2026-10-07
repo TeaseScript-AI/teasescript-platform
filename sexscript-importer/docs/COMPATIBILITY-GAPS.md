@@ -245,7 +245,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   that may hold a fraction, by the importer's types, ends where Groovy stopped: `n.times` loops `0..toInteger(n)`, an
   inclusive range ends at `floor(b)`, an exclusive one at `ceil(b)` (`0..<2.5` went through 0, 1, and 2;
   `SX_RANGE_FLOOR`), as does `nextInt(b)`, which Java called with a whole number only; whole bounds stay as written.
-  A range kept in a variable and a descending range with a fractional bound are not rounded.
+  This keeps Groovy's steps for an ascending range from a whole number; a range kept in a variable is not rounded, and
+  a descending range with a fractional bound, though rounded, does not go through the values Groovy did
+  (`5..<2.5` went through 5, 4, and 3).
 - Known residual differences, found by adversarial review and left as is because they need unusual input or fail
   loudly: Groovy integer ranges contain only whole numbers, while a converted range case also matches a fractional
   value; a `times` count or list index that is fractional, where the importer cannot tell, or negative only at runtime

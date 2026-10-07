@@ -1437,6 +1437,7 @@ export function lowerParsedFile(
   let texts = withFillableLoads(
     withParsedLoads(typedStatements, context.syntheticHelpers),
     context.syntheticHelpers,
+    shared,
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
@@ -1641,6 +1642,7 @@ function lowerHelperCompilationUnit(
               baseContext.syntheticHelpers,
             ),
             baseContext.syntheticHelpers,
+            true,
           ),
           diagnostics,
           true,
