@@ -7,8 +7,12 @@ import {
   parseIsoDate,
   parseIsoDateTime,
   parseIsoTime,
+  presentDate,
+  presentDateTime,
+  presentTime,
   type DateFields,
   type DateTimeFields,
+  type TemporalContext,
   type TimeFields,
 } from "./temporal.js";
 
@@ -86,4 +90,19 @@ export function temporalAnswerText(value: TemporalAnswer): string {
     case "datetime":
       return formatIsoDateTime(value);
   }
+}
+
+/** A typed field's value as its button and the transcript show it: a number as typed, a date or time as `say` does. */
+export function formValueText(
+  value: boolean | number | string | TemporalAnswer,
+  presentation: TemporalContext["presentation"],
+): string {
+  if (typeof value === "number") return numberAnswerText(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return value.kind === "date"
+    ? presentDate(presentation, value)
+    : value.kind === "time"
+      ? presentTime(presentation, value)
+      : presentDateTime(presentation, value);
 }

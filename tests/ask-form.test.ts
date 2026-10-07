@@ -103,7 +103,7 @@ test("askForm says its question, then its descriptions and outro as prose, and r
   const { events: settled, finished } = submitted(plan, edited);
   assert.deepEqual(
     settled.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
-    ["3 of 3 fields set"],
+    ["✓ enabled, intensity: High, level: High"],
   );
   assert.deepEqual(said(finished.events), []);
   const bindings = new Map(
@@ -580,7 +580,7 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   const first = submitted(plan, select(plan, snapshot, "2", 1));
   assert.deepEqual(
     first.events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
-    ["2 of 3 selected"],
+    ["✓ A, ✗ B, ✓ A"],
   );
   const binding = (state: RuntimeSnapshot, name: string) =>
     state.frames[0]!.bindings.find((candidate) => candidate.name === name)?.value;

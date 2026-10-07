@@ -3828,9 +3828,10 @@ async function formsScenario(cdp, origin) {
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   await physicalClick(cdp, "[data-session-activation] button");
   const fields = `[...document.querySelectorAll('[data-form-fields] button')]`;
-  const status = `document.querySelector('[data-form-controls] [role=status]')?.textContent.trim()`;
+  // Each toggle shows and announces its own state; the form has no count of them.
+  const pressed = `${fields}.filter((button) => button.getAttribute("aria-pressed") === "true").length`;
   await waitFor(cdp, `${fields}.length === 43`, 15_000, "The 43 toggles did not appear");
-  assertEqual(await value(cdp, status), "1 of 43 selected", "The status does not count the start");
+  assertEqual(await value(cdp, pressed), 1, "The toggles do not show the start");
   // Every control keeps its touch height; following the latest content shows the submit button above the composer
   // while the fields scroll.
   assertEqual(
@@ -3859,14 +3860,35 @@ async function formsScenario(cdp, origin) {
   await evaluate(cdp, `${fields}.at(-1).scrollIntoView({ block: "center" })`);
   await evaluate(cdp, `${fields}.at(-1).setAttribute("data-smoke-last", "")`);
   await physicalClick(cdp, "[data-smoke-last]");
-  await waitFor(cdp, `${status} === "2 of 43 selected"`, 8_000, "The toggle did not turn on");
+  await waitFor(cdp, `${pressed} === 2`, 8_000, "The toggle did not turn on");
   assertEqual(
     await value(cdp, `document.querySelector('[data-smoke-last]').getAttribute('aria-pressed')`),
     "true",
     "The toggle is not pressed",
   );
   await evaluate(cdp, `${submit}.click()`);
-  await waitFor(cdp, `document.body.innerText.includes("2 of 43 selected")`);
+  // Submitting adds one answer listing every toggle with its state, one per line; screen readers read its plain text.
+  const summary = `document.querySelector('[data-form-summary]')`;
+  await waitFor(cdp, `!!${summary}`, 8_000, "Submitting did not add the form's summary");
+  assertEqual(
+    await value(
+      cdp,
+      `[...${summary}.querySelectorAll('[data-form-summary-line="on"]')].map((line) => line.textContent.trim()).join(", ")`,
+    ),
+    "Rope, key",
+    "The summary does not show the toggles that are on",
+  );
+  assertEqual(
+    await value(cdp, `${summary}.querySelectorAll('[data-form-summary-line="off"]').length`),
+    41,
+    "The summary does not list the toggles that are off",
+  );
+  const plain = await value(cdp, `${summary}.previousElementSibling.textContent`);
+  assertEqual(
+    plain.startsWith("Submitted form: ✓ Rope, ✗ ") && plain.endsWith(", ✓ key"),
+    true,
+    `The summary's plain text is ${plain}`,
+  );
   await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
   assertEqual(
     await value(
