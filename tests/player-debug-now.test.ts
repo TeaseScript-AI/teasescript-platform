@@ -6,6 +6,7 @@ import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  playerRuntimeCalls,
   playerRuntimeDebugNow,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
@@ -192,4 +193,37 @@ test("Now lists each active sound with the statement that started it", () => {
     { source: "sounds/a.wav", loaded: true, startedAt: location("rooms/hall.tease", 1) },
     { source: "sounds/b.wav", loaded: false, startedAt: location("rooms/hall.tease", 2) },
   ]);
+});
+
+test("a failed session keeps the calls its error happened in, which the error dialog lists", () => {
+  let session = createPlayerRuntimeSession({
+    files: [
+      {
+        path: "main.tease",
+        source: ["timer async 1 s {", "    punish(2)", "}", "wait 5 s", "exit", ""].join("\n"),
+      },
+      {
+        path: "rules.tease",
+        source: [
+          "global function punish(count: number) {",
+          "    let zero = 0",
+          "    let rounds = count / zero",
+          "}",
+          "",
+        ].join("\n"),
+      },
+    ],
+  });
+  session = observe(session, 1_000);
+  assert.equal(session.state.failure?.path, "rules.tease");
+  assert.deepEqual(
+    playerRuntimeCalls(session).map(({ kind, from }) => ({ kind, from })),
+    [
+      { kind: "function", from: location("main.tease", 2) },
+      { kind: "timer", from: location("main.tease", 4) },
+    ],
+  );
+  assert.equal(playerRuntimeCalls(session)[0]?.name, "punish");
+  // Debug's Now lists calls only while the session runs or waits.
+  assert.deepEqual(playerRuntimeDebugNow(session, 1_000).calls, []);
 });

@@ -156,6 +156,7 @@ export {
   listRandomSites,
   pendingRandomDraw,
   RANDOM_DRAW_KINDS,
+  replayRandomChoices,
   type RandomChoiceReceipt,
   type RandomControlFilter,
   type RandomControlOptions,

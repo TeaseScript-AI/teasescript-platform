@@ -30,9 +30,11 @@ import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
-import { playerRuntimeDebugNow } from "../../runtime-adapter.js";
+import { playerRuntimeCalls, playerRuntimeDebugNow } from "../../runtime-adapter.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
+import SessionEndDialog from "./SessionEndDialog.vue";
+import SessionErrorDialog from "./SessionErrorDialog.vue";
 import RewindInspection from "./RewindInspection.vue";
 import { rewindFutureTranscript } from "../../debug-history.js";
 import { rewindRows } from "./rewindPresentation";
@@ -114,7 +116,7 @@ function toggleThemeMode() {
 const session = computed(() => props.player.session.value);
 // The Debug menu adds the Debug panel first in the tools menu.
 const debug = usePlayerDebug(props.player, props.debug);
-// A debug export for a developer, from the failure card, its notice, or Settings (DEBUGGER.md "Debug export").
+// A debug export for a developer, from the error dialog, Settings, or the Debug panel (DEBUGGER.md "Debug export").
 const debugExport = useDebugExport(
   props.player,
   () => props.title,
@@ -169,20 +171,47 @@ function openDebugExport() {
 onErrorCaptured((error) => {
   props.player.reportHostError(error);
 });
-// After an error the notice offers the export too, until a new session starts.
+const debugTool: PlayerTool = { name: "Debug", icon: Bug };
+const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
+// Session end and failure (PLAYER-UI "Session end and failure"). An ordinary end opens the end dialog by itself; the
+// error dialog opens only from the error line or its notice, which stays until a new session starts. Like the debug
+// export, each opening of either dialog mounts it anew, so it stays above Settings or the notification panel.
+const runtimeEnd = ref<InstanceType<typeof RuntimeFailure> | null>(null);
+const endDialogOpen = ref(false);
+const endDialogOpening = ref(0);
+watch(props.player.endings, () => {
+  if (props.player.hostError.value !== null) return;
+  if (!endDialogOpen.value) endDialogOpening.value += 1;
+  endDialogOpen.value = true;
+});
+const errorDialogOpen = ref(false);
+const errorDialogOpening = ref(0);
+function showErrorDetails() {
+  if (!errorDialogOpen.value) errorDialogOpening.value += 1;
+  errorDialogOpen.value = true;
+}
 watch(
   () => [session.value?.state.failure ?? null, props.player.hostError.value] as const,
   ([failure, hostError]) => {
-    if (failure === null && hostError === null)
+    if (failure === null && hostError === null) {
+      errorDialogOpen.value = false;
       props.player.withdrawNotice(playerNoticeKeys.sessionError);
-    else
+    } else
       props.player.publishNotice(
-        playerNotices.sessionError(failure === null ? "player" : "script", openDebugExport),
+        playerNotices.sessionError(failure === null ? "player" : "script", showErrorDetails),
       );
   },
 );
-const debugTool: PlayerTool = { name: "Debug", icon: Bug };
-const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
+// The calls a script error happened in, for the error dialog while it is open.
+const failureCalls = computed(() =>
+  errorDialogOpen.value && session.value?.state.failure ? playerRuntimeCalls(session.value) : [],
+);
+// Open in Debug shows the Debug panel's Now tab, which names the error and its statement, and focuses the tab.
+async function openFailureInDebug() {
+  debug.tab.value = "now";
+  await toolsShell.value?.showTool(debugTool.name);
+  document.querySelector<HTMLElement>('[data-debug-tab="now"]')?.focus({ preventScroll: true });
+}
 // Explain values on a chat message opens the Debug panel on its Variables tab.
 provide(explainValues, {
   offers: debug.offers,
@@ -416,6 +445,25 @@ async function toggleFullscreen() {
             :exporter="debugExport"
             :photo-url="player.resolveAsset"
           />
+          <SessionEndDialog
+            :key="endDialogOpening"
+            v-model:open="endDialogOpen"
+            @return-focus="runtimeEnd?.focus()"
+          />
+          <SessionErrorDialog
+            :key="errorDialogOpening"
+            v-model:open="errorDialogOpen"
+            :failure="session?.state.failure ?? null"
+            :host-error="player.hostError.value"
+            :source="
+              session?.state.failure ? player.scriptSource(session.state.failure.path) : null
+            "
+            :calls="failureCalls"
+            :debug-available="debug.time.value !== null && !!session?.state.failure"
+            @export="openDebugExport"
+            @debug="void openFailureInDebug()"
+            @return-focus="runtimeEnd?.focus()"
+          />
           <PlayerToasts
             :notifications="notifications.notifications.value"
             :seen-sequence="notifications.seenSequence.value"
@@ -470,9 +518,13 @@ async function toggleFullscreen() {
           <template #end>
             <RuntimeFailure
               v-if="!failure && player.activation.value === null"
+              ref="runtimeEnd"
               :state="session?.state ?? null"
               :host-error="player.hostError.value"
-              @export="openDebugExport"
+              :can-play-again="player.canPlayAgain.value"
+              :end-dialog-open="endDialogOpen"
+              @details="showErrorDetails"
+              @play-again="void player.playAgain()"
             />
             <!-- Closest to the composer, also below a failure the inspected state shows. -->
             <RewindInspection

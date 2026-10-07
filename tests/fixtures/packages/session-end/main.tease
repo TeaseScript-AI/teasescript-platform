@@ -1,0 +1,7 @@
+---
+title: "Session end"
+---
+say "Ready to finish?"
+showButton "Finish"
+say "This is the last message."
+exit

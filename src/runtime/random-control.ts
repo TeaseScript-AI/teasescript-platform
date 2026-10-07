@@ -1357,6 +1357,25 @@ export class RandomDecisionError extends RandomControlSignal {
   }
 }
 
+/**
+ * The control that repeats recorded decisions: each chosen outcome at the draw its receipt names, a pause at `pauseAt`,
+ * and the natural outcome everywhere else. Running the recorded operations with it reaches the recorded state; its
+ * own receipts then equal `choices`.
+ */
+export function replayRandomChoices(
+  choices: readonly RandomChoiceReceipt[],
+  pauseAt: number | null = null,
+): RandomControlOptions {
+  const chosen = new Map(choices.map((receipt) => [receipt.drawId, receipt.outcome]));
+  return {
+    decide: (draw) => {
+      const outcome = chosen.get(draw.drawId);
+      if (outcome !== undefined) return { kind: "choose", outcome };
+      return draw.drawId === pauseAt ? { kind: "suspend" } : { kind: "natural" };
+    },
+  };
+}
+
 /** The draw a snapshot is paused at, as a deeply frozen copy, or `null`. */
 export function pendingRandomDraw(snapshot: RuntimeSnapshot): RandomDrawView | null {
   const pending = snapshot.randomControl?.pending ?? null;

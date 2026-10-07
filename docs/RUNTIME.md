@@ -1050,8 +1050,9 @@ not language; without it every draw is natural and costs one more check.
 - **Inputs.** An accepted chosen outcome, also one equal to the natural result, is a host input: the result lists it in
   `randomChoices` as `{ drawId, site, kind, outcome }`, the snapshot counts it in `randomControl.forcedChoices`, and
   its debug-trace record says `forced`. A natural resolution leaves nothing behind: a run that pauses at every draw and
-  resolves each naturally reaches the same events and state as a run without control. Replaying the same operations
-  while choosing each receipt's outcome at its `drawId` reaches the same state as the original run.
+  resolves each naturally reaches the same events and state as a run without control. The same operations with
+  `replayRandomChoices(receipts, pauseAt)` as their control, which chooses each receipt's outcome at its `drawId`,
+  pauses at `pauseAt`, and leaves every other draw natural, reach the same state as the original run.
 - **Pause.** A paused draw undoes the unit it belongs to, its instruction or a ranged timer round during catch-up, and
   the snapshot keeps `randomControl.pending`: the draw, the operation it interrupted with its instruction budget, the
   outcomes chosen for earlier draws of the unit, and what the host builtins the unit already called returned. The state
