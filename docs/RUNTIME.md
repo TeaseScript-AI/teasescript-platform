@@ -909,11 +909,59 @@ The low-level runtime entry points are:
 - `stepToEvent(...)` until the next event, halt, or failure;
 - `run(...)` until halt, failure, or instruction-budget exhaustion.
 
-Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
+Each of these snapshot-taking entries validates the instruction plan and the supplied runtime snapshot before executing
+or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke
+`validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces
+`RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`. A [runtime
+session](#runtime-sessions) runs the same engine on state that it owns.
 
 Normal main-path execution stops at `waiting`; validated operations submit time observations and typed completions.
 An eligible queued timer handler may preempt a pending foreground action other than a storage write at runtime entry
 under [Timers and scene time](#timers-and-scene-time).
+
+### Runtime sessions
+
+Owner decision, 2026-10-07 ([ADR 0025](decisions/0025-engine-owned-runtime-sessions.md)): an engine-owned session
+(`src/runtime/session.ts`) keeps the validated immutable plan and the canonical snapshot itself, so that an ordinary
+step does work in proportion to its input and output rather than to the unchanged state. The snapshot-taking
+operations stay as they are.
+
+- **Creation.** `createRuntimeSession(plan, snapshot)` captures and completely validates both like a snapshot-taking
+  entry (`TSR100`, `TSR101`); `createFreshRuntimeSession(plan, freshOptions)` creates the state that
+  `createFreshRuntimeSnapshot` would; `restoreRuntimeSession(checkpoint)` and `deserializeRuntimeSession(json)` restore
+  as `restoreCheckpoint` and `deserializeCheckpoint` do. The last `options` argument may give `capabilities`, which
+  every operation of the session and of its forks uses. Sessions come only from these factories and `fork()`; the state
+  lives in a private field, and `session.plan` is the validated, deeply frozen plan.
+- **Operations.** `run`, `stepToEvent`, `executeInstruction`, `observeTime`, and `completeAction` take the arguments and
+  options of the snapshot API without plan, snapshot, and capabilities, and run the same engine on the session's state.
+  Host requests, observations, and capability results keep their complete capture and validation; the state itself is
+  not captured or validated again. An operation started while another operation of the same session runs, such as
+  from a builtin, throws `RuntimeSessionError`; through a builtin that becomes the usual `TSR012` failure.
+- **Results.** An operation returns `events`, `instructionsExecuted`, `instructionTrace` when requested, and `outcome`
+  where the snapshot API has one, as deeply frozen copies that share nothing with the session's state. `view()`
+  returns the operational state a host acts on, also detached and frozen: `status`, `failure`, `nextInstruction`,
+  both session times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, and
+  `suspendedAction`, the foreground action of the path a running block interrupted. Variables, storage, and other
+  script data are read from an export.
+- **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
+  plain data that later operations do not change; importing it again crosses the external-data boundary.
+- **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An
+  operation that throws, such as `TSR101` when an event sequence runs out or a host callback's error, ends the session:
+  the error reaches the caller, and every later call, including `view`, the exports, and `fork`, throws
+  `RuntimeSessionError` with that error as its `cause`, because the operation may have changed part of the state. The
+  caller continues from its last export or checkpoint. Malformed options, an invalid `instructionBudget`, a
+  `capturedMedia` without `holds`, and malformed session `capabilities` throw before anything runs and leave the
+  session usable. A typed refusal, such as `invalidPayload`, changes nothing.
+- **Forks.** `fork()` returns an independent session with a trusted copy of the state, which keeps the property order
+  and therefore the checkpoint bytes, and shares only the immutable plan and deeply frozen temporal contexts. It uses
+  the parent's capabilities unless its options give others; an injected `random` source stays external state that a
+  fork does not copy.
+- **Traces.** A host passes the same `RuntimeDebugContext` to a session's successive operations as to successive
+  snapshot results; an operation on another session, such as a fork, starts an `attach` epoch.
+
+The same plan, starting state, and operations give the same results, events, outcomes, and checkpoint bytes through a
+session as through the snapshot API, including across `exportCheckpoint` and restore. A session adds no plan,
+snapshot, or checkpoint field.
 
 ## Host values and capabilities
 
@@ -1260,22 +1308,25 @@ The failure points at the innermost loop of the running call when execution runs
 waiting session catches up timer blocks, at the next instruction. Fresh snapshot creation validates the plan,
 serializable globals, script storage, call-depth limit, and RNG seed before returning state.
 
-Live externally supplied instruction plans, runtime snapshots, globals, script storage, and serializable runtime values are captured
-into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or
-RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite values, and
-non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are validated
-directly. Runtime entry points reuse an exact immutable plan graph, and the facts that snapshot validation derives from
-that plan alone, after complete validation has established process-local evidence for that graph; compiler output and
-plans returned from capture or checkpoint restore can retain this evidence across calls. A caller-owned plan without
-that evidence is captured and validated at every entry, while caller-controlled snapshots are always freshly captured
-and validated, including for halted and failed entries. Runtime
-and checkpoint operations also reuse a plan already captured and validated by that operation when validating the
-snapshot, and checkpoint data freshly produced by `JSON.parse(...)` goes directly through complete structural
-validation. Checkpoint restore validates its envelope, plan, snapshot, and their consistency before execution resumes.
-A generic capture depth/work or detailed-validation counter alone does not make otherwise structurally valid data
-malformed. Malformed or inconsistent plan and snapshot data still produces the existing public invalid results,
-`TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its format consequences are described
-under [Format evolution](#format-evolution).
+Live externally supplied instruction plans, runtime snapshots, globals, script storage, and serializable runtime values
+are captured into stable plain-data graphs before detailed validation, freezing, state construction, execution, event
+emission, or RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite
+values, and non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are
+validated directly. Runtime entry points reuse an exact immutable plan graph, and the facts that snapshot validation
+derives from that plan alone, after complete validation has established process-local evidence for that graph; compiler
+output and plans returned from capture or checkpoint restore can retain this evidence across calls. A caller-owned plan
+without that evidence is captured and validated at every entry. Snapshot-taking operations always freshly capture and
+completely validate their supplied snapshots, including mutable snapshots returned by an earlier operation and snapshots
+whose status is halted or failed. Engine-owned sessions capture and completely validate imported snapshots at creation
+or restore; between those boundaries their operations run on private canonical state without repeating whole-snapshot
+capture or validation, while host requests, observations, values, and capability results keep their complete capture and
+validation ([Runtime sessions](#runtime-sessions)). Runtime and checkpoint operations also reuse a plan already captured
+and validated by that operation when validating the snapshot, and checkpoint data freshly produced by `JSON.parse(...)`
+goes directly through complete structural validation. Checkpoint restore validates its envelope, plan, snapshot, and
+their consistency before execution resumes. A generic capture depth/work or detailed-validation counter alone does not
+make otherwise structurally valid data malformed. Malformed or inconsistent plan and snapshot data still produces the
+existing public invalid results, `TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its
+format consequences are described under [Format evolution](#format-evolution).
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
@@ -1306,7 +1357,7 @@ The zero-state rule prevents the absorbing xorshift32 state in which every futur
 they have. A host passes the same context as `debugTrace` to each operation on a session's successive results: in the
 options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `completeAction`, `observeTime`,
 `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, `applyExternalStorageEdit`, and
-`updateInteraction`. A Player session
+`updateInteraction`, and of the matching [runtime session](#runtime-sessions) methods. A Player session
 carries it as `debugTrace`, like its debug recorder: `createPlayerRuntimeSession` and `restorePlayerRuntimeSession`
 take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The trace is not
 part of plans, snapshots, events, checkpoints, restore points, or recorded calls and changes no format: an operation
@@ -1361,9 +1412,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
 ## Instruction trace
 
 A development and testing aid, such as a coverage explorer: `run`, `stepToEvent`, `executeInstruction`,
-`runValidatedState`, and `stepValidatedStateToEvent` take the option `instructionTrace: true`, and their result then
-also holds `instructionTrace` (`RuntimeInstructionTrace`), what that call executed. Both lists are in ascending order
-and hold each entry once, so the plan bounds their size.
+`runValidatedState`, `stepValidatedStateToEvent`, and the session methods of those names take the option
+`instructionTrace: true`, and their result then also holds `instructionTrace` (`RuntimeInstructionTrace`), what that
+call executed. Both lists are in ascending order and hold each entry once, so the plan bounds their size.
 
 - `instructions`: the plan index of every instruction the call executed, including one that failed. Starting a timer,
   media, or permanent-button block executes none; the block's own instructions follow.

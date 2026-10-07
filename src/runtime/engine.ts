@@ -242,6 +242,27 @@ export function executeInstruction(
   return executed;
 }
 
+/** Executes one instruction of engine-owned plan/state that already passed complete validation. */
+export function executeValidatedInstruction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
+): RuntimeOperationResult {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const context = new RuntimeExecutionContext(
+    snapshot,
+    capabilities,
+    plan,
+    trace,
+    instructionTraceFor(plan, options),
+  );
+  const instructionsExecuted = executeCapturedInstruction(plan, snapshot, context);
+  const executed = result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
+  closeDebugTrace(trace, executed);
+  return executed;
+}
+
 /**
  * Executes one instruction boundary. Once execution waits or ends, scene time continues toward the already observed
  * time, which may make a later deadline's work runnable at that deadline.
@@ -2616,7 +2637,7 @@ function failForBudget(
   );
 }
 
-function instructionBudget(value: number | undefined): number {
+export function instructionBudget(value: number | undefined): number {
   const budget = value ?? 1_000_000;
   if (!Number.isSafeInteger(budget) || budget < 1) {
     throw new RangeError("Instruction budget must be a positive safe integer.");
