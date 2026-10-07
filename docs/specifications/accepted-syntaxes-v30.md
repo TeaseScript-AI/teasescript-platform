@@ -453,7 +453,7 @@ let reps = round(randomPert(5, 10, 20))    // from 5 through 20, most likely nea
   distribution: `min + (max - min) × randomBeta(1 + 4 × (mostLikely - min) / (max - min), 1 + 4 × (max - mostLikely) /
   (max - min))`, for `min <= mostLikely <= max`. With `min` equal to `max` it returns `min`.
 - `randomBeta` and `randomPert` sample by rejection: a call makes at least 6 draws, about 6 to 8 on average, and at
-  most 386. The number depends only on the draws themselves, so replay and checkpoint resume repeat it.
+  most 386. The number depends only on the parameters and the draws, so replay and checkpoint resume repeat it.
 - Each returns a `number`. Invalid parameters are a compile error when the compiler can see them, and runtime error
   `TSR039` otherwise; a `randomNormal` result too large to represent is `TSR036`.
 
