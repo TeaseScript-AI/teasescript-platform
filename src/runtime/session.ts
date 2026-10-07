@@ -14,10 +14,20 @@ import {
 import {
   executeValidatedInstruction,
   instructionBudget,
+  resumeValidatedRandomDraw,
   runValidatedState,
   stepValidatedStateToEvent,
   type RuntimeRunOptions,
 } from "./engine.js";
+import {
+  compileRandomPolicy,
+  type RandomChoiceReceipt,
+  type RandomControlOptions,
+  type RandomDecisionRefusal,
+  type RandomDrawResolutionOutcome,
+  type RandomDrawView,
+  type RandomPolicy,
+} from "./random-control.js";
 import type { RuntimeCapabilities } from "./evaluator.js";
 import type { InterpreterEvent } from "./events.js";
 import type { RuntimeInstructionTrace } from "./instruction-trace.js";
@@ -60,7 +70,7 @@ import {
 } from "./media-projection.js";
 import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
 import { captureExecutableData } from "./operations/support.js";
-import { isFrozenTemporalContext } from "../temporal.js";
+import { copyPlainData } from "./plain-data.js";
 import type { PresentationSettings } from "../temporal.js";
 import type { SourceSpan } from "../source.js";
 import {
@@ -82,6 +92,11 @@ import {
 /** What every operation of a session, and of the sessions forked from it, may call. */
 export interface RuntimeSessionOptions {
   readonly capabilities?: RuntimeCapabilities;
+  /**
+   * Which draws the host decides or pauses at (`docs/RUNTIME.md#controlled-randomness`); `null` or absent leaves every
+   * draw natural. A fork inherits it unless its options give `randomControl`.
+   */
+  readonly randomControl?: RandomControlOptions | null;
 }
 
 /** What a session operation did: detached, deeply frozen data that shares nothing with the session's state. */
@@ -90,6 +105,10 @@ export interface RuntimeSessionResult {
   readonly instructionsExecuted: number;
   /** Present only when the operation was called with `instructionTrace: true`. */
   readonly instructionTrace?: RuntimeInstructionTrace;
+  /** The chosen random outcomes the operation accepted, in draw order; present only when there are some. */
+  readonly randomChoices?: readonly RandomChoiceReceipt[];
+  /** Present only when the decision callback gave an outcome a draw cannot produce, so it paused instead. */
+  readonly randomRefusal?: RandomDecisionRefusal;
 }
 
 export interface RuntimeSessionOutcomeResult<T> extends RuntimeSessionResult {
@@ -118,6 +137,10 @@ export interface RuntimeSessionView {
   readonly queuedBlocks: number;
   /** What the protected `debugMode` reads now. */
   readonly debugMode: boolean;
+  /** The random draw execution is paused at, which `resumeRandomDraw` resolves, or `null`. */
+  readonly randomDraw: RandomDrawView | null;
+  /** How many chosen random outcomes the state's history accepted. */
+  readonly forcedRandomChoices: number;
 }
 
 /** One active call, as a debugger shows it, without its variables or arguments. */
@@ -190,6 +213,7 @@ const CREATE = Symbol("RuntimeSession");
 export class RuntimeSession {
   readonly #plan: InstructionPlan;
   readonly #capabilities: RuntimeCapabilities;
+  #randomPolicy: RandomPolicy | null;
   #state: RuntimeSnapshot;
   #operating = false;
   /** What an operation threw, which ended the session, or `null`. */
@@ -201,6 +225,7 @@ export class RuntimeSession {
     plan: InstructionPlan,
     state: RuntimeSnapshot,
     capabilities: RuntimeCapabilities,
+    randomPolicy: RandomPolicy | null,
   ) {
     if (token !== CREATE) {
       throw new TypeError(
@@ -210,6 +235,7 @@ export class RuntimeSession {
     this.#plan = plan;
     this.#state = state;
     this.#capabilities = capabilities;
+    this.#randomPolicy = randomPolicy;
   }
 
   /** The validated, deeply frozen instruction plan the session runs. */
@@ -220,7 +246,11 @@ export class RuntimeSession {
   public run(options: RuntimeRunOptions = {}): RuntimeSessionResult {
     return this.#operate(
       () => runOptions(options),
-      (state, checked) => runValidatedState(this.#plan, state, this.#capabilities, checked),
+      (state, checked) =>
+        runValidatedState(this.#plan, state, this.#capabilities, {
+          ...checked,
+          randomPolicy: this.#randomPolicy,
+        }),
       executed,
     );
   }
@@ -228,7 +258,11 @@ export class RuntimeSession {
   public stepToEvent(options: RuntimeRunOptions = {}): RuntimeSessionResult {
     return this.#operate(
       () => runOptions(options),
-      (state, checked) => stepValidatedStateToEvent(this.#plan, state, this.#capabilities, checked),
+      (state, checked) =>
+        stepValidatedStateToEvent(this.#plan, state, this.#capabilities, {
+          ...checked,
+          randomPolicy: this.#randomPolicy,
+        }),
       executed,
     );
   }
@@ -237,11 +271,52 @@ export class RuntimeSession {
     options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
   ): RuntimeSessionResult {
     return this.#operate(
-      () => ({ ...traceOptions(options), ...instructionTraceOption(options) }),
+      () => ({
+        ...traceOptions(options),
+        ...instructionTraceOption(options),
+        randomPolicy: this.#randomPolicy,
+      }),
       (state, checked) =>
         executeValidatedInstruction(this.#plan, state, this.#capabilities, checked),
       executed,
     );
+  }
+
+  /**
+   * Resolves the random draw execution is paused at and finishes the operation it interrupted, with the session's
+   * random control for later draws. `{ drawId, outcome: "natural" }` keeps the natural result; a chosen outcome is an
+   * input with a receipt in `randomChoices`. A request that does not fit the paused draw changes nothing.
+   */
+  public resumeRandomDraw(
+    request: unknown,
+    options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
+  ): RuntimeSessionOutcomeResult<RandomDrawResolutionOutcome> {
+    return this.#operate(
+      () => {
+        if (this.#capabilities.random !== undefined)
+          throw new TypeError(
+            "A paused random draw resumes with the session generator, so capabilities.random must not be injected.",
+          );
+        return {
+          ...traceOptions(options),
+          ...instructionTraceOption(options),
+          randomPolicy: this.#randomPolicy,
+        };
+      },
+      (state, checked) =>
+        resumeValidatedRandomDraw(this.#plan, state, request, this.#capabilities, checked),
+      settled,
+    );
+  }
+
+  /**
+   * Changes which draws the host decides or pauses at, from the next operation on; `null` leaves every draw natural.
+   * A draw already paused stays paused until `resumeRandomDraw` resolves it.
+   */
+  public setRandomControl(randomControl: RandomControlOptions | null): void {
+    this.#read(() => {
+      this.#randomPolicy = sessionRandomPolicy(this.#plan, randomControl, this.#capabilities);
+    });
   }
 
   public observeTime(
@@ -250,7 +325,7 @@ export class RuntimeSession {
     options: TraceOptions = {},
   ): RuntimeSessionOutcomeResult<TimeObservationOutcome> {
     return this.#operate(
-      () => traceOptions(options),
+      () => ({ ...traceOptions(options), randomPolicy: this.#randomPolicy }),
       (state, checked) => observeValidatedTime(this.#plan, state, nowMs, mediaReports, checked),
       settled,
     );
@@ -273,7 +348,7 @@ export class RuntimeSession {
     options: TraceOptions = {},
   ): RuntimeSessionOutcomeResult<MediaReportOutcome> {
     return this.#operate(
-      () => traceOptions(options),
+      () => ({ ...traceOptions(options), randomPolicy: this.#randomPolicy }),
       (state, checked) => reportValidatedMediaLoad(this.#plan, state, mediaId, report, checked),
       settled,
     );
@@ -342,13 +417,15 @@ export class RuntimeSession {
         nextInstruction: state.nextInstruction,
         currentSessionTimeMs: state.currentSessionTimeMs,
         observedSessionTimeMs: state.observedSessionTimeMs,
-        runnable: executionRunnable(state),
+        runnable: executionRunnable(state) && state.randomControl?.pending == null,
         foregroundAction: state.foregroundAction,
         backgroundActions: state.backgroundActions,
         suspendedAction: interruptFrame(state)?.timerInterruption?.suspendedAction ?? null,
         cameraView: state.cameraView,
         queuedBlocks: state.pendingTimerHandlers.length,
         debugMode: state.debugMode,
+        randomDraw: state.randomControl?.pending?.draw ?? null,
+        forcedRandomChoices: state.randomControl?.forcedChoices ?? 0,
       }),
     );
   }
@@ -461,7 +538,21 @@ export class RuntimeSession {
       const given = options === undefined ? undefined : sessionCapabilities(options);
       const capabilities =
         given === undefined ? this.#capabilities : { ...this.#capabilities, ...given };
-      return new RuntimeSession(CREATE, this.#plan, copyPlainData(state, "fork"), capabilities);
+      const randomPolicy =
+        options !== undefined && "randomControl" in options
+          ? sessionRandomPolicy(this.#plan, options.randomControl ?? null, capabilities)
+          : this.#randomPolicy;
+      if (randomPolicy !== null && capabilities.random !== undefined)
+        throw new TypeError(
+          "randomControl cannot be used with an injected capabilities.random: a paused draw needs the session generator.",
+        );
+      return new RuntimeSession(
+        CREATE,
+        this.#plan,
+        copyPlainData(state, "fork"),
+        capabilities,
+        randomPolicy,
+      );
     });
   }
 
@@ -539,21 +630,22 @@ function variablePreview(binding: RuntimeBindingSnapshot): RuntimeSessionVariabl
 }
 
 function executed(done: RuntimeOperationResult): RuntimeSessionResult {
-  return published(
-    done.instructionTrace === undefined
-      ? { events: done.events, instructionsExecuted: done.instructionsExecuted }
-      : {
-          events: done.events,
-          instructionsExecuted: done.instructionsExecuted,
-          instructionTrace: done.instructionTrace,
-        },
-  );
+  return published({
+    events: done.events,
+    instructionsExecuted: done.instructionsExecuted,
+    ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
+    ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
+    ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
+  });
 }
 
 function settled<T>(done: PendingActionOperationResult<T>): RuntimeSessionOutcomeResult<T> {
   return published({
     events: done.events,
     instructionsExecuted: done.instructionsExecuted,
+    ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
+    ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
+    ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
     outcome: done.outcome,
   });
 }
@@ -633,6 +725,22 @@ function sessionCapabilities(options: RuntimeSessionOptions): RuntimeCapabilitie
   };
 }
 
+/** The random policy `randomControl` gives a session of `plan`, checked once; `null` leaves every draw natural. */
+function sessionRandomPolicy(
+  plan: InstructionPlan,
+  randomControl: RandomControlOptions | null | undefined,
+  capabilities: RuntimeCapabilities,
+): RandomPolicy | null {
+  return randomControl === undefined || randomControl === null
+    ? null
+    : compileRandomPolicy(plan, randomControl, capabilities.random !== undefined);
+}
+
+/** The random control a session's options give, read once. */
+function sessionRandomControl(options: RuntimeSessionOptions): RandomControlOptions | null {
+  return typeof options === "object" && options !== null ? (options.randomControl ?? null) : null;
+}
+
 /** A session that runs `snapshot`, which it captures and completely validates as external data. */
 export function createRuntimeSession(
   plan: InstructionPlan,
@@ -640,8 +748,15 @@ export function createRuntimeSession(
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
   const capabilities = sessionCapabilities(options) ?? {};
+  const randomControl = sessionRandomControl(options);
   const captured = captureExecutableData(plan, snapshot);
-  return new RuntimeSession(CREATE, captured.plan, captured.snapshot, capabilities);
+  return new RuntimeSession(
+    CREATE,
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    sessionRandomPolicy(captured.plan, randomControl, capabilities),
+  );
 }
 
 /** A session at the start of `plan`, with state that `createFreshRuntimeSnapshot` would create. */
@@ -657,12 +772,18 @@ export function createFreshRuntimeSession(
       capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
     );
   }
+  const randomPolicy = sessionRandomPolicy(
+    capturedPlan.plan,
+    sessionRandomControl(options),
+    capabilities,
+  );
   const state = createFreshRuntimeSnapshotWithValidatedPlan(capturedPlan.plan, fresh);
   return new RuntimeSession(
     CREATE,
     capturedPlan.plan,
     withFrozenTemporalCaptures(state),
     capabilities,
+    randomPolicy,
   );
 }
 
@@ -672,7 +793,8 @@ export function restoreRuntimeSession(
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
   const capabilities = sessionCapabilities(options) ?? {};
-  return adoptCheckpoint(restoreCheckpoint(checkpoint), capabilities);
+  const randomControl = sessionRandomControl(options);
+  return adoptCheckpoint(restoreCheckpoint(checkpoint), capabilities, randomControl);
 }
 
 /** A session that continues checkpoint JSON, which `deserializeCheckpoint` parses and completely validates. */
@@ -681,59 +803,26 @@ export function deserializeRuntimeSession(
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
   const capabilities = sessionCapabilities(options) ?? {};
-  return adoptCheckpoint(deserializeCheckpoint(json), capabilities);
+  const randomControl = sessionRandomControl(options);
+  return adoptCheckpoint(deserializeCheckpoint(json), capabilities, randomControl);
 }
 
 /** The restored checkpoint was created by this restore, so no caller holds its snapshot. */
 function adoptCheckpoint(
   checkpoint: RuntimeCheckpoint,
   capabilities: RuntimeCapabilities,
+  randomControl: RandomControlOptions | null,
 ): RuntimeSession {
-  return new RuntimeSession(CREATE, checkpoint.plan, checkpoint.snapshot, capabilities);
+  return new RuntimeSession(
+    CREATE,
+    checkpoint.plan,
+    checkpoint.snapshot,
+    capabilities,
+    sessionRandomPolicy(checkpoint.plan, randomControl, capabilities),
+  );
 }
-
-/** JSON-safe engine data: the shape of runtime state and of everything an operation returns. */
-type PlainValue = string | number | boolean | null | undefined | PlainValue[] | PlainRecord;
-type PlainRecord = { [key: string]: PlainValue };
 
 /** A deeply frozen copy of plain engine output, so that nothing a session publishes shares an object with its state. */
 function published<T>(value: T): T {
   return copyPlainData(value, "publish");
-}
-
-/**
- * Copies JSON-safe engine data without recursion, keeping each record's property order, in work proportional to the
- * data. `publish` freezes every copy; `fork` makes a state copy for another session, which shares the deeply frozen
- * temporal contexts; `export` makes a copy that shares nothing.
- */
-function copyPlainData<T>(value: T, use: "publish" | "fork" | "export"): T {
-  const publish = use === "publish";
-  const work: Array<readonly [PlainValue[], PlainValue[]] | readonly [PlainRecord, PlainRecord]> =
-    [];
-  const enter = (nested: PlainValue): PlainValue => {
-    if (typeof nested !== "object" || nested === null) return nested;
-    if (use === "fork" && isFrozenTemporalContext(nested)) return nested;
-    if (Array.isArray(nested)) {
-      const copy = new Array<PlainValue>(nested.length);
-      work.push([nested, copy]);
-      return copy;
-    }
-    const copy: PlainRecord = Object.getPrototypeOf(nested) === null ? Object.create(null) : {};
-    work.push([nested, copy]);
-    return copy;
-  };
-  // EVIDENCE: invariant: engine state and operation output are JSON-safe plain data.
-  const root = enter(value as PlainValue);
-  for (let step = work.pop(); step !== undefined; step = work.pop()) {
-    if (Array.isArray(step[0]) && Array.isArray(step[1])) {
-      const [source, copy] = step;
-      for (let index = 0; index < source.length; index += 1) copy[index] = enter(source[index]);
-    } else if (!Array.isArray(step[0]) && !Array.isArray(step[1])) {
-      const [source, copy] = step;
-      for (const key of Object.keys(source)) copy[key] = enter(source[key]);
-    }
-    if (publish) Object.freeze(step[1]);
-  }
-  // EVIDENCE: invariant: the copy has the same JSON-safe structure as `value`.
-  return root as T;
 }

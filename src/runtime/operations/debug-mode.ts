@@ -1,3 +1,5 @@
+import type { RandomDrawPendingOutcome } from "../random-control.js";
+import { randomDrawPending } from "./observe-time.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
@@ -9,7 +11,8 @@ export type DebugModeOutcome =
   | { readonly kind: "set"; readonly enabled: boolean }
   | { readonly kind: "invalidRequest"; readonly message: string }
   /** An ended or failed session reads nothing more. */
-  | { readonly kind: "invalidState"; readonly status: RuntimeSnapshot["status"] };
+  | { readonly kind: "invalidState"; readonly status: RuntimeSnapshot["status"] }
+  | RandomDrawPendingOutcome;
 
 /**
  * Sets what the protected `debugMode` reads, on behalf of the host that runs the session in Debug or not. The change is
@@ -46,6 +49,8 @@ function setCapturedDebugMode(
   current: RuntimeSnapshot,
   enabled: unknown,
 ): PendingActionOperationResult<DebugModeOutcome> {
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   if (typeof enabled !== "boolean")
     return pendingResult(current, [], {
       kind: "invalidRequest",

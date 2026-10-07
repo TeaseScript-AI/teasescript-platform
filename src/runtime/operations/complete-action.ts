@@ -1,3 +1,4 @@
+import { randomDrawPending } from "./observe-time.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { messageText } from "../text-length.js";
@@ -95,6 +96,8 @@ function completeCapturedAction(
   trace: TraceStore | null,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const current = captured.snapshot;
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   const external = captureExternalData(request);
   if (!external.ok || !isPlainRecord(external.value)) {
     return pendingResult(current, [], {

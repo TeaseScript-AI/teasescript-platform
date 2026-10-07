@@ -17,6 +17,7 @@ import { messageText } from "../text-length.js";
 import type { Evaluator } from "../evaluator.js";
 import { drawFromSessionGenerator, sampleIndex } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
+import type { RandomControl } from "../random-control.js";
 import { cloneTransferDestination } from "../state.js";
 import { isScriptReference } from "../value-predicates.js";
 import { describeValue } from "../value-types.js";
@@ -101,7 +102,13 @@ export function executeTransfer(
           evaluator,
           instruction.span,
         )
-      : drawDestination(plan, snapshot, instruction.destination, evaluator.trace);
+      : drawDestination(
+          plan,
+          snapshot,
+          instruction.destination,
+          evaluator.trace,
+          evaluator.control,
+        );
   const root = freshRoot(snapshot, destination);
   if (instruction.mode === "goto") {
     const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
@@ -136,6 +143,7 @@ export function executeEnd(
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
   trace: TraceStore | null,
+  control: RandomControl | null,
 ): void {
   const index = innermostFileCallIndex(snapshot);
   if (index < 0 && snapshot.fallback === null) {
@@ -149,7 +157,7 @@ export function executeEnd(
   removeNonPersistentWork(snapshot, activationRootsFrom(snapshot, index), instruction.span, events);
   if (index < 0) {
     // A glob fallback draws its file each time it is used.
-    const fallback = drawDestination(plan, snapshot, snapshot.fallback!, trace);
+    const fallback = drawDestination(plan, snapshot, snapshot.fallback!, trace, control);
     replaceCurrentRoot(snapshot, freshRoot(snapshot, fallback));
     snapshot.nextInstruction = fallback.target;
   } else {
@@ -223,21 +231,40 @@ function resolveComputed(
   return { file, target: target! };
 }
 
-/** A glob target picks one of its files with one draw from the session random generator, each time it runs. */
+/**
+ * A glob target picks one of its files with one draw from the session random generator, each time it runs. Its site is
+ * the `goto`, `call`, or `end` that runs.
+ */
 function drawDestination(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   destination: PlanTransferDestination,
   trace: TraceStore | null,
+  control: RandomControl | null,
 ): PlanDestination {
   if (!("pick" in destination)) return destination;
   const count = destination.pick.length;
-  const picked =
-    destination.pick[
-      drawFromSessionGenerator(snapshot.rng, trace, "glob", null, count, null, (draw) =>
-        sampleIndex(draw, count),
-      )
-    ]!;
+  const drawId = snapshot.rng.state;
+  let index = drawFromSessionGenerator(snapshot.rng, trace, "glob", null, count, null, (draw) =>
+    sampleIndex(draw, count),
+  );
+  if (control !== null) {
+    const instruction = snapshot.nextInstruction;
+    const resolved = control.resolve(
+      instruction,
+      plan.instructions[instruction]!.span,
+      "glob",
+      drawId,
+      { kind: "index", index },
+      () => ({
+        kind: "candidates",
+        candidates: destination.pick.map((candidate) => plan.files[candidate.file]!.path),
+      }),
+    );
+    if (resolved.kind !== "index") throw new Error("A glob resolved to another kind of outcome.");
+    index = resolved.index;
+  }
+  const picked = destination.pick[index]!;
   trace?.randomResult(plan.files[picked.file]!.path);
   return picked;
 }

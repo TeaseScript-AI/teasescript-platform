@@ -481,6 +481,15 @@ export function validForegroundActionState(
  */
 export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
   if (snapshot.status === "ready" || snapshot.status === "running") return true;
+  // A random draw paused during catch-up leaves the rest of the catch-up to resuming it.
+  const control = snapshot.randomControl;
+  if (
+    isPlainRecord(control) &&
+    isPlainRecord(control.pending) &&
+    control.pending.unit === "dueWork" &&
+    snapshot.status === "waiting"
+  )
+    return true;
   if (
     snapshot.status === "waiting" &&
     isPlainRecord(snapshot.foregroundAction) &&

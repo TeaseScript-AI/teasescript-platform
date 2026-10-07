@@ -1,3 +1,5 @@
+import type { RandomDrawPendingOutcome } from "../random-control.js";
+import { randomDrawPending } from "./observe-time.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import { interruptFrame } from "../activations.js";
 import type { InstructionPlan } from "../../plan/model.js";
@@ -24,7 +26,8 @@ import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../de
 
 export type ContinueCaptureOutcome =
   | { readonly kind: "recorded"; readonly boundaryMs: number }
-  | { readonly kind: "invalidCapture"; readonly message: string };
+  | { readonly kind: "invalidCapture"; readonly message: string }
+  | RandomDrawPendingOutcome;
 
 /**
  * Records what the host captured when the player continues a restored session (V30 §35): the wall clock and, when it
@@ -65,6 +68,9 @@ function recordCapturedContinueCapture(
   const current = captured.snapshot;
   const invalid = (message: string) =>
     pendingResult(current, [], { kind: "invalidCapture", message } as const);
+  // A paused draw resumes in the date and time context it paused in.
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   if (current.status === "failed") return invalid("A failed session accepts no Continue capture.");
   const input = captureExternalData(capture);
   if (

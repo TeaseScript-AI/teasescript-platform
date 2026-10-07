@@ -1,3 +1,5 @@
+import type { RandomDrawPendingOutcome } from "../random-control.js";
+import { randomDrawPending } from "./observe-time.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
@@ -14,6 +16,7 @@ import {
 import type { PendingActionOperationResult } from "./model.js";
 
 export type InteractionUpdateOutcome =
+  | RandomDrawPendingOutcome
   /** The edit changed the pending interaction's answers or editor. */
   | { readonly kind: "updated"; readonly actionId: number }
   /** The edit was valid but left everything as it was, such as a repeated one. */
@@ -83,6 +86,8 @@ function updateCapturedInteraction(
   current: RuntimeSnapshot,
   request: Record<string, unknown>,
 ): PendingActionOperationResult<InteractionUpdateOutcome> {
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   if (!positiveSafeInteger(request.actionId))
     return pendingResult(current, [], {
       kind: "invalidPayload",
