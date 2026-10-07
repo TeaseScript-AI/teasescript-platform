@@ -69,9 +69,9 @@ const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2
  * between. A call that ends the session in failure, or that throws, freezes the recording, so later calls cannot evict
  * its evidence.
  *
- * A call that pauses at a random draw stays one record: the resolutions that continue it add their events and chosen
- * outcomes to it rather than records of their own, so many natural resolutions add nothing, and the log never starts
- * again between a call and its resolutions.
+ * A call that pauses at a random draw stays one record: each resolution that continues it adds its events to it, and a
+ * chosen one also its outcome, rather than a record of its own, so many natural resolutions add no record, and the log
+ * never starts again between a call and its resolutions.
  *
  * The session's state stays in its engine-owned runner: the recorder exports it only where it needs a snapshot (a new
  * anchor, the end of a frozen recording, or `recording()`). Its calls also rebuild the state of the session's latest

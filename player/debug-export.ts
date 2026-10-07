@@ -148,8 +148,8 @@ export type DebugOperationKind = (typeof OPERATION_KINDS)[number];
  * `updateInteraction` the form edit; `resumeRandomDraw` the resolution of a draw that paused before the anchor.
  *
  * A call that paused at a random draw (`docs/RUNTIME.md#controlled-randomness`) stays one record while the Player
- * resolves its draws: each resolution adds its events and chosen outcomes to the call it continues, and a natural one
- * adds nothing else, so the record holds the call as one decided run would make it.
+ * resolves its draws: each resolution adds its events to the call it continues, and a chosen one also its outcome, so
+ * the record holds the call as one decided run would make it.
  */
 export interface DebugOperation {
   readonly seq: number;

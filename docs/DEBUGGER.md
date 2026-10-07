@@ -160,8 +160,8 @@ with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButto
 `applyExternalStorageEdit` with the edit, and `updateInteraction` with the form edit, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name and the status the call started from, the random outcomes chosen during it, and the
 [random draw](RUNTIME.md#controlled-randomness) it stands paused at, or `null`. A call that paused stays one record
-while the Player resolves its draws: a resolution adds its events and chosen outcomes to it, a natural one nothing
-else, and the calls the engine refuses meanwhile need no record; only a resolution of a draw that paused before the
+while the Player resolves its draws: each resolution adds its events to it, and a chosen one also its outcome; calls
+the engine refuses meanwhile are not recorded; only a resolution of a draw that paused before the
 anchor is a `resumeRandomDraw` call of its own. Replay decides each recorded draw as recorded, every other one
 naturally, and pauses where the call stood paused. It adds no plan, snapshot, or checkpoint revision.
 
