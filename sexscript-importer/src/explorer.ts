@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
+import type { Constants } from "./explorer-analysis.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
@@ -343,10 +344,18 @@ export class Session {
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
   /**
-   * The expressions the code compares a typed ask's answer with (`comparedWithAsks`), by the ask's instruction: their
+   * The expressions the code compares a typed ask's answer with (`comparedWith`), by the ask's instruction: their
    * values in the state at the ask are answers too, such as the line the script asks the player to type.
    */
   readonly comparedWith = new Map<number, readonly unknown[]>();
+  /**
+   * The player may think before pressing a button that the code times (see {@link thinkTimes}): the expressions a
+   * timed button's result is compared with, by its instruction (`(showButton "Done") / 1 s > count`); and the
+   * constants a difference of clock reads is compared with, by the instruction that takes the difference
+   * (`clockDifferences`), for the buttons before it.
+   */
+  readonly timedWith = new Map<number, readonly unknown[]>();
+  readonly clockDifferences = new Map<number, Constants>();
   /**
    * Runtime operations called so far, a deterministic measure of the work the session's steps took: fresh sessions,
    * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
@@ -435,14 +444,22 @@ export class Session {
         ...interactionOptions(ui, literals, [...compared, ...directed], record(action.form)),
       );
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
-      // happens meanwhile.
-      if (
+      // happens meanwhile. So is a button between two clock reads whose difference a condition compares, and one
+      // whose result is compared with a value in the state.
+      const kept =
         ui.kind === "button" &&
         action.expectedResult === "duration" &&
-        action.destinationTemporary !== null
-      ) {
+        action.destinationTemporary !== null;
+      const timed = ui.kind === "button" ? this.#timedConstants(runtime, action, state) : null;
+      if (kept || (timed !== null && timed.numbers.length + timed.durations.length > 0)) {
         const now = Number(view.observedSessionTimeMs);
-        for (const afterMs of thinkTimes(literals)) {
+        const constants = kept
+          ? {
+              numbers: [...literals.numbers, ...(timed?.numbers ?? [])],
+              durations: [...literals.durations, ...(timed?.durations ?? [])],
+            }
+          : timed!;
+        for (const afterMs of thinkTimes(constants)) {
           if (until === null || now + afterMs < until)
             options.push({ kind: "button", label: String(ui.buttonLabel), afterMs });
         }
@@ -722,6 +739,43 @@ export class Session {
     };
   }
 
+  /**
+   * The constants a button is timed against beyond its compared literals: those of the clock differences taken in the
+   * instructions after it, or after where a call that leads to it returns; and the values, in the state (when `state`
+   * gives it), of what a timed button's result is compared with.
+   */
+  #timedConstants(runtime: Runtime, action: Data, state?: () => Data): Constants | null {
+    if (this.clockDifferences.size === 0 && this.timedWith.size === 0) return null;
+    const found: Constants = { numbers: [], durations: [] };
+    const positions = [
+      action.owningInstruction,
+      ...(this.clockDifferences.size === 0 ? [] : runtime.callReturnInstructions()),
+    ].filter((position): position is number => typeof position === "number");
+    for (const position of positions) {
+      for (let at = position + 1; at <= position + LITERAL_WINDOW; at += 1) {
+        const constants = this.clockDifferences.get(at);
+        if (constants === undefined) continue;
+        found.numbers.push(...constants.numbers);
+        found.durations.push(...constants.durations);
+      }
+    }
+    const expressions =
+      typeof action.owningInstruction === "number"
+        ? this.timedWith.get(action.owningInstruction)
+        : undefined;
+    if (expressions !== undefined && state !== undefined) {
+      const bindings = bindingsOf(state());
+      for (const expression of expressions) {
+        const value = valueOf(expression, bindings);
+        const duration = record(value);
+        if (typeof value === "number") found.numbers.push(value);
+        else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
+          found.durations.push(duration.milliseconds);
+      }
+    }
+    return found;
+  }
+
   /** The earliest time at which something happens without the player, or null when nothing will. */
   #nextDeadline(runtime: Runtime, view: Data): number | null {
     const now = typeof view.observedSessionTimeMs === "number" ? view.observedSessionTimeMs : 0;
@@ -795,7 +849,7 @@ const TEMPORAL_ANSWERS: Readonly<Record<string, readonly string[]>> = {
 };
 
 /** Constants an instruction compares with; durations in milliseconds. */
-interface Literals {
+interface Literals extends Constants {
   numbers: number[];
   strings: string[];
   durations: number[];
@@ -853,12 +907,7 @@ function comparedValues(
   snapshot: Data,
   integer: boolean | null,
 ): string[] {
-  const bindings = new Map<string, unknown>();
-  for (const binding of list(snapshot.globals))
-    if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
-  for (const frame of list(snapshot.frames))
-    for (const binding of list(frame.bindings))
-      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  const bindings = bindingsOf(snapshot);
   const found = new Set<string>();
   for (const expression of expressions) {
     const value = valueOf(expression, bindings);
@@ -868,6 +917,17 @@ function comparedValues(
     if (found.size >= MAX_COMPARED_VALUES) break;
   }
   return [...found];
+}
+
+/** The variables of a state by name, each by its innermost binding. */
+function bindingsOf(snapshot: Data): Map<string, unknown> {
+  const bindings = new Map<string, unknown>();
+  for (const binding of list(snapshot.globals))
+    if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  for (const frame of list(snapshot.frames))
+    for (const binding of list(frame.bindings))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  return bindings;
 }
 
 /** A runtime value as the explorer reads it: a scalar, a composite record, or undefined for none it can read. */
@@ -949,7 +1009,7 @@ function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): R
  * Think times before a timed button: just past each compared number, read as seconds, and each compared duration, in
  * whole seconds; {@link THINK_MS} without one.
  */
-function thinkTimes(literals: Literals): number[] {
+function thinkTimes(literals: Constants): number[] {
   const seconds = [
     ...literals.numbers,
     ...literals.durations.map((milliseconds) => milliseconds / 1000),

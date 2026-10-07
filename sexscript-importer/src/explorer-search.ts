@@ -2,7 +2,8 @@ import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
 import {
   comparedSlots,
-  comparedWithAsks,
+  clockDifferences,
+  comparedWith,
   constantConditions,
   DataFlow,
   distance,
@@ -184,7 +185,7 @@ export interface ExploreOptions {
   readonly later?: boolean;
   /**
    * Typed answers from compared values: a typed ask is also answered with the values, in the state at the ask, of what
-   * the code compares its answer with (`comparedWithAsks`), such as the line it asks the player to type; and directed
+   * the code compares its answer with (`comparedWith`), such as the line it asks the player to type; and directed
    * search also aims answers at asks whose prompt the code computes. Off by default.
    */
   readonly comparedAnswers?: boolean;
@@ -910,8 +911,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     computedPrompts: options.comparedAnswers === true,
   });
   if (options.comparedAnswers === true)
-    for (const [ask, expressions] of comparedWithAsks(flow, instructions))
+    for (const [ask, expressions] of comparedWith(flow, instructions, "asks"))
       session.comparedWith.set(ask, expressions);
+  for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
+    session.timedWith.set(button, expressions);
+  for (const [at, constants] of clockDifferences(flow, instructions))
+    session.clockDifferences.set(at, constants);
   const constants = constantConditions(instructions, files, options.diagnostics);
   // Conditions that read only stored keys whose values this package fixes have one value too.
   const fixed = new Map<number, { value: boolean; reason: string }>();

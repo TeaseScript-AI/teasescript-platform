@@ -1021,19 +1021,23 @@ function readable(expression: unknown, top = true): boolean {
 }
 
 /**
- * The expressions the code compares typed answers with, by the instruction of the ask: in each comparison or text test
- * (`answer == line`, `answer.contains(word)`) whose one side comes from a typed ask's answer (`DataFlow.flowOf`, also
- * for an ask whose prompt is computed), the other side when its value can be read from a state (variables, properties,
- * indices, and arithmetic), at most four per ask.
+ * The expressions the code compares the results of interactions with, by the instruction of the interaction: in each
+ * comparison or text test (`answer == line`, `answer.contains(word)`, `(showButton "Done") / 1 s > count`) whose one
+ * side comes from the result (`DataFlow.flowOf`), the other side when its value can be read from a state (variables,
+ * properties, indices, and arithmetic), at most four per interaction. `asks` takes typed asks (text and number, also
+ * when the code computes the prompt); `timed` takes buttons whose result is the time the player took.
  */
-export function comparedWithAsks(
+export function comparedWith(
   flow: DataFlow,
   instructions: readonly Data[],
+  kind: "asks" | "timed",
 ): Map<number, unknown[]> {
   const typed = (index: number) => {
     const instruction = record(instructions[index]);
     const ui = record(instruction.ui ?? instruction.preparedUi);
-    return ui.kind === "text" || ui.kind === "number";
+    return kind === "asks"
+      ? ui.kind === "text" || ui.kind === "number"
+      : ui.kind === "button" && instruction.expectedResult === "duration";
   };
   const found = new Map<number, Map<string, unknown>>();
   const pair = (answer: unknown, other: unknown) => {
@@ -1073,6 +1077,85 @@ export function comparedWithAsks(
   };
   instructions.forEach(walk);
   return new Map([...found].map(([ask, expressions]) => [ask, [...expressions.values()]]));
+}
+
+/** Constants a condition compares with: numbers, and durations in milliseconds. */
+export interface Constants {
+  readonly numbers: number[];
+  readonly durations: number[];
+}
+
+/**
+ * The differences of clock reads the code times something with (`start = getTimestamp().toSeconds()`, a button, then
+ * `took = getTimestamp().toSeconds() - start`): by the instruction that subtracts from a clock read, the constants a
+ * condition compares the difference with (`took < 5`).
+ */
+export function clockDifferences(
+  flow: DataFlow,
+  instructions: readonly Data[],
+): Map<number, Constants> {
+  const clockMinus = (expression: unknown): boolean => {
+    const value = record(expression);
+    if (value.kind === "group") return clockMinus(value.expression);
+    return (
+      value.kind === "binary" &&
+      value.operator === "-" &&
+      (flow.flowOf(value.left).clock || flow.flowOf(value.right).clock)
+    );
+  };
+  /** The instructions that compute a difference, by the variable it goes to. */
+  const differences = new Map<string, number[]>();
+  instructions.forEach((instruction, index) => {
+    const name =
+      instruction.kind === "assign"
+        ? targetName(instruction.target)
+        : (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
+            typeof instruction.name === "string"
+          ? instruction.name
+          : null;
+    if (typeof name !== "string" || !clockMinus(instruction.value)) return;
+    differences.set(name, [...(differences.get(name) ?? []), index]);
+  });
+  const found = new Map<number, Constants>();
+  const add = (at: number, constant: unknown) => {
+    const known = found.get(at) ?? { numbers: [], durations: [] };
+    const duration = record(constant);
+    if (typeof constant === "number" && !known.numbers.includes(constant))
+      known.numbers.push(constant);
+    if (duration.kind === "duration" && typeof duration.milliseconds === "number")
+      if (!known.durations.includes(duration.milliseconds))
+        known.durations.push(duration.milliseconds);
+    found.set(at, known);
+  };
+  const compared = (subject: unknown, constant: unknown, at: number) => {
+    if (clockMinus(subject)) add(at, constant);
+    for (const name of namesIn(subject))
+      for (const difference of differences.get(name) ?? []) add(difference, constant);
+  };
+  instructions.forEach((instruction, index) => {
+    if (
+      instruction.kind !== "jumpIfFalse" &&
+      !(instruction.kind === "loopStart" && instruction.loopKind === "while")
+    )
+      return;
+    const condition = instruction.condition ?? instruction.expression;
+    for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant, index);
+    const walk = (expression: unknown): void => {
+      const value = record(expression);
+      if (value.kind === "group") walk(value.expression);
+      if (value.kind !== "binary") return;
+      if (String(value.operator) in FLIP && record(value.right).kind === "duration")
+        compared(value.left, value.right, index);
+      else if (String(value.operator) in FLIP && record(value.left).kind === "duration")
+        compared(value.right, value.left, index);
+      else {
+        walk(value.left);
+        walk(value.right);
+      }
+    };
+    walk(condition);
+  });
+  return found;
 }
 
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */

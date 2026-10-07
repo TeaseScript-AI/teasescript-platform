@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { isRecord } from "../src/ast.ts";
-import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
+import {
+  clockDifferences,
+  comparedWith,
+  DataFlow,
+  type PlanDiagnostic,
+} from "../src/explorer-analysis.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
 import {
   EPOCH_MS,
@@ -398,7 +403,7 @@ test(
 );
 
 test(
-  "the inputs of a state come from its runtime session: a caller's compared constants, a compared duration, and the wait a block interrupted",
+  "the inputs of a state come from its runtime session: a caller's compared constants, a compared duration, the time a timed button is compared with, and the wait a block interrupted",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -429,6 +434,40 @@ test(
       { kind: "button", label: "Beg" },
       { kind: "button", label: "Beg", afterMs: 16_000 },
     ]);
+
+    // A button the code times by reading the clock before and after it, or whose time it compares with a value of the
+    // state, can also be pressed just after the compared time.
+    const timedStart = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const session = new Session(engine, plan, 1);
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const flow = new DataFlow(plan, instructions);
+      for (const [at, constants] of clockDifferences(flow, instructions))
+        session.clockDifferences.set(at, constants);
+      for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
+        session.timedWith.set(button, expressions);
+      const step = session.start();
+      return session.options(step.runtime, step.runtime.view(), () => step.snapshot);
+    };
+    assert.deepEqual(
+      timedStart(
+        'let took = getTimestamp().toSeconds()\nshowButton "Edge"\ntook = getTimestamp().toSeconds() - took\n' +
+          'if took < 5 {\n  say "Too fast."\n}\nexit\n',
+      ),
+      [
+        { kind: "button", label: "Edge" },
+        { kind: "button", label: "Edge", afterMs: 6000 },
+      ],
+    );
+    assert.deepEqual(
+      timedStart(
+        'let count = 40\nif (showButton "Done") / 1 s > count {\n  say "Good."\n}\nexit\n',
+      ).at(-1),
+      { kind: "button", label: "Done", afterMs: 41_000 },
+    );
 
     // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
     const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');

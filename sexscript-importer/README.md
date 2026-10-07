@@ -268,7 +268,9 @@ with (a variable, or a property, index, or sum of variables, found through the d
 asks the player to type: three at most, and `v - 1`, `v`, and `v + 1` for a number `v`; and directed search (below)
 also answers asks whose prompt the code computes (`askText "Type: ${line}"`), which it otherwise leaves out. A button whose result the
 script keeps (`(showButton …) / 1 s`, `beg < 15 s`) can also be pressed after the player thinks for just over each
-compared number of seconds or duration (60 s without one). Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
+compared number of seconds or duration (60 s without one), or of the value in the state that the time is compared with
+(`(showButton …) / 1 s > count`). So can any button between two clock reads whose difference a condition compares
+with a constant (`took = getTimestamp().toSeconds() - start` after it, then `took < 5`), just past that constant. Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
 each shown permanent button, are options too. Media loads succeed with one second per pass, `takePhoto` finds no
 camera, `askImage` gets one stored image, pacing is instant, and the clock starts at 2026-10-02 12:00 UTC. The first
 session starts with empty storage. A later session starts from the storage an explored state left, as the player's
