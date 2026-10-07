@@ -289,6 +289,7 @@ interface SessionHost {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
+  observe(): PlayerRuntimeSession | null;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
@@ -457,6 +458,35 @@ test("+10 s works during chat pacing, also from a pending save, and not after th
   player.update(activatePlayerRuntimeButton(session)!.session);
   assert.equal(player.session.value!.state.status, "halted");
   assert.equal(time.canAdvance.value, false);
+});
+
+test("a jump logs only the scene time it advanced, not real time observed while the host answered", async (context) => {
+  let answer = () => {};
+  const { player, time, logged } = await mount(
+    context,
+    'save 1 as "seen"\nsay "First", 20\nlet done = showButton "Done"\nexit',
+    { autoSkip: false },
+    {
+      scope: "test",
+      load: async () => [],
+      write: () => new Promise<void>((resolve) => (answer = resolve)),
+      replace: async () => {},
+      clear: async () => {},
+    },
+  );
+  const jumped = time.advanceBy(50);
+  // After one task the jump has observed its start and waits for the host to store the save.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const targetMs = player.session.value!.state.observedSessionTimeMs + 50;
+  // Ordinary observations, as a timer's wake-up makes, pass that target meanwhile; the jump ends without a step.
+  for (let waited = 0; player.session.value!.state.observedSessionTimeMs < targetMs; waited += 10) {
+    assert.ok(waited < 5_000, "real time was not observed");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    player.observe();
+  }
+  answer();
+  await jumped;
+  assert.deepEqual(logged, []);
 });
 
 test("auto-skip completes waits but leaves the player's think time and background timers real", async (context) => {

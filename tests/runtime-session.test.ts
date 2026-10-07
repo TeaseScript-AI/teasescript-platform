@@ -134,6 +134,18 @@ test("nothing a session publishes or exports shares an object with its state", (
   Reflect.set(exported, "status", "halted");
   const checkpoint = session.exportCheckpoint();
   checkpoint.snapshot.frames.length = 0;
+  // A trusted export is the checked export's JSON, copied without checking, and it is the host's own data too.
+  const trusted = withValidationTestStatistics((statistics) => {
+    const copy = session.exportTrustedSnapshot();
+    assert.equal(statistics().counts.snapshotValidationAnalyses ?? 0, 0);
+    return copy;
+  });
+  assert.equal(JSON.stringify(trusted), JSON.stringify(session.exportSnapshot()));
+  trusted.frames.length = 0;
+  // Even the date and time contexts, which a fork shares, are copies the host may change.
+  assert.ok(trusted.temporalCaptures.length > 0);
+  for (const capture of trusted.temporalCaptures)
+    assert.equal(Reflect.set(capture.context, "presentation", null), true);
   assert.equal(serializeCheckpoint(session.exportCheckpoint()), before);
   assert.equal(session.view().status, "running");
 });
@@ -255,6 +267,7 @@ test("an operation that throws ends its session, and argument errors leave it us
       () => session.run(),
       () => session.observeTime(1),
       () => session.exportSnapshot(),
+      () => session.exportTrustedSnapshot(),
       () => session.exportCheckpoint(),
       () => session.fork(),
     ])
@@ -415,20 +428,26 @@ test("a fork keeps the property order of an imported snapshot, and an ended sess
     );
 });
 
-test("a fork keeps its parent's capabilities unless its options give others", () => {
-  const plan = compileValidPlan("let value = answer()\nsay value, instant\nexit", {
-    builtins: ["answer"],
-  });
+test("a fork keeps each of its parent's capabilities that its options do not give", () => {
+  const plan = compileValidPlan(
+    'let value = answer()\nlet pick = ["first", "last"].random\nsay "${value} ${pick}", instant\nexit',
+    { builtins: ["answer"] },
+  );
+  const fixed = (value: number) => ({ next: () => value });
   const parent = createRuntimeSession(plan, createImmediatePacingRuntimeSnapshot(plan), {
-    capabilities: { builtins: { answer: () => 42 } },
+    capabilities: { builtins: { answer: () => 42 }, random: fixed(0) },
   });
   const said = (session: RuntimeSession) =>
     session.run().events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
   // EVIDENCE: fixture: an explicit undefined, which an untyped caller may pass, is still no capabilities.
   const explicitlyNone = { capabilities: undefined } as never;
-  for (const options of [undefined, {}, explicitlyNone])
-    assert.deepEqual(said(parent.fork(options)), ["42"]);
-  assert.deepEqual(said(parent.fork({ capabilities: { builtins: { answer: () => 7 } } })), ["7"]);
+  for (const options of [undefined, {}, explicitlyNone, { capabilities: {} }])
+    assert.deepEqual(said(parent.fork(options)), ["42 first"]);
+  // Options replace only the capabilities they give.
+  assert.deepEqual(said(parent.fork({ capabilities: { builtins: { answer: () => 7 } } })), [
+    "7 first",
+  ]);
+  assert.deepEqual(said(parent.fork({ capabilities: { random: fixed(0.99) } })), ["42 last"]);
 });
 
 test("the other host operations, projections, and inspection give the snapshot API's results", () => {

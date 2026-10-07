@@ -27,6 +27,7 @@ import {
   playerRuntimeDebugVariables,
   playerRuntimeForeground,
   restorePlayerRuntimeSession,
+  restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
@@ -87,6 +88,30 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   const file = await debugExportFile(exported, false);
   return replayDebugExport(parseDebugExport(await file.text()));
 }
+
+/**
+ * `script` started with its scope IDs used up but `spare`: the scope after them throws `TSR101`, an error that no script
+ * reaches otherwise, so that an operation throws in the middle of its run.
+ */
+function startedWithScopesUsedUp(
+  script: string,
+  spare: number,
+  recorder: DebugRecorder | null = null,
+): PlayerRuntimeSession {
+  const started = createPlayerRuntimeSession(script);
+  const snapshot = {
+    ...playerRuntimeSnapshot(started),
+    nextScopeId: Number.MAX_SAFE_INTEGER - spare,
+  };
+  return restorePlayerRuntimeSessionAt(
+    started.plan,
+    JSON.stringify(snapshot),
+    started.events,
+    recorder,
+  );
+}
+
+const SCOPES_USED_UP = /nextScopeId cannot be advanced safely/u;
 
 /** Plays a script through every engine seam of the Player: time, media, input, image, photo, button, and storage. */
 function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSession {
@@ -337,11 +362,14 @@ test("a media store that throws during a recorded call leaves the recording inco
 });
 
 test("after a call throws, the session continues from the state the Player showed, and the recording keeps the call", async () => {
-  // A text longer than JavaScript can hold throws in the middle of a timer block, after the block changed the state.
+  // With the scope IDs used up, a timer block throws in its middle, after it changed the state.
   const source = [
+    "let go = true",
     "timer async 1 s {",
     '  say "before", instant',
-    '  let long = "x".repeat(9007199254740991)',
+    "  if go {",
+    '    say "deep", instant',
+    "  }",
     "}",
     'let pick = choose again: "Again"',
     'say "done", instant',
@@ -353,20 +381,20 @@ test("after a call throws, the session continues from the state the Player showe
     return selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!.session;
   };
   const recorder = new DebugRecorder();
-  const session = createPlayerRuntimeSession(source, { recorder });
+  const session = startedWithScopesUsedUp(source, 1, recorder);
   const before = playerRuntimeSnapshot(session);
   const shown = session.state;
-  assert.throws(() => observePlayerRuntimeTime(session, 1_000), RangeError);
+  assert.throws(() => observePlayerRuntimeTime(session, 1_000), SCOPES_USED_UP);
   // What the Player shows and holds is the state before the call: the say before the error is undone.
   assert.equal(session.state, shown);
   assert.deepEqual(playerRuntimeSnapshot(session), before);
   // After a later publication, a second error recovers to that one.
   const later = observePlayerRuntimeTime(session, 500).session;
   const laterSnapshot = playerRuntimeSnapshot(later);
-  assert.throws(() => observePlayerRuntimeTime(later, 1_000), RangeError);
+  assert.throws(() => observePlayerRuntimeTime(later, 1_000), SCOPES_USED_UP);
   assert.deepEqual(playerRuntimeSnapshot(later), laterSnapshot);
   const continued = again(later);
-  const expected = again(observePlayerRuntimeTime(createPlayerRuntimeSession(source), 500).session);
+  const expected = again(observePlayerRuntimeTime(startedWithScopesUsedUp(source, 1), 500).session);
   assert.equal(continued.state.status, "halted");
   assert.deepEqual(playerRuntimeSnapshot(continued), playerRuntimeSnapshot(expected));
   assert.deepEqual(continued.transcriptEntries, expected.transcriptEntries);
@@ -377,21 +405,28 @@ test("after a call throws, the session continues from the state the Player showe
   assert.deepEqual(
     recording.operations.map((operation) => [operation.kind, operation.thrown]),
     [
-      ["run", null],
       ["observeTime", null],
-      ["run", "RangeError"],
+      ["run", "RuntimeDataError"],
     ],
   );
   assert.deepEqual(recording.endSnapshot, observeTime(session.plan, before, 1_000, []).snapshot);
   assert.equal(recording.complete, true);
-  assert.deepEqual(await replay(recorder), { kind: "reproduced", failure: null, operations: 3 });
+  assert.deepEqual(await replay(recorder), { kind: "reproduced", failure: null, operations: 2 });
 });
 
 test("after a call the recording could not keep, an error still continues from the state the Player showed", () => {
-  const timer = ["timer async 1 s {", '  let long = "x".repeat(9007199254740991)', "}"];
+  // With the scope IDs used up, the timer block throws as it starts.
+  const timer = [
+    "let go = true",
+    "timer async 1 s {",
+    "  if go {",
+    '    say "deep", instant',
+    "  }",
+    "}",
+  ];
   const continues = (session: PlayerRuntimeSession, act: () => void) => {
     const before = playerRuntimeSnapshot(session);
-    assert.throws(act, RangeError);
+    assert.throws(act, SCOPES_USED_UP);
     assert.deepEqual(playerRuntimeSnapshot(session), before);
   };
 
@@ -404,7 +439,7 @@ test("after a call the recording could not keep, an error still continues from t
   ].join("\n");
   const small = new DebugRecorder({ argumentBytes: 50 });
   const answered = submitPlayerRuntimeComposer(
-    createPlayerRuntimeSession(asking, { recorder: small }),
+    startedWithScopesUsedUp(asking, 0, small),
     "x".repeat(100),
   )!.session;
   assert.equal(small.recording()!.complete, false);
@@ -413,7 +448,7 @@ test("after a call the recording could not keep, an error still continues from t
 
   // A storage edit larger than the default retention, whose call has no run after it.
   const edited = applyPlayerRuntimeStorageEdit(
-    createPlayerRuntimeSession(asking, { recorder: new DebugRecorder() }),
+    startedWithScopesUsedUp(asking, 0, new DebugRecorder()),
     { key: "big", value: "x".repeat(2 * 1024 * 1024) },
   );
   assert.equal(edited.outcome.kind, "applied");
@@ -428,14 +463,12 @@ test("after a call the recording could not keep, an error still continues from t
   const checked = [
     'let name = askText "Name"',
     'if name != "ok" {',
-    '  let long = "x".repeat(9007199254740991)',
+    '  say "deep", instant',
     "}",
     'say "${name}", instant',
     "exit",
   ].join("\n");
-  const session = createPlayerRuntimeSession(checked, {
-    recorder: new DebugRecorder({ argumentBytes: 50 }),
-  });
+  const session = startedWithScopesUsedUp(checked, 0, new DebugRecorder({ argumentBytes: 50 }));
   continues(session, () => submitPlayerRuntimeComposer(session, "x".repeat(100)));
   const continued = submitPlayerRuntimeComposer(session, "ok")!.session;
   assert.equal(continued.state.status, "halted");
@@ -443,9 +476,11 @@ test("after a call the recording could not keep, an error still continues from t
 
   // Two such answers in a row, the second one's run throwing: the state after the first.
   const twice = submitPlayerRuntimeComposer(
-    createPlayerRuntimeSession(`let first = askText "First"\n${checked}`, {
-      recorder: new DebugRecorder({ argumentBytes: 50 }),
-    }),
+    startedWithScopesUsedUp(
+      `let first = askText "First"\n${checked}`,
+      0,
+      new DebugRecorder({ argumentBytes: 50 }),
+    ),
     "a".repeat(100),
   )!.session;
   continues(twice, () => submitPlayerRuntimeComposer(twice, "b".repeat(100)));
@@ -453,9 +488,10 @@ test("after a call the recording could not keep, an error still continues from t
 });
 
 test("a refusal the host does not keep leaves the later publications recoverable", () => {
+  // With the scope IDs used up but one, which the first timer block takes, the second one throws as it starts.
   const source = [
     "timer async 1 s {",
-    '  let long = "x".repeat(9007199254740991)',
+    '  say "late", instant',
     "}",
     "let seen = 0",
     "timer async 300 ms {",
@@ -464,7 +500,7 @@ test("a refusal the host does not keep leaves the later publications recoverable
     'let pick = choose again: "Again"',
     "exit",
   ].join("\n");
-  const shown = createPlayerRuntimeSession(source, { recorder: new DebugRecorder() });
+  const shown = startedWithScopesUsedUp(source, 1, new DebugRecorder());
   // As the Player's media host does, the session shown stays when a report is refused.
   const refused = reportPlayerRuntimeMediaLoad(shown, 99, { kind: "loaded", durationMs: 1 });
   assert.equal(refused.outcome.kind, "unknownMedia");
@@ -472,7 +508,7 @@ test("a refusal the host does not keep leaves the later publications recoverable
   assert.ok(later.revision > refused.session.revision);
   const before = playerRuntimeSnapshot(later);
   const variables = playerRuntimeDebugVariables(later).variables;
-  assert.throws(() => observePlayerRuntimeTime(later, 1_000), RangeError);
+  assert.throws(() => observePlayerRuntimeTime(later, 1_000), SCOPES_USED_UP);
   assert.deepEqual(playerRuntimeSnapshot(later), before);
   assert.deepEqual(playerRuntimeDebugVariables(later).variables, variables);
 });

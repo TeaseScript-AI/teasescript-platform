@@ -1,5 +1,6 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
+import { messageText } from "../text-length.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import {
   currentTemporalContext,
@@ -291,7 +292,7 @@ function completeStorageWrite(
         severity: "warning",
         code: "TSW014",
         message: `${action.value === null ? "delete" : "save"} could not persist ${JSON.stringify(
-          action.key,
+          messageText(action.key),
         )}; the previous value is kept.`,
         span,
       } satisfies DeveloperWarningEvent),

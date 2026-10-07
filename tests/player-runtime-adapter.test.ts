@@ -1,3 +1,4 @@
+import { DebugRecorder } from "../player/debug-recorder.js";
 import { preparePlayerMessageMarkup } from "../player/message-markup.js";
 import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
@@ -37,6 +38,7 @@ import {
   playerRuntimeTimers,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
+  restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
   stepPlayerRuntimeFormField,
@@ -48,6 +50,7 @@ import {
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
   playerRuntimeSnapshot,
+  type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
@@ -1229,4 +1232,42 @@ test("a message update replaces its row in place, keeping its identity, speaker,
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
   assert.equal(restorePlayerRuntimeSession(restorePoint).transcriptEntries[0]?.text, "Waiting.");
+});
+
+test("an answer whose run throws leaves the transcript as the Player showed it, and the next answer follows on", () => {
+  const source = [
+    'let pick = choose again: "Again", long: "Long"',
+    'if pick == "long" {',
+    '  say "deep", instant',
+    "}",
+    'say "done ${pick}", instant',
+    "exit",
+  ].join("\n");
+  // With the scope IDs used up, the run after "Long" throws (TSR101) as it enters the block, an error no script reaches
+  // otherwise; the run after "Again" enters none.
+  const started = createPlayerRuntimeSession(source);
+  const usedUp = JSON.stringify({
+    ...playerRuntimeSnapshot(started),
+    nextScopeId: Number.MAX_SAFE_INTEGER,
+  });
+  const restored = (recorder: DebugRecorder | null) =>
+    restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events, recorder);
+  const choose = (session: PlayerRuntimeSession, label: string) => {
+    const foreground = playerRuntimeForeground(session);
+    assert.ok(foreground?.kind === "choose");
+    const option = foreground.options.find((candidate) => candidate.label === label)!;
+    return selectPlayerRuntimeChoice(session, option.id)!.session;
+  };
+  const session = restored(new DebugRecorder());
+  const events = [...session.events];
+  const transcript = [...session.transcriptEntries];
+  assert.throws(() => choose(session, "Long"), /nextScopeId cannot be advanced safely/u);
+  assert.deepEqual(session.events, events);
+  assert.deepEqual(session.transcriptEntries, transcript);
+
+  const continued = choose(session, "Again");
+  const expected = choose(restored(null), "Again");
+  assert.equal(continued.state.status, "halted");
+  assert.deepEqual(continued.events, expected.events);
+  assert.deepEqual(continued.transcriptEntries, expected.transcriptEntries);
 });
