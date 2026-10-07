@@ -197,6 +197,26 @@ With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySk
 
 `wait` remains separate. It does not become a `say` option and does not consume the pacing gate.
 
+Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
+pacing ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
+it in parentheses, `say("text", pacing)`:
+
+```tease
+let waiting = say "Waiting.", instant
+repeat 2 {
+    wait 1 s
+    waiting.text += "."
+}
+
+let count: integer = 0
+let strokes = say "Strokes: 0", instant
+repeat 50 {
+    wait 1 s
+    count += 1
+    strokes.text = "Strokes: ${count}"
+}
+```
+
 ### Authored `say` message markup
 
 After the final `say` string is evaluated and interpolated, the runtime parses it once using the constrained grammar in
@@ -212,8 +232,9 @@ let name = "**Mistress**"
 say "**Warning:** ${escapeMarkup(name)}, no touching."
 ```
 
-Player-authored transcript entries remain plain text. The canonical specification owns the complete grammar, escaping,
-nesting, recovery, and link rules.
+A message handle's `text` is that evaluated string before parsing, and a new `text` is parsed whole again; interpolation
+is not repeated. Player-authored transcript entries remain plain text. The canonical specification owns the complete
+grammar, escaping, nesting, recovery, and link rules.
 
 ### Bounded-data boundary
 
