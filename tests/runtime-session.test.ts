@@ -134,6 +134,18 @@ test("nothing a session publishes or exports shares an object with its state", (
   Reflect.set(exported, "status", "halted");
   const checkpoint = session.exportCheckpoint();
   checkpoint.snapshot.frames.length = 0;
+  // A trusted export is the checked export's JSON, copied without checking, and it is the host's own data too.
+  const trusted = withValidationTestStatistics((statistics) => {
+    const copy = session.exportTrustedSnapshot();
+    assert.equal(statistics().counts.snapshotValidationAnalyses ?? 0, 0);
+    return copy;
+  });
+  assert.equal(JSON.stringify(trusted), JSON.stringify(session.exportSnapshot()));
+  trusted.frames.length = 0;
+  // Even the date and time contexts, which a fork shares, are copies the host may change.
+  assert.ok(trusted.temporalCaptures.length > 0);
+  for (const capture of trusted.temporalCaptures)
+    assert.equal(Reflect.set(capture.context, "presentation", null), true);
   assert.equal(serializeCheckpoint(session.exportCheckpoint()), before);
   assert.equal(session.view().status, "running");
 });
@@ -255,6 +267,7 @@ test("an operation that throws ends its session, and argument errors leave it us
       () => session.run(),
       () => session.observeTime(1),
       () => session.exportSnapshot(),
+      () => session.exportTrustedSnapshot(),
       () => session.exportCheckpoint(),
       () => session.fork(),
     ])

@@ -961,7 +961,11 @@ operations stay as they are.
   of the values; and `temporalPresentation()` gives the date and time presentation in force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
   whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
-  plain data that later operations do not change; importing it again crosses the external-data boundary.
+  plain data that later operations do not change; importing it again crosses the external-data boundary. For trusted
+  hosts only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or
+  validation, which shares nothing with the session: for a host that keeps the snapshot itself, such as a search
+  frontier. It is not a boundary; the snapshot is captured and validated wherever it crosses one later, such as
+  `createRuntimeSession`.
 - **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An
   operation that throws, such as `TSR101` when an event sequence runs out or a host callback's error, ends the session:
   the error reaches the caller, and every later call, including `view`, the exports, and `fork`, throws
