@@ -142,6 +142,7 @@ async function main() {
       await debugStorageEditScenario(cdp, origin);
       await debugHistoryStorageScenario(cdp, origin);
       await debugRewindScenario(cdp, origin);
+      await heldPressScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
@@ -152,7 +153,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1080,6 +1081,12 @@ async function physicalClick(cdp, selector) {
  * move for a few frames, partly under the bar above the composer; a click in that window lands elsewhere.
  */
 async function settledClick(cdp, selector, timeout = 5_000) {
+  await settle(cdp, selector, timeout);
+  await physicalClick(cdp, selector);
+}
+
+// Waits until the element has held its position for three animation frames with nothing covering its centre.
+async function settle(cdp, selector, timeout = 5_000) {
   const settled = await evaluate(
     cdp,
     `return new Promise((resolve) => {
@@ -1102,7 +1109,6 @@ async function settledClick(cdp, selector, timeout = 5_000) {
     })`,
   );
   if (!settled) throw new Error(`${selector} did not come to rest uncovered`);
-  await physicalClick(cdp, selector);
 }
 
 // A real Space key: unless a handler prevents its default, it types a space into the focused field.
@@ -4241,6 +4247,72 @@ async function debugRewindScenario(cdp, origin) {
     `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-failure]')`,
   );
   await setViewport(cdp, 1440, 900);
+}
+
+/**
+ * A Player action button held down by the mouse, a choice and a form toggle: its rim keeps its colour and nothing moves
+ * or changes size, so a press draws no line; only keyboard focus draws an outline.
+ */
+async function heldPressScenario(cdp, origin) {
+  await setViewport(cdp, 1100, 760);
+  const steady = async (label) => {
+    const look = `(() => { const button = document.querySelector('[data-smoke-press]'); const rect = button.getBoundingClientRect(); const style = getComputedStyle(button); return JSON.stringify([rect.x, rect.y, rect.width, rect.height, style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor, style.borderTopWidth, style.outlineStyle, style.transform]); })()`;
+    await settle(cdp, "[data-smoke-press]");
+    const idle = await value(cdp, look);
+    const point = await value(
+      cdp,
+      `(() => { const rect = document.querySelector('[data-smoke-press]').getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+    );
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-smoke-press]').matches(':active')`,
+      5_000,
+      `${label} was not held`,
+    );
+    const held = await value(cdp, look);
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+    assertEqual(held, idle, `Holding ${label} changed its rim, outline, or box`);
+  };
+  await navigate(cdp, `${origin}/player/?package=debug-rewind`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === "One")`,
+  );
+  await evaluate(
+    cdp,
+    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === "One").setAttribute('data-smoke-press', '')`,
+  );
+  await steady("a choice");
+  await navigate(cdp, `${origin}/player/?package=forms`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.querySelectorAll('[data-form-fields] button').length === 43`,
+    15_000,
+    "The toggles did not appear",
+  );
+  // The fields scroll; the toggle is brought to the middle of their region, clear of its edges.
+  await evaluate(
+    cdp,
+    `const toggle = document.querySelector('[data-form-fields] button'); toggle.setAttribute('data-smoke-press', ''); toggle.scrollIntoView({ block: "center" });`,
+  );
+  await steady("a form toggle");
 }
 
 async function navigate(cdp, url) {

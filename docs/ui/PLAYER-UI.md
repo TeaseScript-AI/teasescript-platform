@@ -838,7 +838,8 @@ vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
 apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
-without moving the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate
+without moving the label; pressing reduces the depth. Neither changes the rim colour or the button's size; only keyboard
+focus (`:focus-visible`) draws an outline. Controls scroll away with the transcript; there is no separate
 button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
 following the latest content. After completion, the active controls disappear and the existing runtime transcript
 records the response. Completed choices and buttons carry a visible `›` marker in the transcript, distinct from typed
