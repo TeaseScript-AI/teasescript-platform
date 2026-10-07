@@ -26,7 +26,7 @@ import type {
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
-import { escapeMarkup, parseMessageMarkup } from "../message-markup.js";
+import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
@@ -64,8 +64,14 @@ import {
   type PreparedReferenceStep,
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
-import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
-import { boundedText, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
+import {
+  isVisibleScalar,
+  quotedText,
+  quotedTextWithin,
+  valueNotation,
+  visibleText,
+} from "./value-text.js";
+import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -1500,7 +1506,10 @@ export class Evaluator {
       (handle) => this.#handleNotation(handle, span),
       "say",
     );
-    return boundedText(() => escapeMarkup(notation), "say", span);
+    // Escaping puts a backslash before some characters, so only a notation that could get too long is measured first.
+    if (notation.length * 2 > MAX_TEXT_LENGTH)
+      checkTextLength(escapedMarkupLength(notation), "say", span);
+    return escapeMarkup(notation);
   }
 
   /**
@@ -1525,20 +1534,23 @@ export class Evaluator {
       const shown = shownPermanentButton(this.snapshot, handle.buttonId);
       return shown === undefined
         ? "<permanent button, removed>"
-        : `<permanent button ${quotedText(shown.button.text)}>`;
+        : quotedTextWithin("<permanent button ", shown.button.text, ">", "say", span);
     }
     const now = this.snapshot.currentSessionTimeMs;
     const time = (value: SerializableRuntimeValue | undefined): string =>
       value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
     if (isTimerHandle(handle)) {
       const timer = this.#timer(handle, span);
-      const name = timer.label === null ? "timer" : `timer ${quotedText(timer.label)}`;
       const left = `${time(timerProperty(timer, "remaining", now))} left`;
-      return timer.state === "running"
-        ? `<${name}, ${left}>`
-        : timer.state === "paused"
-          ? `<${name}, paused, ${left}>`
-          : `<${name}, ${timer.state}>`;
+      const rest =
+        timer.state === "running"
+          ? `, ${left}>`
+          : timer.state === "paused"
+            ? `, paused, ${left}>`
+            : `, ${timer.state}>`;
+      return timer.label === null
+        ? `<timer${rest}`
+        : quotedTextWithin("<timer ", timer.label, rest, "say", span);
     }
     const media = this.#media(handle, span);
     const at = `at ${time(mediaProperty(media, "position", now))}`;
@@ -1548,7 +1560,7 @@ export class Evaluator {
         : media.state === "paused"
           ? `paused ${at}`
           : media.state;
-    return `<media ${quotedText(media.source)}, ${state}>`;
+    return quotedTextWithin("<media ", media.source, `, ${state}>`, "say", span);
   }
 
   /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
@@ -1799,6 +1811,8 @@ export class Evaluator {
           const code = error.code === "cyclic" ? "TSR031" : "TSR013";
           throw fault(code, error.message, expression.span);
         }
+        // A text that would be too long fails as it does anywhere else.
+        if (error instanceof RuntimeFault && error.code === "TSR084") throw error;
         const message = error instanceof Error ? error.message : String(error);
         throw fault(
           "TSR012",
@@ -2072,13 +2086,13 @@ export class Evaluator {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
           const separator = (positional[0] as string | undefined) ?? ", ";
-          const texts = receiver.items.map((item) => this.#joinedText(item, span));
-          checkTextLength(
-            texts.reduce((length, text) => length + text.length, 0) +
-              separator.length * Math.max(0, texts.length - 1),
-            "join",
-            span,
-          );
+          let length = separator.length * Math.max(0, receiver.items.length - 1);
+          const texts = receiver.items.map((item) => {
+            const text = this.#joinedText(item, span);
+            length += text.length;
+            return text;
+          });
+          checkTextLength(length, "join", span);
           return texts.join(separator);
         }
         default:
@@ -2681,7 +2695,7 @@ export class Evaluator {
         `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    const shown = typeof value === "string" ? ` ${JSON.stringify(messageText(value))}` : "";
     const reason =
       typeof value === "string" && isTemporalConversionResult(result)
         ? (temporalTextProblem(result, value) ?? "")
@@ -2872,6 +2886,9 @@ export class Evaluator {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
     const text = call.positional[0];
     if (typeof text !== "string") throw new TypeError("escapeMarkup(text) requires a string.");
+    // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
+    if (text.length * 2 > MAX_TEXT_LENGTH)
+      checkTextLength(escapedMarkupLength(text), "escapeMarkup", call.span);
     return escapeMarkup(text);
   }
 
@@ -3140,10 +3157,11 @@ function missingKey(
   keyPlan: ExpressionPlan,
   span: SourceSpan,
 ): RuntimeFault {
-  const check = `contains(${planLabel(keyPlan) ?? quotedText(key)})`;
+  const shown = quotedText(messageText(key));
+  const check = `contains(${planLabel(keyPlan) ?? shown})`;
   return fault(
     "TSR061",
-    `Dictionary has no key ${quotedText(key)}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
+    `Dictionary has no key ${shown}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
     span,
   );
 }

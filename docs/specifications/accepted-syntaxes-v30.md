@@ -791,10 +791,12 @@ Rules:
   visibly negative, out-of-range, or empty argument, or an assignment such as `text.length = 0`. A value the compiler
   cannot know is checked when the operation runs, and an invalid one raises a runtime error.
 - A text holds at most 536,870,888 UTF-16 code units, what V8 holds, in every host. An operation that would make a
-  longer text, such as `repeat`, `padStart`, `replace`, `uppercase`, joining with `+`, `"${...}"`, `join`, or `say` of a
-  value, raises runtime error `TSR084` instead. Its message names the operation and, where it is known before the text is
-  built, how long the text would be: `Text too long: repeat(9007199254740991) would make a text of about
-  9,007,199,254,740,991 characters; a text can hold at most about 536 million.`
+  longer text, such as `repeat`, `padStart`, `replace`, `uppercase`, `escapeMarkup`, joining with `+`, `"${...}"`,
+  `join`, the notation of a script reference, the descriptions of `askForm`, or `say` of a value, raises runtime error
+  `TSR084` instead. Its message names the operation and, where it is known before the text is built, how long the text
+  would be: `Text too long: repeat(9007199254740991) would make a text of about 9,007,199,254,740,991 characters; a text
+  can hold at most about 536 million.` An error message that quotes text from the script cuts it after 1,024 characters
+  with `…`.
 
 ## 9. Commands
 **Status:** Accepted

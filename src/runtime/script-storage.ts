@@ -1,6 +1,7 @@
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
+import { messageText } from "./text-length.js";
 import { copySpan } from "./operations/support.js";
 import {
   cloneCapturedSerializableValue,
@@ -124,7 +125,8 @@ export function validateScriptStorageEntries(
     // EVIDENCE: validation: the guard above proved a plain object with exactly own key and value fields.
     const { key, value: stored } = entry as { key: unknown; value: unknown };
     if (typeof key !== "string") return `${entryPath}.key must be a string.`;
-    if (keys.has(key)) return `${path} contains the key ${JSON.stringify(key)} more than once.`;
+    if (keys.has(key))
+      return `${path} contains the key ${JSON.stringify(messageText(key))} more than once.`;
     if (sorted && previousKey !== null && !(previousKey < key))
       return `${path} must be sorted by key.`;
     keys.add(key);

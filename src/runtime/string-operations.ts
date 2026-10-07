@@ -15,7 +15,7 @@ import {
 } from "../text-operations.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import { boundedText, checkTextLength, MAX_TEXT_LENGTH } from "./text-length.js";
+import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import { describeRuntimeValue, isDuration } from "./value-predicates.js";
 import {
   createCapturedSerializableList,
@@ -212,20 +212,22 @@ export function callStringMethod(
       return text.trimStart();
     case "trimEnd":
       return text.trimEnd();
-    // Case mapping can make a text longer, "ß" becoming "SS", by an amount known only once it is mapped.
     case "uppercase":
-      return boundedText(() => text.toUpperCase(), "uppercase", span);
-    case "lowercase":
-      return boundedText(() => text.toLowerCase(), "lowercase", span);
+    case "lowercase": {
+      const upper = name === "uppercase";
+      // Case mapping can make a text longer, "ß" becoming "SS": at most three times in upper case and twice in lower
+      // case. Only a text that could get too long is measured first.
+      if (text.length * (upper ? 3 : 2) > MAX_TEXT_LENGTH)
+        checkTextLength(caseMappedLength(text, upper), name, span);
+      return upper ? text.toUpperCase() : text.toLowerCase();
+    }
     case "uppercaseFirst": {
       const codePoint = text.codePointAt(0);
       if (codePoint === undefined) return text;
       const firstText = String.fromCodePoint(codePoint);
-      return boundedText(
-        () => firstText.toUpperCase() + text.slice(firstText.length),
-        "uppercaseFirst",
-        span,
-      );
+      const first = firstText.toUpperCase();
+      checkTextLength(text.length - firstText.length + first.length, "uppercaseFirst", span);
+      return first + text.slice(firstText.length);
     }
     case "repeat":
       checkTextLength(text.length * numbers[0]!, `repeat(${numbers[0]!})`, span);
@@ -242,14 +244,22 @@ export function callStringMethod(
       // A lone high surrogate before a lone low one joins into one code point, so a fill or text with lone surrogates
       // at its edges can need another, shorter round; well-formed text is padded in one round. Only the new padding is
       // counted, so the work stays linear in the result.
-      while (length < target) {
+      for (let round = 0; length < target; round += 1) {
         const missing = target - length;
         const rest = utf16Offset(fill, missing % fillLength);
-        checkTextLength(
-          result.length + Math.floor(missing / fillLength) * fill.length + rest,
-          `${name}(${target})`,
-          span,
-        );
+        const units = result.length + Math.floor(missing / fillLength) * fill.length + rest;
+        if (units > MAX_TEXT_LENGTH) {
+          // This round is the last one, and its length the result's, unless a lone surrogate joins another between
+          // repeated fills or at the text's edge.
+          const end = fill.charCodeAt((rest > 0 ? rest : fill.length) - 1);
+          const joins =
+            (isHighSurrogate(fill.charCodeAt(fill.length - 1)) &&
+              isLowSurrogate(fill.charCodeAt(0))) ||
+            (name === "padStart"
+              ? isHighSurrogate(end) && isLowSurrogate(first)
+              : isHighSurrogate(last) && isLowSurrogate(fill.charCodeAt(0)));
+          throw textTooLong(`${name}(${target})`, span, round === 0 && !joins ? units : null);
+        }
         const padding = fill.repeat(Math.floor(missing / fillLength)) + fill.slice(0, rest);
         const before = name === "padStart" ? padding.charCodeAt(padding.length - 1) : last;
         const after = name === "padStart" ? first : padding.charCodeAt(0);
