@@ -4896,11 +4896,11 @@ getPlayerHistory
 This protected list may grow when new engine APIs are added. Editor autocomplete should distinguish grammar keywords, protected built-ins, and user-declared identifiers.
 
 ### Debug mode
+**Status:** Accepted (Owner decision, 2026-10-07)
 
-`debugMode` is a protected, read-only `boolean`: `true` while the host runs the session in Debug, otherwise `false`
-(owner decision, 2026-10-07). A script reads it like a variable but cannot declare, assign, or shadow it, and a host
-cannot configure a global or builtin of that name. The host may change it between two statements, so each read gives
-the current value; a value copied earlier keeps what it read.
+`debugMode` is a protected, read-only `boolean`: `true` while the host runs the session in Debug, otherwise `false`. A
+script reads it like a variable, and a host cannot configure a global or builtin of that name. The host may change it
+between two statements, so each read gives the current value.
 
 ```text
 let answer = askText "Type the line exactly"
