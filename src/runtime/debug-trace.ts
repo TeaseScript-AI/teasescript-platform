@@ -209,7 +209,11 @@ export interface RuntimeDebugTraceOptions {
 /** A source span as the runtime carries it: plan provenance, or a rich span copied from it. */
 type TraceSpan = PlanSourceLocation | SourceSpan;
 
-const STORE = Symbol("runtimeDebugTraceStore");
+/**
+ * The store of each context, kept here rather than on the context, so that nothing a host holds reaches a store, which
+ * runtime operations hand their state.
+ */
+const stores = new WeakMap<RuntimeDebugContext, TraceStore>();
 
 /**
  * An opt-in record of why runtime values have the values they have: a host-owned sidecar that runtime operations
@@ -218,14 +222,14 @@ const STORE = Symbol("runtimeDebugTraceStore");
  * See `docs/RUNTIME.md#debug-trace`.
  */
 export class RuntimeDebugContext {
-  /** @internal */
-  public readonly [STORE]: TraceStore;
+  readonly #store: TraceStore;
 
   public constructor(options: RuntimeDebugTraceOptions = {}) {
-    this[STORE] = new TraceStore(
+    this.#store = new TraceStore(
       positiveLimit(options.maxRecords, RUNTIME_DEBUG_TRACE_LIMITS.maxRecords),
       positiveLimit(options.maxAccountedBytes, RUNTIME_DEBUG_TRACE_LIMITS.maxAccountedBytes),
     );
+    stores.set(this, this.#store);
   }
 
   /**
@@ -233,41 +237,41 @@ export class RuntimeDebugContext {
    * runs. The next operation anchors the epoch at its snapshot.
    */
   public reset(origin: "start" | "restore"): void {
-    this[STORE].reset(origin);
+    this.#store.reset(origin);
   }
 
   public status(): RuntimeDebugTraceStatus {
-    return this[STORE].status();
+    return this.#store.status();
   }
 
   /** A retained record of the current epoch, or `null`. */
   public record(id: number): RuntimeDebugRecord | null {
-    return this[STORE].view(id);
+    return this.#store.view(id);
   }
 
   /** The output record of the `say` event with this sequence in the current epoch, or `null`. */
   public outputRecord(eventSequence: number): number | null {
-    return this[STORE].outputRecord(eventSequence);
+    return this.#store.outputRecord(eventSequence);
   }
 
   /** The newest retained output records, newest first. */
   public outputs(limit = 20): readonly number[] {
-    return this[STORE].newest("output", limit);
+    return this.#store.newest("output", limit);
   }
 
   /** The record of a variable's current version: a scope ID from the snapshot, or `"global"`. */
   public variableRecord(scope: number | "global", name: string): number | null {
-    return this[STORE].current(bindingKey(scope === "global" ? GLOBAL_SCOPE_ID : scope, name));
+    return this.#store.current(bindingKey(scope === "global" ? GLOBAL_SCOPE_ID : scope, name));
   }
 
   /** The record of the current version of a stored key in the session's storage view, if this epoch wrote it. */
   public storageRecord(key: string): number | null {
-    return this[STORE].current(storageKeyOf(key));
+    return this.#store.current(storageKeyOf(key));
   }
 
   /** The record of the `showImage` or `hideImage` that set the current Stage image. */
   public stageImageRecord(): number | null {
-    return this[STORE].stageImage();
+    return this.#store.stageImage();
   }
 }
 
@@ -278,9 +282,10 @@ export function openDebugTrace(
   snapshot: RuntimeSnapshot,
 ): TraceStore | null {
   if (context === undefined) return null;
+  if (context === null) throw new TypeError("debugTrace must be a RuntimeDebugContext.");
   // A context of another copy of this module is not this trace; the operation runs untraced rather than failing.
-  const store: unknown = context[STORE];
-  return store instanceof TraceStore && store.open(plan, snapshot) ? store : null;
+  const store = stores.get(context);
+  return store !== undefined && store.open(plan, snapshot) ? store : null;
 }
 
 /** Ends an operation: its result snapshot is the one the next operation continues from. */

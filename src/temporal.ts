@@ -594,7 +594,12 @@ export function temporalContextProblem(value: unknown): string | null {
 }
 
 /** Contexts that `frozenTemporalContext` made: deeply frozen, so snapshots can share them. */
-const frozenContexts = new WeakSet<TemporalContext>();
+const frozenContexts = new WeakSet<object>();
+
+/** Whether `value` is a context that `frozenTemporalContext` made, which every copy of state may share. */
+export function isFrozenTemporalContext(value: unknown): boolean {
+  return typeof value === "object" && value !== null && frozenContexts.has(value);
+}
 
 /**
  * A deeply frozen copy of a valid temporal context, or the context itself when this function froze it. Frozen contexts

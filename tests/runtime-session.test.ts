@@ -7,6 +7,7 @@ import {
   createCheckpoint,
   createFreshRuntimeSession,
   createRuntimeSession,
+  executeInstruction,
   observeTime,
   restoreRuntimeSession,
   run,
@@ -18,6 +19,7 @@ import {
   type RuntimeSession,
   type RuntimeSnapshot,
 } from "../src/index.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -311,4 +313,91 @@ test("an operation that throws ends its session, and argument errors leave it us
     run(plan, createImmediatePacingRuntimeSnapshot(plan)).events,
   );
   assert.equal(serializeCheckpoint(usable.exportCheckpoint()), checkpointOf(plan, snapshot));
+});
+
+test("a session's plan, options, debug context, and deep output cannot reach or change its state", () => {
+  const plan = compileValidPlan("let value = 1\nsay value, instant\nexit");
+  const other = compileValidPlan('say "replacement", instant\nexit');
+  const session = createRuntimeSession(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.equal(Reflect.set(session, "plan", other), false);
+  assert.equal(session.plan, plan);
+
+  // A debug context holds nothing that leads to the recorder, which sees the session's state.
+  const debugTrace = new RuntimeDebugContext();
+  assert.deepEqual(Reflect.ownKeys(debugTrace), []);
+
+  // Each option is read once, so the value checked is the value used.
+  let reads = 0;
+  const options = {
+    get instructionBudget() {
+      reads += 1;
+      return reads === 1 ? 10 : 0;
+    },
+    debugTrace,
+  };
+  const ran = session.run(options);
+  assert.equal(reads, 1);
+  assert.deepEqual(
+    ran.events,
+    run(plan, createImmediatePacingRuntimeSnapshot(plan), {}, { instructionBudget: 10 }).events,
+  );
+
+  // Deeply nested values publish and fork without exhausting the stack, as the snapshot API runs them.
+  const depth = 1_500;
+  const deep = compileValidPlan(
+    `let nested = ${"{ item: ".repeat(depth)}1${" }".repeat(depth)}\nsave nested as "deep"\nsay nested, instant\nexit`,
+  );
+  const initial = createImmediatePacingRuntimeSnapshot(deep, { persistentScriptStorage: true });
+  const nested = createRuntimeSession(deep, initial);
+  const legacy = run(deep, initial);
+  // Compared as JSON: node:assert itself recurses through nested values.
+  assert.equal(
+    serializeValidatedRuntimeJson(nested.run()),
+    serializeValidatedRuntimeJson({
+      events: legacy.events,
+      instructionsExecuted: legacy.instructionsExecuted,
+    }),
+  );
+  assert.equal(
+    serializeCheckpoint(nested.fork().exportCheckpoint()),
+    checkpointOf(deep, legacy.snapshot),
+  );
+});
+
+test("a fork keeps the property order of an imported snapshot, and an ended session refuses every fork", () => {
+  const plan = compileValidPlan(CHOICE_LOOP);
+  const initial = createImmediatePacingRuntimeSnapshot(plan);
+  // EVIDENCE: fixture: the same snapshot fields in reverse order, which import accepts as they are.
+  const reordered = Object.fromEntries(Object.entries(initial).reverse()) as never;
+  const parent = createRuntimeSession(plan, reordered);
+  const child = parent.fork();
+  assert.equal(
+    serializeCheckpoint(child.exportCheckpoint()),
+    serializeCheckpoint(parent.exportCheckpoint()),
+  );
+  child.executeInstruction();
+  assert.equal(
+    serializeCheckpoint(child.exportCheckpoint()),
+    checkpointOf(plan, executeInstruction(plan, reordered).snapshot),
+  );
+
+  const failing = new Error("random source failed");
+  const picks = compileValidPlan("let values = [1, 2]\nsay values.random\nexit");
+  const ended = createRuntimeSession(picks, createImmediatePacingRuntimeSnapshot(picks), {
+    capabilities: {
+      random: {
+        next: () => {
+          throw failing;
+        },
+      },
+    },
+  });
+  assert.throws(() => ended.run(), failing);
+  // EVIDENCE: fixture: null and a random source without `next` are deliberately malformed fork options.
+  const malformed = [null, { capabilities: { random: {} } }] as never[];
+  for (const options of malformed)
+    assert.throws(
+      () => ended.fork(options),
+      (error) => error instanceof RuntimeSessionError && error.cause === failing,
+    );
 });
