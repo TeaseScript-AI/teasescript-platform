@@ -6,7 +6,7 @@ let pause = 2
 // NOTE SX_TRY_WITHOUT_CATCH line 3: Legacy caught errors in this block; TeaseScript has no exceptions, so the block runs without its catch, and an error here stops the script.
 if true {
   let shown = "Hold still"
-  say shown, instant
+  say shown
   wait pause
 }
 say "Relax"

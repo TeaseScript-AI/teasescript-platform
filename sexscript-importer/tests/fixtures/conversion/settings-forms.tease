@@ -1,6 +1,16 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
 // Settings asked one after the other and saved right away become one form, each question the field's description.
 let takePics = load("game.takePics") == true
-let tries = load "game.tries"
+let tries = sexscriptLegacyLoadInteger("game.tries")
 if tries == null or tries == 0 {
   tries = 3
 }

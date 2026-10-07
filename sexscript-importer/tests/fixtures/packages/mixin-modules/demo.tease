@@ -46,10 +46,14 @@ function loadGreetingModule {
 let roundsInGreeting = 10
 function loadLaterModule {
   // Loaded after greeting.groovy, so this greet replaces the earlier one.
+  // A module reads the loading script's field as a number.
 }
 function greet {
   say "Hello again"
   pause()
+}
+function report {
+  say "Took ${reaction + 1} seconds"
 }
 function setupLaterModule(times = 2) {
   say "Setup ${times}"
@@ -79,6 +83,8 @@ function loadModules {
 }
 let rounds = 2
 let enabled = false
+// A field that a module reads keeps the button's seconds.
+let reaction: number = 0
 function pauseCycle(delay, cycleValue = 60) {
   wait delay / cycleValue
 }
@@ -88,4 +94,10 @@ greet()
 let cycle = "pauseCycle"
 sexscriptLegacyCall(cycle, [120])
 say "Rounds: ${rounds}"
+reaction = (showButton "Go") / 1 s
+if reaction < 15 {
+  say "Quick"
+}
+report()
+say "Bye"
 exit

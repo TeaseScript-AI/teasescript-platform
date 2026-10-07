@@ -1,0 +1,82 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacyLoadFloat(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toNumber(value))
+}
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
+// Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping the fraction toward
+// zero; a missing key read null.
+save "5.1" as "game.version"
+let lastVersion = sexscriptLegacyLoadFloat("game.version", 0)
+if sexscriptLegacyCompare(lastVersion, 4) > 0 {
+  say "Welcome back."
+}
+save 100.5 as "game.points"
+let points = 80
+if load("game.points") != null {
+  // NOTE SX_LOAD_KEEPS_VALUE line 9: Groovy stored null in 'points' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  points = sexscriptLegacyLoadInteger("game.points", points)
+}
+say "You have ${points} points."
+let missing = sexscriptLegacyLoadInteger("game.missing")
+if missing == null {
+  say "Nothing stored."
+}
+// A whole-number variable that reads a number widens to hold it.
+let version: number = 0
+function readVersion {
+  // NOTE SX_LOAD_KEEPS_VALUE line 15: Groovy stored null in 'version' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  version = sexscriptLegacyLoadFloat("game.version", version)
+}
+readVersion()
+say "Version ${version}"
+// Half of a stored whole number may hold a fraction, and so does what is left of it.
+save 13 as "game.total"
+function halves {
+  let s1 = sexscriptLegacyLoadInteger("game.total")
+  let s2: number = 0
+  let s3: number = 0
+  s2 = s1 / 2
+  s3 = s1 - s2
+  say "${s2} and ${s3}"
+}
+halves()
+// A read whose key a call computes, with a fallback that may fail, computes the key once, in a variable of a name the
+// script does not use.
+let sexscriptLegacyKey1 = "taken"
+function keyOf {
+  return "game.points"
+}
+let sexscriptLegacyKey2 = keyOf()
+let counted = sexscriptLegacyLoadInteger(sexscriptLegacyKey2, load(sexscriptLegacyKey2, default: 1 + 1))
+say "${counted} ${sexscriptLegacyKey1}"
+exit

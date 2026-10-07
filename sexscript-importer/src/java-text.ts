@@ -459,7 +459,7 @@ export function textCall(
     case "abs": {
       if (args.length !== 0 || !number) return undefined;
       const value = host.lower(receiver);
-      return value === null ? null : host.helper("abs", [value]);
+      return value === null ? null : call("abs", value);
     }
     case "intdiv": {
       // Groovy intdiv() divides whole numbers and drops the fraction toward zero, as toInteger() does.
@@ -509,18 +509,19 @@ function mathCall(
   args: readonly AstNode[],
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
-  const helpers = new Map<
-    string,
-    { helper: "sqrt" | "log" | "pow" | "cos" | "sin" | "exp"; arity: number }
-  >([
-    ["sqrt", { helper: "sqrt", arity: 1 }],
+  const helpers = new Map<string, { helper: "log" | "cos" | "sin" | "exp"; arity: number }>([
     ["log", { helper: "log", arity: 1 }],
-    ["pow", { helper: "pow", arity: 2 }],
     ["cos", { helper: "cos", arity: 1 }],
     ["sin", { helper: "sin", arity: 1 }],
     ["exp", { helper: "exp", arity: 1 }],
   ]);
   if (name === "random" && args.length === 0) return call("random");
+  // TeaseScript's sqrt() and pow() give Java's results, and stop the script where Java gave NaN or Infinity, as the
+  // helpers for the other functions do (V30 "Numeric functions").
+  if ((name === "sqrt" && args.length === 1) || (name === "pow" && args.length === 2)) {
+    const lowered = lowerEach(args, host);
+    return lowered === null ? null : call(name, ...lowered);
+  }
   const entry = helpers.get(name);
   if (entry === undefined || args.length !== entry.arity) return undefined;
   const lowered = lowerEach(args, host);
@@ -538,9 +539,7 @@ export function powerOperation(node: AstNode, host: JavaRuleHost): IrExpression 
     operands.filter((operand) => operand !== null),
     host,
   );
-  if (lowered === null) return null;
-  noteOnce(host, "SX_MATH_PRECISION", MATH_NOTE, node.span);
-  return host.helper("pow", lowered);
+  return lowered === null ? null : call("pow", ...lowered);
 }
 
 /** Every node lowered, or null when one could not be. */

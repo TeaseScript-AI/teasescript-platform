@@ -1,4 +1,7 @@
 function sexscriptLegacyItems(value) {
+  if value == null {
+    return []
+  }
   if value is string {
     return value.split("")
   }
@@ -67,4 +70,13 @@ function stars(countValue) {
   return "*".repeat(toInteger(countValue))
 }
 say "${code.substring(0, 3)}${code.substring(code.length - 2)}${code.substring(1, cut)}${code.substring(cut)}${sexscriptLegacyTextMinus(code, "O")}${stars(cut)}"
+// Groovy iterated null zero times.
+say "Pick one?"
+let picked: string? = "red"
+if (choose 0: "none", 1: "red") == "none" {
+  picked = null
+}
+for c in sexscriptLegacyItems(picked) {
+  say c
+}
 exit

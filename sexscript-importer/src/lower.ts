@@ -41,6 +41,10 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
 import { withParagraphs } from "./paragraphs.ts";
+import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
+import { withElapsedDurations } from "./elapsed-time.ts";
+import { withMessageHandles } from "./message-handles.ts";
+import { withParsedLoads } from "./parsed-loads.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1421,20 +1425,27 @@ export function lowerParsedFile(
     if (!callsFunction([typedStatements, others], "sexscriptLegacyTruth"))
       context.syntheticHelpers.delete("truth");
   }
+  // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
+  // kept as a duration, empty texts dropped,
+  // animations and counters made messages that change in place, legacy waits replaced by reading time, repeated texts
+  // shortened, texts folded into asks, paragraphs split, and `instant` taken away where it would cut a reading time
+  // short.
+  const { diagnostics } = context;
+  // A module's script variables, and those of a script that loads modules, are shared with other files.
+  const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
+  let texts = withParsedLoads(typedStatements, context.syntheticHelpers);
+  texts = withElapsedDurations(texts, diagnostics, shared);
+  texts = withoutBlankText(texts, diagnostics, mixin === null);
+  texts = withMessageHandles(texts, diagnostics, mixin !== null);
+  texts = withReadingTimes(texts, diagnostics);
+  texts = withoutRepeatedText(texts, diagnostics);
+  texts = withAskQuestions(texts, diagnostics);
+  texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
+  texts = withoutCutReadingTimes(texts, diagnostics);
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
-    ...withParagraphs(
-      withAskQuestions(
-        withoutRepeatedText(
-          withoutBlankText(typedStatements, context.diagnostics, mixin === null),
-          context.diagnostics,
-        ),
-        context.diagnostics,
-      ),
-      context.diagnostics,
-      options.keepParagraphs === true,
-    ),
+    ...texts,
   ];
   if (body?.kind !== "block") {
     addDiagnostic(
@@ -1613,7 +1624,25 @@ function lowerHelperCompilationUnit(
       lowered.leadingComments = leadingComments;
     statements.push(lowered);
   }
-  const typedStatements = withEnforcedTypes([...fieldStatements, ...statements], baseContext);
+  const { diagnostics } = baseContext;
+  const typedStatements = withoutCutReadingTimes(
+    withReadingTimes(
+      withMessageHandles(
+        withElapsedDurations(
+          withParsedLoads(
+            withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+            baseContext.syntheticHelpers,
+          ),
+          diagnostics,
+          true,
+        ),
+        diagnostics,
+        false,
+      ),
+      diagnostics,
+    ),
+    diagnostics,
+  );
   return {
     sourceName: file.sourceName,
     metadata: null,
@@ -2224,23 +2253,7 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withInstantShows(
-    withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context)),
-  );
-}
-
-/**
- * Legacy `show()` displayed its text at once, and the `wait()` right after it set the timing, so text shown directly
- * before a wait appears without reading time (converter owner decision 2026-10-05); counting loops keep their pace.
- */
-function withInstantShows(statements: IrStatement[]): IrStatement[] {
-  return statements.map((statement, index) => {
-    if (statement.kind !== "say") return statement;
-    const next = statements
-      .slice(index + 1)
-      .find((item) => item.kind !== "blank" && item.kind !== "comment");
-    return next?.kind === "wait" && !next.visible ? { ...statement, instant: true } : statement;
-  });
+  return withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context));
 }
 
 /**
@@ -2529,6 +2542,7 @@ function hasIrCall(expression: IrExpression): boolean {
     case "load":
       return true;
     case "button":
+    case "message":
       return true;
     case "literal":
     case "duration":
@@ -6094,6 +6108,8 @@ function lowerCallStatement(
       const legacyTimeout = buttonTimeout(args[1], node, context);
       if (legacyTimeout === null)
         return [unsupportedStatement(context, node, "SX_BUTTON_TIMEOUT", NEGATIVE_TIMEOUT)];
+      if (legacyTimeout === "computed")
+        return [{ kind: "expression", expression: helperCall("button", [label, timeout!]), span }];
       return [{ kind: "showButton", label, timeout: legacyTimeout ?? timeout, span }];
     }
     case "showPopup":
@@ -7210,6 +7226,7 @@ function lowerCollectionStatement(
               from: { kind: "literal", value: 0 },
               to: count,
               inclusive: false,
+              count: true,
             },
             body: loopBody,
             span,
@@ -7980,8 +7997,9 @@ const ENTRY_GETTERS = new Map([
 ]);
 
 /**
- * A collection a loop iterates. Groovy iterated a range up to the whole number at or below a fractional upper bound,
- * where TeaseScript stops, so a bound that may hold a fraction is floored.
+ * A collection a loop iterates. Groovy iterated a range up to the last whole step within a fractional upper bound,
+ * where TeaseScript needs a whole bound (#689), so a bound that may hold a fraction is floored, or for an exclusive
+ * range raised to the first whole number past it (`0..<2.5` went through 0, 1, and 2).
  */
 function lowerIterated(
   node: AstNode,
@@ -7993,7 +8011,7 @@ function lowerIterated(
   // Groovy iterated text by character.
   const type = node.kind === "range" || provenList ? 0 : inferType(node, context.types);
   if ((type & STRING) !== 0) {
-    if (onlyOf(type, STRING | NULL))
+    if (onlyOf(type, STRING))
       return {
         kind: "methodCall",
         target: collection,
@@ -8004,7 +8022,7 @@ function lowerIterated(
       context,
       "SX_ITEMS_OF_TEXT",
       "info",
-      "Groovy iterated text by character and a list by element; this value is not proven to be one of them, so a helper splits text into its characters.",
+      "Groovy iterated text by character, a list by element, and null not at all; this value is not proven to be one of them, so a helper splits text into its characters and makes null an empty list.",
       node.span,
     );
     return useHelper(context, "items", [collection]);
@@ -8016,13 +8034,11 @@ function lowerIterated(
     context,
     "SX_RANGE_FLOOR",
     "info",
-    "Groovy iterated this range up to the whole number at or below its upper bound, which may hold a fraction; the bound is floored.",
+    "Groovy iterated this range up to the last whole step within its upper bound, which may hold a fraction; the bound is rounded to that step, floor for an inclusive range and ceil for an exclusive one.",
     node.span,
   );
-  return {
-    ...collection,
-    to: { kind: "call", name: "floor", positional: [collection.to], named: {} },
-  };
+  const name = collection.inclusive ? "floor" : "ceil";
+  return { ...collection, to: { kind: "call", name, positional: [collection.to], named: {} } };
 }
 
 /**
@@ -11531,7 +11547,7 @@ function lowerObjectMethodCallExpression(
       const args = lowerArguments(argumentsNodes, context);
       return args === null ? null : useHelper(context, helper.name, args);
     }
-    if ((name === "ceil" || name === "floor") && argumentsNodes.length === 1) {
+    if ((name === "ceil" || name === "floor" || name === "abs") && argumentsNodes.length === 1) {
       const args = lowerArguments(argumentsNodes, context);
       return args === null ? null : { kind: "call", name, positional: args, named: {} };
     }
@@ -12173,7 +12189,6 @@ const TEXT_ONLY_METHODS = new Set(["contains", "count", "indexOf", "lastIndexOf"
 
 /** Java Math helpers without an accepted TeaseScript built-in. */
 const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
-  ["abs", { name: "abs", arity: 1 }],
   ["max", { name: "max", arity: 2 }],
   ["min", { name: "min", arity: 2 }],
 ]);
@@ -14342,6 +14357,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     if (key === null) return null;
     if (call.name === "loadInteger" || call.name === "receiveInteger")
       return { kind: "load", key, integer: true };
+    if (call.name === "loadFloat") return { kind: "load", key, number: true };
     const shape = storageKeyShape(call.arguments[0]!);
     if (call.name === "loadString" && shape !== null && context.nonTextKeys.has(shape)) {
       addDiagnostic(
@@ -14516,6 +14532,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         args.length === 2 ? buttonTimeout(call.arguments[1], node, context) : undefined;
       if (legacyTimeout === null)
         return unsupportedExpression(context, node, "SX_BUTTON_TIMEOUT", NEGATIVE_TIMEOUT);
+      if (legacyTimeout === "computed") return helperCall("button", [args[0]!, args[1]!]);
       if (legacyTimeout !== undefined) {
         // A zero timeout always returned 0 seconds, after the button's 10 ms.
         const root = context.statementRoot;
@@ -14705,19 +14722,21 @@ function buttonTimeout(
   timeoutNode: AstNode | undefined,
   node: AstNode,
   context: LowerContext,
-): IrExpression | null | undefined {
+): IrExpression | null | undefined | "computed" {
   if (timeoutNode === undefined) return undefined;
   const value = staticNumber(timeoutNode, context);
   if (value !== undefined && value < 0) return null;
   if (value === undefined) {
+    // A timeout known only at runtime may be zero, which TeaseScript rejects (#531): a helper keeps the legacy button.
+    context.syntheticHelpers.add("button");
     addDiagnostic(
       context,
-      "SX_BUTTON_TIMEOUT",
-      "warning",
-      "With a zero timeout the legacy button stayed visible for its 10 ms safety margin; TeaseScript rejects a timeout that is not positive (#531), so this button stops the script if its computed timeout is zero or negative.",
+      "SX_BUTTON_COMPUTED_TIMEOUT",
+      "info",
+      "The legacy button with a timeout known only at runtime goes through a helper that keeps a zero timeout's 10 ms button and result of 0 seconds; a negative timeout stops the script, as it did in legacy.",
       node.span,
     );
-    return undefined;
+    return "computed";
   }
   if (value !== 0) return undefined;
   addDiagnostic(

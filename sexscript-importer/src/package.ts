@@ -46,6 +46,7 @@ import {
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
+  "abs",
   "askBoolean",
   "askBooleans",
   "askImage",
@@ -63,11 +64,13 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "max",
   "min",
   "openUrl",
+  "pow",
   "random",
   "randomInteger",
   "removePermanentButton",
   "round",
   "showButton",
+  "sqrt",
   "takePhoto",
   "toBoolean",
   "toDate",

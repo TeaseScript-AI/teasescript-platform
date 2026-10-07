@@ -1,0 +1,145 @@
+// An animation, texts that each add only punctuation with only waits between them, is one message whose text each
+// step changes in place; the waits between the steps stay as they are, also short ones.
+showButton "Start"
+let line = say "Wait.", instant
+wait 1
+line.text += " ."
+wait 1
+line.text += " ."
+wait 1
+// A text that repeats the animation's last step says only what it adds.
+say "Now begin."
+// A text with a value computed anew, such as a random draw, is no step of an animation.
+say "Pick ${randomInteger(0..100)}.", instant
+wait 1
+say "Pick ${randomInteger(0..100)}..", instant
+wait 1
+let line2 = say "Thinking .", instant
+wait 0.5
+line2.text = "Thinking  .."
+wait 0.5
+// A loop that shows the line said before it again with a new count changes that line in place.
+let message = "Count them."
+let x = 0
+let counter = say """
+  ${message}
+
+  ${x}
+""", instant
+wait 3000 ms
+for it in 1..=3 {
+  x += 1
+  counter.text = """
+    ${message}
+
+    ${x}
+  """
+  playAudio "swat.wav"
+  wait 1000 ms
+}
+let counter2 = say "20 jerks", instant
+let i = 19
+while i > 17 {
+  counter2.text = "${i} jerks"
+  wait 1
+  i -= 1
+}
+// A loop whose text is no new count of the line before it, or that follows a call, says each text as a message of its
+// own, as does a text that is no text.
+say "Get ready!"
+for s in 1..=2 {
+  say "Shock ${s} of 2"
+  wait 5
+}
+let questions = ["Ready?", "Sure?"]
+say "Question 1"
+let q = 1
+while q <= 2 {
+  say "Question ${q}: ${questions[q - 1]}"
+  wait 5
+  q += 1
+}
+function countdown {
+  say "Get set"
+}
+say "Round 0"
+countdown()
+for r in 1..=2 {
+  say "Round ${r}"
+  wait 5
+}
+let n = 0
+say n
+for k in 1..=2 {
+  n += 1
+  say n
+  wait 5
+}
+// Nor does a loop whose text grows by text, or whose other values the loop, its condition, or the statements before it
+// change, nor an animation whose wait runs script code.
+let story = "First"
+say "Story: ${story}"
+for p in 1..=2 {
+  story += " next"
+  say "Story: ${story}"
+  wait 5
+}
+let title = "One"
+say "Chapter ${title}: 0"
+let c = 1
+while c <= 2 {
+  title = "Two"
+  say "Chapter ${title}: ${c}"
+  wait 5
+  c += 1
+}
+let words = ["First", "Second", "Third"]
+say "Word ${words[0]} count 0"
+for w in 1..=2 {
+  let dropped = words.removeAt(0)
+  say "Word ${words[0]} count ${w}"
+  wait 5
+}
+let chapter = "First"
+function advance {
+  chapter = "Second"
+}
+say "Chapter ${chapter}: 0"
+for a in 1..=2 {
+  advance()
+  say "Chapter ${chapter}: ${a}"
+  wait 5
+}
+let part = "First"
+say "Part ${part}: 0"
+part = "Second"
+for p in 1..=2 {
+  say "Part ${part}: ${p}"
+  wait 5
+}
+let step = 0
+function ready {
+  part = "Step ${step}"
+  return step < 3
+}
+say "Part ${part}: ${step}"
+while ready() {
+  step += 1
+  say "Part ${part}: ${step}"
+  wait 5
+}
+function pause {
+  part = "Third"
+  return 1
+}
+say "${part}."
+wait pause()
+say "${part}.."
+function floorValue {
+  part = "Fourth"
+  return 1
+}
+say "${part}.", instant
+wait floorValue()
+say "${part}.."
+exit

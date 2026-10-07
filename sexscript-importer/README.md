@@ -33,8 +33,9 @@ source that is legally and technically appropriate.
 - Java 17 or newer and the Groovy 2.5.21 `groovy` and `groovy-json` JARs (the version SexScript embeds). The parser
   helper uses `SEXSCRIPT_GROOVY_JAR` and `SEXSCRIPT_GROOVY_JSON_JAR`, defaulting to the Maven local-repository layout
   under `~/.m2/repository/org/codehaus/groovy/`. See [`parser-groovy/README.md`](parser-groovy/README.md).
-- For `--compile`, `--run`, and the compiler-checked fixtures: the repository build (`npm run build:typescript` in the
-  repository root), which provides the real TeaseScript compiler and runtime under `dist/`.
+- The repository build (`npm run build:typescript` in the repository root), which provides the real TeaseScript
+  compiler and runtime under `dist/` for `--compile`, `--run`, and the compiler-checked fixtures, and the message-markup
+  parser that measures a text's reading time for every conversion.
 
 The parser output is cached per file content, parse mode, and parser version (the exporter source and the Groovy
 JARs), so only a new or changed file starts a JVM. The cache lives in `~/.cache/sexscript-importer/groovy-ast/`

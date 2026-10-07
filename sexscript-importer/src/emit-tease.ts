@@ -387,6 +387,9 @@ export function emitExpression(expression: IrExpression): string {
       return `(${emitChoice(expression)})`;
     case "button":
       return `(${emitButton(expression.label, expression.timeout)})`;
+    case "message":
+      // Inside an expression a `say` value takes the bounded form (V30 "Updatable messages").
+      return `say${expression.speaker === undefined ? "" : ` as ${expression.speaker}`}(${emitExpression(expression.value)}${expression.instant === true ? ", instant" : ""})`;
     case "range": {
       const operator = expression.inclusive ? "..=" : "..";
       return `${operand(expression.from, RANGE + 1)}${operator}${operand(expression.to, RANGE + 1)}`;
@@ -656,6 +659,9 @@ function emitButton(label: IrExpression, timeout: IrExpression | null): string {
 /** A complete statement value, where a compact choice, button, read, or ask needs no parentheses. */
 function emitValue(expression: IrExpression): string {
   if (expression.kind === "button") return emitButton(expression.label, expression.timeout);
+  // A whole statement value takes the compact form, its pacing up to the end of the statement.
+  if (expression.kind === "message")
+    return `say ${expression.speaker === undefined ? "" : `as ${expression.speaker} `}${emitExpression(expression.value)}${expression.instant === true ? ", instant" : ""}`;
   if (expression.kind === "load")
     return expression.defaultValue === undefined
       ? `load ${operand(expression.key, POSTFIX)}`

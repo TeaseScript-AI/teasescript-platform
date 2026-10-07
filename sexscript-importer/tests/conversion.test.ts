@@ -42,6 +42,8 @@ import {
   type TeaseRunner,
 } from "../src/runtime-check.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
+import { lowerParsedFile } from "../src/lower.ts";
+import { repositoryBuildUrl } from "../src/repository-build.ts";
 
 const parserUnavailable = groovyParserUnavailableReason();
 const compilerResult = await loadRepositoryCompiler().then(
@@ -904,7 +906,9 @@ test(
         // An assembled unit's internal script, such as an add-on, is no entry: the package starts at the story.
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
-        assert.equal(emitTease(unit.main.menu), 'goto "Story/start.tease"\n');
+        // The entry holds the package's global helpers and goes straight to the story, with no menu.
+        const menu = emitTease(unit.main.menu);
+        assert.ok(menu.endsWith('\ngoto "Story/start.tease"\n') && !menu.includes("choose"), menu);
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.
@@ -1453,6 +1457,202 @@ async function convert(
   const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], options);
   assert.ok(program !== undefined);
   return program;
+}
+
+// With the Player's default pacing, a text said at once (`instant`) ends the reading time of the text before it, so a
+// text whose legacy wait the reading time replaced is read in full on every path: after other statements, across a
+// call, after an ask that a condition may skip, on a loop's next pass after `continue`, where computing a text, a wait,
+// a value after an ask, or what media show says it, and before a beat, which keeps its timing (docs/RUNTIME.md "Pacing
+// gate").
+test(
+  "a reading time that replaced a legacy wait runs in full before the next text",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probes use.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime, completeAction } =
+      runtime as PacedRuntime;
+    const sources = {
+      statement: 'show("Good.")\nwait(1)\nint n = 20\nshow("Hold.")\nwait(20)',
+      call: 'def hold = { show("Hold."); wait(20) }\nshow("Good.")\nwait(1)\nhold()',
+      values:
+        'def t = "a b c d e f g h i j"\nshow(t)\nwait(1)\nint x = 1\nwait(2)\nshow("Hold.")\nwait(20)',
+      skippedAsk:
+        'show("Good.")\nwait(1)\nif (false && getFile(null) != null) { show("No.") }\nshow("Hold.")\nwait(20)',
+      continued:
+        'for (int i = 0; i < 2; i++) {\n show("Hold " + i)\n wait(20)\n show("Good.")\n wait(1)\n if (i == 0) continue\n wait(10)\n}',
+      computedText:
+        'def content = { show("Good."); wait(1); return "Hold." }\nshowButton("Start")\nshow(content())\nwait(20)',
+      computedWait:
+        'def delay = { show("Good."); wait(1); return 1 }\nshowButton("Start")\nshow("Hold.")\nwait(delay())\nshow("Next.")\nwait(20)',
+      beat: 'show("Good.")\nwait(1)\nfor (int i = 3; i > 0; i--) {\n show("Starting in " + i)\n wait(1)\n}',
+      longBeat: 'show("Good.")\nwait(1)\nshow("3")\nwait(3)',
+      number: 'show("Good.")\nwait(1)\nshow(3)\nwait(1)',
+      animation: 'show("Good.")\nwait(1)\nshow("Wait.")\nwait(1)\nshow("Wait..")\nwait(1)',
+      splitBeat: 'show("Good.")\nwait(1)\nshow("!\\n\\n?")\nwait(1)',
+      splitTick:
+        'for (int i = 3; i > 0; i--) {\n show("First part.\\n\\nSecond part.\\n\\nStarting in " + i)\n wait(1)\n}',
+      media:
+        'def image = { show("Good."); wait(1); return "test.jpg" }\nshowButton("Start")\nsetImage(image())\nshow("Hold.")\nwait(20)',
+      askThenText:
+        'def content = { show("Good."); wait(1); return true }\nshowButton("Start")\ndef same = getBoolean("Ready?") == content()\nshow("Hold.")\nwait(20)',
+    };
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-reading-"));
+    try {
+      for (const [name, source] of Object.entries(sources)) {
+        const file = path.join(directory, `${name}.groovy`);
+        writeFileSync(file, `${source}\n`);
+        const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+        const { plan } = compileSource(tease);
+        assert.ok(plan !== undefined, name);
+        const cut: string[] = [];
+        const note = (events: readonly PacedEvent[]): void => {
+          for (const event of events)
+            if (event.settlement?.settlementKind === "supersededByInstantOutput") cut.push(name);
+        };
+        let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+        note(step.events);
+        for (let turn = 0; turn < 40 && step.snapshot.status === "waiting"; turn += 1) {
+          const action = step.snapshot.foregroundAction;
+          // A button is pressed and a choice takes its first option at once; time runs to the next deadline.
+          const answered =
+            action?.kind === "interaction"
+              ? completeAction(plan, step.snapshot, {
+                  actionId: action.actionId,
+                  actionKind: "interaction",
+                  interactionKind: action.interactionKind,
+                  payload:
+                    action.interactionKind === "button"
+                      ? { kind: "activate" }
+                      : { kind: "selectedOption", optionIndex: 0 },
+                })
+              : observeTime(plan, step.snapshot, action?.deadlineMs ?? NaN);
+          note(answered.events);
+          step = run(plan, answered.snapshot);
+          note(step.events);
+        }
+        assert.equal(step.snapshot.status, "halted", name);
+        assert.deepEqual(cut, [], tease);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// Legacy loadInteger() and loadFloat() parsed the stored text, loadInteger() dropping the fraction toward zero, and left
+// the stored text as it was; a value the script used for a missing key stays as it is. Half of a whole number keeps
+// its fraction through a later subtraction (RCA 2026-10-07 #1, #2, #4).
+test(
+  "typed storage reads give the values legacy gave and keep what is stored",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probes use.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-loads-"));
+    try {
+      const file = path.join(directory, "loads.groovy");
+      writeFileSync(
+        file,
+        [
+          'save("game.version", "5.1")',
+          'show("" + loadInteger("game.version") + " " + loadFloat("game.version") + " " + loadString("game.version"))',
+          'save("game.points", 100.5)',
+          "def points = 80",
+          'if (loadInteger("game.points") != null) points = loadInteger("game.points")',
+          'def missing = loadInteger("game.missing")',
+          "if (missing == null) missing = 0.5",
+          'save("game.total", 13)',
+          'def s1 = loadInteger("game.total")',
+          "def s2 = 0",
+          "def s3 = 0",
+          "s2 = s1 / 2",
+          "s3 = s1 - s2",
+          "def zero = 0",
+          'def kept = loadInteger("game.points")',
+          "if (kept == null) kept = 1 / zero",
+          'show("" + points + " " + missing + " " + s2 + " " + s3 + " " + kept)',
+          "def unset = null",
+          "def ratio = 0",
+          'ratio = loadFloat("game.ratio")',
+          "if (ratio == null) ratio = unset",
+          'if (ratio == null) show("no ratio")',
+          "def reads = 0",
+          'def keyOf = { reads++; return "game.points" }',
+          "def counted = loadInteger(keyOf())",
+          "if (counted == null) counted = 1 + 1",
+          'def total = loadInteger("game.total")',
+          'def version = loadFloat("game.version")',
+          "if (version == null) version = total",
+          'show("" + counted + " " + reads + " " + (version + 1))',
+          "",
+        ].join("\n"),
+      );
+      const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+      const { plan } = compileSource(tease);
+      assert.ok(plan !== undefined, tease);
+      const said: string[] = [];
+      const note = (events: readonly PacedEvent[]): void => {
+        for (const event of events)
+          if (event.kind === "say" && event.text !== undefined) said.push(event.text);
+      };
+      let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      note(step.events);
+      for (let turn = 0; turn < 20 && step.snapshot.status === "waiting"; turn += 1) {
+        const observed = observeTime(
+          plan,
+          step.snapshot,
+          step.snapshot.foregroundAction?.deadlineMs ?? NaN,
+        );
+        note(observed.events);
+        step = run(plan, observed.snapshot);
+        note(step.events);
+      }
+      assert.equal(step.snapshot.status, "halted", tease);
+      assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5 100", "no ratio", "100 1 6.1"], tease);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+interface PacedEvent {
+  kind?: string;
+  text?: string;
+  settlement?: { settlementKind?: string };
+}
+interface PacedSnapshot {
+  status: string;
+  foregroundAction?: {
+    kind?: string;
+    actionId?: number;
+    interactionKind?: string;
+    deadlineMs?: number;
+  } | null;
+}
+interface PacedCompletion {
+  actionId?: number | undefined;
+  actionKind: "interaction";
+  interactionKind?: string | undefined;
+  payload: { kind: "activate" } | { kind: "selectedOption"; optionIndex: number };
+}
+interface PacedRuntime {
+  compileSource(source: string): { plan?: unknown };
+  createFreshRuntimeSnapshot(plan: unknown, options: { seed: number }): PacedSnapshot;
+  run(plan: unknown, snapshot: PacedSnapshot): { snapshot: PacedSnapshot; events: PacedEvent[] };
+  observeTime(
+    plan: unknown,
+    snapshot: PacedSnapshot,
+    now: number,
+  ): { snapshot: PacedSnapshot; events: PacedEvent[] };
+  completeAction(
+    plan: unknown,
+    snapshot: PacedSnapshot,
+    completion: PacedCompletion,
+  ): { snapshot: PacedSnapshot; events: PacedEvent[] };
 }
 
 function groovyParserUnavailableReason(): string | false {

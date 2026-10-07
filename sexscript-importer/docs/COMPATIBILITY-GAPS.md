@@ -55,6 +55,7 @@ implemented):
 | ternary / Elvis | `if` statements with one assignment or statement per branch |
 | implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
 | `list[getRandom(list.size())]`, `list[-1]` | `list.random`, `list.last` / `list[list.length - n]` |
+| `Math.sqrt(x)`, `Math.pow(x, y)`, `x ** y`, `Math.abs(x)`, `x.abs()` | `sqrt(x)`, `pow(x, y)`, `abs(x)` (V30 "Numeric functions"), which stop the script where Java gave NaN or Infinity; `Math.log`, `exp`, `sin`, and `cos` stay generated helpers with Java's radians |
 | `collect`, `findAll`, `find`, `any`, `every`, `sum`, `times`, `eachWithIndex` with closures; `collect()` without one | ordinary `for` / `repeat` loops |
 | closures stored in data or passed as callbacks | string action IDs (the forwarded function's name) plus one generated dispatcher function |
 | `return new Object() { fields; methods }.main()` | globals, functions, and the entry method's statements as the script flow |
@@ -86,7 +87,7 @@ implemented):
 | a variable that receives a function result that may be absent, or a storage read that the script then tests for null; `def b = a` where `a` may be null | `let x: integer? = 7`, since a possibly null value fits only an optional place (ADR 0021 rule 1.9); `let b: string? = a`, since the compiler narrows `a` at the declaration. Other storage reads are checked at runtime when stored |
 | `text += value` | `text = "${text}${value}"` |
 | a list literal mixing types, such as Groovy pairs `[["late", 2], ["rude", 4]]` | `let pairs: (string \| integer)[][] = [["late", 2], ["rude", 4]]` (ADR 0021 rule 1.3), with a note when later elements add a type |
-| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k`, and another storage read `toInteger(load(k))` |
+| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = sexscriptLegacyLoadInteger(k)` (below) |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
 | `setInfos(version, title, summary, author, status, color, language, tags)` | the `---` file header (V30 §41, #575): `title`, `author`, `description`, and the legacy tags, which named a script in the legacy catalog, as `keywords` rather than the selection `tags`; the version, status, color, and language have no header field and stay a comment after it, as does a value the script computed (`SX_METADATA_DYNAMIC`, 0 corpus sites); text joined from literals with `+` counts as written. All 23 corpus calls convert |
@@ -99,9 +100,10 @@ implemented):
 | the methods of a package-local helper class, such as `Domme3Class` | `global function`s in the class's own file (`Domme3/Domme3Class.tease`), with its static fields of literal values as `global`s, where other files call them; a method that reads other state or dispatches closure values is copied into each script that calls it |
 | the importer's own generated helpers (`sexscriptLegacy*`) and the system speaker | one `global function` each in `main.tease`, with the state they share across files, such as the switch button's ID, as a `global`; the background-sound helpers stay in each file, since the legacy player stopped a script's sounds when it ended |
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
-| `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
+| `showButton(text, s)` used as a value (seconds until the click) | the duration where the seconds are only compared with numbers, waited for, or a timeout: `(showButton text, timeout: 30) >= 30 s`, `let t = showButton text` with `while t < 15 s`; elsewhere `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
 | `x = loadInteger(k)` followed by `if (x == null) x = d`, also further down a settings block where the code between neither uses `x`, nor calls script code, nor leaves the block | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`, and the online `receive*` reads) |
+| `loadInteger(k)`, `loadFloat(k)` (legacy parsed the stored text as a number, `loadInteger` dropping the fraction toward zero, so `"5.1"` read 5.1 and 100.5 read 100; a missing key read null) | a generated helper, `sexscriptLegacyLoadInteger(k)` or `sexscriptLegacyLoadFloat(k)`, that parses a stored value, leaves storage as it is, and gives null for a missing key, or the value the script used instead (`sexscriptLegacyLoadInteger(k, d)` for `x = loadInteger(k)` then `if (x == null) x = d`), unparsed; a `d` that may fail or have an effect, such as `level * 2`, runs only for a missing key, as legacy ran it, through a plain read (`sexscriptLegacyLoadInteger(k, load(k, default: level * 2))`), whose key a variable computed once holds where computing it twice could differ (`let sexscriptLegacyKey1 = keyOf()`); the parsed value passes through `sexscriptLegacyValue`, so its type stays as open as a `load`'s; a null test stays `load(k) == null`. A whole-number variable that receives a `loadFloat()` read with a default is declared a number, also where the default may be null, whose read then stays open as one without a default, and so is one that receives a subtraction, product, or remainder of a value not proven a number and a number (`s3 = s1 - s2` after `s2 = s1 / 2`) |
 | `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
 | `loadBoolean(k)` of a key under which the package saves a number or a text (legacy read it as text, true only for "true") | a helper that reads the stored value the same way, a missing one as false, with a note (`SX_LOAD_BOOLEAN_TEXT`); keys match by shape, so `"p" + i + ".chosen"` matches a save under `"p" + 1 + ".chosen"` |
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
@@ -127,22 +129,31 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   becomes the question of its ask, which the Player says before the field opens (#634): `askInteger "How many?",
   default: 3`, also inside an expression as `askInteger("How many?", default: 3)`, where the text is said right before
   the ask with the ask's speaker; otherwise it stays a `say` before the statement. The report counts the asks that
-  took their question (`askQuestions`, `SX_ASK_QUESTION`; 890 in 108 selected units). The same holds for the photo
+  took their question (`askQuestions`, `SX_ASK_QUESTION`; 892 in 108 selected units). The same holds for the photo
   that `askImage` asks for (#636): a text said right before it fills a missing message, and one that its message
   repeats goes. A text is not folded into an ask across something with an effect that the statement runs first, as in
   `n = before() + getInteger(null)`.
 - Paragraphs (owner decision 2026-10-07): the legacy display showed one text, so authors separated what a chat shows
   as separate messages with a blank line. A text whose literal parts hold a blank line becomes one `say` per paragraph,
   in order, with the same speaker; a blank line inside an interpolated value or a text built at runtime stays. The
-  pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it, and the
-  `wait` stays after the last piece. An ask's question says its earlier paragraphs before the ask and keeps the last as
-  the question (also `askImage`'s message); a form's question keeps its first paragraph and says the others after the
-  fields as its `outro:`, where neither they nor the fields have effects (the outro is computed after the fields).
+  pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it. The wait
+  started when the whole text appeared, so a kept wait after the last piece keeps only what the reading time of the
+  earlier pieces leaves, in whole seconds, and goes when nothing is left (owner decision 2026-10-07;
+  `readingWaits.shortened` and `dropped`). An ask's question (also `askImage`'s message) is the last paragraph that ends with a
+  question mark, ignoring closing brackets, quotes, and markup, or else the last that starts with an instruction or
+  question word (Enter, Type, Choose, Select, Pick, Write, Tell, Give, Name, How, What, Which, Please, Input, Insert,
+  Answer, Click, Press, Set); the paragraphs before it are said before the ask, and the remarks after it, such as
+  `(default is 2, current is 3)` or a legend, stay in the question. Where no paragraph qualifies, as in non-English
+  scripts without a question mark, the last paragraph is the question (owner decision 2026-10-07, option E;
+  `SX_PARAGRAPH_QUESTION`, `_REMARKS`, `_FALLBACK`, counted as `questions`, `questionRemarks`, `questionFallbacks`).
+  A form's question keeps its first paragraph and says the others after the fields as its `outro:`, where neither they
+  nor the fields have effects (the outro is computed after the fields).
   `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
   whose blank lines lay them out stay whole: two aligned lines, a ruled line, an empty box (`[  ]`), a table row, or a
   block of value rows (`Score: 12`, `Time unit = ${unit}`; three, or two that make up half the text). A unit whose
-  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). Corpus: 10,585 says split in 172 units,
-  172 questions in 50 units, 254 single paragraphs trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
+  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). Corpus: 10,635 says split in 172 units,
+  172 questions in 50 units (71 that ask, 49 with remarks after them, 52 by the fallback), 263 single paragraphs
+  trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
   outros (no form question in the corpus has a literal blank line); report counter `paragraphs`.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
@@ -229,9 +240,15 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - `break`/`continue` with a label leave an outer loop; TeaseScript jumps affect only the innermost loop, so they are
   reported. A statement that only computes a value (often `==` written for `=`) had no effect and is dropped with a
   `NOTE`.
+- A loop's range and a `randomInteger` draw end at a whole number (#689). A bound written in the loop or the draw
+  that may hold a fraction, by the importer's types, ends where Groovy stopped: `n.times` loops `0..toInteger(n)`, an
+  inclusive range ends at `floor(b)`, an exclusive one at `ceil(b)` (`0..<2.5` went through 0, 1, and 2;
+  `SX_RANGE_FLOOR`), as does `nextInt(b)`, which Java called with a whole number only; whole bounds stay as written.
+  A range kept in a variable and a descending range with a fractional bound are not rounded.
 - Known residual differences, found by adversarial review and left as is because they need unusual input or fail
   loudly: Groovy integer ranges contain only whole numbers, while a converted range case also matches a fractional
-  value; a `times` count or list index that is fractional or negative only at runtime fails in TeaseScript; two
+  value; a `times` count or list index that is fractional, where the importer cannot tell, or negative only at runtime
+  fails in TeaseScript; two
   scripts that load the same module directory share one set of function and field facts; a variable that shadows
   `Calendar` is still read as the Calendar class; functions authored with the importer's `sexscriptLegacy` prefix
   collide with generated helpers; a closure parameter declared `int` does not truncate later stores, as a typed local
@@ -248,12 +265,22 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` rounds ties away from zero (V30 §13),
   so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`, 7 corpus sites).
 - Legacy `showButton()` returned the seconds until the click as a number; the TeaseScript result is a duration
-  (#513, #531), so a used result is divided by `1 s`, 49 corpus sites. A Groovy `int` that stores it truncates, as
-  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3. A zero timeout kept the legacy
+  (#513, #531). Where the seconds are only compared with numbers the duration stays and the numbers become seconds
+  (owner decision 2026-10-07): a comparison of the button with a number literal, `(showButton "Done", timeout: 30) >=
+  30 s` (`SX_BUTTON_DURATION`, counted as `buttonDurations.compared`), and a variable that only buttons and number
+  literals write and that only comparisons with number literals, waits, and button timeouts read, `let t = showButton
+  "Done"` with `while t < 15 s` (`SX_BUTTON_DURATION_VARIABLE`, `buttonDurations.variables`); a Groovy `int` that
+  stores the seconds does so only where its truncation changes nothing, compared by `<` or `>=` with a whole number.
+  Elsewhere, where a plain number is needed (arithmetic, text, storage, a function's result, a comparison with a
+  computed number, a parameter's default) or other files may read the variable (a module's or a class's, or one of a
+  script that loads modules), the result is divided by `1 s`, and a Groovy `int` truncates it as Groovy did: `t =
+  toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` also holds a timestamp difference
+  and is shown in text. A zero timeout kept the legacy
   button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`) when the zero is
-  known before the run (a literal, arithmetic on literals, or a variable assigned one such value once); a computed
-  timeout gets a note, since it fails in TeaseScript (#531) if it is zero or negative (6 corpus sites), and a negative
-  one, which failed in legacy too, is reported.
+  known before the run (a literal, arithmetic on literals, or a variable assigned one such value once); a timeout
+  known only at runtime goes through a helper that does the same when it is zero and stops the script when it is
+  negative, as legacy did (`sexscriptLegacyShowButton(text, timeout)`, `SX_BUTTON_COMPUTED_TIMEOUT`), and a negative
+  timeout known before the run is reported.
 - Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
   player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
@@ -293,8 +320,8 @@ unannotated integer widens to `number` by itself (option B). Measured on the fou
   guards (`if (loadInteger(k) != null) p = loadInteger(k)`) rely on.
 - **Groovy integer declarations coerce:** an `int` stores whole numbers, so every value not known to be an integer
   truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`). The 53 `int`
-  declarations initialized with `loadInteger()` become `let x: integer = load k`, which `main` now checks when the
-  value is stored (#520); in isolated smoke runs with empty storage four Domme3 scripts fail there (`TSR058`), where
+  declarations initialized with `loadInteger()` become `let x: integer = sexscriptLegacyLoadInteger(k)`, which `main`
+  checks when the value is stored (#520); in isolated smoke runs with empty storage four Domme3 scripts fail there (`TSR058`), where
   Groovy's `int` rejected null too. Groovy stored a one-character text in an `int` as its character code (`"3"` became
   51), so a value proven to be text is reported and a truncated value that may be text gets a note
   (`SX_INTEGER_FROM_TEXT`; 0 corpus sites).
@@ -409,8 +436,8 @@ Concrete points the migration surfaced in TeaseScript itself:
   rewrite of the saved value.
 - **Calendar day counts** convert with #532's `(date - date).days`: Domme3's `Calendar.DAY_OF_YEAR` seed (1 site)
   becomes `(getDate() - toDate("${getDate().year}-01-01")).days + 1`, which lowers `sleep`.
-- **Compact interactions as values.** A used `showButton` result needs parentheses and a duration division,
-  `(showButton "Done", timeout: 30) / 1 s`, 49 corpus sites; most compare the seconds with a number.
+- **Compact interactions as values.** A used `showButton` result needs parentheses, `(showButton "Done", timeout: 30)
+  >= 30 s`, and a duration division where a number is needed.
 - **Defects found in `main` at `337388d2` are fixed in `242ada7a`** (#567): `case null, 0` removes null from the later
   cases (#557); `==` and `!=` with a value the other side can never hold warn (ADR 0021 rule 4.5; #535); a range case a
   `choose` result never matches, and `case 5` after `case is integer`, warn (V30 §32; #557); a `load` default of the
@@ -550,14 +577,50 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   counted as `missingMedia` in the report, 190 paths in 18 selected units; a photo the package copies to the path is
   no missing file). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General MIDI soundfont, then
   ffmpeg).
-- Pacing: legacy `show()` displayed its text at once and a `wait()` right after it set the timing, so text shown
-  directly before a wait becomes `say …, instant`; other text keeps TeaseScript's reading time (converter owner,
-  2026-10-05).
+- Updatable messages (owner decision 2026-10-07, V30 "Updatable messages"): the legacy display was redrawn to
+  animate a text or to count, where TeaseScript changes a shown message in place. An animation, texts that each add
+  only punctuation to the one before with only waits without effects between them, becomes `let line = say "Deciding.", instant` and
+  `line.text += "."` per step, or `= text` where a step is no plain extension; a text with a value computed anew,
+  such as a random draw, is no step (`SX_MESSAGE_ANIMATION`, counted as `messageHandles.animations`). A loop whose
+  body says one text with a count, a variable the loop steps with `+=` or `-=` or a range loop's own, where the last
+  text said before the loop, with only statements without effects in between, is the same line with a number or a
+  placeholder in place of the count (`20 jerks` before `${i} jerks`, only digits, punctuation, and spaces around the
+  count) or the same text, and whose other values neither the loop nor the statements between can change (no
+  write, method call, or call of script code in its body, its condition, or those statements that may reach them),
+  becomes `let counter = say …, instant` before the loop and `counter.text = …`
+  in it, as Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`). The waits between the steps stay as they
+  are, since the pacing rule below only touches waits right after a `say`; other loops keep one message per pass, a
+  module's code outside its functions keeps its texts, and a later text that repeats a handle's current text says only
+  what it adds.
+- Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
+  the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
+  more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an
+  ask; the time is measured on the whole legacy text's visible words, without its interpolated values (owner decision
+  2026-10-07; `SX_WAIT_READING`, counted as `readingWaits.replaced`). A longer wait is time for an action or a task and
+  stays, and its text becomes `say …, instant` (converter owner, 2026-10-05; `readingWaits.kept`). Since `instant`
+  also ends the reading time of the text before it, a text keeps `instant` only where its own block shows, on the
+  straight path before it, that no reading time that replaced a wait can still run: after a text said at once or
+  without such a reading time, an ask, button, or choice that surely opens, media, or literal waits as long as a fixed
+  text's reading time, with only statements without effects in between. Elsewhere (the start of a function, a loop's
+  body, or a script, after a call or where computing the text calls something, or after a text with values whose
+  length is unknown) the text keeps its reading time and waits for the one before it (`SX_WAIT_KEPT_PACED`,
+  `keptPaced`). A fixed text's own reading time is shorter than the literal kept wait after it, so only a pending
+  reading time delays it; a text with values, or one before a computed wait, may also make the pause longer by its
+  own reading time. Computed waits, a wait that another wait follows, waits after
+  the importer's system texts, and beats keep their `instant` text as before. Beats (owner decision 2026-10-07), the
+  wait whatever its length: the wait after a text without letters, a count or a pause such as `3`, `. . .`, or a
+  number (`SX_WAIT_BEAT`, `beats`), and a loop's tick, a wait of a second at most after a text the loop's body builds
+  anew each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`); animations and counters keep theirs as
+  updatable messages (above), whose first message keeps `instant` as a beat does. A beat split into paragraphs keeps
+  `instant` on every paragraph, so the text shows whole at once. A beat keeps its `instant`, so a text whose
+  replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead, a beat itself
+  in turn unless it was split (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or
+  from a loop's earlier pass, gives way to the beat.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is
   dropped, joining the waits around it; a text that adds only punctuation, with only waits between, is an animation
-  such as growing dots and stays (owner decision 2026-10-06, counted as `animation`). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
+  such as growing dots, which becomes one updatable message (below). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
   the repeat ends at a word boundary, and only literal text and interpolations of identical expressions compare. Any
   other statement, a nested block, or a call in an image or sound starts over. The display also kept the last text
   across a chain to the next script: before a `goto` to a script whose start shows the same literal texts again, with
@@ -565,7 +628,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   callers. The report counts the dropped, shortened, and kept texts, the animations, and those dropped across a chain
   (`repeatedText`; `SX_REPEATED_TEXT_DROPPED`, `SX_REPEATED_TEXT_SHORTENED`, `SX_REPEATED_TEXT_KEPT` where the
   interpolated values differ, `SX_REPEATED_TEXT_ANIMATION`, `SX_REPEATED_TEXT_ACROSS_CHAIN`): in the selected units 38
-  dropped and 171 shortened in 39 units, 68 animations in 11, and 5 across a chain in 4.
+  dropped and 159 shortened in 39 units, no animation (updatable messages take them: 22 in 11 units, and 34 counters
+  in 14), and 5 across a chain in 4.
 - Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
   (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
@@ -615,7 +679,7 @@ counts are those measured at importer `c83f938a`, which no later rule changed.
     versions and are not converted.
   - Two units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, and jewell and
     JewellMistressMiley. Lines v2 counts as a revision of Lines.
-- **Script-specific fixes** are unit patches (52 units), not converter rules.
+- **Script-specific fixes** are unit patches (54 units), not converter rules.
 
 | Result | Units of 210 |
 | --- | ---: |

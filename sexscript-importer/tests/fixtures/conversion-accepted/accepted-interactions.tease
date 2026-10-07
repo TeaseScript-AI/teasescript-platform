@@ -1,6 +1,13 @@
 // MIGRATION INCOMPLETE: 1 error diagnostic.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
+function sexscriptLegacyShowButton(text, timeout) {
+  if timeout == 0 {
+    showButton text, timeout: 10 ms
+    return 0
+  }
+  return (showButton text, timeout: timeout) / 1 s
+}
 say "Are you ready?"
 let ready = (choose yes: "Yes", no: "No") == "yes"
 say "Really?"
@@ -21,10 +28,9 @@ showButton "Now", timeout: 10 ms
 // NOTE SX_BUTTON_TIMEOUT line 12: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
 showButton "Again", timeout: 10 ms
 let pause = randomInteger(0..3) + 1
-// NOTE SX_BUTTON_TIMEOUT line 14: With a zero timeout the legacy button stayed visible for its 10 ms safety margin; TeaseScript rejects a timeout that is not positive (#531), so this button stops the script if its computed timeout is zero or negative.
-showButton "Later", timeout: pause
-let elapsed = (showButton "Done", timeout: 30) / 1 s
-if elapsed >= 30 or instant > 0 {
+sexscriptLegacyShowButton("Later", pause)
+let elapsed = showButton "Done", timeout: 30
+if elapsed >= 30 s or instant > 0 {
   say "Too slow"
 }
 openUrl("https://example.com")

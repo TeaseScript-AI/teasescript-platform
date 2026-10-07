@@ -9,10 +9,8 @@ import type { IrExpression, IrStatement } from "./ir.ts";
 export type JavaHelperName =
   | "calendarTime"
   | "formEncode"
-  | "sqrt"
   | "log"
   | "exp"
-  | "pow"
   | "cos"
   | "sin"
   | "gaussian"
@@ -33,10 +31,8 @@ export type JavaHelperName =
 export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
   "calendarTime",
   "formEncode",
-  "sqrt",
   "log",
   "exp",
-  "pow",
   "cos",
   "sin",
   "gaussian",
@@ -55,8 +51,7 @@ export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
 ];
 
 const DEPENDENCIES = new Map<string, JavaHelperName[]>([
-  ["pow", ["exp", "log"]],
-  ["gaussian", ["sqrt", "log"]],
+  ["gaussian", ["log"]],
   ["isInteger", ["javaTrim"]],
   ["isNumber", ["javaTrim"]],
 ]);
@@ -231,7 +226,7 @@ function trigonometry(name: string, sine: boolean): IrStatement {
       ]),
       letS("square", bin("*", v("angle"), v("angle")), "number"),
       letS("term", sine ? v("angle") : lit(1.0), "number"),
-      letS("sum", v("term"), "number"),
+      letS("total", v("term"), "number"),
       letS("divisor", lit(sine ? 2 : 1)),
       whileS(bin("<", v("divisor"), lit(40)), [
         set(
@@ -242,10 +237,10 @@ function trigonometry(name: string, sine: boolean): IrStatement {
             bin("*", v("divisor"), bin("+", v("divisor"), lit(1))),
           ),
         ),
-        set("sum", v("term"), "+="),
+        set("total", v("term"), "+="),
         set("divisor", lit(2), "+="),
       ]),
-      ret(v("sum")),
+      ret(v("total")),
     ],
   );
 }
@@ -345,27 +340,6 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         ],
       ),
   },
-  // Java Math.sqrt(): Newton's method from above, which ends at the root within the last digit.
-  sqrt: {
-    name: "sexscriptLegacySqrt",
-    build: () =>
-      fn(
-        "sexscriptLegacySqrt",
-        ["value"],
-        [
-          ifS(bin("<", v("value"), lit(0)), fail("Math.sqrt() of a negative number")),
-          ifS(bin("==", v("value"), lit(0)), [ret(lit(0.0))]),
-          letS("root", v("value"), "number"),
-          ifS(bin("<", v("root"), lit(1)), [set("root", lit(1.0))]),
-          letS("next", bin("/", bin("+", v("root"), bin("/", v("value"), v("root"))), lit(2))),
-          whileS(bin("<", v("next"), v("root")), [
-            set("root", v("next")),
-            set("next", bin("/", bin("+", v("root"), bin("/", v("value"), v("root"))), lit(2))),
-          ]),
-          ret(v("root")),
-        ],
-      ),
-  },
   // Java Math.log(), the natural logarithm: value = mantissa * 2^exponent, then 2 atanh((m - 1) / (m + 1)).
   log: {
     name: "sexscriptLegacyLog",
@@ -396,14 +370,14 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
           letS("ratio", bin("/", bin("-", v("mantissa"), lit(1)), bin("+", v("mantissa"), lit(1)))),
           letS("square", bin("*", v("ratio"), v("ratio")), "number"),
           letS("term", v("ratio"), "number"),
-          letS("sum", lit(0.0), "number"),
+          letS("total", lit(0.0), "number"),
           letS("divisor", lit(1)),
           whileS(bin("<", v("divisor"), lit(40)), [
-            set("sum", bin("/", v("term"), v("divisor")), "+="),
+            set("total", bin("/", v("term"), v("divisor")), "+="),
             set("term", bin("*", v("term"), v("square"))),
             set("divisor", lit(2), "+="),
           ]),
-          ret(bin("+", bin("*", v("exponent"), lit(LN2)), bin("*", lit(2), v("sum")))),
+          ret(bin("+", bin("*", v("exponent"), lit(LN2)), bin("*", lit(2), v("total")))),
         ],
       ),
   },
@@ -418,68 +392,22 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
           letS("halves", call("round", bin("/", v("value"), lit(LN2)))),
           letS("rest", bin("-", v("value"), bin("*", v("halves"), lit(LN2)))),
           letS("term", lit(1.0), "number"),
-          letS("sum", lit(1.0), "number"),
+          letS("total", lit(1.0), "number"),
           letS("count", lit(1)),
           whileS(bin("<", v("count"), lit(25)), [
             set("term", bin("/", bin("*", v("term"), v("rest")), v("count"))),
-            set("sum", v("term"), "+="),
+            set("total", v("term"), "+="),
             set("count", lit(1), "+="),
           ]),
           whileS(bin(">", v("halves"), lit(0)), [
-            set("sum", bin("*", v("sum"), lit(2))),
+            set("total", bin("*", v("total"), lit(2))),
             set("halves", lit(1), "-="),
           ]),
           whileS(bin("<", v("halves"), lit(0)), [
-            set("sum", bin("/", v("sum"), lit(2))),
+            set("total", bin("/", v("total"), lit(2))),
             set("halves", lit(1), "+="),
           ]),
-          ret(v("sum")),
-        ],
-      ),
-  },
-  // Java Math.pow(): a whole exponent multiplies by repeated squaring; another one is exp(exponent * log(base)).
-  pow: {
-    name: "sexscriptLegacyPow",
-    build: () =>
-      fn(
-        "sexscriptLegacyPow",
-        ["base", "exponent"],
-        [
-          ifS(bin("==", v("exponent"), lit(0)), [ret(lit(1.0))]),
-          ifS(bin("==", bin("%", v("exponent"), lit(1)), lit(0)), [
-            letS("count", v("exponent")),
-            ifS(bin("<", v("count"), lit(0)), [set("count", neg(v("count")))]),
-            letS("factor", v("base"), "number"),
-            letS("result", lit(1.0), "number"),
-            whileS(bin(">", v("count"), lit(0)), [
-              ifS(bin("==", bin("%", v("count"), lit(2)), lit(1)), [
-                set("result", bin("*", v("result"), v("factor"))),
-              ]),
-              set("count", call("floor", bin("/", v("count"), lit(2)))),
-              ifS(bin(">", v("count"), lit(0)), [
-                set("factor", bin("*", v("factor"), v("factor"))),
-              ]),
-            ]),
-            ifS(bin("<", v("exponent"), lit(0)), [
-              ifS(bin("==", v("result"), lit(0)), fail("Math.pow() of zero to a negative power")),
-              ret(bin("/", lit(1), v("result"))),
-            ]),
-            ret(v("result")),
-          ]),
-          ifS(
-            bin("<", v("base"), lit(0)),
-            fail("Math.pow() of a negative number to a fractional power"),
-          ),
-          ifS(bin("==", v("base"), lit(0)), [
-            ifS(bin("<", v("exponent"), lit(0)), fail("Math.pow() of zero to a negative power")),
-            ret(lit(0.0)),
-          ]),
-          ret(
-            local(
-              "sexscriptLegacyExp",
-              bin("*", v("exponent"), local("sexscriptLegacyLog", v("base"))),
-            ),
-          ),
+          ret(v("total")),
         ],
       ),
   },
@@ -509,8 +437,8 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
             bin(
               "*",
               v("first"),
-              local(
-                "sexscriptLegacySqrt",
+              call(
+                "sqrt",
                 bin("/", bin("*", lit(-2), local("sexscriptLegacyLog", v("square"))), v("square")),
               ),
             ),

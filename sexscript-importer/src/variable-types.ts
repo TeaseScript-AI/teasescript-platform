@@ -783,6 +783,20 @@ function analyse(
         return change(() => (target.optional = true));
       return;
     }
+    // A legacy loadFloat() read parses a number, which a whole-number variable widens to hold.
+    const read =
+      statement.kind === "assign" || statement.kind === "let" ? statement.value : undefined;
+    const held = nonNull(bindingType(target) ?? UNKNOWN);
+    if (
+      read?.kind === "load" &&
+      read.number === true &&
+      held.kind === "scalar" &&
+      held.name === "integer" &&
+      target.declaration !== null &&
+      !target.integer &&
+      !target.widened
+    )
+      return change(() => (target.widened = true));
     // A storage read is checked when stored; it may be null, which matters only where the program tests the variable
     // for null and so expects one. Elsewhere a missing key would stop the script where the variable's type cannot hold
     // null, so the read keeps the variable's value then.
@@ -878,9 +892,22 @@ function analyse(
     );
   };
 
+  /**
+   * A range a loop goes through or `randomInteger` draws from ends at a whole number (#689); one from a whole number to a
+   * number ends where Groovy stopped: `floor` for the last value, `ceil` for the first one left out, the whole part of
+   * an `n.times` count.
+   */
+  const findBounds = (range: IrExpression, scope: Scope): void => {
+    if (range.kind !== "range" || !isNumber(typeOf(range.to, scope))) return;
+    const from = nonNull(typeOf(range.from, scope));
+    if (from.kind === "scalar" && from.name === "integer") analysis.indexes.add(range);
+  };
+
   /** A position that may hold a fraction cannot index a list (#504 option B); Groovy truncated it. */
   const findIndexes = (value: IrExpression, scope: Scope): void => {
     forEachExpression(value, (child) => {
+      if (child.kind === "call" && child.name === "randomInteger" && child.positional.length === 1)
+        findBounds(child.positional[0]!, scope);
       const position =
         child.kind === "index" && child.dict !== true
           ? child.index
@@ -905,6 +932,7 @@ function analyse(
 
   const statement = (item: IrStatement, scope: Scope): void => {
     for (const value of ownExpressions(item)) findIndexes(value, scope);
+    if (item.kind === "for") findBounds(item.collection, scope);
     switch (item.kind) {
       case "let": {
         const fixed = item.type === undefined ? undefined : parseAnnotation(item.type);
@@ -1778,6 +1806,17 @@ function arithmeticType(
     (left.kind === "unknown" || right.kind === "unknown")
   )
     return scalar("number");
+  // Subtraction, multiplication, and the remainder take only numbers in legacy code, so a value not proven a number
+  // with a number that may hold a fraction gives a number too (`s1 - s2`, with `s2 = s1 / 2`).
+  const fractional = (type: TeaseType): boolean => type.kind === "scalar" && type.name === "number";
+  if (
+    (operator === "-" || operator === "*" || operator === "%") &&
+    plain(left) &&
+    plain(right) &&
+    (left.kind === "unknown" || right.kind === "unknown") &&
+    (fractional(left) || fractional(right))
+  )
+    return scalar("number");
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
@@ -1937,6 +1976,8 @@ export function expressionType(
     case "duration":
     case "button":
       return scalar("duration");
+    case "message":
+      return UNKNOWN;
     case "template":
       return scalar("string");
     case "variable":
@@ -1986,10 +2027,14 @@ export function expressionType(
       return UNKNOWN;
     }
     case "load":
-      // A read with a default has the default's type (#541); without one, a missing key reads null.
-      return value.defaultValue === undefined
+      // A read with a default has the default's type (#541); without one, a missing key reads null. A legacy
+      // loadFloat() read with a default parses a number (withParsedLoads), or gives the default, which stays open where
+      // it may be null, as a read without a default does.
+      if (value.defaultValue === undefined) return { kind: "optional", value: UNKNOWN };
+      if (value.number !== true) return type(value.defaultValue);
+      return ["null", "optional", "unknown"].includes(type(value.defaultValue).kind)
         ? { kind: "optional", value: UNKNOWN }
-        : type(value.defaultValue);
+        : scalar("number");
     case "choice":
       // Numeric choice values are integers (#515).
       return scalar(value.labels === undefined ? "integer" : "string");
@@ -2039,6 +2084,23 @@ export function expressionType(
       if (value.local === true) return UNKNOWN;
       const temporal = TEMPORAL_GETTERS.get(value.name);
       if (temporal !== undefined) return { kind: "temporal", name: temporal };
+      // abs keeps an integer whole, and so does pow with a whole exponent of at least 0 written as a literal; sqrt and
+      // other powers give a number (V30 "Numeric functions").
+      if (value.name === "abs" || value.name === "pow" || value.name === "sqrt") {
+        const [base, exponent] = value.positional;
+        const whole =
+          value.name === "abs" ||
+          (value.name === "pow" &&
+            exponent?.kind === "literal" &&
+            exponent.decimal !== true &&
+            typeof exponent.value === "number" &&
+            Number.isInteger(exponent.value) &&
+            exponent.value >= 0);
+        const argument = base === undefined ? UNKNOWN : nonNull(type(base));
+        if (!whole || (argument.kind === "scalar" && argument.name === "number"))
+          return scalar("number");
+        return argument.kind === "scalar" && argument.name === "integer" ? argument : UNKNOWN;
+      }
       // askBooleans returns the toggles' states, or null when the player cancels a form that offers it (V30 §20).
       if (value.name === "askBooleans") {
         const states: TeaseType = { kind: "list", element: scalar("boolean") };
@@ -2179,6 +2241,10 @@ function withIntegerIndexes<T extends IrStatement>(
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);
     if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
+    if (copy.kind === "range") {
+      const name = copy.count === true ? "toInteger" : copy.inclusive ? "floor" : "ceil";
+      return { ...copy, to: { kind: "call", name, positional: [copy.to], named: {} } };
+    }
     if (copy.kind === "methodCall") return { ...copy, arguments: [truncated(copy.arguments[0]!)] };
     return copy;
   };
@@ -2333,5 +2399,7 @@ export function mapChildren(
         label: map(value.label),
         timeout: value.timeout === null ? null : map(value.timeout),
       };
+    case "message":
+      return { ...value, value: map(value.value) };
   }
 }

@@ -359,6 +359,8 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
         label: child(expression.label),
         timeout: expression.timeout === null ? null : child(expression.timeout),
       };
+    case "message":
+      return { ...expression, value: child(expression.value) };
     case "literal":
       return expression.action === true && typeof expression.value === "string"
         ? { ...expression, value: renamer.functions.get(expression.value) ?? expression.value }

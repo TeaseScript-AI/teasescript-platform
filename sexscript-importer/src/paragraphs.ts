@@ -7,6 +7,7 @@ import {
   isAsk,
   withNestedBlocks,
 } from "./repeated-text.ts";
+import { shortestReadingTime } from "./reading-time.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 type Part = { text: string } | { value: IrExpression };
@@ -23,9 +24,12 @@ const BLANK_LINES = /\n(?:[^\S\n]*\n)+/u;
  * and with the same speaker; a blank line inside an interpolated value stays.
  * - A `say` becomes one `say` per paragraph, each with the Player's reading time (owner decision 2026-10-07): a text
  *   that was `instant` because a legacy `wait` follows loses it, since `instant` would also skip the reading time of
- *   the paragraph before it, and the `wait` stays as it is.
- * - An ask's question (said before the field opens, also after withAskQuestions made a `say` its question) says its
- *   earlier paragraphs before the asking statement and keeps the last as the question.
+ *   the paragraph before it, except the paragraphs of a beat (withReadingTimes), so that the beat's text shows whole
+ *   at once. A kept wait after it (withReadingTimes) keeps only what the reading time of the paragraphs before
+ *   the last leaves (shortenedWait); any other `wait` stays as it is.
+ * - An ask's question (said before the field opens, also after withAskQuestions made a `say` its question) says the
+ *   paragraphs before the one that asks (questionAt), or before the last where none does, before the asking statement,
+ *   and keeps the rest as the question.
  * - A form's question keeps its first paragraph, the intro, and the form says the others after it, in its `outro:`
  *   prose block (V30 §20 Forms), unsplit.
  * Text laid out with blank lines (aligned columns, ruled lines, tables, stat blocks; isLayout) and the units that keep
@@ -57,8 +61,15 @@ export function withParagraphs(
       "The blank lines around this text's only paragraph showed nothing, so they go.",
       statement,
     );
-  const block = (items: IrStatement[]): IrStatement[] =>
-    items.flatMap((item): IrStatement[] => {
+  const block = (items: IrStatement[]): IrStatement[] => {
+    // The reading time of the paragraphs before the last of the text just split, which the wait after it now follows.
+    let readBefore: number | null = null;
+    return items.flatMap((item): IrStatement[] => {
+      if (readBefore !== null && item.kind !== "blank" && item.kind !== "comment") {
+        const read = readBefore;
+        readBefore = null;
+        if (item.kind === "wait" && item.afterText === true) return shortenedWait(item, read);
+      }
       const statement = withNestedBlocks(item, block);
       if (statement.kind === "say") {
         if (statement.prose === true || statement.speaker === SYSTEM_SPEAKER) return [statement];
@@ -77,8 +88,15 @@ export function withParagraphs(
           "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own.",
           statement,
         );
-        const { instant: _instant, ...paced } = statement;
-        return split.paragraphs.map((value) => ({ ...paced, value }));
+        const { instant: _instant, beat, ...paced } = statement;
+        readBefore = split.paragraphs
+          .slice(0, -1)
+          .reduce((total, value) => total + shortestReadingTime(value), 0);
+        // A beat's paragraphs keep `instant`, so that the text shows whole at once, as legacy showed it, and its wait
+        // keeps the beat.
+        return split.paragraphs.map((value) =>
+          beat === true ? { ...paced, value, instant: true, beat } : { ...paced, value },
+        );
       }
       const ask = ASKING_STATEMENTS.has(statement.kind) ? soleAsk(statement) : null;
       const question = ask === null ? undefined : questionOf(ask);
@@ -110,24 +128,70 @@ export function withParagraphs(
         );
         return [withAsk(statement, { ...ask, question: first!, outro: joined(rest) })];
       }
-      report(
-        "SX_PARAGRAPH_QUESTION",
-        "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question.",
-        statement,
-      );
+      const at = questionAt(split.paragraphs);
+      const last = split.paragraphs.length - 1;
+      if (at === null)
+        report(
+          "SX_PARAGRAPH_QUESTION_FALLBACK",
+          "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question, since no paragraph ends with a question mark or starts with an instruction.",
+          statement,
+        );
+      else if (at < last)
+        report(
+          "SX_PARAGRAPH_QUESTION_REMARKS",
+          "The legacy display showed one text, whose paragraphs a blank line separated; the paragraphs before the question are messages of their own, and the question keeps the remarks after it.",
+          statement,
+        );
+      else
+        report(
+          "SX_PARAGRAPH_QUESTION",
+          "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question.",
+          statement,
+        );
+      const start = at ?? last;
       const speaker = ask.kind === "input" ? ask.speaker : undefined;
       return [
         ...split.paragraphs
-          .slice(0, -1)
+          .slice(0, start)
           .map((value): IrStatement => ({
             kind: "say",
             value,
             ...(speaker === undefined ? {} : { speaker }),
             span: statement.span,
           })),
-        withAsk(statement, asked(ask, split.paragraphs.at(-1)!)),
+        withAsk(statement, asked(ask, joined(split.paragraphs.slice(start)))),
       ];
     });
+  };
+  /**
+   * The legacy wait after a split text started when the whole text appeared, and the paragraphs before the last now
+   * take their reading time first, so a kept wait keeps only the rest, in whole seconds, and goes when none is left
+   * (owner decision 2026-10-07): the next statement comes as long after the text first appeared as before.
+   */
+  const shortenedWait = (
+    wait: Extract<IrStatement, { kind: "wait" }>,
+    read: number,
+  ): IrStatement[] => {
+    const { duration } = wait;
+    if (duration.kind !== "literal" || typeof duration.value !== "number") return [wait];
+    const milliseconds = wait.unit === "ms" ? duration.value : duration.value * 1000;
+    const seconds = Math.round((milliseconds - read) / 1000);
+    if (seconds <= 0) {
+      report(
+        "SX_PARAGRAPH_WAIT_DROPPED",
+        "The reading time of the paragraphs before the last covers the legacy wait after the text, so the wait goes.",
+        wait,
+      );
+      return [];
+    }
+    report(
+      "SX_PARAGRAPH_WAIT",
+      "The legacy wait after the text started when the whole text appeared; it keeps what the reading time of the paragraphs before the last leaves, in whole seconds.",
+      wait,
+    );
+    const value = wait.unit === "ms" ? seconds * 1000 : seconds;
+    return [{ ...wait, duration: { kind: "literal", value } }];
+  };
   return block(statements);
 }
 
@@ -184,6 +248,30 @@ function withAsk(statement: IrStatement, ask: Ask): IrStatement {
       ? ask
       : mapChildren(value, replace);
   return mapOwnExpressions(statement, replace);
+}
+
+// A question mark at the end, before closing brackets, quotes, closing markup, and whitespace.
+const QUESTION_END = /\?(?:[\s)\]}"'`’”»*_~]|\[\/[^\]]*\]|<\/[^>]*>)*$/u;
+// Opening markup and quotes before a paragraph's first word.
+const OPENING = /^(?:[\s*_~#>"'`‘“«]|\[[^\]/][^\]]*\]|<[^>/][^>]*>)*/u;
+const INSTRUCTION =
+  /^(?:Enter|Type|Choose|Select|Pick|Write|Tell|Give|Name|How|What|Which|Please|Input|Insert|Answer|Click|Press|Set)(?![\p{L}\p{M}\p{N}_\u{F0000}-\u{FFFFD}])/iu;
+
+/**
+ * The paragraph that asks (owner decision 2026-10-07, option E): the last one that ends with a question mark, or else
+ * the last one that starts with an instruction or question word, such as `Enter` or `How`; null for none. The
+ * paragraphs after it are remarks on it, such as `(default is 2, current is 3)`, which the question keeps.
+ */
+function questionAt(paragraphs: readonly IrExpression[]): number | null {
+  const texts = paragraphs.map((paragraph) =>
+    partsOf(paragraph)!
+      .map((part) => ("text" in part ? part.text : String.fromCodePoint(FIRST_VALUE)))
+      .join(""),
+  );
+  const asked = texts.findLastIndex((text) => QUESTION_END.test(text));
+  if (asked >= 0) return asked;
+  const instructed = texts.findLastIndex((text) => INSTRUCTION.test(text.replace(OPENING, "")));
+  return instructed >= 0 ? instructed : null;
 }
 
 /** Paragraphs joined by a blank line, as one text. */

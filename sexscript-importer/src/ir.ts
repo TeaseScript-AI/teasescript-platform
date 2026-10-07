@@ -66,16 +66,37 @@ export interface IrFunctionParameter {
 export type IrStatement =
   /**
    * `instant` shows the text without reading time (`say text, instant`); `speaker` says it `as` that speaker, and
-   * `prose` shows it as prose rather than a speech bubble (V30 §17).
+   * `prose` shows it as prose rather than a speech bubble (V30 §17). `readingTime` marks a text whose reading time
+   * replaced the legacy wait after it (withReadingTimes), and holds that wait, which a later `instant` text must not
+   * cut short; `beat` marks
+   * an `instant` text that keeps it: a beat, a count or a loop's tick, or a text that keeps its legacy wait before one.
    */
-  | (IrBase & { kind: "say"; value: IrExpression; instant?: true; speaker?: string; prose?: true })
+  | (IrBase & {
+      kind: "say";
+      value: IrExpression;
+      instant?: true;
+      speaker?: string;
+      prose?: true;
+      readingTime?: Extract<IrStatement, { kind: "wait" }>;
+      beat?: true;
+    })
   /** A speaker declaration, global in the package (V30 §37). */
   | (IrBase & {
       kind: "speaker";
       name: string;
       properties: Array<{ name: string; value: IrExpression }>;
     })
-  | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
+  /**
+   * `visible` shows a countdown (`timer`). `afterText` marks a literal wait right after a text that is longer than 1.5
+   * times the text's reading time and stays (withReadingTimes), which withParagraphs shortens when it splits the text.
+   */
+  | (IrBase & {
+      kind: "wait";
+      duration: IrExpression;
+      visible: boolean;
+      unit: "s" | "ms";
+      afterText?: true;
+    })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   /**
@@ -240,9 +261,11 @@ export type IrExpression =
     }
   /**
    * `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage, written
-   * `load key, default: value` (#541). `integer` marks a legacy `loadInteger()`, which read a whole number.
+   * `load key, default: value` (#541). `integer` marks a legacy `loadInteger()`, which parsed the stored text as a
+   * number and dropped its fraction toward zero, and `number` a legacy `loadFloat()`, which parsed it as a number
+   * (withParsedLoads).
    */
-  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression; integer?: true }
+  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression; integer?: true; number?: true }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
    * option gets the identifier label that `choose` returns.
@@ -272,13 +295,19 @@ export type IrExpression =
       /** Asks `as` this speaker. */
       speaker?: string;
     }
-  | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
+  /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
+  | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }
   /** A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). */
   | {
       kind: "duration";
       value: number;
       unit: "s" | "ms" | "min" | "h" | "day" | "week" | "month" | "year";
     }
+  /**
+   * A `say` used as a value: it shows its text as a `say` statement does and gives the message's handle, whose `text`
+   * changes the message in place (V30 "Updatable messages").
+   */
+  | { kind: "message"; value: IrExpression; instant?: true; speaker?: string }
   /** `showButton label, timeout: t` used as a value: the elapsed duration until the click or the timeout (#531). */
   | { kind: "button"; label: IrExpression; timeout: IrExpression | null }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }

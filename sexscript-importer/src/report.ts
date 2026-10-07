@@ -181,18 +181,44 @@ export interface FeasibilityReport {
    */
   forms: { sequences: number; menus: number };
   /**
-   * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph, form
-   * questions whose later paragraphs became the outro, single paragraphs without the blank lines around them, and texts
-   * left whole as layout or by the unit's keepParagraphs.
+   * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph (the
+   * question the last paragraph, `questions`; the question with the remarks after it, `questionRemarks`; or the last
+   * paragraph where none asks, `questionFallbacks`), form questions whose later paragraphs became the outro, single
+   * paragraphs without the blank lines around them, and texts left whole as layout or by the unit's keepParagraphs.
    */
   paragraphs: {
     says: number;
     questions: number;
+    questionRemarks: number;
+    questionFallbacks: number;
     outros: number;
     trimmed: number;
     layout: number;
     kept: number;
   };
+  /**
+   * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
+   * than 1.5 times it, or kept as the `beats` of texts without letters or a loop's `ticks`, or replaced and kept
+   * again before a beat (`keptForBeats`); `keptPaced` texts that keep their reading time where a replaced
+   * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`.
+   */
+  readingWaits: {
+    replaced: number;
+    kept: number;
+    keptPaced: number;
+    beats: number;
+    keptForBeats: number;
+    ticks: number;
+    shortened: number;
+    dropped: number;
+  };
+  /**
+   * Buttons whose waiting time stays a duration (withElapsedDurations): comparisons of a button's seconds with a number
+   * (`compared`), and variables that hold such a duration (`variables`).
+   */
+  buttonDurations: { compared: number; variables: number };
+  /** Texts the legacy display redrew, now one message changed in place (withMessageHandles). */
+  messageHandles: { animations: number; counters: number };
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
@@ -325,7 +351,28 @@ export function analyzeFeasibility(
     askQuestions: 0,
     blankTexts: 0,
     forms: { sequences: 0, menus: 0 },
-    paragraphs: { says: 0, questions: 0, outros: 0, trimmed: 0, layout: 0, kept: 0 },
+    paragraphs: {
+      says: 0,
+      questions: 0,
+      questionRemarks: 0,
+      questionFallbacks: 0,
+      outros: 0,
+      trimmed: 0,
+      layout: 0,
+      kept: 0,
+    },
+    readingWaits: {
+      replaced: 0,
+      kept: 0,
+      keptPaced: 0,
+      beats: 0,
+      keptForBeats: 0,
+      ticks: 0,
+      shortened: 0,
+      dropped: 0,
+    },
+    buttonDurations: { compared: 0, variables: 0 },
+    messageHandles: { animations: 0, counters: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -435,10 +482,24 @@ export function analyzeFeasibility(
       else if (code === "SX_MENU_FORM") report.forms.menus += 1;
       else if (code === "SX_PARAGRAPHS") report.paragraphs.says += 1;
       else if (code === "SX_PARAGRAPH_QUESTION") report.paragraphs.questions += 1;
+      else if (code === "SX_PARAGRAPH_QUESTION_REMARKS") report.paragraphs.questionRemarks += 1;
+      else if (code === "SX_PARAGRAPH_QUESTION_FALLBACK") report.paragraphs.questionFallbacks += 1;
       else if (code === "SX_FORM_OUTRO") report.paragraphs.outros += 1;
       else if (code === "SX_PARAGRAPH_TRIMMED") report.paragraphs.trimmed += 1;
       else if (code === "SX_PARAGRAPHS_LAYOUT") report.paragraphs.layout += 1;
       else if (code === "SX_PARAGRAPHS_KEPT") report.paragraphs.kept += 1;
+      else if (code === "SX_WAIT_READING") report.readingWaits.replaced += 1;
+      else if (code === "SX_WAIT_KEPT") report.readingWaits.kept += 1;
+      else if (code === "SX_WAIT_KEPT_PACED") report.readingWaits.keptPaced += 1;
+      else if (code === "SX_WAIT_BEAT") report.readingWaits.beats += 1;
+      else if (code === "SX_WAIT_FOR_BEAT") report.readingWaits.keptForBeats += 1;
+      else if (code === "SX_WAIT_TICK") report.readingWaits.ticks += 1;
+      else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
+      else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
+      else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;
+      else if (code === "SX_BUTTON_DURATION_VARIABLE") report.buttonDurations.variables += 1;
+      else if (code === "SX_MESSAGE_ANIMATION") report.messageHandles.animations += 1;
+      else if (code === "SX_MESSAGE_COUNTER") report.messageHandles.counters += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;

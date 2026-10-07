@@ -1,18 +1,17 @@
 // The legacy display showed one text at a time, so a script repeated a message to extend it; the Player keeps earlier
 // messages, so a text says only what it adds to the one just before it, with whitespace, line breaks, and the earlier
 // text's final punctuation ignored.
-say "I will decide when you get to cum from now on.", instant
-wait 5
+say "I will decide when you get to cum from now on."
 say "Do you accept?"
 if (choose yes: "Yes", no: "No") == "yes" {
   say "Good."
 }
-// Growing dots, which only add punctuation between waits, are an animation and stay.
-say "Deciding.", instant
+// Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
+let line = say "Deciding.", instant
 wait 1
-say "Deciding..", instant
+line.text += "."
 wait 1
-say "Deciding...", instant
+line.text += "."
 wait 1
 // A question that repeats the text before it asks without saying it again.
 let days = askInteger "How many days?", default: 3
@@ -35,5 +34,5 @@ let pickedColor = choose 0: "Red", 1: "Blue"
 say "Color ${pickedColor}"
 // An exact repeat between waits goes, and the waits around it join.
 say "Processing.", instant
-wait 2
+wait 10
 exit

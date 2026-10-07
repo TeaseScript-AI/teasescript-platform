@@ -1,0 +1,27 @@
+// A loop goes through, and a draw takes from, a range that ends at a whole number. One that may end at a fraction ends
+// where Groovy stopped: n.times runs for the whole part of n, an inclusive range at the last whole number in it, an
+// exclusive one before the first whole number past it; whole bounds stay as they are.
+let half = 2.5
+for it in 0..toInteger(half) {
+  say "Tick ${it}"
+}
+for i in 0..=floor(half) {
+  say "Up to ${i}"
+}
+for it in 0..ceil(half) {
+  say "Below ${it}"
+}
+// Java's nextInt took a whole number only, here one a variable that may hold a fraction holds.
+let bound = 2.5
+bound = 4
+// NOTE SX_RANDOM_OBJECT line 13: Java's Random object kept its own sequence of random numbers; its draws come from the session's random numbers now, with the same distribution.
+say "Drawn ${randomInteger(0..ceil(bound))}"
+let whole = 3
+for it in 0..whole {
+  say "Again ${it}"
+}
+for i in 0..whole {
+  say "Whole ${i}"
+}
+say "Drawn ${randomInteger(0..whole)}"
+exit

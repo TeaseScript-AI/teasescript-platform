@@ -1,0 +1,85 @@
+// A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
+// button; a wait that timed the reading goes, also in milliseconds.
+showButton "Start"
+say "Do ten push-ups now.", instant
+wait 30
+say "Well done."
+say "Breathe."
+
+// Also before a button, where the player decides when to go on.
+say "Ready?"
+showButton "Yes"
+
+// A text that would appear at once keeps its reading time where the reading time of a text whose wait went may still
+// run, also across other statements and branches, so that the text before it is read first; a button ends it.
+say "Good."
+let reps = 20
+say "Now hold it."
+wait 30
+if reps > 10 {
+  say "Steady."
+}
+say "Now relax."
+wait 20
+say "Look at me."
+showButton "Done"
+say "Stay there.", instant
+wait 30
+
+// A count without letters keeps its beat, and so does a wait of a second at most after a text that a loop builds anew
+// each pass, the loop's tick; their texts are said at once.
+say "3", instant
+wait 1
+say "2", instant
+wait 1
+let left = 3
+while left > 0 {
+  say "Starting in ${left}", instant
+  wait 1
+  left -= 1
+}
+// A kept wait after a split text keeps what the earlier paragraphs' reading time leaves.
+say "First paragraph has a few words."
+say "Second paragraph."
+say "Last one."
+wait 15
+say "One."
+say "Two."
+say "Three."
+say "Four."
+say "Five."
+
+// A computed wait, and a run of waits, stay as they are.
+let n = askInteger "How long?", default: 3
+say "Waiting ${n} seconds.", instant
+wait n
+say "Pause", instant
+wait 1
+wait 2
+say "Done."
+
+// A beat keeps its timing whatever its wait, a number is a count too, and an animation keeps its timing; a text whose
+// replaced reading time a beat would cut keeps its legacy wait.
+say "Get ready.", instant
+wait 1
+say "10", instant
+wait 3
+say 5, instant
+wait 1
+say "Good.", instant
+wait 1
+let line = say "Wait.", instant
+wait 1
+line.text += "."
+wait 1
+line.text += "."
+wait 1
+// Every paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
+left = 3
+while left > 0 {
+  say "Starting soon.", instant
+  say "Starting in ${left}", instant
+  wait 1
+  left -= 1
+}
+exit

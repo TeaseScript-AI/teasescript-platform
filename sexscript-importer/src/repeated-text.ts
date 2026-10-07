@@ -19,7 +19,7 @@ export function withoutRepeatedText(
     diagnostics.push({ code, severity: "info", message, span: statement.span });
   };
   const block = (items: IrStatement[]): IrStatement[] => {
-    let previous: { tokens: Token[]; say: Extract<IrStatement, { kind: "say" }> } | null = null;
+    let previous: Shown | null = null;
     // Whether only waits came after the previous text.
     let onlyWaits = true;
     const result: IrStatement[] = [];
@@ -90,6 +90,14 @@ export function withoutRepeatedText(
         onlyWaits = true;
         continue;
       }
+      // A message kept in a handle (withMessageHandles) shows its text, and a change of its text shows the new one.
+      const handle = handleText(statement, previous?.handle === undefined ? null : previous);
+      if (handle !== undefined) {
+        previous = handle;
+        onlyWaits = true;
+        result.push(statement);
+        continue;
+      }
       if (!keepsText(statement)) previous = null;
       if (statement.kind !== "wait" && statement.kind !== "comment" && statement.kind !== "blank")
         onlyWaits = false;
@@ -98,6 +106,39 @@ export function withoutRepeatedText(
     return result;
   };
   return block(statements);
+}
+
+/** The text on display: the last text said, or the current text of a message kept in a handle (`handle`). */
+type Shown = { tokens: Token[]; say: Extract<IrStatement, { kind: "say" }>; handle?: string };
+
+/**
+ * The text on display after a statement that creates a message handle or changes its text, null where that text is
+ * not known; undefined for any other statement. `shown` is what a handle showed before.
+ */
+function handleText(statement: IrStatement, shown: Shown | null): Shown | null | undefined {
+  if (statement.kind === "let" && statement.value.kind === "message") {
+    const { value, speaker } = statement.value;
+    const tokens = textTokens(value);
+    if (tokens === null) return null;
+    const say: Extract<IrStatement, { kind: "say" }> = {
+      kind: "say",
+      value,
+      ...(speaker === undefined ? {} : { speaker }),
+      span: statement.span,
+    };
+    return { tokens, say, handle: statement.name };
+  }
+  if (
+    statement.kind !== "assign" ||
+    statement.target.kind !== "property" ||
+    statement.target.name !== "text" ||
+    statement.target.target.kind !== "variable"
+  )
+    return undefined;
+  const name = statement.target.target.name;
+  const tokens = textTokens(statement.value);
+  if (shown?.handle !== name || tokens === null) return null;
+  return { ...shown, tokens: statement.operator === "+=" ? [...shown.tokens, ...tokens] : tokens };
 }
 
 type WaitStatement = Extract<IrStatement, { kind: "wait" }>;
@@ -128,11 +169,42 @@ function textTokens(value: IrExpression): Token[] | null {
     return typeof value.value === "string" ? [...value.value].map((char) => ({ char })) : null;
   }
   if (value.kind !== "template") return null;
+  // A value computed anew each time, such as a random draw, matches no other.
   return value.parts.flatMap((part): Token[] =>
     "text" in part
       ? [...part.text].map((char) => ({ char }))
-      : [{ value: part.value, key: JSON.stringify(part.value) }],
+      : [
+          {
+            value: part.value,
+            key: computes(part.value)
+              ? `computed ${(computedValues += 1)}`
+              : JSON.stringify(part.value),
+          },
+        ],
   );
+}
+let computedValues = 0;
+
+/** Whether a value calls, asks, or reads storage, which may give another result each time, as a random draw does. */
+export function computes(value: IrExpression): boolean {
+  if (
+    value.kind === "call" ||
+    value.kind === "methodCall" ||
+    value.kind === "input" ||
+    value.kind === "choice" ||
+    value.kind === "listChoice" ||
+    value.kind === "button" ||
+    value.kind === "message" ||
+    value.kind === "load" ||
+    (value.kind === "property" && value.name === "random")
+  )
+    return true;
+  let found = false;
+  mapChildren(value, (child) => {
+    found ||= computes(child);
+    return child;
+  });
+  return found;
 }
 
 function textValue(tokens: readonly Token[]): IrExpression {
@@ -150,6 +222,23 @@ function textValue(tokens: readonly Token[]): IrExpression {
       value: parts.map((part) => ("text" in part ? part.text : "")).join(""),
     };
   return { kind: "template", parts };
+}
+
+/** Whether the text `next` adds only punctuation to the text `earlier`, a step of an animation such as growing dots. */
+export function addsOnlyMarks(earlier: IrExpression, next: IrExpression): boolean {
+  const before = textTokens(earlier);
+  const after = textTokens(next);
+  return before !== null && after !== null && growsByMarks(before, after);
+}
+
+/** What the text `next` adds after the whole text `earlier`, exactly as written; null where it does not start with it. */
+export function addedText(earlier: IrExpression, next: IrExpression): IrExpression | null {
+  const before = textTokens(earlier);
+  const after = textTokens(next);
+  if (before === null || after === null || after.length <= before.length) return null;
+  return before.every((token, index) => sameToken(token, after[index]!))
+    ? textValue(after.slice(before.length))
+    : null;
 }
 
 /** Whether `next` is `earlier` in full, whitespace runs alike, followed by punctuation and whitespace only. */
@@ -323,6 +412,7 @@ export function withoutRepeatedChainText<
       kind === "listChoice" ||
       kind === "input" ||
       kind === "button" ||
+      kind === "message" ||
       kind === "function"
     )
       return false;
@@ -453,8 +543,11 @@ const PURE_CALLS: ReadonlySet<string> = new Set([
   "min",
   "max",
   "randomInteger",
+  "abs",
   "getTimestamp",
-  "sexscriptLegacyAbs",
+  "sexscriptLegacyLoadFloat",
+  "sexscriptLegacyLoadInteger",
+  "sexscriptLegacyValue",
   "sexscriptLegacyCompare",
   "sexscriptLegacyIndexOf",
   "sexscriptLegacyItemAt",
@@ -482,16 +575,18 @@ const PURE_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 /** Whether evaluating this node itself, apart from its children, may have an effect: a call, a change, or an interaction. */
-function ownEffect(value: IrExpression): boolean {
+export function ownEffect(value: IrExpression): boolean {
   switch (value.kind) {
     case "call":
-      return !PURE_CALLS.has(value.name);
+      // A function of the script may have any effect, whatever its name.
+      return value.local === true || !PURE_CALLS.has(value.name);
     case "methodCall":
       return !PURE_METHODS.has(value.name);
     case "input":
     case "choice":
     case "listChoice":
     case "button":
+    case "message":
       return true;
     default:
       return false;

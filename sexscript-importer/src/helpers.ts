@@ -165,7 +165,6 @@ function withNestedBodies(
  * expression. Each is emitted once per generated file that needs it.
  */
 export type HelperName =
-  | "abs"
   | "array"
   | "fixed"
   | "packagePath"
@@ -187,6 +186,10 @@ export type HelperName =
   | "listPart"
   | "listMinus"
   | "booleanText"
+  | "button"
+  | "value"
+  | "loadInteger"
+  | "loadFloat"
   | "textMinus"
   | "repeatList"
   | "compare"
@@ -241,6 +244,7 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
+  if (needed.has("loadInteger") || needed.has("loadFloat")) needed.add("value");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -260,6 +264,10 @@ const HELPER_ORDER: readonly HelperName[] = [
   "stopBackgroundSounds",
   "random",
   "loadFirstTrue",
+  "value",
+  "loadInteger",
+  "loadFloat",
+  "button",
   "indexOf",
   "count",
   "concat",
@@ -272,7 +280,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listSum",
   "max",
   "min",
-  "abs",
   "fixed",
   "packagePath",
   "pathTag",
@@ -352,6 +359,29 @@ const forS = (variable: string, collection: IrExpression, body: IrStatement[]): 
   body,
   span: null,
 });
+/** A storage read whose stored value the conversion parses, with `whenMissing` for a missing key. */
+function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrStatement {
+  return {
+    kind: "function",
+    name,
+    parameters: [
+      { name: "key", defaultValue: null },
+      { name: "whenMissing", defaultValue: lit(null) },
+    ],
+    body: [
+      letS("value", { kind: "load", key: v("key") }),
+      ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
+      ret({
+        kind: "call",
+        name: "sexscriptLegacyValue",
+        positional: [{ kind: "call", name: conversion, positional: [v("value")], named: {} }],
+        named: {},
+      }),
+    ],
+    span: null,
+  };
+}
+
 const fn = (name: string, parameters: string[], body: IrStatement[]): IrStatement => ({
   kind: "function",
   name,
@@ -562,9 +592,9 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             positional: [bin("*", v("value"), v("factor"))],
             named: {},
           }),
-          letS("sign", lit("")),
+          letS("minus", lit("")),
           ifS(bin("<", v("scaled"), lit(0)), [
-            set(v("sign"), lit("-")),
+            set(v("minus"), lit("-")),
             set(v("scaled"), { kind: "unary", operator: "-", value: v("scaled") }),
           ]),
           letS("whole", {
@@ -573,10 +603,10 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             positional: [bin("/", v("scaled"), v("factor"))],
             named: {},
           }),
-          ifS(bin("==", v("digits"), lit(0)), [ret(template(v("sign"), v("whole")))]),
+          ifS(bin("==", v("digits"), lit(0)), [ret(template(v("minus"), v("whole")))]),
           letS("fraction", bin("-", v("scaled"), bin("*", v("whole"), v("factor")))),
           ret(
-            template(v("sign"), v("whole"), ".", {
+            template(v("minus"), v("whole"), ".", {
               kind: "methodCall",
               target: { kind: "call", name: "toString", positional: [v("fraction")], named: {} },
               name: "padStart",
@@ -1055,6 +1085,50 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     },
   },
   // Legacy loadBoolean(): a stored value read as text is true only as "true" in any case; a missing one is false here.
+  // Legacy showButton() with a timeout known only at runtime: the seconds until the click, at most the timeout; a zero
+  // timeout kept the button for its 10 ms safety margin and gave 0, where TeaseScript rejects a zero timeout (#531).
+  button: {
+    name: "sexscriptLegacyShowButton",
+    build: () =>
+      fn(
+        "sexscriptLegacyShowButton",
+        ["text", "timeout"],
+        [
+          ifS(bin("==", v("timeout"), lit(0)), [
+            {
+              kind: "showButton",
+              label: v("text"),
+              timeout: { kind: "duration", value: 10, unit: "ms" },
+              span: null,
+            },
+            ret(lit(0)),
+          ]),
+          ret(
+            bin(
+              "/",
+              { kind: "button", label: v("text"), timeout: v("timeout") },
+              { kind: "duration", value: 1, unit: "s" },
+            ),
+          ),
+        ],
+      ),
+  },
+  // A value whose type the compiler leaves open, as it does a storage read's.
+  value: {
+    name: "sexscriptLegacyValue",
+    build: () => fn("sexscriptLegacyValue", ["value"], [ret(v("value"))]),
+  },
+  // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
+  // zero, and read null for a missing key, which the script could replace with a value of its own (`whenMissing`). The
+  // parsed value passes through `value`, so that its type stays open, as a storage read's does.
+  loadInteger: {
+    name: "sexscriptLegacyLoadInteger",
+    build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),
+  },
+  loadFloat: {
+    name: "sexscriptLegacyLoadFloat",
+    build: () => parsedLoad("sexscriptLegacyLoadFloat", "toNumber"),
+  },
   booleanText: {
     name: "sexscriptLegacyBooleanText",
     build: () =>
@@ -1237,7 +1311,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // The items a Groovy loop visited: the characters of text, the elements of anything else.
+  // The items a Groovy loop visited: none of null, the characters of text, the elements of anything else.
   items: {
     name: "sexscriptLegacyItems",
     build: () =>
@@ -1245,6 +1319,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyItems",
         ["value"],
         [
+          ifS(bin("==", v("value"), lit(null)), [ret({ kind: "list", items: [] })]),
           ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
             ret({ kind: "methodCall", target: v("value"), name: "split", arguments: [lit("")] }),
           ]),
@@ -1546,20 +1621,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyMin",
         ["first", "second"],
         [ifS(bin("<=", v("first"), v("second")), [ret(v("first"))]), ret(v("second"))],
-      ),
-  },
-  abs: {
-    name: "sexscriptLegacyAbs",
-    build: () =>
-      fn(
-        "sexscriptLegacyAbs",
-        ["value"],
-        [
-          ifS(bin("<", v("value"), lit(0)), [
-            ret({ kind: "unary", operator: "-", value: v("value") }),
-          ]),
-          ret(v("value")),
-        ],
       ),
   },
   ...JAVA_HELPERS,

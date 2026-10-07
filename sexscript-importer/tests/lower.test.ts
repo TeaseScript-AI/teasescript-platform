@@ -59,11 +59,15 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  assert.deepEqual(program.diagnostics, []);
+  // A script's first text keeps its reading time, since one may still run from the script before it.
+  assert.deepEqual(
+    program.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_WAIT_KEPT_PACED"],
+  );
   assert.equal(
     emitTease(program),
     [
-      'say "Hello", instant',
+      'say "Hello"',
       "wait 2",
       "timer 3",
       'showImage "scene/one.jpg"',
@@ -302,9 +306,13 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
     },
   ]);
   const assignedProgram = lowerParsedFile(assignedSource);
-  assert.deepEqual(assignedProgram.diagnostics, []);
-  // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21, #531).
-  assert.equal(emitTease(assignedProgram), 'let elapsed = (showButton "Continue") / 1 s\nexit\n');
+  assert.deepEqual(
+    assignedProgram.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_BUTTON_DURATION_VARIABLE"],
+  );
+  // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21, #531), which a variable
+  // that nothing needs as a number keeps.
+  assert.equal(emitTease(assignedProgram), 'let elapsed = showButton "Continue"\nexit\n');
 });
 
 test("maps legacy save(key, null) deletion semantics to delete", () => {

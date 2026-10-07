@@ -21,6 +21,9 @@ function sexscriptLegacyMenuOptions(texts, first) {
   return options
 }
 function sexscriptLegacyItems(value) {
+  if value == null {
+    return []
+  }
   if value is string {
     return value.split("")
   }

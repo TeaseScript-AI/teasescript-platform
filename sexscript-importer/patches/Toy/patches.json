@@ -118,6 +118,13 @@
       "category": "b",
       "reason": "compose() picked one text per group with a collect/join/capitalize chain, which the converter does not lower, so every composed line came out null. Pick one text per group in a loop and join the parts, with the same random draws and result.",
       "diff": "compose-loop.diff"
+    },
+    {
+      "id": "profile-toys",
+      "layer": "source",
+      "category": "b",
+      "reason": "has(i) read the player's toy chest through a key built from the toy (\"toys.$i\"), so profile generation, which collects literal keys, never asked for the toy chest and every toy-gated branch stayed unreachable. Read the toys this script asks about (BALLGAG, CHASTITY, DILDO, COLLAR, HANDCUFFS, CLAMPS) by their own keys and keep the built key for any other.",
+      "diff": "profile-toys.diff"
     }
   ]
 }

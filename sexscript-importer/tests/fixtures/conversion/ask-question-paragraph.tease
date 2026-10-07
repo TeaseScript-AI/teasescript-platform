@@ -1,0 +1,44 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+// An ask's question is the last paragraph that ends with a question mark, or else the last that starts with an
+// instruction or question word; the remarks after it stay with it, and the paragraphs before it are said before the ask.
+let current = sexscriptLegacyLoadInteger("spanks.multiplier")
+if current == null or current == 0 {
+  current = 2
+}
+let multiplier = askInteger """
+  Enter the multiplier for spanks.
+
+  (default is 2, current is ${current})
+""", default: 2
+let visits = askInteger """
+  How often do you want Ashley to visit?
+
+  Currently set to: every ${current} days
+""", default: 3
+say "Before we start."
+let mood = askInteger """
+  **Choose your mood:**
+
+  1 = generally good
+  2 = so-so
+""", default: 1
+say "I trust you didn't fail or missed something!"
+let done = askText "Did you do everything as I told you?", default: "yes"
+// Where no paragraph asks, the last one is the question; a word that only starts like an instruction is none.
+say "Let's be sure:"
+let locked = askText "Is this an image of you locked up", default: "yes"
+let suffix = "tings"
+say "Set${suffix} can be changed."
+say "Seté is a name."
+let changed = askText "A remark.", default: "no"
+say "${multiplier} ${visits} ${mood} ${done} ${locked} ${changed}"
+exit

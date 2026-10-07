@@ -1,9 +1,18 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
 // The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
-// the Player's reading time; a wait after the text stays after its last paragraph.
+// the Player's reading time.
 let name = "Ann"
 say "Do you deserve a break?"
 say "Well, ${name}, let's check."
-wait 3
 say "You are late."
 say "Kneel."
 // An ask's question keeps its last paragraph; the others are said before the ask.
@@ -59,7 +68,7 @@ let note = """
 say note
 // A form's question keeps its first paragraph, the intro, and says the others after the form's fields as its outro.
 let pics = load("game.pics") == true
-let rounds = load "game.rounds"
+let rounds = sexscriptLegacyLoadInteger("game.rounds")
 if rounds == null or rounds == 0 {
   rounds = 3
 }
