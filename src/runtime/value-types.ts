@@ -1,6 +1,7 @@
 import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
+import { messageText } from "./text-length.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import {
@@ -125,7 +126,7 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       if (!isDict(value) || (frame.next > 0 && !fits)) return false;
       if (type.element === null || frame.next === value.entries.length) return true;
       const entry = value.entries[frame.next++]!;
-      return matchFrame(entry.value, type.element, `[${JSON.stringify(entry.key)}]`);
+      return matchFrame(entry.value, type.element, `[${JSON.stringify(messageText(entry.key))}]`);
     }
     case "object": {
       if (!isObject(value)) return false;

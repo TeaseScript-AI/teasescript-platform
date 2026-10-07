@@ -14,6 +14,7 @@ import {
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 
 const colours = ["gold", "oklch(0.7 0.18 45)"];
@@ -24,9 +25,9 @@ test("authored CSS backgrounds cross source, runtime, adapter and checkpoint for
     let session = createPlayerRuntimeSession(
       `let answer = choose yes: { text: "Yes", background: ${literal} }, no: "No"\nshowButton "Continue", background: ${literal}\nsay answer, instant\nexit`,
     );
-    assert.equal(session.snapshot.status, "waiting", colour);
+    assert.equal(session.state.status, "waiting", colour);
     assert.equal(validateInstructionPlan(session.plan).valid, true);
-    assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
+    assert.equal(validateRuntimeSnapshot(playerRuntimeSnapshot(session), session.plan).valid, true);
     const foreground = playerRuntimeForeground(session);
     assert.equal(foreground?.kind, "choose");
     if (foreground?.kind !== "choose") throw new Error("Expected choices");
@@ -37,7 +38,7 @@ test("authored CSS backgrounds cross source, runtime, adapter and checkpoint for
     const direct = selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!;
     const resumed = selectPlayerRuntimeChoice(restored, foreground.options[0]!.id)!;
     assert.equal(direct.outcome.kind, "completed");
-    assert.deepEqual(resumed.session.snapshot, direct.session.snapshot);
+    assert.deepEqual(playerRuntimeSnapshot(resumed.session), playerRuntimeSnapshot(direct.session));
     session = resumed.session;
     assert.deepEqual(playerRuntimeForeground(session), {
       kind: "show-button",
@@ -47,11 +48,12 @@ test("authored CSS backgrounds cross source, runtime, adapter and checkpoint for
     });
     const buttonRestored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
     assert.deepEqual(playerRuntimeForeground(buttonRestored), playerRuntimeForeground(session));
+    const activated = activatePlayerRuntimeButton(session)!.session;
     assert.deepEqual(
-      activatePlayerRuntimeButton(session)!.session.snapshot,
-      activatePlayerRuntimeButton(buttonRestored)!.session.snapshot,
+      playerRuntimeSnapshot(activated),
+      playerRuntimeSnapshot(activatePlayerRuntimeButton(buttonRestored)!.session),
     );
-    assert.equal(activatePlayerRuntimeButton(session)!.session.snapshot.status, "halted");
+    assert.equal(activated.state.status, "halted");
   }
 });
 
@@ -70,7 +72,7 @@ say answer, instant
 exit
 `;
   let session = createPlayerRuntimeSession(source);
-  assert.equal(session.snapshot.status, "waiting");
+  assert.equal(session.state.status, "waiting");
   session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   const choices = playerRuntimeForeground(session);
   assert.equal(choices?.kind, "choose");
@@ -91,7 +93,7 @@ exit
     normalizeOpaqueColor("blue"),
   );
   session = activatePlayerRuntimeButton(session)!.session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
     ["Second", "Continue", "FirstredgoldSecondContinueblue", "Second"],
@@ -120,9 +122,12 @@ test("invalid and transparent authored backgrounds fail statically or before pub
       `let fill = ${literal}\nlet answer = choose { text: "Yes", background: fill }\nexit`,
     ]) {
       const session = createPlayerRuntimeSession(source);
-      assert.equal(session.snapshot.status, "failed", source);
+      assert.equal(session.state.status, "failed", source);
       assert.equal(playerRuntimeForeground(session), null);
-      assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
+      assert.equal(
+        validateRuntimeSnapshot(playerRuntimeSnapshot(session), session.plan).valid,
+        true,
+      );
     }
   }
   for (const source of [
@@ -167,7 +172,7 @@ showButton "Continue", background: fill("blue")
 say answer, instant
 exit
 `);
-  assert.equal(session.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(session.state.foregroundAction?.kind, "delay");
   session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   session = observePlayerRuntimeTime(session, 10)!.session;
   const choices = playerRuntimeForeground(session);
@@ -175,7 +180,7 @@ exit
   if (choices?.kind !== "choose") throw new Error("Expected choices");
   assert.equal(choices.options[0]!.authoredFill, normalizeOpaqueColor("gold"));
   session = selectPlayerRuntimeChoice(session, choices.options[0]!.id)!.session;
-  assert.equal(session.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(session.state.foregroundAction?.kind, "delay");
   session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   session = observePlayerRuntimeTime(session, 20)!.session;
   const button = playerRuntimeForeground(session);
@@ -183,7 +188,7 @@ exit
   if (button?.kind !== "show-button") throw new Error("Expected button");
   assert.equal(button.authoredFill, normalizeOpaqueColor("blue"));
   session = activatePlayerRuntimeButton(session)!.session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   assert.equal(session.transcriptEntries.at(-1)?.text, "1");
 });
 
@@ -196,10 +201,10 @@ test("option objects may return the same value as other options", () => {
   const session = createPlayerRuntimeSession(
     'let text = "Same"\nlet answer = choose { text: text, background: "red" }, "Same"\nexit',
   );
-  assert.equal(session.snapshot.status, "waiting");
+  assert.equal(session.state.status, "waiting");
   assert.equal(playerRuntimeForeground(session)?.kind, "choose");
   const plain = createPlayerRuntimeSession('let answer = choose { text: "Plain" }, "Other"\nexit');
-  assert.equal(plain.snapshot.status, "waiting");
+  assert.equal(plain.state.status, "waiting");
   assert.deepEqual(
     playerRuntimeForeground(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(plain))),
     playerRuntimeForeground(plain),
@@ -208,16 +213,18 @@ test("option objects may return the same value as other options", () => {
 
 test("a showButton background continues after its colon like the single-line form", () => {
   const singleLine = createPlayerRuntimeSession('showButton "Continue", background: "gold"\nexit');
+  const singleLineForeground = playerRuntimeForeground(singleLine);
+  const singleLineStatus = activatePlayerRuntimeButton(singleLine)!.session.state.status;
   for (const source of [
     'showButton "Continue", background:\n    "gold"\nexit',
     'showButton "Continue",\n    background:\n\n    // fill\n    "gold"\nexit',
   ]) {
     const session = createPlayerRuntimeSession(source);
-    assert.equal(session.snapshot.status, "waiting", source);
-    assert.deepEqual(playerRuntimeForeground(session), playerRuntimeForeground(singleLine), source);
+    assert.equal(session.state.status, "waiting", source);
+    assert.deepEqual(playerRuntimeForeground(session), singleLineForeground, source);
     assert.deepEqual(
-      activatePlayerRuntimeButton(session)!.session.snapshot.status,
-      activatePlayerRuntimeButton(singleLine)!.session.snapshot.status,
+      activatePlayerRuntimeButton(session)!.session.state.status,
+      singleLineStatus,
       source,
     );
   }

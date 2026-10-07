@@ -8,9 +8,11 @@ import type { DebugRecorder } from "../player/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
   playerRuntimeForeground,
+  restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
@@ -70,6 +72,11 @@ interface RewindHost {
   debugExportCandidate(
     player: Record<string, never>,
   ): Promise<{
+    readonly session: { readonly snapshot: RuntimeSnapshot } | null;
+    readonly recording: {
+      readonly operations: readonly { readonly kind: string; readonly thrown: string | null }[];
+      readonly complete: boolean;
+    } | null;
     readonly rewoundWhileDebugging: { restoredSceneTimeMs: number; rewindCount: number } | null;
   }>;
 }
@@ -263,6 +270,8 @@ const script = [
   "exit",
 ].join("\n");
 
+const SCOPES_USED_UP = /nextScopeId cannot be advanced safely/u;
+
 async function start(context: TestContext, host: RewindHost) {
   await host.loadScriptStorage();
   host.prepare((recording) =>
@@ -310,13 +319,13 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
   // The restored state is a diagnostic fork, and its recording begins at it.
   assert.deepEqual((await host.debugExportCandidate({})).rewoundWhileDebugging, {
-    restoredSceneTimeMs: inspected!.snapshot.observedSessionTimeMs,
+    restoredSceneTimeMs: inspected!.state.observedSessionTimeMs,
     rewindCount: 1,
   });
-  assert.equal(host.debugRecording()?.anchorSnapshot, inspected!.snapshot);
+  assert.deepEqual(host.debugRecording()?.anchorSnapshot, playerRuntimeSnapshot(inspected!));
 
   assert.equal(await rewind.forward(), true);
-  assert.deepEqual(host.session.value?.snapshot, tip.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!), playerRuntimeSnapshot(tip));
   assert.deepEqual(said(host), ["One", "first One"]);
   assert.equal(host.rewind.inspecting.value, true);
 
@@ -326,6 +335,64 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.equal(host.rewind.inspecting.value, false);
   assert.equal((await host.debugExportCandidate({})).rewoundWhileDebugging, null);
   assert.deepEqual(storage.calls, ["write k", "write pick"]);
+});
+
+test("after an engine call throws, the export, Back, Forward, and Return work from the state the Player showed", async (context) => {
+  const { host, rewind } = createHost(context, memoryStorage().provider);
+  // With the scope IDs used up, the run after the second answer throws (TSR101) when it enters the block, an error no
+  // script reaches otherwise.
+  const source = [
+    'let first = choose "One", "Two"',
+    'say "first ${first}", instant',
+    'let second = choose "Red", "Long"',
+    'if second == "Long" {',
+    '  say "deep", instant',
+    "}",
+    'say "second ${second}", instant',
+    "exit",
+  ].join("\n");
+  await host.loadScriptStorage();
+  const started = createPlayerRuntimeSession(source, host.scriptStorageOptions());
+  const usedUp = JSON.stringify({
+    ...playerRuntimeSnapshot(started),
+    nextScopeId: Number.MAX_SAFE_INTEGER,
+  });
+  host.prepare(({ recorder }) =>
+    restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events, recorder),
+  );
+  host.activate();
+  await settle(context);
+  await choose(context, host, "One");
+  const tip = host.session.value!;
+  const shown = playerRuntimeSnapshot(tip);
+  await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
+  assert.equal(host.session.value, tip);
+
+  const candidate = await host.debugExportCandidate({});
+  assert.deepEqual(candidate.session?.snapshot, shown);
+  assert.deepEqual(
+    candidate.recording?.operations.map((operation) => [operation.kind, operation.thrown]),
+    [
+      ["completeAction", null],
+      ["run", null],
+      ["completeAction", null],
+      ["run", "RuntimeDataError"],
+    ],
+  );
+  assert.equal(candidate.recording?.complete, true);
+
+  // After another error, Back keeps the state it left, the one the Player showed, for Forward.
+  await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
+  assert.equal(await rewind.back(0), true);
+  assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "choose");
+  assert.equal(await rewind.forward(), true);
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!), shown);
+  assert.equal(await rewind.back(0), true);
+  assert.equal(rewind.returnToSession(), true);
+  assert.equal(host.session.value, tip);
+  await choose(context, host, "Red");
+  assert.equal(host.session.value!.state.status, "halted");
+  assert.deepEqual(said(host).slice(-2), ["Red", "second Red"]);
 });
 
 test("a different choice adopts the restored state: its saved data, then the new writes, and no way back", async (context) => {
@@ -457,7 +524,7 @@ test("input to an inspected state is evaluated only once it is adopted, so a fai
   assert.equal(host.session.value, inspected);
   assert.deepEqual(said(host), []);
   assert.equal(inspected.events.length, events);
-  assert.equal(host.debugRecording()?.endSnapshot, inspected.snapshot);
+  assert.deepEqual(host.debugRecording()?.endSnapshot, playerRuntimeSnapshot(inspected));
 });
 
 test("a second input while the state is being adopted is refused, and the first applies once", async (context) => {
@@ -555,7 +622,7 @@ test("turning the Debug switch off while an adoption fails reinstates the sessio
   release();
   await chosen;
   assert.equal(host.rewind.inspecting.value, false);
-  assert.deepEqual(host.session.value?.snapshot, tip.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!), playerRuntimeSnapshot(tip));
   assert.deepEqual(said(host), ["One", "first One"]);
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
 });
@@ -578,7 +645,10 @@ test("input is refused while a step reads a spilled state, so the saved data sta
   assert.deepEqual(storage.saved(), { k: 1, pick: "One", color: "Red" });
   assert.equal(rewind.returnToSession(), true);
   const view = Object.fromEntries(
-    host.session.value!.snapshot.scriptStorage.map((entry) => [entry.key, entry.value]),
+    playerRuntimeSnapshot(host.session.value!).scriptStorage.map((entry) => [
+      entry.key,
+      entry.value,
+    ]),
   );
   assert.deepEqual(view, storage.saved());
 });
@@ -588,7 +658,7 @@ test("importing the shown script ends its rewind history and an inspected state,
   const { host, rewind } = createHost(context, storage.provider);
   await start(context, host);
   for (const label of ["One", "Red", "A"]) await choose(context, host, label);
-  assert.equal(host.session.value?.snapshot.status, "halted");
+  assert.equal(host.session.value?.state.status, "halted");
   assert.equal(await rewind.back(0), true);
   assert.equal(await rewind.forward(), true);
   assert.equal(host.rewind.inspecting.value, true);

@@ -11,6 +11,14 @@ projected audio through `player/media-device.ts` and shows the Stage image; brow
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
 
+The Player runs each session on one [runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication
+of it: `state` holds the view, projections, active calls, and date and time presentation it shows, and
+`playerRuntimeSnapshot` exports the complete state only where one is kept, such as a restore point, a debug export, a
+rewind point, or a saved-data adoption. An operation goes through a publication that shows the current state; once an
+operation changed the state, one made from an earlier publication throws. When an operation throws, the error reaches
+the Player, and the next use rebuilds the state of the latest publication from the calls the session's [debug
+recorder](DEBUGGER.md#debug-export) logged, so play continues from the state the Player showed.
+
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
 ## Accepted model
@@ -948,12 +956,16 @@ operations stay as they are.
   `callReturnInstructions()` gives where each active call continues when it returns, outermost first, in work
   proportional to the call depth. For a debugger, `callStack()` gives each active call's kind, function, call site,
   return position, scope depth, and the kind of block that interrupted it, also in work proportional to the call depth;
-  `variables()` gives the globals, scopes, kept scopes, and the current text of each message with a handle, in work
-  proportional to the variables and their values; and `temporalPresentation()` gives the date and time presentation in
-  force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
+  `variablePreviews()` gives the globals, scopes, and kept scopes with bounded previews of their values, and the current
+  text of each message with a handle, in work proportional to the number of variables and those texts, not to the size
+  of the values; and `temporalPresentation()` gives the date and time presentation in force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
   whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
-  plain data that later operations do not change; importing it again crosses the external-data boundary.
+  plain data that later operations do not change; importing it again crosses the external-data boundary. For trusted
+  hosts only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or
+  validation, which shares nothing with the session: for a host that keeps the snapshot itself, such as a search
+  frontier. It is not a boundary; the snapshot is captured and validated wherever it crosses one later, such as
+  `createRuntimeSession`.
 - **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An
   operation that throws, such as `TSR101` when an event sequence runs out or a host callback's error, ends the session:
   the error reaches the caller, and every later call, including `view`, the exports, and `fork`, throws
@@ -963,9 +975,9 @@ operations stay as they are.
   usable; the session reads each option once, so the value it checks is the value it uses. A typed refusal, such as
   `invalidPayload`, changes nothing.
 - **Forks.** `fork()` returns an independent session with a trusted copy of the state, which keeps the property order
-  and therefore the checkpoint bytes, and shares only the immutable plan and deeply frozen temporal contexts. It uses
-  the parent's capabilities unless its options give others; an injected `random` source stays external state that a
-  fork does not copy.
+  and therefore the checkpoint bytes, and shares only the immutable plan and deeply frozen temporal contexts. It keeps
+  each of the parent's capabilities, `builtins` and `random`, that its options do not give; an injected `random` source
+  stays external state that a fork does not copy.
 - **Traces.** A host passes the same `RuntimeDebugContext` to a session's successive operations as to successive
   snapshot results; an operation on another session, such as a fork, starts an `attach` epoch.
 

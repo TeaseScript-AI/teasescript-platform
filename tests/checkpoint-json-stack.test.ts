@@ -16,6 +16,7 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   restorePlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
@@ -110,8 +111,8 @@ test("both checkpoint writers give the same bytes for a suspended session and it
   assert.equal(hooked.uses, 0);
   assert.equal(hooked.result.checkpointJson, nativePoint.checkpointJson);
   assert.equal(
-    JSON.stringify(restorePlayerRuntimeSession(nativePoint).snapshot),
-    JSON.stringify(session.snapshot),
+    JSON.stringify(playerRuntimeSnapshot(restorePlayerRuntimeSession(nativePoint))),
+    JSON.stringify(playerRuntimeSnapshot(session)),
   );
 });
 

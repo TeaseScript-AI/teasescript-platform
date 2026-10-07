@@ -153,8 +153,8 @@ test("the camera opens by itself with the request, and a photo answers only when
   await settled();
   assert.equal(capture.view.value, null);
   assert.equal(camera.released, 1, "the camera the request opened turns off after the answer");
-  assert.equal(session.value?.snapshot.status, "halted");
-  assert.equal(playerRuntimeMedia(session.value!.snapshot).stage.image, camera.taken[1]);
+  assert.equal(session.value?.state.status, "halted");
+  assert.equal(playerRuntimeMedia(session.value!.state).stage.image, camera.taken[1]);
   assert.equal(media.holds(camera.taken[1]!, "image"), true, "the used photo stays");
 });
 
@@ -236,7 +236,7 @@ test("a capture uses the open session camera and leaves it on after the answer",
   await capture.shutter();
   capture.use();
   await settled();
-  assert.equal(session.value?.snapshot.status, "halted");
+  assert.equal(session.value?.state.status, "halted");
   assert.equal(sessionCamera.taken.length, 1);
   assert.deepEqual(
     [camera.opened, sessionCamera.opened, sessionCamera.released, sessionCamera.available],

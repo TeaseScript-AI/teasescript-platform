@@ -11,6 +11,7 @@ import {
   playerRuntimeForeground,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import type { DebugExportCandidate } from "../player/debug-export-assembly.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
@@ -168,7 +169,7 @@ test("a chosen image is session media: kept durably only when saved, and release
   answer(host, first);
   const second = await chosen(host, "second.png");
   answer(host, second);
-  await until(() => host.session.value?.snapshot.status === "halted", "the save was not serviced");
+  await until(() => host.session.value?.state.status === "halted", "the save was not serviced");
 
   // Only the saved image became durable, under the script's storage scope.
   assert.deepEqual([...entries], [["kept", second]]);
@@ -203,19 +204,21 @@ test("a debug export candidate is the state when it was asked for, while play co
   // The Player's event and transcript lists grow with play, so the state asked for is their length then.
   const events = [...asked.events];
   const transcriptEntries = [...asked.transcriptEntries];
+  // So is its state, which play changes in place.
+  const askedSnapshot = playerRuntimeSnapshot(asked);
   const pending = host.debugExportCandidate({
     player: {},
     host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
   });
   // The player answers before the candidate has read the photo the session used.
   host.update(submitPlayerRuntimeComposer(asked, "later answer")!.session);
-  assert.equal(host.session.value?.snapshot.status, "halted");
+  assert.equal(host.session.value?.state.status, "halted");
   const candidate = await pending;
-  assert.equal(candidate.session?.snapshot, asked.snapshot);
+  assert.deepEqual(candidate.session?.snapshot, askedSnapshot);
   assert.notEqual(asked.events.length, events.length, "play continued");
   assert.deepEqual(candidate.session?.events, events);
   assert.deepEqual(candidate.session?.transcriptEntries, transcriptEntries);
-  assert.equal(candidate.recording?.endSnapshot, asked.snapshot);
+  assert.deepEqual(candidate.recording?.endSnapshot, askedSnapshot);
   assert.equal(candidate.photos.length, 1);
 });
 
@@ -319,11 +322,13 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   // A captured image is no package file, so neither showing it nor a failure to load it is reported.
   answer(host, await chosen(host, "photo.png"));
   await nextTick();
-  host.stageImageFailure(host.resolveAsset(host.session.value!.snapshot.stageImage!)!);
+  host.stageImageFailure(
+    host.resolveAsset(playerRuntimeSnapshot(host.session.value!).stageImage!)!,
+  );
   // The same missing image shown again in this session is not reported again.
   answer(host, await chosen(host, "other.png"));
   await nextTick();
-  assert.equal(host.session.value!.snapshot.stageImage, "images/missing.png");
+  assert.equal(playerRuntimeSnapshot(host.session.value!).stageImage, "images/missing.png");
   assert.deepEqual(messages(), []);
 
   // A new session reports it again.

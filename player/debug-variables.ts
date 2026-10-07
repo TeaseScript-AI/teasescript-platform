@@ -1,11 +1,11 @@
 import {
   RUNTIME_DEBUG_TRACE_LIMITS,
-  runtimeDebugPreview,
   type RuntimeDebugContext,
   type RuntimeDebugRecord,
-  type RuntimeScopeFrameSnapshot,
-  type RuntimeSnapshot,
-  type SerializableRuntimeValue,
+  type RuntimeSessionCall,
+  type RuntimeSessionScopePreview,
+  type RuntimeSessionVariablePreview,
+  type RuntimeSessionVariablePreviews,
 } from "../src/index.js";
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
 import { quotedText } from "../src/runtime/value-text.js";
@@ -27,6 +27,12 @@ export interface PlayerDebugVariable {
   readonly record: number | null;
 }
 
+/** What the Variables view lists: a session's variables and, to group them by call, its active calls. */
+export interface PlayerDebugVariableSource {
+  readonly variables: RuntimeSessionVariablePreviews;
+  readonly calls: readonly RuntimeSessionCall[];
+}
+
 /** Variables that live together: the globals, a file's top level, a function or block call, or kept for blocks. */
 export interface PlayerDebugVariableGroup {
   readonly key: string;
@@ -40,7 +46,7 @@ export interface PlayerDebugVariableGroup {
  */
 export function playerDebugVariables(
   plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
+  snapshot: PlayerDebugVariableSource,
   trace: RuntimeDebugContext | null,
   filter = "",
 ): readonly PlayerDebugVariableGroup[] {
@@ -50,16 +56,16 @@ export function playerDebugVariables(
     key: string,
     label: string,
     scope: number | "global",
-    name: string,
-    value: SerializableRuntimeValue,
+    variable: RuntimeSessionVariablePreview,
   ) => {
+    const name = variable.name;
     if (wanted !== "" && !name.toLowerCase().includes(wanted)) return;
     let group = groups.get(key);
     if (group === undefined) {
       group = { label, variables: [] };
       groups.set(key, group);
     }
-    const preview = livePreview(snapshot, value);
+    const preview = livePreview(snapshot.variables, variable);
     group.variables.push(
       Object.freeze({
         name,
@@ -70,14 +76,13 @@ export function playerDebugVariables(
       }),
     );
   };
-  for (const binding of snapshot.globals)
-    add("globals", "Globals", "global", binding.name, binding.value);
+  for (const variable of snapshot.variables.globals) add("globals", "Globals", "global", variable);
 
   const filePath = (file: number) => plan.files[file]?.path ?? "?";
-  const calls = snapshot.callFrames;
-  let root: RuntimeScopeFrameSnapshot | null = null;
-  for (let index = 0, call = -1; index < snapshot.frames.length; index += 1) {
-    const frame = snapshot.frames[index]!;
+  const calls = snapshot.calls;
+  let root: RuntimeSessionScopePreview | null = null;
+  for (let index = 0, call = -1; index < snapshot.variables.frames.length; index += 1) {
+    const frame = snapshot.variables.frames[index]!;
     while (call + 1 < calls.length && calls[call + 1]!.scopeBaseDepth <= index) call += 1;
     if (frame.file !== null) root = frame;
     const owner = call < 0 ? null : calls[call]!;
@@ -102,15 +107,14 @@ export function playerDebugVariables(
       key = `root:${root?.id ?? frame.id}`;
       label = root === null || root.file === null ? "Top level" : filePath(root.file);
     }
-    for (const binding of frame.bindings) add(key, label, frame.id, binding.name, binding.value);
+    for (const variable of frame.variables) add(key, label, frame.id, variable);
   }
-  for (const frame of snapshot.retainedScopes) {
+  for (const frame of snapshot.variables.retainedScopes) {
     const label =
       frame.file === null
         ? "Kept for timer, media, and button blocks"
         : `${filePath(frame.file)} (left, kept for blocks)`;
-    for (const binding of frame.bindings)
-      add(`kept:${frame.id}`, label, frame.id, binding.name, binding.value);
+    for (const variable of frame.variables) add(`kept:${frame.id}`, label, frame.id, variable);
   }
   return Object.freeze(
     [...groups].map(([key, group]) =>
@@ -121,18 +125,17 @@ export function playerDebugVariables(
 
 /** A value as the trace previews it; a message handle also shows the text its message has now. */
 function livePreview(
-  snapshot: RuntimeSnapshot,
-  value: SerializableRuntimeValue,
+  snapshot: Pick<RuntimeSessionVariablePreviews, "liveMessages">,
+  variable: RuntimeSessionVariablePreview,
 ): { readonly text: string; readonly truncated: boolean } {
-  const preview = runtimeDebugPreview(value);
-  if (typeof value !== "object" || value === null || value.kind !== "messageHandle") return preview;
-  const text = snapshot.liveMessages.find(
-    (message) => message.messageId === value.messageId,
-  )?.sourceText;
+  const preview = { text: variable.preview, truncated: variable.truncated };
+  const messageId = variable.messageId;
+  if (messageId === null) return preview;
+  const text = snapshot.liveMessages.find((message) => message.messageId === messageId)?.sourceText;
   if (text === undefined) return preview;
   const limit = RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters;
   return {
-    text: `<message ${value.messageId} ${quotedText(text.slice(0, limit))}>`,
+    text: `<message ${messageId} ${quotedText(text.slice(0, limit))}>`,
     truncated: text.length > limit,
   };
 }
@@ -302,17 +305,19 @@ export type PlayerDebugLiveValue = (scope: number | "global", name: string) => s
  * The live value of a variable in `snapshot`, previewed as the trace previews it, a message handle with its message's
  * text now; `null` once it no longer exists.
  */
-export function playerDebugLiveValue(snapshot: RuntimeSnapshot): PlayerDebugLiveValue {
+export function playerDebugLiveValue(
+  snapshot: RuntimeSessionVariablePreviews,
+): PlayerDebugLiveValue {
   return (scope, name) => {
-    const bindings =
+    const variables =
       scope === "global"
         ? snapshot.globals
         : (
             snapshot.frames.find((frame) => frame.id === scope) ??
             snapshot.retainedScopes.find((frame) => frame.id === scope)
-          )?.bindings;
-    const binding = bindings?.find((candidate) => candidate.name === name);
-    return binding === undefined ? null : livePreview(snapshot, binding.value).text;
+          )?.variables;
+    const variable = variables?.find((candidate) => candidate.name === name);
+    return variable === undefined ? null : livePreview(snapshot, variable).text;
   };
 }
 

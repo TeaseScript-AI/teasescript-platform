@@ -13,8 +13,9 @@ import { runsNothing } from "../activation-validation.js";
 import { innermostFileCallIndex } from "../activations.js";
 import { leaveScopes, sweepRetainedScopes } from "../captures.js";
 import { RuntimeFault } from "../errors.js";
+import { messageText } from "../text-length.js";
 import type { Evaluator } from "../evaluator.js";
-import { nextXorShift32 } from "../random.js";
+import { drawFromSessionGenerator, sampleIndex } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
 import { cloneTransferDestination } from "../state.js";
 import { isScriptReference } from "../value-predicates.js";
@@ -212,11 +213,11 @@ function resolveComputed(
         : plan.files[file]!.labels.find((candidate) => candidate.name === label)?.instruction;
   const problem =
     file < 0
-      ? `This ${keyword} names the file '${path}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
+      ? `This ${keyword} names the file '${messageText(path)}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
       : target === undefined
-        ? `This ${keyword} names label '${label}' of '${path}', but that file has no such label.`
+        ? `This ${keyword} names label '${messageText(label!)}' of '${messageText(path)}', but that file has no such label.`
         : keyword !== "call" && runsNothing(plan, file)
-          ? `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+          ? `'${messageText(path)}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
           : null;
   if (problem !== null) throw new RuntimeFault("TSR069", problem, copySpan(span));
   return { file, target: target! };
@@ -230,13 +231,14 @@ function drawDestination(
   trace: TraceStore | null,
 ): PlanDestination {
   if (!("pick" in destination)) return destination;
-  const before = snapshot.rng.state;
+  const count = destination.pick.length;
   const picked =
-    destination.pick[Math.floor(nextXorShift32(snapshot.rng) * destination.pick.length)]!;
-  if (trace !== null) {
-    trace.random("glob", null, destination.pick.length, null, before, snapshot.rng.state);
-    trace.randomResult(plan.files[picked.file]!.path);
-  }
+    destination.pick[
+      drawFromSessionGenerator(snapshot.rng, trace, "glob", null, count, null, (draw) =>
+        sampleIndex(draw, count),
+      )
+    ]!;
+  trace?.randomResult(plan.files[picked.file]!.path);
   return picked;
 }
 

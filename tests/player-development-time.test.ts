@@ -18,6 +18,7 @@ import {
   stepPlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { MediaProgressReport } from "../src/index.js";
@@ -35,16 +36,14 @@ function said(session: PlayerRuntimeSession): string[] {
 
 /** The canonical result of a session, without the adapter's presentation cache. */
 function canonical(session: PlayerRuntimeSession) {
-  return { snapshot: session.snapshot, events: session.events };
+  return { snapshot: playerRuntimeSnapshot(session), events: session.events };
 }
 
 /** Observes at every deadline the session reports, as the Player's wake-ups do, and finally at `targetMs`. */
 function observeEveryDeadline(session: PlayerRuntimeSession, targetMs: number) {
   for (;;) {
-    const observedMs = session.snapshot.observedSessionTimeMs;
-    const due = playerRuntimeDeadlines(session.snapshot).filter(
-      (deadline) => deadline > observedMs,
-    );
+    const observedMs = session.state.observedSessionTimeMs;
+    const due = playerRuntimeDeadlines(session.state).filter((deadline) => deadline > observedMs);
     const nowMs = Math.min(targetMs, ...due);
     session = observePlayerRuntimeTime(session, nowMs).session;
     if (nowMs >= targetMs) return session;
@@ -64,9 +63,9 @@ test("a jump gives the session that observing every deadline on time gives", () 
     const late = observePlayerRuntimeTime(createPlayerRuntimeSession(source), 12_000).session;
     const jumped = advancePlayerRuntimeTime(createPlayerRuntimeSession(source), 12_000);
     let skipped = createPlayerRuntimeSession(source);
-    for (let next = nextPlayerRuntimeEventMs(skipped.snapshot); next !== null && next < 12_000;) {
+    for (let next = nextPlayerRuntimeEventMs(skipped.state); next !== null && next < 12_000;) {
       skipped = advancePlayerRuntimeTime(skipped, next);
-      next = nextPlayerRuntimeEventMs(skipped.snapshot);
+      next = nextPlayerRuntimeEventMs(skipped.state);
     }
     skipped = advancePlayerRuntimeTime(skipped, 12_000);
     assert.deepEqual(canonical(jumped), canonical(onTime), `jump: ${source}`);
@@ -91,8 +90,8 @@ test("+10 s at a button runs timers and its timeout in scene-time order and show
     ),
     [3_000, 7_000],
   );
-  assert.equal(session.snapshot.observedSessionTimeMs, 10_000);
-  assert.equal(session.snapshot.foregroundAction?.kind, "interaction", "More waits for the player");
+  assert.equal(session.state.observedSessionTimeMs, 10_000);
+  assert.equal(session.state.foregroundAction?.kind, "interaction", "More waits for the player");
 
   // A jump is real scene time: a button's elapsed result and timestamp differences include it.
   session = advancePlayerRuntimeTime(
@@ -114,7 +113,7 @@ test("a jump waits for a write a block makes, and checkpoints before and after i
     'timer async 2 {\n  save 1 as "seen"\n  say "saved", instant\n}\nlet elapsed = showButton "Done"\nsay "Waited ${elapsed}", instant\nexit';
   const options: PlayerRuntimeSessionOptions = { scriptStorage: [], persistentScriptStorage: true };
   const finish = (session: PlayerRuntimeSession) => {
-    const write = pendingPlayerRuntimeStorageWrite(session.snapshot)!;
+    const write = pendingPlayerRuntimeStorageWrite(session.state)!;
     session = completePlayerRuntimeStorageWrite(session, write.actionId, true).session;
     session = advancePlayerRuntimeTime(session, 10_000);
     const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
@@ -125,8 +124,8 @@ test("a jump waits for a write a block makes, and checkpoints before and after i
 
   // The block's write holds the jump at the block's scene time, where the host answers it.
   const held = advancePlayerRuntimeTime(createPlayerRuntimeSession(source, options), 10_000);
-  assert.equal(held.snapshot.observedSessionTimeMs, 2_000);
-  assert.ok(pendingPlayerRuntimeStorageWrite(held.snapshot));
+  assert.equal(held.state.observedSessionTimeMs, 2_000);
+  assert.ok(pendingPlayerRuntimeStorageWrite(held.state));
   assert.equal(advancePlayerRuntimeTime(held, 10_000), held, "no time passes before the answer");
 
   const [continued, restoredAfter] = finish(held);
@@ -139,7 +138,7 @@ test("a jump waits for a write a block makes, and checkpoints before and after i
   );
   assert.deepEqual(canonical(restoredBefore!), canonical(continued!));
   assert.deepEqual(canonical(restoredAfter!), canonical(continued!));
-  assert.equal(continued!.snapshot.status, "halted");
+  assert.equal(continued!.state.status, "halted");
   assert.deepEqual(
     continued!.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["saved", "Waited 15 s"],
@@ -179,7 +178,7 @@ test("a jump plays running audio on at 1× through cues, seeks, pauses, and resu
   let sampled = loaded();
   for (let nowMs = 10; nowMs <= 3_600; nowMs += 10) {
     const reports: MediaProgressReport[] = [];
-    for (const action of sampled.snapshot.backgroundActions) {
+    for (const action of sampled.state.backgroundActions) {
       if (action.kind !== "media" || action.media.state !== "running") continue;
       const last = action.media.points.at(-1)!;
       reports.push({
@@ -205,13 +204,13 @@ test("a jump plays running audio on at 1× through cues, seeks, pauses, and resu
 
 test("Skip goes to the end of blocking audio once it loaded; loading audio has no timed event", () => {
   let session = createPlayerRuntimeSession('playAudio "voice.mp3"\nsay "after", instant\nexit');
-  assert.equal(nextPlayerRuntimeEventMs(session.snapshot), null);
+  assert.equal(nextPlayerRuntimeEventMs(session.state), null);
   session = observePlayerRuntimeTime(session, 300).session;
   session = reportPlayerRuntimeMediaLoad(session, 1, { kind: "loaded", durationMs: 4_000 }).session;
-  assert.equal(nextPlayerRuntimeEventMs(session.snapshot), 4_300);
-  session = advancePlayerRuntimeTime(session, nextPlayerRuntimeEventMs(session.snapshot)!);
+  assert.equal(nextPlayerRuntimeEventMs(session.state), 4_300);
+  session = advancePlayerRuntimeTime(session, nextPlayerRuntimeEventMs(session.state)!);
   assert.deepEqual(said(session), ["after"]);
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
 });
 
 test("a jump passes silent timer rounds and cue-free media passes like one late observation", () => {
@@ -226,7 +225,7 @@ test("a jump passes silent timer rounds and cue-free media passes like one late 
     "exit",
   ].join("\n");
   // Rounds of a repeating timer without a block and passes without cues run nothing; only the audio's end is an event.
-  assert.equal(nextPlayerRuntimeEventMs(createPlayerRuntimeSession(source).snapshot), null);
+  assert.equal(nextPlayerRuntimeEventMs(createPlayerRuntimeSession(source).state), null);
   const loaded = () =>
     reportPlayerRuntimeMediaLoad(createPlayerRuntimeSession(source), 1, {
       kind: "loaded",
@@ -236,14 +235,14 @@ test("a jump passes silent timer rounds and cue-free media passes like one late 
   const steps: number[] = [];
   for (let next = stepPlayerRuntimeTime(jumped, 10_000); next !== jumped;) {
     jumped = next;
-    steps.push(jumped.snapshot.observedSessionTimeMs);
+    steps.push(jumped.state.observedSessionTimeMs);
     // Bounded, so observing each round or pass fails here instead of running for hours.
     assert.ok(steps.length <= 2, `steps at ${steps.slice(0, 5).join(", ")}`);
     next = stepPlayerRuntimeTime(jumped, 10_000);
   }
   assert.deepEqual(steps, [6_000, 10_000]);
   const late = loaded();
-  const media = late.snapshot.backgroundActions.find((action) => action.kind === "media");
+  const media = late.state.backgroundActions.find((action) => action.kind === "media");
   assert.ok(media?.kind === "media");
   const observed = observePlayerRuntimeTime(late, 10_000, [
     { mediaId: media.media.mediaId, segment: media.media.segment, progressMs: 10_000 },
@@ -260,16 +259,14 @@ test("after a jump the device plays from the jumped playhead and measures on fro
   const [element] = player.elements;
   element!.metadata(4);
   player.tick(1_000);
-  const segment = player.session.snapshot.backgroundActions.find(
-    (action) => action.kind === "media",
-  );
+  const segment = player.session.state.backgroundActions.find((action) => action.kind === "media");
   player.jump(3_500);
   assert.deepEqual(player.texts(), ["cue 3 s"]);
   // The jump stays in the segment, so only the jump moves the element.
   assert.equal(element!.position, 3.5);
   assert.equal(element!.paused, false);
   player.tick(400);
-  const media = player.session.snapshot.backgroundActions.find((action) => action.kind === "media");
+  const media = player.session.state.backgroundActions.find((action) => action.kind === "media");
   assert.ok(media?.kind === "media" && segment?.kind === "media");
   assert.equal(media.media.segment, segment.media.segment);
   assert.equal(
@@ -292,6 +289,7 @@ interface SessionHost {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
+  observe(): PlayerRuntimeSession | null;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
@@ -414,7 +412,7 @@ test("+10 s continues after the host stores a block's write, at the block's scen
   const session = player.session.value!;
   assert.deepEqual(writes, ["seen"]);
   assert.deepEqual(said(session), ["saved"]);
-  assert.ok(session.snapshot.observedSessionTimeMs >= 10_000);
+  assert.ok(session.state.observedSessionTimeMs >= 10_000);
   assert.deepEqual(
     session.events.flatMap((event) =>
       event.kind === "actionCompleted" && event.settlement.actionKind === "storageWrite"
@@ -441,15 +439,15 @@ test("+10 s works during chat pacing, also from a pending save, and not after th
     },
   );
   // The jump starts while the host stores the save and continues once it answered.
-  assert.equal(player.session.value!.snapshot.foregroundAction?.kind, "storageWrite");
+  assert.equal(player.session.value!.state.foregroundAction?.kind, "storageWrite");
   assert.equal(time.canAdvance.value, true);
   const jumped = time.advanceBy(10_000);
   await later();
   answer();
   await jumped;
   let session = player.session.value!;
-  assert.ok(session.snapshot.observedSessionTimeMs >= 10_000);
-  assert.equal(session.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.ok(session.state.observedSessionTimeMs >= 10_000);
+  assert.equal(session.state.foregroundAction?.kind, "chatPacingGate");
   assert.deepEqual(said(session), ["First"], "First paces for 20 s");
   // A jump during the pause passes its end, and the next message follows.
   assert.equal(time.canAdvance.value, true);
@@ -458,8 +456,37 @@ test("+10 s works during chat pacing, also from a pending save, and not after th
   assert.deepEqual(said(session), ["First", "Second"]);
   assert.deepEqual(logged, ["⏩ 10 s skipped", "⏩ 10 s skipped"]);
   player.update(activatePlayerRuntimeButton(session)!.session);
-  assert.equal(player.session.value!.snapshot.status, "halted");
+  assert.equal(player.session.value!.state.status, "halted");
   assert.equal(time.canAdvance.value, false);
+});
+
+test("a jump logs only the scene time it advanced, not real time observed while the host answered", async (context) => {
+  let answer = () => {};
+  const { player, time, logged } = await mount(
+    context,
+    'save 1 as "seen"\nsay "First", 20\nlet done = showButton "Done"\nexit',
+    { autoSkip: false },
+    {
+      scope: "test",
+      load: async () => [],
+      write: () => new Promise<void>((resolve) => (answer = resolve)),
+      replace: async () => {},
+      clear: async () => {},
+    },
+  );
+  const jumped = time.advanceBy(50);
+  // After one task the jump has observed its start and waits for the host to store the save.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const targetMs = player.session.value!.state.observedSessionTimeMs + 50;
+  // Ordinary observations, as a timer's wake-up makes, pass that target meanwhile; the jump ends without a step.
+  for (let waited = 0; player.session.value!.state.observedSessionTimeMs < targetMs; waited += 10) {
+    assert.ok(waited < 5_000, "real time was not observed");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    player.observe();
+  }
+  answer();
+  await jumped;
+  assert.deepEqual(logged, []);
 });
 
 test("auto-skip completes waits but leaves the player's think time and background timers real", async (context) => {
@@ -470,14 +497,14 @@ test("auto-skip completes waits but leaves the player's think time and backgroun
   );
   await later();
   let session = player.session.value!;
-  assert.equal(session.snapshot.foregroundAction?.kind, "interaction");
-  const skippedTo = session.snapshot.observedSessionTimeMs;
+  assert.equal(session.state.foregroundAction?.kind, "interaction");
+  const skippedTo = session.state.observedSessionTimeMs;
   assert.ok(skippedTo >= 30_000 && skippedTo < 31_000, `${skippedTo}`);
   player.update(activatePlayerRuntimeButton(session)!.session);
   await later();
   session = player.session.value!;
   assert.deepEqual(said(session), ["Done"], "the timer runs in real time while Again waits");
-  assert.ok(session.snapshot.observedSessionTimeMs < skippedTo + 1_000);
+  assert.ok(session.state.observedSessionTimeMs < skippedTo + 1_000);
 });
 
 test("a long jump yields between tasks, and unmounting the Player stops it", async (context) => {
@@ -486,7 +513,7 @@ test("a long jump yields between tasks, and unmounting the Player stops it", asy
     'timer(duration: 1 ms, async: true, repeat: true) {\n  let x = 1\n}\nlet e = showButton "Done"\nexit',
     { autoSkip: false },
   );
-  const fromMs = player.session.value!.snapshot.observedSessionTimeMs;
+  const fromMs = player.session.value!.state.observedSessionTimeMs;
   let yielded = false;
   setTimeout(() => {
     yielded = true;
@@ -494,7 +521,7 @@ test("a long jump yields between tasks, and unmounting the Player stops it", asy
   }, 0);
   await time.advanceBy(60_000);
   assert.ok(yielded, "the jump let other tasks run");
-  const reachedMs = player.session.value!.snapshot.observedSessionTimeMs;
+  const reachedMs = player.session.value!.state.observedSessionTimeMs;
   assert.ok(reachedMs > fromMs && reachedMs < fromMs + 60_000, `${fromMs} → ${reachedMs}`);
   assert.equal(logged.length, 1, "the part that was jumped is logged");
 });
@@ -527,10 +554,10 @@ test("Debug off ends auto-skip and a running jump, and Debug on again starts wit
   const time = timeNow();
   assert.ok(time);
   assert.equal(time.autoSkip.value, true);
-  const fromMs = player.session.value!.snapshot.observedSessionTimeMs;
+  const fromMs = player.session.value!.state.observedSessionTimeMs;
   setTimeout(() => (debug.active.value = false), 0);
   await time.advanceBy(60_000);
-  const reachedMs = player.session.value!.snapshot.observedSessionTimeMs;
+  const reachedMs = player.session.value!.state.observedSessionTimeMs;
   assert.ok(
     reachedMs < fromMs + 60_000,
     `the jump went on after Debug off: ${fromMs} → ${reachedMs}`,

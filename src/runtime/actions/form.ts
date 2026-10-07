@@ -49,7 +49,8 @@ import {
 } from "../value-predicates.js";
 import { fieldText } from "../value-text.js";
 import { describeType, describeValue, matchesValueType } from "../value-types.js";
-import { escapeMarkup } from "../../message-markup.js";
+import { escapedMarkupLength, escapeMarkup } from "../../message-markup.js";
+import { checkTextLength, MAX_TEXT_LENGTH, messageText } from "../text-length.js";
 import {
   FORM_FIELD_PROPERTIES,
   FORM_FIELD_PROPERTIES_TEXT,
@@ -114,7 +115,9 @@ export function materializeForm(
 
   const fields: FormField[] = [];
   const values: RuntimeFormValue[] = [];
-  const descriptions: string[] = [];
+  const descriptions: { readonly label: string; readonly description: string }[] = [];
+  // The length of the description lines, without the line breaks between them, counted as they are added.
+  let described = 0;
   // Fields and their options share the interaction's entry limit, checked as each field is added.
   let entries = 0;
   const add = (field: FormField, value: RuntimeFormValue) => {
@@ -143,7 +146,7 @@ export function materializeForm(
       const start = defaults.items[index]!;
       if (typeof start !== "boolean")
         throw fault(
-          `askBooleans default ${index} (${JSON.stringify(fieldText(text, span, context))}): takes true or false, not ${describeRuntimeValue(start)}.`,
+          `askBooleans default ${index} (${JSON.stringify(messageText(fieldText(text, span, context)))}): takes true or false, not ${describeRuntimeValue(start)}.`,
           span,
         );
       add(
@@ -178,8 +181,14 @@ export function materializeForm(
       );
       add(field.field, field.value);
       // The label is shown as written; the description is said as `say` says text.
-      if (field.description !== null)
-        descriptions.push(`${escapeMarkup(field.field.text)} — ${field.description}`);
+      if (field.description !== null) {
+        // Escaping puts a backslash before some characters, so only a label that could get too long is measured first.
+        if (field.field.text.length * 2 > MAX_TEXT_LENGTH)
+          checkTextLength(escapedMarkupLength(field.field.text), "askForm", span);
+        const label = escapeMarkup(field.field.text);
+        descriptions.push({ label, description: field.description });
+        described += label.length + 3 + field.description.length;
+      }
     }
   }
   if (fields.length === 0) throw fault("A form needs at least one field.", span);
@@ -187,7 +196,7 @@ export function materializeForm(
   if (mismatch !== null)
     throw new RuntimeFault(
       "TSR058",
-      `askForm field '${mismatch.field.id}' was checked to answer ${describeType(mismatch.type)}, but it can answer ${describeValue(mismatch.answer)}. Write type: where the field's starting object is created, so the compiler sees its kind.`,
+      `askForm field '${messageText(mismatch.field.id)}' was checked to answer ${describeType(mismatch.type)}, but it can answer ${describeValue(mismatch.answer)}. Write type: where the field's starting object is created, so the compiler sees its kind.`,
       copySpan(span),
     );
   const timeout = formTimeout(timeoutValue, onTimeout, span);
@@ -200,7 +209,15 @@ export function materializeForm(
         span,
       );
   }
-  const prose = [descriptions.join("\n"), outro ?? ""].filter((part) => part !== "").join("\n\n");
+  // Each description is `<label> — <description>` on a line of its own, and the outro follows after a blank line.
+  const lines = described + Math.max(0, descriptions.length - 1);
+  checkTextLength(lines + (outro ? outro.length + (lines > 0 ? 2 : 0) : 0), "askForm", span);
+  const prose = [
+    descriptions.map(({ label, description }) => `${label} — ${description}`).join("\n"),
+    outro ?? "",
+  ]
+    .filter((part) => part !== "")
+    .join("\n\n");
   return {
     ui: {
       kind: "form",
@@ -635,7 +652,8 @@ export function applyFormUpdate(
   if (!isPlainRecord(update) || typeof update.fieldId !== "string")
     return refused("A form update needs a kind and the fieldId of a field.");
   const index = ui.fields.findIndex((field) => field.id === update.fieldId);
-  if (index === -1) return refused(`The form has no field ${JSON.stringify(update.fieldId)}.`);
+  if (index === -1)
+    return refused(`The form has no field ${JSON.stringify(messageText(update.fieldId))}.`);
   const field = ui.fields[index]!;
   const keys = (names: readonly string[]) =>
     Object.keys(update).length === names.length && names.every((name) => name in update);
@@ -645,7 +663,7 @@ export function applyFormUpdate(
       if (!keys(["kind", "fieldId", "optionIndex"]))
         return refused("A select update has kind, fieldId, and optionIndex.");
       if (field.kind !== "boolean" && field.kind !== "cycle")
-        return refused(`Field ${JSON.stringify(field.id)} is typed in the composer.`);
+        return refused(`Field ${JSON.stringify(messageText(field.id))} is typed in the composer.`);
       const count = field.options?.length ?? 2;
       const optionIndex = update.optionIndex;
       if (
@@ -654,7 +672,9 @@ export function applyFormUpdate(
         optionIndex < 0 ||
         optionIndex >= count
       )
-        return refused(`Field ${JSON.stringify(field.id)} has no option ${String(optionIndex)}.`);
+        return refused(
+          `Field ${JSON.stringify(messageText(field.id))} has no option ${String(optionIndex)}.`,
+        );
       const committed = commitEditor(ui, state);
       if (!committed.ok) return committed;
       const value =
@@ -668,7 +688,9 @@ export function applyFormUpdate(
     case "edit": {
       if (!keys(["kind", "fieldId"])) return refused("An edit update has kind and fieldId.");
       if (field.kind === "boolean" || field.kind === "cycle")
-        return refused(`Field ${JSON.stringify(field.id)} is not typed in the composer.`);
+        return refused(
+          `Field ${JSON.stringify(messageText(field.id))} is not typed in the composer.`,
+        );
       if (editing) return { ok: true, state };
       const committed = commitEditor(ui, state);
       if (!committed.ok) return committed;
@@ -685,7 +707,8 @@ export function applyFormUpdate(
         return refused("A draft update has kind, fieldId, and text.");
       if (typeof update.text !== "string" || !interactionStringFits(update.text))
         return refused("Draft text must be text within the shared UTF-8 byte limit.");
-      if (!editing) return refused(`Field ${JSON.stringify(field.id)} is not being edited.`);
+      if (!editing)
+        return refused(`Field ${JSON.stringify(messageText(field.id))} is not being edited.`);
       return {
         ok: true,
         state: { values: state.values, editor: { fieldId: field.id, text: update.text } },
@@ -695,13 +718,16 @@ export function applyFormUpdate(
       if (!keys(["kind", "fieldId"])) return refused("A commit update has kind and fieldId.");
       // A repeated commit finds the field already closed.
       if (state.editor === null) return { ok: true, state };
-      if (!editing) return refused(`Field ${JSON.stringify(field.id)} is not being edited.`);
+      if (!editing)
+        return refused(`Field ${JSON.stringify(messageText(field.id))} is not being edited.`);
       return commitEditor(ui, state);
     }
     case "clear": {
       if (!keys(["kind", "fieldId"])) return refused("A clear update has kind and fieldId.");
       if (field.kind === "boolean" || field.kind === "cycle")
-        return refused(`Field ${JSON.stringify(field.id)} is not typed in the composer.`);
+        return refused(
+          `Field ${JSON.stringify(messageText(field.id))} is not typed in the composer.`,
+        );
       if (!field.optional) return refused(`That is wrong. ${field.text} needs a value.`);
       const committed = editing ? { ok: true as const, state } : commitEditor(ui, state);
       if (!committed.ok) return committed;

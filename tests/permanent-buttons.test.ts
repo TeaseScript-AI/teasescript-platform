@@ -24,6 +24,7 @@ import {
   observePlayerRuntimeTime,
   playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -553,7 +554,7 @@ test("the Player shows a session's buttons, inactive while their block runs, and
   let session = createPlayerRuntimeSession(
     'showPermanentButton "Count" {\n    wait 1\n}\nshowPermanentButton "Quit" {\n    exit\n}\nwait 10\nexit',
   );
-  assert.deepEqual(playerRuntimePermanentButtons(session.snapshot), [
+  assert.deepEqual(playerRuntimePermanentButtons(session.state), [
     { buttonId: 1, label: "Count", busy: false },
     { buttonId: 2, label: "Quit", busy: false },
   ]);
@@ -561,15 +562,15 @@ test("the Player shows a session's buttons, inactive while their block runs, and
   assert.equal(counted.outcome.kind, "pressed");
   session = counted.session;
   // The press also ran the session, which started the block.
-  assert.equal(functionFrames(session.snapshot).length, 1);
-  assert.equal(playerRuntimePermanentButtons(session.snapshot)[0]!.busy, true);
+  assert.equal(functionFrames(playerRuntimeSnapshot(session)).length, 1);
+  assert.equal(playerRuntimePermanentButtons(session.state)[0]!.busy, true);
   assert.equal(pressPlayerRuntimePermanentButton(session, 1).outcome.kind, "busy");
   session = pressPlayerRuntimePermanentButton(session, 2).session;
-  assert.equal(session.snapshot.status, "waiting", "the Quit click waits behind the running block");
+  assert.equal(session.state.status, "waiting", "the Quit click waits behind the running block");
   assert.equal(pressPlayerRuntimePermanentButton(session, 2).outcome.kind, "busy");
   session = observePlayerRuntimeTime(session, 1000).session;
-  assert.equal(session.snapshot.status, "halted");
-  assert.deepEqual(playerRuntimePermanentButtons(session.snapshot), []);
+  assert.equal(session.state.status, "halted");
+  assert.deepEqual(playerRuntimePermanentButtons(session.state), []);
 });
 
 type Mutable<T> = T extends readonly [infer First, infer Second]

@@ -26,7 +26,7 @@ import type {
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
-import { escapeMarkup, parseMessageMarkup } from "../message-markup.js";
+import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
@@ -64,7 +64,21 @@ import {
   type PreparedReferenceStep,
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
-import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
+import {
+  sampleChance,
+  sampleIndex,
+  sampleOrder,
+  sampleRangeInteger,
+  type PrimitiveDraw,
+} from "./random-draws.js";
+import {
+  isVisibleScalar,
+  quotedText,
+  quotedTextWithin,
+  valueNotation,
+  visibleText,
+} from "./value-text.js";
+import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -230,6 +244,13 @@ export interface RuntimeCapabilities {
 }
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
+
+/** `text` with `part` of a `"${...}"` text appended; `TSR084` when the text would be too long. */
+function templateText(text: string, part: string, span: SourceSpan): string {
+  // The later placeholders have not run yet, so the length the whole text would reach is not known.
+  if (text.length + part.length > MAX_TEXT_LENGTH) throw textTooLong("${…}", span, null);
+  return text + part;
+}
 
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
@@ -556,10 +577,7 @@ export class Evaluator {
                     ? 0
                     : expression.name === "last"
                       ? base.items.length - 1
-                      : Math.floor(
-                          this.#findRandom(expression.span, "collectionRandom", base.items.length) *
-                            base.items.length,
-                        );
+                      : this.#drawIndex(expression.span, "collectionRandom", base.items.length);
                 if (expression.name === "random") trace?.randomResult(base.items[index]!);
                 if (isSet(base)) {
                   // A set member is read as a copy: changing it must not change the set or its uniqueness.
@@ -802,7 +820,11 @@ export class Evaluator {
             const part = expression.parts[frame.index - 1]!;
             if (part.kind === "expression") {
               if (trace === null)
-                frame.text += this.interpolationText(result.value, part.expression.span);
+                frame.text = templateText(
+                  frame.text,
+                  this.interpolationText(result.value, part.expression.span),
+                  expression.span,
+                );
               else {
                 // A list's selection draw belongs to the placeholder, whose text the string then depends on.
                 const placeholder = finished?.deps ?? emptyDependencies();
@@ -810,7 +832,7 @@ export class Evaluator {
                 const text = this.interpolationText(result.value, part.expression.span);
                 trace.focus(frame.deps!, null, false);
                 trace.interpolation(placeholder, text, part.expression.span);
-                frame.text += text;
+                frame.text = templateText(frame.text, text, expression.span);
               }
             }
           }
@@ -819,7 +841,8 @@ export class Evaluator {
             expression.parts[frame.index]!.kind === "text"
           ) {
             const part = expression.parts[frame.index++]!;
-            if (part.kind === "text") frame.text += part.value;
+            if (part.kind === "text")
+              frame.text = templateText(frame.text, part.value, expression.span);
           }
           if (frame.index < expression.parts.length) {
             const part = expression.parts[frame.index++]!;
@@ -1414,13 +1437,17 @@ export class Evaluator {
       }
       displayName = explicit;
     } else {
-      const derived = [
+      const parts = [
         this.#speakerText(speaker, "title", span) ?? this.#speakerText(speaker, "shortTitle", span),
         this.#speakerText(speaker, "firstName", span),
         this.#speakerText(speaker, "lastName", span),
-      ]
-        .filter((part): part is string => part !== null && part.length > 0)
-        .join(" ");
+      ].filter((part): part is string => part !== null && part.length > 0);
+      checkTextLength(
+        parts.reduce((length, part) => length + part.length + 1, -1),
+        "say",
+        span,
+      );
+      const derived = parts.join(" ");
       displayName = derived.length === 0 ? speaker.identifier : derived;
       fallback = derived.length === 0;
     }
@@ -1475,9 +1502,18 @@ export class Evaluator {
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
     // A script reference shows as the call that makes it, which is notation too.
-    return isVisibleScalar(value) && !isScriptReference(value)
-      ? visibleText(value, span, currentTemporalContext(this.snapshot))
-      : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
+    if (isVisibleScalar(value) && !isScriptReference(value))
+      return visibleText(value, span, currentTemporalContext(this.snapshot));
+    const notation = valueNotation(
+      value,
+      span,
+      (handle) => this.#handleNotation(handle, span),
+      "say",
+    );
+    // Escaping puts a backslash before some characters, so only a notation that could get too long is measured first.
+    if (notation.length * 2 > MAX_TEXT_LENGTH)
+      checkTextLength(escapedMarkupLength(notation), "say", span);
+    return escapeMarkup(notation);
   }
 
   /**
@@ -1502,20 +1538,23 @@ export class Evaluator {
       const shown = shownPermanentButton(this.snapshot, handle.buttonId);
       return shown === undefined
         ? "<permanent button, removed>"
-        : `<permanent button ${quotedText(shown.button.text)}>`;
+        : quotedTextWithin("<permanent button ", shown.button.text, ">", "say", span);
     }
     const now = this.snapshot.currentSessionTimeMs;
     const time = (value: SerializableRuntimeValue | undefined): string =>
       value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
     if (isTimerHandle(handle)) {
       const timer = this.#timer(handle, span);
-      const name = timer.label === null ? "timer" : `timer ${quotedText(timer.label)}`;
       const left = `${time(timerProperty(timer, "remaining", now))} left`;
-      return timer.state === "running"
-        ? `<${name}, ${left}>`
-        : timer.state === "paused"
-          ? `<${name}, paused, ${left}>`
-          : `<${name}, ${timer.state}>`;
+      const rest =
+        timer.state === "running"
+          ? `, ${left}>`
+          : timer.state === "paused"
+            ? `, paused, ${left}>`
+            : `, ${timer.state}>`;
+      return timer.label === null
+        ? `<timer${rest}`
+        : quotedTextWithin("<timer ", timer.label, rest, "say", span);
     }
     const media = this.#media(handle, span);
     const at = `at ${time(mediaProperty(media, "position", now))}`;
@@ -1525,7 +1564,7 @@ export class Evaluator {
         : media.state === "paused"
           ? `paused ${at}`
           : media.state;
-    return `<media ${quotedText(media.source)}, ${state}>`;
+    return quotedTextWithin("<media ", media.source, `, ${state}>`, "say", span);
   }
 
   /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
@@ -1618,7 +1657,10 @@ export class Evaluator {
     left: SerializableRuntimeValue,
     right: SerializableRuntimeValue,
   ): SerializableRuntimeValue {
-    if (typeof left === "string" && typeof right === "string") return left + right;
+    if (typeof left === "string" && typeof right === "string") {
+      checkTextLength(left.length + right.length, "joining with +", expression.span);
+      return left + right;
+    }
     if (isList(left) && isList(right))
       return createCapturedSerializableList(left.items.concat(right.items));
     throw fault(
@@ -1773,6 +1815,8 @@ export class Evaluator {
           const code = error.code === "cyclic" ? "TSR031" : "TSR013";
           throw fault(code, error.message, expression.span);
         }
+        // A text that would be too long fails as it does anywhere else.
+        if (error instanceof RuntimeFault && error.code === "TSR084") throw error;
         const message = error instanceof Error ? error.message : String(error);
         throw fault(
           "TSR012",
@@ -2028,7 +2072,10 @@ export class Evaluator {
             receiver,
             name === "sort"
               ? sortOrder(receiver.items, span)
-              : this.#shuffleOrder(receiver.items.length, span),
+              : // A trace records the whole shuffle as one record of its draws, not each swap.
+                this.#draw(span, "shuffle", receiver.items.length, null, (draw) =>
+                  sampleOrder(draw, receiver.items.length),
+                ),
           );
           return null;
         case "intersection":
@@ -2046,7 +2093,14 @@ export class Evaluator {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
           const separator = (positional[0] as string | undefined) ?? ", ";
-          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+          let length = separator.length * Math.max(0, receiver.items.length - 1);
+          const texts = receiver.items.map((item) => {
+            const text = this.#joinedText(item, span);
+            length += text.length;
+            return text;
+          });
+          checkTextLength(length, "join", span);
+          return texts.join(separator);
         }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);
@@ -2510,8 +2564,7 @@ export class Evaluator {
         query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
         query.span,
       );
-    const picked =
-      found[Math.floor(this.#findRandom(query.span, "tagQuery", found.length) * found.length)]!;
+    const picked = found[this.#drawIndex(query.span, "tagQuery", found.length)]!;
     this.trace?.randomResult(picked);
     return picked;
   }
@@ -2527,18 +2580,33 @@ export class Evaluator {
     return value;
   }
 
-  /** One draw for `operation`, which a debug trace records with the generator state around it. */
-  #findRandom(
+  /**
+   * One semantic draw for `operation`: `sample` turns the primitive draws it takes into the outcome, and a debug trace
+   * records them as one record with the generator state around them. Every random operation of an expression draws
+   * through here.
+   */
+  #draw<T>(
     span: SourceSpan,
     operation: RuntimeDebugRandomOperation,
     choices: number | null,
-    range: SerializableRuntimeRange | null = null,
-  ): number {
+    range: SerializableRuntimeRange | null,
+    sample: (draw: PrimitiveDraw) => T,
+  ): T {
     const trace = this.trace;
     const before = trace === null ? null : this.#randomState();
-    const random = this.#drawRandom(span);
-    trace?.random(operation, span, choices, range, before, this.#randomState());
-    return random;
+    let draws = 0;
+    const outcome = sample(() => {
+      draws += 1;
+      return this.#drawRandom(span);
+    });
+    if (trace !== null && draws > 0)
+      trace.random(operation, span, choices, range, before, this.#randomState(), draws);
+    return outcome;
+  }
+
+  /** The index of one of `count` equally likely outcomes. */
+  #drawIndex(span: SourceSpan, operation: RuntimeDebugRandomOperation, count: number): number {
+    return this.#draw(span, operation, count, null, (draw) => sampleIndex(draw, count));
   }
 
   /** The session generator's state, or `null` when the host injected the random source. */
@@ -2565,7 +2633,7 @@ export class Evaluator {
 
   #randomBuiltin(call: RuntimeCapabilityCall): number {
     this.#expectBuiltinArguments("random", call, 0);
-    const random = this.#findRandom(call.span, "random", null);
+    const random = this.#draw(call.span, "random", null, null, (draw) => draw());
     this.trace?.randomResult(random);
     return random;
   }
@@ -2580,7 +2648,9 @@ export class Evaluator {
         call.span,
       );
     }
-    const chosen = this.#findRandom(call.span, "chance", null) * 100 < percent;
+    const chosen = this.#draw(call.span, "chance", null, null, (draw) =>
+      sampleChance(draw, percent),
+    );
     this.trace?.randomResult(chosen);
     return chosen;
   }
@@ -2606,8 +2676,9 @@ export class Evaluator {
     if (length < 1) {
       throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
-    const drawn =
-      range.start + Math.floor(this.#findRandom(span, operation, length, range) * length);
+    const drawn = this.#draw(span, operation, length, range, (draw) =>
+      sampleRangeInteger(draw, range, length),
+    );
     this.trace?.randomResult(drawn);
     return drawn;
   }
@@ -2648,7 +2719,7 @@ export class Evaluator {
         `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    const shown = typeof value === "string" ? ` ${JSON.stringify(messageText(value))}` : "";
     const reason =
       typeof value === "string" && isTemporalConversionResult(result)
         ? (temporalTextProblem(result, value) ?? "")
@@ -2775,8 +2846,10 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const { choices, weights } = weightedChoices(positional, named, span);
-    const draw = this.#findRandom(span, "randomWeighted", choices.length);
-    const chosen = cloneSerializableValue(choices[weightedIndex(weights, draw)]!);
+    const index = this.#draw(span, "randomWeighted", choices.length, null, (draw) =>
+      weightedIndex(weights, draw()),
+    );
+    const chosen = cloneSerializableValue(choices[index]!);
     this.trace?.randomResult(chosen);
     return chosen;
   }
@@ -2813,23 +2886,17 @@ export class Evaluator {
     const invalid = random?.(numbers);
     if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
     // A trace records a random function's draws as one record, like a shuffle.
-    const before = random === undefined || this.trace === null ? null : this.#randomState();
-    let draws = 0;
-    const result = apply(numbers, options, () => {
-      draws += 1;
-      return this.#drawRandom(span);
-    });
-    if (random !== undefined)
-      this.trace?.random(
-        // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
-        name as RuntimeDebugRandomOperation,
-        span,
-        null,
-        null,
-        before,
-        this.#randomState(),
-        draws,
-      );
+    const result =
+      random === undefined
+        ? apply(numbers, options, NO_DRAWS)
+        : this.#draw(
+            span,
+            // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
+            name as RuntimeDebugRandomOperation,
+            null,
+            null,
+            (draw) => apply(numbers, options, draw),
+          );
     if (typeof result !== "number") throw fault(result.code, result.failure, span);
     if (random !== undefined) this.trace?.randomResult(result);
     return result;
@@ -2839,6 +2906,9 @@ export class Evaluator {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
     const text = call.positional[0];
     if (typeof text !== "string") throw new TypeError("escapeMarkup(text) requires a string.");
+    // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
+    if (text.length * 2 > MAX_TEXT_LENGTH)
+      checkTextLength(escapedMarkupLength(text), "escapeMarkup", call.span);
     return escapeMarkup(text);
   }
 
@@ -2862,23 +2932,6 @@ export class Evaluator {
     if (!isList(argument) && !isSet(argument))
       throw fault("TSR060", setOperationArgumentMessage(name, argument), span);
     return argument.items;
-  }
-
-  /**
-   * A uniform random order of `length` items as their old indexes (Fisher–Yates), drawing `length - 1` numbers from the
-   * session RNG, or none for fewer than two items, so replay and checkpoint resume reproduce it.
-   */
-  #shuffleOrder(length: number, span: SourceSpan): number[] {
-    const order = Array.from({ length }, (_, index) => index);
-    // A trace records the whole shuffle as one record of its draws, not each swap.
-    const before = this.trace === null ? null : this.#randomState();
-    for (let index = length - 1; index > 0; index -= 1) {
-      const other = Math.floor(this.#drawRandom(span) * (index + 1));
-      [order[index], order[other]] = [order[other]!, order[index]!];
-    }
-    if (length > 1)
-      this.trace?.random("shuffle", span, length, null, before, this.#randomState(), length - 1);
-    return order;
   }
 
   /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
@@ -2912,7 +2965,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    const item = items[Math.floor(this.#findRandom(span, operation, items.length) * items.length)]!;
+    const item = items[this.#drawIndex(span, operation, items.length)]!;
     this.trace?.randomResult(item);
     return item;
   }
@@ -3081,6 +3134,11 @@ export class Evaluator {
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
+/** The draws of a numeric function that is not random: it never takes one. */
+const NO_DRAWS: PrimitiveDraw = () => {
+  throw new Error("A numeric function that is not random drew a random number.");
+};
+
 /** List, set, and dict methods that change their receiver in place. */
 const MUTATING_METHODS: ReadonlySet<string> = new Set([
   "add",
@@ -3107,10 +3165,11 @@ function missingKey(
   keyPlan: ExpressionPlan,
   span: SourceSpan,
 ): RuntimeFault {
-  const check = `contains(${planLabel(keyPlan) ?? quotedText(key)})`;
+  const shown = quotedText(messageText(key));
+  const check = `contains(${planLabel(keyPlan) ?? shown})`;
   return fault(
     "TSR061",
-    `Dictionary has no key ${quotedText(key)}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
+    `Dictionary has no key ${shown}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
     span,
   );
 }
@@ -3127,7 +3186,7 @@ function planLabel(plan: ExpressionPlan): string | null {
     } else break;
   }
   if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
-    return quotedText(current.value);
+    return quotedText(messageText(current.value));
   if (current.kind !== "identifier") return null;
   names.push(current.name);
   return names.reverse().join(".");

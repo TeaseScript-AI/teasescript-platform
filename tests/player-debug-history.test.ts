@@ -14,6 +14,7 @@ import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
@@ -80,6 +81,8 @@ test("Back restores a point exactly, Forward the state it left, and the answer e
   const first = createPlayerRuntimeSession(twoChoices);
   // The adapter's transcript grows in place, so the first state's is copied while it is shown.
   const firstTranscript = [...first.transcriptEntries];
+  // The session advances in place, so the first state is exported while it is shown.
+  const firstSnapshot = playerRuntimeSnapshot(first);
   const history = new DebugHistory(first.plan, Promise.resolve(null));
   history.follow(first, unmarked);
   const second = choose(first, "One");
@@ -98,15 +101,16 @@ test("Back restores a point exactly, Forward the state it left, and the answer e
 
   const back = await history.back(0, () => ({ session: second, marks: unmarked }));
   const atFirst = restored(history, back);
-  assert.deepEqual(atFirst.snapshot, first.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
   assert.deepEqual(atFirst.transcriptEntries, firstTranscript);
   assert.deepEqual(back.marks.rewoundWhileDebugging, { restoredSceneTimeMs: 0, rewindCount: 1 });
   assert.deepEqual(history.inspection, { points: 1, canForward: true });
   // The state Back left is the future the restored state does not show yet.
   assert.equal(history.future?.eventCount, second.events.length);
 
+  const secondSnapshot = playerRuntimeSnapshot(second);
   const atSecond = restored(history, await history.forward());
-  assert.deepEqual(atSecond.snapshot, second.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(atSecond), secondSnapshot);
   assert.deepEqual(said(atSecond), ["One", "first One"]);
   assert.deepEqual(history.inspection, { points: 2, canForward: false });
 });
@@ -168,6 +172,7 @@ test("points beyond the memory budget move to the spill store and are read back 
   const first = createPlayerRuntimeSession(twoChoices);
   const history = new DebugHistory(first.plan, Promise.resolve(spill), 1);
   history.follow(first, unmarked);
+  const firstSnapshot = playerRuntimeSnapshot(first);
   const second = choose(first, "One");
   history.follow(second, unmarked);
   await settle();
@@ -178,7 +183,7 @@ test("points beyond the memory budget move to the spill store and are read back 
     history,
     await history.back(0, () => ({ session: second, marks: unmarked })),
   );
-  assert.deepEqual(atFirst.snapshot, first.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
   // Adopting the restored state deletes the rows of the states it discards.
   history.adopt();
   await settle();
@@ -188,13 +193,14 @@ test("points beyond the memory budget move to the spill store and are read back 
 });
 
 test("without a spill store, or after it failed, points stop at the memory budget and earlier ones stay", async () => {
-  const first = createPlayerRuntimeSession(twoChoices);
-  const size = JSON.stringify(first.snapshot).length;
+  const firstSnapshot = playerRuntimeSnapshot(createPlayerRuntimeSession(twoChoices));
+  const size = JSON.stringify(firstSnapshot).length;
   // Without a spill store, the second point no longer fits; a failing one takes the first point, then fails.
   for (const [spill, budget] of [
     [Promise.resolve(null), 1.5 * size],
     [Promise.resolve(memorySpill(true).spill), 1],
   ] as const) {
+    const first = createPlayerRuntimeSession(twoChoices);
     const history = new DebugHistory(first.plan, spill, budget);
     await settle();
     history.follow(first, unmarked);
@@ -208,7 +214,7 @@ test("without a spill store, or after it failed, points stop at the memory budge
       history,
       await history.back(0, () => ({ session: second, marks: unmarked })),
     );
-    assert.deepEqual(atFirst.snapshot, first.snapshot);
+    assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
   }
 });
 

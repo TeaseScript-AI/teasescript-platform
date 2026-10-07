@@ -213,6 +213,11 @@ export function assertRuntimeResumeEquivalent(
       checkpointJson,
       `${context}: session checkpoint`,
     );
+    assert.equal(
+      JSON.stringify(stepper.exportTrustedSnapshot()),
+      JSON.stringify(stepper.exportSnapshot()),
+      `${context}: the trusted export differs from the checked one`,
+    );
     // The session continues from a restored copy of this boundary, or from a fork of itself.
     stepper = boundary % 2 === 0 ? deserializeRuntimeSession(checkpointJson) : stepper.fork();
     const restored = deserializeCheckpoint(checkpointJson);

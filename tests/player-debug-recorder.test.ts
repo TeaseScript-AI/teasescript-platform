@@ -24,15 +24,21 @@ import {
   pendingPlayerRuntimeStorageWrite,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
+  playerRuntimeDebugVariables,
+  playerRuntimeForeground,
   restorePlayerRuntimeSession,
+  restorePlayerRuntimeSessionAt,
+  selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeForm,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import {
   createCheckpoint,
   DEFAULT_TEMPORAL_CONTEXT,
+  observeTime,
   type MediaProgressReport,
 } from "../src/index.js";
 
@@ -83,6 +89,30 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   return replayDebugExport(parseDebugExport(await file.text()));
 }
 
+/**
+ * `script` started with its scope IDs used up but `spare`: the scope after them throws `TSR101`, an error that no script
+ * reaches otherwise, so that an operation throws in the middle of its run.
+ */
+function startedWithScopesUsedUp(
+  script: string,
+  spare: number,
+  recorder: DebugRecorder | null = null,
+): PlayerRuntimeSession {
+  const started = createPlayerRuntimeSession(script);
+  const snapshot = {
+    ...playerRuntimeSnapshot(started),
+    nextScopeId: Number.MAX_SAFE_INTEGER - spare,
+  };
+  return restorePlayerRuntimeSessionAt(
+    started.plan,
+    JSON.stringify(snapshot),
+    started.events,
+    recorder,
+  );
+}
+
+const SCOPES_USED_UP = /nextScopeId cannot be advanced safely/u;
+
 /** Plays a script through every engine seam of the Player: time, media, input, image, photo, button, and storage. */
 function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSession {
   let session = createPlayerRuntimeSession(
@@ -117,7 +147,7 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
   session = pressPlayerRuntimePermanentButton(session, 1).session;
   session = completePlayerRuntimeStorageWrite(
     session,
-    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    pendingPlayerRuntimeStorageWrite(session.state)!.actionId,
     true,
   ).session;
   // A refused and then an accepted answer.
@@ -129,7 +159,7 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
   const refused = answerPlayerRuntimeImage(session, reference.replace(":1", ":2"), store)!;
   assert.equal(refused.outcome.kind, "invalidPayload");
   session = answerPlayerRuntimeImage(refused.session, reference, store)!.session;
-  const capture = activePlayerRuntimeCapture(session.snapshot)!;
+  const capture = activePlayerRuntimeCapture(session.state)!;
   session = answerPlayerRuntimeCapture(
     session,
     capture.actionId,
@@ -138,7 +168,7 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
   ).session;
   session = completePlayerRuntimeStorageWrite(
     session,
-    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    pendingPlayerRuntimeStorageWrite(session.state)!.actionId,
     false,
   ).session;
   return session;
@@ -168,7 +198,7 @@ test("the recorder records every Player engine seam so that a replay reproduces 
   session = observePlayerRuntimeTime(session, 3_000, [
     { mediaId: 1, segment: 1, progressMs: 3_000 },
   ]).session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const continued = recorder.recording()!;
   assert.equal(
     continued.operations[0]?.kind,
@@ -185,9 +215,9 @@ test("the recorder records every Player engine seam so that a replay reproduces 
 test("recording changes nothing about the session", () => {
   const recorded = playEverySeam(new DebugRecorder());
   const plain = playEverySeam(undefined);
-  assert.deepEqual(recorded.snapshot, plain.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(recorded), playerRuntimeSnapshot(plain));
   assert.deepEqual(recorded.events, plain.events);
-  assert.deepEqual(recorded.snapshot.rng, plain.snapshot.rng);
+  assert.deepEqual(playerRuntimeSnapshot(recorded).rng, playerRuntimeSnapshot(plain).rng);
 });
 
 test("each call keeps its own copy of the arguments and the store's answers, also refusals", () => {
@@ -239,7 +269,7 @@ test("a recording outgrowing its limits starts again before a Player call and st
     session = observePlayerRuntimeTime(session, atMs).session;
     assert.ok(recorder.recording()!.operations.length <= 6);
   }
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const recording = recorder.recording()!;
   assert.equal(recording.complete, true);
   assert.notEqual(recording.anchorSnapshot.observedSessionTimeMs, 0, "the anchor moved forward");
@@ -251,22 +281,23 @@ test("a failure freezes the recording, from the first run on, and a too large ca
   const failed = createPlayerRuntimeSession("let zero = 0\nlet result = 1 / zero\nexit", {
     recorder,
   });
-  assert.equal(failed.snapshot.status, "failed");
+  assert.equal(failed.state.status, "failed");
+  const failedSnapshot = playerRuntimeSnapshot(failed);
   // The Player still observes time after a failure, as on hiding the page; the published state moves on.
   const latest = observePlayerRuntimeTime(failed, 1_000).session;
-  assert.equal(latest.snapshot.observedSessionTimeMs, 1_000);
+  assert.equal(latest.state.observedSessionTimeMs, 1_000);
   assert.deepEqual(
     recorder.recording()!.operations.map((operation) => [operation.kind, operation.status]),
     [["run", "failed"]],
     "later calls do not replace the evidence",
   );
-  assert.equal(
+  assert.deepEqual(
     recorder.recording()!.endSnapshot,
-    failed.snapshot,
+    failedSnapshot,
     "the recording ends where it froze",
   );
   const result = await replay(recorder);
-  assert.ok(result.kind === "reproduced" && result.failure?.code === failed.snapshot.failure?.code);
+  assert.ok(result.kind === "reproduced" && result.failure?.code === failed.state.failure?.code);
 
   // A development time jump past a failure: the recording reaches the failure, not the later observed time.
   const jumped = new DebugRecorder();
@@ -274,7 +305,7 @@ test("a failure freezes the recording, from the first run on, and a too large ca
     recorder: jumped,
   });
   const advanced = advancePlayerRuntimeTime(waiting, 5_000);
-  assert.equal(advanced.snapshot.status, "failed");
+  assert.equal(advanced.state.status, "failed");
   const jumpedResult = await replay(jumped);
   assert.ok(
     jumpedResult.kind === "reproduced" && jumpedResult.failure !== null,
@@ -302,7 +333,10 @@ test("a call the recorder cannot copy still runs exactly as without it", () => {
   const withRecorder = pressPlayerRuntimePermanentButton(session, unusual);
   const without = pressPlayerRuntimePermanentButton({ ...session, recorder: null }, unusual);
   assert.equal(withRecorder.outcome.kind, without.outcome.kind);
-  assert.deepEqual(withRecorder.session.snapshot, without.session.snapshot);
+  assert.deepEqual(
+    playerRuntimeSnapshot(withRecorder.session),
+    playerRuntimeSnapshot(without.session),
+  );
   assert.deepEqual(
     [recorder.recording()!.complete, recorder.recording()!.reason],
     [false, "A call's arguments could not be copied exactly."],
@@ -327,6 +361,158 @@ test("a media store that throws during a recorded call leaves the recording inco
   );
 });
 
+test("after a call throws, the session continues from the state the Player showed, and the recording keeps the call", async () => {
+  // With the scope IDs used up, a timer block throws in its middle, after it changed the state.
+  const source = [
+    "let go = true",
+    "timer async 1 s {",
+    '  say "before", instant',
+    "  if go {",
+    '    say "deep", instant',
+    "  }",
+    "}",
+    'let pick = choose again: "Again"',
+    'say "done", instant',
+    "exit",
+  ].join("\n");
+  const again = (session: PlayerRuntimeSession) => {
+    const foreground = playerRuntimeForeground(session);
+    assert.ok(foreground?.kind === "choose");
+    return selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!.session;
+  };
+  const recorder = new DebugRecorder();
+  const session = startedWithScopesUsedUp(source, 1, recorder);
+  const before = playerRuntimeSnapshot(session);
+  const shown = session.state;
+  assert.throws(() => observePlayerRuntimeTime(session, 1_000), SCOPES_USED_UP);
+  // What the Player shows and holds is the state before the call: the say before the error is undone.
+  assert.equal(session.state, shown);
+  assert.deepEqual(playerRuntimeSnapshot(session), before);
+  // After a later publication, a second error recovers to that one.
+  const later = observePlayerRuntimeTime(session, 500).session;
+  const laterSnapshot = playerRuntimeSnapshot(later);
+  assert.throws(() => observePlayerRuntimeTime(later, 1_000), SCOPES_USED_UP);
+  assert.deepEqual(playerRuntimeSnapshot(later), laterSnapshot);
+  const continued = again(later);
+  const expected = again(observePlayerRuntimeTime(startedWithScopesUsedUp(source, 1), 500).session);
+  assert.equal(continued.state.status, "halted");
+  assert.deepEqual(playerRuntimeSnapshot(continued), playerRuntimeSnapshot(expected));
+  assert.deepEqual(continued.transcriptEntries, expected.transcriptEntries);
+
+  // The recording froze at the first error: the run after the observation threw, and the recording ends at the state
+  // that run started from, where a replay throws again.
+  const recording = recorder.recording()!;
+  assert.deepEqual(
+    recording.operations.map((operation) => [operation.kind, operation.thrown]),
+    [
+      ["observeTime", null],
+      ["run", "RuntimeDataError"],
+    ],
+  );
+  assert.deepEqual(recording.endSnapshot, observeTime(session.plan, before, 1_000, []).snapshot);
+  assert.equal(recording.complete, true);
+  assert.deepEqual(await replay(recorder), { kind: "reproduced", failure: null, operations: 2 });
+});
+
+test("after a call the recording could not keep, an error still continues from the state the Player showed", () => {
+  // With the scope IDs used up, the timer block throws as it starts.
+  const timer = [
+    "let go = true",
+    "timer async 1 s {",
+    "  if go {",
+    '    say "deep", instant',
+    "  }",
+    "}",
+  ];
+  const continues = (session: PlayerRuntimeSession, act: () => void) => {
+    const before = playerRuntimeSnapshot(session);
+    assert.throws(act, SCOPES_USED_UP);
+    assert.deepEqual(playerRuntimeSnapshot(session), before);
+  };
+
+  // An answer larger than the recording keeps, then an error at the next observation.
+  const asking = [
+    ...timer,
+    'let name = askText "Name"',
+    'let pick = choose again: "Again"',
+    "exit",
+  ].join("\n");
+  const small = new DebugRecorder({ argumentBytes: 50 });
+  const answered = submitPlayerRuntimeComposer(
+    startedWithScopesUsedUp(asking, 0, small),
+    "x".repeat(100),
+  )!.session;
+  assert.equal(small.recording()!.complete, false);
+  continues(answered, () => observePlayerRuntimeTime(answered, 1_000));
+  assert.equal(observePlayerRuntimeTime(answered, 500).outcome.kind, "observed");
+
+  // A storage edit larger than the default retention, whose call has no run after it.
+  const edited = applyPlayerRuntimeStorageEdit(
+    startedWithScopesUsedUp(asking, 0, new DebugRecorder()),
+    { key: "big", value: "x".repeat(2 * 1024 * 1024) },
+  );
+  assert.equal(edited.outcome.kind, "applied");
+  continues(edited.session, () => observePlayerRuntimeTime(edited.session, 1_000));
+  const saved = playerRuntimeSnapshot(edited.session).scriptStorage;
+  assert.deepEqual(
+    saved.map((entry) => entry.key),
+    ["big"],
+  );
+
+  // An answer larger than the recording keeps, whose own run throws: the state before the answer.
+  const checked = [
+    'let name = askText "Name"',
+    'if name != "ok" {',
+    '  say "deep", instant',
+    "}",
+    'say "${name}", instant',
+    "exit",
+  ].join("\n");
+  const session = startedWithScopesUsedUp(checked, 0, new DebugRecorder({ argumentBytes: 50 }));
+  continues(session, () => submitPlayerRuntimeComposer(session, "x".repeat(100)));
+  const continued = submitPlayerRuntimeComposer(session, "ok")!.session;
+  assert.equal(continued.state.status, "halted");
+  assert.equal(continued.transcriptEntries.at(-1)?.text, "ok");
+
+  // Two such answers in a row, the second one's run throwing: the state after the first.
+  const twice = submitPlayerRuntimeComposer(
+    startedWithScopesUsedUp(
+      `let first = askText "First"\n${checked}`,
+      0,
+      new DebugRecorder({ argumentBytes: 50 }),
+    ),
+    "a".repeat(100),
+  )!.session;
+  continues(twice, () => submitPlayerRuntimeComposer(twice, "b".repeat(100)));
+  assert.equal(submitPlayerRuntimeComposer(twice, "ok")!.session.state.status, "halted");
+});
+
+test("a refusal the host does not keep leaves the later publications recoverable", () => {
+  // With the scope IDs used up but one, which the first timer block takes, the second one throws as it starts.
+  const source = [
+    "timer async 1 s {",
+    '  say "late", instant',
+    "}",
+    "let seen = 0",
+    "timer async 300 ms {",
+    "  seen = 1",
+    "}",
+    'let pick = choose again: "Again"',
+    "exit",
+  ].join("\n");
+  const shown = startedWithScopesUsedUp(source, 1, new DebugRecorder());
+  // As the Player's media host does, the session shown stays when a report is refused.
+  const refused = reportPlayerRuntimeMediaLoad(shown, 99, { kind: "loaded", durationMs: 1 });
+  assert.equal(refused.outcome.kind, "unknownMedia");
+  const later = observePlayerRuntimeTime(shown, 500).session;
+  assert.ok(later.revision > refused.session.revision);
+  const before = playerRuntimeSnapshot(later);
+  const variables = playerRuntimeDebugVariables(later).variables;
+  assert.throws(() => observePlayerRuntimeTime(later, 1_000), SCOPES_USED_UP);
+  assert.deepEqual(playerRuntimeSnapshot(later), before);
+  assert.deepEqual(playerRuntimeDebugVariables(later).variables, variables);
+});
+
 test("a debugging tool's storage edit is recorded, so a replay applies it again", async () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
@@ -336,7 +522,7 @@ test("a debugging tool's storage edit is recorded, so a replay applies it again"
   const edited = applyPlayerRuntimeStorageEdit(session, { key: "visits", value: 5 });
   assert.equal(edited.outcome.kind, "applied");
   session = submitPlayerRuntimeComposer(edited.session, "Ada")!.session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const last = session.transcriptEntries.at(-1);
   assert.equal(last?.kind === "message" ? last.text : undefined, "Visit 5");
   assert.deepEqual(
@@ -372,17 +558,16 @@ test("a value the engine produced, such as a saved list, is recorded as an argum
   );
   session = completePlayerRuntimeStorageWrite(
     session,
-    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    pendingPlayerRuntimeStorageWrite(session.state)!.actionId,
     true,
   ).session;
-  const saved = createCheckpoint(session.plan, session.snapshot).snapshot.scriptStorage[0]!.value;
+  const saved = createCheckpoint(session.plan, playerRuntimeSnapshot(session)).snapshot
+    .scriptStorage[0]!.value;
   const edited = applyPlayerRuntimeStorageEdit(session, { key: "b", value: saved });
   assert.equal(edited.outcome.kind, "applied");
   session = submitPlayerRuntimeComposer(edited.session, "Ada")!.session;
-  assert.equal(session.snapshot.status, "failed");
+  assert.equal(session.state.status, "failed");
   assert.equal(recorder.recording()!.complete, true);
   const result = await replay(recorder);
-  assert.ok(
-    result.kind === "reproduced" && result.failure?.code === session.snapshot.failure?.code,
-  );
+  assert.ok(result.kind === "reproduced" && result.failure?.code === session.state.failure?.code);
 });

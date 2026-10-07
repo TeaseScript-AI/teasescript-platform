@@ -8,6 +8,7 @@ import {
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import { parse } from "../src/parser.js";
@@ -92,8 +93,8 @@ test("each parenthesized basic ask completes after a checkpoint restore like its
       assert.deepEqual(playerRuntimeForeground(restored), foreground, expression);
       const direct = answer(session, text);
       const resumed = answer(restored, text);
-      assert.equal(resumed.snapshot.status, "halted", expression);
-      assert.deepEqual(resumed.snapshot, direct.snapshot, expression);
+      assert.equal(resumed.state.status, "halted", expression);
+      assert.deepEqual(playerRuntimeSnapshot(resumed), playerRuntimeSnapshot(direct), expression);
       assert.deepEqual(resumed.events, direct.events, expression);
       assert.deepEqual(resumed.transcriptEntries, direct.transcriptEntries, expression);
       return resumed.transcriptEntries.map((entry) => entry.text);
@@ -138,7 +139,7 @@ test("a parenthesized ask ends at its ')' inside larger expressions", () => {
     ["Again?", "Bea"],
     ["Key?", null],
   ]);
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   assert.equal(session.transcriptEntries.at(-1)?.text, "5 Ada 1 Cy none");
 });
 

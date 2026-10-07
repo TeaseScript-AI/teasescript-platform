@@ -35,6 +35,7 @@ let adapter: Pick<
   | "createPlayerRuntimeRestorePoint"
   | "restorePlayerRuntimeSession"
   | "submitPlayerRuntimeComposer"
+  | "playerRuntimeSnapshot"
 >;
 
 before(async () => {
@@ -61,6 +62,7 @@ before(async () => {
       "createPlayerRuntimeRestorePoint",
       "restorePlayerRuntimeSession",
       "submitPlayerRuntimeComposer",
+      "playerRuntimeSnapshot",
     ])
       assert.equal(typeof loaded[name], "function");
     adapter = {
@@ -76,6 +78,8 @@ before(async () => {
       // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
       submitPlayerRuntimeComposer:
         loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
+      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+      playerRuntimeSnapshot: loaded.playerRuntimeSnapshot as typeof Adapter.playerRuntimeSnapshot,
     };
   } finally {
     await server.close();
@@ -120,7 +124,10 @@ test("Start traces from the first statement, off drops the trace, and on again a
   host.activate();
   assert.equal(host.session.value?.debugTrace, trace);
   assert.deepEqual([trace.status().origin, trace.status().epoch], ["start", 1]);
-  assert.notEqual(trace.variableRecord(host.session.value!.snapshot.frames[0]!.id, "mood"), null);
+  assert.notEqual(
+    trace.variableRecord(adapter.playerRuntimeSnapshot(host.session.value!).frames[0]!.id, "mood"),
+    null,
+  );
 
   host.setDebugTracing(false);
   assert.equal(host.debugTrace.value, null);
