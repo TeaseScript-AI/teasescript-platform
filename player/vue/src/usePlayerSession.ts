@@ -431,8 +431,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   let activationToken = 0;
-  // The latest Start, offered again after an import replaced the saved data.
-  let lastStart: PlayerSessionStart | null = null;
+  // The latest Start, offered again after an import replaced the saved data, and by Play again.
+  const lastStart = shallowRef<PlayerSessionStart | null>(null);
+  // The source text of each file of the script Start runs, by path, when its host supplied it.
+  let scriptSources: ReadonlyMap<string, string> = new Map();
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
@@ -801,7 +803,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (ownChosen) {
         await loadScriptStorage();
         importing.value = false;
-        if (lastStart !== null && !sessionInProgress.value) prepare(lastStart);
+        if (lastStart.value !== null && !sessionInProgress.value) prepare(lastStart.value);
       } else importing.value = false;
     }
     if (failed.length > 0)
@@ -863,6 +865,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function update(next: PlayerRuntimeSession) {
     if (!inspecting.value) session.value = next;
   }
+  // Counts the sessions that ended as they played, also within their Start; a state Debug's rewind restored has ended
+  // before and does not end anew.
+  const endings = ref(0);
+  let rewoundGeneration = -1;
+  watch([session, generation], ([next, current], [previous, before]) => {
+    if (next?.state.status !== "halted") return;
+    if (current === before ? previous?.state.status !== "halted" : current !== rewoundGeneration)
+      endings.value++;
+  });
   /**
    * Readies the session for input before the input is evaluated: an inspected state Debug's rewind restored is adopted
    * first. `true` when input may go ahead at once, else whether it may once the state is adopted; a state that could
@@ -885,6 +896,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (disposed) return;
     const next = create({ recorder });
     start(next, state.paused);
+    rewoundGeneration = generation.value;
     debugEdits.value = state.marks.editedWhileDebugging;
     rewound.value = state.marks.rewoundWhileDebugging;
   }
@@ -976,10 +988,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
-   * on page load and the click is the user activation later audible playback relies on.
+   * on page load and the click is the user activation later audible playback relies on. `sources`, the text of the
+   * script's files by path, lets the error dialog show a failing line; a later `prepare` without them keeps them.
    */
-  function prepare(create: PlayerSessionStart) {
-    lastStart = create;
+  function prepare(create: PlayerSessionStart, sources?: ReadonlyMap<string, string>) {
+    lastStart.value = create;
+    if (sources !== undefined) scriptSources = sources;
     activationToken++;
     openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
@@ -1056,6 +1070,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
     startFrom(pending);
+  }
+  /** Whether Play again can start the script anew now: it was started before, and no session or import runs. */
+  const canPlayAgain = computed(
+    () =>
+      lastStart.value !== null && !sessionInProgress.value && !clearing.value && !importing.value,
+  );
+  /** Starts the script anew like Start, from the player's click; it runs only when `canPlayAgain`. */
+  function playAgain(): Promise<void> {
+    if (!canPlayAgain.value) return Promise.resolve();
+    prepare(lastStart.value!);
+    return activate();
   }
   /** Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. */
   function startFrom(pending: Activation) {
@@ -1315,6 +1340,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     prepare,
     prepareRestore,
     activate,
+    /** The source text of a file of the script, or `null` when its host did not supply it. */
+    scriptSource: (path: string): string | null => scriptSources.get(path) ?? null,
+    canPlayAgain,
+    playAgain,
+    /** Changes whenever a session ends as it plays, including at its Start; not when Debug's rewind restores an end. */
+    endings: computed(() => endings.value),
     /** The capture a new session records at Start; Continue records its own. */
     temporalCapture,
   };

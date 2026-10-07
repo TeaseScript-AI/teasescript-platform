@@ -98,15 +98,15 @@ export const playerNotices = {
     level: "warning",
     message: "This image request needs a camera, which cannot be used here.",
   }),
-  /** The session stopped because of a script error, or the Player itself failed; the action offers a debug export. */
-  sessionError: (cause: "script" | "player", exportDebug: () => void): PlayerNotice => ({
+  /** The session stopped because of a script error, or the Player itself failed; the action shows the error's details. */
+  sessionError: (cause: "script" | "player", showDetails: () => void): PlayerNotice => ({
     key: playerNoticeKeys.sessionError,
     level: "error",
     message:
       cause === "script"
-        ? "The session stopped because of an error."
+        ? "The script stopped because of an error."
         : "The Player ran into an error.",
-    action: { label: "Download debug export", run: exportDebug },
+    action: { label: "Details", run: showDetails },
   }),
   /**
    * A media file the script refers to is not in the package (`missing`), or the browser cannot load or decode it

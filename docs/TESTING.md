@@ -615,9 +615,12 @@ and the narrow dialog fits with touch-sized controls. In a fresh browser profile
 lists every script as new and Cancel keeps the running session; a dropped file's confirmation ends the session, puts
 every script into its own scope, and the next Start shows the imported photo; pasted text replaces the data before
 Start; and, while another script runs, only the ticked script is replaced and the session continues. Its `debug-failure`
-package stops with TSR036 after an answer and a photo: the failure card names the error and line, the debug export with
-nothing chosen holds no answer or photo reference, the export with replay data and the photo chosen holds the photo's
-exact bytes and the offline tool reproduces the failure, and the narrow dialog fits with touch-sized rows. On the
+package stops with TSR036 after an answer and a photo: the error line and its notice open the error dialog, which does
+not open by itself, names the file and line, and shows the code with its message and the failing line with its
+expression marked only once expanded; Close returns focus to the line, and the dialog fits a narrow screen; the debug
+export it hands over to with nothing chosen holds no answer or photo reference, the export with replay data and the
+photo chosen holds the photo's exact bytes and the offline tool reproduces the failure, and the narrow dialog fits with
+touch-sized rows. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
@@ -638,7 +641,12 @@ rows in IndexedDB; its sweep deletes the history databases of pages that ended, 
 and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
 shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
 later state and Return the session; a different answer adopts the earlier state with its saved data; an inspected failed
-state shows its failure above the bar, which fits a narrow screen with 44 px controls. A choice and a form toggle held
+state shows its failure above the bar, which fits a narrow screen with 44 px controls, and the error dialog's Open in
+Debug shows the failure on the Now tab. Its `session-end` package opens the end dialog with Close focused, which returns
+focus to the end line, and a five-star radio group chosen by click and arrow key beside an unavailable Send review;
+Escape closes it too, the line's Play again starts anew, and an end that rewind's Forward and Return restore opens no
+dialog; its `call-failure` package's error dialog shows the failing line and the call path from a function of another
+file. A choice and a form toggle held
 down with the mouse keep their box, rim colour and outline while held. With auto-skip, the
 `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image

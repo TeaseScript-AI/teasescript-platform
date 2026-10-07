@@ -45,13 +45,19 @@ export function prepareHostedScript(
         };
         return;
       }
-      player.prepare((recording) =>
-        createPlayerRuntimeSession(plan, {
-          ...recording,
-          ...player.scriptStorageOptions(),
-          // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
-          ...player.temporalCapture(),
-        }),
+      player.prepare(
+        (recording) =>
+          createPlayerRuntimeSession(plan, {
+            ...recording,
+            ...player.scriptStorageOptions(),
+            // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
+            ...player.temporalCapture(),
+          }),
+        new Map(
+          typeof project === "string"
+            ? [[MAIN_FILE_PATH, project]]
+            : project.files.map((file) => [file.path, file.source]),
+        ),
       );
     },
     (error: unknown) => {

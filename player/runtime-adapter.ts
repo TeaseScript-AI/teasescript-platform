@@ -847,19 +847,13 @@ function debugWaitKind(
 }
 
 /**
- * Where the session is, for Player Debug's Now view at display scene time `nowMs`: the next statement, the statement
- * whose foreground action it waits for, the active calls, every timer, hidden ones included, and the active media. Paths are package
- * paths, relative to the folder of the entry script. Read-only and derived on demand; it adds nothing to the session.
+ * The active calls, innermost first, also of a failed session, where they are the calls the error happened in. Work is
+ * proportional to the call depth.
  */
-export function playerRuntimeDebugNow(
+export function playerRuntimeCalls(
   session: Pick<PlayerRuntimeSession, "plan" | "state">,
-  nowMs: number,
-): PlayerRuntimeDebugNow {
+): readonly PlayerDebugCall[] {
   const { plan, state: snapshot } = session;
-  const now = Math.max(snapshot.observedSessionTimeMs, nowMs);
-  const active = snapshot.status === "running" || snapshot.status === "waiting";
-  const foreground = snapshot.foregroundAction;
-
   // Each frame runs in the file that the next inner frame was called from, the innermost in the next statement's file.
   const calls: PlayerDebugCall[] = [];
   let runningIn = instructionSourcePath(plan, snapshot.nextInstruction);
@@ -877,6 +871,22 @@ export function playerRuntimeDebugNow(
     );
     runningIn = from.path;
   }
+  return Object.freeze(calls);
+}
+
+/**
+ * Where the session is, for Player Debug's Now view at display scene time `nowMs`: the next statement, the statement
+ * whose foreground action it waits for, the active calls, every timer, hidden ones included, and the active media. Paths are package
+ * paths, relative to the folder of the entry script. Read-only and derived on demand; it adds nothing to the session.
+ */
+export function playerRuntimeDebugNow(
+  session: Pick<PlayerRuntimeSession, "plan" | "state">,
+  nowMs: number,
+): PlayerRuntimeDebugNow {
+  const { plan, state: snapshot } = session;
+  const now = Math.max(snapshot.observedSessionTimeMs, nowMs);
+  const active = snapshot.status === "running" || snapshot.status === "waiting";
+  const foreground = snapshot.foregroundAction;
 
   const timers: PlayerDebugTimer[] = [];
   const delays = [
@@ -938,7 +948,7 @@ export function playerRuntimeDebugNow(
             at: debugLocation(plan, foreground.owningInstruction),
           })
         : null,
-    calls: Object.freeze(active ? calls : []),
+    calls: active ? playerRuntimeCalls(session) : Object.freeze([]),
     timers: Object.freeze(
       active
         ? timers.sort((left, right) => left.actionId - right.actionId).map((t) => Object.freeze(t))
