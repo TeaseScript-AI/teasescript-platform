@@ -515,6 +515,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else {
           savedDataRevision.value++;
+          // Play again starts from the values the provider now holds.
+          seedNextStart(write!.key, write!.value);
           for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
         }
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
@@ -535,7 +537,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the script's own write waits for the host, an edit is not taken: it would have to come between that write and the
   // script. A write the script issues while an edit is being stored settles as usual first.
   let editChain: Promise<unknown> = Promise.resolve();
-  /** Puts a stored edit into the values the next Start loads, as the provider now holds them. */
+  /** Puts a stored edit or script write into the values the next Start loads, as the provider now holds them. */
   function seedNextStart(key: string, value: SerializableRuntimeValue) {
     const entries = storedEntries.value;
     if (entries === null) return;

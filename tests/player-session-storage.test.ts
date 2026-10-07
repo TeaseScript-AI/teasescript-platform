@@ -46,6 +46,8 @@ interface StorageHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
+  readonly canPlayAgain: Readonly<Ref<boolean>>;
+  playAgain(): Promise<void>;
   debugRecording(): { readonly operations: readonly { readonly kind: string }[] } | null;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): void;
@@ -922,4 +924,43 @@ test("a stored edit reaches the session even when storage cannot be read afterwa
   host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
   assert.deepEqual(said(host.session.value), ["2"]);
   assert.equal(storage.entries.get("k"), 2);
+});
+
+test("Play again starts from the values the previous run saved and deleted", async (context) => {
+  const stored = new Map<string, SerializableRuntimeValue>([["gone", "old"]]);
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [...stored].map(([key, value]) => ({ key, value })),
+    write: async (key, value) => {
+      if (value === null) stored.delete(key);
+      else stored.set(key, value);
+    },
+    replace: async () => {},
+    clear: async () => {},
+  });
+  // Each stored write reports in a later task; play on until the run ends.
+  const playOut = async () => {
+    for (let step = 0; step < 10 && host.session.value?.state.status !== "halted"; step++) {
+      await nextTick();
+      context.mock.timers.tick(0);
+    }
+    assert.equal(host.session.value?.state.status, "halted");
+    return host.session.value!.transcriptEntries.at(-1)?.text;
+  };
+  await start(
+    host,
+    [
+      'let runs = load("runs", default: 0) + 1',
+      'let gone = load("gone", default: "none")',
+      'save runs as "runs"',
+      'delete "gone"',
+      'say "${runs} ${gone}", instant',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(await playOut(), "1 old");
+  assert.equal(host.canPlayAgain.value, true);
+  await host.playAgain();
+  assert.equal(await playOut(), "2 none");
+  assert.deepEqual([...stored], [["runs", 2]]);
 });
