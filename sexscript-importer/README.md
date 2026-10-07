@@ -333,13 +333,15 @@ once per cell and outcome; where the condition was first read, the state the ste
 them too. Their outcomes at a state's wall clock are part of its cell, so a new outcome or change of one counts as
 reaching something new. A later session starts a minute after the wall clock where the state it continues stands,
 and also at the time steps of the clock conditions its first state reads; a session chain keeps the gap of the session
-it continues. For a clock condition the explorer cannot read, or reads only through an approximate helper, it also
-tries a fixed ladder: continuing an hour, an evening, a night, a morning, a day, two or three days, a week, 40 days,
-or 400 days later just before the step that read it, or starting that session that much later. All these steps are
-play, and a path records them: its `later` inputs and each session's start clock. A gap must be positive. Only a
-session that starts before the clock where the state it continues stands, such as one of an old corpus entry, is a
-clock start. The report's `search.time` counts the conditions that read the clock, the places they were read after,
-and the time steps taken by states and sessions.
+it continues. A condition that compares how long the player took between two clock reads (a reaction time held in a
+variable, against a constant or another value) gets no forward time: think times at the button between the reads
+reach it, and coming back later changes nothing. For a clock condition the explorer cannot read in full, or reads
+only through an approximate helper, it also tries a fixed ladder: continuing an hour, an evening, a night, a morning,
+a day, two or three days, a week, 40 days, or 400 days later just before the step that read it, or starting that
+session that much later. All these steps are play, and a path records them: its `later` inputs and each session's
+start clock. A gap must be positive. Only a session that does not start after the clock where the state it continues
+stands, such as one of an old corpus entry, is a clock start. The report's `search.time` counts the conditions that
+read the clock, the places they were read after, and the time steps taken by states and sessions.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
