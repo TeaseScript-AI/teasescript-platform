@@ -24,3 +24,10 @@ def before = null
 before = getTime()
 def after = getTime()
 if (after - before >= 0) show("Measured")
+// A loop that only counts adds the count at once where its range is not empty.
+def addPoints = { i ->
+	def p = 0
+	(1..i).each { p++ }
+	show("Points ${p}")
+}
+addPoints(1000000)

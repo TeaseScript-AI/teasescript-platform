@@ -2217,7 +2217,9 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withInstantShows(withVisibleCountdowns(withReusedLoopCounters(result), context));
+  return withInstantShows(
+    withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context)),
+  );
 }
 
 /**
@@ -2360,6 +2362,79 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
           ]),
     ];
   });
+}
+
+/**
+ * A loop over an inclusive range whose only statement adds a number to a variable, `for it in 1..=n { p += 1 }`, only
+ * counts; Groovy finished it at once, while TeaseScript runs it out of its instruction budget for a large n. It adds the
+ * count in one step where the range is not empty: `if n >= 1 { p += n }`. The bounds are read twice, so they must be
+ * free of effects.
+ */
+function withCountedLoops(statements: IrStatement[]): IrStatement[] {
+  return statements.map((statement): IrStatement => {
+    if (statement.kind !== "for" || statement.collection.kind !== "range") return statement;
+    const { from, to, inclusive } = statement.collection;
+    const [only, ...rest] = statement.body;
+    if (
+      !inclusive ||
+      rest.length > 0 ||
+      only?.kind !== "assign" ||
+      (only.operator !== "+=" && only.operator !== "-=") ||
+      only.target.kind !== "variable" ||
+      only.target.name === statement.variable ||
+      only.value.kind !== "literal" ||
+      typeof only.value.value !== "number" ||
+      !isRepeatableBound(from) ||
+      !isRepeatableBound(to)
+    )
+      return statement;
+    const count: IrExpression =
+      from.kind === "literal" && from.value === 1
+        ? to
+        : {
+            kind: "binary",
+            operator: "+",
+            left: { kind: "binary", operator: "-", left: to, right: from },
+            right: { kind: "literal", value: 1 },
+          };
+    const step = only.value.value;
+    return {
+      kind: "if",
+      condition: { kind: "binary", operator: ">=", left: to, right: from },
+      then: [
+        {
+          ...only,
+          value:
+            step === 1 ? count : { kind: "binary", operator: "*", left: count, right: only.value },
+        },
+      ],
+      else: [],
+      span: statement.span,
+    };
+  });
+}
+
+/** Whether a range bound reads the same value twice: literals, variables, and `floor` and arithmetic of these. */
+function isRepeatableBound(value: IrExpression): boolean {
+  switch (value.kind) {
+    case "literal":
+    case "variable":
+      return true;
+    case "binary":
+      return (
+        ["+", "-", "*"].includes(value.operator) &&
+        isRepeatableBound(value.left) &&
+        isRepeatableBound(value.right)
+      );
+    case "call":
+      return (
+        ["floor", "ceil", "round"].includes(value.name) &&
+        Object.keys(value.named).length === 0 &&
+        value.positional.every(isRepeatableBound)
+      );
+    default:
+      return false;
+  }
 }
 
 /** The start variable of `waited = getTimestamp().toSeconds() - start` (declaration or assignment), or null. */
