@@ -309,7 +309,7 @@ test("edits change only the form's answers, absolutely, and refused ones change 
   }
 });
 
-test("submitting requires every required field and returns the answers once, with a summary line", () => {
+test("submitting requires every required field and returns the answers once, with a line of what was chosen", () => {
   const plan = formPlan(SETTINGS, OBJECT);
   let snapshot = started(plan);
   const missing = submit(plan, snapshot);
@@ -328,7 +328,10 @@ test("submitting requires every required field and returns the answers once, wit
   assert.equal(submitted.outcome.kind, "completed");
   assert.deepEqual(
     submitted.events.map((event) => (event.kind === "playerTranscript" ? event.text : event.kind)),
-    ["9 of 10 fields set", "actionCompleted"],
+    [
+      "Access: On, intensity: Low, Level: High, Impact: 5, weight: 2.5, name: Ada, day: 2026-10-05, count: 3",
+      "actionCompleted",
+    ],
   );
   const actionId = pendingForm(snapshot).actionId;
   const repeated = completeAction(plan, submitted.snapshot, {
@@ -389,7 +392,35 @@ test("every interim edit, including a draft, survives a checkpoint and resumes a
   assert.deepEqual(finishedRestored.snapshot, finishedDirect.snapshot);
 });
 
-test("a dict form keeps its keys and order, and a boolean list counts what is selected", () => {
+test("a submitted form with nothing chosen says so, and answers too long for one line are refused", () => {
+  const listPlan = formPlan(`{ texts: ["A", "B"], defaults: [false, false] }`, {
+    kind: "booleanList",
+  });
+  const nothing = submit(listPlan, started(listPlan));
+  assert.deepEqual(
+    nothing.events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
+    ["Nothing selected"],
+  );
+  const notesPlan = formPlan(
+    `{ fields: { first: { type: "text", text: "First" }, second: { type: "text", text: "Second" } } }`,
+    { kind: "object", numericKinds: [], answers: [] },
+  );
+  const long = "x".repeat(40_000);
+  const drafted = edited(notesPlan, started(notesPlan), [
+    { kind: "edit", fieldId: "first" },
+    { kind: "draft", fieldId: "first", text: long },
+    { kind: "edit", fieldId: "second" },
+    { kind: "draft", fieldId: "second", text: long },
+  ]);
+  const refused = submit(notesPlan, drafted);
+  assert.deepEqual(refused.outcome, {
+    kind: "invalidPayload",
+    message: "That is wrong. These answers are too long to send at once.",
+  });
+  assert.deepEqual(refused.snapshot, drafted);
+});
+
+test("a dict form keeps its keys and order, and a boolean list names what is selected", () => {
   const dictPlan = formPlan(
     `{ fields: dict { "12": { value: 5, min: 1, max: 10, text: "Rope" }, "3": { value: 2, text: "Cuffs" } } }`,
     { kind: "dict", numericKind: "integer", answer: null },
@@ -421,7 +452,7 @@ test("a dict form keeps its keys and order, and a boolean list counts what is se
   );
   assert.deepEqual(
     selected.events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
-    ["2 of 3 selected"],
+    ["A, A"],
   );
   assert.deepEqual(binding(runUntilExit(listPlan, selected.snapshot).snapshot, "result"), {
     kind: "list",

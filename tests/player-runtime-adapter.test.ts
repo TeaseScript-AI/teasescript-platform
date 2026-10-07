@@ -980,7 +980,6 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   );
   assert.equal(form.fields[2]!.authoredFill, normalizeColor("seagreen"));
   assert.deepEqual(form.submit, { label: "Continue", authoredFill: normalizeColor("red") });
-  assert.equal(form.status, "3 of 3 set");
   // The same answers keep the same presentation, so frequent observations do not re-render the form.
   assert.equal(playerRuntimeForm(session), form);
 
@@ -1013,7 +1012,7 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
       entry.kind === "message" ? (entry.responseKind ?? null) : null,
     ]),
     [
-      ["3 of 3 fields set", "form"],
+      ["Rope, cuffs, Pace: Fast", "form"],
       ["true Fast", null],
     ],
   );
@@ -1100,7 +1099,7 @@ test("a typed form field opens in the composer, keeps its draft through a restor
   const done = submitPlayerRuntimeForm(day2.session, "2026-10-05")!;
   assert.equal(done.outcome.kind, "completed");
   assert.deepEqual(done.session.transcriptEntries.map((entry) => entry.text).slice(-2), [
-    "2 of 3 fields set",
+    "Impact: 7, day: 2026-10-05",
     "7 null 2026-10-05",
   ]);
 });

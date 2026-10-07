@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { Toggle } from "reka-ui";
-import { Badge } from "@/components/ui/badge";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import PlayerActionButton from "./components/PlayerActionButton.vue";
 import type { PlayerFormPresentation } from "../../model.js";
 
-// One form stays in place while the player edits it: its fields wrap and scroll in a bounded region, and the submit
-// button and the status stay visible below them.
+// One form stays in place while the player edits it: its fields wrap and scroll in a bounded region, and its submit
+// and cancel buttons stay visible below them. Each toggle shows and announces its own state.
 defineProps<{ form: PlayerFormPresentation; accessibleName: string; disabled: boolean }>();
 const emit = defineEmits<{
   step: [fieldId: string];
@@ -19,8 +18,10 @@ const emit = defineEmits<{
 
 <template>
   <div data-foreground-controls data-form-controls role="group" :aria-label="accessibleName" class="flex min-w-0 flex-col items-center">
-    <ScrollArea data-form-fields class="w-full">
-      <div class="flex w-full min-w-0 flex-wrap justify-center gap-2">
+    <!-- Room inside the scroll region for the buttons' shadows, which it would otherwise clip; the negative margin keeps
+         the layout as it was. -->
+    <ScrollArea data-form-fields class="-my-1.5 w-full">
+      <div class="flex w-full min-w-0 flex-wrap justify-center gap-2 py-1.5">
         <template v-for="field in form.fields" :key="field.id">
           <!-- A toggle is a pressed button; its mark and the announced state, not its colour, show whether it is on. -->
           <Toggle
@@ -77,7 +78,6 @@ const emit = defineEmits<{
         :label="form.cancel.label"
         @click="emit('cancel')"
       />
-      <Badge variant="outline" role="status" aria-live="polite">{{ form.status }}</Badge>
     </div>
   </div>
 </template>

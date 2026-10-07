@@ -110,8 +110,8 @@ export type PlayerForegroundPresentation =
     };
 
 /**
- * The controls of a pending form as its answers stand: each field by its ID, the submit button, a status such as
- * `3 of 5 selected`, and the field the composer edits. A toggle is `pressed` while on; a toggle with options and a cycle
+ * The controls of a pending form as its answers stand: each field by its ID, the submit button, and the field the
+ * composer edits. A toggle is `pressed` while on; a toggle with options and a cycle
  * show their current option as `state`, whose colour wins over the field's; a typed field shows its value as `state`,
  * or `null` without one.
  */
@@ -121,7 +121,6 @@ export interface PlayerFormPresentation {
   readonly submit: { readonly label: string; readonly authoredFill?: string };
   /** The button that cancels the whole form, or `null` when the form must be submitted. */
   readonly cancel: { readonly label: string; readonly authoredFill?: string } | null;
-  readonly status: string;
   readonly editor: PlayerFormEditorPresentation | null;
 }
 

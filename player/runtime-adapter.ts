@@ -49,13 +49,9 @@ import {
   updateInteraction,
   type InteractionUpdateOutcome,
 } from "../src/index.js";
-import type {
-  RuntimeChatPacingGateActionSnapshot,
-  RuntimeFormValue,
-} from "../src/runtime/actions/model.js";
+import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { currentTemporalContext } from "../src/runtime/state.js";
-import { presentDate, presentDateTime, presentTime } from "../src/temporal.js";
-import { numberAnswerText } from "../src/interaction-answers.js";
+import { formValueText } from "../src/interaction-answers.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { runValidatedState } from "../src/runtime/engine.js";
@@ -947,10 +943,6 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
       ...(authoredFill === undefined ? {} : { authoredFill }),
     });
   });
-  const total = ui.fields.length;
-  const status = ui.fields.every((field) => field.kind === "boolean")
-    ? `${form.values.filter((value) => value === true).length} of ${total} selected`
-    : `${form.values.filter((value) => value !== null).length} of ${total} set`;
   const edited = ui.fields.find((field) => field.id === form.editor?.fieldId);
   const result = Object.freeze({
     actionId: action.actionId,
@@ -966,7 +958,6 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
             label: ui.cancel.text,
             ...(ui.cancel.background === undefined ? {} : { authoredFill: ui.cancel.background }),
           }),
-    status,
     editor:
       edited === undefined ||
       form.editor === null ||
@@ -999,21 +990,6 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
   });
   formPresentations.set(action.form, result);
   return result;
-}
-
-/** A typed field's value as its button shows it: a number as typed, a date or time as `say` shows it. */
-function formValueText(
-  value: NonNullable<RuntimeFormValue>,
-  presentation: TemporalContext["presentation"],
-): string {
-  if (typeof value === "number") return numberAnswerText(value);
-  if (typeof value === "string") return value;
-  if (typeof value === "boolean") return value ? "true" : "false";
-  return value.kind === "date"
-    ? presentDate(presentation, value)
-    : value.kind === "time"
-      ? presentTime(presentation, value)
-      : presentDateTime(presentation, value);
 }
 
 type FormControlResult = PlayerRuntimeControlResult<

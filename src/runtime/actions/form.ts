@@ -1,6 +1,7 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../../color.js";
 import { isInteractionChoiceValue } from "../../choice-values.js";
 import {
+  formValueText,
   isBlankTextAnswer,
   isIntegerAnswerText,
   isNumberAnswerText,
@@ -806,9 +807,13 @@ export type FormSubmission =
 /**
  * Submits a form: commits the text being edited, requires a value for every required field, and returns the answers
  * in field order as the form's shape: an object, a dict, or a list of booleans. An optional field without a value
- * returns `null`.
+ * returns `null`. The transcript line is the overview of the answers in `presentation`, the player's presentation now.
  */
-export function submitForm(ui: FormUi, state: RuntimeFormStateSnapshot): FormSubmission {
+export function submitForm(
+  ui: FormUi,
+  state: RuntimeFormStateSnapshot,
+  presentation: TemporalContext["presentation"],
+): FormSubmission {
   const committed = commitEditor(ui, state);
   if (!committed.ok) return committed;
   const values = committed.state.values;
@@ -821,11 +826,11 @@ export function submitForm(ui: FormUi, state: RuntimeFormStateSnapshot): FormSub
   );
   if (missing !== undefined) return refused(`That is wrong. ${missing.text} needs a value.`);
   const answers = ui.fields.map((field, index) => formAnswer(field, values[index]!));
-  return {
-    ok: true,
-    result: formResult(ui, answers),
-    transcriptText: formSummaryText(ui, answers),
-  };
+  const transcriptText = formOverviewText(ui, values, presentation);
+  // Every answer is shown in full; answers too long for one transcript line are refused rather than cut.
+  if (!interactionStringFits(transcriptText))
+    return refused("That is wrong. These answers are too long to send at once.");
+  return { ok: true, result: formResult(ui, answers), transcriptText };
 }
 
 /**
@@ -872,14 +877,29 @@ function formAnswer(field: FormField, value: RuntimeFormValue): SerializableRunt
 }
 
 /**
- * The player's transcript line for a submitted form: how many toggles are on when every field is a toggle, such as
- * `12 of 43 selected`, and otherwise how many fields have a value, such as `5 of 6 fields set`.
+ * The player's transcript line for a submitted form (V30 askForm; owner decision 2026-10-07): in field order, the label
+ * of each toggle that is on, and `label: value` for each other field with a value, as its button shows it, joined with
+ * `, `; `Nothing selected` when that leaves nothing.
  */
-function formSummaryText(ui: FormUi, answers: readonly SerializableRuntimeValue[]): string {
-  const total = ui.fields.length;
-  if (ui.fields.every((field) => field.kind === "boolean"))
-    return `${answers.filter((answer) => answer === true).length} of ${total} selected`;
-  return `${answers.filter((answer) => answer !== null).length} of ${total} ${total === 1 ? "field" : "fields"} set`;
+function formOverviewText(
+  ui: FormUi,
+  values: readonly RuntimeFormValue[],
+  presentation: TemporalContext["presentation"],
+): string {
+  const parts: string[] = [];
+  ui.fields.forEach((field, index) => {
+    const value = values[index] ?? null;
+    if (field.kind === "boolean") {
+      const option = field.options?.find((candidate) => candidate.value === value);
+      if (field.options === null) {
+        if (value === true) parts.push(field.text);
+      } else if (option !== undefined) parts.push(`${field.text}: ${option.text}`);
+    } else if (field.kind === "cycle") {
+      const option = typeof value === "number" ? field.options[value] : undefined;
+      if (option !== undefined) parts.push(`${field.text}: ${option.text}`);
+    } else if (value !== null) parts.push(`${field.text}: ${formValueText(value, presentation)}`);
+  });
+  return parts.length === 0 ? "Nothing selected" : parts.join(", ");
 }
 
 function refused(message: string): { readonly ok: false; readonly message: string } {
@@ -1186,8 +1206,8 @@ function validFieldValue(field: FormField, value: unknown, unset: boolean): bool
 }
 
 /**
- * Whether `result` is what this valid form definition can return, and `transcriptText` its summary: one answer per
- * field, by ID and in order, with only optional fields `null`.
+ * Whether `result` is what this valid form definition can return, with a transcript that fits it: one answer per field,
+ * by ID and in order, with only optional fields `null`.
  */
 export function validFormResult(
   ui: FormUi,
@@ -1203,8 +1223,9 @@ export function validFormResult(
   }
   // A cancelled form returns `null`, with its cancel button's text.
   if (result === null) return ui.cancel !== null && transcriptText === ui.cancel.text;
-  const answers = formAnswersOf(ui, result);
-  return answers !== null && transcriptText === formSummaryText(ui, answers);
+  // A submitted form's line shows a date or time answer in the player's presentation then, which a later capture may
+  // have replaced, so it is checked as text, as a date or time ask's line is.
+  return formAnswersOf(ui, result) !== null && typeof transcriptText === "string";
 }
 
 /**

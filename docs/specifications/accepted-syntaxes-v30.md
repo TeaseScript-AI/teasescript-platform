@@ -2010,8 +2010,12 @@ Rules:
   also blank text for a required field, keeps it open. Back or Escape drops the text and keeps the field's value.
 - Submitting commits the text being edited, as selecting another field does, and requires a value for every required
   field; otherwise the form stays open. The author's starting values are never changed.
-- Edits add nothing to the transcript. Submitting adds one player line: `12 of 43 selected` when every field is a
-  toggle, otherwise `5 of 6 fields set`, which does not count an optional field without a value.
+- Edits add nothing to the transcript. Submitting adds one player line of what was chosen, in field order and joined
+  with `, `: the label of each toggle that is on, and `label: value` for each other field with a value, as its button
+  shows it, such as `crop / cane, whip` or `Intensity: High, Impact: 5`. Every answer is shown, and when nothing is on
+  and no other field has a value, the line is `Nothing selected`. Answers too long for one transcript line are refused
+  and the form stays open. (Owner decision, 2026-10-07; it replaces the earlier `12 of 43 selected` and
+  `5 of 6 fields set` counts.)
 - With `cancel:` the player may cancel the whole form, which returns `null`, so the form's type is optional. A field's
   `null` is not a cancelled form. Without `cancel:` the player cannot cancel the form.
 - A timer, media, or permanent-button block may interrupt a form; the form then resumes with its answers and the text
