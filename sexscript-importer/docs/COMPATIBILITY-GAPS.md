@@ -584,9 +584,13 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   ask; the time is measured on the whole legacy text's visible words, without its interpolated values (owner decision
   2026-10-07; `SX_WAIT_READING`, counted as `readingWaits.replaced`). A longer wait is time for an action or a task and
   stays, and its text becomes `say …, instant` (converter owner, 2026-10-05; `readingWaits.kept`). Since `instant`
-  also ends the reading time of the text before it, a text keeps its reading time instead where the reading time of a
-  text whose wait went may still run, on any path from that text with no button, ask, or media in between and less
-  waiting than its reading time (`SX_WAIT_KEPT_PACED`, `keptPaced`). Computed waits, a wait that another wait follows, and waits after
+  also ends the reading time of the text before it, a text keeps `instant` only where its own block shows, on the
+  straight path before it, that no reading time that replaced a wait can still run: after a text said at once or
+  without such a reading time, an ask, button, or choice that surely opens, media, or literal waits as long as a fixed
+  text's reading time, with only statements without effects in between. Elsewhere (the start of a function, a loop's
+  body, or a script, after a call, or after a text with values whose length is unknown) the text keeps its reading
+  time and waits for the one before it (`SX_WAIT_KEPT_PACED`, `keptPaced`); its own reading time is shorter than the
+  kept wait after it, so only a pending reading time delays it. Computed waits, a wait that another wait follows, and waits after
   the importer's system texts keep their `instant` text as before.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight

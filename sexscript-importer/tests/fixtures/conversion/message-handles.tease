@@ -1,5 +1,6 @@
 // An animation, texts that each add only punctuation with only waits between them, is one message whose text each
 // step changes in place; the waits between the steps stay as they are, also short ones.
+showButton "Start"
 let line = say "Wait.", instant
 wait 1
 line.text += " ."
@@ -29,7 +30,7 @@ for it in 1..=3 {
   playAudio "swat.wav"
   wait 1000 ms
 }
-let counter2 = say "20 jerks", instant
+let counter2 = say "20 jerks"
 let i = 19
 while i > 17 {
   counter2.text = "${i} jerks"
@@ -39,7 +40,7 @@ while i > 17 {
 // A loop whose text is no new count of the line before it says each text as a message of its own.
 say "Get ready!"
 for s in 1..=2 {
-  say "Shock ${s} of 2", instant
+  say "Shock ${s} of 2"
   wait 5
 }
 exit

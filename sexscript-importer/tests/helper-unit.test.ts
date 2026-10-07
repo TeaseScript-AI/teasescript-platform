@@ -103,13 +103,13 @@ test("lowers an auxiliary Groovy helper class to ordinary TeaseScript functions"
   const program = lowerParsedFile(source);
   assert.deepEqual(
     program.diagnostics.map((diagnostic) => diagnostic.code),
-    ["SX_WAIT_KEPT"],
+    ["SX_WAIT_KEPT", "SX_WAIT_KEPT_PACED"],
   );
   assert.equal(
     emitTease(program),
     [
       "function helper(count) {",
-      '  say "Working", instant',
+      '  say "Working"',
       "  wait 15000 ms",
       "  return count",
       "}",

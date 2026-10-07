@@ -1,6 +1,6 @@
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
-import { withNestedBlocks } from "./repeated-text.ts";
+import { hasEffect, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
@@ -78,122 +78,171 @@ export function withReadingTimes(
 
 /**
  * `instant` also ends the reading time of the text before it while that still runs (docs/RUNTIME.md, "`instant`, `0`,
- * and `wait`"), so a text keeps no `instant` where the reading time of a text whose legacy wait it replaced
- * (`readingTime`) may still run: on some path from that text, with no button, ask, or media in between and less
- * waiting than its reading time. The text then waits for that reading time and keeps its own, which the wait after it,
- * if any, overlaps. This runs after the passes that split, shorten, and fold texts, on the texts they leave.
+ * and `wait`"), so a text keeps `instant` only where no reading time that replaced a legacy wait (`readingTime`) can
+ * still run when it is said, as its own block shows on the straight path before it: after a text said at once or one
+ * without such a reading time, after a button, an ask, or a choice that surely opens, or media, which wait for it, or
+ * after literal waits as long as a fixed text's reading time; statements without effects leave this as it is. Anywhere
+ * else, at the start of a function, a loop's body, or a script, after a call or a transfer, or where a reading time of
+ * a text with values may still run, the text keeps its own reading time instead and waits for the one before it. This
+ * runs after the passes that split, shorten, and fold texts, on the texts they leave.
  */
 export function withoutCutReadingTimes(
   statements: IrStatement[],
   diagnostics: MigrationDiagnostic[],
 ): IrStatement[] {
-  // A walk gives the statements and the reading time, in milliseconds, that may still run after them (0 for none);
-  // a trial walk, which finds what a loop's body leaves running, reports nothing.
-  const walk = (items: IrStatement[], running: number, trial = false): [IrStatement[], number] => {
+  const paced = (statement: IrStatement): void => {
+    diagnostics.push({
+      code: "SX_WAIT_KEPT_PACED",
+      severity: "info",
+      message:
+        "This text keeps its reading time: said at once, it could cut short the reading time of a text before it that replaced a legacy wait, so it waits for that one first.",
+      span: statement.span,
+    });
+  };
+  // A walk gives the statements and the reading time, in milliseconds, that may still run after them: 0 for none,
+  // Infinity for one of unknown length.
+  const walk = (items: readonly IrStatement[], running: number): [IrStatement[], number] => {
     const result: IrStatement[] = [];
     let left = running;
     for (const item of items) {
-      const [statement, after] = step(item, left, trial);
+      const [statement, after] = step(item, left);
       result.push(statement);
       left = after;
     }
     return [result, left];
   };
-  const step = (item: IrStatement, running: number, trial: boolean): [IrStatement, number] => {
-    if (item.kind === "function") return [{ ...item, body: walk(item.body, 0, trial)[0] }, running];
-    if (item.kind === "permanentButton")
-      return [
-        item.body === undefined ? item : { ...item, body: walk(item.body, 0, trial)[0] },
-        running,
-      ];
-    const left = ENDS_READING.has(item.kind) || asks(item) ? 0 : running;
-    const paced = (statement: IrStatement): void => {
-      if (!trial)
-        diagnostics.push({
-          code: "SX_WAIT_KEPT_PACED",
-          severity: "info",
-          message:
-            "This text keeps its reading time: `instant` would cut short the reading time of a text before it that replaced a legacy wait; the text waits for that one first.",
-          span: statement.span,
-        });
-    };
+  const step = (item: IrStatement, running: number): [IrStatement, number] => {
     // A message kept in a handle (withMessageHandles) is said as a `say` is.
     if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
       const { instant, ...message } = item.value;
-      if (instant !== true || left === 0) return [item, 0];
+      if (instant !== true || running === 0) return [item, 0];
       paced(item);
-      return [{ ...item, value: message }, shortestReadingTime(message.value)];
+      return [{ ...item, value: message }, 0];
     }
     switch (item.kind) {
-      case "say": {
-        if (item.instant === true && left > 0) {
+      case "say":
+        if (item.instant === true) {
+          if (running === 0) return [item, 0];
           paced(item);
           const { instant: _instant, ...rest } = item;
-          return [rest, shortestReadingTime(item.value)];
+          return [rest, 0];
         }
-        if (item.instant === true) return [item, 0];
-        return [item, item.readingTime === true ? shortestReadingTime(item.value) : 0];
-      }
+        return [item, item.readingTime === true ? readingLength(item.value) : 0];
       case "wait": {
         const { duration } = item;
-        if (duration.kind !== "literal" || typeof duration.value !== "number") return [item, left];
+        if (duration.kind !== "literal" || typeof duration.value !== "number")
+          return [item, running];
         const milliseconds = item.unit === "ms" ? duration.value : duration.value * 1000;
-        return [item, Math.max(0, left - milliseconds)];
+        return [item, Math.max(0, running - milliseconds)];
       }
+      case "showButton":
+      case "showImage":
+      case "hideImage":
+      case "playAudio":
+        return [item, 0];
       case "if": {
-        const [then, afterThen] = walk(item.then, left, trial);
-        const [otherwise, afterElse] = walk(item.else, left, trial);
+        const before = afterExpressions(item, running);
+        const [then, afterThen] = walk(item.then, before);
+        const [otherwise, afterElse] = walk(item.else, before);
         return [{ ...item, then, else: otherwise }, Math.max(afterThen, afterElse)];
       }
       case "switch": {
-        let most = item.default.length === 0 ? left : 0;
+        const before = afterExpressions(item, running);
+        let most = 0;
         const cases = item.cases.map((switchCase) => {
-          const [body, after] = walk(switchCase.body, left, trial);
+          const [body, after] = walk(switchCase.body, before);
           most = Math.max(most, after);
           return { ...switchCase, body };
         });
-        const [fallback, afterDefault] = walk(item.default, left, trial);
+        const [fallback, afterDefault] = walk(item.default, before);
         return [{ ...item, cases, default: fallback }, Math.max(most, afterDefault)];
       }
       case "while":
       case "repeat":
       case "for": {
-        // A loop's body starts after what came before it or after its own end.
-        const entry = Math.max(left, walk(item.body, left, true)[1]);
-        const [body, after] = walk(item.body, entry, trial);
-        return [{ ...item, body }, Math.max(left, after)];
+        // A pass of the body may follow another pass or a `continue`, so it starts unknown.
+        const [body] = walk(item.body, Infinity);
+        const next = { ...item, body };
+        return [next, transparent(item) ? running : Infinity];
       }
+      case "function":
+        return [{ ...item, body: walk(item.body, Infinity)[0] }, running];
+      case "permanentButton":
+        return [
+          item.body === undefined ? item : { ...item, body: walk(item.body, Infinity)[0] },
+          running,
+        ];
       default:
-        return [item, left];
+        return [item, transparent(item) ? running : afterExpressions(item, running)];
     }
   };
-  return walk(statements, 0)[0];
+  return walk(statements, Infinity)[0];
 }
 
-// A button ends the reading time before it, and media wait for it (docs/RUNTIME.md "Media pacing barrier").
-const ENDS_READING: ReadonlySet<string> = new Set([
-  "showButton",
-  "showImage",
-  "hideImage",
-  "playAudio",
-]);
+// Statements after which nothing runs on the straight path, or that run code elsewhere.
+const LEAVING: ReadonlySet<string> = new Set(["goto", "exit", "return", "break", "continue"]);
 
-/** Whether the statement's own expressions ask, show a button, or offer a choice, which ends a reading time. */
-function asks(statement: IrStatement): boolean {
-  let found = false;
-  const visit = (value: IrExpression): IrExpression => {
-    if (
-      value.kind === "input" ||
-      value.kind === "button" ||
-      value.kind === "choice" ||
-      value.kind === "listChoice" ||
-      (value.kind === "call" && value.name === "askImage")
+/**
+ * The reading time that may run after a statement's own expressions: none after an ask, a button, or a choice that
+ * surely opens, unknown after another effect such as a call, and as before without effects.
+ */
+function afterExpressions(statement: IrStatement, running: number): number {
+  if (LEAVING.has(statement.kind)) return Infinity;
+  let opens = false;
+  let effect = false;
+  mapOwnExpressions(statement, (value) => {
+    opens ||= surelyAsks(value);
+    effect ||= hasEffect(value);
+    return value;
+  });
+  return opens ? 0 : effect ? Infinity : running;
+}
+
+/** Whether evaluating the value surely opens an ask, a button, or a choice, not on one side of `and` or `or` only. */
+function surelyAsks(value: IrExpression): boolean {
+  if (
+    value.kind === "input" ||
+    value.kind === "button" ||
+    value.kind === "choice" ||
+    value.kind === "listChoice" ||
+    (value.kind === "call" && value.name === "askImage")
+  )
+    return true;
+  if (value.kind === "binary")
+    return value.operator === "and" || value.operator === "or"
+      ? surelyAsks(value.left)
+      : surelyAsks(value.left) || surelyAsks(value.right);
+  return value.kind === "unary" && surelyAsks(value.value);
+}
+
+/** Whether a statement and everything in it say nothing, wait for nothing, and have no effect, and leave nowhere. */
+function transparent(statement: IrStatement): boolean {
+  if (statement.kind === "say" || statement.kind === "function" || LEAVING.has(statement.kind))
+    return false;
+  if (
+    ["showButton", "showImage", "hideImage", "playAudio", "permanentButton"].includes(
+      statement.kind,
     )
-      found = true;
-    return mapChildren(value, visit);
-  };
-  mapOwnExpressions(statement, visit);
-  return found;
+  )
+    return false;
+  let clean = true;
+  mapOwnExpressions(statement, (value) => {
+    clean &&= !hasEffect(value);
+    return value;
+  });
+  withNestedBlocks(statement, (body) => {
+    clean &&= body.every(transparent);
+    return body;
+  });
+  return clean;
+}
+
+/** A text's reading time where its words are fixed; unknown (Infinity) where values change its length. */
+function readingLength(value: IrExpression): number {
+  const fixed =
+    (value.kind === "literal" && typeof value.value === "string") ||
+    (value.kind === "template" && value.parts.every((part) => "text" in part));
+  return fixed ? shortestReadingTime(value) : Infinity;
 }
 
 function significant(statement: IrStatement): boolean {

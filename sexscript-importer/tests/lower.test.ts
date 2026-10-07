@@ -59,11 +59,15 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  assert.deepEqual(program.diagnostics, []);
+  // A script's first text keeps its reading time, since one may still run from the script before it.
+  assert.deepEqual(
+    program.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_WAIT_KEPT_PACED"],
+  );
   assert.equal(
     emitTease(program),
     [
-      'say "Hello", instant',
+      'say "Hello"',
       "wait 2",
       "timer 3",
       'showImage "scene/one.jpg"',

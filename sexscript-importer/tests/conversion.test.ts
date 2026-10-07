@@ -42,6 +42,8 @@ import {
   type TeaseRunner,
 } from "../src/runtime-check.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
+import { lowerParsedFile } from "../src/lower.ts";
+import { repositoryBuildUrl } from "../src/repository-build.ts";
 
 const parserUnavailable = groovyParserUnavailableReason();
 const compilerResult = await loadRepositoryCompiler().then(
@@ -1453,6 +1455,78 @@ async function convert(
   const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], options);
   assert.ok(program !== undefined);
   return program;
+}
+
+// With the Player's default pacing, a text said at once (`instant`) ends the reading time of the text before it, so a
+// text whose legacy wait the reading time replaced is read in full on every path: after other statements, across a
+// call, after an ask that a condition may skip, and on a loop's next pass after `continue` (docs/RUNTIME.md "Pacing
+// gate").
+test(
+  "a reading time that replaced a legacy wait runs in full before the next text",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probes use.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const sources = {
+      statement: 'show("Good.")\nwait(1)\nint n = 20\nshow("Hold.")\nwait(20)',
+      call: 'def hold = { show("Hold."); wait(20) }\nshow("Good.")\nwait(1)\nhold()',
+      values:
+        'def t = "a b c d e f g h i j"\nshow(t)\nwait(1)\nint x = 1\nwait(2)\nshow("Hold.")\nwait(20)',
+      skippedAsk:
+        'show("Good.")\nwait(1)\nif (false && getFile(null) != null) { show("No.") }\nshow("Hold.")\nwait(20)',
+      continued:
+        'for (int i = 0; i < 2; i++) {\n show("Hold " + i)\n wait(20)\n show("Good.")\n wait(1)\n if (i == 0) continue\n wait(10)\n}',
+    };
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-reading-"));
+    try {
+      for (const [name, source] of Object.entries(sources)) {
+        const file = path.join(directory, `${name}.groovy`);
+        writeFileSync(file, `${source}\n`);
+        const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+        const { plan } = compileSource(tease);
+        assert.ok(plan !== undefined, name);
+        const cut: string[] = [];
+        const note = (events: readonly PacedEvent[]): void => {
+          for (const event of events)
+            if (event.settlement?.settlementKind === "supersededByInstantOutput") cut.push(name);
+        };
+        let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+        note(step.events);
+        for (let turn = 0; turn < 40 && step.snapshot.status === "waiting"; turn += 1) {
+          const deadline = step.snapshot.foregroundAction?.deadlineMs;
+          assert.equal(typeof deadline, "number", name);
+          const observed = observeTime(plan, step.snapshot, deadline!);
+          note(observed.events);
+          step = run(plan, observed.snapshot);
+          note(step.events);
+        }
+        assert.equal(step.snapshot.status, "halted", name);
+        assert.deepEqual(cut, [], tease);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+interface PacedEvent {
+  settlement?: { settlementKind?: string };
+}
+interface PacedSnapshot {
+  status: string;
+  foregroundAction?: { deadlineMs?: number } | null;
+}
+interface PacedRuntime {
+  compileSource(source: string): { plan?: unknown };
+  createFreshRuntimeSnapshot(plan: unknown, options: { seed: number }): PacedSnapshot;
+  run(plan: unknown, snapshot: PacedSnapshot): { snapshot: PacedSnapshot; events: PacedEvent[] };
+  observeTime(
+    plan: unknown,
+    snapshot: PacedSnapshot,
+    now: number,
+  ): { snapshot: PacedSnapshot; events: PacedEvent[] };
 }
 
 function groovyParserUnavailableReason(): string | false {

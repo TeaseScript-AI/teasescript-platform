@@ -1,5 +1,6 @@
-// A longer wait stays, time for a task, and its text appears at once; a wait that timed the reading goes, also in
-// milliseconds.
+// A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
+// button; a wait that timed the reading goes, also in milliseconds.
+showButton("Start")
 show("Do ten push-ups now.")
 wait(30)
 show("Well done.")

@@ -1,5 +1,6 @@
 // An animation, texts that each add only punctuation with only waits between them, is one message whose text each
 // step changes in place; the waits between the steps stay as they are, also short ones.
+showButton("Start")
 show("Wait.")
 wait(1)
 show("Wait. .")
