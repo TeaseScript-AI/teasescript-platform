@@ -9,6 +9,7 @@ import {
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
+import { clockModel, holdsAt, timeContext } from "../src/explorer-time.ts";
 import {
   EPOCH_MS,
   loadEngine,
@@ -467,6 +468,28 @@ test(
       ).at(-1),
       { kind: "button", label: "Done", afterMs: 41_000 },
     );
+    // A time divided by ten seconds is compared in tens of seconds.
+    assert.deepEqual(
+      timedStart(
+        'let limit = 5\nif (showButton "Check") / 10 s > limit {\n  say "Slow."\n}\nexit\n',
+      ).at(-1),
+      { kind: "button", label: "Check", afterMs: 51_000 },
+    );
+    // Both clock reads kept in variables time the button between them; a read the variable lost times nothing.
+    assert.deepEqual(
+      timedStart(
+        'let a = getTimestamp().toSeconds()\nshowButton "One"\nlet b = getTimestamp().toSeconds()\n' +
+          'if b - a < 5 {\n  say "Fast."\n}\nexit\n',
+      ).at(-1),
+      { kind: "button", label: "One", afterMs: 6000 },
+    );
+    assert.deepEqual(
+      timedStart(
+        'let a = getTimestamp().toSeconds()\na = 0\nshowButton "Two"\nlet t = getTimestamp().toSeconds() - a\n' +
+          'if t < 5 {\n  say "Fast."\n}\nexit\n',
+      ),
+      [{ kind: "button", label: "Two" }],
+    );
 
     // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
     const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');
@@ -519,6 +542,82 @@ test(
       80,
     );
     assert.deepEqual(counted.search.cells, { slots: 1, cells: 5, values: 3, transitions: 2 });
+  },
+);
+
+test(
+  "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const cases: [string, string, boolean][] = [
+      ["hour", 'showButton "Check"\nif getDateTime().hour >= 22 {\n  say "Hit."\n}\nexit\n', true],
+      [
+        "minute",
+        'showButton "Check"\nif getDateTime().minute == 30 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
+        "month",
+        'showButton "Check"\nif getDateTime().month == 11 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
+        "window",
+        'let start = getTimestamp()\nshowButton "Go"\nlet took = (getTimestamp() - start) / 1 s\n' +
+          'if took >= 300 and took < 600 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
+        "helper",
+        'function hourNow {\n  return getDateTime().hour\n}\nshowButton "Check"\nif hourNow() >= 22 {\n' +
+          '  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
+        "repeated without cells",
+        'let n = 0\nwhile n < 2 {\n  showButton "Go"\n  n += 1\n}\nif getDateTime().hour >= 22 {\n' +
+          '  say "Hit."\n}\nexit\n',
+        false,
+      ],
+    ];
+    for (const [name, source, cells] of cases) {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan), name);
+      const result = explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 2000,
+        sources: new Map(),
+        diagnostics: [],
+        later: true,
+        cells,
+      });
+      assert.equal(result.search.stoppedBy, "exhausted", name);
+      const hit = source.split("\n").findIndex((line) => line.includes('"Hit."')) + 1;
+      assert.ok(
+        !result.coverage.files[0]!.unvisited.some((range) => {
+          const [from = 0, to = from] = range.lines.split("-").map(Number);
+          return hit >= from && hit <= to;
+        }),
+        name,
+      );
+      assert.equal(result.coverage.reach.clock, 0, name);
+    }
+
+    // A variable computed from the clock in two ways cannot be computed again: its comparison reads as unknown.
+    const ambiguous =
+      'let hour = getDateTime().hour\nshowButton "Go"\nhour = getDateTime().hour + 1\nif hour == 14 {\n' +
+      '  say "Hit."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source: ambiguous }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(plan));
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const model = clockModel(plan, instructions);
+    const [comparison] = [...model.comparisons.values()][0]!;
+    assert.equal(holdsAt(comparison!, model, timeContext({}), EPOCH_MS), undefined);
   },
 );
 

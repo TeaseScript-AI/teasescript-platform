@@ -39,8 +39,8 @@ export interface ClockComparison {
   readonly right: Data;
   /** What the temporaries it reads were stored from, just before the condition. */
   readonly temporaries: ReadonlyMap<number, Data>;
-  /** It reads a part of the date or time, which comes back each day or week; otherwise only the timestamp. */
-  readonly periodic: boolean;
+  /** The parts of the date or time it reads (`hour`, `day`, ...), which come back; none when only the timestamp. */
+  readonly parts: ReadonlySet<string>;
 }
 
 /**
@@ -50,6 +50,8 @@ export interface ClockComparison {
 export interface ClockModel {
   readonly comparisons: ReadonlyMap<number, readonly ClockComparison[]>;
   readonly definitions: ReadonlyMap<string, Data>;
+  /** Variables computed from the clock in more than one way, which cannot be computed again: they read as unknown. */
+  readonly ambiguous: ReadonlySet<string>;
   readonly helpers: ReadonlyMap<string, string>;
 }
 
@@ -70,38 +72,63 @@ function clockCall(node: Data): boolean {
 }
 
 /**
- * Whether an expression reads the clock: a getter, a helper, or a variable or temporary set from one; `part` only
- * counts a part of the date or time (`.hour`, a helper), not the timestamp alone.
+ * The clock reads of an expression, also through variables and temporaries set from the clock: `timestamp` for a
+ * getter of the current moment, and each part of the date or time it reads (`hour` for `.hour` or a helper).
  */
-function reads(
+function clockReads(
   expression: unknown,
   model: ClockModel,
   temporaries: ReadonlyMap<number, Data>,
-  part: boolean,
+  found: Set<string> = new Set(),
   seen: Set<unknown> = new Set(),
-): boolean {
-  if (Array.isArray(expression))
-    return expression.some((item) => reads(item, model, temporaries, part, seen));
-  if (!isRecord(expression) || seen.has(expression)) return false;
+): Set<string> {
+  if (Array.isArray(expression)) {
+    for (const item of expression) clockReads(item, model, temporaries, found, seen);
+    return found;
+  }
+  if (!isRecord(expression) || seen.has(expression)) return found;
   seen.add(expression);
   if (expression.kind === "call") {
     const name = calleeName(expression) ?? "";
-    if (model.helpers.has(name) && record(expression.callee).kind === "identifier") return true;
-    if (!part && CLOCK_GETTERS.has(name)) return true;
+    const plain = record(expression.callee).kind === "identifier";
+    if (plain && model.helpers.has(name)) found.add(model.helpers.get(name)!);
+    if (plain && CLOCK_GETTERS.has(name)) found.add("timestamp");
   }
   if (expression.kind === "property" && PARTS.has(String(expression.name)))
-    if (clockCall(record(expression.object))) return true;
+    if (clockCall(record(expression.object))) found.add(String(expression.name));
   if (expression.kind === "identifier" && typeof expression.name === "string") {
+    if (model.ambiguous.has(expression.name)) found.add("timestamp");
     const defined = model.definitions.get(expression.name);
-    if (defined !== undefined && reads(defined, model, temporaries, part, seen)) return true;
+    if (defined !== undefined) clockReads(defined, model, temporaries, found, seen);
   }
   if (expression.kind === "temporary" && typeof expression.temporaryId === "number") {
     const stored = temporaries.get(expression.temporaryId);
-    if (stored !== undefined && reads(stored, model, temporaries, part, seen)) return true;
+    if (stored !== undefined) clockReads(stored, model, temporaries, found, seen);
   }
-  return Object.entries(expression).some(
-    ([key, item]) => key !== "span" && reads(item, model, temporaries, part, seen),
-  );
+  for (const [key, item] of Object.entries(expression))
+    if (key !== "span") clockReads(item, model, temporaries, found, seen);
+  return found;
+}
+
+function reads(expression: unknown, model: ClockModel, temporaries: ReadonlyMap<number, Data>) {
+  return clockReads(expression, model, temporaries).size > 0;
+}
+
+/** An expression without its source spans, to tell expressions apart. */
+function shape(expression: Data): string {
+  return JSON.stringify(expression, (key, value: unknown) => (key === "span" ? undefined : value));
+}
+
+/** The temporaries an expression reads. */
+function temporariesOf(expression: unknown, found: number[] = []): number[] {
+  if (Array.isArray(expression)) for (const item of expression) temporariesOf(item, found);
+  else if (isRecord(expression)) {
+    if (expression.kind === "temporary" && typeof expression.temporaryId === "number")
+      found.push(expression.temporaryId);
+    for (const [key, item] of Object.entries(expression))
+      if (key !== "span") temporariesOf(item, found);
+  }
+  return found;
 }
 
 /** The variables an expression reads. */
@@ -140,10 +167,11 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   }
   const comparisons = new Map<number, ClockComparison[]>();
   const definitions = new Map<string, Data>();
-  const model: ClockModel = { comparisons, definitions, helpers };
+  const ambiguous = new Set<string>();
+  const model: ClockModel = { comparisons, definitions, ambiguous, helpers };
   // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
-  // through variables computed so), and is not a bare clock read, which is a time kept to measure from: the first such
-  // value. Rounds until no variable is added.
+  // through variables computed so), and is not a bare clock read, which is a time kept to measure from. When those
+  // values differ, the variable cannot be computed again: it is ambiguous. Rounds until no variable is added.
   const none = new Map<number, Data>();
   const assigned = new Map<string, Data[]>();
   for (const instruction of instructions) {
@@ -161,16 +189,17 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   for (let added = true; added;) {
     added = false;
     for (const [name, values] of assigned) {
-      if (definitions.has(name)) continue;
+      if (definitions.has(name) || ambiguous.has(name)) continue;
       // A value that updates the variable from itself (`took += 60`) keeps what it is computed from.
       const updates = (value: Data) => namesOf(value).has(name);
+      const computed = values.filter((value) => !updates(value));
       if (
-        values.some((value) => !updates(value)) &&
-        values.every(
-          (value) => updates(value) || (!clockCall(value) && reads(value, model, none, false)),
-        )
+        computed.length > 0 &&
+        values.every((value) => updates(value) || (!clockCall(value) && reads(value, model, none)))
       ) {
-        definitions.set(name, values[0]!);
+        const distinct = new Set(computed.map(shape));
+        if (distinct.size === 1) definitions.set(name, computed[0]!);
+        else ambiguous.add(name);
         added = true;
       }
     }
@@ -180,13 +209,33 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
       instruction.kind === "jumpIfFalse" ||
       (instruction.kind === "loopStart" && instruction.loopKind === "while");
     if (!conditional) return;
-    // The temporaries the condition reads, as the instructions just before it stored them.
+    // The temporaries the condition reads, as the latest instructions before it produced them: a stored value, or the
+    // result of a call.
     const temporaries = new Map<number, Data>();
-    for (let before = index - 1; before >= Math.max(0, index - 8); before -= 1) {
-      const stored = instructions[before]!;
-      if (stored.kind === "storeTemporary" && typeof stored.temporaryId === "number")
-        if (!temporaries.has(stored.temporaryId))
-          temporaries.set(stored.temporaryId, record(stored.value));
+    const wanted = new Set(temporariesOf(instruction.condition ?? instruction.expression));
+    for (let before = index - 1; before >= 0 && wanted.size > 0; before -= 1) {
+      const producer = instructions[before]!;
+      const id =
+        producer.kind === "storeTemporary"
+          ? producer.temporaryId
+          : producer.kind === "callFunction"
+            ? producer.destinationTemporary
+            : null;
+      if (typeof id !== "number" || !wanted.has(id)) continue;
+      wanted.delete(id);
+      const value =
+        producer.kind === "storeTemporary"
+          ? record(producer.value)
+          : {
+              kind: "call",
+              callee: {
+                kind: "identifier",
+                name: String(record(list(plan.functions)[Number(producer.functionId) - 1]).name),
+              },
+              arguments: [],
+            };
+      temporaries.set(id, value);
+      for (const more of temporariesOf(value)) if (!temporaries.has(more)) wanted.add(more);
     }
     const found: ClockComparison[] = [];
     const walk = (value: unknown): void => {
@@ -202,15 +251,16 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
       if (!COMPARISONS.has(String(node.operator))) return;
       const left = record(node.left);
       const right = record(node.right);
-      if (!reads(left, model, temporaries, false) && !reads(right, model, temporaries, false))
-        return;
+      const parts = clockReads([left, right], model, temporaries);
+      if (parts.size === 0) return;
+      parts.delete("timestamp");
       found.push({
         instruction: index,
         operator: String(node.operator),
         left,
         right,
         temporaries,
-        periodic: reads(left, model, temporaries, true) || reads(right, model, temporaries, true),
+        parts,
       });
     };
     walk(instruction.condition ?? instruction.expression);
@@ -310,6 +360,7 @@ function valueAt(expression: unknown, reading: Reading): Value {
       return valueAt(node.expression, reading);
     case "identifier": {
       if (typeof node.name !== "string") return undefined;
+      if (model.ambiguous.has(node.name) && !reading.inside.has(node.name)) return undefined;
       const defined = reading.inside.has(node.name) ? undefined : model.definitions.get(node.name);
       return defined === undefined
         ? runtimeValue(context.bindings.get(node.name))
@@ -406,23 +457,38 @@ function binaryAt(node: Data, reading: Reading): Value {
   }
   const [leftKind, rightKind] = [kindOf(left), kindOf(right)];
   const numbers = leftKind === "number" && rightKind === "number";
+  // A moment moved by a duration lands on a whole millisecond, as the runtime rounds it.
+  const moment = (milliseconds: number): Value => ({
+    kind: "timestamp",
+    milliseconds: Math.sign(milliseconds) * Math.round(Math.abs(milliseconds)),
+  });
+  const duration = (milliseconds: number): Value => ({ kind: "duration", milliseconds });
   switch (operator) {
     case "+":
-      if (leftKind === "timestamp" && rightKind === "duration")
-        return { kind: "timestamp", milliseconds: a + b };
+      if (leftKind === "timestamp" && rightKind === "duration") return moment(a + b);
+      if (leftKind === "duration" && rightKind === "timestamp") return moment(a + b);
+      if (leftKind === "duration" && rightKind === "duration") return duration(a + b);
       return numbers ? a + b : undefined;
     case "-":
-      if (leftKind === "timestamp" && rightKind === "timestamp")
-        return { kind: "duration", milliseconds: a - b };
-      if (leftKind === "timestamp" && rightKind === "duration")
-        return { kind: "timestamp", milliseconds: a - b };
+      if (leftKind === "timestamp" && rightKind === "timestamp") return duration(a - b);
+      if (leftKind === "timestamp" && rightKind === "duration") return moment(a - b);
+      if (leftKind === "duration" && rightKind === "duration") return duration(a - b);
       return numbers ? a - b : undefined;
     case "*":
+      if (leftKind === "duration" && rightKind === "number") return duration(a * b);
+      if (leftKind === "number" && rightKind === "duration") return duration(a * b);
       return numbers ? a * b : undefined;
     case "/":
-      return numbers && b !== 0 ? a / b : undefined;
+      if (b === 0) return undefined;
+      if (leftKind === "duration" && rightKind === "duration") return a / b;
+      if (leftKind === "duration" && rightKind === "number") return duration(a / b);
+      return numbers ? a / b : undefined;
     case "%":
       return numbers && b !== 0 ? a % b : undefined;
+  }
+  // Comparisons need operands of one kind: numbers, durations, or moments.
+  if (leftKind !== rightKind) return undefined;
+  switch (operator) {
     case "==":
       return a === b;
     case "!=":
@@ -460,10 +526,31 @@ export function holdsAt(
 }
 
 /**
+ * The moments after `now` at which a comparison of these parts of the date or time can come out another way: each
+ * second of the next minute for `second`, each minute of the next day for `minute`, each hour of the next eight days
+ * for `hour` and `weekdayNumber`, each day of the horizon for `day`, `month`, and `year`; just after each, by
+ * {@link MARGIN} (by a second for seconds).
+ */
+function boundaries(parts: ReadonlySet<string>, now: number): number[] {
+  const found: number[] = [];
+  const every = (unit: number, count: number, margin: number) => {
+    const next = Math.ceil((now + 1) / unit) * unit;
+    for (let index = 0; index < count; index += 1) found.push(next + index * unit + margin);
+  };
+  if (parts.has("second")) every(1000, 61, 0);
+  if (parts.has("minute")) every(MINUTE, 25 * 60, 1000);
+  if (parts.has("hour") || parts.has("weekdayNumber")) every(HOUR, 8 * 24, MARGIN);
+  if (parts.has("day") || parts.has("month") || parts.has("year"))
+    every(DAY, HORIZON / DAY, MARGIN);
+  return [...new Set(found)].sort((left, right) => left - right);
+}
+
+/**
  * The smallest forward gap, within {@link HORIZON}, after which a clock comparison comes out the other way in a state
- * whose wall clock is `now`, plus {@link MARGIN}; null when it cannot be read or does not change. A comparison of a
- * part of the date or time is tried just after each full hour of the next eight days; one of the timestamp alone
- * changes once, and is searched by halving to the minute.
+ * whose wall clock is `now`; null when it cannot be read or does not change. A comparison of parts of the date or time
+ * is tried at the moments one of them changes ({@link boundaries}). One of the timestamp alone is tried after a minute
+ * and each doubling of that up to the horizon, and the first change found is narrowed by halving to the minute; the gap
+ * goes {@link MARGIN} past it when that keeps the outcome.
  */
 export function flipGap(
   comparison: ClockComparison,
@@ -474,24 +561,26 @@ export function flipGap(
   const holds = holdsAt(comparison, model, context, now);
   if (holds === undefined) return null;
   const flipped = (at: number) => holdsAt(comparison, model, context, at) === !holds;
-  if (comparison.periodic) {
-    const nextHour = Math.ceil((now + 1) / HOUR) * HOUR;
-    for (let hours = 0; hours < 8 * 24; hours += 1) {
-      const at = nextHour + hours * HOUR + MARGIN;
-      if (flipped(at)) return at - now;
-    }
-    return null;
+  if (comparison.parts.size > 0) {
+    const at = boundaries(comparison.parts, now).find(flipped);
+    return at === undefined ? null : at - now;
   }
-  if (!flipped(now + HORIZON)) return null;
+  // The first doubling of a minute (up to the horizon) at which the outcome is the other one.
   let low = 0;
-  let high = HORIZON;
+  let first: number | undefined;
+  for (let gap = MINUTE; first === undefined; gap = Math.min(gap * 2, HORIZON)) {
+    if (flipped(now + gap)) first = gap;
+    else if (gap === HORIZON) return null;
+    else low = gap;
+  }
+  let high = first;
   while (high - low > MINUTE) {
-    const middle = Math.floor((low + high) / 2 / MINUTE) * MINUTE;
+    const middle: number = Math.floor((low + high) / 2 / MINUTE) * MINUTE;
     if (middle <= low) break;
     if (flipped(now + middle)) high = middle;
     else low = middle;
   }
-  return high + MARGIN;
+  return flipped(now + high + MARGIN) ? high + MARGIN : high;
 }
 
 /** The context of a state's snapshot: its variables, innermost binding first, and its stored values. */

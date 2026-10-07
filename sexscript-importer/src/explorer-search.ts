@@ -1026,6 +1026,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /** Time steps tried, from a cell (or a session start's storage) to the outcomes they lead to. */
   const timeStepsTried = new Set<string>();
+  /** The first state of each session start, by the start's index. */
+  const firstNodeOf = new Map<number, number>([[0, 0]]);
   const timeStepsTaken = { steps: 0, sessions: 0 };
   /**
    * The time steps of a state that waits where a clock condition is read next: for each of those comparisons that
@@ -1069,6 +1071,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const targets = new Map<number, Target>();
   // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
+  /**
+   * With forward time: states, or session starts (with the start's index), that left a step which read a clock
+   * condition first, to give their time steps (see {@link runTimeJob}).
+   */
+  const timeJobs: { node: number | null; start: number }[] = [];
   const chainAttempts: Attempt[] = [];
   const clockAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
@@ -1174,7 +1181,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const instruction = way >> 1;
       if (times?.comparisons.has(instruction) === true) {
         const at = clockKey(parent?.waitsAt);
-        clockAfter.set(at, (clockAfter.get(at) ?? new Set()).add(instruction));
+        const known = clockAfter.get(at) ?? new Set();
+        // The state the step left was expanded already: it gets its time steps now.
+        if (!known.has(instruction)) timeJobs.push({ node: parent?.id ?? null, start: startIndex });
+        clockAfter.set(at, known.add(instruction));
       }
       if (!witnesses.has(instruction))
         witnesses.set(instruction, { node: parent?.id ?? null, start: startIndex, input });
@@ -1362,6 +1372,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     starts.push(start);
     const first = session.start(start);
     const node = transition(null, null, first, starts.length - 1, lead);
+    firstNodeOf.set(starts.length - 1, node.id);
     return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null };
   };
 
@@ -1422,6 +1433,53 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return null;
     allowance.forced += 1;
     return { input: buttons[0]!, next: index };
+  };
+
+  /** Where time steps from a state count as tried: its cell, or without cells its loop key. */
+  const timeCell = (node: Node): string =>
+    node.cell >= 0 ? `cell ${node.cell}` : `loop ${node.loop}`;
+
+  /**
+   * The time steps of a place where a step read a clock condition for the first time, from the state that step left (it
+   * was expanded before the place was known) or, for a step that started a session, as more starts of that session:
+   * from the same storage, at the gaps its first state gives.
+   */
+  const runTimeJob = (job: { node: number | null; start: number }): void => {
+    const work = session.operations;
+    if (job.node !== null) {
+      const node = nodes[job.node]!;
+      const snapshot =
+        node.status === "open" || node.status === "expanded" ? snapshotOf(node) : null;
+      const gaps =
+        snapshot === null
+          ? []
+          : timeSteps(snapshot, node.waitsAt, wallEnd[node.id]!, timeCell(node));
+      for (const gap of gaps) {
+        const runtime = runtimeOf(node);
+        if (runtime === null || outOfBudget()) break;
+        const input: ExplorerInput = { kind: "later", afterMs: gap };
+        const next = step(node, runtime, input);
+        if (next !== null) transition(node, input, next, node.start, null);
+        timeStepsTaken.steps += 1;
+      }
+    } else {
+      const start = starts[job.start]!;
+      const first = firstNodeOf.get(job.start);
+      const snapshot = first === undefined ? null : store.get(first);
+      const gaps =
+        snapshot === null || first === undefined
+          ? []
+          : timeSteps(snapshot, null, wallEnd[first]!, `start ${job.start}`).map(
+              (gap) => wallEnd[first]! + gap,
+            );
+      for (const at of gaps) {
+        if (outOfBudget()) break;
+        const origin = start.origin === null ? EPOCH_MS : wallEnd[start.origin]!;
+        startSession(laterStart(start.origin, start.storage, at - origin), null);
+        timeStepsTaken.sessions += 1;
+      }
+    }
+    directedWork += session.operations - work;
   };
 
   const runAttempt = (attempt: Attempt): void => {
@@ -1833,6 +1891,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (origin !== null && !clockStart(starts.at(-1)!)) startedFrom.add(JSON.stringify(storage));
       startFrom.set(key, starts.length - 1);
       firstOf.set(starts.length - 1, node.id);
+      firstNodeOf.set(starts.length - 1, node.id);
       return starts.length - 1;
     };
     /**
@@ -1960,6 +2019,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       analyzedOps = session.operations;
       analyze();
     }
+    // With forward time, the time steps of a place where a clock condition was read for the first time.
+    if (timeJobs.length > 0 && (frontier.size === 0 || withinShare())) {
+      runTimeJob(timeJobs.shift()!);
+      continue;
+    }
     // Directed attempts and the rest of the search take turns, by steps.
     const pending =
       playAttempts.length > 0
@@ -2006,7 +2070,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         stored ?? base.exportTrustedSnapshot(),
         node.waitsAt,
         wallEnd[node.id]!,
-        node.cell >= 0 ? `cell ${node.cell}` : `state ${node.id}`,
+        timeCell(node),
       )) {
         inputs.push({ kind: "later", afterMs: gap });
         timeStepsTaken.steps += 1;
@@ -2056,11 +2120,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
       transition(node, input, next, node.start, lead);
       if (lastStepNew || closer >= 0) {
+        if (!productive) at.productive += 1;
         productive = true;
         at.inputs.add(inputKey(input));
       }
     }
-    if (productive) at.productive += 1;
     node.status = "expanded";
   }
 
@@ -2314,20 +2378,9 @@ function cover(
   return kept.reverse();
 }
 
-/** An input as one of the choices at a prompt: its kind with its option, button, or typed answer. */
+/** An input as one of the choices at a prompt: the input itself, apart from labels that only explain it. */
 function inputKey(input: ExplorerInput): string {
-  switch (input.kind) {
-    case "option":
-      return `option ${input.index}`;
-    case "button":
-      return `button ${input.afterMs ?? 0}`;
-    case "text":
-      return `text ${input.text}`;
-    case "press":
-      return `press ${input.label}`;
-    default:
-      return input.kind;
-  }
+  return JSON.stringify(input, (key, value: unknown) => (key === "label" ? undefined : value));
 }
 
 /**

@@ -1056,12 +1056,24 @@ export function comparedWith(
   const found = new Map<number, Map<string, unknown>>();
   const pair = (answer: unknown, other: unknown, at: number) => {
     if (!readable(other)) return;
+    // A timed button's result divided by a duration (`/ 10 s`) is compared in that unit: the other side, read in
+    // seconds, is scaled by it.
+    const unit = kind === "timed" ? divisorOf(answer) : null;
+    const compared =
+      unit === null
+        ? other
+        : {
+            kind: "binary",
+            operator: "*",
+            left: other,
+            right: { kind: "literal", value: unit / 1000 },
+          };
     for (const source of sources(answer, at)) {
       const known = found.get(source) ?? new Map<string, unknown>();
-      const key = JSON.stringify(other, (name, item: unknown) =>
+      const key = JSON.stringify(compared, (name, item: unknown) =>
         name === "span" ? undefined : item,
       );
-      if (known.size < 4) known.set(key, other);
+      if (known.size < 4) known.set(key, compared);
       found.set(source, known);
     }
   };
@@ -1105,6 +1117,32 @@ export function comparedWith(
   return new Map([...found].map(([ask, expressions]) => [ask, [...expressions.values()]]));
 }
 
+/** The duration in milliseconds an expression divides by (`took / 10 s`), the first one found; null without one. */
+function divisorOf(expression: unknown): number | null {
+  if (Array.isArray(expression)) {
+    for (const item of expression) {
+      const found = divisorOf(item);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (!isRecord(expression)) return null;
+  const right = record(expression.right);
+  if (
+    expression.kind === "binary" &&
+    expression.operator === "/" &&
+    right.kind === "duration" &&
+    typeof right.milliseconds === "number"
+  )
+    return right.milliseconds;
+  for (const [key, item] of Object.entries(expression)) {
+    if (key === "span") continue;
+    const found = divisorOf(item);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 /** The temporaries an expression reads. */
 function temporariesIn(expression: unknown): number[] {
   const found: number[] = [];
@@ -1138,18 +1176,25 @@ export interface ClockDifference extends Constants {
  * with (`took < 5`); also a difference a condition takes itself.
  */
 export function clockDifferences(flow: DataFlow, instructions: readonly Data[]): ClockDifference[] {
-  /** The latest clock read each variable got, by name, as of the instruction looked at. */
+  /** The clock read each variable holds, by name, as of the instruction looked at: where it was read. */
   const reads = new Map<string, number>();
-  /** The start of a difference of clock reads (`now - start`): the instruction of the start's clock read. */
-  const startOf = (expression: unknown): number | null => {
+  /** Where a side of a difference read the clock: here, or where the variable it names got its clock read. */
+  const readAt = (side: unknown, here: number): number | null => {
+    const value = record(side);
+    if (value.kind === "group") return readAt(value.expression, here);
+    if (value.kind === "identifier" && typeof value.name === "string")
+      return reads.get(value.name) ?? null;
+    return value.kind === "call" && callsClock(value) ? here : null;
+  };
+  /** The two reads of a difference of clock reads (`now - start`), earlier first; null for another value. */
+  const readsOf = (expression: unknown, here: number): { from: number; at: number } | null => {
     const value = record(expression);
-    if (value.kind === "group") return startOf(value.expression);
-    if (value.kind !== "binary" || value.operator !== "-" || !callsClock(value.left)) return null;
-    for (const name of namesIn(value.right)) {
-      const read = reads.get(name);
-      if (read !== undefined) return read;
-    }
-    return null;
+    if (value.kind === "group") return readsOf(value.expression, here);
+    if (value.kind !== "binary" || value.operator !== "-") return null;
+    const at = readAt(value.left, here);
+    let from: number | null = null;
+    for (const name of namesIn(value.right)) from ??= reads.get(name) ?? null;
+    return at === null || from === null || from >= at ? null : { from, at };
   };
   const differences: (ClockDifference & { readonly name: string | null })[] = [];
   const add = (difference: ClockDifference, constant: unknown) => {
@@ -1172,9 +1217,12 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
           ? instruction.name
           : null;
     if (name !== null) {
-      const from = startOf(instruction.value);
-      if (from !== null) differences.push({ name, from, at: index, numbers: [], durations: [] });
-      else if (callsClock(instruction.value)) reads.set(name, index);
+      // A variable holds a clock read from a bare read on; any other value it is set to ends that.
+      const difference = readsOf(instruction.value, index);
+      if (difference !== null)
+        differences.push({ name, ...difference, numbers: [], durations: [] });
+      if (difference === null && readAt(instruction.value, index) === index) reads.set(name, index);
+      else reads.delete(name);
     }
     const conditional =
       instruction.kind === "jumpIfFalse" ||
@@ -1182,9 +1230,9 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
     if (!conditional) return;
     const condition = instruction.condition ?? instruction.expression;
     const compared = (subject: unknown, constant: unknown) => {
-      const from = startOf(subject);
-      if (from !== null) {
-        const own = { name: null, from, at: index, numbers: [], durations: [] };
+      const taken = readsOf(subject, index);
+      if (taken !== null) {
+        const own = { name: null, ...taken, numbers: [], durations: [] };
         differences.push(own);
         add(own, constant);
       }

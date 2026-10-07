@@ -285,7 +285,7 @@ async function exploreUnits(
       const { entries, ...counts } = result.corpus;
       const written = corpusFile(corpus, dir);
       const exhausted = result.search.stoppedBy === "exhausted";
-      const bytes = await writeCorpus(written, header, exhausted, entries);
+      const bytes = await writeCorpus(written, header, exhausted, settings.strategies, entries);
       corpusReport = { ...counts, file: written, bytes, exhausted };
     }
     const report = {
@@ -357,7 +357,8 @@ async function exploreUnit(
   if (
     stored?.exhausted === true &&
     stored.contentHash === unit.contentHash &&
-    stored.seed === settings.seed
+    stored.seed === settings.seed &&
+    stored.strategies === JSON.stringify(settings.strategies)
   )
     return null;
   const header: ReportHeader = {
@@ -397,8 +398,18 @@ interface StoredCorpus {
   contentHash: string;
   seed: number;
   exhausted: boolean;
+  /** The search strategies of the run that wrote it, as JSON: an exhausted search with others may not be exhausted. */
+  strategies: string;
   entries: CorpusEntry[];
 }
+
+const LEGACY_STRATEGIES = JSON.stringify({
+  cells: false,
+  later: false,
+  comparedAnswers: false,
+  realign: false,
+  progressLeads: false,
+});
 
 function corpusFile(corpus: string, dir: string): string {
   return path.join(corpus, `${path.basename(dir)}.json`);
@@ -434,6 +445,8 @@ async function readCorpus(file: string): Promise<StoredCorpus | null> {
     contentHash: text(stored.contentHash),
     seed: count(stored.seed),
     exhausted: stored.exhausted === true,
+    // A corpus from before strategies were recorded had them all off.
+    strategies: isRecord(stored.strategies) ? JSON.stringify(stored.strategies) : LEGACY_STRATEGIES,
     entries,
   };
 }
@@ -461,6 +474,7 @@ async function writeCorpus(
   file: string,
   header: ReportHeader,
   exhausted: boolean,
+  strategies: RunSettings["strategies"],
   entries: readonly CorpusEntry[],
 ): Promise<number> {
   const { unit, contentHash, explorer, seed } = header;
@@ -470,6 +484,7 @@ async function writeCorpus(
     explorer,
     seed,
     exhausted,
+    strategies,
     writtenAt: new Date().toISOString(),
   });
   const body = `${head.slice(0, -1)},"entries":[\n${entries.map((entry) => JSON.stringify(entry)).join(",\n")}\n]}\n`;
