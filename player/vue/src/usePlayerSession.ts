@@ -218,6 +218,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
+  // The transcript revision through which the session's transcript shows directly, as history: what development time
+  // jumps published. -1 for none in this generation.
+  const jumpedRevision = ref(-1);
   const activation = shallowRef<Activation | null>(null);
   // The script places the camera view with `showCamera [stage]` and hides it with `hideCamera`; the view only previews
   // the session camera, which stays open for `takePhoto()`. Without an available camera there is nothing to show.
@@ -828,6 +831,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingLoadCount.value = 0;
     generation.value++;
     interactionReset.value++;
+    jumpedRevision.value = -1;
     inspecting.value = false;
     rewound.value = null;
     session.value = null;
@@ -847,6 +851,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingLoadCount.value = 0;
     generation.value++;
     interactionReset.value++;
+    jumpedRevision.value = -1;
     session.value = next;
     clock.rebase();
   }
@@ -948,6 +953,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function publishJump(next: PlayerRuntimeSession) {
     if (inspecting.value) return;
+    jumpedRevision.value = next.transcriptRevision;
     session.value = next;
     device.jumped(playerRuntimeMedia(next.snapshot).media);
     clock.rebase();
@@ -1063,6 +1069,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session: computed(() => session.value),
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
+    /**
+     * The transcript revision through which the transcript shows directly, like history, rather than entering as live
+     * play: what development time jumps published (#615). -1 for none since the session started.
+     */
+    jumpedRevision: computed(() => jumpedRevision.value),
     /** The prepared Start or Continue, or `null` once the session runs or while saved data is cleared or imported. */
     activation: computed(() =>
       clearing.value || importing.value ? null : (activation.value?.kind ?? null),

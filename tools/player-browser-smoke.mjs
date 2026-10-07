@@ -1060,10 +1060,26 @@ async function smartFollowCheck(cdp) {
   );
 }
 
+// A click at the element's centre once it no longer moves in: a control that live play just showed enters the
+// conversation for a moment, as do the messages it glides up with.
 async function physicalClick(cdp, selector) {
-  const point = await value(
+  const point = await evaluate(
     cdp,
-    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+    `return new Promise((resolve) => {
+      const target = document.querySelector(${JSON.stringify(selector)});
+      const deadline = performance.now() + 2_000;
+      const entering = () =>
+        document.getAnimations().some((animation) =>
+          animation.playState === "running" &&
+          animation.effect?.getComputedTiming().endTime !== Infinity &&
+          animation.effect?.target?.contains(target));
+      const check = () => {
+        if (entering() && performance.now() < deadline) return setTimeout(check, 16);
+        const rect = target.getBoundingClientRect();
+        resolve({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+      };
+      check();
+    })`,
   );
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
