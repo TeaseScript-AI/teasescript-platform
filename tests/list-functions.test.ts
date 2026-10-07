@@ -304,6 +304,18 @@ test("take and takeLast return a new list of the first or last elements", () => 
   assert.deepEqual(diagnostics("say set[1, 2].take(1)\nexit"), [
     ["TSV043", "A set has no take(). Copy it into a list with toList() first.", "take"],
   ]);
+  // Only lists have take and takeLast, so a visible count is checked whatever the compiler knows about the receiver.
+  for (const count of ['"a"', "null", "1.5", "-1"])
+    assert.deepEqual(
+      diagnostics(`${DYNAMIC}say dynamic([1, 2]).take(${count}).length\nexit`).map(
+        ([code]) => code,
+      ),
+      ["TSV043"],
+      count,
+    );
+  assert.deepEqual(diagnostics("function f(m: integer?) {\n    say [1, 2].takeLast(m)\n}\nexit"), [
+    ["TSV043", "takeLast() needs a whole number (integer), not null.", "m"],
+  ]);
   assert.deepEqual(failure(`${DYNAMIC}say [1, 2].takeLast(dynamic(-2))\nexit`), [
     "TSR057",
     "takeLast() needs a whole number of at least 0, not -2.",

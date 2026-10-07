@@ -108,6 +108,9 @@ export function memberProblems(
     // Only lists have `join`, and only text has the other text methods, so their arguments are checked even when the
     // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections.
     if (call === null) return [];
+    // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
+    if (name === "take" || name === "takeLast")
+      return takeProblems(name, undefined, property, call, typeOf);
     const member = name === "join" ? LIST_JOIN : TEXT_MEMBERS.get(name);
     if (!member?.parameters) return [];
     return name === "contains"
@@ -680,12 +683,12 @@ export function collectionMethodProblems(
 /** Problems with `take` or `takeLast`: a list method of one count, a whole number of at least 0 (V30 §16). */
 function takeProblems(
   name: string,
-  receiverType: StaticType & { readonly kind: "list" | "set" },
+  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
   property: Identifier,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  if (receiverType.kind === "set")
+  if (receiverType?.kind === "set")
     return [
       {
         kind: "invalidOperand",
@@ -713,11 +716,14 @@ function takeProblems(
   const count = call.arguments[0]!.value;
   const type = typeOf(count);
   const known = staticNumber(count);
-  const message = !isAssignable(INTEGER_TYPE, type)
-    ? `${name}() needs a whole number (integer), not ${describeValue(forUse(type))}.`
-    : known !== undefined && known < 0
-      ? `${name}() needs a whole number of at least 0, not ${known}.`
-      : undefined;
+  // The first kind the count may be that is not a whole number, such as null in `integer?`.
+  const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
+  const message =
+    other !== undefined
+      ? `${name}() needs a whole number (integer), not ${describeValue(other)}.`
+      : known !== undefined && known < 0
+        ? `${name}() needs a whole number of at least 0, not ${known}.`
+        : undefined;
   return message === undefined ? [] : [{ kind: "invalidOperand", message, span: count.span }];
 }
 
