@@ -42,6 +42,7 @@ interface RewindHost {
     }) => PlayerRuntimeSession,
   ): void;
   activate(): void;
+  playAgain(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   prepareInput(): true | Promise<boolean>;
   setDebugTracing(on: boolean): void;
@@ -697,4 +698,44 @@ test("a step whose state was read after Start or Continue began changes nothing"
       assert.deepEqual(rewind.state.value.inspection, before);
     });
   }
+});
+
+test("a session-local state that rewind adopted leaves Play again session-local", async (context) => {
+  const writes: string[] = [];
+  const { host, rewind } = createHost(context, {
+    scope: "test",
+    load: async () => {
+      throw new Error("Storage is denied.");
+    },
+    write: async (key) => void writes.push(key),
+    replace: async () => void writes.push("replace"),
+    clear: async () => {},
+  });
+  await host.loadScriptStorage();
+  host.prepare((recording) =>
+    createPlayerRuntimeSession(
+      [
+        'let k = load("k", default: 0) + 1',
+        'save k as "k"',
+        'let pick = choose "Go", "Stay"',
+        'say "${k}", instant',
+        "exit",
+      ].join("\n"),
+      { ...host.scriptStorageOptions(), ...recording },
+    ),
+  );
+  host.activate();
+  await settle(context);
+  await choose(context, host, "Go");
+  assert.equal(host.session.value?.state.status, "halted");
+  assert.equal(await rewind.back(0), true);
+  await choose(context, host, "Stay");
+  assert.equal(host.rewind.inspecting.value, false);
+  assert.equal(host.session.value?.state.status, "halted");
+
+  await host.playAgain();
+  await settle(context);
+  await choose(context, host, "Go");
+  assert.equal(said(host).at(-1), "1");
+  assert.deepEqual(writes, []);
 });

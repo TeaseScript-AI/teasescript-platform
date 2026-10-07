@@ -959,7 +959,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
     if (disposed || generation.value !== owner || !inspecting.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
-    storedEntries.value = adopted.scriptStorage;
+    // Only a replacement in the provider changes what the next Start loads; a session-local state leaves it.
+    if (scriptStorage && adopted.scriptStoragePersistent)
+      storedEntries.value = adopted.scriptStorage;
     savedDataRevision.value++;
     rewindAdopted?.();
     inspecting.value = false;
