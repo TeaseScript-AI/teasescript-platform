@@ -47,11 +47,25 @@ export interface ClockComparison {
   readonly exact: boolean;
 }
 
-/** A value a variable is computed from, with what the temporaries it reads were produced from there. */
+/**
+ * A value a variable is computed from, with what the temporaries it reads were produced from there; `prior` is what
+ * the variable it reads itself was computed from just before (`took = took / 1000` right after `took = now - start`).
+ */
 interface Definition {
   readonly value: Data;
   readonly temporaries: ReadonlyMap<number, Data>;
+  readonly prior: Definition | null;
 }
+
+/** Instructions that leave the next one to run right after them, with no way around it. */
+const STRAIGHT = new Set([
+  "storeTemporary",
+  "clearTemporary",
+  "clearTemporaries",
+  "say",
+  "declareBinding",
+  "assign",
+]);
 
 /** A helper function that returns a part of the date or time, exactly or approximately. */
 interface Helper {
@@ -244,10 +258,11 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   const ambiguous = new Set<string>();
   const model: ClockModel = { comparisons, definitions, ambiguous, helpers };
   // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
-  // through variables computed so), and is not a bare clock read, which is a time kept to measure from. When those
-  // values differ, or one updates the variable from itself (`took += 60`), the variable cannot be computed again: it
-  // is ambiguous. Rounds until no variable is added.
-  const assigned = new Map<string, Definition[]>();
+  // through variables computed so), and is not a bare clock read, which is a time kept to measure from. Updates of the
+  // variable from itself (`took = took / 1000`) that follow its one computation straight on compose with it. When the
+  // computations differ, or an update may or may not run, the variable cannot be computed again: it is ambiguous.
+  // Rounds until no variable is added.
+  const assigned = new Map<string, (Definition & { readonly at: number })[]>();
   instructions.forEach((instruction, index) => {
     const target = record(instruction.target);
     const name =
@@ -258,7 +273,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
           : null;
     const value = record(instruction.value);
     if (typeof name !== "string" || value.kind === "literal") return;
-    const definition = { value, temporaries: temporariesAt(value, index) };
+    const definition = { value, temporaries: temporariesAt(value, index), prior: null, at: index };
     assigned.set(name, [...(assigned.get(name) ?? []), definition]);
   });
   for (let added = true; added;) {
@@ -273,11 +288,37 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
         )
       )
         continue;
-      const updated = values.some(({ value }) => namesOf(value).has(name));
-      if (updated || new Set(values.map(({ value }) => shape(value))).size > 1) ambiguous.add(name);
-      else definitions.set(name, values[0]!);
+      const composed = compose(name, values);
+      if (composed === null) ambiguous.add(name);
+      else definitions.set(name, composed);
       added = true;
     }
+  }
+  /**
+   * One definition of a variable from its assignments: its one computation, with the updates from itself that follow
+   * it straight on composed in; null when the computations differ or an update could be skipped.
+   */
+  function compose(
+    name: string,
+    values: readonly (Definition & { readonly at: number })[],
+  ): Definition | null {
+    const computed = values.filter(({ value }) => !namesOf(value).has(name));
+    if (new Set(computed.map(({ value }) => shape(value))).size !== 1) return null;
+    // Updates compose with one computation only, which they follow.
+    if (computed.length > 1 && computed.length < values.length) return null;
+    let definition: Definition = computed[0]!;
+    let last = -1;
+    for (const { value, temporaries, at } of values) {
+      if (!namesOf(value).has(name)) {
+        last = at;
+        continue;
+      }
+      for (let between = last + 1; between < at; between += 1)
+        if (last < 0 || !STRAIGHT.has(String(instructions[between]?.kind))) return null;
+      definition = { value, temporaries, prior: definition };
+      last = at;
+    }
+    return definition;
   }
   instructions.forEach((instruction, index) => {
     const conditional =
@@ -396,8 +437,11 @@ interface Reading {
   readonly model: ClockModel;
   readonly context: TimeContext;
   readonly now: number;
-  /** The variables being computed again, which are read from the state inside their own computation. */
-  readonly inside: ReadonlySet<string>;
+  /**
+   * The variables being computed again, with what they read of themselves inside their own computation: what they were
+   * computed from just before, or the state (null).
+   */
+  readonly inside: ReadonlyMap<string, Definition | null>;
 }
 
 /** An expression's value in a reading, or undefined when it cannot be read. */
@@ -415,14 +459,15 @@ function valueAt(expression: unknown, reading: Reading): Value {
       return valueAt(node.expression, reading);
     case "identifier": {
       if (typeof node.name !== "string") return undefined;
-      if (model.ambiguous.has(node.name) && !reading.inside.has(node.name)) return undefined;
-      const defined = reading.inside.has(node.name) ? undefined : model.definitions.get(node.name);
-      return defined === undefined
+      const within = reading.inside.has(node.name);
+      if (model.ambiguous.has(node.name) && !within) return undefined;
+      const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
+      return defined == null
         ? runtimeValue(context.bindings.get(node.name))
         : valueAt(defined.value, {
             ...reading,
             temporaries: defined.temporaries,
-            inside: new Set([...reading.inside, node.name]),
+            inside: new Map([...reading.inside, [node.name, defined.prior]]),
           });
     }
     case "temporary": {
@@ -580,7 +625,7 @@ export function holdsAt(
       left: comparison.left,
       right: comparison.right,
     },
-    { temporaries: comparison.temporaries, model, context, now, inside: new Set() },
+    { temporaries: comparison.temporaries, model, context, now, inside: new Map() },
   );
   return typeof value === "boolean" ? value : undefined;
 }
@@ -631,7 +676,7 @@ export function flipGap(
     temporaries: comparison.temporaries,
     model,
     context,
-    inside: new Set<string>(),
+    inside: new Map<string, Definition | null>(),
   };
   const apart = (at: number, right: unknown) => {
     const left = magnitude(valueAt(comparison.left, { ...reading, now: at }));
@@ -698,7 +743,7 @@ export function storedHolds(
     model,
     context: { bindings: new Map(), storage },
     now: 0,
-    inside: new Set(),
+    inside: new Map(),
   });
   return typeof value === "boolean" ? value : undefined;
 }

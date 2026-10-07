@@ -615,6 +615,12 @@ test(
       ],
       ["session start", 'if getDateTime().hour >= 22 {\n  say "Hit."\n}\nexit\n', true],
       [
+        "updated straight on",
+        'let start = getTimestamp().toMilliseconds()\nshowButton "Go"\n' +
+          'let took = getTimestamp().toMilliseconds() - start\ntook = took / 1000\nif took > 600 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
         "repeated without cells",
         'let n = 0\nwhile n < 2 {\n  showButton "Go"\n  n += 1\n}\nif getDateTime().hour >= 22 {\n' +
           '  say "Hit."\n}\nexit\n',
