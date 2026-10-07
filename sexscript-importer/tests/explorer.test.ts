@@ -98,7 +98,7 @@ test(
       { kind: "button", label: "Go on" },
     ]);
     // A value the package stores is read in a next session, which starts from what an explored session left.
-    const back = way('(load "fixture.visited") == true');
+    const back = way('(load "fixture.visited", default: false) == true');
     assert.deepEqual(back && [back.reach, back.sources, back.sessions], ["play", ["storage"], 2]);
     // A count of visits needs a chain of sessions, each from the storage the one before it left.
     const regular = way("visits >= 3");
@@ -131,16 +131,19 @@ test(
     const branch = (text: string) =>
       result.coverage.unvisitedBranches.find((entry) => entry.condition?.text === text);
     assert.deepEqual(
-      [branch('pick == "never"')?.reach, branch('(load "intro.legacy") == true')?.reason],
+      [
+        branch('pick == "never"')?.reach,
+        branch('(load "intro.legacy", default: false) == true')?.reason,
+      ],
       ["unreachable", "key never saved in this package: intro.legacy"],
     );
     assert.match(
-      branch('(load "fixture.level") == 2')?.reason ?? "",
+      branch('(load "fixture.level", default: 0) == 2')?.reason ?? "",
       /every save of fixture\.level is a literal/u,
     );
     // A stored boolean that no explored session saved: the note shows the constant as the condition writes it.
     assert.equal(
-      branch('(load "fixture.badge") == true')?.reason,
+      branch('(load "fixture.badge", default: false) == true')?.reason,
       "needs fixture.badge == true; no explored session stored it",
     );
   },

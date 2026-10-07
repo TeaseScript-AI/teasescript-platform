@@ -875,6 +875,7 @@ export function lowerPackage(
           index === entryIndex ? withProfile(program, withClasses) : program,
         ),
       ),
+      false,
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -923,7 +924,7 @@ export function lowerPackage(
   });
   // Calls in any file may pass null for a parameter whose default gives it a type; reads get defaults by the types of
   // the keys of the whole package.
-  const nullable = withStorageDefaults(withNullableParameters([apartMain, ...apartPrograms]));
+  const nullable = withStorageDefaults(withNullableParameters([apartMain, ...apartPrograms]), true);
   const main = nullable[0]!;
   const paths = files.map(
     (file, index) =>

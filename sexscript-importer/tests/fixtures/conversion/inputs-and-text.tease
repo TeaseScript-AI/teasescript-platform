@@ -1,3 +1,6 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 let name = askText "What is your name?"
 let weight = askNumber "Your weight?", default: 0
 say "Hello ${name}, you said ${weight}."
@@ -37,7 +40,7 @@ question = "Kneel?"
 say question
 let kneel = (choose yes: "Yes", no: "No") == "yes"
 // A question read from storage may be null, which kept the current text, so it is still tested.
-let stored = load "question", default: null
+let stored = load "question", default: sexscriptLegacyValue(null)
 if stored != null {
   say stored
 }

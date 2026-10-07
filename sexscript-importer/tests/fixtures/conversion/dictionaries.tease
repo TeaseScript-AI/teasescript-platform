@@ -1,3 +1,6 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 // Registries keyed by runtime strings become dicts (#536); maps with fixed names stay objects.
 let COLLAR = "collar"
 let GAG = "gag"
@@ -158,7 +161,7 @@ for toyValue, value in needed {
 }
 say "Missing: ${missing}"
 // A stored map that may be missing is false when null or empty, as Groovy's null or empty map was.
-let remembered = load "toy.remembered", default: null
+let remembered = load "toy.remembered", default: sexscriptLegacyValue(null)
 let slot = "first"
 // NOTE SX_DICT_MISSING_KEY line 97: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 if remembered != null and remembered.length > 0 {

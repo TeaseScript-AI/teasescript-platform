@@ -1,16 +1,19 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 speaker system {
   title: "System"
 }
 function sexscriptLegacyAskProfile {
-  if load("intro.name", default: null) == null {
+  if load("intro.name", default: sexscriptLegacyValue(null)) == null {
     save (askText as system "What is your name?", default: "Slave") as "intro.name"
   }
-  if load("intro.female", default: null) == null {
+  if load("intro.female", default: sexscriptLegacyValue(null)) == null {
     say as system "Are you a woman ?"
     save (choose yes: "Yes", no: "No") == "yes" as "intro.female"
   }
-  if load("intro.likemale", default: null) == null {
-    if load("intro.likefemale", default: null) == true {
+  if load("intro.likemale", default: sexscriptLegacyValue(null)) == null {
+    if load("intro.likefemale", default: sexscriptLegacyValue(null)) == true {
       say as system "Are you also attracted to men ?"
       save (choose yes: "Yes", no: "No") == "yes" as "intro.likemale"
     } else {

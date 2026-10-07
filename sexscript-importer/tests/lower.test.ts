@@ -226,8 +226,11 @@ test("lowers nullable legacy scalar storage reads to read-only TeaseScript load"
   assert.equal(
     emitTease(program),
     [
-      'let enabled = load "feature.enabled", default: null',
-      'let raw = load "legacy.raw", default: null',
+      "function sexscriptLegacyValue(value) {",
+      "  return value",
+      "}",
+      'let enabled = load "feature.enabled", default: false',
+      'let raw = load "legacy.raw", default: sexscriptLegacyValue(null)',
       "exit",
       "",
     ].join("\n"),

@@ -77,7 +77,7 @@ if pick == "count" {
   if n == 1234 {
     say "Secret number."
   }
-  if (load "fixture.visited") == true {
+  if (load "fixture.visited", default: false) == true {
     say "Welcome back."
   }
   save true as "fixture.visited"
@@ -86,17 +86,17 @@ if pick == "count" {
   if visits >= 3 {
     say "Regular."
   }
-  if (load "intro.legacy") == true {
+  if (load "intro.legacy", default: false) == true {
     say "Legacy profile."
   }
   save 1 as "fixture.level"
-  if (load "fixture.level") == 2 {
+  if (load "fixture.level", default: 0) == 2 {
     say "Level two."
   }
   if getTime().hour >= 22 {
     say "Late."
   }
-  if (load "fixture.badge") == true {
+  if (load "fixture.badge", default: false) == true {
     say "Badge holder."
   }
   exit

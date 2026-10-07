@@ -45,7 +45,7 @@ import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
 import { withMessageHandles } from "./message-handles.ts";
 import { withParsedLoads } from "./parsed-loads.ts";
-import { withFillableLoads } from "./storage-keys.ts";
+import { withFillableLoads, withStorageDefaults } from "./storage-keys.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1434,7 +1434,10 @@ export function lowerParsedFile(
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withParsedLoads(withFillableLoads(typedStatements), context.syntheticHelpers);
+  let texts = withFillableLoads(
+    withParsedLoads(typedStatements, context.syntheticHelpers),
+    context.syntheticHelpers,
+  );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -1470,10 +1473,12 @@ export function lowerParsedFile(
       : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
   };
   if (options.renameIdentifiers === false) return program;
-  const results = functionResultTypes(program.statements);
+  // A file converted on its own gives its reads their defaults by its own saves, as a package does by all of them.
+  const stored = withStorageDefaults([program], false)[0] ?? program;
+  const results = functionResultTypes(stored.statements);
   const dispatched = withActionDispatcher(
-    program,
-    new Set((program.actions ?? []).filter((action) => results.get(action)?.kind === "null")),
+    stored,
+    new Set((stored.actions ?? []).filter((action) => results.get(action)?.kind === "null")),
   );
   return renameConflictingIdentifiers({
     ...dispatched,
@@ -1630,8 +1635,11 @@ function lowerHelperCompilationUnit(
     withReadingTimes(
       withMessageHandles(
         withElapsedDurations(
-          withParsedLoads(
-            withFillableLoads(withEnforcedTypes([...fieldStatements, ...statements], baseContext)),
+          withFillableLoads(
+            withParsedLoads(
+              withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+              baseContext.syntheticHelpers,
+            ),
             baseContext.syntheticHelpers,
           ),
           diagnostics,

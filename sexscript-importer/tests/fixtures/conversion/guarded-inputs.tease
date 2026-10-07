@@ -1,5 +1,8 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 // A question that && or || guards is asked only where Groovy's short circuit reached it.
-let name = load "training.name", default: null
+let name = load "training.name", default: sexscriptLegacyValue(null)
 while true {
   let answered = false
   if name == null {

@@ -1,6 +1,6 @@
 // The story starts here and names the next chapter from the legacy scripts folder.
 // NOTE SX_LAUNCH_MARKERS: The legacy player recorded each start of this script under "Story.start.launch.*", which the package reads; the script saves the first and last start time and the number of starts as it did.
-if load("Story.start.launch.firsttime", default: null) == null {
+if load("Story.start.launch.firsttime", default: sexscriptLegacyValue(null)) == null {
   save getTimestamp().toSeconds() as "Story.start.launch.firsttime"
 }
 save getTimestamp().toSeconds() as "Story.start.launch.lasttime"

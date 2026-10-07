@@ -1,3 +1,6 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -18,18 +21,18 @@ function reset {
   save 0 as "game.rounds"
 }
 // A read that the script tests for null keeps it.
-let level = load "game.level", default: null
+let level = load "game.level", default: sexscriptLegacyValue(null)
 if level == null {
   level = "easy"
   save level as "game.level"
 }
 say "Level ${level}"
-if load("game.seen", default: null) == null {
+if load("game.seen", default: sexscriptLegacyValue(null)) == null {
   save true as "game.seen"
 }
 // So does a read whose value reaches a test for null or for an empty value through a variable, an argument, or a
 // comparison, and the text that loadString read of a key the package saves numbers under.
-let stored = load "game.stored", default: null
+let stored = load "game.stored", default: sexscriptLegacyValue(null)
 let copy = stored
 if copy == null {
   say "Nothing stored."
@@ -39,12 +42,12 @@ function check(value) {
     say "Nothing given."
   }
 }
-check(load("game.given", default: null))
-if load("game.mode", default: null) == "" {
+check(load("game.given", default: sexscriptLegacyValue(null)))
+if load("game.mode", default: sexscriptLegacyValue(null)) == "" {
   say "No mode."
 }
 // NOTE SX_LOAD_STRING_TEXT line 26: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
-let version: string? = sexscriptLegacyText(load("game.version", default: null))
+let version: string? = sexscriptLegacyText(load("game.version", default: sexscriptLegacyValue(null)))
 if version == null {
   say "No version."
 }
