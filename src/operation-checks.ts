@@ -7,11 +7,11 @@ import {
   isTemporalConversionResult,
   numberFromText,
   MIN_MAX_BUILTINS,
-  ROUNDING_BUILTINS,
   TEMPORAL_CONVERSIONS,
   temporalTextProblem,
   type ConversionResult,
 } from "./conversions.js";
+import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
@@ -108,6 +108,9 @@ export function memberProblems(
     // Only lists have `join`, and only text has the other text methods, so their arguments are checked even when the
     // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections.
     if (call === null) return [];
+    // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
+    if (name === "take" || name === "takeLast")
+      return takeProblems(name, undefined, property, call, typeOf);
     const member = name === "join" ? LIST_JOIN : TEXT_MEMBERS.get(name);
     if (!member?.parameters) return [];
     return name === "contains"
@@ -274,9 +277,9 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
 
 /**
  * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`, and the date and
- * time conversions) or rounding built-in (`round`, `floor`, `ceil`): its arguments, a value of a known type it cannot
- * convert, constant text that cannot convert (V30 §13, §35), and a `default:` of another type than the result. Other
- * callees give no problems.
+ * time conversions), a numeric function (`round`, `floor`, `ceil`, `abs`, `sqrt`, `pow`), `min`, or `max`: its
+ * arguments, a value of a known type it cannot take, constant text that cannot convert (V30 §13, §35), and a `default:`
+ * of another type than the result. Other callees give no problems.
  */
 export function builtinCallProblems(
   name: string,
@@ -284,21 +287,19 @@ export function builtinCallProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
-  const result = isConversionName(name) ? CONVERSION_RESULTS.get(name)! : undefined;
-  if (result === undefined && !ROUNDING_BUILTINS.has(name)) return [];
+  if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (!isConversionName(name)) return [];
+  const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
   let fallback: Expression | undefined;
   const positional: Expression[] = [];
   for (const argument of call.arguments) {
     if (argument.kind === "positionalArgument") positional.push(argument.value);
-    else if (result !== undefined && argument.name.name === "default") fallback = argument.value;
+    else if (argument.name.name === "default") fallback = argument.value;
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message:
-          result === undefined
-            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'; its only named argument is default:.`,
+        message: `${name}(...) has no parameter '${argument.name.name}'; its only named argument is default:.`,
         span: argument.name.span,
       });
   }
@@ -314,22 +315,64 @@ export function builtinCallProblems(
   if (parts) problems.push(...dateTimePartProblems(positional[0]!, positional[1]!, typeOf));
   else {
     const value = positional[0]!;
-    const type = typeOf(value);
-    const message =
-      result === undefined
-        ? isAssignable(NUMBER_TYPE, type)
-          ? undefined
-          : `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`
-        : conversionProblem(name, result, value, type);
+    const message = conversionProblem(name, result, value, typeOf(value));
     if (message !== undefined) problems.push({ kind: "invalidOperand", message, span: value.span });
   }
-  if (result !== undefined && fallback !== undefined) {
+  if (fallback !== undefined) {
     const fallbackType = typeOf(fallback);
     if (!isAssignable({ kind: "scalar", name: result }, fallbackType))
       problems.push({
         kind: "invalidOperand",
         message: `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeValue(fallbackType)}.`,
         span: fallback.span,
+      });
+  }
+  return problems;
+}
+
+/**
+ * Problems with a numeric function: names it does not take, its number of positional arguments, and arguments that are
+ * not numbers.
+ */
+function numericFunctionProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const { parameters, named = [] } = NUMERIC_FUNCTIONS.get(name)!;
+  const problems: OperationProblem[] = [];
+  const values: [Expression, string][] = [];
+  let positional = 0;
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") {
+      positional += 1;
+      values.push([argument.value, ""]);
+    } else if (named.includes(argument.name.name))
+      values.push([argument.value, ` as its ${argument.name.name}:`]);
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message:
+          named.length === 0
+            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
+            : `${name}(...) has no parameter '${argument.name.name}'; its only named argument is ${named[0]}:.`,
+        span: argument.name.span,
+      });
+  }
+  if (positional !== parameters.length)
+    problems.push({
+      kind: "argumentCount",
+      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${positional}.`,
+      span: call.span,
+    });
+  if (problems.length > 0) return problems;
+  for (const [value, place] of values) {
+    const type = typeOf(value);
+    if (!isAssignable(NUMBER_TYPE, type))
+      problems.push({
+        kind: "invalidOperand",
+        message: `${name}(...) needs a number${place}, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`,
+        span: value.span,
       });
   }
   return problems;
@@ -357,7 +400,7 @@ function minMaxProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}(...) takes 2 or more arguments, received ${call.arguments.length}.`,
+        message: `${name}(...) takes 2 or more arguments, or one list, received ${call.arguments.length}.`,
         span: call.span,
       },
     ];
@@ -566,6 +609,8 @@ export function rootName(expression: Expression): string | null {
 export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "sort",
   "shuffle",
+  "take",
+  "takeLast",
   "intersection",
   "union",
   "difference",
@@ -583,6 +628,8 @@ export function collectionMethodProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
+  if (name === "take" || name === "takeLast")
+    return takeProblems(name, receiverType, property, call, typeOf);
   const reorders = name === "sort" || name === "shuffle";
   if (reorders && receiverType.kind === "set")
     return [
@@ -631,6 +678,53 @@ export function collectionMethodProblems(
       },
     ];
   return [];
+}
+
+/** Problems with `take` or `takeLast`: a list method of one count, a whole number of at least 0 (V30 §16). */
+function takeProblems(
+  name: string,
+  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
+  property: Identifier,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  if (receiverType?.kind === "set")
+    return [
+      {
+        kind: "invalidOperand",
+        message: `A set has no ${name}(). Copy it into a list with toList() first.`,
+        span: property.span,
+      },
+    ];
+  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
+  if (named !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `${name}() takes its count without a name; remove '${named.name.name}:'.`,
+        span: named.name.span,
+      },
+    ];
+  if (call.arguments.length !== 1)
+    return [
+      {
+        kind: "argumentCount",
+        message: `${name}() takes 1 argument (count), received ${call.arguments.length}.`,
+        span: call.span,
+      },
+    ];
+  const count = call.arguments[0]!.value;
+  const type = typeOf(count);
+  const known = staticNumber(count);
+  // The first kind the count may be that is not a whole number, such as null in `integer?`.
+  const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
+  const message =
+    other !== undefined
+      ? `${name}() needs a whole number (integer), not ${describeValue(other)}.`
+      : known !== undefined && known < 0
+        ? `${name}() needs a whole number of at least 0, not ${known}.`
+        : undefined;
+  return message === undefined ? [] : [{ kind: "invalidOperand", message, span: count.span }];
 }
 
 /** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */

@@ -358,9 +358,12 @@ Examples:
 let total = score + bonus
 let remaining = total - used
 let doubled = amount * 2
-let average = total / count
+let perRound = total / count
 let remainder = amount % 2
 ```
+
+`%` gives the remainder of a division with the sign of the dividend: `-7 % 3` is `-1` and `7 % -3` is `1`.
+[`mod`](#numeric-functions) gives it the sign of the divisor instead.
 
 Dividing numbers always returns a `number`, also when the result is whole. Storing it where an `integer` is required needs
 explicit rounding ([§13](#13-explicit-types)):
@@ -416,6 +419,23 @@ let index = randomInteger(0..items.length)
 ```
 
 The range itself defines whether the upper bound is inclusive or exclusive. `randomInteger(...)` therefore needs no separate minimum/maximum boundary convention.
+
+### Weighted choice
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`randomWeighted` chooses with a chance in proportion to a weight. Given a dict, it returns one of its keys, weighted by
+the values; given a list of objects and `weight:`, it returns a copy of one element, like `.random`, weighted by that
+property:
+
+```text
+let exercise = randomWeighted(dict{ "10 squats": 3, "5 min plank": 1 })   // squats three times as often
+let task = randomWeighted(tasks, weight: "chance")
+```
+
+Weights are numbers of at least 0, and at least one is above 0; an element of weight 0 is never chosen. Each call makes
+one draw of the session RNG. An empty dict or list is runtime error `TSR018`, a negative weight or no weight above 0
+`TSR039`, and a weight that is not a number `TSR060`; a weight of another type or a missing property is a compile error
+when the compiler can see it.
 
 ## 5. Logical and comparison operators
 **Status:** Accepted
@@ -1230,8 +1250,9 @@ floor(-2.5)  // -3
 ceil(-2.5)   // -2
 ```
 
-`min(...)` and `max(...)` return the smallest or largest of two or more values, which are all numbers, all durations
-of one family, or all date and time values of one kind ([§35](#35-date-time-durations-and-timestamps)). The result is
+`min(...)` and `max(...)` return the smallest or largest of two or more values, or of the values of one list
+([§16](#statistics)), which are all numbers, all durations of one family, or all date and time values of one kind
+([§35](#35-date-time-durations-and-timestamps)). The result is
 an `integer` when every argument is an `integer`, a `number` otherwise, and for durations and date and time values the
 chosen value itself. Mixing numbers, durations, duration families, or temporal kinds, other values, `null`, and named
 arguments are compile errors when the types show them, and runtime errors otherwise:
@@ -1241,6 +1262,49 @@ let minutes = min(20, 5 + punishments)
 let pause = max(1 minute, remaining)
 let boundedLevel = max(1, min(level, 10))
 ```
+
+### Numeric functions
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+These functions take numbers and return a number:
+
+| Function | Result |
+| --- | --- |
+| `abs(value)` | the distance from 0: `abs(-2.5)` is `2.5` |
+| `sign(value)` | `-1`, `0`, or `1` |
+| `sqrt(value)` | the square root |
+| `pow(base, exponent)` | the base raised to the exponent |
+| `mod(value, divisor)` | the remainder with the sign of the divisor: `mod(-1, 3)` is `2`, where `-1 % 3` is `-1` |
+| `clamp(value, min, max)` | the value, raised to `min` or lowered to `max`: `clamp(15, 1, 10)` is `10` |
+| `round(value, decimals: n)` | the value rounded to `n` decimal places |
+
+`pi` is the number π, `3.141592653589793`. Like the functions, it is a protected name ([§38](#protected-engine-names)).
+
+```text
+pow(2, 10)                       // 1024
+pow(10, -2)                      // 0.01
+pow(8, 1 / 3)                    // 2
+round(2.675, decimals: 2)        // 2.68
+round(pi * 2 * 2, decimals: 2)   // 12.57
+```
+
+- `abs`, `mod`, and `clamp` return an `integer` when every argument is one, and `sign` always does. `sqrt` and
+  `round(value, decimals: n)` return a `number`, also when the result is whole. `pow` returns an `integer` when its base
+  is an `integer` and its exponent a whole number of at least 0 that the compiler can see, as in `pow(side, 2)`, and a
+  `number` otherwise. `round`, `floor`, or `ceil` makes another result whole.
+- `round(value, decimals: n)` rounds the number as it is written, a half away from zero, to `n` decimal places, a whole
+  number of at least 0: `round(2.675, decimals: 2)` is `2.68`, although the nearest binary number to 2.675 lies slightly
+  below it. Without `decimals:`, `round` returns an `integer` as described above.
+- A call without a result fails: `sqrt` of a negative number, `pow` of 0 to a negative exponent, `pow` of a negative
+  base to an exponent that is not whole, a `pow` result too large to represent, `mod` by 0, `clamp` with `min` above
+  `max`, and `decimals:` that is negative or not whole. It is a compile error when the compiler can see the arguments,
+  and otherwise runtime error `TSR036` for a result that is not a finite number and `TSR039` for an argument out of
+  range. A `pow` result too small to represent is 0.
+- Every argument is a number. Other values, `null`, another number of arguments, and other named arguments are compile
+  errors when the types show them, and runtime errors otherwise.
+- `sqrt` and `pow` give the same result on every device and browser.
+- Considered and left out: the operators `**` and `^`, the constant `e`, `log(x, base)`, hyperbolic functions,
+  factorial, `gcd`, bitwise operations, and general number formatting.
 
 ## 14. Scope
 **Status:** Accepted
@@ -1396,6 +1460,8 @@ items.join(", ")
 items.intersection(other)
 items.union(other)
 items.difference(other)
+items.take(3)
+items.takeLast(3)
 ```
 
 `removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
@@ -1608,6 +1674,97 @@ queue.addAll(nextRound)           // queue itself grows
 ```
 
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
+
+### Parts of a list
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`take(count)` and `takeLast(count)` return a new list of the first or the last `count` elements, in order, and leave
+the list unchanged. A count beyond the length gives the whole list. The count is a whole number of at least 0; another
+count is a compile error when the compiler can see it, and runtime error `TSR057` otherwise. A rolling window keeps only
+the newest values:
+
+```text
+let recent: integer[] = load "pushups", default: []
+recent.add(count)
+save recent.takeLast(20) as "pushups"
+```
+
+### Statistics
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`sum`, `average`, `median`, `percentile`, and `stddev` describe the values of a list, and `min` and `max` also take one
+list ([§13](#type-conversion)):
+
+```text
+let scores = [12, 15, 11, 18, 16]
+
+sum(scores)             // 72
+average(scores)         // 14.4
+median(scores)          // 15
+percentile(scores, 25)  // 12
+stddev(scores)          // 2.8809720581775866
+max(scores)             // 18
+```
+
+- The values are numbers or durations, and for `min` and `max` also date and time values of one kind
+  ([§35](#35-date-time-durations-and-timestamps)). With `by:`, the values are a property of a list of objects:
+  `median(sessions, by: "count")`.
+- `percentile(list, p)` is the value that `p` percent of the values lie at or below, for `p` from 0 through 100: in
+  ascending order, the value at rank p/100 × (n − 1), between the two nearest values in proportion. `percentile(list,
+  50)` is the median, the middle value or the average of the two middle values.
+- `stddev` is the sample standard deviation: the square root of the summed squared distances to the average, divided by
+  the number of values minus 1.
+- `sum`, `min`, and `max` of integers are integers; `average`, `median`, `percentile`, and `stddev` of numbers are
+  numbers. Durations give durations, and `min` and `max` give the chosen value.
+- The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
+  on every device, also for values that cancel or are very large or very small.
+- Durations are of one family: exact time, days and weeks, or months and years. `average`, `median`, `percentile`,
+  and `stddev` need exact durations, because days, weeks, months, and years have no fixed length.
+- An empty list, and a list of one value for `stddev`, is runtime error `TSR018`. A percentage outside 0 through 100
+  is a compile error when the compiler can see it, and runtime error `TSR039` otherwise. Values of other or mixed kinds,
+  and a missing `by:` property, are compile errors when the types show them, and runtime error `TSR060` otherwise.
+
+A fair target is one the player reaches in most attempts. `percentile(recent, 10)` is the value that 90% of the recent
+attempts reached or beat, so a target there is met about nine times out of ten:
+
+```text
+let recent: integer[] = load "pushups", default: []
+if recent.length > 0 {
+    let target = round(percentile(recent, 10))
+    say "Today: at least ${target} push-ups. You managed that nine times out of ten."
+}
+```
+
+### Trends
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`linearRegression` fits the straight line that comes closest to the points of a list, by least squares, and `predict`
+reads the line at another point:
+
+```text
+let laps = linearRegression([62 s, 60 s, 59 s, 57 s])
+say "You gain ${-laps.slope} per lap."              // 1.6 s
+say "Next lap: ${predict(laps, 4)}"                 // 55.5 s
+
+let trend = linearRegression(sessions, x: "day", y: "count")
+say "About ${round(trend.slope, decimals: 1)} more each day."
+let expected = predict(trend, toDate("2026-10-31"))
+```
+
+- `linearRegression(list)` takes the list's values as y, numbers or exact durations, at x = 0, 1, 2, and so on. With
+  `y:`, the y values are a property of a list of objects, and `x:` names a property for x as well: numbers, or dates,
+  datetimes, or timestamps of one kind, measured in days, with a time of day as a fraction of a day. Without `x:`, x is
+  the index.
+- The result is an object `{ slope, intercept, r2, start }`. `slope` is the change of y per step of x, or per day, and
+  is a duration when y is. `intercept` is the line's value at the first point of the list, not at x = 0. `r2`, from 0
+  to 1, is the share of the variation of y that the line explains; it is 1 when every y is the same. `start` is the
+  first point's x, 0 without `x:`.
+- `predict(line, x)` is `intercept + slope × (x − start)`, for an x of the start's kind: a number, or a date and time
+  value of the same kind, measured in days.
+- Like the statistics, `linearRegression` and `predict` compute exactly and round each result once.
+- Fewer than 2 points is runtime error `TSR018`, and points that all have the same x `TSR036`. Values of other kinds,
+  `x:` without `y:`, and a `predict` x of another kind than the start are compile errors when the types show them and
+  runtime errors otherwise (`TSR060`, and `TSR059` for `predict`).
 
 ## 17. Return statements
 **Status:** Accepted
@@ -4549,6 +4706,21 @@ floor
 ceil
 min
 max
+abs
+sign
+sqrt
+pow
+mod
+clamp
+pi
+sum
+average
+median
+percentile
+stddev
+linearRegression
+predict
+randomWeighted
 toString
 toNumber
 toInteger

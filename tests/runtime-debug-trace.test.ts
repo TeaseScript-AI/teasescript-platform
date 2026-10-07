@@ -322,18 +322,18 @@ test("a message explains its interpolated value through a call, its parameters, 
 test("recursion and same-named variables keep each call's and each block's own variables apart", () => {
   const played = traced(
     [
-      "function sum(n) {",
+      "function addUp(n) {",
       "    if n == 0 {",
       "        return 0",
       "    }",
-      "    let rest = sum(n - 1)",
+      "    let rest = addUp(n - 1)",
       "    return n + rest",
       "}",
       "function title {",
       '    let n = "three"',
       "    return n",
       "}",
-      "let total = sum(3)",
+      "let total = addUp(3)",
       "let name = title()",
       "for pass in 1..=2 {",
       "    let step = pass * 10",
@@ -347,7 +347,7 @@ test("recursion and same-named variables keep each call's and each block's own v
     (interpolation) => causes(played.trace, interpolation)[0]!,
   );
   assert.deepEqual([total!.target, total!.preview], ["total", "6"]);
-  // Another function's `n` is not any call of sum's parameter.
+  // Another function's `n` is not any call of addUp's parameter.
   assert.deepEqual(
     lineage(played.trace, name!.id).map((step) => [step.kind, step.target, step.preview]),
     [
@@ -368,7 +368,7 @@ test("recursion and same-named variables keep each call's and each block's own v
   const parameters = lineage(played.trace, total!.id).filter(
     (candidate) => candidate.kind === "parameter",
   );
-  // sum(0) returns a literal 0, which depends on no parameter.
+  // addUp(0) returns a literal 0, which depends on no parameter.
   assert.deepEqual(parameters.map((parameter) => parameter.preview).sort(), ["1", "2", "3"]);
   for (const parameter of parameters) {
     const [argument] = causes(played.trace, parameter);
@@ -1379,14 +1379,14 @@ test("a small byte budget evicts by size, and wide expressions keep at most the 
   const plan = compile(
     [
       ...names.map((name, index) => `let ${name} = ${index}`),
-      `let sum = ${names.join(" + ")}`,
-      'say "${sum}"',
+      `let total = ${names.join(" + ")}`,
+      'say "${total}"',
       "exit",
     ].join("\n"),
   );
   const wide = new RuntimeDebugContext();
   const played = play(plan, { trace: wide });
-  const sum = record(wide, wide.variableRecord(played.snapshot.frames[0]!.id, "sum"));
+  const sum = record(wide, wide.variableRecord(played.snapshot.frames[0]!.id, "total"));
   assert.equal(sum.dependencies.length, RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies);
   assert.equal(sum.omittedDependencies, 50 - RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies);
 

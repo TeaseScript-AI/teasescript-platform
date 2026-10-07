@@ -68,6 +68,7 @@ export type RuntimeDebugRandomOperation =
   | "chance"
   | "randomInteger"
   | "collectionRandom"
+  | "randomWeighted"
   | "interpolation"
   | "shuffle"
   | "tagQuery"

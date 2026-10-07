@@ -123,8 +123,6 @@ export function isConversionResult(result: ConversionResult, value: unknown): bo
   return result === "integer" ? Number.isInteger(value) : typeof value === result;
 }
 
-export const ROUNDING_BUILTINS: ReadonlySet<string> = new Set(["round", "floor", "ceil"]);
-
 /** `min` and `max` of two or more numbers or durations (V30 §13). */
 export const MIN_MAX_BUILTINS: ReadonlySet<string> = new Set(["min", "max"]);
 

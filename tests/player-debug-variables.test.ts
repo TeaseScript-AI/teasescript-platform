@@ -140,14 +140,14 @@ test("expired causes, omitted causes, and long cause lists show as such", () => 
   const { trace } = traced(
     [
       ...names.map((name, index) => `let ${name} = ${index}`),
-      `let sum = ${names.join(" + ")}`,
-      'say "${sum}"',
+      `let total = ${names.join(" + ")}`,
+      'say "${total}"',
       "exit",
     ].join("\n"),
   );
   const [output] = trace.outputs();
   const rows = playerDebugTraceRows(trace, [output!], defaults());
-  const sum = rows.find((row) => row.kind === "record" && row.text.title === "let sum")!;
+  const sum = rows.find((row) => row.kind === "record" && row.text.title === "let total")!;
   const opened = playerDebugTraceRows(trace, [output!], defaults(new Set([sum.key])));
   const kinds = opened.map((row) => row.kind);
   assert.equal(

@@ -583,6 +583,8 @@ class SemanticValidator {
           "hideCamera",
           "showPermanentButton",
           "askImage",
+          // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
+          "pi",
         ].includes(name),
       ),
     );

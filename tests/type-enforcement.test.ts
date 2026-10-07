@@ -938,7 +938,7 @@ test("only integers convert implicitly: division gives a number, and durations n
     mismatches('let joined = "Score: " + 5\nexit')[0]?.[1],
     "'+' joins text only with other text, not with a whole number (integer). Put the value in the text instead, as in \"Score: ${5}\".",
   );
-  assert.deepEqual(codes("let sum = true + 1\nexit"), [["TSV043", "true + 1"]]);
+  assert.deepEqual(codes("let total = true + 1\nexit"), [["TSV043", "true + 1"]]);
   // Bare numbers count as seconds in commands that expect a time.
   assert.deepEqual(
     codes(

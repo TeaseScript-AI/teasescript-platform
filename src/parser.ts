@@ -3388,6 +3388,17 @@ class Parser {
       this.#advance();
       return yield* parseChild(this.#withinDelimiters(this.#parseDictLiteral(token)));
     }
+    // The protected constant `pi` (V30 §13) is the number it names.
+    if (this.#checkIdentifier("pi")) {
+      this.#advance();
+      return Object.freeze({
+        kind: "numberLiteral",
+        raw: "pi",
+        value: 3.141592653589793,
+        numericType: "number",
+        span: copySpan(token.span),
+      });
+    }
     if (
       this.#match(TokenKind.Identifier) ||
       this.#match(TokenKind.KeywordSpeaker) ||
