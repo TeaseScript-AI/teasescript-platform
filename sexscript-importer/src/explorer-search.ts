@@ -17,6 +17,7 @@ import {
   failureOf,
   isClockInput,
   Session,
+  wallClockOf,
   short,
   stateKeys,
   storageOf,
@@ -49,7 +50,7 @@ import {
  * - A corpus carries a run's work to the next one: input lists from the start that together cover what the run
  *   covered, and reach its crashes and traps (see {@link explore}).
  * - Coverage labels: a line is `play` when a step of play executed it, in any session; `clock` when only steps after
- *   the wall clock was set did; `unreachable` when no execution can reach it from the session start, constant
+ *   the wall clock was set did (with forward time, set back); `unreachable` when no execution can reach it from the session start, constant
  *   conditions taking only their one way (a literal, a condition the compiler proves constant, or one that reads only
  *   stored keys whose values this package fixes); and `unknown` otherwise.
  */
@@ -94,6 +95,18 @@ const STORE_BYTES = 256 * 1024 * 1024;
 const CLOCK_VARIANTS = [-11.5, -6, 6, 11.5, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400].map(
   (hours) => EPOCH_MS + hours * 3_600_000,
 );
+/**
+ * With forward time ({@link ExploreOptions.later}): the gaps after which the player continues, for a condition that
+ * reads the clock: the next hour, evening, night, morning, and day, a few days, a week, a month, and a year.
+ */
+const LATER_GAPS = [1, 6, 11.5, 18, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400].map(
+  (hours) => hours * 3_600_000,
+);
+/** With forward time: the gap before a next session, and before the next day's session of a plan that reads the clock. */
+const NEXT_SESSION_GAP = 60_000;
+const NEXT_DAY_GAP = 24 * 3_600_000;
+/** With forward time: steps before the step that evaluated a clock condition at which the player may also continue. */
+const LATER_BACK = 1;
 
 type NodeStatus = "open" | "expanded" | "partial" | "completed" | "failed" | "stuck";
 
@@ -159,6 +172,12 @@ export interface ExploreOptions {
    * new. Off by default.
    */
   readonly cells?: boolean;
+  /**
+   * Forward time as play: a later session starts after the wall clock where its origin state ended, and a condition
+   * that reads the clock is tried with the player continuing later (`later` inputs, and later session starts) instead
+   * of at other wall clocks. Only a start before the clock its origin ended at is a `clock` start. Off by default.
+   */
+  readonly later?: boolean;
 }
 
 /**
@@ -762,6 +781,34 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const frontier = new Frontier();
   const crashes = new Map<string, CrashReport>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
+  const later = options.later === true;
+  /** With forward time: the wall clock where each state stands, by ID. */
+  const wallEnd: number[] = [];
+  /**
+   * The start of a session from an explored state's storage (`origin`; the first session for none), `gap` after the
+   * wall clock where that state stands; a play start.
+   */
+  const laterStart = (origin: number | null, storage: readonly StorageEntry[], gap: number) => ({
+    origin,
+    storage,
+    wallClockMs: (origin === null ? EPOCH_MS : wallEnd[origin]!) + gap,
+    clock: false,
+    session: origin === null ? 1 : starts[nodes[origin]!.start]!.session + 1,
+  });
+  /** A plan that reads the clock gets a next day's session too. */
+  const readsClock = later && instructions.some((instruction) => flow.flowOf(instruction).clock);
+  /** A start is a clock start when it says so; without forward time, when it is not at the play clock. */
+  const clockStart = (start: Start): boolean => start.clock ?? start.wallClockMs !== EPOCH_MS;
+  /** With forward time, a start before the clock where its origin stands, or before the play clock, is a clock start. */
+  const backwards = (origin: number | null, wallClockMs: number): boolean =>
+    wallClockMs < (origin === null ? EPOCH_MS : wallEnd[origin]!);
+  /** How long after its origin a session started; {@link NEXT_SESSION_GAP} for the first one, or a shorter gap. */
+  const gapOf = (startIndex: number): number => {
+    const start = starts[startIndex]!;
+    const gap = start.origin === null ? 0 : start.wallClockMs - wallEnd[start.origin]!;
+    return Math.max(NEXT_SESSION_GAP, gap);
+  };
+  const laterAttempts: Attempt[] = [];
   const witnesses = new Map<number, Witness>();
   const targets = new Map<number, Target>();
   // Answers in the same session go first, then session chains, then clock attempts.
@@ -853,8 +900,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     lead: Lead | null,
   ): Node => {
     const start = starts[startIndex]!;
-    const clock =
-      (parent?.clock ?? start.wallClockMs !== EPOCH_MS) || (input !== null && isClockInput(input));
+    const clock = (parent?.clock ?? clockStart(start)) || (input !== null && isClockInput(input));
     const inherited = lead ?? (parent !== null && active(parent.lead) ? parent.lead : null);
     const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
     const stepItems = items === null ? NO_ITEMS : items.of(step, clock);
@@ -931,6 +977,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       waitsAt: typeof waitsAt === "number" ? waitsAt : null,
     };
     nodes.push(node);
+    if (later) wallEnd[node.id] = wallClockOf(step.snapshot);
     byState.set(keys.state, node.id);
     if (parent !== null) parent.edges.push(node.id);
     if (!clock) remember(step.snapshot, node);
@@ -1154,15 +1201,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       target.note = `needs ${need}; no explored session stored it`;
       return false;
     }
+    // With forward time, the next session follows the rhythm of the one that left the storage: as long after it.
     const fromBest = (inputs: readonly ExplorerInput[]): Attempt => ({
       target: code,
       from: null,
-      start: {
-        origin: best.left.node,
-        storage: best.left.entries,
-        wallClockMs: EPOCH_MS,
-        session: best.left.sessions + 1,
-      },
+      start: later
+        ? laterStart(best.left.node, best.left.entries, gapOf(nodes[best.left.node]!.start))
+        : {
+            origin: best.left.node,
+            storage: best.left.entries,
+            wallClockMs: EPOCH_MS,
+            session: best.left.sessions + 1,
+          },
       inputs,
       chain: key,
     });
@@ -1238,15 +1288,19 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (startedFrom.has(key)) continue;
       startedFrom.add(key);
       const work = session.operations;
-      startSession(
-        {
-          origin: entry.node,
-          storage: entry.entries,
-          wallClockMs: EPOCH_MS,
-          session: entry.sessions + 1,
-        },
-        null,
-      );
+      if (later) {
+        startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
+        if (readsClock) startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
+      } else
+        startSession(
+          {
+            origin: entry.node,
+            storage: entry.entries,
+            wallClockMs: EPOCH_MS,
+            session: entry.sessions + 1,
+          },
+          null,
+        );
       directedWork += session.operations - work;
       scheduled = true;
     }
@@ -1260,6 +1314,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (plan.length < MAX_ATTEMPTS) plan.push(attempt);
     };
     let chained = false;
+    /** With forward time: the attempts that continue later, once per target. */
+    const laterPlan: Attempt[] = [];
+    let timed = false;
     for (const goal of target.goals) {
       const source = goal.source;
       if (source.kind === "ask") {
@@ -1290,6 +1347,31 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         }
       } else if (source.kind === "storage") {
         chained = chainStep(code, target, goal) || chained;
+      } else if (source.kind === "clock" && later) {
+        if (timed) continue;
+        timed = true;
+        // The player continues later just before the step that evaluated the condition, or a step before it (the
+        // clock may have been read there), and the rest of the path follows; or the whole session starts later.
+        const chain = witnessNode === null ? [] : ancestry(nodes, witnessNode);
+        if (witness?.input != null)
+          for (let back = 0; back <= LATER_BACK && back < chain.length; back += 1) {
+            const at = chain.length - 1 - back;
+            for (const gap of LATER_GAPS)
+              laterPlan.push({
+                target: code,
+                from: chain[at]!.id,
+                start: null,
+                inputs: [{ kind: "later", afterMs: gap }, ...fullPath.slice(at, at + MAX_SUFFIX)],
+              });
+          }
+        if (witness !== undefined && fullPath.length <= MAX_SUFFIX)
+          for (const gap of LATER_GAPS)
+            laterPlan.push({
+              target: code,
+              from: null,
+              start: laterStart(witnessStart.origin, witnessStart.storage, gap),
+              inputs: fullPath,
+            });
       } else if (source.kind === "clock") {
         for (const wallClockMs of CLOCK_VARIANTS) {
           if (witnessNode !== null && witness?.input != null)
@@ -1316,13 +1398,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         });
       }
     }
-    target.attempts = plan.length;
+    target.attempts = plan.length + laterPlan.length;
     for (const attempt of plan)
       (attempt.inputs.some(isClockInput) || (attempt.start?.wallClockMs ?? EPOCH_MS) !== EPOCH_MS
         ? clockAttempts
         : playAttempts
       ).push(attempt);
-    return plan.length > 0 || chained;
+    laterAttempts.push(...laterPlan);
+    return plan.length > 0 || laterPlan.length > 0 || chained;
   };
 
   const budgetOps = options.budgetOps ?? Infinity;
@@ -1367,11 +1450,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const storage = origin === null ? [] : left === null ? ended.get(origin.id) : storageOf(left);
       if (storage === undefined) return null;
       const sessions = origin === null ? 1 : starts[origin.start]!.session + 1;
-      starts.push({ origin: origin?.id ?? null, storage, wallClockMs, session: sessions });
+      const clock = later ? backwards(origin?.id ?? null, wallClockMs) : undefined;
+      starts.push({
+        origin: origin?.id ?? null,
+        storage,
+        wallClockMs,
+        ...(clock === undefined ? {} : { clock }),
+        session: sessions,
+      });
       const begun = session.start(starts.at(-1)!);
       const node = transition(null, null, begun, starts.length - 1, null);
       reach(node, begun.snapshot);
-      if (origin !== null && wallClockMs === EPOCH_MS) startedFrom.add(JSON.stringify(storage));
+      if (origin !== null && !clockStart(starts.at(-1)!)) startedFrom.add(JSON.stringify(storage));
       startFrom.set(key, starts.length - 1);
       firstOf.set(starts.length - 1, node.id);
       return starts.length - 1;
@@ -1488,7 +1578,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         ? playAttempts
         : chainAttempts.length > 0
           ? chainAttempts
-          : clockAttempts;
+          : laterAttempts.length > 0
+            ? laterAttempts
+            : clockAttempts;
     if (pending.length > 0 && (frontier.size === 0 || withinShare())) {
       runAttempt(pending.shift()!);
       continue;

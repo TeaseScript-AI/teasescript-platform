@@ -4,7 +4,7 @@
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
- *          [--corpus <dir> [--rounds N]] [--[no-]cells] <unit-dir>... --out <dir>
+ *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -13,7 +13,8 @@
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
  * given.
  *
- * `--cells` ranks states by cells (see `src/explorer-search.ts`); `--no-cells` switches it off.
+ * `--cells` ranks states by cells, and `--later` makes time go forward as play (see `src/explorer-search.ts`); `--no-…`
+ * switches each off.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -88,6 +89,7 @@ async function main(args: string[]): Promise<void> {
       rounds: { type: "string", default: "1" },
       "no-summary": { type: "boolean", default: false },
       cells: { type: "boolean", default: false },
+      later: { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -130,7 +132,7 @@ async function main(args: string[]): Promise<void> {
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
-        "         [--corpus <dir> [--rounds N]] [--[no-]cells] <unit-dir>... --out <dir>\n" +
+        "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -159,7 +161,13 @@ async function main(args: string[]): Promise<void> {
     process.exitCode =
       (await exploreUnits(
         remaining,
-        { ...budgets, maxStates, seed, corpus, strategies: { cells: values.cells } },
+        {
+          ...budgets,
+          maxStates,
+          seed,
+          corpus,
+          strategies: { cells: values.cells, later: values.later },
+        },
         out,
         workers,
       )) || process.exitCode;
@@ -192,7 +200,7 @@ interface RunSettings {
   /** The corpus folder, or null without one. */
   corpus: string | null;
   /** The search strategies that can be switched off (see `ExploreOptions`). */
-  strategies: { cells: boolean };
+  strategies: { cells: boolean; later: boolean };
 }
 
 /** Explores units with one budget, in this process or in two; returns 1 when a process failed. */
@@ -771,6 +779,13 @@ function parseInput(value: unknown): ExplorerInput | null {
         : null;
     case "wait":
       return typeof value.untilMs === "number" ? { kind: "wait", untilMs: value.untilMs } : null;
+    case "later":
+      // Time only goes forward between the inputs of a path.
+      return typeof value.afterMs === "number" &&
+        Number.isSafeInteger(value.afterMs) &&
+        value.afterMs > 0
+        ? { kind: "later", afterMs: value.afterMs }
+        : null;
     case "press":
       return typeof value.buttonId === "number"
         ? { kind: "press", buttonId: value.buttonId, label }
@@ -840,7 +855,8 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
   earlier.forEach((session, index) =>
     process.stdout.write(
-      `Session ${index + 1}: ${session.inputs.map(describeInput).join("; ") || "(no input)"}, then its storage starts the next\n`,
+      `Session ${index + 1}${session.wallClockMs === undefined ? "" : ` at ${new Date(session.wallClockMs).toISOString()}`}: ` +
+        `${session.inputs.map(describeInput).join("; ") || "(no input)"}, then its storage starts the next\n`,
     ),
   );
   if (wallClockMs !== EPOCH_MS)
@@ -873,6 +889,13 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   return reproduced ? 0 : 1;
 }
 
+/** A time gap in words: whole days from two days on, else hours, else seconds. */
+function describeGap(milliseconds: number): string {
+  const hours = milliseconds / 3_600_000;
+  if (hours >= 48 && hours % 24 === 0) return `${hours / 24} days`;
+  return hours >= 1 ? `${hours} h` : `${milliseconds / 1000} s`;
+}
+
 function describeInput(input: ExplorerInput): string {
   switch (input.kind) {
     case "option":
@@ -893,5 +916,7 @@ function describeInput(input: ExplorerInput): string {
       return `wait until ${input.untilMs / 1000} s`;
     case "press":
       return `press permanent [${input.label}]`;
+    case "later":
+      return `continue ${describeGap(input.afterMs)} later`;
   }
 }

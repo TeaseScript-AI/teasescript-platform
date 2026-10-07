@@ -157,7 +157,9 @@ export type ExplorerInput =
   | { readonly kind: "wait"; readonly untilMs: number }
   | { readonly kind: "press"; readonly buttonId: number; readonly label: string }
   /** The player continues at another wall clock time (epoch milliseconds): a `clock` input. */
-  | { readonly kind: "clock"; readonly wallClockMs: number };
+  | { readonly kind: "clock"; readonly wallClockMs: number }
+  /** The player saves and continues `afterMs` later than the wall clock now; only a positive gap is accepted. */
+  | { readonly kind: "later"; readonly afterMs: number };
 
 /** Whether an input sets the wall clock. */
 export function isClockInput(input: ExplorerInput): boolean {
@@ -166,11 +168,12 @@ export function isClockInput(input: ExplorerInput): boolean {
 
 /**
  * How a session starts: the storage an earlier explored session left (none for the first), and the wall clock. A
- * start at another wall clock than {@link EPOCH_MS} is a `clock` start.
+ * start at another wall clock than {@link EPOCH_MS} is a `clock` start unless `clock` says otherwise.
  */
 export interface Setup {
   readonly storage: readonly StorageEntry[];
   readonly wallClockMs: number;
+  readonly clock?: boolean;
 }
 
 /** One session of a path: its inputs, and its start wall clock when that is not {@link EPOCH_MS}. */
@@ -191,6 +194,22 @@ export function storageOf(snapshot: Data): StorageEntry[] {
       ? [{ key: entry.key, value }]
       : [];
   });
+}
+
+/**
+ * The wall clock where a state stands, in epoch milliseconds: the clock of its temporal capture in force (the session
+ * start's, or the last Continue's) plus the session time since; {@link EPOCH_MS} plus the session time without one.
+ */
+export function wallClockOf(snapshot: Data): number {
+  const now =
+    typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
+  let capture: Data | undefined;
+  for (const candidate of list(snapshot.temporalCaptures))
+    if (typeof candidate.boundaryMs === "number" && candidate.boundaryMs <= now)
+      capture = candidate;
+  return typeof capture?.epochMs === "number" && typeof capture.boundaryMs === "number"
+    ? capture.epochMs + now - capture.boundaryMs
+    : EPOCH_MS + now;
 }
 
 /** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
@@ -356,7 +375,10 @@ export class Session {
         wallClockMs: setup.wallClockMs,
       }),
     );
-    return this.#reached(runtime, this.#settle(runtime, setup.wallClockMs !== EPOCH_MS));
+    return this.#reached(
+      runtime,
+      this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS),
+    );
   }
 
   /** A session that goes on from a stored state. */
@@ -525,6 +547,13 @@ export class Session {
         break;
       case "clock":
         result = runtime.call("recordContinueCapture", { wallClockMs: input.wallClockMs });
+        accepted = "recorded";
+        break;
+      case "later":
+        if (!(input.afterMs > 0 && Number.isSafeInteger(input.afterMs))) return false;
+        result = runtime.call("recordContinueCapture", {
+          wallClockMs: Math.round(wallClockOf(runtime.exportSnapshot()) + input.afterMs),
+        });
         accepted = "recorded";
         break;
     }

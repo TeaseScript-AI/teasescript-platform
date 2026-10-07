@@ -249,7 +249,7 @@ them at the top.
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
-  [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] <unit-dir>... --out <dir>
+  [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -308,6 +308,15 @@ condition takes the missed way (a session chain goes on from the storage it reac
 share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
 work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations
 (fresh sessions, runs, inputs, and automatic answers), a deterministic measure of what steps cost.
+
+With `--later`, time only goes forward and is play, as for a player who comes back later. A later session starts
+after the wall clock where the state it continues stands: a minute later, and for a package that reads the clock also
+a day later, and a session chain keeps the gap of the session it continues. For a condition that reads the clock, the
+player continues later (a `later` input: an hour, an evening, a night, a morning, a day, two or three days, a week, 40
+days, or 400 days after the clock where the state stands) just before the step that evaluated it, or a step before
+that, and the rest of that path follows; or that session starts that much later. These steps are play, and a path
+records them: its `later` inputs and each session's start clock. A gap must be positive. Only a session that starts
+before the clock where the state it continues stands, such as one of an old corpus entry, is a clock start.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with

@@ -5,9 +5,11 @@ import { isRecord } from "../src/ast.ts";
 import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
 import {
+  EPOCH_MS,
   loadEngine,
   replay,
   Session,
+  wallClockOf,
   type Data,
   type Engine,
   type Runtime,
@@ -394,5 +396,48 @@ test(
     // between 3 and 100; `n` changed bucket twice.
     assert.equal(result.search.states, 40);
     assert.deepEqual(result.search.cells, { slots: 1, cells: 5, values: 3, transitions: 2 });
+  },
+);
+
+test(
+  "with forward time, the late hour is play: later sessions start after the clock their origin ended at, and a later gap must be positive",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const { source, plan, diagnostics } = await fixture(engine);
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 5000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics,
+      later: true,
+    });
+    assert.equal(result.search.stoppedBy, "exhausted");
+    // The late hour is reached by a session that starts later, as a player would come back: play, not clock.
+    const late = result.directed.ways.find((entry) => entry.condition === "getTime().hour >= 22");
+    assert.equal(late?.reach, "play");
+    assert.equal(result.coverage.reach.clock, 0);
+    const replayed = replay(engine, plan, 1, late!.repro.inputs, {
+      earlier: late!.repro.earlier ?? [],
+      wallClockMs: late!.repro.wallClockMs ?? EPOCH_MS,
+    });
+    assert.ok(replayed.steps.some((step) => step.texts.includes("Late.")));
+    // A next session starts after the clock where the session it continues ended.
+    const back = result.directed.ways.find((entry) => entry.sessions === 2)!;
+    const earlier = replay(engine, plan, 1, back.repro.earlier![0]!.inputs);
+    assert.ok(back.repro.wallClockMs! > wallClockOf(earlier.snapshot));
+
+    // Continuing later moves the clock forward by the gap; a gap that is not positive is rejected.
+    const session = new Session(engine, plan, 1);
+    const start = session.start();
+    const now = wallClockOf(start.snapshot);
+    assert.equal(
+      session.apply(start.runtime.fork(), { kind: "later", afterMs: -3_600_000 }, false),
+      null,
+    );
+    const moved = session.apply(start.runtime, { kind: "later", afterMs: 3_600_000 }, false);
+    assert.equal(wallClockOf(moved!.snapshot), now + 3_600_000);
   },
 );
