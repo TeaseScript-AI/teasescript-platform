@@ -593,8 +593,7 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-07, at importer `3a92a3e4` with `main` `068015e2` merged in. The
-class tables of unconverted code and compile errors below are from 2026-10-06, at importer `e32615c6`.
+Measured on the selected large corpus on 2026-10-07, at importer `c83f938a` with `main` `068015e2` merged in.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
@@ -607,15 +606,16 @@ class tables of unconverted code and compile errors below are from 2026-10-06, a
 | --- | ---: |
 | Converted without a failed step | 210 |
 | Compile as one project | 155 |
-| Compile and play to the end from `main.tease` in the smoke run | 133 |
-| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 133, 54, 21, 1, 1 |
+| Compile and play to the end from `main.tease` in the smoke run | 134 |
+| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 134, 54, 21, 0, 1 |
 
 Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,441 root errors remain.
 
 **Smoke runs:**
 - **The step limit is inconclusive** (21 units). Most of these are loops that wait for a typed text or a time.
-- **The failed run** is ashleyYHBS (`TSR058`): a missing setting stored in an `int`. The legacy bugs that failed
-  SpankingParty (six implements drawn from fewer owned toys) and tabata (a division by zero) are patched in their units.
+- **No run fails.** The legacy bugs that failed SpankingParty (six implements drawn from fewer owned toys) and tabata
+  (a division by zero) are patched in their units. ashleyYHBS stored the null of a function with `return null` in a
+  variable that started as text; such a variable now gets an optional type.
 - **Isolated runs** of scripts that no entry run reaches fail mostly on settings that an introduction saves:
   `TSR058` 21 times and `TSR027` 17 times. Groovy compared and computed with such a missing setting as null.
 
@@ -629,28 +629,27 @@ The TODO sites of the leading root codes, classified by their original Groovy li
 
 | Class | TODO sites | Units (not compiling) | Workaround class |
 | --- | ---: | ---: | --- |
-| In-memory image composition (`ImageIO`, `BufferedImage`, `drawImage`, `getWidth`, `setImage(bytes)`) | 441 | 20 (8) | Language gap: the layered scene is accepted but not implemented, and placing overlays needs the base image's size (see Accepted but not implemented) |
-| List, text, and map methods on receivers not proven, operators, and other idioms | 358 | 67 (41) | Importer work where inference can prove the receiver; otherwise per unit |
-| Files and folders (`new File`, listings, writes, `eachFile`) outside the decided substitutes | 198 | 55 (31) | Legacy baggage. Substitutes cover existence checks, photos, stored text files, audio, and video |
+| In-memory image composition (`ImageIO`, `BufferedImage`, `drawImage`, `getWidth`, `setImage(bytes)`) | 456 | 20 (8) | Language gap: the layered scene is accepted but not implemented, and placing overlays needs the base image's size (see Accepted but not implemented) |
+| List, text, and map methods on receivers not proven, operators, and other idioms | 343 | 63 (37) | Importer work where inference can prove the receiver; otherwise per unit |
+| Files and folders (`new File`, listings, writes, `eachFile`) outside the decided substitutes | 163 | 47 (30) | Legacy baggage. Substitutes cover existence checks, photos, stored text files, audio, and video |
 | Closures that capture local state | 58 | 9 (7) | Per unit, since TeaseScript has no closures |
-| Java formatting, dates, JSON, and Base64 | 52 | 22 (15) | Importer work where TeaseScript has the form (the `String.format` subset is done); otherwise baggage |
-| Dynamic code (`Eval.me`, `inspect`, expression strings in data, per-script property objects) | 32 | 3 (2) | Owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general. Each behaviour is an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch`. Toy's session plans are patched that way. Eval is not emulated with a lookup table of expression texts |
-| `try`/`catch` around fallible calls | 26 | 17 (11) | No exceptions. A try block without fallible calls runs without its catch |
-| Network, processes, and system properties | 16 | 4 (4) | Legacy baggage. The online service, device commands, and OS information have decided substitutes |
-| Legacy bugs: calls of functions that no file defines, and names that nothing assigns | 27 | 9 (6) | Reported for the author's repair (see Legacy baggage) |
+| Java formatting, dates, JSON, and Base64 | 85 | 25 (16) | Importer work where TeaseScript has the form (the `String.format` subset is done); otherwise baggage |
+| Dynamic code (`Eval.me`, `inspect`, expression strings in data, per-script property objects) | 29 | 2 (2) | Owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general. Each behaviour is an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch`. Toy's session plans are patched that way. Eval is not emulated with a lookup table of expression texts |
+| `try`/`catch` around fallible calls | 25 | 16 (11) | No exceptions. A try block without fallible calls runs without its catch |
+| Network, processes, and system properties | 21 | 7 (5) | Legacy baggage. The online service, device commands, and OS information have decided substitutes |
+| Legacy bugs: calls of functions that no file defines, and names that nothing assigns | 27 | 8 (5) | Reported for the author's repair (see Legacy baggage) |
 
 ### Compile errors
 
-Null-related errors are the largest compile error class left: 874 errors in 39 of the 55 units, 34 more than before
-the null padding of lists whose elements the code compares with null (SlideLadderDare and OwlGames). "Null-related" means
-may be null, no property of null, null indexed, combined, or compared.
+Null-related errors are the largest compile error class left: 871 of the 1,525 errors, in 39 of the 55 units.
+"Null-related" means may be null, no property of null, null indexed, combined, or compared.
 
 | Class | Errors | Units | Route |
 | --- | ---: | ---: | --- |
-| A script variable that starts as null, read in functions (354) or at the top level after a call, wait, or loop start (63) | 417 | 21 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would cover 296 of these errors. Together with the locals below, such a declaration would make 3 units compile by itself (gunfighter, jeuxdemain_femme, SpankingParty), because the other units have more blockers |
-| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 97 | 15 | Per unit; a declaration assigned later would cover 64. Number counters start at 0 (owner decision 2026-10-05) |
-| Values that really may be null, read in other functions: function results that may be null (70), storage reads whose default is set elsewhere (45), and copies of them (78) | 193 | 13 | Per unit; the compiler keeps a null check within one function. Defaults set further down a settings block are merged into the read |
-| Nullable function results, fields, and list items read directly | 133 | 17 | Per unit |
+| A script variable that starts as null, read in functions (352) or at the top level after a call, wait, or loop start (62) | 414 | 20 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would fit the variables of 293 of these errors. Tried on the converted units together with the locals below, such declarations remove 269 errors but make no unit compile by itself, because each has more blockers (fapioh keeps 9 of its 88) |
+| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 106 | 15 | Per unit; a declaration assigned later would fit the variables of 76. Number counters start at 0 (owner decision 2026-10-05) |
+| Values that really may be null, read in other functions: function results that may be null (70), storage reads whose default is set elsewhere (45), and copies of them or parameters that receive them (80) | 195 | 13 | Per unit; the compiler keeps a null check within one function. Defaults set further down a settings block are merged into the read |
+| Nullable function results, fields, and list items read directly | 156 | 17 | Per unit |
 
 **The 4 units without unconverted code:**
 - questionnaire: null-related errors only (5).
