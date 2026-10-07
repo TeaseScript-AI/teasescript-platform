@@ -293,14 +293,16 @@ other wall clock times (times of day, weekdays, later dates) before that step, a
 after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
 condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
 share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
-work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations,
-which measure what steps cost.
+work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations
+(fresh sessions, runs, inputs, and automatic answers), a deterministic measure of what steps cost.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
-`instructionTrace: true`, and the condition ways come from the trace's branch edges. A build without the trace falls
-back to executing instruction by instruction, which records nothing after 200 known instructions in a row.
-`TEASESCRIPT_DIST` names another repository build to load the compiler and runtime from, for comparisons. Each line has
+`instructionTrace: true`, and the condition ways come from the trace's branch edges. A path runs in one runtime
+session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between operations: the explorer exports the state
+once per step, for its hash and the snapshot store, restores a stored state once to expand it, and tries each input in
+a fork of it. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
+from, for comparisons. Each line has
 a label: `play` when a play step executed it, in any session; `clock` when only steps after the wall clock was set did;
 `unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control
 flow in which a constant condition takes only its one way; and `unknown` otherwise. A condition is constant when it is a
@@ -330,8 +332,9 @@ A path has the inputs of each session: the earlier sessions (`earlier`), each fr
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
-runtime operation that throws, such as a runtime that rejects a snapshot it produced (`TSR101`), is no crash of the
-package: the report counts these under `search.engineErrors` with the path of the first, which `--error` replays.
+runtime operation that throws, such as a runtime that rejects a state it produced when exporting it (`TSR101`), is no
+crash of the package: it ends that runtime session, the search goes on from the state before the input, and the report
+counts these under `search.engineErrors` with the path of the first, which `--error` replays.
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its

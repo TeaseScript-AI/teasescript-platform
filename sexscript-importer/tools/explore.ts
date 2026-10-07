@@ -246,10 +246,7 @@ interface LoadedUnit {
 
 async function loadUnit(engine: Engine, scan: Scanner, dir: string): Promise<LoadedUnit> {
   const folder = await scan(dir);
-  const compiled = engine.call("compileProject", folder.sources, {
-    builtins: [],
-    images: folder.images,
-  });
+  const compiled = engine.compileProject(folder.sources, { builtins: [], images: folder.images });
   const errors = records(compiled.diagnostics)
     .filter((entry) => entry.severity === "error")
     .map((entry) => {

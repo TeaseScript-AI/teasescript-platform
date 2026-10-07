@@ -4,7 +4,14 @@ import { test } from "node:test";
 import { isRecord } from "../src/ast.ts";
 import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
 import { explore } from "../src/explorer-search.ts";
-import { loadEngine, replay, type Engine } from "../src/explorer.ts";
+import {
+  loadEngine,
+  replay,
+  Session,
+  type Data,
+  type Engine,
+  type Runtime,
+} from "../src/explorer.ts";
 
 const engineResult = await loadEngine().then(
   (engine): { engine: Engine } | { reason: string } => ({ engine }),
@@ -14,9 +21,7 @@ const engineResult = await loadEngine().then(
 /** The fixture package compiled, with the diagnostics the explorer reads constant conditions from. */
 async function fixture(engine: Engine) {
   const source = await readFile(new URL("fixtures/explorer/main.tease", import.meta.url), "utf8");
-  const compiled = engine.call("compileProject", [{ path: "main.tease", source }], {
-    builtins: [],
-  });
+  const compiled = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
   const { plan } = compiled;
   assert.ok(isRecord(plan));
   const diagnostics: PlanDiagnostic[] = (
@@ -168,7 +173,7 @@ test(
 
     // A reconversion renames "Stay": each entry that chooses it is stale, and the others still replay.
     const renamed = source.replace('stay: "Stay"', 'stay: "Remain"');
-    const compiled = engine.call("compileProject", [{ path: "main.tease", source: renamed }], {
+    const compiled = engine.compileProject([{ path: "main.tease", source: renamed }], {
       builtins: [],
     });
     assert.ok(isRecord(compiled.plan));
@@ -185,28 +190,63 @@ test(
   },
 );
 
+/**
+ * A runtime session whose state keeps as few event sequences as it can once the player picks "Stay": the step then
+ * throws inside the runtime (`nextEventSequence cannot be advanced`) and ends the session, as a runtime that fails on
+ * its own state would. Every later call of that session throws `RuntimeSessionError`.
+ */
+function exhaustedAtStay(engine: Engine, plan: Data, runtime: Runtime): Runtime {
+  let inner = runtime;
+  const exhausted = (): Runtime => {
+    const snapshot = inner.exportSnapshot();
+    // The runtime refuses a state without room for the events its pending actions still need.
+    for (let left = 1; left < 100; left += 1) {
+      try {
+        return engine.createRuntimeSession(plan, {
+          ...snapshot,
+          nextEventSequence: Number.MAX_SAFE_INTEGER - left,
+        });
+      } catch {
+        continue;
+      }
+    }
+    throw new Error("No state with few event sequences left was accepted.");
+  };
+  return {
+    call: (name, ...args) => {
+      const request = args[0];
+      if (
+        name === "completeAction" &&
+        isRecord(request) &&
+        isRecord(request.payload) &&
+        request.payload.optionIndex === 2
+      )
+        inner = exhausted();
+      return inner.call(name, ...args);
+    },
+    project: (name) => inner.project(name),
+    view: () => inner.view(),
+    callReturnInstructions: () => inner.callReturnInstructions(),
+    exportSnapshot: () => inner.exportSnapshot(),
+    fork: () => exhaustedAtStay(engine, plan, inner.fork()),
+  };
+}
+
 test(
-  "a runtime operation that throws is no crash, and its input list replays the throw",
+  "a runtime operation that throws is no crash, the search goes on beside it, and its input list replays the throw",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    // Stands in for a runtime that rejects its own snapshot (TSR101) when the player picks "Stay".
     const failing: Engine = {
       ...engine,
-      call: (name, ...args) => {
-        const request = args[2];
-        if (
-          name === "completeAction" &&
-          isRecord(request) &&
-          isRecord(request.payload) &&
-          request.payload.optionIndex === 2
-        )
-          throw new Error("TSR101 Malformed runtime snapshot.");
-        return engine.call(name, ...args);
-      },
+      createFreshRuntimeSession: (plan, fresh) =>
+        exhaustedAtStay(engine, plan, engine.createFreshRuntimeSession(plan, fresh)),
+      createRuntimeSession: (plan, snapshot) =>
+        exhaustedAtStay(engine, plan, engine.createRuntimeSession(plan, snapshot)),
     };
-    const { plan, diagnostics } = await fixture(engine);
+    const { plan, diagnostics, lineOf } = await fixture(engine);
+    // A session used again after its operation threw would throw RuntimeSessionError out of `explore`.
     const result = explore(failing, plan, {
       seed: 1,
       budgetMs: 60_000,
@@ -216,9 +256,52 @@ test(
     });
 
     assert.ok(result.search.engineErrors.count >= 1);
-    assert.equal(result.crashes.length, 1);
     const first = result.search.engineErrors.first!;
+    assert.match(first.message, /^RuntimeDataError: .*nextEventSequence/u);
     assert.deepEqual(first.inputs, [{ kind: "option", index: 2, label: "Stay" }]);
     assert.equal(replay(failing, plan, 1, first.inputs).error, first.message);
+    // "Count", tried after "Stay" from the same state, is explored as without the throw.
+    assert.equal(result.crashes.length, 1);
+    const file = result.coverage.files.find((entry) => entry.path === "main.tease")!;
+    const unvisited = (text: string) =>
+      file.unvisited.some((entry) => {
+        const [from = 0, to = from] = entry.lines.split("-").map(Number);
+        return lineOf(text) >= from && lineOf(text) <= to;
+      });
+    assert.equal(unvisited('say "Secret number."'), false);
+    assert.equal(unvisited('say "You are stuck."'), true);
+  },
+);
+
+test(
+  "the inputs of a state come from its runtime session: a caller's compared constants, and the wait a block interrupted",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const start = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const session = new Session(engine, plan, 1);
+      return { session, step: session.start() };
+    };
+    // The ask is far from the comparison, which is next to where the helper returns.
+    const lines = (from: number) =>
+      Array.from({ length: 45 }, (_, index) => `  say "Line ${from + index}."`).join("\n");
+    const helper = start(
+      `function askCode {\n${lines(1)}\n  let answer = askInteger default: 0\n${lines(100)}\n  return answer\n}\n` +
+        'let code = askCode()\nif code == 4321 {\n  say "Opened."\n}\nexit\n',
+    );
+    const answers = helper.session
+      .options(helper.step.runtime)
+      .map((input) => (input.kind === "text" ? input.text : input.kind));
+    assert.deepEqual(answers, ["0", "1", "-1", "1000000", "4320", "4321", "4322"]);
+
+    // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
+    const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');
+    assert.deepEqual(timed.session.options(timed.step.runtime), [
+      { kind: "button", label: "Hit" },
+      { kind: "wait", untilMs: 10_000 },
+    ]);
   },
 );
