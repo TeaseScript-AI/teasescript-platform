@@ -941,13 +941,17 @@ operations stay as they are.
 - **Results.** An operation returns `events`, `instructionsExecuted`, `instructionTrace` when requested, and `outcome`
   where the snapshot API has one, as deeply frozen copies that share nothing with the session's state. `view()` returns
   the operational state a host acts on, also detached and frozen: `status`, `failure`, `nextInstruction`, both session
-  times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, and
-  `suspendedAction`, the foreground action of the path a running block interrupted. `stageProjection()`,
-  `mediaPlaybackProjection()`, and `permanentButtonProjection()` give what the functions of those names give for a
-  snapshot, also detached and frozen. `callReturnInstructions()` gives where each active call continues when it returns,
-  outermost first, in work proportional to the call depth. `inspect()` returns `inspectRuntimeState`'s detached debugger
-  inspection after capturing and validating the whole state. Variables, storage, and other script data are read from an
-  export.
+  times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, `suspendedAction`,
+  the foreground action of the path a running block interrupted, `cameraView`, and `queuedBlocks`, how many timer,
+  media, and button blocks are queued. `stageProjection()`, `mediaPlaybackProjection()`, and
+  `permanentButtonProjection()` give what the functions of those names give for a snapshot, also detached and frozen.
+  `callReturnInstructions()` gives where each active call continues when it returns, outermost first, in work
+  proportional to the call depth. For a debugger, `callStack()` gives each active call's kind, function, call site,
+  return position, scope depth, and the kind of block that interrupted it, also in work proportional to the call depth;
+  `variables()` gives the globals, scopes, kept scopes, and the current text of each message with a handle, in work
+  proportional to the variables and their values; and `temporalPresentation()` gives the date and time presentation in
+  force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
+  whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
   plain data that later operations do not change; importing it again crosses the external-data boundary.
 - **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An
