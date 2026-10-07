@@ -191,7 +191,10 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
         : instruction.kind === "callFunction"
           ? instruction.destinationTemporary
           : null;
-    if (typeof id === "number") producers.set(id, [...(producers.get(id) ?? []), index]);
+    if (typeof id !== "number") return;
+    const indices = producers.get(id);
+    if (indices === undefined) producers.set(id, [index]);
+    else indices.push(index);
   });
   /** What a temporary was last produced from before `at`. */
   const producedFrom = (id: number, at: number): Data | null => {
@@ -219,7 +222,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
       const value = producedFrom(id, at);
       if (value === null) continue;
       found.set(id, value);
-      wanted.push(...temporariesOf(value));
+      for (const read of temporariesOf(value)) wanted.push(read);
     }
     return found;
   };
@@ -634,7 +637,7 @@ export function holdsAt(
  * The moments after `now` at which a comparison of these parts of the date or time can come out another way: each
  * second of the next minute for `second`, each minute of the next day for `minute`, each hour of the next eight days
  * for `hour` and `weekdayNumber`, each day of the horizon for `day`, `month`, and `year`; just after each, by
- * {@link MARGIN} (by a second for seconds).
+ * {@link MARGIN} (by a second for seconds), and none past the horizon.
  */
 function boundaries(parts: ReadonlySet<string>, now: number): number[] {
   const found: number[] = [];
@@ -647,7 +650,8 @@ function boundaries(parts: ReadonlySet<string>, now: number): number[] {
   if (parts.has("hour") || parts.has("weekdayNumber")) every(HOUR, 8 * 24, MARGIN);
   if (parts.has("day") || parts.has("month") || parts.has("year"))
     every(DAY, HORIZON / DAY, MARGIN);
-  return [...new Set(found)].sort((left, right) => left - right);
+  const within = found.map((at) => Math.min(at, now + HORIZON));
+  return [...new Set(within)].sort((left, right) => left - right);
 }
 
 /**

@@ -1065,9 +1065,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /** A start is a clock start when it says so; without forward time, when it is not at the play clock. */
   const clockStart = (start: Start): boolean => start.clock ?? start.wallClockMs !== EPOCH_MS;
-  /** With forward time, a start before the clock where its origin stands, or before the play clock, is a clock start. */
+  /**
+   * With forward time, a next session that does not start after the clock where its origin stands, or a first session
+   * before the play clock, is a clock start: a player comes back later.
+   */
   const backwards = (origin: number | null, wallClockMs: number): boolean =>
-    wallClockMs < (origin === null ? EPOCH_MS : wallEnd[origin]!);
+    origin === null ? wallClockMs < EPOCH_MS : wallClockMs <= wallEnd[origin]!;
   /** How long after its origin a session started; {@link NEXT_SESSION_GAP} for the first one, or a shorter gap. */
   const gapOf = (startIndex: number): number => {
     const start = starts[startIndex]!;
@@ -1703,7 +1706,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         // A minute later; then at the time steps of the clock conditions a session start reads, as its first state
         // reads them; a day later when none can be read.
         const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
-        const snapshot = store.get(first.node.id);
+        const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
         const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
         const steps =
           snapshot === null
@@ -1778,7 +1781,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         // A condition that compares how long the player took between two clock reads (a reaction, a hold) is reached
         // by thinking before the button between them, which its options have; coming back later changes nothing.
         if (measured.has(target.instruction)) continue;
-        // A condition whose clock comparisons can be read where it was evaluated gets time steps there instead.
+        // A condition whose clock comparisons can all be read where it was evaluated gets time steps there instead.
         const comparisons = times?.comparisons.get(target.instruction) ?? [];
         const before = witnessNode === null ? null : snapshotOf(witnessNode);
         const context =
@@ -1786,7 +1789,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const at = witnessNode === null ? witnessStart.wallClockMs : wallEnd[witnessNode.id]!;
         if (
           context !== null &&
-          comparisons.some(
+          comparisons.length > 0 &&
+          comparisons.every(
             (comparison) =>
               times !== null &&
               comparison.exact &&

@@ -803,6 +803,20 @@ test(
     const back = result.directed.ways.find((entry) => entry.sessions === 2)!;
     const earlier = replay(engine, plan, 1, back.repro.earlier![0]!.inputs);
     assert.ok(back.repro.wallClockMs! > wallClockOf(earlier.snapshot));
+    // Replayed from a corpus, that next session is play; one that starts at the very clock its origin ended at is not.
+    const startCoverage = (wallClockMs: number) =>
+      explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 5000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics,
+        later: true,
+        corpus: [{ ...back.repro, wallClockMs, seed: 1, reason: "coverage" }],
+      }).corpus!.coverageAtStart.visitedLines;
+    assert.ok(
+      startCoverage(wallClockOf(earlier.snapshot)) < startCoverage(back.repro.wallClockMs!),
+    );
 
     // Continuing later moves the clock forward by the gap; a gap that is not positive is rejected.
     const session = new Session(engine, plan, 1);
