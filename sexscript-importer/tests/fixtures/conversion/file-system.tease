@@ -1,6 +1,6 @@
 // Deleting a file clears the reference stored under its path, such as a photo copied there; making a folder does
 // nothing in a package.
-let photo = load "training.photoName"
+let photo = load "training.photoName", default: ""
 // NOTE SX_FILE_DELETE line 4: delete() removed this file from the player's computer; a package keeps no files, so the reference stored under its path, such as a photo copied there, is cleared.
 delete "sexscript.image.images/training/${photo}"
 // NOTE SX_FOLDER_CREATE line 5: mkdir() made a folder on the player's computer; a package has no folders to make, so it is dropped.

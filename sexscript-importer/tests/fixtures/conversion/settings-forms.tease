@@ -9,7 +9,7 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   return sexscriptLegacyValue(toInteger(value))
 }
 // Settings asked one after the other and saved right away become one form, each question the field's description.
-let takePics = load("game.takePics") == true
+let takePics = load("game.takePics", default: false) == true
 let tries = sexscriptLegacyLoadInteger("game.tries")
 if tries == null or tries == 0 {
   tries = 3

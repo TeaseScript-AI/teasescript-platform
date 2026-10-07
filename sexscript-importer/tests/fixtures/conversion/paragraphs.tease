@@ -67,7 +67,7 @@ let note = """
 """
 say note
 // A form's question keeps its first paragraph, the intro, and says the others after the form's fields as its outro.
-let pics = load("game.pics") == true
+let pics = load("game.pics", default: false) == true
 let rounds = sexscriptLegacyLoadInteger("game.rounds")
 if rounds == null or rounds == 0 {
   rounds = 3

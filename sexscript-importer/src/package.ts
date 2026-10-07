@@ -37,6 +37,7 @@ import {
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
+import { withStorageDefaults } from "./storage-keys.ts";
 import {
   expressionType,
   functionResultTypes,
@@ -868,9 +869,11 @@ export function lowerPackage(
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withNullableParameters(
-      withClasses.map((program, index) =>
-        index === entryIndex ? withProfile(program, withClasses) : program,
+    const programs = withStorageDefaults(
+      withNullableParameters(
+        withClasses.map((program, index) =>
+          index === entryIndex ? withProfile(program, withClasses) : program,
+        ),
       ),
     );
     return {
@@ -918,8 +921,9 @@ export function lowerPackage(
     const position = outputIndexes.indexOf(index);
     return position < 0 ? program : apart(shared.programs[position]!, false);
   });
-  // Calls in any file may pass null for a parameter whose default gives it a type.
-  const nullable = withNullableParameters([apartMain, ...apartPrograms]);
+  // Calls in any file may pass null for a parameter whose default gives it a type; reads get defaults by the types of
+  // the keys of the whole package.
+  const nullable = withStorageDefaults(withNullableParameters([apartMain, ...apartPrograms]));
   const main = nullable[0]!;
   const paths = files.map(
     (file, index) =>

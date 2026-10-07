@@ -268,6 +268,7 @@ interface Rounds {
   textIntegers: Set<IrStatement>;
   indexes: Set<IrExpression>;
   loadDefaults: Set<IrStatement>;
+  saved: Map<IrStatement, TeaseType>;
 }
 
 /** Analysis rounds until no declaration or function result changes. */
@@ -287,6 +288,7 @@ function runRounds(
     textIntegers: new Set(),
     indexes: new Set(),
     loadDefaults: new Set(),
+    saved: new Map(),
   };
   let results = new Map(knownResults);
   for (let round = 0; round < 50; round += 1) {
@@ -298,6 +300,7 @@ function runRounds(
     rounds.unguarded = analysis.unguarded;
     rounds.indexes = analysis.indexes;
     rounds.loadDefaults = analysis.loadDefaults;
+    rounds.saved = analysis.saved;
     for (const statement of analysis.truncations) rounds.truncations.add(statement);
     for (const statement of analysis.integerLoads) rounds.integerLoads.add(statement);
     rounds.textIntegers = analysis.textIntegers;
@@ -328,6 +331,7 @@ export function enforceVariableTypes(
     textIntegers,
     indexes,
     loadDefaults,
+    saved,
   } = accepted;
   const conflicts = accepted.conflicts;
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
@@ -577,6 +581,16 @@ export function enforceVariableTypes(
             cases: statement.cases.map((item) => ({ ...item, body: rewrite(item.body) })),
             default: rewrite(statement.default),
           };
+        case "save": {
+          // The type of the value saved under a literal key, from which the package decides the key's type.
+          const type = saved.get(statement);
+          const valueType = type === undefined ? null : annotation(nonNull(type));
+          if (statementConflicts.has(statement)) return statement;
+          return withIntegerIndexes(
+            valueType === null ? statement : { ...statement, valueType },
+            indexes,
+          );
+        }
         default:
           return statementConflicts.has(statement)
             ? statement
@@ -641,6 +655,8 @@ interface Analysis {
   unguarded: Set<IrStatement>;
   /** Unguarded storage reads into a variable with a type that cannot hold null, read with the variable as default. */
   loadDefaults: Set<IrStatement>;
+  /** Saves under a key written as one literal, with the type of the value saved. */
+  saved: Map<IrStatement, TeaseType>;
 }
 
 function analyse(
@@ -662,6 +678,7 @@ function analyse(
     selfAppends: new Map(),
     unguarded: new Set(),
     loadDefaults: new Set(),
+    saved: new Map(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
@@ -677,6 +694,10 @@ function analyse(
     ),
   );
   for (const item of bindings.values()) item.inferred = undefined;
+  // The known types of the values each variable is set to, and the variables that saves under a literal key save: a
+  // variable read from storage has no type of its own here, so its save has the type its other values share.
+  const assignedTypes = new Map<Binding, TeaseType[]>();
+  const savedVariables = new Map<IrStatement, Binding>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
@@ -755,6 +776,8 @@ function analyse(
 
   /** Checks that `value` may be stored in `target`, repairing the declaration where an annotation can. */
   const store = (target: Binding, value: TeaseType, statement: IrStatement): void => {
+    if (nonNull(value).kind !== "unknown")
+      assignedTypes.set(target, [...(assignedTypes.get(target) ?? []), nonNull(value)]);
     if (
       target.fixed === undefined &&
       target.initial.kind === "null" &&
@@ -1157,6 +1180,13 @@ function analyse(
         if (item.handle !== undefined)
           scope.names.set(item.handle, binding(item, item.handle, null, { kind: "handle" }));
         return;
+      case "save":
+        if (item.key.kind === "literal" && typeof item.key.value === "string") {
+          analysis.saved.set(item, typeOf(item.value, scope));
+          const saved = item.value.kind === "variable" ? scope.resolve(item.value.name) : undefined;
+          if (saved !== undefined) savedVariables.set(item, saved);
+        }
+        return;
       default:
         return;
     }
@@ -1220,6 +1250,11 @@ function analyse(
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
+  }
+  for (const [item, variable] of savedVariables) {
+    const known = assignedTypes.get(variable);
+    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind === "unknown" && known !== undefined)
+      analysis.saved.set(item, sharedValueType(known));
   }
   return analysis;
 }

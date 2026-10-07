@@ -1,0 +1,24 @@
+// A read whose null the script never tests gets the empty value of the type legacy read as its default, text for
+// loadString and false for loadBoolean; a plain load gets the one the saves under its key give.
+let name = load "game.name", default: ""
+say "Hello ${name}"
+let sound = load "game.sound", default: false
+if sound == true {
+  say "The sound is on."
+}
+let rounds = load "game.rounds", default: 0
+say "Rounds won: ${rounds}"
+function reset {
+  save 0 as "game.rounds"
+}
+// A read that the script tests for null keeps it.
+let level = load "game.level"
+if level == null {
+  level = "easy"
+  save level as "game.level"
+}
+say "Level ${level}"
+if load("game.seen") == null {
+  save true as "game.seen"
+}
+exit

@@ -20,7 +20,7 @@ function sexscriptLegacyMaskUrl(url) {
 }
 // An online service cannot answer here: a system notice shows the request, with secret values hidden, and the
 // read is empty, as when the service answered nothing.
-let userId = load "training.id"
+let userId = load "training.id", default: ""
 let request = "https://example.org/cases.php?id=${userId}&apikey=SECRET&version=3"
 // NOTE SX_ONLINE_REQUEST line 5: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.
 say as system "Online feature not available here. The original would have requested: GET ${sexscriptLegacyMaskUrl(request)}"

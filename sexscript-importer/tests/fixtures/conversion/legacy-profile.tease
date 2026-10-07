@@ -36,11 +36,11 @@ function sexscriptLegacyAskProfile {
 sexscriptLegacyAskProfile()
 // The legacy desktop intro asked the player's name and gender once; a package that only reads them asks once.
 let gender = "boy"
-if load("intro.female") == true {
+if load("intro.female", default: false) == true {
   gender = "girl"
 }
-say "Hello, ${load("intro.name")}, my good ${gender}"
-if load("intro.likemale") == true {
+say "Hello, ${load("intro.name", default: "")}, my good ${gender}"
+if load("intro.likemale", default: false) == true {
   say "You like men too"
 }
 if load("toys.dildo") != true {

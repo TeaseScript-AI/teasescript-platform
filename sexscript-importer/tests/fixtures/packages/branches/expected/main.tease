@@ -1,6 +1,6 @@
 // The route key only ever holds "rooms", so the garden branch never runs; its missing script becomes exit.
 save "rooms" as "game.route"
-let route = load "game.route"
+let route = load "game.route", default: ""
 switch route {
   case "rooms" {
     goto "rooms.tease"

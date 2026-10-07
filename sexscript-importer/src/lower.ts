@@ -45,6 +45,7 @@ import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
 import { withMessageHandles } from "./message-handles.ts";
 import { withParsedLoads } from "./parsed-loads.ts";
+import { withFillableLoads } from "./storage-keys.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1433,7 +1434,7 @@ export function lowerParsedFile(
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withParsedLoads(typedStatements, context.syntheticHelpers);
+  let texts = withParsedLoads(withFillableLoads(typedStatements), context.syntheticHelpers);
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -1630,7 +1631,7 @@ function lowerHelperCompilationUnit(
       withMessageHandles(
         withElapsedDurations(
           withParsedLoads(
-            withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+            withFillableLoads(withEnforcedTypes([...fieldStatements, ...statements], baseContext)),
             baseContext.syntheticHelpers,
           ),
           diagnostics,
@@ -14379,6 +14380,10 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       );
       return useHelper(context, "booleanText", [{ kind: "load", key }]);
     }
+    if (call.name === "loadString" || call.name === "receiveString")
+      return { kind: "load", key, read: "string" };
+    if (call.name === "loadBoolean" || call.name === "receiveBoolean")
+      return { kind: "load", key, read: "boolean" };
     return { kind: "load", key };
   }
   if (call.name === "loadMap") {
