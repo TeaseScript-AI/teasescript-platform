@@ -295,7 +295,8 @@ export type IrExpression =
       /** Asks `as` this speaker. */
       speaker?: string;
     }
-  | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
+  /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
+  | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }
   /** A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). */
   | {
       kind: "duration";

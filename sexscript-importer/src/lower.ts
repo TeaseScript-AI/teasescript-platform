@@ -7226,6 +7226,7 @@ function lowerCollectionStatement(
               from: { kind: "literal", value: 0 },
               to: count,
               inclusive: false,
+              count: true,
             },
             body: loopBody,
             span,
@@ -7996,8 +7997,9 @@ const ENTRY_GETTERS = new Map([
 ]);
 
 /**
- * A collection a loop iterates. Groovy iterated a range up to the whole number at or below a fractional upper bound,
- * where TeaseScript stops, so a bound that may hold a fraction is floored.
+ * A collection a loop iterates. Groovy iterated a range up to the last whole step within a fractional upper bound,
+ * where TeaseScript needs a whole bound (#689), so a bound that may hold a fraction is floored, or for an exclusive
+ * range raised to the first whole number past it (`0..<2.5` went through 0, 1, and 2).
  */
 function lowerIterated(
   node: AstNode,
@@ -8032,13 +8034,11 @@ function lowerIterated(
     context,
     "SX_RANGE_FLOOR",
     "info",
-    "Groovy iterated this range up to the whole number at or below its upper bound, which may hold a fraction; the bound is floored.",
+    "Groovy iterated this range up to the last whole step within its upper bound, which may hold a fraction; the bound is rounded to that step, floor for an inclusive range and ceil for an exclusive one.",
     node.span,
   );
-  return {
-    ...collection,
-    to: { kind: "call", name: "floor", positional: [collection.to], named: {} },
-  };
+  const name = collection.inclusive ? "floor" : "ceil";
+  return { ...collection, to: { kind: "call", name, positional: [collection.to], named: {} } };
 }
 
 /**

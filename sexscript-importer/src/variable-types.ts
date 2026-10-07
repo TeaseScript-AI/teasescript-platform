@@ -892,9 +892,22 @@ function analyse(
     );
   };
 
+  /**
+   * A range a loop goes through or `randomInteger` draws from ends at a whole number (#689); one from a whole number to a
+   * number ends where Groovy stopped: `floor` for the last value, `ceil` for the first one left out, the whole part of
+   * an `n.times` count.
+   */
+  const findBounds = (range: IrExpression, scope: Scope): void => {
+    if (range.kind !== "range" || !isNumber(typeOf(range.to, scope))) return;
+    const from = nonNull(typeOf(range.from, scope));
+    if (from.kind === "scalar" && from.name === "integer") analysis.indexes.add(range);
+  };
+
   /** A position that may hold a fraction cannot index a list (#504 option B); Groovy truncated it. */
   const findIndexes = (value: IrExpression, scope: Scope): void => {
     forEachExpression(value, (child) => {
+      if (child.kind === "call" && child.name === "randomInteger" && child.positional.length === 1)
+        findBounds(child.positional[0]!, scope);
       const position =
         child.kind === "index" && child.dict !== true
           ? child.index
@@ -919,6 +932,7 @@ function analyse(
 
   const statement = (item: IrStatement, scope: Scope): void => {
     for (const value of ownExpressions(item)) findIndexes(value, scope);
+    if (item.kind === "for") findBounds(item.collection, scope);
     switch (item.kind) {
       case "let": {
         const fixed = item.type === undefined ? undefined : parseAnnotation(item.type);
@@ -2227,6 +2241,10 @@ function withIntegerIndexes<T extends IrStatement>(
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);
     if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
+    if (copy.kind === "range") {
+      const name = copy.count === true ? "toInteger" : copy.inclusive ? "floor" : "ceil";
+      return { ...copy, to: { kind: "call", name, positional: [copy.to], named: {} } };
+    }
     if (copy.kind === "methodCall") return { ...copy, arguments: [truncated(copy.arguments[0]!)] };
     return copy;
   };
