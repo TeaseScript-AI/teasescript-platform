@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { constants } from "node:buffer";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
+import { MAX_TEXT_LENGTH } from "../src/runtime/text-length.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -502,5 +504,148 @@ test("text operations are checkpoint and resume equivalent", () => {
       'say "${words.join("").length}"',
       "exit",
     ].join("\n"),
+  );
+});
+
+test("an operation that would make a text longer than any text can be fails with TSR084", () => {
+  // The limit is what V8 can hold, here and in every other host.
+  assert.equal(MAX_TEXT_LENGTH, constants.MAX_STRING_LENGTH);
+  const limit = "a text can hold at most about 536 million.";
+  // Doubling builds long texts without copying them.
+  const doubled = (times: number, text = "x") =>
+    [`let s = "${text}"`, `repeat ${times} {`, "    s = s + s", "}"].join("\n");
+  const high = String.fromCharCode(0xd800);
+  const low = String.fromCharCode(0xdc00);
+  for (const [source, line, message] of [
+    [
+      'let s = "x".repeat(9007199254740991)\nexit',
+      1,
+      `Text too long: repeat(9007199254740991) would make a text of about 9,007,199,254,740,991 characters; ${limit}`,
+    ],
+    [
+      `let s = "x".repeat(${MAX_TEXT_LENGTH + 1})\nexit`,
+      1,
+      `Text too long: repeat(536870889) would make a text of about 536,870,889 characters; ${limit}`,
+    ],
+    [
+      'let s = "x".padStart(600000000, "x")\nexit',
+      1,
+      `Text too long: padStart(600000000) would make a text of about 600,000,000 characters; ${limit}`,
+    ],
+    [
+      'let s = "x".padEnd(600000000, "ab")\nexit',
+      1,
+      `Text too long: padEnd(600000000) would make a text of about 600,000,000 characters; ${limit}`,
+    ],
+    // Lone surrogates join while padding, so the length the text would reach is not known.
+    [
+      `let s = "${high}".padEnd(536870889, "${low}")\nexit`,
+      1,
+      `Text too long: padEnd(536870889) would make a text; ${limit}`,
+    ],
+    [
+      `${doubled(30)}\nexit`,
+      3,
+      `Text too long: joining with + would make a text of about 536,870,912 characters; ${limit}`,
+    ],
+    [
+      'let s = "x"\nrepeat 30 {\n    s = "${s}${s}"\n}\nexit',
+      3,
+      `Text too long: \${…} would make a text; ${limit}`,
+    ],
+    [
+      `${doubled(27)}\nlet joined = [s, s, s, s, s].join("")\nexit`,
+      5,
+      `Text too long: join would make a text of about 671,088,640 characters; ${limit}`,
+    ],
+    [
+      `${doubled(27)}\nlet grown = "aaaaa".replace("a", s)\nexit`,
+      5,
+      `Text too long: replace would make a text of about 671,088,640 characters; ${limit}`,
+    ],
+    [
+      'let s = "ß".repeat(268435445).uppercase()\nexit',
+      1,
+      `Text too long: uppercase would make a text of about 536,870,890 characters; ${limit}`,
+    ],
+    [
+      'let s = escapeMarkup("-".repeat(268435445))\nexit',
+      1,
+      `Text too long: escapeMarkup would make a text of about 536,870,890 characters; ${limit}`,
+    ],
+    [
+      'let s = "x".repeat(268435444)\nlet answers = askForm fields: { a: { value: true, description: s }, b: { value: true, description: s } }\nexit',
+      2,
+      `Text too long: askForm would make a text of about 536,870,897 characters; ${limit}`,
+    ],
+    // Quoting doubles each line break, so the notation of one text is too long.
+    [
+      `${doubled(28, "\\n")}\nsay [s], instant\nexit`,
+      5,
+      `Text too long: say would make a text; ${limit}`,
+    ],
+    [
+      `${doubled(28, "\\n")}\nlet t = "\${script("main.tease", label: s)}"\nexit`,
+      5,
+      `Text too long: script(…) would make a text of about 536,870,943 characters; ${limit}`,
+    ],
+    [
+      `${doubled(28, "\\n")}\nlet t = timer(duration: 1 s, async: true, label: s)\nsay t, instant\nexit`,
+      6,
+      `Text too long: say would make a text of about 536,870,932 characters; ${limit}`,
+    ],
+  ] as const) {
+    const failure = runValidSource(source).snapshot.failure;
+    assert.deepEqual(
+      [failure?.code, failure === null ? null : failure.span.start.line + 1, failure?.message],
+      ["TSR084", line, message],
+      source,
+    );
+  }
+});
+
+test("an error message cuts the script's text it quotes, and a text no check foresaw still fails with TSR084", (context) => {
+  const key = "k".repeat(2_000);
+  const missing = runValidSource(
+    `let key = "${key}"\nlet stock = dict{ "a": 1 }\nlet count = stock[key]\nexit`,
+  ).snapshot.failure;
+  assert.deepEqual(
+    [missing?.code, missing?.message],
+    ["TSR061", `Dictionary has no key "${"k".repeat(1_024)}…". Check stock.contains(key) first.`],
+  );
+  const literal = runValidSource(`let stock = dict{ "a": 1 }\nlet count = stock["${key}"]\nexit`)
+    .snapshot.failure;
+  const cut = `"${"k".repeat(1_024)}…"`;
+  assert.equal(
+    literal?.message,
+    `Dictionary has no key ${cut}. Check stock.contains(${cut}) first.`,
+  );
+  const path = `${"d".repeat(2_000)}.tease`;
+  const project = compileProject([
+    {
+      path: "main.tease",
+      source: `let target = "${path}"\ncall script(target, label: "missing")\nexit`,
+    },
+    { path, source: "exit" },
+  ]);
+  assert.ok(project.plan !== null);
+  const unlabeled = run(project.plan, createImmediatePacingRuntimeSnapshot(project.plan)).snapshot
+    .failure;
+  assert.equal(
+    unlabeled?.message,
+    `This call names label 'missing' of '${"d".repeat(1_024)}…', but that file has no such label.`,
+  );
+  // V8 says that a text is too long with this error.
+  context.mock.method(String.prototype, "toUpperCase", () => {
+    throw new RangeError("Invalid string length");
+  });
+  const failure = runValidSource('let s = "a"\nlet shout = s.uppercase()\nexit').snapshot.failure;
+  assert.deepEqual(
+    [failure?.code, failure === null ? null : failure.span.start.line + 1, failure?.message],
+    [
+      "TSR084",
+      2,
+      "Text too long: this line would make a text; a text can hold at most about 536 million.",
+    ],
   );
 });

@@ -13,6 +13,7 @@ import {
 } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
+import { checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import type {
   SerializableRuntimeDictEntry,
   SerializableRuntimeProperty,
@@ -101,17 +102,31 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
   if (isDuration(value)) return formatDuration(durationParts(value));
-  if (isScriptReference(value)) return scriptNotation(value);
+  if (isScriptReference(value)) return scriptNotation(value, span);
   throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
 }
 
 /**
  * A script reference as the call that makes it: `script("rooms/hall.tease", label: "start")`. A `limit` cuts its texts
- * before they are quoted.
+ * before they are quoted. Notation longer than any text can be fails with `TSR084` for `script(…)`.
  */
-function scriptNotation(value: SerializableScriptReference, limit = Infinity): string {
-  const label = value.label === null ? "" : `, label: ${quotedText(prefix(value.label, limit))}`;
-  return `script(${quotedText(prefix(value.path, limit))}${label})`;
+function scriptNotation(
+  value: SerializableScriptReference,
+  span: SourceSpan,
+  limit = Infinity,
+): string {
+  const path = prefix(value.path, limit);
+  const label = value.label === null ? null : prefix(value.label, limit);
+  // `script(`, `)`, and `, label: ` around the quoted texts.
+  const around = 8 + (label === null ? 0 : 9);
+  // Quoting adds two quotes and at most one escape for each character, so only texts that could get too long are measured.
+  if ((path.length + (label?.length ?? 0)) * 2 + 4 + around > MAX_TEXT_LENGTH)
+    checkTextLength(
+      quotedLength(path) + (label === null ? 0 : quotedLength(label)) + around,
+      "script(…)",
+      span,
+    );
+  return `script(${quotedText(path)}${label === null ? "" : `, label: ${quotedText(label)}`})`;
 }
 
 /** At most the first `limit` characters of `text`. */
@@ -151,7 +166,7 @@ export function fieldText(
  * Code-like notation of any value, as `say` shows a value that is not a scalar: `["pet", 2.5, { name: "Bo" }]`,
  * `dict{ "collar": "leather" }`, `1..=5`, or `<speaker mistress>`. Nested text and dict keys are quoted with the
  * string-literal escapes, other scalars use `visibleText`, and `handleNotation` describes a handle from its current
- * state.
+ * state. Notation longer than any text can be fails with `TSR084` for `operation` as soon as it is.
  */
 export function valueNotation(
   value: SerializableRuntimeValue,
@@ -163,8 +178,9 @@ export function valueNotation(
       | SerializablePermanentButtonHandle
       | SerializableCameraViewHandle,
   ) => string,
+  operation: string,
 ): string {
-  return writeNotation(value, span, handleNotation, Infinity).text;
+  return writeNotation(value, span, handleNotation, Infinity, operation).text;
 }
 
 /**
@@ -177,7 +193,7 @@ export function valueNotationPrefix(
   handleNotation: Parameters<typeof valueNotation>[2],
   limit: number,
 ): { readonly text: string; readonly truncated: boolean } {
-  return writeNotation(value, span, handleNotation, limit);
+  return writeNotation(value, span, handleNotation, limit, null);
 }
 
 /** Work of `writeNotation`: text, a value, or the next of a collection's members, written one at a time. */
@@ -193,9 +209,23 @@ function writeNotation(
   span: SourceSpan,
   handleNotation: Parameters<typeof valueNotation>[2],
   limit: number,
+  /** Without a limit, the operation that fails when the notation gets longer than any text can be. */
+  operation: string | null,
 ): { readonly text: string; readonly truncated: boolean } {
   const output: string[] = [];
   let length = 0;
+  // The whole notation is not known before it is written, so only that it is too long is.
+  const tooLong = (added: number) => {
+    if (operation !== null && length + added > MAX_TEXT_LENGTH)
+      throw textTooLong(operation, span, null);
+  };
+  // A text cut to the limit and quoted. Quoting adds two quotes and at most one escape for each character, so only a
+  // text that could be too long is measured first.
+  const quoted = (text: string) => {
+    if (operation !== null && text.length * 2 + 2 > MAX_TEXT_LENGTH - length)
+      tooLong(quotedLength(text));
+    return quotedText(prefix(text, limit));
+  };
   // Members are taken one at a time, so a limit stops a large collection after the members it writes.
   const work: NotationWork[] = [{ value }];
   while (work.length > 0) {
@@ -205,6 +235,7 @@ function writeNotation(
     }
     const next = work.pop()!;
     if ("text" in next) {
+      tooLong(next.text.length);
       output.push(next.text);
       length += next.text.length;
       continue;
@@ -222,8 +253,9 @@ function writeNotation(
       const property = next.properties[next.index]!;
       next.index += 1;
       // Whether to quote depends on the whole name; it is cut to the limit before it is written.
-      const cut = prefix(property.name, limit);
-      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name) ? cut : quotedText(cut);
+      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name)
+        ? prefix(property.name, limit)
+        : quoted(property.name);
       work.push(
         next,
         { value: property.value },
@@ -238,7 +270,7 @@ function writeNotation(
       work.push(
         next,
         { value: entry.value },
-        { text: `${next.index > 1 ? ", " : ""}${quotedText(prefix(entry.key, limit))}: ` },
+        { text: `${next.index > 1 ? ", " : ""}${quoted(entry.key)}: ` },
       );
       continue;
     }
@@ -246,7 +278,7 @@ function writeNotation(
     const before = output.length;
     if (typeof current === "string")
       // A long text is cut before it is quoted; the closing quote then marks no end.
-      output.push(quotedText(prefix(current, limit)));
+      output.push(quoted(current));
     else if (isList(current) || isSet(current))
       work.push({ text: "]" }, { items: current.items, index: 0 }, { text: "[" });
     else if (isObject(current)) {
@@ -271,14 +303,55 @@ function writeNotation(
     )
       output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
-    else if (isScriptReference(current)) output.push(scriptNotation(current, limit));
+    else if (isScriptReference(current)) output.push(scriptNotation(current, span, limit));
     else output.push(plainScalarText(current, span));
-    for (let index = before; index < output.length; index += 1) length += output[index]!.length;
+    for (let index = before; index < output.length; index += 1) {
+      tooLong(output[index]!.length);
+      length += output[index]!.length;
+    }
   }
   const text = output.join("");
   return length > limit
     ? { text: text.slice(0, limit), truncated: true }
     : { text, truncated: false };
+}
+
+/**
+ * `text` quoted with `before` and `after` around it, or `TSR084` for `operation` when that would be longer than any text
+ * can be.
+ */
+export function quotedTextWithin(
+  before: string,
+  text: string,
+  after: string,
+  operation: string,
+  span: SourceSpan,
+): string {
+  // Quoting adds two quotes and at most one escape for each character, so only a text that could get too long is
+  // measured.
+  const around = before.length + after.length;
+  if (text.length * 2 + 2 + around > MAX_TEXT_LENGTH)
+    checkTextLength(quotedLength(text) + around, operation, span);
+  return `${before}${quotedText(text)}${after}`;
+}
+
+/** The length of `quotedText(text)`, found without writing it: each character it escapes adds one. */
+function quotedLength(text: string): number {
+  let length = text.length + 2;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    // Backslash, quote, line feed, carriage return, tab, and a `$` before `{`.
+    if (
+      code === 0x5c ||
+      code === 0x22 ||
+      code === 0x0a ||
+      code === 0x0d ||
+      code === 0x09 ||
+      (code === 0x24 && text.charCodeAt(index + 1) === 0x7b)
+    )
+      length += 1;
+  }
+  return length;
 }
 
 /** A double-quoted string literal with the TeaseScript escapes, including `\${`. */

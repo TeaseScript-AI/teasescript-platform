@@ -26,7 +26,7 @@ import type {
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
-import { escapeMarkup, parseMessageMarkup } from "../message-markup.js";
+import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
@@ -71,7 +71,14 @@ import {
   sampleRangeInteger,
   type PrimitiveDraw,
 } from "./random-draws.js";
-import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
+import {
+  isVisibleScalar,
+  quotedText,
+  quotedTextWithin,
+  valueNotation,
+  visibleText,
+} from "./value-text.js";
+import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -237,6 +244,13 @@ export interface RuntimeCapabilities {
 }
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
+
+/** `text` with `part` of a `"${...}"` text appended; `TSR084` when the text would be too long. */
+function templateText(text: string, part: string, span: SourceSpan): string {
+  // The later placeholders have not run yet, so the length the whole text would reach is not known.
+  if (text.length + part.length > MAX_TEXT_LENGTH) throw textTooLong("${…}", span, null);
+  return text + part;
+}
 
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
@@ -806,7 +820,11 @@ export class Evaluator {
             const part = expression.parts[frame.index - 1]!;
             if (part.kind === "expression") {
               if (trace === null)
-                frame.text += this.interpolationText(result.value, part.expression.span);
+                frame.text = templateText(
+                  frame.text,
+                  this.interpolationText(result.value, part.expression.span),
+                  expression.span,
+                );
               else {
                 // A list's selection draw belongs to the placeholder, whose text the string then depends on.
                 const placeholder = finished?.deps ?? emptyDependencies();
@@ -814,7 +832,7 @@ export class Evaluator {
                 const text = this.interpolationText(result.value, part.expression.span);
                 trace.focus(frame.deps!, null, false);
                 trace.interpolation(placeholder, text, part.expression.span);
-                frame.text += text;
+                frame.text = templateText(frame.text, text, expression.span);
               }
             }
           }
@@ -823,7 +841,8 @@ export class Evaluator {
             expression.parts[frame.index]!.kind === "text"
           ) {
             const part = expression.parts[frame.index++]!;
-            if (part.kind === "text") frame.text += part.value;
+            if (part.kind === "text")
+              frame.text = templateText(frame.text, part.value, expression.span);
           }
           if (frame.index < expression.parts.length) {
             const part = expression.parts[frame.index++]!;
@@ -1418,13 +1437,17 @@ export class Evaluator {
       }
       displayName = explicit;
     } else {
-      const derived = [
+      const parts = [
         this.#speakerText(speaker, "title", span) ?? this.#speakerText(speaker, "shortTitle", span),
         this.#speakerText(speaker, "firstName", span),
         this.#speakerText(speaker, "lastName", span),
-      ]
-        .filter((part): part is string => part !== null && part.length > 0)
-        .join(" ");
+      ].filter((part): part is string => part !== null && part.length > 0);
+      checkTextLength(
+        parts.reduce((length, part) => length + part.length + 1, -1),
+        "say",
+        span,
+      );
+      const derived = parts.join(" ");
       displayName = derived.length === 0 ? speaker.identifier : derived;
       fallback = derived.length === 0;
     }
@@ -1479,9 +1502,18 @@ export class Evaluator {
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
     // A script reference shows as the call that makes it, which is notation too.
-    return isVisibleScalar(value) && !isScriptReference(value)
-      ? visibleText(value, span, currentTemporalContext(this.snapshot))
-      : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
+    if (isVisibleScalar(value) && !isScriptReference(value))
+      return visibleText(value, span, currentTemporalContext(this.snapshot));
+    const notation = valueNotation(
+      value,
+      span,
+      (handle) => this.#handleNotation(handle, span),
+      "say",
+    );
+    // Escaping puts a backslash before some characters, so only a notation that could get too long is measured first.
+    if (notation.length * 2 > MAX_TEXT_LENGTH)
+      checkTextLength(escapedMarkupLength(notation), "say", span);
+    return escapeMarkup(notation);
   }
 
   /**
@@ -1506,20 +1538,23 @@ export class Evaluator {
       const shown = shownPermanentButton(this.snapshot, handle.buttonId);
       return shown === undefined
         ? "<permanent button, removed>"
-        : `<permanent button ${quotedText(shown.button.text)}>`;
+        : quotedTextWithin("<permanent button ", shown.button.text, ">", "say", span);
     }
     const now = this.snapshot.currentSessionTimeMs;
     const time = (value: SerializableRuntimeValue | undefined): string =>
       value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
     if (isTimerHandle(handle)) {
       const timer = this.#timer(handle, span);
-      const name = timer.label === null ? "timer" : `timer ${quotedText(timer.label)}`;
       const left = `${time(timerProperty(timer, "remaining", now))} left`;
-      return timer.state === "running"
-        ? `<${name}, ${left}>`
-        : timer.state === "paused"
-          ? `<${name}, paused, ${left}>`
-          : `<${name}, ${timer.state}>`;
+      const rest =
+        timer.state === "running"
+          ? `, ${left}>`
+          : timer.state === "paused"
+            ? `, paused, ${left}>`
+            : `, ${timer.state}>`;
+      return timer.label === null
+        ? `<timer${rest}`
+        : quotedTextWithin("<timer ", timer.label, rest, "say", span);
     }
     const media = this.#media(handle, span);
     const at = `at ${time(mediaProperty(media, "position", now))}`;
@@ -1529,7 +1564,7 @@ export class Evaluator {
         : media.state === "paused"
           ? `paused ${at}`
           : media.state;
-    return `<media ${quotedText(media.source)}, ${state}>`;
+    return quotedTextWithin("<media ", media.source, `, ${state}>`, "say", span);
   }
 
   /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
@@ -1622,7 +1657,10 @@ export class Evaluator {
     left: SerializableRuntimeValue,
     right: SerializableRuntimeValue,
   ): SerializableRuntimeValue {
-    if (typeof left === "string" && typeof right === "string") return left + right;
+    if (typeof left === "string" && typeof right === "string") {
+      checkTextLength(left.length + right.length, "joining with +", expression.span);
+      return left + right;
+    }
     if (isList(left) && isList(right))
       return createCapturedSerializableList(left.items.concat(right.items));
     throw fault(
@@ -1777,6 +1815,8 @@ export class Evaluator {
           const code = error.code === "cyclic" ? "TSR031" : "TSR013";
           throw fault(code, error.message, expression.span);
         }
+        // A text that would be too long fails as it does anywhere else.
+        if (error instanceof RuntimeFault && error.code === "TSR084") throw error;
         const message = error instanceof Error ? error.message : String(error);
         throw fault(
           "TSR012",
@@ -2053,7 +2093,14 @@ export class Evaluator {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
           const separator = (positional[0] as string | undefined) ?? ", ";
-          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+          let length = separator.length * Math.max(0, receiver.items.length - 1);
+          const texts = receiver.items.map((item) => {
+            const text = this.#joinedText(item, span);
+            length += text.length;
+            return text;
+          });
+          checkTextLength(length, "join", span);
+          return texts.join(separator);
         }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);
@@ -2672,7 +2719,7 @@ export class Evaluator {
         `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    const shown = typeof value === "string" ? ` ${JSON.stringify(messageText(value))}` : "";
     const reason =
       typeof value === "string" && isTemporalConversionResult(result)
         ? (temporalTextProblem(result, value) ?? "")
@@ -2859,6 +2906,9 @@ export class Evaluator {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
     const text = call.positional[0];
     if (typeof text !== "string") throw new TypeError("escapeMarkup(text) requires a string.");
+    // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
+    if (text.length * 2 > MAX_TEXT_LENGTH)
+      checkTextLength(escapedMarkupLength(text), "escapeMarkup", call.span);
     return escapeMarkup(text);
   }
 
@@ -3115,10 +3165,11 @@ function missingKey(
   keyPlan: ExpressionPlan,
   span: SourceSpan,
 ): RuntimeFault {
-  const check = `contains(${planLabel(keyPlan) ?? quotedText(key)})`;
+  const shown = quotedText(messageText(key));
+  const check = `contains(${planLabel(keyPlan) ?? shown})`;
   return fault(
     "TSR061",
-    `Dictionary has no key ${quotedText(key)}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
+    `Dictionary has no key ${shown}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
     span,
   );
 }
@@ -3135,7 +3186,7 @@ function planLabel(plan: ExpressionPlan): string | null {
     } else break;
   }
   if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
-    return quotedText(current.value);
+    return quotedText(messageText(current.value));
   if (current.kind !== "identifier") return null;
   names.push(current.name);
   return names.reverse().join(".");
