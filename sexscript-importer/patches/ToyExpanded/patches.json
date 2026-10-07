@@ -279,6 +279,13 @@
       "category": "b",
       "reason": "endPlan's arg is the map that beginPlan schedules ([friendName: ..., waketime: ...]), whose arg[0] Groovy read as null, so !arg[0] was always true (the comment refers to an older version that passed the friend's name); indexing the converted record stops the script, so sleep is the truth of arg.waketime.",
       "diff": "end-plan-wake.diff"
+    },
+    {
+      "id": "profile-toys",
+      "layer": "source",
+      "category": "b",
+      "reason": "has(i) read the player's toy chest through a key built from the toy (\"toys.$i\"), so profile generation, which collects literal keys, never asked for the toy chest and every toy-gated branch stayed unreachable. Read the distribution's toys this script asks about by their own keys in ownsToy(i), keeping the built key for any other, and has(i) keeps its other checks (toy.toys.$i and DEFAULTTOYS).",
+      "diff": "profile-toys.diff"
     }
   ]
 }
