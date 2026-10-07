@@ -591,31 +591,29 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-06, at importer `e32615c6` with `main` `0ab0fac9` merged in.
+Measured on the selected large corpus on 2026-10-07, at importer `777b12c2` with `main` `068015e2` merged in. The
+class tables of unconverted code and compile errors below are from 2026-10-06, at importer `e32615c6`.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
     versions and are not converted.
   - Two units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, and jewell and
     JewellMistressMiley. Lines v2 counts as a revision of Lines.
-- **Script-specific fixes** are unit patches (50 units), not converter rules.
+- **Script-specific fixes** are unit patches (52 units), not converter rules.
 
 | Result | Units of 210 |
 | --- | ---: |
 | Converted without a failed step | 210 |
 | Compile as one project | 155 |
-| Compile and play to the end from `main.tease` in the smoke run | 129 |
-| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 129, 54, 23, 3, 1 |
+| Compile and play to the end from `main.tease` in the smoke run | 133 |
+| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 133, 54, 21, 1, 1 |
 
-Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,445 root errors remain.
+Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,451 root errors remain.
 
 **Smoke runs:**
-- **The step limit is inconclusive** (23 units). Most of these are loops that wait for a typed text or a time.
-- **The 3 failed runs:**
-  - SpankingParty (`TSR058`): the script draws six implements from the player's toys, and with fewer toys the
-    draws give null, which a list of implements cannot hold (and which Groovy's later draws read past the end).
-  - ashleyYHBS (`TSR058`): a missing setting stored in an `int`.
-  - tabata (`TSR036`): a division by zero.
+- **The step limit is inconclusive** (21 units). Most of these are loops that wait for a typed text or a time.
+- **The failed run** is ashleyYHBS (`TSR058`): a missing setting stored in an `int`. The legacy bugs that failed
+  SpankingParty (six implements drawn from fewer owned toys) and tabata (a division by zero) are patched in their units.
 - **Isolated runs** of scripts that no entry run reaches fail mostly on settings that an introduction saves:
   `TSR058` 21 times and `TSR027` 17 times. Groovy compared and computed with such a missing setting as null.
 
