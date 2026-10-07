@@ -9,7 +9,7 @@ show("Wait. . .")
 wait(1)
 // A text that repeats the animation's last step says only what it adds.
 show("Wait. . . Now begin.")
-// A step whose values have effects, such as a random draw, says its whole text anew.
+// A text with a value computed anew, such as a random draw, is no step of an animation.
 show("Pick " + getRandom(100) + ".")
 wait(1)
 show("Pick " + getRandom(100) + "..")
@@ -59,5 +59,20 @@ show(n)
 for (k in 1..2) {
     n++
     show(n)
+    wait(5)
+}
+// Nor does a loop whose text grows by text, or whose other values the loop changes.
+def story = "First"
+show("Story: " + story)
+for (p in 1..2) {
+    story += " next"
+    show("Story: " + story)
+    wait(5)
+}
+def title = "One"
+show("Chapter " + title + ": 0")
+for (int c = 1; c <= 2; c++) {
+    title = "Two"
+    show("Chapter " + title + ": " + c)
     wait(5)
 }

@@ -169,11 +169,42 @@ function textTokens(value: IrExpression): Token[] | null {
     return typeof value.value === "string" ? [...value.value].map((char) => ({ char })) : null;
   }
   if (value.kind !== "template") return null;
+  // A value computed anew each time, such as a random draw, matches no other.
   return value.parts.flatMap((part): Token[] =>
     "text" in part
       ? [...part.text].map((char) => ({ char }))
-      : [{ value: part.value, key: JSON.stringify(part.value) }],
+      : [
+          {
+            value: part.value,
+            key: computes(part.value)
+              ? `computed ${(computedValues += 1)}`
+              : JSON.stringify(part.value),
+          },
+        ],
   );
+}
+let computedValues = 0;
+
+/** Whether a value calls, asks, or reads storage, which may give another result each time, as a random draw does. */
+export function computes(value: IrExpression): boolean {
+  if (
+    value.kind === "call" ||
+    value.kind === "methodCall" ||
+    value.kind === "input" ||
+    value.kind === "choice" ||
+    value.kind === "listChoice" ||
+    value.kind === "button" ||
+    value.kind === "message" ||
+    value.kind === "load" ||
+    (value.kind === "property" && value.name === "random")
+  )
+    return true;
+  let found = false;
+  mapChildren(value, (child) => {
+    found ||= computes(child);
+    return child;
+  });
+  return found;
 }
 
 function textValue(tokens: readonly Token[]): IrExpression {

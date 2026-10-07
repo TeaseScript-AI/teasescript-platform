@@ -1,6 +1,12 @@
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
-import { addedText, addsOnlyMarks, hasEffect, withNestedBlocks } from "./repeated-text.ts";
+import {
+  addedText,
+  addsOnlyMarks,
+  computes,
+  hasEffect,
+  withNestedBlocks,
+} from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 type Say = Extract<IrStatement, { kind: "say" }>;
@@ -199,32 +205,51 @@ function quiet(statement: IrStatement): boolean {
   return calm;
 }
 
-/** The names a loop counts with: those its body steps with `+=` or `-=` (or `x = x ± n`), and a range loop's own. */
+/**
+ * The names a loop counts with: those its body steps by a number, `x += 1`, `x -= 2`, or `x = x + 1`, and a range
+ * loop's own.
+ */
 function counts(loop: Extract<IrStatement, { kind: "while" | "for" | "repeat" }>): Set<string> {
   const names = new Set<string>();
   if (loop.kind === "for" && loop.collection.kind === "range") names.add(loop.variable);
+  const number = (value: IrExpression): boolean =>
+    value.kind === "literal" && typeof value.value === "number";
   for (const item of loop.body) {
     if (item.kind !== "assign" || item.target.kind !== "variable") continue;
     const name = item.target.name;
     const { value } = item;
     if (
-      item.operator !== "=" ||
-      (value.kind === "binary" &&
+      (item.operator !== "=" && number(value)) ||
+      (item.operator === "=" &&
+        value.kind === "binary" &&
         (value.operator === "+" || value.operator === "-") &&
         value.left.kind === "variable" &&
-        value.left.name === name)
+        value.left.name === name &&
+        number(value.right))
     )
       names.add(name);
   }
   return names;
 }
 
-/** The names the statements write. */
+/** The names the statements write, also through a member, an element, or a method of the value. */
 function written(statements: readonly IrStatement[]): Set<string> {
   const names = new Set<string>();
+  const base = (value: IrExpression): string | null =>
+    value.kind === "variable"
+      ? value.name
+      : value.kind === "property" || value.kind === "index" || value.kind === "methodCall"
+        ? base(value.target)
+        : null;
   const visit = (item: IrStatement): void => {
     if (item.kind === "let") names.add(item.name);
-    if (item.kind === "assign" && item.target.kind === "variable") names.add(item.target.name);
+    const target =
+      item.kind === "assign"
+        ? base(item.target)
+        : item.kind === "expression"
+          ? base(item.expression)
+          : null;
+    if (target !== null) names.add(target);
     if (item.kind === "for") names.add(item.variable);
     withNestedBlocks(item, (body) => {
       body.forEach(visit);
@@ -280,40 +305,24 @@ function sameLine(
       values.every(
         (token) =>
           isCount(token) ||
-          ("value" in token && !hasEffect(token.value) && !readsAny(token.value, changed)),
+          ("value" in token && !computes(token.value) && !readsAny(token.value, changed)),
       )
     );
   }
   const nowValues = now.filter((token) => "value" in token);
+  // The values around the count show the same each time round.
+  const changed = written(loop.body);
+  const stable = shared.every(
+    (token) => !("value" in token) || (!computes(token.value) && !readsAny(token.value, changed)),
+  );
   return (
+    stable &&
     shared.some((token) => "value" in token || /\p{L}/u.test(token.char)) &&
     was.every((token) => "char" in token && COUNT.test(token.char)) &&
     nowValues.length === 1 &&
     isCount(nowValues[0]!) &&
     now.every((token) => "value" in token || COUNT.test(token.char))
   );
-}
-
-/** Whether a value calls, asks, or reads storage, which may give another result each time, as a random draw does. */
-function computes(value: IrExpression): boolean {
-  if (
-    value.kind === "call" ||
-    value.kind === "methodCall" ||
-    value.kind === "input" ||
-    value.kind === "choice" ||
-    value.kind === "listChoice" ||
-    value.kind === "button" ||
-    value.kind === "message" ||
-    value.kind === "load" ||
-    (value.kind === "property" && value.name === "random")
-  )
-    return true;
-  let found = false;
-  mapChildren(value, (child) => {
-    found ||= computes(child);
-    return child;
-  });
-  return found;
 }
 
 /** Whether the value reads one of the names. */

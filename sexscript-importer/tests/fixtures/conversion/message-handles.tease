@@ -9,14 +9,12 @@ line.text += " ."
 wait 1
 // A text that repeats the animation's last step says only what it adds.
 say "Now begin."
-// A step whose values have effects, such as a random draw, says its whole text anew.
-let line2 = say "Pick ${randomInteger(0..100)}.", instant
-wait 1
-line2.text = "Pick ${randomInteger(0..100)}.."
-wait 1
-let line3 = say "Thinking .", instant
+// A text with a value computed anew, such as a random draw, is no step of an animation.
+say "Pick ${randomInteger(0..100)}."
+say "Pick ${randomInteger(0..100)}.."
+let line2 = say "Thinking ."
 wait 0.5
-line3.text = "Thinking  .."
+line2.text = "Thinking  .."
 wait 0.5
 // A loop that shows the line said before it again with a new count changes that line in place.
 let message = "Count them."
@@ -74,5 +72,22 @@ for k in 1..=2 {
   n += 1
   say n
   wait 5
+}
+// Nor does a loop whose text grows by text, or whose other values the loop changes.
+let story = "First"
+say "Story: ${story}"
+for p in 1..=2 {
+  story += " next"
+  say "Story: ${story}"
+  wait 5
+}
+let title = "One"
+say "Chapter ${title}: 0"
+let c = 1
+while c <= 2 {
+  title = "Two"
+  say "Chapter ${title}: ${c}"
+  wait 5
+  c += 1
 }
 exit
