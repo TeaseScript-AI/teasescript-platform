@@ -87,7 +87,8 @@ async function main(args: string[]): Promise<void> {
       way: { type: "string" },
       corpus: { type: "string" },
       rounds: { type: "string", default: "1" },
-      "no-summary": { type: "boolean", default: false },
+      // `--no-summary`, as `allowNegative` reads it.
+      summary: { type: "boolean", default: true },
       cells: { type: "boolean", default: false },
       later: { type: "boolean", default: false },
     },
@@ -180,7 +181,7 @@ async function main(args: string[]): Promise<void> {
     );
     remaining = remaining.filter((_, index) => going[index]);
   }
-  if (!values["no-summary"]) {
+  if (values.summary) {
     const reports = await Promise.all(
       names.map(async (name) => {
         const file = path.join(out, `${name}.json`);

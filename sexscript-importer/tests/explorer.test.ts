@@ -373,29 +373,47 @@ test(
 );
 
 test(
-  "with cells, a state's cell is where it waits and the buckets of what conditions compare: each pass of a for loop is a cell, and a counter's values between its compared constants share one",
+  "with cells, a loop that keeps making states no condition tells apart does not starve another way, and a cell is where a state waits with the buckets of what conditions compare",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    const source =
+    const run = (source: string, budgetOps: number) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps,
+        maxStates: 5000,
+        sources: new Map(),
+        diagnostics: [],
+        cells: true,
+      });
+    };
+    // "Spiral" counts forever, every state new; "Tour" needs eight steps of code it already ran. The counts above 0 are
+    // one cell, which the search expands less often as it goes, so the tour, a cell per pass, gets to its end.
+    const spiral = run(
+      'let count = 0\nlet side = choose spiral: "Spiral", tour: "Tour"\nif side == "spiral" {\n' +
+        '  while count >= 0 {\n    showButton "Again"\n    count += 1\n  }\n}\n' +
+        'for pass in 1..=8 {\n  showButton "Step"\n}\nsay "Reached."\nexit\n',
+      40,
+    );
+    assert.equal(spiral.search.stoppedBy, "operations");
+    const file = spiral.coverage.files[0]!;
+    assert.deepEqual(
+      file.unvisited.map((range) => range.reach),
+      ["unreachable"],
+    );
+
+    // `n` is compared with 3 and 100: "Go" with `n` below 3, at 3, and between 3 and 100 are three cells, after the two
+    // passes of "Round"; `n` changed bucket twice.
+    const counted = run(
       'let n = 0\nfor pass in 1..=2 {\n  showButton "Round"\n}\nwhile n < 100 {\n  showButton "Go"\n  n += 1\n' +
-      '  if n == 3 {\n    say "Three."\n  }\n}\nexit\n';
-    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
-    assert.ok(isRecord(plan));
-    const result = explore(engine, plan, {
-      seed: 1,
-      budgetMs: Infinity,
-      budgetOps: 80,
-      maxStates: 5000,
-      sources: new Map(),
-      diagnostics: [],
-      cells: true,
-    });
-    // `n` is compared with 3 and 100. The 40 states are two passes of "Round", then "Go" with `n` below 3, at 3, and
-    // between 3 and 100; `n` changed bucket twice.
-    assert.equal(result.search.states, 40);
-    assert.deepEqual(result.search.cells, { slots: 1, cells: 5, values: 3, transitions: 2 });
+        '  if n == 3 {\n    say "Three."\n  }\n}\nexit\n',
+      80,
+    );
+    assert.deepEqual(counted.search.cells, { slots: 1, cells: 5, values: 3, transitions: 2 });
   },
 );
 

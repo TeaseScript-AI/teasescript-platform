@@ -277,13 +277,14 @@ session, then, earlier sessions first, states that look new apart from clock, ra
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
 first. With `--cells`, the search ranks states by cells. A cell is where a state waits (its pending action, the return
 points of its calls, and the pass of each `for` and `repeat` loop) with the bucket of each value that conditions compare
-with constants: each variable and stored key (also through the data flow) a comparison reads, bucketed as unset,
-`null`, `true` or `false`, a compared text or other text, or a number's place among its compared constants (below, at,
-between, or above them). A step that shows such a value, or a change of one, for the first time counts as reaching new
-instructions, and among the other states those of the cells expanded least go first. States of one cell differ only in
-what no condition tells apart, so a loop that keeps making such states, such as a counter no condition reads, no longer
-takes most of the search; the report's `search.cells` counts the slots, cells, values, and changes found. Waiting
-states keep their snapshots
+with constants: each variable and stored key (also through the data flow, each key a key template matches apart) a
+comparison reads, or its length, bucketed as unset, `null`, `true` or `false`, a compared text or other text, or a
+number's or duration's place among its compared constants (below, at, between, or above them). A step that shows such
+a value, or a change of one, for the first time counts as reaching new instructions, and among the other states those
+of the cells expanded least go first, before the loop key. A cell groups states coarsely: a condition that computes
+with a value (`n + 1 == 3`) can still tell states of one cell apart. A loop that keeps making states no condition
+tells apart, such as a counter no condition reads, so no longer takes most of the search; the report's `search.cells`
+counts the slots, cells, values, and changes found. Waiting states keep their snapshots
 as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
 `--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic

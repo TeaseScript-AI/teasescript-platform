@@ -439,11 +439,6 @@ class Frontier {
     return this.#items.length;
   }
 
-  /** The rank of the state that comes first. */
-  peek(): readonly number[] | undefined {
-    return this.#items[0]?.rank;
-  }
-
   push(node: number, rank: readonly number[]): void {
     const items = this.#items;
     items.push({ node, rank });
@@ -455,11 +450,21 @@ class Frontier {
     }
   }
 
+  /** The rank of the state that comes first. */
+  peek(): readonly number[] | undefined {
+    return this.#items[0]?.rank;
+  }
+
   pop(): number | undefined {
+    return this.popEntry()?.node;
+  }
+
+  /** The state that comes first, with the rank it was queued at. */
+  popEntry(): { node: number; rank: readonly number[] } | undefined {
     const items = this.#items;
     const top = items[0];
     const last = items.pop();
-    if (top === undefined || last === undefined || items.length === 0) return top?.node;
+    if (top === undefined || last === undefined || items.length === 0) return top;
     items[0] = last;
     for (let index = 0; ;) {
       const left = index * 2 + 1;
@@ -471,17 +476,109 @@ class Frontier {
       [items[index], items[best]] = [items[best]!, items[index]!];
       index = best;
     }
-    return top.node;
+    return top;
   }
 }
 
 /**
+ * The frontier with cells: the open states of each cell (and place in the order before cells), with one place in the
+ * order per cell, which its least expansions and best state give. Expanding a cell moves only its own place, so the
+ * search finds the state that comes first without reordering every state of that cell.
+ */
+class CellFrontier {
+  /**
+   * The open states by cell and by the order before cells (the first {@link GROUP} order elements), each group with its
+   * place in the order when queued.
+   */
+  readonly #groups = new Map<string, number>();
+  readonly #entries: {
+    readonly cell: number;
+    readonly group: readonly number[];
+    readonly states: Frontier;
+    queued: readonly number[] | null;
+  }[] = [];
+  readonly #order = new Frontier();
+  readonly #cellOf: (node: number) => number;
+  readonly #expansions: (cell: number) => number;
+  #size = 0;
+
+  constructor(cellOf: (node: number) => number, expansions: (cell: number) => number) {
+    this.#cellOf = cellOf;
+    this.#expansions = expansions;
+  }
+
+  get size(): number {
+    return this.#size;
+  }
+
+  /** Queues a state at `rank`: the order before cells, its cell's expansions, then the state's own order. */
+  push(node: number, rank: readonly number[]): void {
+    const cell = this.#cellOf(node);
+    const group = rank.slice(0, GROUP);
+    const key = `${cell}|${group.join(",")}`;
+    let id = this.#groups.get(key);
+    if (id === undefined) {
+      id = this.#entries.length;
+      this.#groups.set(key, id);
+      this.#entries.push({ cell, group, states: new Frontier(), queued: null });
+    }
+    this.#entries[id]!.states.push(node, rank.slice(GROUP + 1));
+    this.#size += 1;
+    this.#queue(id);
+  }
+
+  pop(): number | undefined {
+    for (let next = this.#order.popEntry(); next !== undefined; next = this.#order.popEntry()) {
+      const entry = this.#entries[next.node]!;
+      // Only the place a group was last queued at counts; an earlier one is from before a better state came.
+      if (entry.queued !== next.rank) continue;
+      entry.queued = null;
+      const now = this.#rank(entry);
+      if (now === null) continue;
+      if (before(next.rank, now)) {
+        // The cell was expanded since: its place moves back.
+        this.#queue(next.node);
+        continue;
+      }
+      const node = entry.states.pop()!;
+      this.#size -= 1;
+      this.#queue(next.node);
+      return node;
+    }
+    return undefined;
+  }
+
+  #rank(entry: {
+    cell: number;
+    group: readonly number[];
+    states: Frontier;
+  }): readonly number[] | null {
+    const first = entry.states.peek();
+    return first === undefined ? null : [...entry.group, this.#expansions(entry.cell), ...first];
+  }
+
+  /** Gives a group its place in the order now, unless it already has an earlier or equal one. */
+  #queue(id: number): void {
+    const entry = this.#entries[id]!;
+    const rank = this.#rank(entry);
+    if (rank === null || (entry.queued !== null && !before(rank, entry.queued))) return;
+    entry.queued = rank;
+    this.#order.push(id, rank);
+  }
+}
+
+/** The order elements before a state's cell expansions: lead, clock, new instructions, and session (see `order`). */
+const GROUP = 4;
+
+/**
  * The cells of the search ({@link ExploreOptions.cells}). A state's cell is where it waits (its pending action, the
  * return points of its active calls, and the pass of each active `for` and `repeat` loop, as those loops make progress)
- * with the bucket of each compared slot's value (`comparedSlots`): unset, null, a boolean, a compared text or other
- * text, or a number's place among the constants it is compared with, such as below, at, or above `15` for `t < 15`.
- * States of one cell differ only in what no condition tells apart, so the search expands the cells expanded least
- * first. The buckets are read from the step's snapshot, from the slots' bindings and storage entries only.
+ * with the bucket of each compared slot's value (`comparedSlots`), each stored key a pattern matches apart: unset, null,
+ * a boolean, a compared text or other text, or a number's or a duration's place among the constants it is compared
+ * with, such as below, at, or above `15` for `t < 15`. A cell groups states coarsely: what a condition computes from a
+ * slot (`n + 1 == 3`) can still tell states of one cell apart. The search expands the cells expanded least first. The
+ * buckets are read from the step's snapshot, from the slots' bindings (in scope, or kept for a timer, media, or button
+ * block) and storage entries only.
  */
 class Cells {
   readonly slots: readonly Slot[];
@@ -494,13 +591,17 @@ class Cells {
     readonly slot: number;
     readonly matches: (key: string) => boolean;
   }[];
-  /** Per slot, its buckets seen so far by text, numbered from 1 (0 is unset). */
-  readonly #buckets: Map<string, number>[];
-  /** The slot values seen, as `slot:bucket` lists, by ID; each one's slots and buckets, in slot order. */
+  /**
+   * The slot values read so far: a binding slot, or a storage slot with one stored key, by `slot` or `slot:key`; and
+   * the buckets of each, by text, numbered from 1 (0 is unset).
+   */
+  readonly #sources = new Map<string, number>();
+  readonly #buckets: Map<string, number>[] = [];
+  /** The slot values seen, as `source,bucket,...` lists in source order, by ID; and each one's list. */
   readonly #values = new Map<string, number>();
   readonly #vectors: Int32Array[] = [];
   readonly #cells = new Map<string, number>();
-  /** Changes of a slot's bucket seen (`slot:from:to`), and the pairs of slot values compared for them. */
+  /** Changes of a value's bucket seen (`source:from:to`), and the pairs of slot values compared for them. */
   readonly #transitions = new Set<string>();
   readonly #pairs = new Set<string>();
 
@@ -512,7 +613,6 @@ class Cells {
       else this.#byName.set(slot.name, [...(this.#byName.get(slot.name) ?? []), index]);
     });
     this.#patterns = patterns;
-    this.#buckets = slots.map(() => new Map());
   }
 
   get stats() {
@@ -535,24 +635,34 @@ class Cells {
   ): { cell: number; values: number; novel: boolean } {
     let novel = false;
     const found = new Map<number, number>();
-    const put = (slot: number, value: unknown) => {
-      if (found.has(slot)) return;
+    const put = (slot: number, key: string, value: unknown) => {
+      let source = this.#sources.get(key);
+      if (source === undefined) {
+        source = this.#buckets.length;
+        this.#sources.set(key, source);
+        this.#buckets.push(new Map());
+      }
+      if (found.has(source)) return;
       const text = bucket(this.slots[slot]!, value);
-      const buckets = this.#buckets[slot]!;
+      const buckets = this.#buckets[source]!;
       let id = buckets.get(text);
       if (id === undefined) {
         id = buckets.size + 1;
         buckets.set(text, id);
         novel = true;
       }
-      found.set(slot, id);
+      found.set(source, id);
     };
-    // The innermost binding of a name first.
-    const scopes = [...list(snapshot.frames).toReversed(), { bindings: snapshot.globals }];
+    // The innermost binding of a name first; then those kept for a block, and the globals.
+    const scopes = [
+      ...list(snapshot.frames).toReversed(),
+      ...list(snapshot.retainedScopes).toReversed(),
+      { bindings: snapshot.globals },
+    ];
     for (const scope of scopes) {
       for (const binding of list(scope.bindings)) {
         const slots = typeof binding.name === "string" ? this.#byName.get(binding.name) : undefined;
-        for (const slot of slots ?? []) put(slot, binding.value);
+        for (const slot of slots ?? []) put(slot, String(slot), binding.value);
       }
     }
     for (const entry of list(snapshot.scriptStorage)) {
@@ -563,7 +673,7 @@ class Cells {
         slots = this.#patterns.filter(({ matches }) => matches(key)).map(({ slot }) => slot);
         this.#byKey.set(key, slots);
       }
-      for (const slot of slots) put(slot, entry.value);
+      for (const slot of slots) put(slot, `${slot}:${key}`, entry.value);
     }
     const vector = Int32Array.from([...found].sort(([left], [right]) => left - right).flat());
     const text = vector.join(",");
@@ -600,18 +710,31 @@ class Cells {
   }
 }
 
-/** A value's bucket for a slot (see {@link Cells}). */
+/** A value's bucket for a slot (see {@link Cells}); a length as the runtime counts it, in code points or entries. */
 function bucket(slot: Slot, value: unknown): string {
+  const data = record(value);
   if (slot.length) {
-    const items = record(value).items;
     const length =
-      typeof value === "string" ? value.length : Array.isArray(items) ? items.length : null;
+      typeof value === "string"
+        ? [...value].length
+        : Array.isArray(data.items)
+          ? data.items.length
+          : Array.isArray(data.entries)
+            ? data.entries.length
+            : null;
     return length === null ? "other" : numberBucket(slot.numbers, length);
   }
   if (value === null) return "null";
   if (typeof value === "boolean") return String(value);
   if (typeof value === "number") return numberBucket(slot.numbers, value);
   if (typeof value === "string") return slot.strings.has(value) ? JSON.stringify(value) : "text";
+  if (
+    data.kind === "duration" &&
+    typeof data.milliseconds === "number" &&
+    data.months === undefined &&
+    data.days === undefined
+  )
+    return `d${numberBucket(slot.durations, data.milliseconds)}`;
   return "other";
 }
 
@@ -625,20 +748,20 @@ function numberBucket(constants: readonly number[], value: number): string {
   return `#${below}`;
 }
 
-/** The changes of a slot's bucket between two slot value lists (`slot, bucket, ...` in slot order), as `slot:from:to`. */
+/** The changes of a bucket between two slot value lists (`source, bucket, ...` in source order), as `source:from:to`. */
 function changes(from: Int32Array, to: Int32Array): string[] {
   const found: string[] = [];
   let left = 0;
   let right = 0;
   while (left < from.length || right < to.length) {
-    const leftSlot = left < from.length ? from[left]! : Infinity;
-    const rightSlot = right < to.length ? to[right]! : Infinity;
-    const slot = Math.min(leftSlot, rightSlot);
-    const before = leftSlot === slot ? from[left + 1]! : 0;
-    const after = rightSlot === slot ? to[right + 1]! : 0;
-    if (before !== after) found.push(`${slot}:${before}:${after}`);
-    if (leftSlot === slot) left += 2;
-    if (rightSlot === slot) right += 2;
+    const leftSource = left < from.length ? from[left]! : Infinity;
+    const rightSource = right < to.length ? to[right]! : Infinity;
+    const source = Math.min(leftSource, rightSource);
+    const before = leftSource === source ? from[left + 1]! : 0;
+    const after = rightSource === source ? to[right + 1]! : 0;
+    if (before !== after) found.push(`${source}:${before}:${after}`);
+    if (leftSource === source) left += 2;
+    if (rightSource === source) right += 2;
   }
   return found;
 }
@@ -778,7 +901,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
   const loopSeen = new Map<string, number>();
-  const frontier = new Frontier();
+  const frontier: Pick<Frontier, "size" | "push" | "pop"> =
+    cells === null
+      ? new Frontier()
+      : new CellFrontier(
+          (node) => nodes[node]!.cell,
+          (cell) => cells.expansions[cell]!,
+        );
   const crashes = new Map<string, CrashReport>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
@@ -884,9 +1013,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       leads(node) ? 0 : node.clock ? 2 : 1,
       tier === 0 ? 0 : 1,
       starts[node.start]!.session,
-      tier,
-      // With cells, the states of the cell expanded least first.
+      // With cells, the states of the cell expanded least first (see `CellFrontier`).
       ...(cells === null ? [] : [cells.expansions[node.cell]!]),
+      tier,
       ...rest,
     ];
   };
@@ -1597,14 +1726,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const next = frontier.pop()!;
       frontier.push(next, order(nodes[next]!));
       if (before(order(nodes[next]!), own)) {
-        frontier.push(node.id, own);
-        continue;
-      }
-    }
-    // With cells, a state whose cell was expanded since it was queued goes back when another one now comes first.
-    if (cells !== null && frontier.size > 0) {
-      const own = order(node);
-      if (before(frontier.peek()!, own)) {
         frontier.push(node.id, own);
         continue;
       }

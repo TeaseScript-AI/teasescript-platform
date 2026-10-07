@@ -890,54 +890,86 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
 }
 
 /**
- * A value that the plan's conditions compare with constants: a named binding (`length` for `name.length`), or a stored
- * key, by its text or a pattern with {@link KEY_PLACEHOLDER} parts; with those constants.
+ * A value that the plan's conditions compare with constants: a named binding, or a stored key by its text or a pattern
+ * with {@link KEY_PLACEHOLDER} parts; or its `length`, for `name.length`; with those constants.
  */
 export interface Slot {
   readonly kind: "binding" | "storage";
   readonly name: string;
   readonly length: boolean;
-  /** The numbers it is compared with, ascending, and the texts. */
+  /** The numbers, the durations in milliseconds (`t < 15 s`), each ascending, and the texts it is compared with. */
   readonly numbers: readonly number[];
+  readonly durations: readonly number[];
   readonly strings: ReadonlySet<string>;
 }
 
 /**
- * The slots of every condition and `while` loop: in each of their comparisons with a constant, the bindings the compared
- * side names and the stored keys its value comes from (`DataFlow.flowOf`), each with the constant. Slots compared with
- * no constant are left out, as nothing tells which of their values differ.
+ * The slots of every condition and `while` loop: in each of their comparisons with a constant (a literal or a duration),
+ * the bindings the compared side names and the stored keys its value comes from (`DataFlow.flowOf`), each with the
+ * constant; for `x.length`, the length of `x` and of the keys `x` comes from. A value compared with no constant is no
+ * slot, as nothing tells which of its values differ.
  */
 export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Slot[] {
-  const slots = new Map<string, { slot: Slot; numbers: Set<number>; strings: Set<string> }>();
-  const add = (kind: Slot["kind"], name: string, length: boolean, constant: Atom["constant"]) => {
+  const slots = new Map<
+    string,
+    { slot: Slot; numbers: Set<number>; durations: Set<number>; strings: Set<string> }
+  >();
+  const add = (kind: Slot["kind"], name: string, length: boolean, constant: unknown) => {
     const id = `${kind}:${name}${length ? ".length" : ""}`;
     let known = slots.get(id);
     if (known === undefined) {
-      const numbers = new Set<number>();
       const strings = new Set<string>();
-      known = { slot: { kind, name, length, numbers: [], strings }, numbers, strings };
+      known = {
+        slot: { kind, name, length, numbers: [], durations: [], strings },
+        numbers: new Set(),
+        durations: new Set(),
+        strings,
+      };
       slots.set(id, known);
     }
+    const duration = record(constant);
     if (typeof constant === "number") known.numbers.add(constant);
-    if (typeof constant === "string") known.strings.add(constant);
+    else if (typeof constant === "string") known.strings.add(constant);
+    else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
+      known.durations.add(duration.milliseconds);
+  };
+  const compared = (subject: unknown, constant: unknown) => {
+    const value = record(subject);
+    const length = value.kind === "property" && value.name === "length";
+    const object = length ? value.object : subject;
+    if (length && record(object).kind === "identifier")
+      add("binding", String(record(object).name), true, constant);
+    else if (!length) for (const name of namesIn(subject)) add("binding", name, false, constant);
+    for (const key of flow.flowOf(object).keys) add("storage", key, length, constant);
   };
   for (const instruction of instructions) {
     const conditional =
       instruction.kind === "jumpIfFalse" ||
       (instruction.kind === "loopStart" && instruction.loopKind === "while");
     if (!conditional) continue;
-    for (const atom of atomsFor(instruction.condition ?? instruction.expression, true)) {
-      const subject = record(atom.subject);
-      const object = record(subject.object);
-      if (subject.kind === "property" && subject.name === "length" && object.kind === "identifier")
-        add("binding", String(object.name), true, atom.constant);
-      else for (const name of namesIn(atom.subject)) add("binding", name, false, atom.constant);
-      for (const key of flow.flowOf(atom.subject).keys) add("storage", key, false, atom.constant);
-    }
+    const condition = instruction.condition ?? instruction.expression;
+    for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);
+    // Comparisons with a duration, which `atomsFor` leaves to the clock and the asks.
+    const walk = (expression: unknown): void => {
+      const value = record(expression);
+      if (value.kind === "group") walk(value.expression);
+      if (value.kind === "unary") walk(value.operand);
+      if (value.kind !== "binary") return;
+      const comparison = String(value.operator) in FLIP;
+      if (comparison && record(value.right).kind === "duration") compared(value.left, value.right);
+      else if (comparison && record(value.left).kind === "duration")
+        compared(value.right, value.left);
+      else {
+        walk(value.left);
+        walk(value.right);
+      }
+    };
+    walk(condition);
   }
-  return [...slots.values()].map(({ slot, numbers }) => ({
+  return [...slots.values()].map(({ slot, numbers, durations }) => ({
     ...slot,
     numbers: [...numbers].sort((left, right) => left - right),
+    durations: [...durations].sort((left, right) => left - right),
   }));
 }
 
