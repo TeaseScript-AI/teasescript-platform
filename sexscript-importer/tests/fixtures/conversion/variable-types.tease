@@ -171,11 +171,11 @@ say "Page ${page + 1}"
 // A local that a null test rules out in a branch holds no null there.
 function joinNames {
   let all = "0"
-  let next: string? = "0"
+  let next: string = "0"
   let i = 0
-  while next != null {
-    next = load "names.${i}", default: null
-    if next == null {
+  while next != "" {
+    next = load "names.${i}", default: ""
+    if next == "" {
       say "End"
     } else if all == "0" {
       all = next

@@ -1,6 +1,9 @@
 function sexscriptLegacyBooleanText(value) {
   return "${value}".lowercase() == "true"
 }
+function sexscriptLegacyValue(value) {
+  return value
+}
 function sexscriptLegacyText(value): string? {
   if value == null or value == "" {
     return null
@@ -52,9 +55,8 @@ function resetMode {
   delete "game.mode"
 }
 // NOTE SX_LOAD_STRING_TEXT line 28: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
-let savedVersion: integer? = load "game.version", default: null
-let version: string? = sexscriptLegacyText(savedVersion)
-if version == null {
+let version: string = "${load("game.version", default: sexscriptLegacyValue(""))}"
+if version == "" {
   say "No version."
 }
 function upgrade {
@@ -77,9 +79,8 @@ function restart {
 }
 // A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
 // it into text, or into true only for "true".
-// NOTE SX_LOAD_STRING_TEXT line 43: loadString() read the stored value as text, and the package saves values of another type under this key too, so the value is read as stored and turned into text.
-let savedPick: integer? = load "game.pick", default: null
-let pick = sexscriptLegacyText(savedPick)
+// NOTE SX_LOAD_STRING_TEXT line 43: loadString() read the stored value as text, and the package saves values of another type under this key too, so the value is read as stored and turned into text; a missing value is the empty text.
+let pick = "${load("game.pick", default: sexscriptLegacyValue(""))}"
 say "Pick ${pick}"
 function roll {
   save randomInteger(0..6) as "game.pick"
@@ -92,4 +93,29 @@ if sexscriptLegacyBooleanText(savedVolume) == true {
 function setVolume {
   save randomInteger(0..10) as "game.volume"
 }
+// A text variable that the script also gives null, or a value of a type that the importer cannot tell, holds that too.
+let dompic: string? = load "game.dompic", default: ""
+say "Reset the picture?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  dompic = null
+}
+if dompic == null or dompic == "" {
+  say "No picture."
+}
+function pickOutfit {
+  return { set: "first" }
+}
+// NOTE SX_LOAD_OPEN_NULL line 53: Legacy read null for a missing text, the empty text here; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.
+let outfit = sexscriptLegacyValue(load("game.outfit", default: ""))
+if outfit == null or outfit == "" {
+  outfit = pickOutfit()
+}
+// A legacy text read of a computed key is text too.
+let names = ["a", "b"]
+let n = 0
+while n < 2 {
+  names[n] = load "game.name${n}", default: ""
+  n += 1
+}
+say names.join(", ")
 exit

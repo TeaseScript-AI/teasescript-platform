@@ -1,3 +1,6 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 function sexscriptLegacyListMinus(items, removed) {
   let kept = []
   for item in items {
@@ -8,7 +11,8 @@ function sexscriptLegacyListMinus(items, removed) {
   return kept
 }
 // Groovy list - value drops the value from a copy of the list; list - otherList drops each of its elements.
-let picked = load "picked", default: ""
+// NOTE SX_LOAD_OPEN_NULL line 2: Legacy read null for a missing text, the empty text here; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.
+let picked = sexscriptLegacyValue(load("picked", default: ""))
 function pickToy {
   let toys = ["paddle", "crop", "cane"]
   say "Add the strap?"

@@ -1295,7 +1295,13 @@ export function lowerParsedFile(
     };
   }
 
-  if (file.root.kind === "compilationUnit") return lowerHelperCompilationUnit(file, context);
+  if (file.root.kind === "compilationUnit") {
+    const unit = lowerHelperCompilationUnit(file, context);
+    // A helper class converted on its own gives its reads their defaults by its own saves.
+    return options.renameIdentifiers === false
+      ? unit
+      : (withStorageDefaults([unit], false)[0] ?? unit);
+  }
   if (file.root.kind !== "scriptBody") {
     context.diagnostics.push({
       code: "SX_UNIT_LOWERING_DEFERRED",

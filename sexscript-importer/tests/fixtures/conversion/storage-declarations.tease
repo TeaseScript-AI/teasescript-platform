@@ -1,0 +1,49 @@
+function sexscriptLegacyValue(valueValue) {
+  return valueValue
+}
+// A read that keeps its null declares its key's type at the variable it starts, with the other values the script gives
+// that variable.
+let payload: boolean | integer[] | string | null = load "game.payload", default: null
+say "A list?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  payload = [1]
+} else {
+  payload = "text"
+}
+save true as "game.payload"
+save payload == null as "game.payloadMissing"
+// A null test that `and` may skip keeps its read where it is, so the read keeps an open null.
+function mark {
+  save 1 as "game.marked"
+}
+say "Check?"
+// NOTE SX_LOAD_OPEN_NULL line 10: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+if (choose yes: "Yes", no: "No") == "yes" and load("game.marked", default: sexscriptLegacyValue(null)) == null {
+  say "Not marked."
+}
+// A number key's empty value is a number.
+function keep {
+  save 1.5 as "game.ratio"
+}
+let ratio = load "game.ratio", default: 0.0
+// NOTE SX_PLUS_OPERAND_TYPE line 14: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Ratio ${ratio + 1}"
+// A read in a parameter's default keeps its null too.
+// NOTE SX_LOAD_OPEN_NULL line 16: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+function greet(who = load("game.who", default: sexscriptLegacyValue(null))) {
+  say "Hello ${who}"
+}
+function remember {
+  save 2 as "game.who"
+}
+greet()
+// The helper's parameter takes a name apart from the script's own variable.
+save 3 as "game.count"
+// NOTE SX_LOAD_OPEN_NULL line 21: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+let value = load "game.count", default: sexscriptLegacyValue(null)
+while value == null {
+  value = askInteger "A number?", default: 1
+}
+// NOTE SX_PLUS_OPERAND_TYPE line 23: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Value ${value + 1}"
+exit

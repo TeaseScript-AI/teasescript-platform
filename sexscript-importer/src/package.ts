@@ -922,10 +922,6 @@ export function lowerPackage(
     const position = outputIndexes.indexOf(index);
     return position < 0 ? program : apart(shared.programs[position]!, false);
   });
-  // Calls in any file may pass null for a parameter whose default gives it a type; reads get defaults by the types of
-  // the keys of the whole package.
-  const nullable = withStorageDefaults(withNullableParameters([apartMain, ...apartPrograms]), true);
-  const main = nullable[0]!;
   const paths = files.map(
     (file, index) =>
       scripts.pathOf.get(index) ??
@@ -933,6 +929,23 @@ export function lowerPackage(
         ? packagePath(file.sourceName, scripts.root)
         : null),
   );
+  // Calls in any file may pass null for a parameter whose default gives it a type; reads get defaults by the types of
+  // the keys of the whole package, declared in the files it publishes.
+  const nullable = withStorageDefaults(
+    withNullableParameters([apartMain, ...apartPrograms]),
+    true,
+    {
+      published: [
+        legacyMain === null,
+        ...apartPrograms.map(
+          (program, index) =>
+            paths[index] !== null && paths[index] !== undefined && program.module === undefined,
+        ),
+      ],
+      main: legacyMain === null ? 0 : legacyMain + 1,
+    },
+  );
+  const main = nullable[0]!;
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
   const programs = withoutRepeatedChainText(nullable.slice(1), paths);
   return {

@@ -45,3 +45,14 @@ show("Pick " + pick)
 def roll = { save("game.pick", getRandom(6)) }
 if (loadBoolean("game.volume")) show("Loud.")
 def setVolume = { save("game.volume", getRandom(10)) }
+// A text variable that the script also gives null, or a value of a type that the importer cannot tell, holds that too.
+def dompic = loadString("game.dompic")
+if (getBoolean("Reset the picture?")) dompic = null
+if (dompic == null) show("No picture.")
+def pickOutfit = { -> [set: "first"] }
+def outfit = loadString("game.outfit")
+if (outfit == null) outfit = pickOutfit()
+// A legacy text read of a computed key is text too.
+def names = ["a", "b"]
+for (int n = 0; n < 2; n++) names[n] = loadString("game.name" + n)
+show(names.join(", "))
