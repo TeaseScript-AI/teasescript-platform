@@ -1459,8 +1459,8 @@ async function convert(
 
 // With the Player's default pacing, a text said at once (`instant`) ends the reading time of the text before it, so a
 // text whose legacy wait the reading time replaced is read in full on every path: after other statements, across a
-// call, after an ask that a condition may skip, and on a loop's next pass after `continue` (docs/RUNTIME.md "Pacing
-// gate").
+// call, after an ask that a condition may skip, on a loop's next pass after `continue`, and where computing a text, a
+// wait, or a value after an ask says it (docs/RUNTIME.md "Pacing gate").
 test(
   "a reading time that replaced a legacy wait runs in full before the next text",
   { skip: parserUnavailable },
@@ -1468,7 +1468,8 @@ test(
     const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
     assert.ok(typeof runtime === "object" && runtime !== null);
     // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probes use.
-    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime, completeAction } =
+      runtime as PacedRuntime;
     const sources = {
       statement: 'show("Good.")\nwait(1)\nint n = 20\nshow("Hold.")\nwait(20)',
       call: 'def hold = { show("Hold."); wait(20) }\nshow("Good.")\nwait(1)\nhold()',
@@ -1478,6 +1479,12 @@ test(
         'show("Good.")\nwait(1)\nif (false && getFile(null) != null) { show("No.") }\nshow("Hold.")\nwait(20)',
       continued:
         'for (int i = 0; i < 2; i++) {\n show("Hold " + i)\n wait(20)\n show("Good.")\n wait(1)\n if (i == 0) continue\n wait(10)\n}',
+      computedText:
+        'def content = { show("Good."); wait(1); return "Hold." }\nshowButton("Start")\nshow(content())\nwait(20)',
+      computedWait:
+        'def delay = { show("Good."); wait(1); return 20 }\nshowButton("Start")\nshow("Hold.")\nwait(delay())\nshow("Next.")\nwait(20)',
+      askThenText:
+        'def content = { show("Good."); wait(1); return true }\nshowButton("Start")\ndef same = getBoolean("Ready?") == content()\nshow("Hold.")\nwait(20)',
     };
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-reading-"));
     try {
@@ -1495,11 +1502,22 @@ test(
         let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
         note(step.events);
         for (let turn = 0; turn < 40 && step.snapshot.status === "waiting"; turn += 1) {
-          const deadline = step.snapshot.foregroundAction?.deadlineMs;
-          assert.equal(typeof deadline, "number", name);
-          const observed = observeTime(plan, step.snapshot, deadline!);
-          note(observed.events);
-          step = run(plan, observed.snapshot);
+          const action = step.snapshot.foregroundAction;
+          // A button is pressed and a choice takes its first option at once; time runs to the next deadline.
+          const answered =
+            action?.kind === "interaction"
+              ? completeAction(plan, step.snapshot, {
+                  actionId: action.actionId,
+                  actionKind: "interaction",
+                  interactionKind: action.interactionKind,
+                  payload:
+                    action.interactionKind === "button"
+                      ? { kind: "activate" }
+                      : { kind: "selectedOption", optionIndex: 0 },
+                })
+              : observeTime(plan, step.snapshot, action?.deadlineMs ?? NaN);
+          note(answered.events);
+          step = run(plan, answered.snapshot);
           note(step.events);
         }
         assert.equal(step.snapshot.status, "halted", name);
@@ -1516,7 +1534,18 @@ interface PacedEvent {
 }
 interface PacedSnapshot {
   status: string;
-  foregroundAction?: { deadlineMs?: number } | null;
+  foregroundAction?: {
+    kind?: string;
+    actionId?: number;
+    interactionKind?: string;
+    deadlineMs?: number;
+  } | null;
+}
+interface PacedCompletion {
+  actionId?: number | undefined;
+  actionKind: "interaction";
+  interactionKind?: string | undefined;
+  payload: { kind: "activate" } | { kind: "selectedOption"; optionIndex: number };
 }
 interface PacedRuntime {
   compileSource(source: string): { plan?: unknown };
@@ -1526,6 +1555,11 @@ interface PacedRuntime {
     plan: unknown,
     snapshot: PacedSnapshot,
     now: number,
+  ): { snapshot: PacedSnapshot; events: PacedEvent[] };
+  completeAction(
+    plan: unknown,
+    snapshot: PacedSnapshot,
+    completion: PacedCompletion,
   ): { snapshot: PacedSnapshot; events: PacedEvent[] };
 }
 

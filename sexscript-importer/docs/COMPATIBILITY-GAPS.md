@@ -591,9 +591,11 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   straight path before it, that no reading time that replaced a wait can still run: after a text said at once or
   without such a reading time, an ask, button, or choice that surely opens, media, or literal waits as long as a fixed
   text's reading time, with only statements without effects in between. Elsewhere (the start of a function, a loop's
-  body, or a script, after a call, or after a text with values whose length is unknown) the text keeps its reading
-  time and waits for the one before it (`SX_WAIT_KEPT_PACED`, `keptPaced`); its own reading time is shorter than the
-  kept wait after it, so only a pending reading time delays it. Computed waits, a wait that another wait follows, waits after
+  body, or a script, after a call or where computing the text calls something, or after a text with values whose
+  length is unknown) the text keeps its reading time and waits for the one before it (`SX_WAIT_KEPT_PACED`,
+  `keptPaced`). A fixed text's own reading time is shorter than the literal kept wait after it, so only a pending
+  reading time delays it; a text with values, or one before a computed wait, may also make the pause longer by its
+  own reading time. Computed waits, a wait that another wait follows, waits after
   the importer's system texts, and a loop's tick, a wait of a second at most after a text the loop's body builds anew
   each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`; whether ticks should become reading time is open
   to the owner), keep their `instant` text as before.

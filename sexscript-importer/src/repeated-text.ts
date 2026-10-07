@@ -541,7 +541,7 @@ const PURE_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 /** Whether evaluating this node itself, apart from its children, may have an effect: a call, a change, or an interaction. */
-function ownEffect(value: IrExpression): boolean {
+export function ownEffect(value: IrExpression): boolean {
   switch (value.kind) {
     case "call":
       return !PURE_CALLS.has(value.name);

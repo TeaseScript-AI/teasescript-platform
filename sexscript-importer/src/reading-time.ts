@@ -1,6 +1,6 @@
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
-import { hasEffect, withNestedBlocks } from "./repeated-text.ts";
+import { hasEffect, ownEffect, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
@@ -130,27 +130,31 @@ export function withoutCutReadingTimes(
     return [result, left];
   };
   const step = (item: IrStatement, running: number): [IrStatement, number] => {
-    // A message kept in a handle (withMessageHandles) is said as a `say` is.
+    // A message kept in a handle (withMessageHandles) is said as a `say` is, after its text is computed.
     if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
       const { instant, ...message } = item.value;
-      if (instant !== true || running === 0) return [item, 0];
+      const before = afterValues([message.value], running);
+      if (instant !== true || before === 0) return [item, 0];
       paced(item);
       return [{ ...item, value: message }, 0];
     }
     switch (item.kind) {
-      case "say":
+      case "say": {
+        // The text is computed first, which may say something itself.
+        const before = afterExpressions(item, running);
         if (item.instant === true) {
           // A loop's tick stays as the legacy script timed it.
-          if (running === 0 || item.tick === true) return [item, 0];
+          if (before === 0 || item.tick === true) return [item, 0];
           paced(item);
           const { instant: _instant, ...rest } = item;
           return [rest, 0];
         }
         return [item, item.readingTime === true ? readingLength(item.value) : 0];
+      }
       case "wait": {
         const { duration } = item;
         if (duration.kind !== "literal" || typeof duration.value !== "number")
-          return [item, running];
+          return [item, afterExpressions(item, running)];
         const milliseconds = item.unit === "ms" ? duration.value : duration.value * 1000;
         return [item, Math.max(0, running - milliseconds)];
       }
@@ -202,31 +206,48 @@ export function withoutCutReadingTimes(
 const LEAVING: ReadonlySet<string> = new Set(["goto", "exit", "return", "break", "continue"]);
 
 /**
- * The reading time that may run after a statement's own expressions: none after an ask, a button, or a choice that
- * surely opens, unknown after another effect such as a call, and as before without effects.
+ * The reading time that may run after a statement's own expressions: unknown after an effect such as a call, which
+ * may say a text; otherwise none after an ask, a button, or a choice that surely opens; and as before without effects.
  */
 function afterExpressions(statement: IrStatement, running: number): number {
   if (LEAVING.has(statement.kind)) return Infinity;
-  let opens = false;
-  let effect = false;
+  const values: IrExpression[] = [];
   mapOwnExpressions(statement, (value) => {
-    opens ||= surelyAsks(value);
-    effect ||= hasEffect(value);
+    values.push(value);
     return value;
   });
-  return opens ? 0 : effect ? Infinity : running;
+  return afterValues(values, running);
 }
 
-/** Whether evaluating the value surely opens an ask, a button, or a choice, not on one side of `and` or `or` only. */
-function surelyAsks(value: IrExpression): boolean {
-  if (
+function afterValues(values: readonly IrExpression[], running: number): number {
+  if (values.some(effectBesidesAsks)) return Infinity;
+  return values.some(surelyAsks) ? 0 : running;
+}
+
+/** Whether evaluating the value has an effect other than opening an ask, a button, or a choice. */
+function effectBesidesAsks(value: IrExpression): boolean {
+  if (!asking(value) && ownEffect(value)) return true;
+  let found = false;
+  mapChildren(value, (child) => {
+    found ||= effectBesidesAsks(child);
+    return child;
+  });
+  return found;
+}
+
+function asking(value: IrExpression): boolean {
+  return (
     value.kind === "input" ||
     value.kind === "button" ||
     value.kind === "choice" ||
     value.kind === "listChoice" ||
     (value.kind === "call" && value.name === "askImage")
-  )
-    return true;
+  );
+}
+
+/** Whether evaluating the value surely opens an ask, a button, or a choice, not on one side of `and` or `or` only. */
+function surelyAsks(value: IrExpression): boolean {
+  if (asking(value)) return true;
   if (value.kind === "binary")
     return value.operator === "and" || value.operator === "or"
       ? surelyAsks(value.left)
