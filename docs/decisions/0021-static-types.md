@@ -135,11 +135,12 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    unknown type.
 2. The key keeps one type by rule 1, decided by the values saved under it in checking order (rule 1.6). Saving `null`,
    `delete`, and a value whose type the compiler cannot know decide nothing; a saved `T?` contributes `T`. Saving a
-   value of another type is an error that names the first save, and its file when that is another one.
-3. A key holds a union only when the save that decides it stores a variable or parameter with a declared type, or the
-   result of a function with a declared result type. The key then takes that declared type without its `null`, also
-   where narrowing knows a narrower type at the save (rule 5.2), and the type stays strict like any declared type.
-   Mixing types without such a save is an error that names this fix.
+   value of another type is an error that names the line that decided the key, and its file when that is another one.
+3. A key holds a union only when the save or default that decides it (rule 6.4) is a variable or parameter with a
+   declared type, or the result of a function with a declared result type. The key then takes that declared type
+   without its `null`, also where narrowing knows a narrower type there (rule 5.2), and the type stays strict like any
+   declared type. A later union does not widen a key that is already decided. Mixing types without such a deciding
+   value is an error that names this fix.
 4. Saves decide before `load` defaults, whatever their order. A default must fit what the saves decide; where they
    decide nothing, or leave a part open, such as the elements of a saved `[]`, the defaults decide it in checking
    order. An inferred `integer` widens to `number` by rule 1.2 when a save or default stores a non-whole number. The

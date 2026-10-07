@@ -3123,14 +3123,15 @@ let level = load "level", default: 1               // compact form
 `load` evaluates its key first. When the key holds a value that fits the key's type, if it has one, `load` returns a
 copy without evaluating the default. Otherwise it evaluates and returns the default, or returns `null` without one.
 `load` never writes: the default is not stored. Only `save` creates or changes a stored value, apart from the Player's
-Debug storage editor, a debugging tool whose edits the next `load` returns (see `RUNTIME.md`, Script storage).
+Debug storage editor, a debugging tool whose edits the next `load` reads like any stored value (see `RUNTIME.md`, Script
+storage).
 
 A key written as one string literal without `${...}`, also in parentheses, is one storage place for the whole script, in
 every file, function, and handler. It keeps one type, like a variable ([§12](#12-variable-declarations),
 [ADR 0021 §6](../decisions/0021-static-types.md)): the values saved under it decide the type, and a default must fit
 that type, or decides it when no save does. Saving `null`, `delete`, and a value whose type the compiler cannot know
 decide nothing. Saving a value of another type is a compile error. To keep values of different types under one key on
-purpose, the save that decides the key stores a variable with a declared union type:
+purpose, the save or default that decides the key is a variable with a declared union type:
 
 ```text
 let level: integer | string = 5
