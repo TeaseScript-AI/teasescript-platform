@@ -18,8 +18,9 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  * list ({@link replay}).
  *
  * Each path runs in an engine-owned runtime session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between
- * operations. The whole state is copied and checked only where the explorer needs it: one export per step for the
- * search's state hash and store, an import to go on from a stored state, and a fork per input tried from one state.
+ * operations. The explorer handles the whole state only where it needs it: one checked export per step for the
+ * search's state hash and store, a checked import to go on from a stored state, and a trusted copy (a fork) for each
+ * input tried from one state but the last.
  */
 
 /** A runtime result read field by field. */
