@@ -10,6 +10,9 @@ if (typed.startsWith("write") && !typed.endsWith("!")) {
 show(typed.replaceAll(" ", "_"))
 def parts = "red,green,blue".split(",")
 show(parts[1] + " " + typed.substring(0, 5))
+// A separator with its regular-expression metacharacters escaped splits at the plain text.
+def opponent = "Alexis|26".split("\\|")
+show(opponent[0])
 if ("Yes".equalsIgnoreCase("YES")) show("same")
 show("x".replace("x", "\$&"))
 if (typed.contains("this")) show("At " + typed.indexOf("this"))

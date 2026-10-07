@@ -199,4 +199,12 @@ for item in 0..=2 {
   positions.add(item)
 }
 say "Positions ${positions.length}"
+let rows = []
+// NOTE SX_SPLIT_TRAILING_EMPTY line 62: Java split() drops trailing empty parts; TeaseScript split() keeps them.
+let collectResult = []
+for item in "a,b".split(",") {
+  collectResult.add(item)
+}
+rows.add(collectResult)
+say "Rows ${rows.length}"
 exit

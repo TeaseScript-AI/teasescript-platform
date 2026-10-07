@@ -3127,10 +3127,12 @@ function hoistDeferred(
     variables.set(name, inferType(part, context.types));
     const listElements = new Map(context.types.listElements ?? []);
     const receiver = part === deferred ? asNode(deferred.object) : null;
-    const result =
-      loop?.name === "collect" ? closureResult(closureArgument(loop.arguments)!.closure) : null;
+    // collect() without a closure keeps each element as it is, as findAll keeps those it selects.
+    const closure = loop?.name === "collect" ? closureArgument(loop.arguments) : null;
+    const result = closure === null ? null : closureResult(closure.closure);
     const elements =
-      loop?.name === "findAll" && receiver !== null
+      (loop?.name === "findAll" || (loop?.name === "collect" && closure === null)) &&
+      receiver !== null
         ? listElementType(receiver, context)
         : result !== null
           ? inferType(result.value, context.types)
@@ -3680,6 +3682,7 @@ const PURE_OBJECT_METHODS = new Set([
   "isEmpty",
   "length",
   "size",
+  "split",
   "toLowerCase",
   "toString",
   "toUpperCase",
@@ -11929,7 +11932,8 @@ function textOperation(
       // Java split() takes a regular expression and drops trailing empty parts.
       const separator = literalText(argumentsNodes[0]);
       if (argumentsNodes.length !== 1 || separator === null || separator === "") return undefined;
-      if (/[\\^$.|?*+()[\]{}]/u.test(separator)) return undefined;
+      // Plain characters, and metacharacters escaped as in the patterns `\|` or `\.`, match themselves.
+      if (!/^(?:[^\\^$.|?*+()[\]{}]|\\[^A-Za-z0-9])+$/u.test(separator)) return undefined;
       addDiagnostic(
         context,
         "SX_SPLIT_TRAILING_EMPTY",
@@ -11937,8 +11941,13 @@ function textOperation(
         "Java split() drops trailing empty parts; TeaseScript split() keeps them.",
         node.span,
       );
-      operation = "split";
-      break;
+      const target = lowerExpression(targetNode, context);
+      if (target === null) return null;
+      return member(
+        "split",
+        [{ kind: "literal", value: separator.replace(/\\(.)/gu, "$1") }],
+        target,
+      );
     }
     case "substring":
       if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;

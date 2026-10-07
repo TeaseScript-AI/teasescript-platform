@@ -43,6 +43,10 @@ say typed.replace(" ", "_")
 // NOTE SX_SPLIT_TRAILING_EMPTY line 11: Java split() drops trailing empty parts; TeaseScript split() keeps them.
 let parts = "red,green,blue".split(",")
 say "${parts[1]} ${typed.substring(0, 5)}"
+// A separator with its regular-expression metacharacters escaped splits at the plain text.
+// NOTE SX_SPLIT_TRAILING_EMPTY line 14: Java split() drops trailing empty parts; TeaseScript split() keeps them.
+let opponent = "Alexis|26".split("|")
+say opponent[0]
 if "Yes".lowercase() == "YES".lowercase() {
   say "same"
 }
@@ -57,7 +61,7 @@ let mixed: (number | boolean)[] = [1, 2.5, true]
 say "Mixed: [${mixed.join(", ")}]"
 say "[${items.join(", ")}]"
 // Java counted an emoji as two characters.
-// NOTE SX_TEXT_CODE_POINTS line 23: Java counted this text in UTF-16 units, so a character such as an emoji counted twice; TeaseScript length counts code points, which changes the result here.
+// NOTE SX_TEXT_CODE_POINTS line 26: Java counted this text in UTF-16 units, so a character such as an emoji counted twice; TeaseScript length counts code points, which changes the result here.
 say "Smile count: ${"😀!".length}"
 // Groovy += on text appended the value's text.
 let trail = ""
@@ -68,7 +72,7 @@ trail += "!"
 say trail
 // tokenize() splits at any delimiter character and drops empty parts; String.format() pads and rounds.
 let fields = sexscriptLegacyTokenize("a,b,,c;d", ",;")
-// NOTE SX_FORMAT line 33: Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.
+// NOTE SX_FORMAT line 36: Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.
 let stamp = "07:05, ${sexscriptLegacyFixed(12.345, 1, 10)}%"
 say "${fields.length} fields at ${stamp}"
 exit

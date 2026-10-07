@@ -58,3 +58,6 @@ show("Slots ${slots.size()} ${seats.size()}")
 // collect() without a closure collects each element as it is.
 def positions = (0..2).collect()
 show("Positions ${positions.size()}")
+def rows = []
+rows.add("a,b".split(",").collect())
+show("Rows ${rows.size()}")
