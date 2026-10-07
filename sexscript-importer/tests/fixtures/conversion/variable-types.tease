@@ -195,4 +195,14 @@ if implement == "toys.paddle" {
 } else {
   say "No implement"
 }
+// A Groovy `double`, or a decimal literal such as `1.0`, takes fractions later.
+let share = 1.0
+let tally = 0.0
+function scale(factor) {
+  share = factor * 2
+  // NOTE SX_PLUS_OPERAND_TYPE line 127: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  tally = factor + 1
+}
+scale(0.25)
+say "Share ${share} ${tally}"
 exit

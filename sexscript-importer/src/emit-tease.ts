@@ -298,7 +298,9 @@ export function emitExpression(expression: IrExpression): string {
     case "literal":
       return typeof expression.value === "string"
         ? (blockString([{ text: expression.value }]) ?? `"${escapeStringText(expression.value)}"`)
-        : String(expression.value);
+        : expression.decimal === true && /^-?\d+$/u.test(String(expression.value))
+          ? `${expression.value}.0`
+          : String(expression.value);
     case "duration":
       return `${expression.value} ${expression.unit}`;
     case "template": {

@@ -210,7 +210,8 @@ export interface IrSwitchCase {
 
 export type IrExpression =
   /** `action` marks the ID of a function kept as a value; renaming the function renames the ID. */
-  | { kind: "literal"; value: string | number | boolean | null; action?: true }
+  /** `decimal` writes a whole number as a decimal (`1.0`), which TeaseScript types as a number rather than an integer. */
+  | { kind: "literal"; value: string | number | boolean | null; action?: true; decimal?: true }
   | { kind: "variable"; name: string }
   /** `set` marks a set literal `set[...]` (V30 §16). */
   | { kind: "list"; items: IrExpression[]; set?: true }

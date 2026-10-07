@@ -4055,11 +4055,23 @@ function lowerDeclaration(
         })),
     ];
   }
+  // A Groovy `double` or a decimal literal such as `0.0` takes fractions later, which a TeaseScript variable that starts
+  // with a whole number does not, so its whole start is written as a decimal: `0.0`.
+  const fractional =
+    value.kind === "literal" &&
+    typeof value.value === "number" &&
+    Number.isInteger(value.value) &&
+    (FRACTIONAL_TYPES.has(declaredType.replace(/^java\.(lang|math)\./u, "")) ||
+      writtenDecimal(right, context));
   return [
     {
       kind: "let",
       name,
-      value: TEXT_TYPES.has(declaredType) ? asStoredText(value, right, context) : value,
+      value: TEXT_TYPES.has(declaredType)
+        ? asStoredText(value, right, context)
+        : fractional
+          ? { ...value, decimal: true }
+          : value,
       span,
       ...(optionalType === null ? {} : { type: `${optionalType}?` }),
       ...(INTEGER_TYPES.has(declaredType) ? { integer: true as const } : {}),
@@ -4068,6 +4080,21 @@ function lowerDeclaration(
         : {}),
     },
   ];
+}
+
+/** Java types of numbers that hold fractions. */
+const FRACTIONAL_TYPES = new Set(["float", "Float", "double", "Double", "BigDecimal", "Number"]);
+
+/** Whether a Groovy number literal is written with a fraction or an exponent, as `0.0`, `-1.0`, or `1d`. */
+function writtenDecimal(node: AstNode, context: LowerContext): boolean {
+  const literal = node.kind === "unaryMinus" ? asNode(node.value) : node;
+  const span = literal?.kind === "constant" ? literal.span : null;
+  if (span === null || span === undefined) return false;
+  // A negative literal's span may cover its sign only, so the literal is read from there on.
+  const rest = context.sourceLines[span.line - 1]?.slice(span.column - 1) ?? "";
+  return /^-?\s*(?:[0-9_]*\.[0-9_]+(?:[eE][-+]?[0-9]+)?[dDfFgG]?|[0-9_]+(?:[eE][-+]?[0-9]+[dDfFgG]?|[dDfF]))(?![\w.])/u.test(
+    rest,
+  );
 }
 
 /** Whether a Groovy value may be text, which an integer variable stored as a character code ("3" became 51). */

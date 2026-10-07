@@ -121,3 +121,9 @@ def chooseImplement = { -> implement = pickOwned(["toys.paddle", "toys.ruler"]) 
 chooseImplement()
 if (implement == "toys.paddle") show("Paddle")
 else show("No implement")
+// A Groovy `double`, or a decimal literal such as `1.0`, takes fractions later.
+def share = 1.0
+double tally = 0
+def scale = { factor -> share = factor * 2; tally = factor + 1 }
+scale(0.25)
+show("Share ${share} ${tally}")
