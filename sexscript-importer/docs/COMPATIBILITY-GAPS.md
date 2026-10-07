@@ -593,8 +593,10 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   text's reading time, with only statements without effects in between. Elsewhere (the start of a function, a loop's
   body, or a script, after a call, or after a text with values whose length is unknown) the text keeps its reading
   time and waits for the one before it (`SX_WAIT_KEPT_PACED`, `keptPaced`); its own reading time is shorter than the
-  kept wait after it, so only a pending reading time delays it. Computed waits, a wait that another wait follows, and waits after
-  the importer's system texts keep their `instant` text as before.
+  kept wait after it, so only a pending reading time delays it. Computed waits, a wait that another wait follows, waits after
+  the importer's system texts, and a loop's tick, a wait of a second at most after a text the loop's body builds anew
+  each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`; whether ticks should become reading time is open
+  to the owner), keep their `instant` text as before.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is

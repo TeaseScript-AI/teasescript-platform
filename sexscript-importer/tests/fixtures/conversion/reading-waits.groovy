@@ -32,6 +32,12 @@ showButton("Done")
 show("Stay there.")
 wait(30)
 
+// A wait of a second at most after a text that a loop builds anew each pass is the loop's tick, as in a countdown, and
+// stays with its text said at once.
+for (int left = 3; left > 0; left--) {
+    show("Starting in " + left)
+    wait(1)
+}
 // A kept wait after a split text keeps what the earlier paragraphs' reading time leaves.
 show("First paragraph has a few words.\n\nSecond paragraph.\n\nLast one.")
 wait(20)

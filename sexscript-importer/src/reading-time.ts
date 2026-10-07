@@ -10,6 +10,8 @@ const WORD_MS = 300;
 const CHARACTER_MS = 30;
 // A wait up to this many times the reading time of the text before it timed its reading (owner decision 2026-10-07).
 const READING_WAIT_RATIO = 1.5;
+// The longest wait that is a loop's tick, after a text the loop builds anew each pass.
+const TICK_MS = 1000;
 
 const visibleText = await loadVisibleText();
 
@@ -25,7 +27,9 @@ const visibleText = await loadVisibleText();
  * The reading time is measured on the whole legacy text, before withParagraphs splits it and withoutRepeatedText
  * shortens it, as the visible text of its message markup; a value interpolated at runtime counts as empty, so the
  * measure is the shortest reading time the text can have. A wait stays as it is where another wait follows it, a pause
- * the author made, and after the system speaker's text, which the importer adds.
+ * the author made; after the system speaker's text, which the importer adds; and where it is a loop's tick, a second
+ * at most after a text the loop's body builds anew each pass, as a clock or a countdown does (whether such ticks
+ * should become reading time is open to the owner).
  */
 export function withReadingTimes(
   statements: IrStatement[],
@@ -34,8 +38,12 @@ export function withReadingTimes(
   const report = (code: string, message: string, statement: IrStatement): void => {
     diagnostics.push({ code, severity: "info", message, span: statement.span });
   };
-  const block = (items: IrStatement[]): IrStatement[] => {
-    const nested = items.map((item) => withNestedBlocks(item, block));
+  const block = (items: IrStatement[], loopBody = false): IrStatement[] => {
+    const nested = items.map((item) =>
+      withNestedBlocks(item, (body) =>
+        block(body, item.kind === "while" || item.kind === "repeat" || item.kind === "for"),
+      ),
+    );
     // The index of the next statement that is no blank line or comment, -1 for none.
     const next: number[] = Array.from(nested, () => -1);
     for (let index = nested.length - 2; index >= 0; index -= 1)
@@ -61,6 +69,16 @@ export function withReadingTimes(
           statement,
         );
         result[index] = { ...statement, instant: true };
+        return;
+      }
+      // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown.
+      if (loopBody && milliseconds <= TICK_MS && builtAtRuntime(statement.value)) {
+        report(
+          "SX_WAIT_TICK",
+          "The legacy wait after this text, which the loop builds anew each pass, is the loop's tick, a clock or a countdown, so it stays and the text appears without reading time.",
+          statement,
+        );
+        result[index] = { ...statement, instant: true, tick: true };
         return;
       }
       report(
@@ -122,7 +140,8 @@ export function withoutCutReadingTimes(
     switch (item.kind) {
       case "say":
         if (item.instant === true) {
-          if (running === 0) return [item, 0];
+          // A loop's tick stays as the legacy script timed it.
+          if (running === 0 || item.tick === true) return [item, 0];
           paced(item);
           const { instant: _instant, ...rest } = item;
           return [rest, 0];
@@ -247,6 +266,12 @@ function readingLength(value: IrExpression): number {
 
 function significant(statement: IrStatement): boolean {
   return statement.kind !== "blank" && statement.kind !== "comment";
+}
+
+/** Whether a text holds a value computed at runtime, or is one. */
+function builtAtRuntime(value: IrExpression): boolean {
+  if (value.kind === "literal") return false;
+  return value.kind !== "template" || value.parts.some((part) => "value" in part);
 }
 
 /** The duration of a wait of a number literal, in milliseconds; null for a computed one. */
