@@ -129,7 +129,21 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   the ask with the ask's speaker; otherwise it stays a `say` before the statement. The report counts the asks that
   took their question (`askQuestions`, `SX_ASK_QUESTION`; 890 in 108 selected units). The same holds for the photo
   that `askImage` asks for (#636): a text said right before it fills a missing message, and one that its message
-  repeats goes.
+  repeats goes. A text is not folded into an ask across something with an effect that the statement runs first, as in
+  `n = before() + getInteger(null)`.
+- Paragraphs (owner decision 2026-10-07): the legacy display showed one text, so authors separated what a chat shows
+  as separate messages with a blank line. A text whose literal parts hold a blank line becomes one `say` per paragraph,
+  in order, with the same speaker; a blank line inside an interpolated value or a text built at runtime stays. The
+  pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it, and the
+  `wait` stays after the last piece. An ask's question says its earlier paragraphs before the ask and keeps the last as
+  the question (also `askImage`'s message); a form's question keeps its first paragraph and says the others after the
+  fields as its `outro:`, where neither they nor the fields have effects (the outro is computed after the fields).
+  `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
+  whose blank lines lay them out stay whole: two aligned lines, a ruled line, an empty box (`[  ]`), a table row, or a
+  block of value rows (`Score: 12`, `Time unit = ${unit}`; three, or two that make up half the text). A unit whose
+  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). Corpus: 10,585 says split in 172 units,
+  172 questions in 50 units, 254 single paragraphs trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
+  outros (no form question in the corpus has a literal blank line); report counter `paragraphs`.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
@@ -593,7 +607,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-07, at importer `c83f938a` with `main` `068015e2` merged in.
+Measured on the selected large corpus on 2026-10-07, after the paragraph rule, with `main` `8a510558` merged in; the
+counts are those measured at importer `c83f938a`, which no later rule changed.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
