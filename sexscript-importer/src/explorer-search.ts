@@ -1290,7 +1290,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (items === null || replayed === null || coverageAtStart === null) return null;
     const stamp = new Uint32Array(items.size);
     let generation = 0;
-    /** The items of every step on the path to a state (through its earlier sessions) and of one more step. */
+    /**
+     * The items of every step on the path to a state (through its earlier sessions) and of one more step; without the
+     * clock items of what play covered, which no report label needs.
+     */
     const pathItems = (last: Node | null, startIndex: number, own: Uint32Array) => {
       generation += 1;
       const found: number[] = [];
@@ -1300,7 +1303,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         for (const item of list) {
           if (stamp[item] === generation) continue;
           stamp[item] = generation;
-          found.push(item);
+          const play = items.playOf(item);
+          if (play < 0 || covered[play] === 0) found.push(item);
         }
       };
       add(own);
@@ -1417,6 +1421,13 @@ function corpusItems(instructions: readonly Data[], files: readonly string[]) {
     lineIds,
     lines,
     size: 2 * lines + 2 * ways,
+    /** The play item of a clock item; -1 for a play item. */
+    playOf: (item: number): number =>
+      item < lines || (item >= 2 * lines && item < 2 * lines + ways)
+        ? -1
+        : item < 2 * lines
+          ? item - lines
+          : item - ways,
     /** A step's items: the lines it executed and the condition ways it took, as play or as clock coverage. */
     of: (step: Step, clock: boolean): Uint32Array => {
       const found = new Set<number>();

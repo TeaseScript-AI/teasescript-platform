@@ -245,7 +245,8 @@ them at the top.
 
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
-node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] <unit-dir>... --out <dir>
+node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] \
+  [--corpus <corpus-dir> [--rounds N]] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -335,6 +336,23 @@ future is unknown. A group that leads to an escaping group escapes too. Each str
 remaining groups that no explored input leaves is one trap. A state where the player can do nothing and nothing
 happens is a `stuck` trap. A loop that waits for a word or number the candidates miss, or for a clock time, is also
 reported as a trap.
+
+With `--corpus`, a run starts where earlier runs ended. `<corpus-dir>/<unit>.json` holds input lists only: each entry
+is a seed and a path from the start, with its earlier sessions. The run first replays the entries of its seed through
+the search's own steps, each session from the storage the one before it left, which rebuilds the coverage, the storage
+sessions left, and the states; an input is applied to a state once. The search then goes on with the rest of the
+budget, and states the replay went on from, which an earlier run expanded, come after all others. An entry is `stale`
+from the first input that no longer fits the pending action (another option or button label, another kind of ask,
+another deadline) or that the runtime rejects; it is replayed up to there. At the end the corpus is written back
+minimized: the paths to the crashes and traps, then, by greedy set cover over lines and condition ways (play and clock
+apart), paths of steps that covered one first, until they cover all the run covered, without one that the others cover;
+entries of another seed, and those the budget left unreplayed, stay as they are. The report's `corpus` block has the
+entries loaded, replayed, stale, and written, the replay's steps and time, the play coverage at the start (from the
+corpus) and at the end, and the file's size. The file also records the `contentHash` and seed of the run that wrote it
+and whether that run was exhausted; a unit exhausted with the same content and seed is skipped. `--rounds N` explores
+the units in N rounds: the first with the budget, each later one with twice the budget before and only the units not
+exhausted yet. Directed attempts and session chains start over in each run; what they reached comes back with the
+corpus.
 
 The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.
 
