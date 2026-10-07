@@ -204,7 +204,7 @@ export class RuntimeSession {
   public fork(options?: RuntimeSessionOptions): RuntimeSession {
     return this.#read((state) => {
       const capabilities =
-        options === undefined ? this.#capabilities : sessionCapabilities(options);
+        (options === undefined ? undefined : sessionCapabilities(options)) ?? this.#capabilities;
       return new RuntimeSession(CREATE, this.#plan, copyPlainData(state, false), capabilities);
     });
   }
@@ -329,13 +329,13 @@ function completionOptions(options: ActionCompletionOptions): ActionCompletionOp
   };
 }
 
-/** The capabilities `options` gives, read once into a plain record, after checking their shape. */
-function sessionCapabilities(options: RuntimeSessionOptions): RuntimeCapabilities {
+/** The capabilities `options` gives, read once into a plain record after checking their shape, or `undefined`. */
+function sessionCapabilities(options: RuntimeSessionOptions): RuntimeCapabilities | undefined {
   if (typeof options !== "object" || options === null) {
     throw new TypeError("Runtime session options must be an object.");
   }
   const capabilities = options.capabilities;
-  if (capabilities === undefined) return {};
+  if (capabilities === undefined) return undefined;
   if (typeof capabilities !== "object" || capabilities === null) {
     throw new TypeError("capabilities must be an object.");
   }
@@ -362,7 +362,7 @@ export function createRuntimeSession(
   snapshot: RuntimeSnapshot,
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
-  const capabilities = sessionCapabilities(options);
+  const capabilities = sessionCapabilities(options) ?? {};
   const captured = captureExecutableData(plan, snapshot);
   return new RuntimeSession(CREATE, captured.plan, captured.snapshot, capabilities);
 }
@@ -373,7 +373,7 @@ export function createFreshRuntimeSession(
   fresh: FreshRuntimeOptions = {},
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
-  const capabilities = sessionCapabilities(options);
+  const capabilities = sessionCapabilities(options) ?? {};
   const capturedPlan = captureOrReuseInstructionPlan(plan);
   if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
     throw new TypeError(
@@ -394,7 +394,7 @@ export function restoreRuntimeSession(
   checkpoint: unknown,
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
-  const capabilities = sessionCapabilities(options);
+  const capabilities = sessionCapabilities(options) ?? {};
   return adoptCheckpoint(restoreCheckpoint(checkpoint), capabilities);
 }
 
@@ -403,7 +403,7 @@ export function deserializeRuntimeSession(
   json: string,
   options: RuntimeSessionOptions = {},
 ): RuntimeSession {
-  const capabilities = sessionCapabilities(options);
+  const capabilities = sessionCapabilities(options) ?? {};
   return adoptCheckpoint(deserializeCheckpoint(json), capabilities);
 }
 

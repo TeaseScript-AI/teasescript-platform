@@ -401,3 +401,19 @@ test("a fork keeps the property order of an imported snapshot, and an ended sess
       (error) => error instanceof RuntimeSessionError && error.cause === failing,
     );
 });
+
+test("a fork keeps its parent's capabilities unless its options give others", () => {
+  const plan = compileValidPlan("let value = answer()\nsay value, instant\nexit", {
+    builtins: ["answer"],
+  });
+  const parent = createRuntimeSession(plan, createImmediatePacingRuntimeSnapshot(plan), {
+    capabilities: { builtins: { answer: () => 42 } },
+  });
+  const said = (session: RuntimeSession) =>
+    session.run().events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  // EVIDENCE: fixture: an explicit undefined, which an untyped caller may pass, is still no capabilities.
+  const explicitlyNone = { capabilities: undefined } as never;
+  for (const options of [undefined, {}, explicitlyNone])
+    assert.deepEqual(said(parent.fork(options)), ["42"]);
+  assert.deepEqual(said(parent.fork({ capabilities: { builtins: { answer: () => 7 } } })), ["7"]);
+});
