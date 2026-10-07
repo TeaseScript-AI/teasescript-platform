@@ -75,7 +75,17 @@ export type IrStatement =
       name: string;
       properties: Array<{ name: string; value: IrExpression }>;
     })
-  | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
+  /**
+   * `visible` shows a countdown (`timer`). `afterText` marks a literal wait right after a text that is longer than 1.5
+   * times the text's reading time and stays (withReadingTimes), which withParagraphs shortens when it splits the text.
+   */
+  | (IrBase & {
+      kind: "wait";
+      duration: IrExpression;
+      visible: boolean;
+      unit: "s" | "ms";
+      afterText?: true;
+    })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   /**

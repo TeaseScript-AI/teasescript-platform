@@ -134,8 +134,10 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - Paragraphs (owner decision 2026-10-07): the legacy display showed one text, so authors separated what a chat shows
   as separate messages with a blank line. A text whose literal parts hold a blank line becomes one `say` per paragraph,
   in order, with the same speaker; a blank line inside an interpolated value or a text built at runtime stays. The
-  pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it, and the
-  `wait` stays after the last piece. An ask's question says its earlier paragraphs before the ask and keeps the last as
+  pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it. The wait
+  started when the whole text appeared, so a kept wait after the last piece keeps only what the reading time of the
+  earlier pieces leaves, in whole seconds, and goes when nothing is left (owner decision 2026-10-07;
+  `readingWaits.shortened` and `dropped`). An ask's question says its earlier paragraphs before the ask and keeps the last as
   the question (also `askImage`'s message); a form's question keeps its first paragraph and says the others after the
   fields as its `outro:`, where neither they nor the fields have effects (the outro is computed after the fields).
   `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
@@ -550,9 +552,15 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   counted as `missingMedia` in the report, 190 paths in 18 selected units; a photo the package copies to the path is
   no missing file). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General MIDI soundfont, then
   ffmpeg).
-- Pacing: legacy `show()` displayed its text at once and a `wait()` right after it set the timing, so text shown
-  directly before a wait becomes `say …, instant`; other text keeps TeaseScript's reading time (converter owner,
-  2026-10-05).
+- Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
+  the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
+  more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an
+  ask; the time is measured on the whole legacy text's visible words, without its interpolated values (owner decision
+  2026-10-07; `SX_WAIT_READING`, counted as `readingWaits.replaced`). A longer wait is time for an action or a task and
+  stays, and its text becomes `say …, instant` (converter owner, 2026-10-05; `readingWaits.kept`), except right after a
+  text whose wait went: that text keeps its reading time, which the wait covers, since `instant` would cut short the
+  reading time of the text before it (`keptPaced`). Computed waits, a wait that another wait follows, and waits after
+  the importer's system texts keep their `instant` text as before.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is

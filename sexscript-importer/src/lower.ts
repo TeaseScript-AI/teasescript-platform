@@ -41,6 +41,7 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
 import { withParagraphs } from "./paragraphs.ts";
+import { withReadingTimes } from "./reading-time.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1427,7 +1428,10 @@ export function lowerParsedFile(
     ...withParagraphs(
       withAskQuestions(
         withoutRepeatedText(
-          withoutBlankText(typedStatements, context.diagnostics, mixin === null),
+          withReadingTimes(
+            withoutBlankText(typedStatements, context.diagnostics, mixin === null),
+            context.diagnostics,
+          ),
           context.diagnostics,
         ),
         context.diagnostics,
@@ -1613,7 +1617,10 @@ function lowerHelperCompilationUnit(
       lowered.leadingComments = leadingComments;
     statements.push(lowered);
   }
-  const typedStatements = withEnforcedTypes([...fieldStatements, ...statements], baseContext);
+  const typedStatements = withReadingTimes(
+    withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+    baseContext.diagnostics,
+  );
   return {
     sourceName: file.sourceName,
     metadata: null,
@@ -2224,23 +2231,7 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withInstantShows(
-    withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context)),
-  );
-}
-
-/**
- * Legacy `show()` displayed its text at once, and the `wait()` right after it set the timing, so text shown directly
- * before a wait appears without reading time (converter owner decision 2026-10-05); counting loops keep their pace.
- */
-function withInstantShows(statements: IrStatement[]): IrStatement[] {
-  return statements.map((statement, index) => {
-    if (statement.kind !== "say") return statement;
-    const next = statements
-      .slice(index + 1)
-      .find((item) => item.kind !== "blank" && item.kind !== "comment");
-    return next?.kind === "wait" && !next.visible ? { ...statement, instant: true } : statement;
-  });
+  return withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context));
 }
 
 /**

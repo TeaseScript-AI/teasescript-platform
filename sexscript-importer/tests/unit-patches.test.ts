@@ -111,7 +111,7 @@ test(
       converted(await convertUnit(options));
       const main = path.join(options.outputRoot, "Walk/start.tease");
       const generated = await readFile(main, "utf8");
-      assert.match(generated, /say "Hello", instant\nwait 1\nsay "Bye"\nexit/u);
+      assert.match(generated, /say "Hello"\nsay "Bye"\nexit/u);
 
       const outputPatch = {
         id: "farewell",
@@ -169,7 +169,7 @@ test(
         compiles: true,
         failingFiles: [],
         errorsByMessage: {},
-        run: { status: "halted", failure: null, steps: 1 },
+        run: { status: "halted", failure: null, steps: 0 },
       });
     } finally {
       await rm(work, { recursive: true, force: true });

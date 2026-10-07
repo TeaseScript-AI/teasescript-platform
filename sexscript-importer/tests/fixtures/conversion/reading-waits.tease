@@ -1,0 +1,36 @@
+// A longer wait stays, time for a task, and its text appears at once; a wait that timed the reading goes, also in
+// milliseconds.
+say "Do ten push-ups now.", instant
+wait 30
+say "Well done."
+say "Breathe."
+
+// Also before a button, where the player decides when to go on.
+say "Ready?"
+showButton "Yes"
+
+// A text after one whose wait went keeps its reading time before its own long wait.
+say "Good."
+say "Now hold it."
+wait 20
+
+// A kept wait after a split text keeps what the earlier paragraphs' reading time leaves.
+say "First paragraph has a few words."
+say "Second paragraph."
+say "Last one."
+wait 15
+say "One."
+say "Two."
+say "Three."
+say "Four."
+say "Five."
+
+// A computed wait, and a run of waits, stay as they are.
+let n = askInteger "How long?", default: 3
+say "Waiting ${n} seconds.", instant
+wait n
+say "Pause", instant
+wait 1
+wait 2
+say "Done."
+exit

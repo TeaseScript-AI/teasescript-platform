@@ -1,6 +1,5 @@
 // A package with one script: it becomes the package's main.tease.
-say "Kneel.", instant
-wait 2
+say "Kneel."
 // The file chooser asks for a photo, which the Player answers with an image.
 // NOTE SX_FILE_PHOTO line 5: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 showImage askImage("Show me how you kneel.")

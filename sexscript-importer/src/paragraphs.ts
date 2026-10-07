@@ -7,6 +7,7 @@ import {
   isAsk,
   withNestedBlocks,
 } from "./repeated-text.ts";
+import { shortestReadingTime } from "./reading-time.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 type Part = { text: string } | { value: IrExpression };
@@ -23,7 +24,8 @@ const BLANK_LINES = /\n(?:[^\S\n]*\n)+/u;
  * and with the same speaker; a blank line inside an interpolated value stays.
  * - A `say` becomes one `say` per paragraph, each with the Player's reading time (owner decision 2026-10-07): a text
  *   that was `instant` because a legacy `wait` follows loses it, since `instant` would also skip the reading time of
- *   the paragraph before it, and the `wait` stays as it is.
+ *   the paragraph before it. A kept wait after it (withReadingTimes) keeps only what the reading time of the
+ *   paragraphs before the last leaves (shortenedWait); any other `wait` stays as it is.
  * - An ask's question (said before the field opens, also after withAskQuestions made a `say` its question) says its
  *   earlier paragraphs before the asking statement and keeps the last as the question.
  * - A form's question keeps its first paragraph, the intro, and the form says the others after it, in its `outro:`
@@ -57,8 +59,15 @@ export function withParagraphs(
       "The blank lines around this text's only paragraph showed nothing, so they go.",
       statement,
     );
-  const block = (items: IrStatement[]): IrStatement[] =>
-    items.flatMap((item): IrStatement[] => {
+  const block = (items: IrStatement[]): IrStatement[] => {
+    // The reading time of the paragraphs before the last of the text just split, which the wait after it now follows.
+    let readBefore: number | null = null;
+    return items.flatMap((item): IrStatement[] => {
+      if (readBefore !== null && item.kind !== "blank" && item.kind !== "comment") {
+        const read = readBefore;
+        readBefore = null;
+        if (item.kind === "wait" && item.afterText === true) return shortenedWait(item, read);
+      }
       const statement = withNestedBlocks(item, block);
       if (statement.kind === "say") {
         if (statement.prose === true || statement.speaker === SYSTEM_SPEAKER) return [statement];
@@ -78,6 +87,9 @@ export function withParagraphs(
           statement,
         );
         const { instant: _instant, ...paced } = statement;
+        readBefore = split.paragraphs
+          .slice(0, -1)
+          .reduce((total, value) => total + shortestReadingTime(value), 0);
         return split.paragraphs.map((value) => ({ ...paced, value }));
       }
       const ask = ASKING_STATEMENTS.has(statement.kind) ? soleAsk(statement) : null;
@@ -128,6 +140,36 @@ export function withParagraphs(
         withAsk(statement, asked(ask, split.paragraphs.at(-1)!)),
       ];
     });
+  };
+  /**
+   * The legacy wait after a split text started when the whole text appeared, and the paragraphs before the last now
+   * take their reading time first, so a kept wait keeps only the rest, in whole seconds, and goes when none is left
+   * (owner decision 2026-10-07): the next statement comes as long after the text first appeared as before.
+   */
+  const shortenedWait = (
+    wait: Extract<IrStatement, { kind: "wait" }>,
+    read: number,
+  ): IrStatement[] => {
+    const { duration } = wait;
+    if (duration.kind !== "literal" || typeof duration.value !== "number") return [wait];
+    const milliseconds = wait.unit === "ms" ? duration.value : duration.value * 1000;
+    const seconds = Math.round((milliseconds - read) / 1000);
+    if (seconds <= 0) {
+      report(
+        "SX_PARAGRAPH_WAIT_DROPPED",
+        "The reading time of the paragraphs before the last covers the legacy wait after the text, so the wait goes.",
+        wait,
+      );
+      return [];
+    }
+    report(
+      "SX_PARAGRAPH_WAIT",
+      "The legacy wait after the text started when the whole text appeared; it keeps what the reading time of the paragraphs before the last leaves, in whole seconds.",
+      wait,
+    );
+    const value = wait.unit === "ms" ? seconds * 1000 : seconds;
+    return [{ ...wait, duration: { kind: "literal", value } }];
+  };
   return block(statements);
 }
 

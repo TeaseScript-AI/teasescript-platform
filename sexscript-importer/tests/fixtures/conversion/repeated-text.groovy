@@ -35,6 +35,6 @@ def pickedColor = getSelectedValue(promptText, ["Red", "Blue"])
 show("Color " + pickedColor)
 // An exact repeat between waits goes, and the waits around it join.
 show("Processing.")
-wait(1)
+wait(5)
 show("Processing.")
-wait(1)
+wait(5)

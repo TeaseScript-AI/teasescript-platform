@@ -1,9 +1,8 @@
 // The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
-// the Player's reading time; a wait after the text stays after its last paragraph.
+// the Player's reading time.
 let name = "Ann"
 say "Do you deserve a break?"
 say "Well, ${name}, let's check."
-wait 3
 say "You are late."
 say "Kneel."
 // An ask's question keeps its last paragraph; the others are said before the ask.

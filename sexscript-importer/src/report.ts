@@ -194,6 +194,18 @@ export interface FeasibilityReport {
     kept: number;
   };
   /**
+   * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
+   * than 1.5 times it (`keptPaced` where the text keeps its reading time after a replaced wait); kept waits after a
+   * split text that withParagraphs `shortened` or `dropped`.
+   */
+  readingWaits: {
+    replaced: number;
+    kept: number;
+    keptPaced: number;
+    shortened: number;
+    dropped: number;
+  };
+  /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
    * legacy code order, so a jump marks code that moved.
@@ -326,6 +338,7 @@ export function analyzeFeasibility(
     blankTexts: 0,
     forms: { sequences: 0, menus: 0 },
     paragraphs: { says: 0, questions: 0, outros: 0, trimmed: 0, layout: 0, kept: 0 },
+    readingWaits: { replaced: 0, kept: 0, keptPaced: 0, shortened: 0, dropped: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -439,6 +452,11 @@ export function analyzeFeasibility(
       else if (code === "SX_PARAGRAPH_TRIMMED") report.paragraphs.trimmed += 1;
       else if (code === "SX_PARAGRAPHS_LAYOUT") report.paragraphs.layout += 1;
       else if (code === "SX_PARAGRAPHS_KEPT") report.paragraphs.kept += 1;
+      else if (code === "SX_WAIT_READING") report.readingWaits.replaced += 1;
+      else if (code === "SX_WAIT_KEPT") report.readingWaits.kept += 1;
+      else if (code === "SX_WAIT_KEPT_PACED") report.readingWaits.keptPaced += 1;
+      else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
+      else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;
