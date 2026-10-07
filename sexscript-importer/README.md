@@ -248,7 +248,7 @@ them at the top.
 
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
-node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] \
+node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
   [--corpus <corpus-dir> [--rounds N]] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
@@ -277,7 +277,11 @@ session, then, earlier sessions first, states that look new apart from clock, ra
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
 first. Waiting states keep their snapshots
 as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
-when every state is expanded and directed search has nothing left to try, or at the time or state budget.
+when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
+`--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic
+answers, the corpus replay's included): with it the time budget applies only when `--budget-seconds` is given, and
+directed search looks again every tenth of the work budget instead of every tenth of the time, so a run's length and
+result do not depend on the machine's load.
 
 Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
@@ -326,7 +330,11 @@ The report `<out>/<unit>.json` has these parts:
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
   there is), and whether that path set the clock;
 - the traps;
-- the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out.
+- the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out;
+- in `search`, what stopped it (`exhausted`, `budget` for time, `operations` for work, or `maxStates`), the runtime
+  operations, the elapsed and CPU time, and `expansionsByPrompt`: the five places where the most expanded states
+  waited (the `path:line` of their pending action, with its prompt) and their share of all expansions. Most expansions
+  at one place usually means a loop the search keeps going round, which is worth fixing before raising the budget.
 
 A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
@@ -356,8 +364,8 @@ entries of another seed, and those the budget left unreplayed, stay as they are.
 entries loaded, replayed, stale, and written, the replay's steps and time, the play coverage at the start (from the
 corpus) and at the end, and the file's size. The file also records the `contentHash` and seed of the run that wrote it
 and whether that run was exhausted; a unit exhausted with the same content and seed is skipped. `--rounds N` explores
-the units in N rounds: the first with the budget, each later one with twice the budget before and only the units not
-exhausted yet. Directed attempts and session chains start over in each run; what they reached comes back with the
+the units in N rounds: the first with the budgets, each later one with twice the budgets before and only the units
+not exhausted yet. Directed attempts and session chains start over in each run; what they reached comes back with the
 corpus.
 
 The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.

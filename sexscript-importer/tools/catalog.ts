@@ -187,9 +187,11 @@ export interface ExplorerReport {
   readonly exploredAt: string;
   readonly explorer: string | null;
   readonly budgetSeconds: number | null;
+  /** The work budget in runtime operations, or null without one. */
+  readonly budgetOps: number | null;
   /** False when the unit did not compile and was not explored. */
   readonly compiles: boolean;
-  /** Why the search stopped: `budget`, or `exhausted` when it reached every state. */
+  /** Why the search stopped: `budget` (time), `operations` (work), `maxStates`, or `exhausted` at every state. */
   readonly stoppedBy: string | null;
   readonly states: number | null;
   /** Runtime operations that threw: an explorer or runtime problem, not a script failure. */
@@ -751,6 +753,7 @@ export function parseExplorerReport(value: unknown): ExplorerReport | null {
     exploredAt: value.exploredAt,
     explorer: text(value.explorer),
     budgetSeconds: number(value.budgetSeconds),
+    budgetOps: number(value.budgetOps),
     compiles: record(value.compile).ok !== false,
     stoppedBy: text(search.stoppedBy),
     states: number(search.states),
@@ -1177,7 +1180,7 @@ function renderExplorer(entry: CatalogEntry): string {
     ...(of === "conversion"
       ? ["Explored the unit's newer conversion, not the verified copy listed here."]
       : []),
-    `Explored ${report.exploredAt.slice(0, 10)}${report.explorer === null ? "" : ` with explorer ${report.explorer}`}${report.budgetSeconds === null ? "" : `, ${report.budgetSeconds} s budget`}.`,
+    `Explored ${report.exploredAt.slice(0, 10)}${report.explorer === null ? "" : ` with explorer ${report.explorer}`}${report.budgetSeconds === null ? "" : `, ${report.budgetSeconds} s budget`}${report.budgetOps === null ? "" : `, ${report.budgetOps} operations budget`}.`,
     ...(report.compiles ? [] : ["The unit did not compile, so it was not explored."]),
     ...(report.states === null
       ? []

@@ -190,6 +190,40 @@ test(
   },
 );
 
+test(
+  "a work budget ends the search after that many runtime operations, the same way each time, and shows where expansions waited",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const { plan, diagnostics, lineOf } = await fixture(engine);
+    const run = () => {
+      const { search, ...rest } = explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 60,
+        maxStates: 5000,
+        sources: new Map(),
+        diagnostics,
+      });
+      const { elapsedMs: _elapsed, cpuMs: _cpu, ...work } = search;
+      return { search: work, ...rest };
+    };
+    const first = run();
+    assert.equal(first.search.stoppedBy, "operations");
+    assert.ok(first.search.operations >= 60);
+    assert.deepEqual(run(), first);
+    // Each typed answer to the ask before "Go on" leads to its own state there, so most expansions wait at that button.
+    const [top] = first.search.expansionsByPrompt;
+    assert.deepEqual(top && [top.location, top.prompt, top.percent], [
+      `main.tease:${lineOf('showButton "Go on"')}`,
+      "[Go on]",
+      Math.round((top!.expansions / first.search.expanded) * 1000) / 10,
+    ]);
+    assert.ok(top!.percent > 50);
+  },
+);
+
 /**
  * A runtime session whose state keeps as few event sequences as it can once the player picks "Stay": the step then
  * throws inside the runtime (`nextEventSequence cannot be advanced`) and ends the session, as a runtime that fails on

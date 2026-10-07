@@ -125,11 +125,19 @@ interface Node {
   readonly edges: number[];
   readonly texts: readonly string[];
   readonly prompt: Prompt;
+  /** Where it waits: the instruction of its foreground action, or null without one. */
+  readonly waitsAt: number | null;
 }
 
 export interface ExploreOptions {
   readonly seed: number;
+  /** The time budget; `Infinity` for none. */
   readonly budgetMs: number;
+  /**
+   * The work budget: the runtime operations the run may call (`Session.operations`), the corpus replay's included; none
+   * when absent. A run that only this budget and `maxStates` limit is deterministic.
+   */
+  readonly budgetOps?: number;
   readonly maxStates: number;
   /** Project sources by path, for the source text of conditions. */
   readonly sources: ReadonlyMap<string, string>;
@@ -270,6 +278,14 @@ export interface TrapReport extends Repro {
   clock: boolean;
 }
 
+/** The expansions of states that wait at one place: its `path:line`, and the prompt of the first one expanded there. */
+export interface PromptShare {
+  location: string;
+  prompt: string;
+  expansions: number;
+  percent: number;
+}
+
 export interface ExploreResult {
   search: {
     states: number;
@@ -285,8 +301,18 @@ export interface ExploreResult {
      * that throws.
      */
     engineErrors: { count: number; first: ({ message: string } & Repro) | null };
-    stoppedBy: "exhausted" | "budget" | "maxStates";
+    /** Why the search stopped: `budget` is the time budget, `operations` the work budget. */
+    stoppedBy: "exhausted" | "budget" | "operations" | "maxStates";
+    /** Runtime operations the run called: the work that `budgetOps` limits. */
+    operations: number;
     elapsedMs: number;
+    /** CPU time of the process during the run. */
+    cpuMs: number;
+    /**
+     * Where expanded states waited, by the instruction of their foreground action: the five places with the most
+     * expansions, and their share of all expansions. Most of them at one place is usually a loop the search goes round.
+     */
+    expansionsByPrompt: PromptShare[];
     /** The compressed snapshot store: its largest size, the snapshots it dropped, and the replays that made up for them. */
     store: { peakBytes: number; evicted: number; replays: number };
   };
@@ -521,6 +547,7 @@ interface Left {
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
+  const cpuAtStart = process.cpuUsage();
   const instructions = list(plan.instructions);
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
@@ -677,6 +704,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return node;
     }
     const status = step.snapshot.status;
+    const waitsAt = record(step.snapshot.foregroundAction).owningInstruction;
     const repeats = loopSeen.get(keys.loop) ?? 0;
     const id = nodes.length;
     const node: Node = {
@@ -695,6 +723,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       edges: [],
       texts: step.texts,
       prompt: session.prompt(step.snapshot),
+      waitsAt: typeof waitsAt === "number" ? waitsAt : null,
     };
     nodes.push(node);
     byState.set(keys.state, node.id);
@@ -1091,7 +1120,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return plan.length > 0 || chained;
   };
 
-  const outOfBudget = () => performance.now() - started >= options.budgetMs;
+  const budgetOps = options.budgetOps ?? Infinity;
+  /** The budget that is spent: `operations` for work, `budget` for time; null while neither is. */
+  const spent = (): "operations" | "budget" | null =>
+    session.operations >= budgetOps
+      ? "operations"
+      : performance.now() - started >= options.budgetMs
+        ? "budget"
+        : null;
+  const outOfBudget = () => spent() !== null;
   const full = () => outOfBudget() || nodes.length >= options.maxStates;
 
   /**
@@ -1214,18 +1251,28 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
   let sinceAnalysis = 0;
   let analyzedAt = started;
+  let analyzedOps = 0;
+  /** Expansions by where the expanded state waited, with the prompt of the first one. */
+  const expansionsAt = new Map<number | null, { expansions: number; prompt: string }>();
   search: for (;;) {
-    if (outOfBudget()) {
-      stoppedBy = "budget";
+    const stop = spent();
+    if (stop !== null) {
+      stoppedBy = stop;
       break;
     }
     if (nodes.length >= options.maxStates) {
       stoppedBy = "maxStates";
       break;
     }
-    if (sinceAnalysis >= ANALYZE_EVERY || performance.now() - analyzedAt >= options.budgetMs / 10) {
+    // A tenth of the budget: of the work budget when there is one, so that a run it limits stays deterministic.
+    const due =
+      options.budgetOps === undefined
+        ? performance.now() - analyzedAt >= options.budgetMs / 10
+        : session.operations - analyzedOps >= options.budgetOps / 10;
+    if (sinceAnalysis >= ANALYZE_EVERY || due) {
       sinceAnalysis = 0;
       analyzedAt = performance.now();
+      analyzedOps = session.operations;
       analyze();
     }
     // Directed attempts and the rest of the search take turns, by steps.
@@ -1272,12 +1319,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     expanded += 1;
     sinceAnalysis += 1;
+    const at = expansionsAt.get(node.waitsAt);
+    if (at === undefined)
+      expansionsAt.set(node.waitsAt, { expansions: 1, prompt: node.prompt.text });
+    else at.expansions += 1;
     node.status = "partial";
     const closeness =
       distanceTargets.length === 0 ? [] : distances(stored ?? base.exportSnapshot());
     for (const [index, input] of inputs.entries()) {
-      if (outOfBudget()) {
-        stoppedBy = "budget";
+      const stop = spent();
+      if (stop !== null) {
+        stoppedBy = stop;
         break search;
       }
       const work = session.operations;
@@ -1384,6 +1436,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       entries,
     };
   };
+  const cpu = process.cpuUsage(cpuAtStart);
   return {
     search: {
       states: nodes.length,
@@ -1393,7 +1446,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       rejectedInputs,
       engineErrors,
       stoppedBy,
+      operations: session.operations,
       elapsedMs: Math.round(performance.now() - started),
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+      expansionsByPrompt: [...expansionsAt]
+        .sort((left, right) => right[1].expansions - left[1].expansions)
+        .slice(0, 5)
+        .map(([at, { expansions, prompt }]) => {
+          const span = at === null ? null : compactSpan(instructions[at]?.span);
+          return {
+            location:
+              at === null
+                ? "(nothing in the foreground)"
+                : `${files[at]}${span === null ? "" : `:${span.line}`}`,
+            prompt,
+            expansions,
+            percent: Math.round((expansions / expanded) * 1000) / 10,
+          };
+        }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
     },
     endStates: {

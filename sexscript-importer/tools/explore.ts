@@ -3,17 +3,18 @@
  * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
- * Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2]
+ * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
  *          [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
- * one worker; two workers explore two units at a time in separate processes.
+ * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
+ * N runtime operations per unit, which makes a run's length deterministic; a time budget then applies only when given.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
- * `--rounds N` explores the units N times, with the budget doubled each round, and each round only the units not
+ * `--rounds N` explores the units N times, with the budgets doubled each round, and each round only the units not
  * exhausted yet.
  *
  * Every crash, trap, and way directed search reached has the path from the start that reaches it (with its earlier
@@ -52,7 +53,10 @@ interface ReportHeader {
   converter: string | null;
   explorer: string;
   seed: number;
-  budgetSeconds: number;
+  /** The time budget, or null with only a work budget. */
+  budgetSeconds: number | null;
+  /** The work budget in runtime operations, or null without one. */
+  budgetOps: number | null;
   maxStates: number;
   exploredAt: string;
   compile: { ok: boolean; errors: string[] };
@@ -65,7 +69,8 @@ async function main(args: string[]): Promise<void> {
     args,
     allowPositionals: true,
     options: {
-      "budget-seconds": { type: "string", default: "60" },
+      "budget-seconds": { type: "string" },
+      "budget-ops": { type: "string" },
       "max-states": { type: "string", default: "20000" },
       seed: { type: "string", default: "1" },
       workers: { type: "string", default: "1" },
@@ -89,7 +94,14 @@ async function main(args: string[]): Promise<void> {
     });
     return;
   }
-  const budgetSeconds = Number(values["budget-seconds"]);
+  const budgetOps = values["budget-ops"] === undefined ? null : Number(values["budget-ops"]);
+  // Without a work budget the time budget is 60 s by default; with one, only a time budget given applies.
+  const budgetSeconds =
+    values["budget-seconds"] === undefined
+      ? budgetOps === null
+        ? 60
+        : null
+      : Number(values["budget-seconds"]);
   const maxStates = Number(values["max-states"]);
   const seed = Number(values.seed);
   const workers = Number(values.workers);
@@ -97,7 +109,8 @@ async function main(args: string[]): Promise<void> {
   if (
     values.out === undefined ||
     positionals.length === 0 ||
-    !(budgetSeconds > 0) ||
+    (budgetSeconds !== null && !(budgetSeconds > 0)) ||
+    (budgetOps !== null && (!Number.isSafeInteger(budgetOps) || budgetOps < 1)) ||
     !Number.isSafeInteger(maxStates) ||
     maxStates < 1 ||
     !Number.isSafeInteger(seed) ||
@@ -107,7 +120,7 @@ async function main(args: string[]): Promise<void> {
     (rounds > 1 && values.corpus === undefined)
   ) {
     process.stderr.write(
-      "Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2]\n" +
+      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
         "         [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
@@ -125,16 +138,18 @@ async function main(args: string[]): Promise<void> {
   if (corpus !== null) await mkdir(corpus, { recursive: true });
   let remaining = dirs;
   for (let round = 1; round <= rounds && remaining.length > 0; round += 1) {
-    const budget = budgetSeconds * 2 ** (round - 1);
+    const factor = 2 ** (round - 1);
+    const budgets = {
+      budgetSeconds: budgetSeconds === null ? null : budgetSeconds * factor,
+      budgetOps: budgetOps === null ? null : budgetOps * factor,
+    };
     if (rounds > 1)
-      process.stderr.write(`Round ${round}: ${remaining.length} units, ${budget} s each\n`);
+      process.stderr.write(
+        `Round ${round}: ${remaining.length} units, ${describeBudget(budgets)} each\n`,
+      );
     process.exitCode =
-      (await exploreUnits(
-        remaining,
-        { budgetSeconds: budget, maxStates, seed, corpus },
-        out,
-        workers,
-      )) || process.exitCode;
+      (await exploreUnits(remaining, { ...budgets, maxStates, seed, corpus }, out, workers)) ||
+      process.exitCode;
     if (corpus === null) break;
     // A unit goes on while its corpus says it was not exhausted; one that did not compile has no corpus.
     const going = await Promise.all(
@@ -157,7 +172,8 @@ async function main(args: string[]): Promise<void> {
 }
 
 interface RunSettings {
-  budgetSeconds: number;
+  budgetSeconds: number | null;
+  budgetOps: number | null;
   maxStates: number;
   seed: number;
   /** The corpus folder, or null without one. */
@@ -171,10 +187,19 @@ async function exploreUnits(
   out: string,
   workers: number,
 ): Promise<number> {
-  const { budgetSeconds, maxStates, seed, corpus } = settings;
+  const { budgetSeconds, budgetOps, maxStates, seed, corpus } = settings;
   if (workers === 2 && dirs.length > 1) {
-    const flags = ["--budget-seconds", String(budgetSeconds), "--max-states", String(maxStates)];
-    flags.push("--seed", String(seed), "--out", out, "--no-summary");
+    const flags = [
+      "--max-states",
+      String(maxStates),
+      "--seed",
+      String(seed),
+      "--out",
+      out,
+      "--no-summary",
+    ];
+    if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
+    if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
     if (corpus !== null) flags.push("--corpus", corpus);
     const groups = [
       dirs.filter((_, index) => index % 2 === 0),
@@ -296,6 +321,7 @@ async function exploreUnit(
     explorer: settings.explorer,
     seed: settings.seed,
     budgetSeconds: settings.budgetSeconds,
+    budgetOps: settings.budgetOps,
     maxStates: settings.maxStates,
     exploredAt: new Date().toISOString(),
     compile: { ok: unit.plan !== null, errors: unit.errors.slice(0, 20) },
@@ -305,7 +331,8 @@ async function exploreUnit(
     header,
     result: explore(engine, unit.plan, {
       seed: settings.seed,
-      budgetMs: settings.budgetSeconds * 1000,
+      budgetMs: settings.budgetSeconds === null ? Infinity : settings.budgetSeconds * 1000,
+      ...(settings.budgetOps === null ? {} : { budgetOps: settings.budgetOps }),
       maxStates: settings.maxStates,
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
@@ -474,6 +501,7 @@ function catalogBlock(result: ExploreResult) {
 function oneLine(header: ReportHeader, result: ExploreResult | null): string {
   if (result === null) return `does not compile (${header.compile.errors.length} errors)`;
   const { coverage, search, endStates, crashes, traps, directed, corpus } = result;
+  const top = search.expansionsByPrompt[0];
   const fromCorpus =
     corpus === null || corpus.loaded === 0
       ? ""
@@ -485,8 +513,22 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
     `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
     `directed ${directed.reached.play} play + ${directed.reached.clock} clock of ${directed.targets}, ` +
     `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})` +
-    (corpus === null ? "" : `, ${corpus.written} corpus entries kept`)
+    (corpus === null ? "" : `, ${corpus.written} corpus entries kept`) +
+    `, ${search.operations} operations, ${Math.round(search.cpuMs / 1000)} s CPU` +
+    (top === undefined ? "" : `, ${top.percent}% of expansions at ${top.location}`)
   );
+}
+
+/** A run's budgets in words. */
+function describeBudget(budgets: {
+  budgetSeconds: number | null;
+  budgetOps: number | null;
+}): string {
+  const parts = [
+    ...(budgets.budgetSeconds === null ? [] : [`${budgets.budgetSeconds} s`]),
+    ...(budgets.budgetOps === null ? [] : [`${budgets.budgetOps} operations`]),
+  ];
+  return parts.join(" or ");
 }
 
 /*
@@ -499,6 +541,10 @@ function text(value: unknown): string {
 
 function count(value: unknown): number {
   return typeof value === "number" ? value : 0;
+}
+
+function number(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
 }
 
 function fields(value: unknown): Readonly<Record<string, unknown>> {
@@ -520,27 +566,30 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
   const lines = [
     "# Explorer summary",
     "",
-    `Explorer \`${text(first.explorer)}\`, seed ${count(first.seed)}, budget ${count(first.budgetSeconds)} s and ` +
+    `Explorer \`${text(first.explorer)}\`, seed ${count(first.seed)}, budget ` +
+      `${describeBudget({ budgetSeconds: number(first.budgetSeconds), budgetOps: number(first.budgetOps) })} and ` +
       `${count(first.maxStates)} states per unit. Reports: \`${out}/<unit>.json\`.`,
     "",
-    "| Unit | Coverage | From corpus | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | Open | Time |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Unit | Coverage | From corpus | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | Open | " +
+      "Operations | Time | CPU | Most expansions at |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const report of reports) {
     if (report.compile === undefined) {
       lines.push(
-        `| ${text(report.unit)} | no report: skipped as exhausted earlier, or its process failed | | | | | | | | | | |`,
+        `| ${text(report.unit)} | no report: skipped as exhausted earlier, or its process failed | | | | | | | | | | | | | |`,
       );
       continue;
     }
     if (fields(report.compile).ok !== true) {
-      lines.push(`| ${text(report.unit)} | does not compile | | | | | | | | | | |`);
+      lines.push(`| ${text(report.unit)} | does not compile | | | | | | | | | | | | | |`);
       continue;
     }
     const coverage = fields(report.coverage);
     const search = fields(report.search);
     const endStates = fields(report.endStates);
     const corpus = fields(report.corpus);
+    const top = records(search.expansionsByPrompt)[0];
     const fromCorpus = isRecord(report.corpus)
       ? `${count(fields(corpus.coverageAtStart).percent)}% (${count(corpus.replayed)} of ` +
         `${count(corpus.loaded)} entries replayed, ${count(corpus.stale)} stale; ${count(corpus.written)} kept)`
@@ -549,7 +598,9 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       `| ${text(report.unit)} | ${count(coverage.percent)}% of ${count(coverage.coverableLines)} lines | ${fromCorpus} | ` +
         `${count(search.states)} | ${text(search.stoppedBy)} | ${records(report.crashes).length} | ` +
         `${records(report.traps).length} | ${count(endStates.completed)} | ${count(endStates.failed)} | ` +
-        `${count(endStates.stuck)} | ${count(endStates.open)} | ${Math.round(count(search.elapsedMs) / 1000)} s |`,
+        `${count(endStates.stuck)} | ${count(endStates.open)} | ${count(search.operations)} | ` +
+        `${Math.round(count(search.elapsedMs) / 1000)} s | ${Math.round(count(search.cpuMs) / 1000)} s | ` +
+        `${top === undefined ? "" : `${count(top.percent)}% ${text(top.location)}`} |`,
     );
   }
   for (const report of reports) {
