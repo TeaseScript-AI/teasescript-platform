@@ -42,6 +42,7 @@ import { renameConflictingIdentifiers } from "./naming.ts";
 import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
 import { withParagraphs } from "./paragraphs.ts";
 import { withReadingTimes } from "./reading-time.ts";
+import { withElapsedDurations } from "./elapsed-time.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1429,7 +1430,11 @@ export function lowerParsedFile(
       withAskQuestions(
         withoutRepeatedText(
           withReadingTimes(
-            withoutBlankText(typedStatements, context.diagnostics, mixin === null),
+            withoutBlankText(
+              withElapsedDurations(typedStatements, context.diagnostics, mixin !== null),
+              context.diagnostics,
+              mixin === null,
+            ),
             context.diagnostics,
           ),
           context.diagnostics,
@@ -1618,7 +1623,11 @@ function lowerHelperCompilationUnit(
     statements.push(lowered);
   }
   const typedStatements = withReadingTimes(
-    withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+    withElapsedDurations(
+      withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+      baseContext.diagnostics,
+      false,
+    ),
     baseContext.diagnostics,
   );
   return {

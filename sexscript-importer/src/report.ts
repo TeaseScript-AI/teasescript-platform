@@ -206,6 +206,11 @@ export interface FeasibilityReport {
     dropped: number;
   };
   /**
+   * Buttons whose waiting time stays a duration (withElapsedDurations): comparisons of a button's seconds with a number
+   * (`compared`), and variables that hold such a duration (`variables`).
+   */
+  buttonDurations: { compared: number; variables: number };
+  /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
    * legacy code order, so a jump marks code that moved.
@@ -339,6 +344,7 @@ export function analyzeFeasibility(
     forms: { sequences: 0, menus: 0 },
     paragraphs: { says: 0, questions: 0, outros: 0, trimmed: 0, layout: 0, kept: 0 },
     readingWaits: { replaced: 0, kept: 0, keptPaced: 0, shortened: 0, dropped: 0 },
+    buttonDurations: { compared: 0, variables: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -457,6 +463,8 @@ export function analyzeFeasibility(
       else if (code === "SX_WAIT_KEPT_PACED") report.readingWaits.keptPaced += 1;
       else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
       else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
+      else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;
+      else if (code === "SX_BUTTON_DURATION_VARIABLE") report.buttonDurations.variables += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;

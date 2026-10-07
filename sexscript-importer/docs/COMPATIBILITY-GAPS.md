@@ -99,7 +99,7 @@ implemented):
 | the methods of a package-local helper class, such as `Domme3Class` | `global function`s in the class's own file (`Domme3/Domme3Class.tease`), with its static fields of literal values as `global`s, where other files call them; a method that reads other state or dispatches closure values is copied into each script that calls it |
 | the importer's own generated helpers (`sexscriptLegacy*`) and the system speaker | one `global function` each in `main.tease`, with the state they share across files, such as the switch button's ID, as a `global`; the background-sound helpers stay in each file, since the legacy player stopped a script's sounds when it ended |
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
-| `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
+| `showButton(text, s)` used as a value (seconds until the click) | the duration where the seconds are only compared with numbers, waited for, or a timeout: `(showButton text, timeout: 30) >= 30 s`, `let t = showButton text` with `while t < 15 s`; elsewhere `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
 | `x = loadInteger(k)` followed by `if (x == null) x = d`, also further down a settings block where the code between neither uses `x`, nor calls script code, nor leaves the block | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`, and the online `receive*` reads) |
 | `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
@@ -250,8 +250,16 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` rounds ties away from zero (V30 §13),
   so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`, 7 corpus sites).
 - Legacy `showButton()` returned the seconds until the click as a number; the TeaseScript result is a duration
-  (#513, #531), so a used result is divided by `1 s`, 49 corpus sites. A Groovy `int` that stores it truncates, as
-  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3. A zero timeout kept the legacy
+  (#513, #531). Where the seconds are only compared with numbers the duration stays and the numbers become seconds
+  (owner decision 2026-10-07): a comparison of the button with a number literal, `(showButton "Done", timeout: 30) >=
+  30 s` (`SX_BUTTON_DURATION`, counted as `buttonDurations.compared`), and a variable that only buttons and number
+  literals write and that only comparisons with number literals, waits, and button timeouts read, `let t = showButton
+  "Done"` with `while t < 15 s` (`SX_BUTTON_DURATION_VARIABLE`, `buttonDurations.variables`); a Groovy `int` that
+  stores the seconds does so only where its truncation changes nothing, compared by `<` or `>=` with a whole number.
+  Elsewhere, where a plain number is needed (arithmetic, text, storage, a function's result, a comparison with a
+  computed number), the result is divided by `1 s`, and a Groovy `int` truncates it as Groovy did: `t =
+  toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` also holds a timestamp difference
+  and is shown in text. A zero timeout kept the legacy
   button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`) when the zero is
   known before the run (a literal, arithmetic on literals, or a variable assigned one such value once); a computed
   timeout gets a note, since it fails in TeaseScript (#531) if it is zero or negative (6 corpus sites), and a negative
@@ -411,8 +419,8 @@ Concrete points the migration surfaced in TeaseScript itself:
   rewrite of the saved value.
 - **Calendar day counts** convert with #532's `(date - date).days`: Domme3's `Calendar.DAY_OF_YEAR` seed (1 site)
   becomes `(getDate() - toDate("${getDate().year}-01-01")).days + 1`, which lowers `sleep`.
-- **Compact interactions as values.** A used `showButton` result needs parentheses and a duration division,
-  `(showButton "Done", timeout: 30) / 1 s`, 49 corpus sites; most compare the seconds with a number.
+- **Compact interactions as values.** A used `showButton` result needs parentheses, `(showButton "Done", timeout: 30)
+  >= 30 s`, and a duration division where a number is needed.
 - **Defects found in `main` at `337388d2` are fixed in `242ada7a`** (#567): `case null, 0` removes null from the later
   cases (#557); `==` and `!=` with a value the other side can never hold warn (ADR 0021 rule 4.5; #535); a range case a
   `choose` result never matches, and `case 5` after `case is integer`, warn (V30 §32; #557); a `load` default of the

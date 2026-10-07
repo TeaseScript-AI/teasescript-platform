@@ -302,9 +302,13 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
     },
   ]);
   const assignedProgram = lowerParsedFile(assignedSource);
-  assert.deepEqual(assignedProgram.diagnostics, []);
-  // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21, #531).
-  assert.equal(emitTease(assignedProgram), 'let elapsed = (showButton "Continue") / 1 s\nexit\n');
+  assert.deepEqual(
+    assignedProgram.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_BUTTON_DURATION_VARIABLE"],
+  );
+  // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21, #531), which a variable
+  // that nothing needs as a number keeps.
+  assert.equal(emitTease(assignedProgram), 'let elapsed = showButton "Continue"\nexit\n');
 });
 
 test("maps legacy save(key, null) deletion semantics to delete", () => {
