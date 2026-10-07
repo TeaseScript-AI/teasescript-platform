@@ -1,10 +1,10 @@
 # Core test set: the units for routine checks after a converter change (README.md "Core test set").
 # The owner's favourites first, then the units a greedy set cover added over what the published reports, conversion
 # logs, and generated code exercise. Each comment names what only that unit exercises within the set, as
-# `node tools/core-units.ts external/converted-merged` lists it. Selected 2026-10-07: these 29 units cover 370 of the
-# 380 features of the 210 units. Left out: eight single-unit TODO codes (SX_BACKGROUND_SOUND_ARGUMENT, SX_CHOICE_ARITY,
-# SX_DICT_VALUE_TYPE, SX_HELPER_UNQUALIFIED_CALL, SX_JAVA_ARRAY, SX_OBJECT_THIS, SX_PARAMETER_DEFAULT_ORDER,
-# SX_UNSUPPORTED_SWITCH_VALUE), SX_STORAGE_MAP_SEMANTICS, and BanjoGameHub's isolated TSR025 (a 110 s report).
+# `node tools/core-units.ts external/converted-merged` lists it. Selected 2026-10-07: these 30 units cover 372 of the
+# 381 features of the 210 units. Left out: seven single-unit TODO codes (SX_BACKGROUND_SOUND_ARGUMENT, SX_CHOICE_ARITY,
+# SX_DICT_VALUE_TYPE, SX_JAVA_ARRAY, SX_OBJECT_THIS, SX_PARAMETER_DEFAULT_ORDER, SX_UNSUPPORTED_SWITCH_VALUE),
+# SX_STORAGE_MAP_SEMANTICS (AI_Mistress, Locker), and BanjoGameHub's isolated TSR025 (a 110 s report).
 Domme3                # favourite; SX_MESSAGE_COUNTER, SX_POPUP_ELAPSED, SX_REPEATED_TEXT_ACROSS_CHAIN, isolated TSR009/027/058
 DisciplineClinic      # favourite; SX_DISCARDED_CONCATENATION
 Toy                   # favourite
@@ -17,20 +17,21 @@ empyrean              # compile error TSV042, SX_CALENDAR_FIELD, isolated TSR017
 tutorial              # SX_EMAIL, SX_PACKAGE_TEXT_WRITTEN, SX_USE_FILE_VIDEO, playVideo
 ShockReflex           # SX_IMAGE_TAGS, SX_INCREMENT_POSITION, SX_NULL_ARGUMENT, findImages
 ChastityRoulette      # menu forms (SX_MENU_FORM), SX_INPUT_PREFILL_EFFECT, SX_ASSIGNMENT_VALUE, the date type
-fight_arena           # SX_DYNAMIC_MAP_ACCESS, SX_SWITCH_CASE_MATCH, pow
-MandysBlackmail       # missing media (SX_MEDIA_MISSING), repeated text kept (SX_REPEATED_TEXT_KEPT)
+fight_arena           # SX_DYNAMIC_MAP_ACCESS, SX_SWITCH_CASE_MATCH, SX_UNSUPPORTED_ASSIGNMENT_TARGET, pow
+MandysBlackmail       # repeated text kept (SX_REPEATED_TEXT_KEPT)
 Sex_Cards             # SX_EXTERNAL_PROGRAM_NOTICE, SX_FILE_VIEW, SX_PACKAGE_TEXT_CHARSET
-JennifersBlackmail    # SX_HOME_FOLDER, SX_HOME_PICTURES
+JennifersBlackmail    # SX_HOME_FOLDER, SX_HOME_PICTURES, SX_OS_INFO
 HurrahForSchool       # settings forms (SX_SETTINGS_FORM), SX_LEFT_SHIFT_RECEIVER, SX_PHOTO_PIXELS
 trick_or_treat_poker  # chance, max
 OdinsMaster           # compile error TSV044
 Bondage_Fun_My_One    # SX_LABELLED_JUMP, SX_SWITCH_BUTTON
 NakedExercise         # compile error TSV003
 DW_intro              # SX_FOLDER_CREATE, SX_UNSUPPORTED_PROPERTY
+campdrain             # SX_HELPER_MAIN_ARGUMENT, SX_HELPER_UNQUALIFIED_CALL
 stripordie            # SX_JVM_SETTING
 scriptManager         # SX_SCRIPT_MANAGER
 Concentration         # SX_INT_RANGE
-PunishmentChooser     # SX_DECIMAL_ROUNDING
-joiSession            # SX_PACKAGE_TEXT_CLOSE
+PunishmentChooser     # SX_DECIMAL_ROUNDING, SX_LOAD_BOOLEAN_TEXT
+joiSession            # SX_PACKAGE_TEXT_CLOSE, SX_CHARACTER_TEXT
 courtroom             # SX_CHARACTER_CODE
 guillotine            # the datetime type

@@ -169,12 +169,12 @@ a checkpoint push, and periodically:
 node tools/convert-corpus.ts --jobs 2 --units-file core-units.txt external/corpus2-selected external/core-check
 # reports only, of units already converted
 node tools/convert-corpus.ts --jobs 2 --report-only --units-file core-units.txt external/corpus2-selected external/core-check
-# what each core unit alone adds, what no core unit exercises, and the next units a greedy cover would add
-node tools/core-units.ts [--units-file core-units.txt] [--suggest N] external/converted-merged
+# what each core unit alone adds, what no core unit exercises, and the next 5 units a greedy cover would add
+node tools/core-units.ts --suggest 5 external/converted-merged
 ```
 
 `--units-file` takes one unit per line, with `#` comments, and combines with `--only`; a unit the corpus does not
-have stops the run. Rerun `core-units.ts` after adding a converter rule: a new SX_ code or counter that no core unit
+have stops the run. `core-units.ts` reads `core-units.txt` unless `--units-file` names another list. Rerun `core-units.ts` after adding a converter rule: a new SX_ code or counter that no core unit
 exercises shows up under the features no listed unit has.
 
 ### Manual unit patches

@@ -2,7 +2,8 @@
  * The coverage of the core test set: what the units of a units file exercise of everything a converted corpus
  * exercises. A unit's features come from its published output:
  *
- * - `rule`: each SX_ diagnostic code in `.conversion.log`, info lines (converter rules applied) and TODOs alike;
+ * - `rule`: each SX_ diagnostic code in `.conversion.log` or the report's diagnostic counts, info lines (converter
+ *   rules applied) and TODOs alike;
  * - `count`: each report counter of a converter rule above zero, such as `paragraphs.says` or `askQuestions`;
  * - `uses`: each engine name (`showButton`, `askForm`, ...) and each token kind (`keywordWhile`, `rangeExclusive`, ...)
  *   of the generated `.tease` files, through the engine's lexer;
@@ -127,6 +128,10 @@ async function unitFeatures(id: string, folder: string): Promise<Unit | null> {
   const features = new Set<string>();
   const log = await readFile(path.join(folder, ".conversion.log"), "utf8").catch(() => "");
   for (const [, code] of log.matchAll(/^\w+ (SX_[A-Z0-9_]+) /gmu)) features.add(`rule ${code}`);
+  // The report lowers the sources again, also helper sources the log does not name, and `--report-only` leaves the log.
+  for (const key of ["diagnosticsByCode", "rootDiagnosticsByCode"])
+    for (const [code, count] of Object.entries(isRecord(report[key]) ? report[key] : {}))
+      if (typeof count === "number" && count > 0) features.add(`rule ${code}`);
   for (const [key, value] of Object.entries(report)) {
     if (typeof value === "number" && value > 0 && !SIZES.has(key)) features.add(`count ${key}`);
     // Keyed counts (by code, message, or status) and the final package have features of their own below.
