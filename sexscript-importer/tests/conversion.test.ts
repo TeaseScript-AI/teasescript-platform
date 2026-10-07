@@ -1565,7 +1565,15 @@ test(
           "def s3 = 0",
           "s2 = s1 / 2",
           "s3 = s1 - s2",
-          'show("" + points + " " + missing + " " + s2 + " " + s3)',
+          "def zero = 0",
+          'def kept = loadInteger("game.points")',
+          "if (kept == null) kept = 1 / zero",
+          'show("" + points + " " + missing + " " + s2 + " " + s3 + " " + kept)',
+          "def unset = null",
+          "def ratio = 0",
+          'ratio = loadFloat("game.ratio")',
+          "if (ratio == null) ratio = unset",
+          'if (ratio == null) show("no ratio")',
           "",
         ].join("\n"),
       );
@@ -1590,7 +1598,7 @@ test(
         note(step.events);
       }
       assert.equal(step.snapshot.status, "halted", tease);
-      assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5"], tease);
+      assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5 100", "no ratio"], tease);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
