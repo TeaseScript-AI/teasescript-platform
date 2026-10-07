@@ -131,6 +131,7 @@ async function main() {
       await demoScenario(cdp, origin);
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
+      await titleBarScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -157,7 +158,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the end line's Play again, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the end line's Play again, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1328,6 +1329,114 @@ async function packageScenario(cdp, origin) {
  * valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
  * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
  */
+/**
+ * The title bar shows the title and author of `main.tease`'s header, for the default build and the development preview;
+ * a title cut off by a narrow bar opens in full on a tap, and on short screens with the auto-hide bar the first tap only
+ * reveals the bar.
+ */
+async function titleBarScenario(cdp, origin) {
+  const title = `document.querySelector('.player-top-bar-title').textContent`;
+  const open = async (query) => {
+    await navigate(cdp, `${origin}/player/?${query}`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  };
+  await setViewport(cdp, 1440, 900);
+  await open("package=title-header");
+  assertEqual(await value(cdp, title), "Title fixture by Author fixture", "Title and author");
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
+    false,
+    "A title that fits offered to open in full",
+  );
+  await open("dev&package=title-author");
+  assertEqual(await value(cdp, title), "by Author fixture", "Author only, in the preview");
+  await open("package=house");
+  assertEqual(await value(cdp, title), "The house", "Title only");
+
+  const full = "A title too long for the title bar of a narrow screen by Author fixture";
+  const popover = `document.querySelector('[data-player-title-popover]')?.textContent.trim() ?? null`;
+  await setViewport(cdp, 390, 760);
+  await open("package=title-long");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-player-title-full]')`,
+    5_000,
+    "No full title",
+  );
+  await touchTap(cdp, "[data-player-title-full]");
+  await waitFor(
+    cdp,
+    `${popover} === ${JSON.stringify(full)}`,
+    5_000,
+    "A tap did not show the full title",
+  );
+
+  // A title without spaces wraps inside the popover rather than running off the screen.
+  await open("package=title-unbroken");
+  await touchTap(cdp, "[data-player-title-full]");
+  await waitFor(cdp, `!!document.querySelector('[data-player-title-popover]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const popover = document.querySelector('[data-player-title-popover]'); return popover.scrollWidth <= popover.clientWidth && popover.getBoundingClientRect().right <= innerWidth; })()`,
+    ),
+    true,
+    "An unbroken title ran out of its popover",
+  );
+  // A bar too narrow for the title hides it visually and keeps it plain text, never an invisible control.
+  await setViewport(cdp, 180, 760);
+  await open("package=title-long");
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
+    false,
+    "A visually hidden title became a control",
+  );
+
+  // The auto-hide bar on a short screen: the first tap reveals it, the next opens the title.
+  await evaluate(cdp, `localStorage.setItem('player-titlebar-variant', 'overlap')`);
+  try {
+    await setViewport(cdp, 600, 380);
+    await open("package=title-long");
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-player-top-bar]').checkVisibility({ opacityProperty: true }) && !!document.querySelector('[data-player-title-full]')`,
+      6_000,
+      "The auto-hide bar did not start hidden with a cut-off title",
+    );
+    await touchTap(cdp, "[data-player-title-full]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-player-top-bar]').hasAttribute('data-revealed')`,
+    );
+    assertEqual(await value(cdp, popover), null, "The tap that revealed the bar opened the title");
+    await touchTap(cdp, "[data-player-title-full]");
+    await waitFor(
+      cdp,
+      `${popover} === ${JSON.stringify(full)}`,
+      5_000,
+      "A tap did not show the full title",
+    );
+  } finally {
+    await evaluate(cdp, `localStorage.removeItem('player-titlebar-variant')`);
+    await setViewport(cdp, 1440, 900);
+  }
+}
+
+/** A touch tap at the middle of the first element `selector` matches. */
+async function touchTap(cdp, selector) {
+  const point = await value(
+    cdp,
+    `(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+  );
+  await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true });
+  try {
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
+  }
+}
+
 async function missingMediaScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const button = (label) =>
@@ -3666,7 +3775,8 @@ async function debugExportScenario(cdp, origin, profile) {
     }
     throw new Error("The debug export was not downloaded");
   };
-  const fileName = "development-package-debug-failure-debug.teasedebug.json.gz";
+  // Named after the title of the package's header.
+  const fileName = "Debug-failure-debug.teasedebug.json.gz";
   const ready = `!!document.querySelector('[data-debug-export-download]')`;
 
   // Nothing personal is chosen at first.

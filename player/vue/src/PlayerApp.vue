@@ -52,7 +52,9 @@ import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 const props = withDefaults(
   defineProps<{
     player: PlayerSessionHost;
+    /** The script's title and author for the title bar, each empty when unknown. */
     title?: string;
+    author?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
     /** Why the script cannot start; shown instead of Start. */
@@ -60,7 +62,13 @@ const props = withDefaults(
     /** How Debug starts: the Debug menu, and auto-skip once Debug runs. Both are off unless the host asks (`?dev`). */
     debug?: { readonly menu: boolean; readonly autoSkip: boolean };
   }>(),
-  { title: "", tools: () => [], failure: null, debug: () => ({ menu: false, autoSkip: false }) },
+  {
+    title: "",
+    author: "",
+    tools: () => [],
+    failure: null,
+    debug: () => ({ menu: false, autoSkip: false }),
+  },
 );
 // The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
@@ -367,6 +375,7 @@ async function toggleFullscreen() {
         <template #topbar>
           <PlayerTopBar
             :title="title"
+            :author="author"
             :fullscreen="fullscreen"
             :fullscreen-supported="fullscreenSupported"
             :fullscreen-error="fullscreenError"
