@@ -11531,7 +11531,7 @@ function lowerObjectMethodCallExpression(
       const args = lowerArguments(argumentsNodes, context);
       return args === null ? null : useHelper(context, helper.name, args);
     }
-    if ((name === "ceil" || name === "floor") && argumentsNodes.length === 1) {
+    if ((name === "ceil" || name === "floor" || name === "abs") && argumentsNodes.length === 1) {
       const args = lowerArguments(argumentsNodes, context);
       return args === null ? null : { kind: "call", name, positional: args, named: {} };
     }
@@ -12173,7 +12173,6 @@ const TEXT_ONLY_METHODS = new Set(["contains", "count", "indexOf", "lastIndexOf"
 
 /** Java Math helpers without an accepted TeaseScript built-in. */
 const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
-  ["abs", { name: "abs", arity: 1 }],
   ["max", { name: "max", arity: 2 }],
   ["min", { name: "min", arity: 2 }],
 ]);

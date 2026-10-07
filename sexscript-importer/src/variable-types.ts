@@ -2039,6 +2039,23 @@ export function expressionType(
       if (value.local === true) return UNKNOWN;
       const temporal = TEMPORAL_GETTERS.get(value.name);
       if (temporal !== undefined) return { kind: "temporal", name: temporal };
+      // abs keeps an integer whole, and so does pow with a whole exponent of at least 0 written as a literal; sqrt and
+      // other powers give a number (V30 "Numeric functions").
+      if (value.name === "abs" || value.name === "pow" || value.name === "sqrt") {
+        const [base, exponent] = value.positional;
+        const whole =
+          value.name === "abs" ||
+          (value.name === "pow" &&
+            exponent?.kind === "literal" &&
+            exponent.decimal !== true &&
+            typeof exponent.value === "number" &&
+            Number.isInteger(exponent.value) &&
+            exponent.value >= 0);
+        const argument = base === undefined ? UNKNOWN : nonNull(type(base));
+        if (!whole || (argument.kind === "scalar" && argument.name === "number"))
+          return scalar("number");
+        return argument.kind === "scalar" && argument.name === "integer" ? argument : UNKNOWN;
+      }
       // askBooleans returns the toggles' states, or null when the player cancels a form that offers it (V30 §20).
       if (value.name === "askBooleans") {
         const states: TeaseType = { kind: "list", element: scalar("boolean") };

@@ -1,16 +1,16 @@
 function sexscriptLegacyFixed(value, digits, factor) {
   let scaled = round(value * factor)
-  let sign = ""
+  let minus = ""
   if scaled < 0 {
-    sign = "-"
+    minus = "-"
     scaled = -scaled
   }
   let whole = toInteger(scaled / factor)
   if digits == 0 {
-    return "${sign}${whole}"
+    return "${minus}${whole}"
   }
   let fraction = scaled - whole * factor
-  return "${sign}${whole}.${toString(fraction).padStart(digits, "0")}"
+  return "${minus}${whole}.${toString(fraction).padStart(digits, "0")}"
 }
 function sexscriptLegacyTokenize(text, delimiters) {
   let tokens = []

@@ -165,7 +165,6 @@ function withNestedBodies(
  * expression. Each is emitted once per generated file that needs it.
  */
 export type HelperName =
-  | "abs"
   | "array"
   | "fixed"
   | "packagePath"
@@ -272,7 +271,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listSum",
   "max",
   "min",
-  "abs",
   "fixed",
   "packagePath",
   "pathTag",
@@ -562,9 +560,9 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             positional: [bin("*", v("value"), v("factor"))],
             named: {},
           }),
-          letS("sign", lit("")),
+          letS("minus", lit("")),
           ifS(bin("<", v("scaled"), lit(0)), [
-            set(v("sign"), lit("-")),
+            set(v("minus"), lit("-")),
             set(v("scaled"), { kind: "unary", operator: "-", value: v("scaled") }),
           ]),
           letS("whole", {
@@ -573,10 +571,10 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             positional: [bin("/", v("scaled"), v("factor"))],
             named: {},
           }),
-          ifS(bin("==", v("digits"), lit(0)), [ret(template(v("sign"), v("whole")))]),
+          ifS(bin("==", v("digits"), lit(0)), [ret(template(v("minus"), v("whole")))]),
           letS("fraction", bin("-", v("scaled"), bin("*", v("whole"), v("factor")))),
           ret(
-            template(v("sign"), v("whole"), ".", {
+            template(v("minus"), v("whole"), ".", {
               kind: "methodCall",
               target: { kind: "call", name: "toString", positional: [v("fraction")], named: {} },
               name: "padStart",
@@ -1546,20 +1544,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyMin",
         ["first", "second"],
         [ifS(bin("<=", v("first"), v("second")), [ret(v("first"))]), ret(v("second"))],
-      ),
-  },
-  abs: {
-    name: "sexscriptLegacyAbs",
-    build: () =>
-      fn(
-        "sexscriptLegacyAbs",
-        ["value"],
-        [
-          ifS(bin("<", v("value"), lit(0)), [
-            ret({ kind: "unary", operator: "-", value: v("value") }),
-          ]),
-          ret(v("value")),
-        ],
       ),
   },
   ...JAVA_HELPERS,

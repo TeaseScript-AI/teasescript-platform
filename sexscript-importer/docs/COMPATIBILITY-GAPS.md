@@ -55,6 +55,7 @@ implemented):
 | ternary / Elvis | `if` statements with one assignment or statement per branch |
 | implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
 | `list[getRandom(list.size())]`, `list[-1]` | `list.random`, `list.last` / `list[list.length - n]` |
+| `Math.sqrt(x)`, `Math.pow(x, y)`, `x ** y`, `Math.abs(x)`, `x.abs()` | `sqrt(x)`, `pow(x, y)`, `abs(x)` (V30 "Numeric functions"), which stop the script where Java gave NaN or Infinity; `Math.log`, `exp`, `sin`, and `cos` stay generated helpers with Java's radians |
 | `collect`, `findAll`, `find`, `any`, `every`, `sum`, `times`, `eachWithIndex` with closures; `collect()` without one | ordinary `for` / `repeat` loops |
 | closures stored in data or passed as callbacks | string action IDs (the forwarded function's name) plus one generated dispatcher function |
 | `return new Object() { fields; methods }.main()` | globals, functions, and the entry method's statements as the script flow |
