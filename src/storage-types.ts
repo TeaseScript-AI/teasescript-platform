@@ -19,8 +19,18 @@ export interface StorageKeyType {
   readonly at: SourceSpan;
   /** Whether a load declares the type, by the variable it starts or is assigned to. */
   readonly declared: boolean;
-  /** The type of each load without a declared type, in checking order, which the later ones must agree with. */
-  readonly loads: readonly { readonly type: StaticType; readonly at: SourceSpan }[];
+  /**
+   * Each distinct type of the loads without a declared type, in checking order, with its first load and its text (see
+   * {@link typeKey}): a load must agree with the types that loads before it first read.
+   */
+  readonly loads: readonly StorageLoadType[];
+}
+
+/** A type that loads of a key read, with the first of them. */
+export interface StorageLoadType {
+  readonly type: StaticType;
+  readonly at: SourceSpan;
+  readonly text: string;
 }
 
 /** A load of a storage key written as a string literal, with the type it reads the stored value as, without `null`. */
@@ -42,13 +52,14 @@ export interface StorageLoad {
 export function storageKeyTypes(loads: readonly StorageLoad[]): Map<string, StorageKeyType> {
   const keys = new Map<
     string,
-    {
-      type: StaticType;
-      at: SourceSpan;
-      declared: boolean;
-      loads: { readonly type: StaticType; readonly at: SourceSpan }[];
-    }
+    { type: StaticType; at: SourceSpan; declared: boolean; loads: StorageLoadType[] }
   >();
+  // A load of a type that an earlier load read adds nothing, so repeated loads add no work per earlier load.
+  const added = (loads: StorageLoadType[], load: StorageLoad): void => {
+    const text = typeKey(load.type);
+    if (!loads.some((earlier) => earlier.text === text))
+      loads.push({ type: detachedType(load.type), at: load.at, text });
+  };
   for (const load of loads) {
     const kept = keys.get(load.key);
     if (load.declared) {
@@ -64,11 +75,12 @@ export function storageKeyTypes(loads: readonly StorageLoad[]): Map<string, Stor
       continue;
     }
     if (kept === undefined) {
-      const type = detachedType(load.type);
-      keys.set(load.key, { type, at: load.at, declared: false, loads: [{ type, at: load.at }] });
+      const loads: StorageLoadType[] = [];
+      added(loads, load);
+      keys.set(load.key, { type: detachedType(load.type), at: load.at, declared: false, loads });
       continue;
     }
-    kept.loads.push({ type: detachedType(load.type), at: load.at });
+    added(kept.loads, load);
     if (kept.declared) continue;
     const narrower = isAssignable(kept.type, load.type);
     const wider = isAssignable(load.type, kept.type);
@@ -131,8 +143,7 @@ export function sameStorageKeyTypes(
       !sameType(other.type, kept.type) ||
       other.loads.length !== kept.loads.length ||
       other.loads.some(
-        (load, index) =>
-          load.at !== kept.loads[index]!.at || !sameType(load.type, kept.loads[index]!.type),
+        (load, index) => load.at !== kept.loads[index]!.at || load.text !== kept.loads[index]!.text,
       )
     )
       return false;
@@ -146,7 +157,7 @@ export function sameType(left: StaticType, right: StaticType): boolean {
 }
 
 /** A text that equal types share: union members and object properties in a fixed order. */
-function typeKey(type: StaticType): string {
+export function typeKey(type: StaticType): string {
   return runCompileTask(typeKeyTask(type));
 }
 

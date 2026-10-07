@@ -192,6 +192,7 @@ import {
   sameStorageKeyTypes,
   sameType,
   storageKeyTypes,
+  typeKey,
   type StorageKeyType,
   type StorageLoad,
 } from "./storage-types.js";
@@ -3138,11 +3139,15 @@ class TypeChecker {
           // A default of a type the compiler cannot know, or that no value decided yet, gives a value it cannot know.
           if (givenKind === "unknown" || givenKind === "open") return UNKNOWN_TYPE;
           read = given;
-          // Each earlier load without a declared type accepts every value of this one, or this one of it.
+          // Each type that loads without a declared type read before this one accepts every value of it, or it of them.
           const earlier = kept?.loads ?? [];
-          const position = earlier.findIndex((load) => load.at === expression.span);
-          const conflict = (position === -1 ? earlier : earlier.slice(0, position)).find(
-            (load) => !isAssignable(load.type, read) && !isAssignable(read, load.type),
+          const text = typeKey(read);
+          const first = earlier.findIndex((load) => load.text === text);
+          const conflict = earlier.find(
+            (load, index) =>
+              (first === -1 || index < first) &&
+              !isAssignable(load.type, read) &&
+              !isAssignable(read, load.type),
           );
           if (conflict !== undefined) {
             const both = union([conflict.type, read]);
