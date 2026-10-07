@@ -96,11 +96,12 @@ watch(
   () => props.entries,
   () => measurement.clear(),
 );
-// Every measurement, equal sizes too, tells which content the row's size was taken with.
+// Each measurement reports the row and content its element shows; an entry updated in place is ahead of the element
+// until Vue renders it.
 const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
-  const row = props.entries[instance.indexFromElement(element)];
-  if (row !== undefined)
-    measurement.measured(row.id, row.kind === "message" ? row.contentSequence : undefined);
+  const key = element.dataset.messageId;
+  if (key !== undefined)
+    measurement.measured(key, element.dataset.contentSequence, entry !== undefined);
   return measureElement(element, entry, instance);
 };
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
@@ -152,6 +153,22 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
 // A message whose text changed out of view keeps the text being read in place as it is measured again on the way up.
 virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
   measurement.compensates(item, instance);
+// Once Vue has rendered every row, a message whose new text kept its size counts as measured with that text.
+watch(
+  [() => props.entries, () => props.revision],
+  () => {
+    const sizes = virtualizer.value.itemSizeCache;
+    for (const element of scrollElement.value?.querySelectorAll<HTMLElement>(".transcript-entry") ??
+      []) {
+      const key = element.dataset.messageId;
+      if (key === undefined) continue;
+      measurement.rendered(key, element.dataset.contentSequence, sizes.get(key), () =>
+        Math.round(element.getBoundingClientRect().height),
+      );
+    }
+  },
+  { flush: "post" },
+);
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
   const previousDistance =
@@ -268,7 +285,10 @@ watch(
   () => {
     const id = focusedEntry;
     focusedEntry = null;
-    if (id === null || (document.activeElement !== null && document.activeElement !== document.body))
+    if (
+      id === null ||
+      (document.activeElement !== null && document.activeElement !== document.body)
+    )
       return;
     const entry = scrollElement.value?.querySelector<HTMLElement>(
       `.transcript-entry[data-message-id="${CSS.escape(id)}"]`,
@@ -367,6 +387,9 @@ onMounted(() => {
                 :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
                 :data-index="item.index"
                 :data-message-id="entry.id"
+                :data-content-sequence="
+                  entry.kind === 'message' ? entry.contentSequence : undefined
+                "
                 :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
                 role="listitem"
                 :aria-posinset="item.index + 1"
