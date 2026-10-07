@@ -51,6 +51,15 @@ interface FrozenRecording {
   end: RuntimeSnapshot | null;
 }
 
+/**
+ * Where the session stands paused at a random draw as the last call left it, and whether the log's last record is the
+ * call that paused there, which resolutions then continue.
+ */
+interface Paused {
+  readonly draw: number | null;
+  readonly record: boolean;
+}
+
 /** How much of a session the recorder keeps; diagnostic retention, not a limit on scripts. */
 export interface DebugRecorderLimits {
   readonly operations: number;
@@ -92,10 +101,17 @@ export class DebugRecorder {
   /** Exports the session's current state. */
   #current: (() => RuntimeSnapshot) | null = null;
   /**
-   * The latest publication of the session: its revision, and how many logged calls reach its state, or `null` when the
-   * log does not reach it.
+   * The latest publication of the session: its revision; how many logged calls reach its state, or `null` when the log
+   * does not reach it; the last of them as it was then, which a resolution may have extended since; and where the
+   * session stood paused.
    */
-  #published: { readonly revision: number; readonly operations: number | null } | null = null;
+  #published: {
+    readonly revision: number;
+    readonly operations: number | null;
+    readonly last: DebugOperation | null;
+    readonly paused: Paused;
+  } | null = null;
+  #paused: Paused = { draw: null, record: false };
   /** The recording once it froze; until then, the recording is the log. */
   #frozen: FrozenRecording | null = null;
   #problem: string | null = null;
@@ -122,7 +138,9 @@ export class DebugRecorder {
     this.#argumentBytes = 0;
     this.#broken = false;
     this.#current = current;
-    this.#published = { revision, operations: 0 };
+    // A recording may begin at a paused draw, whose call is not in the log.
+    this.#paused = { draw: anchor.randomControl?.pending?.draw.drawId ?? null, record: false };
+    this.#published = { revision, operations: 0, last: null, paused: this.#paused };
     this.#frozen = null;
     this.#problem = null;
   }
@@ -130,7 +148,12 @@ export class DebugRecorder {
   /** Notes that `owner` published `revision` after the calls logged so far. */
   published(owner: PlayerRuntimeEngine, revision: number): void {
     if (owner !== this.#owner) return;
-    this.#published = { revision, operations: this.#broken ? null : this.#operations.length };
+    this.#published = {
+      revision,
+      operations: this.#broken ? null : this.#operations.length,
+      last: this.#operations.at(-1) ?? null,
+      paused: this.#paused,
+    };
   }
 
   /** The recording so far, or `null` before any session began. */
@@ -162,6 +185,8 @@ export class DebugRecorder {
     )
       return null;
     const operations = this.#operations.slice(0, published.operations);
+    // A resolution after the publication may have extended its last call; the publication reached the call as it was.
+    if (published.last !== null) operations[operations.length - 1] = published.last;
     let session: RuntimeSession;
     try {
       session = rebuildRecordedSession(this.#plan, this.#anchor, operations);
@@ -172,6 +197,7 @@ export class DebugRecorder {
     // characters they counted stay counted, so the log only starts again a little sooner.
     this.#operations = operations;
     this.#broken = false;
+    this.#paused = published.paused;
     return session;
   }
 
@@ -189,12 +215,12 @@ export class DebugRecorder {
     invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
     continuation = false,
   ): R {
-    // While the last recorded call stands paused at a random draw, a resolution continues that call's record, and the
-    // engine refuses every other call, which then changes nothing and needs no record.
-    const paused = owner === this.#owner ? this.#pausedCall() : null;
-    const continues = paused !== null && kind === "resumeRandomDraw";
-    const prepared =
-      owner === this.#owner ? this.#prepare(input, args, continuation || paused !== null) : null;
+    // While the session stands paused at a random draw, a resolution continues the record of the call that paused, if
+    // the log has it, and the engine refuses every other call, which then changes nothing and needs no record.
+    const owned = owner === this.#owner;
+    const paused = owned ? this.#paused.draw : null;
+    const continues = owned && kind === "resumeRandomDraw" && this.#paused.record && !this.#broken;
+    const prepared = owned ? this.#prepare(input, args, continuation || paused !== null) : null;
     const queries: DebugAdmissionQuery[] = [];
     const admission = (store: CapturedMediaAdmission): CapturedMediaAdmission => ({
       holds: (reference, mediaKind) => {
@@ -218,17 +244,16 @@ export class DebugRecorder {
         this.#add(kind, prepared, queries, null, error instanceof Error ? error.name : "Error");
       throw error;
     }
+    if (!owned) return result;
+    if (paused !== null && unchangedWhilePaused(result, paused)) return result;
+    let recorded = false;
     if (prepared !== null) {
       if (continues) this.#continue(result);
-      else if (paused === null || !refusedWhilePaused(result, paused))
-        this.#add(kind, prepared, queries, result, null);
+      else this.#add(kind, prepared, queries, result, null);
+      recorded = true;
     }
+    this.#paused = { draw: result.pausedAt, record: recorded && result.pausedAt !== null };
     return result;
-  }
-
-  /** The draw the log's last call stands paused at, which a resolution then continues, or `null`. */
-  #pausedCall(): number | null {
-    return this.#broken ? null : (this.#operations.at(-1)?.pausedAt ?? null);
   }
 
   /**
@@ -301,8 +326,15 @@ export class DebugRecorder {
    */
   #restart(input: () => RuntimeSnapshot): void {
     this.#anchor = input();
+    // The call that paused, if any, is now before the anchor.
+    this.#paused = { draw: this.#paused.draw, record: false };
     if (this.#published !== null)
-      this.#published = { revision: this.#published.revision, operations: 0 };
+      this.#published = {
+        revision: this.#published.revision,
+        operations: 0,
+        last: null,
+        paused: this.#paused,
+      };
     this.#operations = [];
     this.#argumentBytes = 0;
     this.#broken = false;
@@ -363,11 +395,19 @@ export class DebugRecorder {
   }
 }
 
-/** Whether a call made while draw `paused` waits was refused, as the engine refuses every call but its resolution. */
-function refusedWhilePaused(result: CallResult, paused: number): boolean {
+/** Refusals that change nothing while a draw is paused: every call but its resolution, and a resolution that misses. */
+const PAUSED_REFUSALS: ReadonlySet<string> = new Set([
+  "randomDrawPending",
+  "noPendingDraw",
+  "staleDraw",
+  "invalidOutcome",
+]);
+
+/** Whether a call made while draw `paused` waits changed nothing, as the engine refused it. */
+function unchangedWhilePaused(result: CallResult, paused: number): boolean {
   return (
     result.events.length === 0 &&
     result.pausedAt === paused &&
-    (result.outcome === undefined || result.outcome.kind === "randomDrawPending")
+    (result.outcome === undefined || PAUSED_REFUSALS.has(result.outcome.kind))
   );
 }

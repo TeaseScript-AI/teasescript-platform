@@ -718,3 +718,61 @@ test("a replay whose chosen outcome differs from the recorded one diverges", asy
   const result = replayDebugExport({ ...exported, replay: { ...exported.replay!, operations } });
   assert.equal(result.kind, "diverged");
 });
+
+test("a recording that begins paused keeps the resolution as its own call after refused calls", async () => {
+  let session = createPlayerRuntimeSession(
+    'wait 1\nlet x = randomInteger(1..=6)\nsay "${x}", instant\nexit',
+  );
+  setPlayerRuntimeRandomControl(session, {});
+  session = observePlayerRuntimeTime(session, 1000).session;
+  const recorder = new DebugRecorder();
+  session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session), recorder);
+  // Refused while the draw is paused: it changes nothing and needs no record.
+  const refused = continuePlayerRuntimeSession(session, {
+    wallClockMs: 0,
+    temporalContext: DEFAULT_TEMPORAL_CONTEXT,
+  });
+  assert.equal(refused.outcome.kind, "randomDrawPending");
+  session = resumePlayerRuntimeRandomDraw(refused.session, {
+    drawId: refused.session.state.randomDraw!.drawId,
+    outcome: "natural",
+  }).session;
+  const recording = recorder.recording()!;
+  assert.deepEqual(
+    recording.operations.map((operation) => operation.kind),
+    ["resumeRandomDraw", "run"],
+  );
+  assert.equal(
+    JSON.stringify(
+      rebuildRecordedSession(
+        recording.plan,
+        recording.anchorSnapshot,
+        recording.operations,
+      ).exportSnapshot(),
+    ),
+    JSON.stringify(playerRuntimeSnapshot(session)),
+  );
+  assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("a resolution whose continuation throws leaves the session at the paused state it showed", () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'let t = timer(duration: 1..=2, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10\nexit',
+    { recorder },
+  );
+  setPlayerRuntimeRandomControl(session, { filter: { kinds: ["timerRepeat"] } });
+  session = observePlayerRuntimeTime(session, 3000).session;
+  const shown = JSON.stringify(playerRuntimeSnapshot(session));
+  const drawId = session.state.randomDraw!.drawId;
+  setPlayerRuntimeRandomControl(session, {
+    filter: { kinds: ["random"] },
+    decide: () => {
+      throw new Error("host decision failed");
+    },
+  });
+  assert.throws(() => resumePlayerRuntimeRandomDraw(session, { drawId, outcome: "natural" }), {
+    name: "RandomDecisionError",
+  });
+  assert.equal(JSON.stringify(playerRuntimeSnapshot(session)), shown);
+});
