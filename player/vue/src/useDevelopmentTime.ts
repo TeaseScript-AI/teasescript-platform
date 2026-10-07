@@ -50,8 +50,7 @@ export function useDevelopmentTime(
       autoSkippable(state.value!),
   );
 
-  function record(from: PlayerRuntimeSession, to: PlayerRuntimeSession) {
-    const skippedMs = to.state.observedSessionTimeMs - from.state.observedSessionTimeMs;
+  function record(skippedMs: number) {
     if (skippedMs > 0) log(`⏩ ${durationText(skippedMs)} skipped`);
   }
 
@@ -75,6 +74,8 @@ export function useDevelopmentTime(
       const targetMs = start === null ? null : target(start);
       if (start === null || targetMs === null) return;
       let current = start;
+      // Only the jump's own steps count as skipped: real time that passed while it waited for the host does not.
+      let skippedMs = 0;
       for (;;) {
         // Each task observes events for a bounded time, so a long jump keeps input and rendering responsive.
         const published = current;
@@ -84,6 +85,7 @@ export function useDevelopmentTime(
           if (performance.now() >= until) break;
           next = stepPlayerRuntimeTime(current, targetMs);
         }
+        skippedMs += current.state.observedSessionTimeMs - published.state.observedSessionTimeMs;
         if (current !== published) player.publishJump(current);
         if (current.state.observedSessionTimeMs >= targetMs) break;
         // A save, delete, or photo waits for the host; the jump continues once its answer is published.
@@ -94,7 +96,7 @@ export function useDevelopmentTime(
         if (disposed || player.generation.value !== generation) break;
         current = player.session.value ?? current;
       }
-      if (player.generation.value === generation) record(start, current);
+      if (player.generation.value === generation) record(skippedMs);
     } finally {
       jumping.value = false;
     }
@@ -122,7 +124,7 @@ export function useDevelopmentTime(
       current = advancePlayerRuntimeTime(current, nextPlayerRuntimeEventMs(current.state)!);
     } while (performance.now() < until && autoSkippable(current.state));
     player.publishJump(current);
-    record(start, current);
+    record(current.state.observedSessionTimeMs - start.state.observedSessionTimeMs);
   }
   let scheduled: ReturnType<typeof setTimeout> | undefined;
   watch(
