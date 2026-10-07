@@ -1164,12 +1164,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ): Promise<DebugExportCandidate> {
       // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
       const current = session.value;
+      // The shown state, after a call that threw rebuilt from the recorded calls; without it, the export has no session
+      // state, so it never presents an earlier state as the one shown.
+      const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
       const recording = recorder.recording();
-      // The shown state; after a call that threw, rebuilt from the recording, or else the state it ends in.
-      const snapshot =
-        current === null
-          ? null
-          : (playerRuntimeSnapshotOrNull(current) ?? recording?.endSnapshot ?? null);
       const frozen = {
         build: playerBuildIdentity,
         package: options.debugPackage ?? { id: null, version: null },
@@ -1188,7 +1186,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         rewoundWhileDebugging: rewound.value,
         ...shown,
       };
-      const storage = snapshot?.scriptStorage ?? [];
+      const storage = (snapshot ?? recording?.endSnapshot)?.scriptStorage ?? [];
       const photos: DebugPhotoCandidate[] = [];
       for (const [reference, usedBy] of debugPhotoUses(frozen.recording, storage)) {
         const record = await capturedMedia.read(reference);

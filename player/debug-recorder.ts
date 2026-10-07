@@ -14,6 +14,7 @@ import {
   type DebugOperation,
   type DebugOperationKind,
 } from "./debug-export.js";
+import type { PlayerRuntimeEngine } from "./runtime-adapter.js";
 
 /** What a recorder holds for a debug export: the anchor and every engine call made since, in order. */
 export interface DebugRecording {
@@ -67,21 +68,26 @@ const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2
  * The session's state stays in its engine-owned runner: the recorder exports it only where it needs a snapshot (a new
  * anchor, the end of a frozen recording, or `recording()`). Its calls also rebuild the state of the session's latest
  * publication, which is how the Player recovers after a call threw; for that, it keeps logging calls after the
- * recording froze, and starts that log again from the session's state after a call it could not record.
+ * recording froze, and after a call it could not record, it starts that log again at the Player's next call.
  */
 export class DebugRecorder {
   readonly #limits: DebugRecorderLimits;
   #plan: InstructionPlan | null = null;
+  /** The engine whose calls the log keeps; calls of any other engine are neither logged nor rebuilt. */
+  #owner: PlayerRuntimeEngine | null = null;
   /** The log: an anchor and the calls since, which reach the session's state unless `#broken`. */
   #anchor: RuntimeSnapshot | null = null;
   #operations: DebugOperation[] = [];
   #argumentBytes = 0;
-  /** Whether a call since the anchor could not be logged; the next call then starts the log again. */
+  /** Whether a call since the anchor could not be logged; the Player's next call then starts the log again. */
   #broken = false;
   /** Exports the session's current state. */
   #current: (() => RuntimeSnapshot) | null = null;
-  /** The latest publication of the session: its revision and the calls logged before it, or `null` if unknown. */
-  #published: { readonly revision: number; readonly operations: number } | null = null;
+  /**
+   * The latest publication of the session: its revision, and how many logged calls reach its state, or `null` when the
+   * log does not reach it.
+   */
+  #published: { readonly revision: number; readonly operations: number | null } | null = null;
   /** The recording once it froze; until then, the recording is the log. */
   #frozen: FrozenRecording | null = null;
   #problem: string | null = null;
@@ -91,16 +97,18 @@ export class DebugRecorder {
   }
 
   /**
-   * Starts a new recording from `anchor`, the state of a new or restored session before any call, published as
-   * `revision`; `current` exports the session's state whenever the recording needs it.
+   * Starts a new recording of `owner`'s calls from `anchor`, the state of its latest publication `revision`; `current`
+   * exports the session's state whenever the recording needs it.
    */
   begin(
     plan: InstructionPlan,
     anchor: RuntimeSnapshot,
     current: () => RuntimeSnapshot,
+    owner: PlayerRuntimeEngine,
     revision: number,
   ): void {
     this.#plan = plan;
+    this.#owner = owner;
     this.#anchor = anchor;
     this.#operations = [];
     this.#argumentBytes = 0;
@@ -111,10 +119,10 @@ export class DebugRecorder {
     this.#problem = null;
   }
 
-  /** Notes that the session published `revision` after the calls logged so far. */
-  published(revision: number): void {
-    if (this.#plan === null || this.#published?.revision === revision) return;
-    this.#published = this.#broken ? null : { revision, operations: this.#operations.length };
+  /** Notes that `owner` published `revision` after the calls logged so far. */
+  published(owner: PlayerRuntimeEngine, revision: number): void {
+    if (owner !== this.#owner) return;
+    this.#published = { revision, operations: this.#broken ? null : this.#operations.length };
   }
 
   /** The recording so far, or `null` before any session began. */
@@ -132,12 +140,18 @@ export class DebugRecorder {
   }
 
   /**
-   * A runner at the state of the publication `revision`, rebuilt from the log, which then continues from it; `null`
-   * when the log does not reach that publication.
+   * A runner at the state of `owner`'s publication `revision`, rebuilt from the log, which then continues from it;
+   * `null` when the log does not reach that publication.
    */
-  recover(revision: number): RuntimeSession | null {
+  recover(owner: PlayerRuntimeEngine, revision: number): RuntimeSession | null {
     const published = this.#published;
-    if (this.#plan === null || this.#anchor === null || published?.revision !== revision)
+    if (
+      owner !== this.#owner ||
+      this.#plan === null ||
+      this.#anchor === null ||
+      published?.revision !== revision ||
+      published.operations === null
+    )
       return null;
     const operations = this.#operations.slice(0, published.operations);
     let session: RuntimeSession;
@@ -154,19 +168,20 @@ export class DebugRecorder {
   }
 
   /**
-   * Makes the engine call `invoke` and records it. `input` exports the state the call starts from, which the recorder
-   * reads only to start again; `args` are the plain arguments the call passes after the plan and snapshot.
+   * Makes `owner`'s engine call `invoke` and records it. `input` exports the state the call starts from, which the
+   * recorder reads only to start again; `args` are the plain arguments the call passes after the plan and snapshot.
    * `continuation` marks the `run` that follows an accepted call, which is never a new anchor. The call receives
    * `admission` to pass to the engine in place of the Player's own media store, which still answers.
    */
   call<R extends CallResult>(
+    owner: PlayerRuntimeEngine,
     kind: DebugOperationKind,
     input: () => RuntimeSnapshot,
     args: readonly unknown[],
     invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
     continuation = false,
   ): R {
-    const prepared = this.#prepare(input, args, continuation);
+    const prepared = owner === this.#owner ? this.#prepare(input, args, continuation) : null;
     const queries: DebugAdmissionQuery[] = [];
     const admission = (store: CapturedMediaAdmission): CapturedMediaAdmission => ({
       holds: (reference, mediaKind) => {
@@ -200,7 +215,8 @@ export class DebugRecorder {
     args: readonly unknown[],
     continuation: boolean,
   ): { readonly args: unknown[]; readonly bytes: number } | null {
-    if (this.#plan === null) return null;
+    // A call that continues one the log could not keep cannot be replayed either.
+    if (this.#plan === null || (this.#broken && continuation)) return null;
     try {
       // JSON would turn a value such as NaN into null and replay a different call, and a cycle has no JSON form, so
       // such a call is not recorded; the engine's own validation then still refuses or admits it.
@@ -215,22 +231,18 @@ export class DebugRecorder {
         this.#skip("A recorded call was larger than the recording keeps.", input);
         return null;
       }
-      // After a call it could not log, the log starts again from the state this call starts from. Otherwise it starts
-      // again only before a call of the Player, whose input is a published session state; a continuation always stays
-      // with the call it continues.
+      // The log starts again only before a call of the Player, after a call it could not keep or when it would outgrow
+      // its limits; a continuation always stays with the call it continues. A call of the Player starts from the state
+      // of the latest publication, so the new anchor is that publication's state.
       if (
         this.#broken ||
         (!continuation &&
           (this.#operations.length + 2 > this.#limits.operations ||
             this.#argumentBytes + bytes > this.#limits.argumentBytes))
       ) {
-        // The new anchor is the latest publication when no call followed it.
-        const published =
-          !this.#broken && this.#published?.operations === this.#operations.length
-            ? { revision: this.#published.revision, operations: 0 }
-            : null;
         this.#anchor = input();
-        this.#published = published;
+        if (this.#published !== null)
+          this.#published = { revision: this.#published.revision, operations: 0 };
         this.#operations = [];
         this.#argumentBytes = 0;
         this.#broken = false;

@@ -11,7 +11,6 @@ import {
   interactionDeadlineMs,
   MAIN_FILE_PATH,
   restoreCheckpoint,
-  RuntimeSessionError,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
@@ -100,8 +99,9 @@ export interface PlayerRuntimeSession {
   /** The engine-owned runner of the session; only this adapter's functions operate it. */
   readonly engine: PlayerRuntimeEngine;
   /**
-   * Counts the session's publications: every operation publishes a new revision, also one that changed nothing. A
-   * publication stays usable until an operation changes the state; from then on only later ones are.
+   * Counts the session's publications: every operation publishes a new revision, also one that changed nothing, and also
+   * when the host keeps an earlier one. A publication stays usable until an operation changes the state; from then on
+   * only later ones are.
    */
   readonly revision: number;
   /** What this publication shows; see `PlayerRuntimeState`. */
@@ -151,7 +151,7 @@ export class PlayerRuntimeEngine {
     if (at.revision < this.#current || at.revision > this.#revision)
       throw new Error("This Player session was replaced by a newer one; use the latest.");
     if (this.#thrown === null) return this.#runtime;
-    const rebuilt = at.recorder?.recover(this.#revision) ?? null;
+    const rebuilt = at.recorder?.recover(this, this.#revision) ?? null;
     if (rebuilt === null) throw this.#thrown.error;
     this.#runtime = rebuilt;
     this.#thrown = null;
@@ -166,7 +166,7 @@ export class PlayerRuntimeEngine {
     },
   >(
     at: PlayerRuntimePublication,
-    kind: Parameters<DebugRecorder["call"]>[0],
+    kind: Parameters<DebugRecorder["call"]>[1],
     args: readonly unknown[],
     invoke: (
       runtime: RuntimeSession,
@@ -178,6 +178,7 @@ export class PlayerRuntimeEngine {
     try {
       if (at.recorder === null) return invoke(runtime, (store) => store);
       return at.recorder.call(
+        this,
         kind,
         () => runtime.exportSnapshot(),
         args,
@@ -194,22 +195,23 @@ export class PlayerRuntimeEngine {
   }
 
   /**
-   * Publishes `revision`, which follows publication `from`, and what it shows; `changed` says whether the calls since
-   * may have changed the state, which ends the use of earlier publications.
+   * Publishes what the session shows after the calls made through publication `from`, as the next revision; `changed`
+   * says whether those calls may have changed the state, which ends the use of earlier publications.
    */
-  publish(revision: number, from: PlayerRuntimePublication, changed = true): PlayerRuntimeState {
+  publish(
+    from: PlayerRuntimePublication,
+    changed = true,
+  ): { readonly revision: number; readonly state: PlayerRuntimeState } {
     const runtime = this.runtimeAt(from);
-    this.#revision = revision;
-    if (changed) this.#current = revision;
-    from.recorder?.published(revision);
-    return Object.freeze({
-      ...runtime.view(),
-      stage: runtime.stageProjection(),
-      media: runtime.mediaPlaybackProjection(),
-      permanentButtons: runtime.permanentButtonProjection(),
-      calls: runtime.callStack(),
-      temporalPresentation: runtime.temporalPresentation(),
-    });
+    this.#revision += 1;
+    if (changed) this.#current = this.#revision;
+    from.recorder?.published(this, this.#revision);
+    return { revision: this.#revision, state: shownState(runtime) };
+  }
+
+  /** What publication `at` shows, read again. */
+  stateAt(at: PlayerRuntimePublication): PlayerRuntimeState {
+    return shownState(this.runtimeAt(at));
   }
 
   /** The complete state of publication `at`, freshly exported and validated. */
@@ -232,7 +234,7 @@ export class PlayerRuntimeEngine {
     return this.runtimeAt(at).variablePreviews();
   }
 
-  /** Starts `recorder`'s recording at publication `at`. */
+  /** Starts `recorder`'s recording at publication `at`, whose state is the latest publication's. */
   beginRecording(
     at: PlayerRuntimePublication,
     plan: InstructionPlan,
@@ -242,18 +244,34 @@ export class PlayerRuntimeEngine {
       plan,
       this.exportSnapshot(at),
       () => this.#runtime.exportSnapshot(),
-      at.revision,
+      this,
+      this.#revision,
     );
   }
 }
 
-/** Whether `runtime` ended because one of its operations threw. */
+/** What a session shows, as detached, frozen data. */
+function shownState(runtime: RuntimeSession): PlayerRuntimeState {
+  return Object.freeze({
+    ...runtime.view(),
+    stage: runtime.stageProjection(),
+    media: runtime.mediaPlaybackProjection(),
+    permanentButtons: runtime.permanentButtonProjection(),
+    calls: runtime.callStack(),
+    temporalPresentation: runtime.temporalPresentation(),
+  });
+}
+
+/**
+ * Whether `runtime` can no longer be read, as after one of its operations threw; one that refused malformed arguments
+ * stays readable.
+ */
 function ended(runtime: RuntimeSession): boolean {
   try {
     runtime.view();
     return false;
-  } catch (error) {
-    return error instanceof RuntimeSessionError;
+  } catch {
+    return true;
   }
 }
 
@@ -1710,12 +1728,7 @@ const REFUSALS: ReadonlySet<string> = new Set<
 
 /** The next publication of the session: a new revision with what it shows now. */
 function publish(session: PlayerRuntimeSession, changed = true): PlayerRuntimeSession {
-  const revision = session.revision + 1;
-  return Object.freeze({
-    ...session,
-    revision,
-    state: session.engine.publish(revision, session, changed),
-  });
+  return Object.freeze({ ...session, ...session.engine.publish(session, changed) });
 }
 
 /** A session over `runtime` before its first publication, revision 0. */
@@ -1730,7 +1743,7 @@ function emptySession(
     plan,
     engine,
     revision: 0,
-    state: engine.publish(0, { revision: 0, recorder: null }),
+    state: engine.stateAt({ revision: 0, recorder: null }),
     recorder,
     debugTrace,
     events: [],

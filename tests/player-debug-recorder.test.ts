@@ -24,6 +24,7 @@ import {
   pendingPlayerRuntimeStorageWrite,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
+  playerRuntimeDebugVariables,
   playerRuntimeForeground,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
@@ -386,30 +387,84 @@ test("after a call throws, the session continues from the state the Player showe
   assert.deepEqual(await replay(recorder), { kind: "reproduced", failure: null, operations: 3 });
 });
 
-test("after a call the recording could not keep, a later error still continues from the state the Player showed", () => {
+test("after a call the recording could not keep, an error still continues from the state the Player showed", () => {
+  const timer = ["timer async 1 s {", '  let long = "x".repeat(9007199254740991)', "}"];
+  const continues = (session: PlayerRuntimeSession, act: () => void) => {
+    const before = playerRuntimeSnapshot(session);
+    assert.throws(act, RangeError);
+    assert.deepEqual(playerRuntimeSnapshot(session), before);
+  };
+
+  // An answer larger than the recording keeps, then an error at the next observation.
+  const asking = [
+    ...timer,
+    'let name = askText "Name"',
+    'let pick = choose again: "Again"',
+    "exit",
+  ].join("\n");
+  const small = new DebugRecorder({ argumentBytes: 50 });
+  const answered = submitPlayerRuntimeComposer(
+    createPlayerRuntimeSession(asking, { recorder: small }),
+    "x".repeat(100),
+  )!.session;
+  assert.equal(small.recording()!.complete, false);
+  continues(answered, () => observePlayerRuntimeTime(answered, 1_000));
+  assert.equal(observePlayerRuntimeTime(answered, 500).outcome.kind, "observed");
+
+  // A storage edit larger than the default retention, whose call has no run after it.
+  const edited = applyPlayerRuntimeStorageEdit(
+    createPlayerRuntimeSession(asking, { recorder: new DebugRecorder() }),
+    { key: "big", value: "x".repeat(2 * 1024 * 1024) },
+  );
+  assert.equal(edited.outcome.kind, "applied");
+  continues(edited.session, () => observePlayerRuntimeTime(edited.session, 1_000));
+  const saved = playerRuntimeSnapshot(edited.session).scriptStorage;
+  assert.deepEqual(
+    saved.map((entry) => entry.key),
+    ["big"],
+  );
+
+  // An answer larger than the recording keeps, whose own run throws: the state before the answer.
+  const checked = [
+    'let name = askText "Name"',
+    'if name != "ok" {',
+    '  let long = "x".repeat(9007199254740991)',
+    "}",
+    'say "${name}", instant',
+    "exit",
+  ].join("\n");
+  const session = createPlayerRuntimeSession(checked, {
+    recorder: new DebugRecorder({ argumentBytes: 50 }),
+  });
+  continues(session, () => submitPlayerRuntimeComposer(session, "x".repeat(100)));
+  const continued = submitPlayerRuntimeComposer(session, "ok")!.session;
+  assert.equal(continued.state.status, "halted");
+  assert.equal(continued.transcriptEntries.at(-1)?.text, "ok");
+});
+
+test("a refusal the host does not keep leaves the later publications recoverable", () => {
   const source = [
     "timer async 1 s {",
     '  let long = "x".repeat(9007199254740991)',
     "}",
-    'let name = askText "Name"',
+    "let seen = 0",
+    "timer async 300 ms {",
+    "  seen = 1",
+    "}",
     'let pick = choose again: "Again"',
-    'say "${name}", instant',
     "exit",
   ].join("\n");
-  const recorder = new DebugRecorder({ argumentBytes: 50 });
-  const answered = submitPlayerRuntimeComposer(
-    createPlayerRuntimeSession(source, { recorder }),
-    "x".repeat(100),
-  )!.session;
-  assert.equal(recorder.recording()!.complete, false);
-  const before = playerRuntimeSnapshot(answered);
-  assert.throws(() => observePlayerRuntimeTime(answered, 1_000), RangeError);
-  assert.deepEqual(playerRuntimeSnapshot(answered), before);
-  const foreground = playerRuntimeForeground(answered);
-  assert.ok(foreground?.kind === "choose");
-  const continued = selectPlayerRuntimeChoice(answered, foreground.options[0]!.id)!.session;
-  assert.equal(continued.state.status, "halted");
-  assert.equal(continued.transcriptEntries.at(-1)?.text, "x".repeat(100));
+  const shown = createPlayerRuntimeSession(source, { recorder: new DebugRecorder() });
+  // As the Player's media host does, the session shown stays when a report is refused.
+  const refused = reportPlayerRuntimeMediaLoad(shown, 99, { kind: "loaded", durationMs: 1 });
+  assert.equal(refused.outcome.kind, "unknownMedia");
+  const later = observePlayerRuntimeTime(shown, 500).session;
+  assert.ok(later.revision > refused.session.revision);
+  const before = playerRuntimeSnapshot(later);
+  const variables = playerRuntimeDebugVariables(later).variables;
+  assert.throws(() => observePlayerRuntimeTime(later, 1_000), RangeError);
+  assert.deepEqual(playerRuntimeSnapshot(later), before);
+  assert.deepEqual(playerRuntimeDebugVariables(later).variables, variables);
 });
 
 test("a debugging tool's storage edit is recorded, so a replay applies it again", async () => {

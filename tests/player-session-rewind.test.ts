@@ -371,6 +371,8 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   );
   assert.equal(candidate.recording?.complete, true);
 
+  // After another error, Back keeps the state it left, the one the Player showed, for Forward.
+  await assert.rejects(choose(context, host, "Long"), RangeError);
   assert.equal(await rewind.back(0), true);
   assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "choose");
   assert.equal(await rewind.forward(), true);
