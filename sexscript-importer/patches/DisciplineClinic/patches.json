@@ -97,6 +97,13 @@
       "category": "b",
       "reason": "pointsBonus is declared without a value and always set by the wheel loop before it is added to the points; declare it as 0 so it is a number from the start.",
       "diff": "loyalty-wheel-default.diff"
+    },
+    {
+      "id": "tempo-change-fraction",
+      "layer": "source",
+      "category": "b",
+      "reason": "spank() sets numTempoChangeStrokes to spanks + 2, and callers pass halves and other fractions of numSpanks (numSpanks / 2, numSpanks * 1.25), so the count can be a fraction, as Groovy kept it; it starts as 0.0 so that it holds a number.",
+      "diff": "tempo-change-fraction.diff"
     }
   ]
 }
