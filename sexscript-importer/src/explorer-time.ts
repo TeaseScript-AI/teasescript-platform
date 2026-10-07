@@ -104,6 +104,17 @@ function reads(
   );
 }
 
+/** The variables an expression reads. */
+function namesOf(expression: unknown, names: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(expression)) for (const item of expression) namesOf(item, names);
+  else if (isRecord(expression)) {
+    if (expression.kind === "identifier" && typeof expression.name === "string")
+      names.add(expression.name);
+    for (const [key, item] of Object.entries(expression)) if (key !== "span") namesOf(item, names);
+  }
+  return names;
+}
+
 /**
  * The clock comparisons of a plan: in each condition and `while` loop, every comparison (also `in` a range) one of
  * whose sides reads the clock, also through variables and temporaries set from it.
@@ -130,8 +141,11 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   const comparisons = new Map<number, ClockComparison[]>();
   const definitions = new Map<string, Data>();
   const model: ClockModel = { comparisons, definitions, helpers };
-  // The first value computed from the clock each variable is set to; a bare clock read is a time kept to measure from.
+  // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
+  // through variables computed so), and is not a bare clock read, which is a time kept to measure from: the first such
+  // value. Rounds until no variable is added.
   const none = new Map<number, Data>();
+  const assigned = new Map<string, Data[]>();
   for (const instruction of instructions) {
     const target = record(instruction.target);
     const name =
@@ -141,8 +155,25 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
           ? instruction.name
           : null;
     const value = record(instruction.value);
-    if (typeof name !== "string" || definitions.has(name) || clockCall(value)) continue;
-    if (reads(value, model, none, false)) definitions.set(name, value);
+    if (typeof name !== "string" || value.kind === "literal") continue;
+    assigned.set(name, [...(assigned.get(name) ?? []), value]);
+  }
+  for (let added = true; added;) {
+    added = false;
+    for (const [name, values] of assigned) {
+      if (definitions.has(name)) continue;
+      // A value that updates the variable from itself (`took += 60`) keeps what it is computed from.
+      const updates = (value: Data) => namesOf(value).has(name);
+      if (
+        values.some((value) => !updates(value)) &&
+        values.every(
+          (value) => updates(value) || (!clockCall(value) && reads(value, model, none, false)),
+        )
+      ) {
+        definitions.set(name, values[0]!);
+        added = true;
+      }
+    }
   }
   instructions.forEach((instruction, index) => {
     const conditional =

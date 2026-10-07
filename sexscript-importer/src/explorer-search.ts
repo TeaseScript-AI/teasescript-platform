@@ -395,6 +395,11 @@ export interface ExploreResult {
     store: { peakBytes: number; evicted: number; replays: number };
     /** With cells: the compared slots, and the cells, slot values, and changes of a slot's value found. */
     cells?: { slots: number; cells: number; values: number; transitions: number };
+    /**
+     * With forward time: the conditions that read the clock, the places a state waits at before one
+     * is read, and the time steps taken: by states (`later` inputs) and by next sessions.
+     */
+    time?: { conditions: number; places: number; steps: number; sessions: number };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -1015,6 +1020,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /** Time steps tried, from a cell (or a session start's storage) to the outcomes they lead to. */
   const timeStepsTried = new Set<string>();
+  const timeStepsTaken = { steps: 0, sessions: 0 };
   /**
    * The time steps of a state that waits where a clock condition is read next: for each of those comparisons that
    * comes out the other way within the horizon, a `later` input just past that moment (`flipGap`); nearest first, at
@@ -1605,18 +1611,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       startedFrom.add(key);
       const work = session.operations;
       if (later) {
-        // A minute later, and at the time steps of the clock conditions a session start reads, from the storage it
-        // starts with; a day later when none can be read.
-        startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
-        const storage = { scriptStorage: entry.entries };
-        const steps = timeSteps(
-          storage,
-          null,
-          wallEnd[entry.node]! + NEXT_SESSION_GAP,
-          `storage ${key}`,
-        );
+        // A minute later; then at the time steps of the clock conditions a session start reads, as its first state
+        // reads them; a day later when none can be read.
+        const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
+        const snapshot = store.get(first.node.id);
+        const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
+        const steps =
+          snapshot === null
+            ? []
+            : timeSteps(snapshot, null, wallEnd[first.node.id]!, `storage ${key}`).map(
+                (gap) => wallEnd[first.node.id]! + gap - begun,
+              );
         for (const gap of steps)
           startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
+        timeStepsTaken.sessions += steps.length;
         if (steps.length === 0 && readsClock)
           startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
       } else
@@ -1992,8 +2000,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         node.waitsAt,
         wallEnd[node.id]!,
         node.cell >= 0 ? `cell ${node.cell}` : `state ${node.id}`,
-      ))
+      )) {
         inputs.push({ kind: "later", afterMs: gap });
+        timeStepsTaken.steps += 1;
+      }
     if (inputs.length === 0) {
       node.status = "stuck";
       store.drop(node.id);
@@ -2170,6 +2180,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
       ...(cells === null ? {} : { cells: cells.stats }),
+      ...(times === null
+        ? {}
+        : {
+            time: {
+              conditions: times.comparisons.size,
+              places: clockAfter.size,
+              ...timeStepsTaken,
+            },
+          }),
     },
     endStates: {
       completed: count("completed"),
