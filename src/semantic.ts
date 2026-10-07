@@ -535,6 +535,8 @@ class SemanticValidator {
 
   /** The innermost statement being checked, which decides whether what it holds can run. */
   #statement: Statement | null = null;
+  /** The value of each `say` statement, whose call of an unknown `skippable` or `unskippable` gets a hint. */
+  readonly #sayStatementValues = new WeakSet<Expression>();
 
   /** The `script(...)` call that a transfer statement being checked names directly, as in `goto script("a.tease")`. */
   #directTarget: {
@@ -2029,9 +2031,15 @@ class SemanticValidator {
               expression.callee.span,
             );
           } else if (!this.#reportFileName(name, expression.callee.span)) {
+            // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text.
+            const hint =
+              this.#sayStatementValues.has(expression) &&
+              (name === "skippable" || name === "unskippable")
+                ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'; only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
+                : "";
             this.#report(
               semanticCode.unknownFunction,
-              `Unknown function '${name}'.`,
+              `Unknown function '${name}'.${hint}`,
               expression.callee.span,
             );
           }
@@ -2163,17 +2171,8 @@ class SemanticValidator {
         );
     }
     this.#diagnostics.push(...messageColorDiagnostics(parts.value));
-    const skipCall = statement ? unknownSkipCall(parts.value, scope) : null;
-    if (skipCall !== null) {
-      // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text.
-      this.#report(
-        semanticCode.unknownFunction,
-        `Unknown function '${skipCall.name}'. To say a message ${skipCall.name}, write its text without parentheses, as in 'say ${skipCall.name} "Hi"'; only a say used as a value, such as 'let line = say ${skipCall.name} ("Hi", instant)', takes its text in parentheses.`,
-        skipCall.span,
-      );
-      for (const argument of skipCall.arguments)
-        yield* compileChild(this.#validateExpressionTask(argument, scope, contextualSpeaker));
-    } else yield* compileChild(this.#validateExpressionTask(parts.value, scope, contextualSpeaker));
+    if (statement) this.#sayStatementValues.add(parts.value);
+    yield* compileChild(this.#validateExpressionTask(parts.value, scope, contextualSpeaker));
     if (parts.pacing !== null && parts.pacing !== "instant") {
       yield* compileChild(this.#validateExpressionTask(parts.pacing, scope, contextualSpeaker));
       const known = staticNumber(parts.pacing);
@@ -3040,29 +3039,6 @@ function isKnownInteger(expression: Expression): boolean {
  * The first interaction, media playback, or camera capture in a parameter default, which cannot pause a default's
  * evaluation.
  */
-/** A say statement's value that calls `skippable` or `unskippable`, which the script does not declare, or `null`. */
-function unknownSkipCall(
-  value: Expression,
-  scope: SemanticScope,
-): {
-  readonly name: string;
-  readonly span: SourceSpan;
-  readonly arguments: readonly Expression[];
-} | null {
-  if (
-    value.kind !== "callExpression" ||
-    value.callee.kind !== "identifier" ||
-    (value.callee.name !== "skippable" && value.callee.name !== "unskippable") ||
-    scope.resolve(value.callee.name) !== undefined
-  )
-    return null;
-  return {
-    name: value.callee.name,
-    span: value.callee.span,
-    arguments: value.arguments.map((argument) => argument.value),
-  };
-}
-
 function findFirstInteraction(
   expression: Expression,
 ): Extract<

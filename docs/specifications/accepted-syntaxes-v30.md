@@ -4094,8 +4094,8 @@ let strokes = [say("First", instant), say("Second", instant)]
   `let line = say unskippable ("Wait", instant)`. A `say` statement keeps the rule above: `say unskippable("Wait")`
   calls a function `unskippable`, so a statement writes `say unskippable "Wait"`.
 - **Statements.** A bare `say` is unchanged and gives no handle. It also takes the bounded form, `say("Hi", instant)`,
-  and keeps reading parentheses as a grouped value wherever the compact form can, as in `say ("A"), instant` and
-  `say (a) + b`. A `say` at the start of a line outside brackets begins a statement.
+  when a comma follows the first value in its parentheses; other parentheses group a value as before, as in
+  `say ("A"), instant` and `say (a) + b`. A `say` at the start of a line outside brackets begins a statement.
 - **Evaluation.** Speaker, options, text, and pacing evaluate once in source order, and pacing works as for any `say`.
   The handle exists once the message is shown: a value that waits behind an earlier message's pacing is shown first. A
   `say` that does not run, as in `false and say("x") == line`, shows nothing. Global and speaker start values and
@@ -4112,8 +4112,8 @@ let strokes = [say("First", instant), say("Second", instant)]
   `say line` shows `<message N>`; `${line}` and `toString(line)` are errors, so use `line.text`. A handle belongs to its
   session: `save` refuses it ([§25](#25-persistent-storage-and-keys)), and saved data and host values cannot hold one.
 - **Types.** `messageHandle` is a protected type name ([§38](#38-keywords-and-protected-built-ins)) that annotations
-  and unions use like `timer`; `message` remains an ordinary name. A literal text written to what can only be a
-  message handle has its markup colours checked like the text of `say`.
+  and unions use like `timer`; `message` remains an ordinary name. A literal replacement text assigned with `=` to what
+  can only be a message handle has its markup colours checked like the text of `say`.
 
 ### Authored colours
 

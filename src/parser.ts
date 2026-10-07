@@ -165,6 +165,29 @@ const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"
 type TypeContext = "statement" | "delimited" | "typeTest" | "delimitedTypeTest";
 
 type StorageDelimiter = "as" | "default";
+/** What the parsers over one token list share. */
+interface SharedParse {
+  /** For each token, whether its innermost enclosing opener is `(` or `[`, where a newline may continue a type (V30 §1). */
+  readonly bracketed: readonly boolean[];
+  /** For each opening delimiter, the index of the delimiter that closes it, once one is looked up. */
+  closers: ReadonlyMap<number, number> | null;
+  /**
+   * The `say` values parsed so far, by token position. Telling a mode or skip word from a value parses ahead, also the
+   * `say` values nested there, so each is parsed once per context; parsed again at every level, nesting is exponential.
+   */
+  readonly sayValues: Map<number, ParsedSayValue[]>;
+}
+/** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
+interface ParsedSayValue {
+  readonly insideDelimiters: boolean;
+  readonly storageDelimiters: ReadonlySet<StorageDelimiter>;
+  readonly blockEndsCompactInteraction: boolean;
+  readonly recoveredAtStatementBoundary: boolean;
+  readonly parts: SayParts | null;
+  readonly end: number;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly recovered: boolean;
+}
 /** The compact interaction commands other than `choose`, and the kind of answer each asks for. */
 const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionKind"]> = new Map([
   ["askText", "text"],
@@ -230,15 +253,18 @@ class Parser {
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
   /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
   #insideDelimiters = false;
-  /** For each token, whether its innermost enclosing opener is `(` or `[`, where a newline may continue a type (V30 §1). */
-  readonly #bracketed: readonly boolean[];
+  /** What every parser over these tokens shares: a speculative parser computes none of it again. */
+  readonly #shared: SharedParse;
 
   public constructor(
     private readonly tokens: readonly Token[],
-    // A speculative parser over the same tokens shares the contexts instead of computing them again.
-    bracketed: readonly boolean[] = bracketContexts(tokens),
+    shared: SharedParse = {
+      bracketed: bracketContexts(tokens),
+      closers: null,
+      sayValues: new Map(),
+    },
   ) {
-    this.#bracketed = bracketed;
+    this.#shared = shared;
   }
 
   public get diagnostics(): readonly Diagnostic[] {
@@ -612,9 +638,9 @@ class Parser {
 
   /**
    * `say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] text [, pacing]`, or its bounded form
-   * with the text and pacing in parentheses, `say("Waiting.", instant)`. A statement reads parentheses as a grouped value
-   * whenever the compact form can take them, as in `say (a) + b`; a value reads them as the bounded form, so it ends at
-   * its `)`. Before that form a mode is written with its options, `say bubble() ("Plain", instant)`, while
+   * with the text and pacing in parentheses, `say("Waiting.", instant)`. A statement reads parentheses as the bounded
+   * form only when a comma follows their first value; others group a value as before, as in `say (a) + b`. A value reads
+   * them as the bounded form, so it ends at its `)`. Before that form a mode is written with its options, `say bubble() ("Plain", instant)`, while
    * `say bubble("x")` shows the value of a call; as a value, a skip word before parentheses is the modifier.
    */
   *#parseSayParts(statement: boolean): ParseTask<SayParts | null> {
@@ -635,7 +661,8 @@ class Parser {
     const presentation =
       this.#check(TokenKind.Identifier) &&
       ["bubble", "prose"].includes(this.#peek().lexeme) &&
-      (this.#atSayModeBeforeBoundedText() || !this.#canParseCompleteSayValue(statement))
+      (this.#atSayModeBeforeBoundedText() ||
+        !(yield* parseChild(this.#canParseCompleteSayValue(statement))))
         ? yield* parseChild(this.#parseSayPresentation())
         : null;
 
@@ -643,7 +670,7 @@ class Parser {
     if (
       (this.#checkIdentifier("skippable") || this.#checkIdentifier("unskippable")) &&
       ((!statement && this.#peek(1).kind === TokenKind.LeftParenthesis) ||
-        !this.#canParseCompleteSayValue(statement))
+        !(yield* parseChild(this.#canParseCompleteSayValue(statement))))
     ) {
       skipPolicy = this.#peek().lexeme === "skippable" ? "skippable" : "unskippable";
       this.#advance();
@@ -651,7 +678,7 @@ class Parser {
 
     if (
       this.#check(TokenKind.LeftParenthesis) &&
-      (!statement || !this.#canParseCompleteSayValue(statement))
+      (!statement || (yield* parseChild(this.#opensBoundedSayText())))
     ) {
       const bounded = yield* parseChild(this.#withinDelimiters(this.#parseBoundedSayText()));
       if (bounded === null) {
@@ -709,6 +736,42 @@ class Parser {
     });
   }
 
+  /** A `say` used as a value, parsed once per position and context (see `SharedParse.sayValues`). */
+  *#parseSayValue(): ParseTask<SayParts | null> {
+    const start = this.#current;
+    const parsed = this.#shared.sayValues.get(start) ?? [];
+    const known = parsed.find(
+      (value) =>
+        value.insideDelimiters === this.#insideDelimiters &&
+        value.storageDelimiters === this.#storageDelimiters &&
+        value.blockEndsCompactInteraction === this.#blockEndsCompactInteraction &&
+        value.recoveredAtStatementBoundary === this.#recoveredAtStatementBoundary,
+    );
+    if (known !== undefined) {
+      this.#diagnostics.push(...known.diagnostics);
+      this.#current = known.end;
+      this.#recoveredAtStatementBoundary = known.recovered;
+      return known.parts;
+    }
+    const context = {
+      insideDelimiters: this.#insideDelimiters,
+      storageDelimiters: this.#storageDelimiters,
+      blockEndsCompactInteraction: this.#blockEndsCompactInteraction,
+      recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
+    };
+    const diagnosticCount = this.#diagnostics.length;
+    const parts = yield* parseChild(this.#parseSayParts(false));
+    parsed.push({
+      ...context,
+      parts,
+      end: this.#current,
+      diagnostics: this.#diagnostics.slice(diagnosticCount),
+      recovered: this.#recoveredAtStatementBoundary,
+    });
+    this.#shared.sayValues.set(start, parsed);
+    return parts;
+  }
+
   /** The parentheses of a bounded `say`: its text, then optionally its pacing, until `)`. */
   *#parseBoundedSayText(): ParseTask<{
     readonly value: Expression;
@@ -760,16 +823,12 @@ class Parser {
       !(isPropertyName(this.#peek(first)) && this.#peek(first + 1).kind === TokenKind.Colon)
     )
       return false;
-    let depth = 0;
-    for (let distance = 1; ; distance += 1) {
-      const token = this.#peek(distance);
-      if (token.kind === TokenKind.EndOfFile) return false;
-      if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
-      else if (CLOSING_DELIMITERS.has(token.kind)) {
-        depth -= 1;
-        if (depth === 0) return this.#peek(distance + 1).kind === TokenKind.LeftParenthesis;
-      }
-    }
+    this.#shared.closers ??= delimiterClosers(this.tokens);
+    const closer = this.#shared.closers.get(this.#current + 1);
+    return (
+      closer !== undefined &&
+      this.#peek(closer + 1 - this.#current).kind === TokenKind.LeftParenthesis
+    );
   }
 
   /** `bubble` or `prose`, with its named options in parentheses or none, as the presentation object of a `say`. */
@@ -845,23 +904,37 @@ class Parser {
    * identifiers. Keep that interpretation whenever the existing say grammar
    * can consume a complete value (and optional pacing) from this position.
    */
-  #canParseCompleteSayValue(statement: boolean): boolean {
-    const speculative = new Parser(this.tokens, this.#bracketed);
+  *#canParseCompleteSayValue(statement: boolean): ParseTask<boolean> {
+    const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current;
 
-    const value = speculative.#parseExpression();
+    const value = yield* parseChild(speculative.#parseOr());
     if (value === null || speculative.#diagnostics.length > 0) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
       if (speculative.#canParseInstantPacingAlias(statement)) {
         speculative.#advance();
       } else {
-        const pacing = speculative.#parseExpression();
+        const pacing = yield* parseChild(speculative.#parseOr());
         if (pacing === null || speculative.#diagnostics.length > 0) return false;
       }
     }
 
     return speculative.#isSayBoundary(statement);
+  }
+
+  /**
+   * Whether the `(` here, after a `say` statement's mode and skip word, holds the text and pacing of its bounded form: a
+   * comma follows its first value. Grouping parentheses, valid or not, hold one value.
+   */
+  *#opensBoundedSayText(): ParseTask<boolean> {
+    const speculative = new Parser(this.tokens, this.#shared);
+    speculative.#current = this.#current + 1;
+    speculative.#skipNewlines();
+    const value = yield* parseChild(speculative.#withinDelimiters(speculative.#parseOr()));
+    if (value === null || speculative.#diagnostics.length > 0) return false;
+    speculative.#skipNewlines();
+    return speculative.#check(TokenKind.Comma);
   }
 
   /** The end of a compact `say`: of its statement, or as a value also of an enclosing `()` or `[]`. */
@@ -878,7 +951,7 @@ class Parser {
   /** `instant` remains an identifier unless it fills the entire pacing slot. */
   #canParseInstantPacingAlias(statement: boolean): boolean {
     if (!this.#checkIdentifier("instant")) return false;
-    const speculative = new Parser(this.tokens, this.#bracketed);
+    const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current;
     speculative.#advance();
     return speculative.#isSayBoundary(statement);
@@ -3126,7 +3199,7 @@ class Parser {
     }
     const type = yield* parseChild(
       this.#parseTypeTask(
-        this.#bracketed[this.#current] === true ? "delimitedTypeTest" : "typeTest",
+        this.#shared.bracketed[this.#current] === true ? "delimitedTypeTest" : "typeTest",
       ),
     );
     if (type === null) return value;
@@ -3463,7 +3536,7 @@ class Parser {
       this.#check(TokenKind.KeywordSay) &&
       (this.#insideDelimiters || this.#previous()?.kind !== TokenKind.Newline)
     ) {
-      const parts = yield* parseChild(this.#parseSayParts(false));
+      const parts = yield* parseChild(this.#parseSayValue());
       return parts === null ? null : Object.freeze({ kind: "sayExpression", ...parts });
     }
     if (this.#match(TokenKind.NumberLiteral)) {
@@ -4707,6 +4780,19 @@ const CLOSERS: Readonly<Partial<Record<TokenKind, TokenKind>>> = {
  * For each token, whether the innermost delimiter around it is `(` or `[`. A block, an object, or text inside them
  * starts again, so a newline there ends a statement as usual.
  */
+function delimiterClosers(tokens: readonly Token[]): Map<number, number> {
+  const closers = new Map<number, number>();
+  const open: number[] = [];
+  tokens.forEach((token, index) => {
+    if (OPENING_DELIMITERS.has(token.kind)) open.push(index);
+    else if (CLOSING_DELIMITERS.has(token.kind)) {
+      const opener = open.pop();
+      if (opener !== undefined) closers.set(opener, index);
+    }
+  });
+  return closers;
+}
+
 function bracketContexts(tokens: readonly Token[]): boolean[] {
   const contexts: boolean[] = [];
   const openers: TokenKind[] = [];

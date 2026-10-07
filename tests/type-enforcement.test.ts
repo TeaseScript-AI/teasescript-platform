@@ -1471,9 +1471,19 @@ test("a say statement that calls skippable or unskippable names the forms that s
       "unskippable",
     ],
   ]);
-  // A function of that name keeps being called, as before.
+  // A function of that name keeps being called, as before, also one the host provides.
   assert.deepEqual(
     mismatches('function unskippable(text) {\n    return text\n}\nsay unskippable("Hi")\nexit'),
     [],
+  );
+  for (const name of ["skippable", "unskippable"])
+    assert.deepEqual(
+      compileSource(`say ${name}("Hi"), instant\nexit`, { builtins: [name] }).diagnostics,
+      [],
+    );
+  // The call is checked as any other.
+  assert.deepEqual(
+    mismatches("say unskippable(a: 1, a: 2)\nexit").map(([code]) => code),
+    ["TSV023", "TSV018"],
   );
 });

@@ -1567,6 +1567,7 @@ async function messageUpdatesScenario(cdp, origin) {
   );
   const tops = `Object.fromEntries([...document.querySelectorAll('.transcript-entry')].map((row) => [row.dataset.messageId, row.getBoundingClientRect().top]))`;
   let passed = false;
+  let observed = 0;
   for (let step = 0; step < 40 && !passed; step += 1) {
     passed = await value(cdp, counterShown);
     const before = await value(cdp, tops);
@@ -1583,13 +1584,18 @@ async function messageUpdatesScenario(cdp, origin) {
         .filter((id) => id in after && before[id] > rect.y - 100 && before[id] < rect.y + 100)
         .map((id) => Math.round(after[id] - before[id])),
     );
-    if (moved.size > 0)
+    if (moved.size > 0) {
+      observed += 1;
       assertEqual(
         [...moved].join(),
         "60",
         "The text in view jumped while scrolling up past a changed message",
       );
+    }
   }
+  passed ||= await value(cdp, counterShown);
+  assertEqual(passed, true, "Scrolling up did not reach the changed counter");
+  assertEqual(observed > 0, true, "Scrolling up compared no text in view");
   // Focus on a link that a change removes stays on its message.
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home" });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });

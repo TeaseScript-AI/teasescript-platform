@@ -409,7 +409,7 @@ test("say used as a value takes its text and pacing compact or in parentheses, w
   // A call of a function named like a mode keeps its meaning.
   assert.deepEqual(parts('let line = say bubble("x")'), value("- - - callExpression -"));
   assert.deepEqual(parts("let line = say skippable"), value("- - - identifier -"));
-  // Statements keep reading parentheses as a grouped value whenever the compact form can take them.
+  // A statement reads parentheses as the bounded form only when a comma follows their first value.
   assert.deepEqual(parts('say("text")'), [
     "sayStatement",
     null,
@@ -457,6 +457,33 @@ test("say used as a value takes its text and pacing compact or in parentheses, w
     null,
     "stringLiteral",
     "instant",
+  ]);
+
+  // Other parentheses group a value as before, also where that value is malformed.
+  const grouped = (source: string) => {
+    const result = parse(source);
+    return [
+      result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span.start.offset]),
+      result.program.statements.map((statement) => [
+        statement.kind,
+        statement.span.start.offset,
+        statement.span.end.offset,
+      ]),
+    ];
+  };
+  assert.deepEqual(grouped('say ("x") +\nexit'), [
+    [
+      ["TSP012", 12],
+      ["TSP006", 12],
+    ],
+    [],
+  ]);
+  assert.deepEqual(grouped('say ("x"), instant, foo\nexit'), [
+    [["TSP002", 18]],
+    [
+      ["sayStatement", 0, 18],
+      ["exitStatement", 24, 28],
+    ],
   ]);
 
   // The parentheses end the say, so commas and operators after them belong to the enclosing expression.
