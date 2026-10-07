@@ -21,7 +21,7 @@ import {
 import type { RuntimeCapabilities } from "./evaluator.js";
 import type { InterpreterEvent } from "./events.js";
 import type { RuntimeInstructionTrace } from "./instruction-trace.js";
-import type { RuntimeDebugContext } from "./debug-trace.js";
+import { runtimeDebugPreview, type RuntimeDebugContext } from "./debug-trace.js";
 import {
   completeValidatedAction,
   type ActionCompletionOptions,
@@ -71,7 +71,7 @@ import {
   type RuntimeBindingSnapshot,
   type RuntimeCameraViewSnapshot,
   type RuntimeFailureSnapshot,
-  type RuntimeFrameSnapshot,
+  type RuntimeCallFrameSnapshot,
   type RuntimeLiveMessageSnapshot,
   type RuntimeScopeFrameSnapshot,
   type RuntimeInterruptibleActionSnapshot,
@@ -121,27 +121,57 @@ export interface RuntimeSessionView {
 }
 
 /** One active call, as a debugger shows it, without its variables or arguments. */
-export interface RuntimeSessionCall {
+export type RuntimeSessionCall = RuntimeSessionCallBase &
+  (
+    | {
+        readonly kind: "function";
+        /** The plan ID and name of the called function or block. */
+        readonly functionId: number;
+        readonly functionName: string;
+        /** For a running timer, media, or button block, the kind of block that interrupted the path; otherwise `null`. */
+        readonly interruption: "timer" | "media" | "button" | null;
+      }
+    | {
+        readonly kind: "file";
+        readonly functionId: null;
+        readonly functionName: null;
+        readonly interruption: null;
+      }
+  );
+
+interface RuntimeSessionCallBase {
   readonly id: number;
-  readonly kind: "function" | "file";
-  /** The plan ID and name of the called function or block; `null` for a file call. */
-  readonly functionId: number | null;
-  readonly functionName: string | null;
   readonly callSiteSpan: SourceSpan;
   /** Where execution continues when the call returns. */
   readonly returnInstruction: number;
   /** The scopes from this depth on belong to the call. */
   readonly scopeBaseDepth: number;
-  /** For a running timer, media, or button block, the kind of block that interrupted the path; otherwise `null`. */
-  readonly interruption: "timer" | "media" | "button" | null;
 }
 
-/** The variables of a session, as a debugger lists them. */
-export interface RuntimeSessionVariables {
-  readonly globals: readonly RuntimeBindingSnapshot[];
-  readonly frames: readonly RuntimeScopeFrameSnapshot[];
+/** A variable as a debugger lists it: its name and a bounded preview of its value. */
+export interface RuntimeSessionVariablePreview {
+  readonly name: string;
+  /** The value as `runtimeDebugPreview` shows it, at most `RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters` long. */
+  readonly preview: string;
+  readonly truncated: boolean;
+  /** For a message handle, its message, whose current text `liveMessages` holds; otherwise `null`. */
+  readonly messageId: number | null;
+}
+
+/** A scope's variables, as a debugger lists them. */
+export interface RuntimeSessionScopePreview {
+  readonly id: number;
+  /** The file of an activation root, `null` for any other scope. */
+  readonly file: number | null;
+  readonly variables: readonly RuntimeSessionVariablePreview[];
+}
+
+/** The variables of a session as a debugger lists them, with bounded previews of their values. */
+export interface RuntimeSessionVariablePreviews {
+  readonly globals: readonly RuntimeSessionVariablePreview[];
+  readonly frames: readonly RuntimeSessionScopePreview[];
   /** Scopes that were left but that timer, media, or button blocks still share. */
-  readonly retainedScopes: readonly RuntimeScopeFrameSnapshot[];
+  readonly retainedScopes: readonly RuntimeSessionScopePreview[];
   /** The text that each message with a handle shows now. */
   readonly liveMessages: readonly RuntimeLiveMessageSnapshot[];
 }
@@ -332,33 +362,43 @@ export class RuntimeSession {
   public callStack(): readonly RuntimeSessionCall[] {
     return this.#read((state) =>
       published(
-        state.callFrames.map((frame) => ({
+        state.callFrames.map((frame): RuntimeSessionCall => ({
           id: frame.id,
-          kind: frame.kind,
-          functionId: frame.kind === "function" ? frame.functionId : null,
-          functionName: frame.kind === "function" ? frame.functionName : null,
           callSiteSpan: frame.callSiteSpan,
           returnInstruction: frame.returnInstruction,
           scopeBaseDepth: frame.scopeBaseDepth,
-          interruption: interruptionKind(frame),
+          ...(frame.kind === "function"
+            ? {
+                kind: "function",
+                functionId: frame.functionId,
+                functionName: frame.functionName,
+                interruption: interruptionKind(frame),
+              }
+            : { kind: "file", functionId: null, functionName: null, interruption: null }),
         })),
       ),
     );
   }
 
   /**
-   * The globals, scopes, kept scopes, and live message texts, as detached, deeply frozen copies: an explicit inspection
-   * whose work is proportional to the variables and their values.
+   * The globals, scopes, and kept scopes with bounded previews of their values, and the live message texts: an
+   * explicit inspection whose work is proportional to the number of variables and the live message texts, not to the
+   * size of the values.
    */
-  public variables(): RuntimeSessionVariables {
-    return this.#read((state) =>
-      published({
-        globals: state.globals,
-        frames: state.frames,
-        retainedScopes: state.retainedScopes,
+  public variablePreviews(): RuntimeSessionVariablePreviews {
+    return this.#read((state) => {
+      const scope = (frame: RuntimeScopeFrameSnapshot): RuntimeSessionScopePreview => ({
+        id: frame.id,
+        file: frame.file,
+        variables: frame.bindings.map(variablePreview),
+      });
+      return published({
+        globals: state.globals.map(variablePreview),
+        frames: state.frames.map(scope),
+        retainedScopes: state.retainedScopes.map(scope),
         liveMessages: state.liveMessages,
-      }),
-    );
+      });
+    });
   }
 
   /** What the Stage shows, as `stageProjection` gives it for a snapshot. */
@@ -466,11 +506,25 @@ export class RuntimeSessionError extends Error {
   }
 }
 
-function interruptionKind(frame: RuntimeFrameSnapshot): RuntimeSessionCall["interruption"] {
-  const interruption = frame.kind === "function" ? frame.timerInterruption : null;
+function interruptionKind(frame: RuntimeCallFrameSnapshot): "timer" | "media" | "button" | null {
+  const interruption = frame.timerInterruption;
   if (interruption === null) return null;
   if ("timerId" in interruption) return "timer";
   return "mediaId" in interruption ? "media" : "button";
+}
+
+function variablePreview(binding: RuntimeBindingSnapshot): RuntimeSessionVariablePreview {
+  const { text, truncated } = runtimeDebugPreview(binding.value);
+  const value = binding.value;
+  return {
+    name: binding.name,
+    preview: text,
+    truncated,
+    messageId:
+      typeof value === "object" && value !== null && value.kind === "messageHandle"
+        ? value.messageId
+        : null,
+  };
 }
 
 function executed(done: RuntimeOperationResult): RuntimeSessionResult {

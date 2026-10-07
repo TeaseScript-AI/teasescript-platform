@@ -4,6 +4,7 @@ import {
   CheckpointError,
   completeAction,
   createCheckpoint,
+  createRuntimeSession,
   INSTRUCTION_PLAN_VERSION,
   observeTime,
   pressPermanentButton,
@@ -18,6 +19,8 @@ import {
   type InstructionPlan,
   type InterpreterEvent,
   type RuntimeCheckpoint,
+  type RuntimeSession,
+  type RuntimeSessionResult,
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { instructionSourcePath } from "../src/plan/model.js";
@@ -836,6 +839,75 @@ function dispatch(
       return withOutcome(applyExternalStorageEdit(plan, snapshot, first));
     case "updateInteraction":
       return withOutcome(updateInteraction(plan, snapshot, first));
+  }
+}
+
+/**
+ * An engine-owned session at the state `operations` reach from `anchor`: each recorded call runs again with its
+ * recorded arguments, the media store answering from the recorded answers. A call that threw, or whose outcome, events,
+ * or status differ from its record, stops the rebuild with an error, because the state it would give is not the one the
+ * calls reached.
+ */
+export function rebuildRecordedSession(
+  plan: InstructionPlan,
+  anchor: RuntimeSnapshot,
+  operations: readonly DebugOperation[],
+): RuntimeSession {
+  const session = createRuntimeSession(plan, anchor);
+  for (const operation of operations) {
+    if (operation.thrown !== null)
+      throw new Error(`call ${operation.seq} (${operation.kind}) threw ${operation.thrown}`);
+    const queries = [...operation.admissionQueries];
+    const capturedMedia = {
+      holds(reference: string, kind: "image"): boolean {
+        const query = queries.shift();
+        if (query === undefined || query.reference !== reference || query.kind !== kind)
+          throw new Error(
+            `call ${operation.seq} asked about ${kind} ${reference}, which was not recorded`,
+          );
+        return query.result;
+      },
+    };
+    const result = dispatchToSession(session, operation, capturedMedia);
+    const first = result.events[0]?.sequence ?? null;
+    if (
+      result.outcome !== operation.outcome ||
+      result.events.length !== operation.events.count ||
+      first !== operation.events.first ||
+      session.view().status !== operation.status
+    )
+      throw new Error(`call ${operation.seq} (${operation.kind}) did not repeat its record`);
+  }
+  return session;
+}
+
+function dispatchToSession(
+  session: RuntimeSession,
+  operation: DebugOperation,
+  capturedMedia: { holds(reference: string, kind: "image"): boolean },
+): { readonly events: RuntimeSessionResult["events"]; readonly outcome: string } {
+  const [first, second] = operation.args;
+  const settled = (result: {
+    events: RuntimeSessionResult["events"];
+    outcome: { kind: string };
+  }) => ({ events: result.events, outcome: result.outcome.kind });
+  switch (operation.kind) {
+    case "run":
+      return { events: session.run(parseRunOptions(first, "run options")).events, outcome: "ran" };
+    case "observeTime":
+      return settled(session.observeTime(first, second));
+    case "completeAction":
+      return settled(session.completeAction(first, { capturedMedia }));
+    case "reportMediaLoad":
+      return settled(session.reportMediaLoad(first, second));
+    case "pressPermanentButton":
+      return settled(session.pressPermanentButton(first));
+    case "recordContinueCapture":
+      return settled(session.recordContinueCapture(first));
+    case "applyExternalStorageEdit":
+      return settled(session.applyExternalStorageEdit(first));
+    case "updateInteraction":
+      return settled(session.updateInteraction(first));
   }
 }
 

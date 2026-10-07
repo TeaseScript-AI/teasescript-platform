@@ -78,7 +78,7 @@ export function useImageCapture(host: ImageCaptureHost) {
   const cameraOf = (target: Capture) => (target.own ? host.captureCamera : host.sessionCamera);
 
   const presentedRequest = (current: PlayerRuntimeSession | null) => {
-    const action = current && activePlayerRuntimeInteraction(current.snapshot);
+    const action = current && activePlayerRuntimeInteraction(current.state);
     return action?.ui.kind === "image" && action.ui.allowCamera ? action : null;
   };
   const answers = (current: PlayerRuntimeSession | null, target: Capture) =>

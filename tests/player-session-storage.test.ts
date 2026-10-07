@@ -12,6 +12,7 @@ import {
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
@@ -153,15 +154,15 @@ test("Vue host writes each pending action once and continues only in a later tas
     clear: async () => {},
   });
   const pending = await start(host, 'save 1 as "first"\nsave 2 as "second"\nexit');
-  assert.ok(pendingPlayerRuntimeStorageWrite(pending.snapshot));
+  assert.ok(pendingPlayerRuntimeStorageWrite(pending.state));
   host.update({ ...pending });
   host.update({ ...pending });
   assert.deepEqual(writes, [{ key: "first", value: 1 }]);
 
   persistence.resolve();
   await nextTick();
-  assert.deepEqual(host.session.value?.snapshot.scriptStorage, []);
-  assert.equal(host.session.value?.snapshot.status, "waiting");
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, []);
+  assert.equal(host.session.value?.state.status, "waiting");
   assert.deepEqual(writes, [{ key: "first", value: 1 }]);
 
   context.mock.timers.tick(0);
@@ -171,14 +172,14 @@ test("Vue host writes each pending action once and continues only in a later tas
   ]);
   const second = host.session.value;
   assert.ok(second);
-  assert.deepEqual(second.snapshot.scriptStorage, [{ key: "first", value: 1 }]);
+  assert.deepEqual(playerRuntimeSnapshot(second).scriptStorage, [{ key: "first", value: 1 }]);
   host.update({ ...second });
   await nextTick();
   assert.equal(writes.length, 2);
-  assert.equal(host.session.value?.snapshot.status, "waiting");
+  assert.equal(host.session.value?.state.status, "waiting");
   context.mock.timers.tick(0);
-  assert.equal(host.session.value?.snapshot.status, "halted");
-  assert.deepEqual(host.session.value?.snapshot.scriptStorage, [
+  assert.equal(host.session.value?.state.status, "halted");
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
     { key: "first", value: 1 },
     { key: "second", value: 2 },
   ]);
@@ -202,8 +203,8 @@ test("Vue host deduplicates by generation and ignores a replaced session's write
   const original = await start(host, 'save 1 as "answer"\nexit');
   const restarted = await start(host, 'save 2 as "answer"\nexit');
   assert.equal(
-    pendingPlayerRuntimeStorageWrite(original.snapshot)?.actionId,
-    pendingPlayerRuntimeStorageWrite(restarted.snapshot)?.actionId,
+    pendingPlayerRuntimeStorageWrite(original.state)?.actionId,
+    pendingPlayerRuntimeStorageWrite(restarted.state)?.actionId,
   );
   host.update({ ...restarted });
   assert.deepEqual(writes, [
@@ -218,8 +219,10 @@ test("Vue host deduplicates by generation and ignores a replaced session's write
   reports[1]!.resolve();
   await nextTick();
   context.mock.timers.tick(0);
-  assert.equal(host.session.value?.snapshot.status, "halted");
-  assert.deepEqual(host.session.value?.snapshot.scriptStorage, [{ key: "answer", value: 2 }]);
+  assert.equal(host.session.value?.state.status, "halted");
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
+    { key: "answer", value: 2 },
+  ]);
 });
 
 test("Vue host reports rejected writes in a later task and preserves the previous value", async (context) => {
@@ -239,8 +242,8 @@ test("Vue host reports rejected writes in a later task and preserves the previou
   await nextTick();
   assert.deepEqual(host.session.value, pending);
   context.mock.timers.tick(0);
-  assert.equal(host.session.value?.snapshot.status, "halted");
-  assert.deepEqual(host.session.value?.snapshot.scriptStorage, [
+  assert.equal(host.session.value?.state.status, "halted");
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
     { key: "answer", value: "previous" },
   ]);
   assert.deepEqual(
@@ -304,7 +307,7 @@ test("Vue host reloads before each Start and falls back to session-local storage
     clear: async () => {},
   });
   const first = await start(host, 'let answer = load "answer"\nsay answer, instant\nexit');
-  assert.equal(first.snapshot.scriptStoragePersistent, true);
+  assert.equal(playerRuntimeSnapshot(first).scriptStoragePersistent, true);
   assert.deepEqual(
     first.transcriptEntries.map((entry) => entry.text),
     ["1"],
@@ -316,9 +319,9 @@ test("Vue host reloads before each Start and falls back to session-local storage
     'save "local" as "answer"\nlet answer = load "answer"\nsay answer, instant\nexit',
   );
   assert.deepEqual(host.scriptStorageOptions(), {});
-  assert.equal(local.snapshot.scriptStoragePersistent, false);
-  assert.equal(local.snapshot.status, "halted");
-  assert.equal(pendingPlayerRuntimeStorageWrite(local.snapshot), null);
+  assert.equal(playerRuntimeSnapshot(local).scriptStoragePersistent, false);
+  assert.equal(local.state.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(local.state), null);
   assert.deepEqual(
     local.transcriptEntries.map((entry) => entry.text),
     ["local"],
@@ -332,7 +335,7 @@ test("Vue host reloads before each Start and falls back to session-local storage
 
   const recovered = await start(host, 'let answer = load "answer"\nsay answer, instant\nexit');
   assert.equal(loads, 3);
-  assert.equal(recovered.snapshot.scriptStoragePersistent, true);
+  assert.equal(playerRuntimeSnapshot(recovered).scriptStoragePersistent, true);
   // A successful load withdraws the unavailable-storage notice.
   assert.deepEqual(host.notices.value, []);
   assert.deepEqual(
@@ -373,7 +376,7 @@ test("Vue host clears once, and no Start begins until the clear settles", async 
   assert.equal(host.activation.value, "start");
   host.activate();
   // The session starts from the cleared view, not from the values loaded before the clear.
-  assert.deepEqual(current()?.snapshot.scriptStorage, []);
+  assert.deepEqual(playerRuntimeSnapshot(current()!).scriptStorage, []);
 });
 
 test("Vue host schedules no clock wake-ups while a pending write holds scene time", async (context) => {
@@ -396,7 +399,7 @@ test("Vue host schedules no clock wake-ups while a pending write holds scene tim
   now = 100;
   host.observe();
   // Catch-up holds at the first block's due time behind the write; an overdue deadline must not spin the clock.
-  assert.equal(host.session.value?.snapshot.currentSessionTimeMs, 10);
+  assert.equal(host.session.value?.state.currentSessionTimeMs, 10);
   const held = host.session.value;
   // The clock reschedules from a pre-flush watcher, so each step lets Vue run it before timers advance.
   for (let tick = 0; tick < 25; tick++) {
@@ -487,14 +490,17 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   host.activate();
   const started = host.session.value;
   assert.ok(started);
-  assert.equal(started.snapshot.temporalCaptures[0]?.context.zone.name, "Europe/Amsterdam");
+  assert.equal(
+    playerRuntimeSnapshot(started).temporalCaptures[0]?.context.zone.name,
+    "Europe/Amsterdam",
+  );
 
   // The account setting changed before the player continued the saved session.
   account = DEFAULT_TEMPORAL_CONTEXT;
   context.mock.method(Date, "now", () => utc("2026-10-05T09:00:00"));
   host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
   host.activate();
-  const continued = host.session.value?.snapshot;
+  const continued = playerRuntimeSnapshot(host.session.value!);
   assert.ok(continued);
   assert.equal(resolved, 2);
   assert.deepEqual(
@@ -539,7 +545,7 @@ test("Vue host's Continue resumes a restored ready session within the activating
     host.session.value?.transcriptEntries.map((entry) => entry.text),
     ["Resumed"],
   );
-  assert.equal(host.session.value?.snapshot.status, "halted");
+  assert.equal(host.session.value?.state.status, "halted");
 });
 
 test("Vue host scopes the write-failure notice to the run it happened in", async (context) => {
@@ -674,7 +680,9 @@ test("a Debug edit is stored first, and the running session's next load returns 
     live: true,
   });
   assert.deepEqual([...storage.entries], [["k", 2]]);
-  assert.deepEqual(host.session.value?.snapshot.scriptStorage, [{ key: "k", value: 2 }]);
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!).scriptStorage, [
+    { key: "k", value: 2 },
+  ]);
   assert.deepEqual(host.debugEdits.value, { firstEditSceneTimeMs: 0, editCount: 1 });
   // A debug export of this session carries the mark.
   assert.deepEqual((await host.debugExportCandidate({})).editedWhileDebugging, {
@@ -745,7 +753,7 @@ test("an edit of a session that was replaced or unmounted meanwhile changes neit
   firstRead.resolve();
   assert.equal((await edit).kind, "failed");
   assert.deepEqual(storage.writes, []);
-  assert.equal(host.session.value?.snapshot, replaced.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(host.session.value!), playerRuntimeSnapshot(replaced));
   assert.equal(host.debugEdits.value, null);
 });
 
@@ -814,7 +822,7 @@ test("a write the script issues while an edit is stored settles first: another k
       for (let turn = 0; turn < 5; turn += 1) await nextTick();
       // The script goes on and saves while the edit is being stored.
       host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
-      assert.ok(pendingPlayerRuntimeStorageWrite(host.session.value!.snapshot));
+      assert.ok(pendingPlayerRuntimeStorageWrite(host.session.value!.state));
       editWrite.resolve();
       let result: unknown;
       void edit.then((settled) => (result = settled));

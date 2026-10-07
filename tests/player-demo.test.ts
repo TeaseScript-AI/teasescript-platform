@@ -46,16 +46,16 @@ test("the repository demo plays to its end through the Player's runtime and medi
   let titlePrompts = 0;
 
   player.start();
-  for (let step = 0; step < 1000 && player.session.snapshot.status !== "halted"; step++) {
+  for (let step = 0; step < 1000 && player.session.state.status !== "halted"; step++) {
     for (const element of player.elements) {
       const sound = element.src.slice("demo:".length);
       if (Number.isNaN(element.duration) && sound in soundSeconds)
         element.metadata(soundSeconds[sound]!);
     }
-    const snapshot = player.session.snapshot;
-    const image = playerRuntimeMedia(snapshot).stage.image;
+    const state = player.session.state;
+    const image = playerRuntimeMedia(state).stage.image;
     if (stageImages.at(-1) !== image) stageImages.push(image);
-    for (const timer of playerRuntimeTimers(snapshot, snapshot.observedSessionTimeMs)) {
+    for (const timer of playerRuntimeTimers(state, state.observedSessionTimeMs)) {
       const kinds = timers.get(timer.name ?? "") ?? new Set();
       timers.set(timer.name ?? "", kinds.add(timer.kind));
       if (timer.name === "Stay exactly like that") {
@@ -79,7 +79,7 @@ test("the repository demo plays to its end through the Player's runtime and medi
     }
   }
 
-  assert.equal(player.session.snapshot.status, "halted", "the demo reaches its exit");
+  assert.equal(player.session.state.status, "halted", "the demo reaches its exit");
   assert.deepEqual(
     player.session.events.flatMap((event) =>
       event.kind === "developerWarning" ? [event.code] : [],

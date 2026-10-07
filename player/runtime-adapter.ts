@@ -1,25 +1,16 @@
 import {
-  applyExternalStorageEdit,
   CHECKPOINT_FORMAT,
   CHECKPOINT_VERSION,
   captureTemporalContext,
   compileProject,
   completeAction,
-  createCheckpoint,
-  createFreshRuntimeSnapshot,
+  createFreshRuntimeSession,
+  createRuntimeSession,
   DEFAULT_TEMPORAL_CONTEXT,
   deserializeCheckpoint,
   interactionDeadlineMs,
   MAIN_FILE_PATH,
-  mediaPlaybackProjection,
-  observeTime,
-  permanentButtonProjection,
-  pressPermanentButton,
-  recordContinueCapture,
-  reportMediaLoad,
   restoreCheckpoint,
-  stageProjection,
-  run,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
@@ -34,6 +25,8 @@ import {
   type StageProjection,
   type PendingActionOperationResult,
   type PermanentButtonPressOutcome,
+  type PermanentButtonProjection,
+  type PresentationSettings,
   type ProjectImageFile,
   type ProjectSourceFile,
   type RuntimeInteractionActionSnapshot,
@@ -41,21 +34,23 @@ import {
   type CaptureUnavailableReason,
   type RuntimeCaptureActionSnapshot,
   type RuntimeScriptStorageEntrySnapshot,
+  type RuntimeSession,
+  type RuntimeSessionCall,
+  type RuntimeSessionResult,
+  type RuntimeSessionVariablePreviews,
+  type RuntimeSessionView,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
   type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
-  updateInteraction,
   type InteractionUpdateOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
-import { currentTemporalContext } from "../src/runtime/state.js";
 import { formValueText } from "../src/interaction-answers.js";
 import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
-import { runValidatedState } from "../src/runtime/engine.js";
 import {
   mediaTerminalProgressMs,
   nextMediaEvent,
@@ -87,9 +82,30 @@ const DEFAULT_SPEAKERS: Readonly<Record<string, PlayerSpeakerPresentation>> = Ob
   user: Object.freeze({ name: "You", accent: "#8fa3ab", avatar: "Y", fontFamily: "inherit" }),
 });
 
+/**
+ * What one publication of a session shows: the engine's operational view with the Stage, media, permanent buttons,
+ * active calls, and date and time presentation, as detached, frozen data that later operations never change.
+ */
+export interface PlayerRuntimeState extends RuntimeSessionView {
+  readonly stage: StageProjection;
+  readonly media: readonly MediaPlaybackProjection[];
+  readonly permanentButtons: readonly PermanentButtonProjection[];
+  readonly calls: readonly RuntimeSessionCall[];
+  readonly temporalPresentation: PresentationSettings;
+}
+
 export interface PlayerRuntimeSession {
   readonly plan: InstructionPlan;
-  readonly snapshot: RuntimeSnapshot;
+  /** The engine-owned runner of the session; only this adapter's functions operate it. */
+  readonly engine: PlayerRuntimeEngine;
+  /**
+   * Counts the session's publications: every operation publishes a new revision, also one that changed nothing, and also
+   * when the host keeps an earlier one. A publication stays usable until an operation changes the state; from then on
+   * only later ones are.
+   */
+  readonly revision: number;
+  /** What this publication shows; see `PlayerRuntimeState`. */
+  readonly state: PlayerRuntimeState;
   readonly events: readonly InterpreterEvent[];
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
@@ -103,6 +119,160 @@ export interface PlayerRuntimeSession {
    * never changes them and is in no snapshot, checkpoint, restore point, or recorded call. `null` when Debug is off.
    */
   readonly debugTrace: RuntimeDebugContext | null;
+}
+
+/** A publication as its engine reads it. */
+type PlayerRuntimePublication = Pick<PlayerRuntimeSession, "revision" | "recorder">;
+
+/**
+ * The engine-owned runtime session behind a Player session's publications (`docs/RUNTIME.md#runtime-sessions`). Every
+ * operation goes through a publication that shows the current state: once an operation changed the state, one made from
+ * an earlier publication throws. When an engine call throws, the runtime session ends; the next use rebuilds the state
+ * of the latest publication from the calls the session's debug recorder logged, so the session continues where the
+ * Player showed it, as it did before the call. Without a recorder, or when its log does not reach that publication, the
+ * original error is thrown again.
+ */
+export class PlayerRuntimeEngine {
+  #runtime: RuntimeSession;
+  /** The latest publication. */
+  #revision: number;
+  /** The first publication that shows the current state; it and every later one share it. */
+  #current: number;
+  #thrown: { readonly error: unknown } | null = null;
+
+  public constructor(runtime: RuntimeSession, revision: number) {
+    this.#runtime = runtime;
+    this.#revision = revision;
+    this.#current = revision;
+  }
+
+  /** The runner for publication `at`, rebuilt from its recorder after a call threw. */
+  runtimeAt(at: PlayerRuntimePublication): RuntimeSession {
+    if (at.revision < this.#current || at.revision > this.#revision)
+      throw new Error("This Player session was replaced by a newer one; use the latest.");
+    if (this.#thrown === null) return this.#runtime;
+    const rebuilt = at.recorder?.recover(this, this.#revision) ?? null;
+    if (rebuilt === null) throw this.#thrown.error;
+    this.#runtime = rebuilt;
+    this.#thrown = null;
+    return rebuilt;
+  }
+
+  /** Makes one engine call on publication `at`'s runner, through its recorder when there is one. */
+  call<
+    R extends {
+      readonly events: RuntimeSessionResult["events"];
+      readonly outcome?: { readonly kind: string };
+    },
+  >(
+    at: PlayerRuntimePublication,
+    kind: Parameters<DebugRecorder["call"]>[1],
+    args: readonly unknown[],
+    invoke: (
+      runtime: RuntimeSession,
+      admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission,
+    ) => R,
+    continuation = false,
+  ): R {
+    const runtime = this.runtimeAt(at);
+    try {
+      if (at.recorder === null) return invoke(runtime, (store) => store);
+      return at.recorder.call(
+        this,
+        kind,
+        () => runtime.exportSnapshot(),
+        args,
+        (admission) => {
+          const result = invoke(runtime, admission);
+          return { ...result, status: runtime.view().status };
+        },
+        continuation,
+      );
+    } catch (error) {
+      if (ended(runtime)) this.#thrown = { error };
+      throw error;
+    }
+  }
+
+  /**
+   * Publishes what the session shows after the calls made through publication `from`, as the next revision; `changed`
+   * says whether those calls may have changed the state, which ends the use of earlier publications.
+   */
+  publish(
+    from: PlayerRuntimePublication,
+    changed = true,
+  ): { readonly revision: number; readonly state: PlayerRuntimeState } {
+    const runtime = this.runtimeAt(from);
+    this.#revision += 1;
+    if (changed) this.#current = this.#revision;
+    from.recorder?.published(this, this.#revision);
+    return { revision: this.#revision, state: shownState(runtime) };
+  }
+
+  /** What publication `at` shows, read again. */
+  stateAt(at: PlayerRuntimePublication): PlayerRuntimeState {
+    return shownState(this.runtimeAt(at));
+  }
+
+  /** The complete state of publication `at`, freshly exported and validated. */
+  exportSnapshot(at: PlayerRuntimePublication): RuntimeSnapshot {
+    return this.runtimeAt(at).exportSnapshot();
+  }
+
+  /** A self-contained checkpoint of publication `at`, freshly exported and validated. */
+  exportCheckpoint(at: PlayerRuntimePublication) {
+    return this.runtimeAt(at).exportCheckpoint();
+  }
+
+  /** The date and time presentation in force at publication `at`. */
+  temporalPresentation(at: PlayerRuntimePublication): PresentationSettings {
+    return this.runtimeAt(at).temporalPresentation();
+  }
+
+  /** Publication `at`'s variables with bounded previews, for Debug. */
+  variablePreviews(at: PlayerRuntimePublication): RuntimeSessionVariablePreviews {
+    return this.runtimeAt(at).variablePreviews();
+  }
+
+  /** Starts `recorder`'s recording at publication `at`, whose state is the latest publication's. */
+  beginRecording(
+    at: PlayerRuntimePublication,
+    plan: InstructionPlan,
+    recorder: DebugRecorder,
+  ): void {
+    recorder.begin(
+      plan,
+      this.exportSnapshot(at),
+      () => this.#runtime.exportSnapshot(),
+      this,
+      this.#revision,
+    );
+  }
+}
+
+/** What a session shows, as detached, frozen data. */
+function shownState(runtime: RuntimeSession): PlayerRuntimeState {
+  return Object.freeze({
+    ...runtime.view(),
+    stage: runtime.stageProjection(),
+    media: runtime.mediaPlaybackProjection(),
+    permanentButtons: runtime.permanentButtonProjection(),
+    calls: runtime.callStack(),
+    temporalPresentation: runtime.temporalPresentation(),
+  });
+}
+
+/**
+ * Whether `runtime` can no longer be read, as after one of its operations threw; one that refused malformed arguments
+ * stays readable.
+ */
+function ended(runtime: RuntimeSession): boolean {
+  try {
+    runtime.view();
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 export interface PlayerRuntimeSessionOptions {
@@ -216,25 +386,21 @@ export function createPlayerRuntimeSession(
   options: PlayerRuntimeSessionOptions = {},
 ): PlayerRuntimeSession {
   const plan = isInstructionPlan(script) ? script : compiledPlan(script);
-  const snapshot = createFreshRuntimeSnapshot(plan, {
+  const runtime = createFreshRuntimeSession(plan, {
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
     persistentScriptStorage: options.persistentScriptStorage ?? false,
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
   });
   const recorder = options.recorder ?? null;
-  recorder?.begin(plan, snapshot);
   const debugTrace = options.debugTrace ?? null;
   debugTrace?.reset("start");
-  const operation = recorded(recorder, "run", snapshot, [{}], () =>
-    run(plan, snapshot, {}, traceOptions(debugTrace)),
+  const session = emptySession(runtime.plan, runtime, recorder, debugTrace);
+  if (recorder !== null) session.engine.beginRecording(session, session.plan, recorder);
+  const operation = session.engine.call(session, "run", [{}], (current) =>
+    current.run(traceOptions(debugTrace)),
   );
-  return applyOperation(
-    emptySession(plan, snapshot, recorder, debugTrace),
-    operation.snapshot,
-    operation.events,
-    false,
-  );
+  return publish(appendRuntimeEvents(session, operation.events));
 }
 
 function isInstructionPlan(
@@ -258,7 +424,7 @@ export function createPlayerRuntimeRestorePoint(
   session: PlayerRuntimeSession,
 ): PlayerRuntimeRestorePoint {
   return Object.freeze({
-    checkpointJson: serializeCheckpoint(createCheckpoint(session.plan, session.snapshot)),
+    checkpointJson: serializeCheckpoint(session.engine.exportCheckpoint(session)),
     events: Object.freeze([...session.events]),
   });
 }
@@ -269,18 +435,57 @@ export function restorePlayerRuntimeSession(
   debugTrace: RuntimeDebugContext | null = null,
 ): PlayerRuntimeSession {
   const checkpoint = deserializeCheckpoint(restorePoint.checkpointJson);
-  recorder?.begin(checkpoint.plan, checkpoint.snapshot);
-  // Restored values are trustworthy, but their history is not part of the checkpoint.
-  debugTrace?.reset("restore");
-  return appendRuntimeEvents(
-    emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
+  return restoredSession(
+    checkpoint.plan,
+    checkpoint.snapshot,
     restorePoint.events,
+    recorder,
+    debugTrace,
   );
+}
+
+/**
+ * The session's complete state, freshly exported and validated: a snapshot a debug export, rewind position, or storage
+ * adoption keeps. It costs work in proportion to the whole state, so ordinary presentation reads `state` instead.
+ */
+export function playerRuntimeSnapshot(session: PlayerRuntimeSession): RuntimeSnapshot {
+  return session.engine.exportSnapshot(session);
+}
+
+/** `playerRuntimeSnapshot`, or `null` when the session's state cannot be read, such as after a call threw. */
+export function playerRuntimeSnapshotOrNull(session: PlayerRuntimeSession): RuntimeSnapshot | null {
+  try {
+    return playerRuntimeSnapshot(session);
+  } catch {
+    return null;
+  }
 }
 
 /** The session's state as JSON, validated first, for Debug's rewind history to keep. */
 export function playerRuntimeSnapshotJson(session: PlayerRuntimeSession): string {
-  return serializeValidatedRuntimeJson(createCheckpoint(session.plan, session.snapshot).snapshot);
+  return serializeValidatedRuntimeJson(playerRuntimeSnapshot(session));
+}
+
+/**
+ * What Debug's Variables view lists for the session: its variables with bounded previews, read now, and its active
+ * calls.
+ */
+export function playerRuntimeDebugVariables(session: PlayerRuntimeSession): {
+  readonly variables: RuntimeSessionVariablePreviews;
+  readonly calls: readonly RuntimeSessionCall[];
+} {
+  return Object.freeze({
+    variables: session.engine.variablePreviews(session),
+    calls: session.state.calls,
+  });
+}
+
+/** Starts `recorder`'s recording at the session as it stands, such as a restored session that continues. */
+export function beginPlayerRuntimeRecording(
+  session: PlayerRuntimeSession,
+  recorder: DebugRecorder,
+): void {
+  session.engine.beginRecording(session, session.plan, recorder);
 }
 
 /**
@@ -300,12 +505,23 @@ export function restorePlayerRuntimeSessionAt(
     plan,
     snapshot: JSON.parse(snapshotJson),
   });
-  recorder?.begin(checkpoint.plan, checkpoint.snapshot);
+  return restoredSession(checkpoint.plan, checkpoint.snapshot, events, recorder, debugTrace);
+}
+
+/** A session continuing a validated `snapshot`, whose recording and value trace begin anew there; nothing runs. */
+function restoredSession(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  recorder: DebugRecorder | null,
+  debugTrace: RuntimeDebugContext | null,
+): PlayerRuntimeSession {
+  const runtime = createRuntimeSession(plan, snapshot);
+  const session = emptySession(runtime.plan, runtime, recorder, debugTrace);
+  if (recorder !== null) session.engine.beginRecording(session, session.plan, recorder);
+  // Restored values are trustworthy, but their history is not part of the checkpoint.
   debugTrace?.reset("restore");
-  return appendRuntimeEvents(
-    emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
-    events,
-  );
+  return publish(appendRuntimeEvents(session, events));
 }
 
 /**
@@ -324,7 +540,7 @@ export function withPlayerRuntimeDebugTrace(
 export function playerRuntimeForeground(
   session: PlayerRuntimeSession,
 ): PlayerForegroundPresentation | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action === null) return null;
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
@@ -399,17 +615,12 @@ export function playerRuntimeForeground(
  * and a settled timer disappears with its action. A paused timer shows its frozen remaining time.
  */
 export function playerRuntimeTimers(
-  snapshot: RuntimeSnapshot,
+  state: PlayerRuntimeState,
   currentSessionTimeMs: number,
 ): readonly PlayerTimerPresentation[] {
-  const now = Math.max(snapshot.observedSessionTimeMs, currentSessionTimeMs);
+  const now = Math.max(state.observedSessionTimeMs, currentSessionTimeMs);
   const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
-  const delays = [
-    snapshot.foregroundAction,
-    ...snapshot.callFrames.map((frame) =>
-      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
-    ),
-  ];
+  const delays = [state.foregroundAction, state.suspendedAction];
   for (const action of delays) {
     if (action?.kind !== "delay" || action.display === "hidden") continue;
     timers.push({
@@ -421,7 +632,7 @@ export function playerRuntimeTimers(
       totalSeconds: (action.deadlineMs - action.createdAtMs) / 1000,
     });
   }
-  for (const action of snapshot.backgroundActions) {
+  for (const action of state.backgroundActions) {
     if (action.kind !== "timer") continue;
     const timer = action.timer;
     const display = timer.display;
@@ -445,22 +656,20 @@ export function playerRuntimeTimers(
 }
 
 /** Session-time deadlines at which the Player must observe time again. A failed session settles nothing further. */
-export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly number[] {
-  return timedDeadlines(snapshot, () => true);
+export function playerRuntimeDeadlines(state: PlayerRuntimeState): readonly number[] {
+  return timedDeadlines(state, () => true);
 }
 
 function timedDeadlines(
-  snapshot: RuntimeSnapshot,
+  state: PlayerRuntimeState,
   timerCounts: (timer: RuntimeTimerSnapshot) => boolean,
 ): number[] {
   const deadlines: number[] = [];
-  if (snapshot.status === "failed") return deadlines;
+  if (state.status === "failed") return deadlines;
   for (const action of [
-    snapshot.foregroundAction,
-    ...snapshot.backgroundActions,
-    ...snapshot.callFrames.map((frame) =>
-      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
-    ),
+    state.foregroundAction,
+    ...state.backgroundActions,
+    state.suspendedAction,
   ]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
@@ -473,7 +682,7 @@ function timedDeadlines(
     }
   }
   // A button with a timeout times out only while it is presented; a suspended one waits for its block to return.
-  const button = activePlayerRuntimeInteraction(snapshot);
+  const button = activePlayerRuntimeInteraction(state);
   const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
   if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   return deadlines;
@@ -482,22 +691,22 @@ function timedDeadlines(
 export function playerRuntimePacingGate(
   session: PlayerRuntimeSession,
 ): RuntimeChatPacingGateActionSnapshot | null {
-  return activePlayerRuntimePacingGate(session.snapshot);
+  return activePlayerRuntimePacingGate(session.state);
 }
 
 export function activePlayerRuntimeInteraction(
-  snapshot: RuntimeSnapshot,
+  state: Pick<RuntimeSessionView, "foregroundAction">,
 ): RuntimeInteractionActionSnapshot | null {
-  return snapshot.foregroundAction?.kind === "interaction" ? snapshot.foregroundAction : null;
+  return state.foregroundAction?.kind === "interaction" ? state.foregroundAction : null;
 }
 
 export function activePlayerRuntimePacingGate(
-  snapshot: RuntimeSnapshot,
+  state: Pick<RuntimeSessionView, "status" | "foregroundAction" | "backgroundActions">,
 ): RuntimeChatPacingGateActionSnapshot | null {
-  if (snapshot.status === "failed") return null;
-  const foreground = snapshot.foregroundAction;
+  if (state.status === "failed") return null;
+  const foreground = state.foregroundAction;
   if (foreground?.kind === "chatPacingGate") return foreground;
-  return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
+  return state.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
 }
 
 /** What a Debug countdown counts down to: a `wait`, a `showButton` timeout, or chat pacing. */
@@ -513,9 +722,9 @@ export interface PlayerRuntimeDebugCountdown {
  * count; that block's own foreground work does. A countdown ends only when its action settles or loses the foreground.
  */
 export function playerRuntimeDebugCountdown(
-  session: Pick<PlayerRuntimeSession, "plan" | "snapshot">,
+  session: Pick<PlayerRuntimeSession, "plan" | "state">,
 ): PlayerRuntimeDebugCountdown | null {
-  const { snapshot } = session;
+  const { state: snapshot } = session;
   if (snapshot.status !== "running" && snapshot.status !== "waiting") return null;
   const foreground = snapshot.foregroundAction;
   let countdown: PlayerRuntimeDebugCountdown | null = null;
@@ -643,10 +852,10 @@ function debugWaitKind(
  * paths, relative to the folder of the entry script. Read-only and derived on demand; it adds nothing to the session.
  */
 export function playerRuntimeDebugNow(
-  session: Pick<PlayerRuntimeSession, "plan" | "snapshot">,
+  session: Pick<PlayerRuntimeSession, "plan" | "state">,
   nowMs: number,
 ): PlayerRuntimeDebugNow {
-  const { plan, snapshot } = session;
+  const { plan, state: snapshot } = session;
   const now = Math.max(snapshot.observedSessionTimeMs, nowMs);
   const active = snapshot.status === "running" || snapshot.status === "waiting";
   const foreground = snapshot.foregroundAction;
@@ -654,25 +863,15 @@ export function playerRuntimeDebugNow(
   // Each frame runs in the file that the next inner frame was called from, the innermost in the next statement's file.
   const calls: PlayerDebugCall[] = [];
   let runningIn = instructionSourcePath(plan, snapshot.nextInstruction);
-  for (const frame of [...snapshot.callFrames].reverse()) {
-    const interruption = frame.kind === "function" ? frame.timerInterruption : null;
+  for (const call of [...snapshot.calls].reverse()) {
     const from =
-      interruption === null
-        ? debugLocation(plan, frame.returnInstruction, frame.callSiteSpan.start.line + 1)
-        : debugLocation(plan, frame.returnInstruction);
+      call.interruption === null
+        ? debugLocation(plan, call.returnInstruction, call.callSiteSpan.start.line + 1)
+        : debugLocation(plan, call.returnInstruction);
     calls.push(
       Object.freeze({
-        kind:
-          frame.kind === "file"
-            ? "file"
-            : interruption === null
-              ? "function"
-              : "timerId" in interruption
-                ? "timer"
-                : "mediaId" in interruption
-                  ? "media"
-                  : "button",
-        name: frame.kind === "file" ? runningIn : frame.functionName,
+        kind: call.kind === "file" ? "file" : (call.interruption ?? "function"),
+        name: call.kind === "file" ? runningIn : call.functionName,
         from,
       }),
     );
@@ -682,11 +881,9 @@ export function playerRuntimeDebugNow(
   const timers: PlayerDebugTimer[] = [];
   const delays = [
     ...(foreground === null ? [] : [{ action: foreground, suspended: false }]),
-    ...snapshot.callFrames.flatMap((frame) =>
-      frame.kind === "function" && frame.timerInterruption?.suspendedAction
-        ? [{ action: frame.timerInterruption.suspendedAction, suspended: true }]
-        : [],
-    ),
+    ...(snapshot.suspendedAction === null
+      ? []
+      : [{ action: snapshot.suspendedAction, suspended: true }]),
   ];
   for (const { action, suspended } of delays) {
     if (action.kind !== "delay" || debugWaitKind(plan, action) !== "timer") continue;
@@ -720,7 +917,7 @@ export function playerRuntimeDebugNow(
   const mediaOwners = new Map<number, number>();
   for (const action of snapshot.backgroundActions)
     if (action.kind === "media") mediaOwners.set(action.media.mediaId, action.owningInstruction);
-  const media = mediaPlaybackProjection(snapshot).map((projection) =>
+  const media = snapshot.media.map((projection) =>
     Object.freeze({
       mediaId: projection.mediaId,
       media: projection.media,
@@ -758,9 +955,9 @@ export type PlayerCaptureAnswer =
 
 /** The pending `takePhoto()` the Player must answer, if any. */
 export function activePlayerRuntimeCapture(
-  snapshot: RuntimeSnapshot,
+  state: PlayerRuntimeState,
 ): RuntimeCaptureActionSnapshot | null {
-  const action = snapshot.status === "waiting" ? snapshot.foregroundAction : null;
+  const action = state.status === "waiting" ? state.foregroundAction : null;
   return action?.kind === "capture" ? action : null;
 }
 
@@ -779,15 +976,12 @@ export function answerPlayerRuntimeCapture(
       ? { kind: "captured", media: { kind: "image", reference: answer.reference } }
       : { kind: "unavailable", reason: answer.reason };
   const request = { actionId, actionKind: "capture", payload };
-  const operation = recorded(
-    session.recorder,
+  const operation = session.engine.call(
+    session,
     "completeAction",
-    session.snapshot,
     [request],
-    (admission) =>
-      completeAction(
-        session.plan,
-        session.snapshot,
+    (runtime, admission) =>
+      runtime.completeAction(
         request,
         capturedMedia === undefined
           ? traceOptions(session.debugTrace)
@@ -795,12 +989,7 @@ export function answerPlayerRuntimeCapture(
       ),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "completed",
-    ),
+    session: applyOperation(session, operation, "completed"),
     outcome: operation.outcome,
   });
 }
@@ -830,7 +1019,7 @@ export function submitPlayerRuntimeComposer(
   session: PlayerRuntimeSession,
   submittedText: string,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome | InteractionUpdateOutcome> | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action?.ui.kind === "button") {
     return submittedText !== "" && submittedText === action.ui.buttonLabel
       ? completePlayerAction(session, action, { kind: "activate" })
@@ -871,7 +1060,7 @@ export function answerPlayerRuntimeImage(
   reference: string,
   capturedMedia: CapturedMediaAdmission,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action?.ui.kind !== "image") return null;
   const request = {
     actionId: action.actionId,
@@ -879,39 +1068,40 @@ export function answerPlayerRuntimeImage(
     interactionKind: "image",
     payload: { kind: "image", reference },
   };
-  const operation = recorded(
-    session.recorder,
+  const operation = session.engine.call(
+    session,
     "completeAction",
-    session.snapshot,
     [request],
-    (admission) =>
-      completeAction(session.plan, session.snapshot, request, {
+    (runtime, admission) =>
+      runtime.completeAction(request, {
         ...traceOptions(session.debugTrace),
         capturedMedia: admission(capturedMedia),
       }),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "completed",
-    ),
+    session: applyOperation(session, operation, "completed"),
     outcome: operation.outcome,
   });
 }
 
-/** One presentation per form state: an edit replaces the state, and nothing else re-renders the form. */
-const formPresentations = new WeakMap<object, PlayerFormPresentation>();
+/**
+ * The latest form presentation of each session, by its form state: an edit changes the state, and nothing else
+ * re-renders the form, although every publication carries its own copy of the state.
+ */
+const formPresentations = new WeakMap<
+  PlayerRuntimeEngine,
+  { readonly key: string; readonly presentation: PlayerFormPresentation }
+>();
 
 /** The controls of the pending form as its answers stand, or `null` without a pending form. */
 export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPresentation | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action?.ui.kind !== "form" || action.form === undefined) return null;
-  const cached = formPresentations.get(action.form);
-  if (cached !== undefined) return cached;
+  const presentation = session.state.temporalPresentation;
+  const key = JSON.stringify([action.actionId, action.form, presentation]);
+  const cached = formPresentations.get(session.engine);
+  if (cached?.key === key) return cached.presentation;
   const { ui, form } = action;
-  const presentation = currentTemporalContext(session.snapshot).presentation;
   const fields = ui.fields.map((field, index): PlayerFormFieldPresentation => {
     const value = form.values[index] ?? null;
     const editing = form.editor?.fieldId === field.id;
@@ -989,7 +1179,7 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
                 : "text",
           } satisfies PlayerFormEditorPresentation),
   });
-  formPresentations.set(action.form, result);
+  formPresentations.set(session.engine, { key, presentation: result });
   return result;
 }
 
@@ -1005,7 +1195,7 @@ function withComposerDraft(
   session: PlayerRuntimeSession,
   draft: string | undefined,
 ): { readonly session: PlayerRuntimeSession } | FormControlResult {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   const editor = action?.form?.editor ?? null;
   if (action === null || editor === null || draft === undefined || draft === editor.text)
     return { session };
@@ -1040,7 +1230,7 @@ export function stepPlayerRuntimeFormField(
   draft?: string,
 ): FormControlResult | null {
   return afterDraft(session, draft, (current) => {
-    const action = activeInteraction(current.snapshot);
+    const action = activeInteraction(current.state);
     if (action?.ui.kind !== "form" || action.form === undefined) return null;
     const index = action.ui.fields.findIndex((field) => field.id === fieldId);
     const field = action.ui.fields[index];
@@ -1069,7 +1259,7 @@ export function commitPlayerRuntimeFormField(
   draft: string,
 ): FormControlResult | null {
   return afterDraft(session, draft, (current) => {
-    const action = activeInteraction(current.snapshot);
+    const action = activeInteraction(current.state);
     const editor = action?.form?.editor ?? null;
     if (action === null || editor === null) return null;
     return updatePlayerRuntimeForm(current, action, { kind: "commit", fieldId: editor.fieldId });
@@ -1080,7 +1270,7 @@ export function commitPlayerRuntimeFormField(
 export function dismissPlayerRuntimeFormField(
   session: PlayerRuntimeSession,
 ): FormControlResult | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   const editor = action?.form?.editor ?? null;
   if (action === null || editor === null) return null;
   return updatePlayerRuntimeForm(session, action, { kind: "dismiss", fieldId: editor.fieldId });
@@ -1090,20 +1280,15 @@ export function dismissPlayerRuntimeFormField(
 export function clearPlayerRuntimeFormField(
   session: PlayerRuntimeSession,
 ): FormControlResult | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   const editor = action?.form?.editor ?? null;
   if (action === null || editor === null) return null;
   return updatePlayerRuntimeForm(session, action, { kind: "clear", fieldId: editor.fieldId });
 }
 
 /** The forms that can still be answered: the presented one and one that a running block suspended. */
-export function playerRuntimeFormActionIds(snapshot: RuntimeSnapshot): readonly number[] {
-  return [
-    snapshot.foregroundAction,
-    ...snapshot.callFrames.map((frame) =>
-      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
-    ),
-  ].flatMap((action) =>
+export function playerRuntimeFormActionIds(state: PlayerRuntimeState): readonly number[] {
+  return [state.foregroundAction, state.suspendedAction].flatMap((action) =>
     action?.kind === "interaction" && action.ui.kind === "form" ? [action.actionId] : [],
   );
 }
@@ -1117,7 +1302,7 @@ export function draftPlayerRuntimeForm(
   target: { readonly actionId: number; readonly fieldId: string },
   draft: string,
 ): FormControlResult | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   const editor = action?.form?.editor ?? null;
   if (
     action === null ||
@@ -1140,7 +1325,7 @@ export function submitPlayerRuntimeForm(
   draft?: string,
 ): FormControlResult | null {
   return afterDraft(session, draft, (current) => {
-    const action = activeInteraction(current.snapshot);
+    const action = activeInteraction(current.state);
     if (action?.ui.kind !== "form") return null;
     return completePlayerAction(current, action, { kind: "submit" });
   });
@@ -1148,7 +1333,7 @@ export function submitPlayerRuntimeForm(
 
 /** Cancels the whole form, dropping every edit and the text being typed; the form returns `null`. */
 export function cancelPlayerRuntimeForm(session: PlayerRuntimeSession): FormControlResult | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action?.ui.kind !== "form" || action.ui.cancel === null) return null;
   return completePlayerAction(session, action, { kind: "cancel" });
 }
@@ -1164,16 +1349,11 @@ function updatePlayerRuntimeForm(
     interactionKind: "form",
     update,
   };
-  const operation = recorded(
-    session.recorder,
-    "updateInteraction",
-    session.snapshot,
-    [request],
-    () =>
-      updateInteraction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  const operation = session.engine.call(session, "updateInteraction", [request], (runtime) =>
+    runtime.updateInteraction(request, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(session, operation.snapshot, operation.events, false),
+    session: applyOperation(session, operation, null),
     outcome: operation.outcome,
   });
 }
@@ -1181,7 +1361,7 @@ function updatePlayerRuntimeForm(
 export function activatePlayerRuntimeButton(
   session: PlayerRuntimeSession,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action?.interactionKind !== "button") return null;
   return completePlayerAction(session, action, { kind: "activate" });
 }
@@ -1190,7 +1370,7 @@ export function selectPlayerRuntimeChoice(
   session: PlayerRuntimeSession,
   optionId: string,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
-  const action = activeInteraction(session.snapshot);
+  const action = activeInteraction(session.state);
   if (action?.interactionKind !== "choice" || action.ui.kind !== "choice") return null;
   const optionIndex = action.ui.options.findIndex(
     (_option, index) => choiceOptionId(action.actionId, index) === optionId,
@@ -1216,26 +1396,11 @@ export function continuePlayerRuntimeSession(
   session: PlayerRuntimeSession,
   capture: { readonly wallClockMs: number; readonly temporalContext: TemporalContext },
 ): PlayerRuntimeControlResult<ContinueCaptureOutcome> {
-  const operation = recorded(
-    session.recorder,
-    "recordContinueCapture",
-    session.snapshot,
-    [capture],
-    () =>
-      recordContinueCapture(
-        session.plan,
-        session.snapshot,
-        capture,
-        traceOptions(session.debugTrace),
-      ),
+  const operation = session.engine.call(session, "recordContinueCapture", [capture], (runtime) =>
+    runtime.recordContinueCapture(capture, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "recorded",
-    ),
+    session: applyOperation(session, operation, "recorded"),
     outcome: operation.outcome,
   });
 }
@@ -1249,28 +1414,16 @@ export function observePlayerRuntimeTime(
   currentSessionTimeMs: number,
   mediaReports: readonly MediaProgressReport[] = [],
 ): PlayerRuntimeControlResult<TimeObservationOutcome> {
-  const operation = recorded(
-    session.recorder,
+  const operation = session.engine.call(
+    session,
     "observeTime",
-    session.snapshot,
     [currentSessionTimeMs, mediaReports],
-    () =>
-      observeTime(
-        session.plan,
-        session.snapshot,
-        currentSessionTimeMs,
-        mediaReports,
-        traceOptions(session.debugTrace),
-      ),
+    (runtime) =>
+      runtime.observeTime(currentSessionTimeMs, mediaReports, traceOptions(session.debugTrace)),
   );
   // A settlement or a queued timer expiry block may make execution eligible; `run` returns at once otherwise.
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "observed",
-    ),
+    session: applyOperation(session, operation, "observed"),
     outcome: operation.outcome,
   });
 }
@@ -1283,20 +1436,17 @@ export function observePlayerRuntimeTime(
  * is already due, such as one of media that stalled, gives the next whole millisecond, so time moves on. `null` when
  * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
-export function nextPlayerRuntimeEventMs(snapshot: RuntimeSnapshot): number | null {
-  const times = timedDeadlines(
-    snapshot,
-    (timer) => !timer.repeat || timer.handlerFunctionId !== null,
-  );
-  if (snapshot.status !== "failed") {
-    for (const action of snapshot.backgroundActions) {
+export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | null {
+  const times = timedDeadlines(state, (timer) => !timer.repeat || timer.handlerFunctionId !== null);
+  if (state.status !== "failed") {
+    for (const action of state.backgroundActions) {
       const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
       if (atMs !== null) times.push(atMs);
     }
   }
   if (times.length === 0) return null;
   const nextMs = Math.min(...times);
-  const observedMs = snapshot.observedSessionTimeMs;
+  const observedMs = state.observedSessionTimeMs;
   return nextMs > observedMs ? nextMs : Math.floor(observedMs) + 1;
 }
 
@@ -1314,10 +1464,10 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
  * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, or a
  * `save`, `delete` or `takePhoto()` waits for the host.
  */
-export function playerRuntimeAwaitsHost(snapshot: RuntimeSnapshot): boolean {
-  const pending = snapshot.foregroundAction?.kind;
+export function playerRuntimeAwaitsHost(state: PlayerRuntimeState): boolean {
+  const pending = state.foregroundAction?.kind;
   return (
-    snapshot.currentSessionTimeMs < snapshot.observedSessionTimeMs ||
+    state.currentSessionTimeMs < state.observedSessionTimeMs ||
     pending === "storageWrite" ||
     pending === "capture"
   );
@@ -1332,11 +1482,10 @@ export function stepPlayerRuntimeTime(
   session: PlayerRuntimeSession,
   targetMs: number,
 ): PlayerRuntimeSession {
-  const { snapshot } = session;
-  if (snapshot.observedSessionTimeMs >= targetMs || playerRuntimeAwaitsHost(snapshot))
-    return session;
-  const stepMs = Math.min(targetMs, nextPlayerRuntimeEventMs(snapshot) ?? targetMs);
-  const result = observePlayerRuntimeTime(session, stepMs, playingMediaReports(snapshot, stepMs));
+  const { state } = session;
+  if (state.observedSessionTimeMs >= targetMs || playerRuntimeAwaitsHost(state)) return session;
+  const stepMs = Math.min(targetMs, nextPlayerRuntimeEventMs(state) ?? targetMs);
+  const result = observePlayerRuntimeTime(session, stepMs, playingMediaReports(state, stepMs));
   return result.outcome.kind === "observed" ? result.session : session;
 }
 
@@ -1359,9 +1508,9 @@ export function advancePlayerRuntimeTime(
 }
 
 /** Progress of every running loaded media at scene time `atMs`, playing on at 1× from its last sample. */
-function playingMediaReports(snapshot: RuntimeSnapshot, atMs: number): MediaProgressReport[] {
+function playingMediaReports(state: PlayerRuntimeState, atMs: number): MediaProgressReport[] {
   const reports: MediaProgressReport[] = [];
-  for (const action of snapshot.backgroundActions) {
+  for (const action of state.backgroundActions) {
     if (action.kind !== "media" || action.media.state !== "running" || !action.media.loaded)
       continue;
     const last = action.media.points.at(-1)!;
@@ -1381,38 +1530,22 @@ export function reportPlayerRuntimeMediaLoad(
   mediaId: number,
   report: MediaLoadReport,
 ): PlayerRuntimeControlResult<MediaReportOutcome> {
-  const operation = recorded(
-    session.recorder,
-    "reportMediaLoad",
-    session.snapshot,
-    [mediaId, report],
-    () =>
-      reportMediaLoad(
-        session.plan,
-        session.snapshot,
-        mediaId,
-        report,
-        traceOptions(session.debugTrace),
-      ),
+  const operation = session.engine.call(session, "reportMediaLoad", [mediaId, report], (runtime) =>
+    runtime.reportMediaLoad(mediaId, report, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "accepted",
-    ),
+    session: applyOperation(session, operation, "accepted"),
     outcome: operation.outcome,
   });
 }
 
 /** The permanent buttons the session shows, in creation order; a session that has ended or failed shows none. */
 export function playerRuntimePermanentButtons(
-  snapshot: RuntimeSnapshot,
+  state: PlayerRuntimeState,
 ): readonly PlayerPermanentButtonPresentation[] {
-  if (snapshot.status !== "running" && snapshot.status !== "waiting") return Object.freeze([]);
+  if (state.status !== "running" && state.status !== "waiting") return Object.freeze([]);
   return Object.freeze(
-    permanentButtonProjection(snapshot).map((button) =>
+    state.permanentButtons.map((button) =>
       Object.freeze({ buttonId: button.buttonId, label: button.text, busy: button.busy }),
     ),
   );
@@ -1426,21 +1559,11 @@ export function applyPlayerRuntimeStorageEdit(
   session: PlayerRuntimeSession,
   edit: { readonly key: string; readonly value: SerializableRuntimeValue },
 ): PlayerRuntimeControlResult<ExternalStorageEditOutcome> {
-  const operation = recorded(
-    session.recorder,
-    "applyExternalStorageEdit",
-    session.snapshot,
-    [edit],
-    () =>
-      applyExternalStorageEdit(
-        session.plan,
-        session.snapshot,
-        edit,
-        traceOptions(session.debugTrace),
-      ),
+  const operation = session.engine.call(session, "applyExternalStorageEdit", [edit], (runtime) =>
+    runtime.applyExternalStorageEdit(edit, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(session, operation.snapshot, operation.events, false),
+    session: applyOperation(session, operation, null),
     outcome: operation.outcome,
   });
 }
@@ -1450,44 +1573,26 @@ export function pressPlayerRuntimePermanentButton(
   session: PlayerRuntimeSession,
   buttonId: number,
 ): PlayerRuntimeControlResult<PermanentButtonPressOutcome> {
-  const operation = recorded(
-    session.recorder,
-    "pressPermanentButton",
-    session.snapshot,
-    [buttonId],
-    () =>
-      pressPermanentButton(
-        session.plan,
-        session.snapshot,
-        buttonId,
-        traceOptions(session.debugTrace),
-      ),
+  const operation = session.engine.call(session, "pressPermanentButton", [buttonId], (runtime) =>
+    runtime.pressPermanentButton(buttonId, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "pressed",
-    ),
+    session: applyOperation(session, operation, "pressed"),
     outcome: operation.outcome,
   });
 }
 
 /** Where the script shows the camera view now: in the floating window, over the Stage, or not at all (`null`). */
-export function playerRuntimeCameraView(snapshot: RuntimeSnapshot): "window" | "stage" | null {
-  return snapshot.cameraView?.shown === true ? snapshot.cameraView.placement : null;
+export function playerRuntimeCameraView(state: PlayerRuntimeState): "window" | "stage" | null {
+  return state.cameraView?.shown === true ? state.cameraView.placement : null;
 }
 
 /** The Stage image and active media the Player presents and plays; see `MediaPlaybackProjection`. */
-export function playerRuntimeMedia(snapshot: RuntimeSnapshot): {
+export function playerRuntimeMedia(state: PlayerRuntimeState): {
   readonly stage: StageProjection;
   readonly media: readonly MediaPlaybackProjection[];
 } {
-  return Object.freeze({
-    stage: stageProjection(snapshot),
-    media: mediaPlaybackProjection(snapshot),
-  });
+  return Object.freeze({ stage: state.stage, media: state.media });
 }
 
 /**
@@ -1502,7 +1607,7 @@ export function playerRuntimeMediaOrigin(
   readonly source: string;
   readonly location: { readonly path: string; readonly line: number };
 } | null {
-  for (const action of session.snapshot.backgroundActions) {
+  for (const action of session.state.backgroundActions) {
     if (action.kind !== "media" || action.media.mediaId !== mediaId) continue;
     const instruction = session.plan.instructions[action.owningInstruction]!;
     return Object.freeze({
@@ -1523,25 +1628,20 @@ function completePlayerAction(
   payload: Record<string, unknown>,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
   const request = actionRequest(action, payload);
-  const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
-    completeAction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  const operation = session.engine.call(session, "completeAction", [request], (runtime) =>
+    runtime.completeAction(request, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "completed",
-    ),
+    session: applyOperation(session, operation, "completed"),
     outcome: operation.outcome,
   });
 }
 
 /** The `save`/`delete` waiting for the host to persist it, if any. */
 export function pendingPlayerRuntimeStorageWrite(
-  snapshot: RuntimeSnapshot,
+  state: PlayerRuntimeState,
 ): RuntimeStorageWriteActionSnapshot | null {
-  const foreground = snapshot.foregroundAction;
+  const foreground = state.foregroundAction;
   return foreground?.kind === "storageWrite" ? foreground : null;
 }
 
@@ -1559,51 +1659,91 @@ export function completePlayerRuntimeStorageWrite(
     actionKind: "storageWrite",
     payload: { kind: stored ? "stored" : "failed" },
   };
-  const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
-    completeAction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  const operation = session.engine.call(session, "completeAction", [request], (runtime) =>
+    runtime.completeAction(request, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
-    session: applyOperation(
-      session,
-      operation.snapshot,
-      operation.events,
-      operation.outcome.kind === "completed",
-    ),
+    session: applyOperation(session, operation, "completed"),
     outcome: operation.outcome,
   });
 }
 
-/** Publishes one runtime operation, optionally followed by the run it makes eligible. */
+/**
+ * Publishes one runtime operation; when its outcome is `continueOn`, the run that the operation makes eligible follows
+ * it first.
+ */
 function applyOperation(
   session: PlayerRuntimeSession,
-  snapshot: RuntimeSnapshot,
-  events: readonly InterpreterEvent[],
-  continueRun: boolean,
+  operation: RuntimeSessionResult & { readonly outcome: { readonly kind: string } },
+  continueOn: string | null,
 ): PlayerRuntimeSession {
-  const next = appendRuntimeEvents({ ...session, snapshot }, events);
-  if (!continueRun) return Object.freeze(next);
-  // The operation just captured and validated this snapshot against the session's plan, and nothing has published it,
-  // so the continuation runs on it without a second capture. It returns at once when nothing is runnable.
-  const continuation = recorded(
-    session.recorder,
+  const next = appendRuntimeEvents(session, operation.events);
+  if (operation.outcome.kind !== continueOn)
+    return publish(next, !REFUSALS.has(operation.outcome.kind));
+  // The continuation runs on the same engine-owned state before anything publishes. It returns at once when nothing is
+  // runnable.
+  const continuation = session.engine.call(
+    session,
     "run",
-    next.snapshot,
     [{}],
-    () => runValidatedState(next.plan, next.snapshot, {}, traceOptions(session.debugTrace)),
+    (runtime) => runtime.run(traceOptions(session.debugTrace)),
     true,
   );
-  return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
+  return publish(appendRuntimeEvents(next, continuation.events));
 }
 
+/**
+ * The outcomes of a refused operation, which changes nothing (`docs/RUNTIME.md#runtime-sessions`), so that earlier
+ * publications stay usable after it; any other outcome may have changed the state.
+ */
+const REFUSALS: ReadonlySet<string> = new Set<
+  | ActionCompletionOutcome["kind"]
+  | TimeObservationOutcome["kind"]
+  | InteractionUpdateOutcome["kind"]
+  | ContinueCaptureOutcome["kind"]
+  | MediaReportOutcome["kind"]
+  | ExternalStorageEditOutcome["kind"]
+  | PermanentButtonPressOutcome["kind"]
+>([
+  "alreadySettled",
+  "staleAction",
+  "unknownAction",
+  "suspendedAction",
+  "wrongActionKind",
+  "invalidPayload",
+  "executionPending",
+  "invalidObservation",
+  "unchanged",
+  "invalidCapture",
+  "ignored",
+  "unknownMedia",
+  "invalidReport",
+  "invalidEdit",
+  "invalidState",
+  "storageWritePending",
+  "busy",
+  "removedButton",
+  "unknownButton",
+]);
+
+/** The next publication of the session: a new revision with what it shows now. */
+function publish(session: PlayerRuntimeSession, changed = true): PlayerRuntimeSession {
+  return Object.freeze({ ...session, ...session.engine.publish(session, changed) });
+}
+
+/** A session over `runtime` before its first publication, revision 0. */
 function emptySession(
   plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
+  runtime: RuntimeSession,
   recorder: DebugRecorder | null,
   debugTrace: RuntimeDebugContext | null,
 ): PlayerRuntimeSession {
+  const engine = new PlayerRuntimeEngine(runtime, 0);
   return Object.freeze({
     plan,
-    snapshot,
+    engine,
+    revision: 0,
+    state: engine.stateAt({ revision: 0, recorder: null }),
     recorder,
     debugTrace,
     events: [],
@@ -1743,7 +1883,7 @@ function appendRuntimeEvents(
     messageRows,
     speakers,
     events,
-    currentTemporalContext(session.snapshot).presentation,
+    session.engine.temporalPresentation(session),
   );
   return Object.freeze({
     ...session,
@@ -1763,22 +1903,10 @@ function traceOptions(debugTrace: RuntimeDebugContext | null): {
   return debugTrace === null ? NO_TRACE : { debugTrace };
 }
 
-/** Makes an engine call through the session's recorder, or directly without one. */
-function recorded<R extends { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[] }>(
-  recorder: DebugRecorder | null,
-  kind: Parameters<DebugRecorder["call"]>[0],
-  input: RuntimeSnapshot,
-  args: readonly unknown[],
-  invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
-  continuation = false,
-): R {
-  return recorder === null
-    ? invoke((store) => store)
-    : recorder.call(kind, input, args, invoke, continuation);
-}
-
-function activeInteraction(snapshot: RuntimeSnapshot): RuntimeInteractionActionSnapshot | null {
-  return activePlayerRuntimeInteraction(snapshot);
+function activeInteraction(
+  state: Pick<RuntimeSessionView, "foregroundAction">,
+): RuntimeInteractionActionSnapshot | null {
+  return activePlayerRuntimeInteraction(state);
 }
 
 function choiceOptionId(actionId: number, optionIndex: number): string {

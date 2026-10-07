@@ -117,7 +117,7 @@ export function usePlayerDebug(
       ? null
       : debugCountdownText(
           countdown.value,
-          Math.max(session.snapshot.observedSessionTimeMs, player.sceneTimeMs.value),
+          Math.max(session.state.observedSessionTimeMs, player.sceneTimeMs.value),
         );
   });
 

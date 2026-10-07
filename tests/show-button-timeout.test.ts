@@ -10,6 +10,7 @@ import {
   playerRuntimeForeground,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
@@ -27,6 +28,7 @@ import {
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { playerStateOf } from "./helpers/player-state.js";
 
 function seconds(milliseconds: number) {
   return { kind: "duration", milliseconds };
@@ -70,12 +72,12 @@ test("a click before the timeout returns the elapsed scene time as a duration", 
     { clickAtMs: 2_500, quick: false },
   ]) {
     let session = createPlayerRuntimeSession(source);
-    assert.deepEqual(playerRuntimeDeadlines(session.snapshot), [5_000]);
+    assert.deepEqual(playerRuntimeDeadlines(session.state), [5_000]);
     session = observe(session, clickAtMs);
     assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
     session = click(session);
-    assert.equal(session.snapshot.status, "halted");
-    assert.deepEqual(binding(session.snapshot, "elapsed"), seconds(clickAtMs));
+    assert.equal(session.state.status, "halted");
+    assert.deepEqual(binding(playerRuntimeSnapshot(session), "elapsed"), seconds(clickAtMs));
     assert.deepEqual(playerMessages(session), ["Continue"]);
     assert.equal(
       session.transcriptEntries.some((entry) => entry.text === "That was quick."),
@@ -95,13 +97,17 @@ test("a reached timeout removes the button without a chat message and returns th
     let session = createPlayerRuntimeSession(
       `let limit = 2 s\nlet elapsed = showButton "Continue", timeout: ${timeout}\nsay "Too slow.", instant\nexit`,
     );
-    assert.deepEqual(playerRuntimeDeadlines(session.snapshot), [milliseconds], timeout);
+    assert.deepEqual(playerRuntimeDeadlines(session.state), [milliseconds], timeout);
     session = observe(session, milliseconds - 1);
     assert.equal(playerRuntimeForeground(session)?.kind, "show-button", timeout);
     session = observe(session, milliseconds);
-    assert.equal(session.snapshot.status, "halted", timeout);
+    assert.equal(session.state.status, "halted", timeout);
     assert.equal(playerRuntimeForeground(session), null);
-    assert.deepEqual(binding(session.snapshot, "elapsed"), seconds(milliseconds), timeout);
+    assert.deepEqual(
+      binding(playerRuntimeSnapshot(session), "elapsed"),
+      seconds(milliseconds),
+      timeout,
+    );
     assert.deepEqual(playerMessages(session), [], timeout);
     assert.ok(session.events.every((event) => event.kind !== "playerTranscript"));
     assert.deepEqual(settlementKinds(session.events), ["timedOut"]);
@@ -111,11 +117,11 @@ test("a reached timeout removes the button without a chat message and returns th
 
 test("without a timeout the button waits for the click however late time is observed", () => {
   let session = createPlayerRuntimeSession('let elapsed = showButton "Continue"\nexit');
-  assert.deepEqual(playerRuntimeDeadlines(session.snapshot), []);
+  assert.deepEqual(playerRuntimeDeadlines(session.state), []);
   session = observe(session, 3_600_000);
   assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
   session = click(session);
-  assert.deepEqual(binding(session.snapshot, "elapsed"), seconds(3_600_000));
+  assert.deepEqual(binding(playerRuntimeSnapshot(session), "elapsed"), seconds(3_600_000));
 });
 
 test("an ignored result keeps the button result-free", () => {
@@ -130,8 +136,8 @@ test("an ignored result keeps the button result-free", () => {
     'showButton "Continue", timeout: 2\nsay "Next", instant\nexit',
   );
   session = observe(session, 2_000);
-  assert.equal(session.snapshot.status, "halted");
-  const settlement = session.snapshot.lastSettlement;
+  assert.equal(session.state.status, "halted");
+  const settlement = playerRuntimeSnapshot(session).lastSettlement;
   assert.equal(settlement?.actionKind, "interaction");
   assert.equal(settlement.settlementKind, "timedOut");
   assert.equal(settlement.result, null);
@@ -148,12 +154,12 @@ test("options appear in either order and evaluate in source order", () => {
     let session = createPlayerRuntimeSession(
       `${record}\nspeaker guide { name: "Guide" }\nlet result = { elapsed: showButton as guide record("Go"), ${options} }\nexit`,
     );
-    assert.equal(binding(session.snapshot, "order"), order);
+    assert.equal(binding(playerRuntimeSnapshot(session), "order"), order);
     const foreground = playerRuntimeForeground(session);
     assert.equal(foreground?.kind, "show-button");
     assert.ok(foreground.authoredFill !== undefined);
     session = observe(session, 3_000);
-    assert.deepEqual(binding(session.snapshot, "result"), {
+    assert.deepEqual(binding(playerRuntimeSnapshot(session), "result"), {
       kind: "object",
       properties: [{ name: "elapsed", value: seconds(3_000) }],
     });
@@ -165,7 +171,7 @@ test("a button works as a value inside interpolation", () => {
     createPlayerRuntimeSession('say "You waited ${showButton "Go", timeout: 1}.", instant\nexit'),
     1_000,
   );
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   assert.equal(session.transcriptEntries.at(-1)?.text, "You waited 1 s.");
 });
 
@@ -258,12 +264,15 @@ test("a checkpoint while the button is shown resumes with its original start and
   session = observe(session, 1_200);
   const restorePoint = createPlayerRuntimeRestorePoint(session);
   const clicked = restorePlayerRuntimeSession(restorePoint);
-  assert.equal(validateRuntimeSnapshot(clicked.snapshot, clicked.plan).valid, true);
+  assert.equal(validateRuntimeSnapshot(playerRuntimeSnapshot(clicked), clicked.plan).valid, true);
   assert.deepEqual(playerRuntimeForeground(clicked), playerRuntimeForeground(session));
-  assert.deepEqual(playerRuntimeDeadlines(clicked.snapshot), [5_000]);
-  assert.deepEqual(binding(click(observe(clicked, 1_800)).snapshot, "elapsed"), seconds(1_800));
+  assert.deepEqual(playerRuntimeDeadlines(clicked.state), [5_000]);
+  assert.deepEqual(
+    binding(playerRuntimeSnapshot(click(observe(clicked, 1_800))), "elapsed"),
+    seconds(1_800),
+  );
   const timedOut = observe(restorePlayerRuntimeSession(restorePoint), 5_000);
-  assert.deepEqual(binding(timedOut.snapshot, "elapsed"), seconds(5_000));
+  assert.deepEqual(binding(playerRuntimeSnapshot(timedOut), "elapsed"), seconds(5_000));
 
   for (const source of [
     'let elapsed = showButton "Continue", timeout: 2\nsay "Waited ${elapsed}.", instant\nexit',
@@ -322,7 +331,7 @@ test("a timeout reached during catch-up matches observing every deadline on time
   const plan = compileValidPlan('timer async 1 { wait 5 }\nshowButton "Go", timeout: 3\nexit');
   const suspended = playAt(plan, createFreshRuntimeSnapshot(plan), [1_000]).snapshot;
   assert.equal(suspended.foregroundAction?.kind, "delay");
-  assert.deepEqual(playerRuntimeDeadlines(suspended), [6_000]);
+  assert.deepEqual(playerRuntimeDeadlines(playerStateOf(plan, suspended)), [6_000]);
 });
 
 test("a button consumes the pacing gate before it, and its timeout starts when it appears", () => {

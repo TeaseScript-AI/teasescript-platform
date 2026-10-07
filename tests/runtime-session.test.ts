@@ -20,6 +20,7 @@ import {
   run,
   RuntimeDataError,
   RuntimeDebugContext,
+  runtimeDebugPreview,
   RuntimeSessionError,
   serializeCheckpoint,
   stageProjection,
@@ -609,17 +610,37 @@ exit
   );
   assert.equal(session.view().suspendedAction?.kind, "delay");
 
-  const variables = session.variables();
+  // Each variable with its bounded preview; a message handle names its message, whose text is listed.
+  const preview = (binding: RuntimeSnapshot["globals"][number]) => {
+    const { text, truncated } = runtimeDebugPreview(binding.value);
+    const value = binding.value;
+    return {
+      name: binding.name,
+      preview: text,
+      truncated,
+      messageId:
+        typeof value === "object" && value !== null && value.kind === "messageHandle"
+          ? value.messageId
+          : null,
+    };
+  };
+  const scope = (frame: RuntimeSnapshot["frames"][number]) => ({
+    id: frame.id,
+    file: frame.file,
+    variables: frame.bindings.map(preview),
+  });
+  const variables = session.variablePreviews();
   assert.deepEqual(variables, {
-    globals: exported.globals,
-    frames: exported.frames,
-    retainedScopes: exported.retainedScopes,
+    globals: exported.globals.map(preview),
+    frames: exported.frames.map(scope),
+    retainedScopes: exported.retainedScopes.map(scope),
     liveMessages: exported.liveMessages,
   });
   assert.deepEqual(
     variables.liveMessages.map((message) => message.sourceText),
     ["Tick"],
   );
+  assert.ok(variables.frames.some((frame) => frame.variables.some((v) => v.messageId !== null)));
   assert.equal(Reflect.set(variables.globals[0]!, "name", "changed"), false);
 
   assert.deepEqual(session.temporalPresentation(), AMSTERDAM.presentation);

@@ -162,7 +162,9 @@ export {
   type RuntimeSessionOptions,
   type RuntimeSessionOutcomeResult,
   type RuntimeSessionResult,
-  type RuntimeSessionVariables,
+  type RuntimeSessionScopePreview,
+  type RuntimeSessionVariablePreview,
+  type RuntimeSessionVariablePreviews,
   type RuntimeSessionView,
 } from "./runtime/session.js";
 export {

@@ -171,7 +171,7 @@ onErrorCaptured((error) => {
 });
 // After an error the notice offers the export too, until a new session starts.
 watch(
-  () => [session.value?.snapshot.failure ?? null, props.player.hostError.value] as const,
+  () => [session.value?.state.failure ?? null, props.player.hostError.value] as const,
   ([failure, hostError]) => {
     if (failure === null && hostError === null)
       props.player.withdrawNotice(playerNoticeKeys.sessionError);
@@ -470,7 +470,7 @@ async function toggleFullscreen() {
           <template #end>
             <RuntimeFailure
               v-if="!failure && player.activation.value === null"
-              :snapshot="session?.snapshot ?? null"
+              :state="session?.state ?? null"
               :host-error="player.hostError.value"
               @export="openDebugExport"
             />

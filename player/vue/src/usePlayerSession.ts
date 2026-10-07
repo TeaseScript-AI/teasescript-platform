@@ -21,6 +21,7 @@ import {
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import {
   activePlayerRuntimeInteraction,
+  beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
   applyPlayerRuntimeStorageEdit,
   continuePlayerRuntimeSession,
@@ -30,6 +31,8 @@ import {
   playerRuntimeMedia,
   playerRuntimeMediaOrigin,
   playerRuntimePermanentButtons,
+  playerRuntimeSnapshot,
+  playerRuntimeSnapshotOrNull,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
   withPlayerRuntimeDebugTrace,
@@ -226,7 +229,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the session camera, which stays open for `takePhoto()`. Without an available camera there is nothing to show.
   const viewfinderPlacement = computed(() => {
     const current = session.value;
-    return current === null ? null : playerRuntimeCameraView(current.snapshot);
+    return current === null ? null : playerRuntimeCameraView(current.state);
   });
   const viewfinder = computed(() => {
     void cameraRevision.value;
@@ -293,7 +296,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
   const clock = useRuntimeSceneClock(session, () => device.sample(), inspecting);
   const stageImage = computed(() =>
-    session.value === null ? null : playerRuntimeMedia(session.value.snapshot).stage.image,
+    session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
   // The Stage source the browser could not load, as the Stage reports it while it shows that source, or `null`. The
   // Stage keeps that image hidden while its source stays, also into a new session, which then gets no new browser error.
@@ -312,7 +315,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   watch(
     [session, inspecting],
     ([current, paused]) => {
-      const media = current ? playerRuntimeMedia(current.snapshot).media : [];
+      const media = current ? playerRuntimeMedia(current.state).media : [];
       // An inspected state shows its media where they were, without playing them.
       device.reconcile(
         paused ? media.map((projection) => ({ ...projection, state: "paused" as const })) : media,
@@ -343,7 +346,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   watch(servicedSession, () => void serviceCapture());
   // A session that ended releases its camera.
   watch(
-    () => session.value?.snapshot.status,
+    () => session.value?.state.status,
     (status) => {
       if (status === "halted" || status === "failed") camera.release();
     },
@@ -382,7 +385,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // a session and an action, is reported once, so a dismissal holds only for the request it was given for.
   watch(
     () => {
-      const request = session.value && activePlayerRuntimeInteraction(session.value.snapshot);
+      const request = session.value && activePlayerRuntimeInteraction(session.value.state);
       return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
         ? `${generation.value}:${request.actionId}`
         : null;
@@ -485,7 +488,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   watch(
     session,
     (current) => {
-      const write = current && pendingPlayerRuntimeStorageWrite(current.snapshot);
+      const write = current && pendingPlayerRuntimeStorageWrite(current.state);
       if (!scriptStorage || !write) return;
       const sessionGeneration = generation.value;
       const flight = `${sessionGeneration}:${write.actionId}`;
@@ -506,7 +509,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         const latest = session.value;
         // The report must belong to the session that requested it.
         if (generation.value !== sessionGeneration || latest === null) return;
-        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
+        if (pendingPlayerRuntimeStorageWrite(latest.state)?.actionId !== write!.actionId) return;
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else {
           savedDataRevision.value++;
@@ -545,12 +548,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Whether a running or waiting session takes an edit now; one that waits for Continue or the camera does not. */
   const liveSession = () =>
     session.value !== null &&
-    (session.value.snapshot.status === "running" || session.value.snapshot.status === "waiting") &&
+    (session.value.state.status === "running" || session.value.state.status === "waiting") &&
     activation.value === null &&
     !openingCamera.value;
   /** Whether the running session's own write waits for the host, so it takes no edit until that settled. */
   const scriptSaving = () =>
-    liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot) !== null;
+    liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.state) !== null;
   // Edits that wait for the session's write to settle; each published session or new run wakes them to look again.
   const writeSettledWaiters = new Set<() => void>();
   watch([session, generation], () => {
@@ -638,7 +641,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       while (
         !retired() &&
         session.value !== null &&
-        pendingPlayerRuntimeStorageWrite(session.value.snapshot) !== null
+        pendingPlayerRuntimeStorageWrite(session.value.state) !== null
       )
         await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
     } finally {
@@ -656,7 +659,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value = edited.session;
     debugEdits.value = {
       firstEditSceneTimeMs:
-        debugEdits.value?.firstEditSceneTimeMs ?? latest.snapshot.observedSessionTimeMs,
+        debugEdits.value?.firstEditSceneTimeMs ?? latest.state.observedSessionTimeMs,
       editCount: (debugEdits.value?.editCount ?? 0) + 1,
     };
     return { kind: "saved", live: true };
@@ -671,8 +674,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       !inspecting.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
-        session.value.snapshot.status === "halted" ||
-        session.value.snapshot.status === "failed"),
+        session.value.state.status === "halted" ||
+        session.value.state.status === "failed"),
   );
   /** Removes this script's saved data; resolves to whether it was cleared. */
   async function clearScriptStorage(): Promise<boolean> {
@@ -812,8 +815,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       openingCamera.value ||
       activation.value?.kind === "continue" ||
       (session.value !== null &&
-        session.value.snapshot.status !== "halted" &&
-        session.value.snapshot.status !== "failed"),
+        session.value.state.status !== "halted" &&
+        session.value.state.status !== "failed"),
   );
   /**
    * Ends the session without running any more of it: its clock, captures, cameras, and media stop, a pending Start or
@@ -899,7 +902,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       !clearing.value &&
       !openingCamera.value &&
       editsInFlight.value === 0 &&
-      pendingPlayerRuntimeStorageWrite(session.value.snapshot) === null,
+      pendingPlayerRuntimeStorageWrite(session.value.state) === null,
   );
   /** Whether Debug's rewind may begin a step now: the session may be left, and no other rewind work runs. */
   const canRewind = computed(() => rewindReady.value && rewindWork.value === null);
@@ -927,10 +930,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   async function adoptShown(shown: PlayerRuntimeSession): Promise<boolean> {
     const owner = generation.value;
+    // The adopted state, exported once before the first await.
+    const adopted = playerRuntimeSnapshot(shown);
     rewindWork.value = "adopt";
     try {
-      if (scriptStorage && shown.snapshot.scriptStoragePersistent)
-        await scriptStorage.replace(shown.snapshot.scriptStorage);
+      if (scriptStorage && adopted.scriptStoragePersistent)
+        await scriptStorage.replace(adopted.scriptStorage);
     } catch {
       if (!disposed) notices.publish(playerNotices.rewindNotAdopted());
       return false;
@@ -940,7 +945,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
     if (disposed || generation.value !== owner || !inspecting.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
-    storedEntries.value = shown.snapshot.scriptStorage;
+    storedEntries.value = adopted.scriptStorage;
     savedDataRevision.value++;
     rewindAdopted?.();
     inspecting.value = false;
@@ -955,11 +960,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (inspecting.value) return;
     jumpedRevision.value = next.transcriptRevision;
     session.value = next;
-    device.jumped(playerRuntimeMedia(next.snapshot).media);
+    device.jumped(playerRuntimeMedia(next.state).media);
     clock.rebase();
   }
   const permanentButtons = computed(() =>
-    session.value === null ? [] : playerRuntimePermanentButtons(session.value.snapshot),
+    session.value === null ? [] : playerRuntimePermanentButtons(session.value.state),
   );
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
   async function pressPermanentButton(buttonId: number) {
@@ -1007,7 +1012,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       kind: "continue",
       begin: () => {
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
-        recorder.begin(restored.plan, restored.snapshot);
+        beginPlayerRuntimeRecording(restored, recorder);
         debugTrace.value?.reset("restore");
         return continuePlayerRuntimeSession(
           Object.freeze({ ...restored, recorder, debugTrace: debugTrace.value }),
@@ -1159,26 +1164,29 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ): Promise<DebugExportCandidate> {
       // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
       const current = session.value;
+      // The shown state, after a call that threw rebuilt from the recorded calls; without it, the export has no session
+      // state, so it never presents an earlier state as the one shown.
+      const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
+      const recording = recorder.recording();
       const frozen = {
         build: playerBuildIdentity,
         package: options.debugPackage ?? { id: null, version: null },
         session:
-          current === null
+          current === null || snapshot === null
             ? null
             : {
                 plan: current.plan,
-                snapshot: current.snapshot,
+                snapshot,
                 events: [...current.events],
                 transcriptEntries: [...current.transcriptEntries],
               },
-        recording: recorder.recording(),
+        recording,
         hostError: hostError.value,
         editedWhileDebugging: debugEdits.value,
         rewoundWhileDebugging: rewound.value,
         ...shown,
       };
-      const storage =
-        current?.snapshot.scriptStorage ?? frozen.recording?.endSnapshot.scriptStorage ?? [];
+      const storage = (snapshot ?? recording?.endSnapshot)?.scriptStorage ?? [];
       const photos: DebugPhotoCandidate[] = [];
       for (const [reference, usedBy] of debugPhotoUses(frozen.recording, storage)) {
         const record = await capturedMedia.read(reference);
