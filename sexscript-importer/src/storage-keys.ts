@@ -200,6 +200,29 @@ function telling(value: IrExpression): boolean {
   return value.value === null || value.value === "" || value.value === 0 || value.value === false;
 }
 
+/** The variables that a legacy text read (`loadString`) starts or is set to, by name. */
+function textVariables(statements: readonly IrStatement[]): Set<string> {
+  const names = new Set<string>();
+  const block = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      const value = item.kind === "let" || item.kind === "assign" ? item.value : null;
+      const name =
+        item.kind === "let"
+          ? item.name
+          : item.kind === "assign" && item.target.kind === "variable"
+            ? item.target.name
+            : null;
+      if (name !== null && value?.kind === "load" && value.read === "string") names.add(name);
+      withNestedBlocks(item, (body) => {
+        block(body);
+        return body;
+      });
+    }
+  };
+  block(statements);
+  return names;
+}
+
 /**
  * Which of the package's programs become output files (`published`), and which of them is main.tease (`main`), whose
  * global functions reach every file.
@@ -236,14 +259,24 @@ export function withStorageDefaults(
     }
     return mapChildren(value, collect);
   };
-  const scan = (items: IrStatement[]): IrStatement[] =>
-    items.map((item) => {
-      const key = item.kind === "save" ? literalKey(item.key) : null;
-      if (key !== null && item.kind === "save")
-        note(saved, key, item.valueType?.replace(/\?$/u, "") ?? valueType(item.value));
-      return mapOwnExpressions(withNestedBlocks(item, scan), collect);
-    });
-  for (const program of programs) scan(program.statements);
+  for (const program of programs) {
+    // A variable that a legacy text read starts or is set to holds text, which a save of it saves.
+    const texts = textVariables(program.statements);
+    const scan = (items: IrStatement[]): IrStatement[] =>
+      items.map((item) => {
+        const key = item.kind === "save" ? literalKey(item.key) : null;
+        if (key !== null && item.kind === "save")
+          note(
+            saved,
+            key,
+            item.valueType?.replace(/\?$/u, "") ??
+              valueType(item.value) ??
+              (item.value.kind === "variable" && texts.has(item.value.name) ? "string" : null),
+          );
+        return mapOwnExpressions(withNestedBlocks(item, scan), collect);
+      });
+    scan(program.statements);
+  }
   // A legacy loadString or loadBoolean read of a key that values of another type are saved under too reads the value
   // as stored and turns it into the type legacy read (withTypedTextReads).
   const routed = new Set(
@@ -395,6 +428,8 @@ function withEmptyText(
   const receivers = programs.map(() => new Set<string>());
   const globals = new Set<string>();
   const mixed = new Set<string>();
+  // Variables the script sets to null, which are mixed unless text is read into them.
+  const nulled = new Set<string>();
   const textual = (value: IrExpression): boolean =>
     text(value) ||
     value.kind === "template" ||
@@ -426,7 +461,9 @@ function withEmptyText(
             receivers[index]!.add(target);
             if (item.kind === "let" && item.global === true) globals.add(target);
           }
-          if (!textual(item.value)) mixed.add(target);
+          // A null set to a variable that text is read into is the empty text there (withEmptyText's statements).
+          if (!textual(item.value) && !isNullLiteral(item.value)) mixed.add(target);
+          if (isNullLiteral(item.value)) nulled.add(target);
           copies.push([target, item.value]);
         }
         if (item.kind === "return" && item.value !== null && current !== null)
@@ -476,6 +513,19 @@ function withEmptyText(
       }
     }
   });
+  // A variable declared global that text is read into in any file is tested as text in every file.
+  const declaredGlobal = new Set(
+    programs.flatMap((program) =>
+      program.statements.flatMap((statement) =>
+        statement.kind === "let" && statement.global === true ? [statement.name] : [],
+      ),
+    ),
+  );
+  for (const names of receivers)
+    for (const name of names) if (declaredGlobal.has(name)) globals.add(name);
+  // A variable set to null that no text is read into holds null besides its other values.
+  for (const name of nulled)
+    if (!globals.has(name) && !receivers.some((names) => names.has(name))) mixed.add(name);
   const EMPTY: IrExpression = { kind: "literal", value: "" };
   return programs.map((program, index) => {
     const diagnostics = [...program.diagnostics];
@@ -552,6 +602,26 @@ function withEmptyText(
         const key = next.kind === "save" ? literalKey(next.key) : null;
         if (next.kind === "save" && key !== null && textKeys.has(key) && isNullLiteral(next.value))
           return [{ ...next, value: EMPTY }];
+        // Null set to a variable that text is read into is the empty text, which its tests test for.
+        const set =
+          next.kind === "let"
+            ? next.name
+            : next.kind === "assign" && next.operator === "=" && next.target.kind === "variable"
+              ? next.target.name
+              : null;
+        if (
+          set !== null &&
+          (next.kind === "let" || next.kind === "assign") &&
+          isNullLiteral(next.value) &&
+          (receivers[index]!.has(set) || globals.has(set))
+        ) {
+          note(
+            "SX_LOAD_TEXT_NULL_SET",
+            "Legacy set this text to null, missing; it is the empty text now.",
+            next.span,
+          );
+          return [{ ...next, value: EMPTY }];
+        }
         if (next.kind === "assign" && next.target.kind === "variable" && text(next.value))
           widened.add(next.target.name);
         if (next.kind !== "let" || !text(next.value) || next.type !== undefined) return [next];

@@ -225,7 +225,8 @@ export interface FeasibilityReport {
    * Storage reads of a key written as one literal (storage-keys.ts): with a default of their type (`defaulted`), with
    * `default: null` and a declared key type (`nullKept`), and the statements whose reads keep a null of an open type
    * (`open`, `SX_LOAD_OPEN_NULL`); text reads whose null the script told apart, now the empty text (`textEmpty`,
-   * `SX_LOAD_TEXT_EMPTY`), and their null tests, now tests for the empty text (`textTests`, `SX_LOAD_TEXT_NULL_TEST`).
+   * `SX_LOAD_TEXT_EMPTY`), and their null tests and nulls set, now the empty text (`textTests`,
+   * `SX_LOAD_TEXT_NULL_TEST`, `SX_LOAD_TEXT_NULL_SET`).
    */
   storageReads: {
     defaulted: number;
@@ -494,7 +495,8 @@ export function analyzeFeasibility(
         packageProgram.diagnostics.filter((diagnostic) => diagnostic.code === code).length;
       report.storageReads.open += count("SX_LOAD_OPEN_NULL");
       report.storageReads.textEmpty += count("SX_LOAD_TEXT_EMPTY");
-      report.storageReads.textTests += count("SX_LOAD_TEXT_NULL_TEST");
+      report.storageReads.textTests +=
+        count("SX_LOAD_TEXT_NULL_TEST") + count("SX_LOAD_TEXT_NULL_SET");
     }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;

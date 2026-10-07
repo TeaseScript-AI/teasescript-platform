@@ -40,7 +40,7 @@ global enabled = false
 // A field that only a module uses is the object's field there too.
 global boost = 1.5
 // A read of a field that a module may test for null keeps its null.
-global title = null
+global title = ""
 title = load "demo.title", default: ""
 function pauseCycle(delay, cycleValue = 60) {
   wait delay / cycleValue

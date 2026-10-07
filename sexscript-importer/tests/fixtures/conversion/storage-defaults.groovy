@@ -45,7 +45,8 @@ show("Pick " + pick)
 def roll = { save("game.pick", getRandom(6)) }
 if (loadBoolean("game.volume")) show("Loud.")
 def setVolume = { save("game.volume", getRandom(10)) }
-// A text variable that the script also gives null, or a value of a type that the importer cannot tell, holds that too.
+// A null the script sets a text variable to is the empty text too; a value of a type that the importer cannot tell
+// keeps the read of an open type.
 def dompic = loadString("game.dompic")
 if (getBoolean("Reset the picture?")) dompic = null
 if (dompic == null) show("No picture.")
@@ -56,3 +57,7 @@ if (outfit == null) outfit = pickOutfit()
 def names = ["a", "b"]
 for (int n = 0; n < 2; n++) names[n] = loadString("game.name" + n)
 show(names.join(", "))
+// A flag read of a key that a text variable is saved under too reads as the flag's text.
+def answer = loadString("game.answer")
+if (loadBoolean("game.flag") == true) show("Flagged.")
+def keepAnswer = { save("game.flag", answer) }
