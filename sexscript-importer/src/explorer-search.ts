@@ -135,7 +135,8 @@ export interface ExploreOptions {
   readonly budgetMs: number;
   /**
    * The work budget: the runtime operations the run may call (`Session.operations`), the corpus replay's included; none
-   * when absent. A run that only this budget and `maxStates` limit is deterministic.
+   * when absent. It is checked before each step, and a step that started finishes, so a run can go over it by the
+   * operations of its last step. A run that only this budget and `maxStates` limit is deterministic.
    */
   readonly budgetOps?: number;
   readonly maxStates: number;
@@ -1202,6 +1203,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const replayEntry = (entry: CorpusEntry): "done" | "stale" | "full" => {
       let origin: Node | null = null;
       for (const part of [...(entry.earlier ?? []), entry]) {
+        // A spent budget also ends the replay between sessions, which may have no inputs.
+        if (full()) return "full";
         const start = sessionStart(origin, part.wallClockMs ?? EPOCH_MS);
         const reached = start === null ? null : walk(start, part.inputs);
         if (reached === null || reached === "full") return reached ?? "stale";
@@ -1436,6 +1439,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       entries,
     };
   };
+  const directed = directedSummary(
+    instructions,
+    files,
+    options.sources,
+    targets,
+    attemptCount,
+    directedTransitions,
+  );
+  const corpus = corpusResult();
+  // The run's time and CPU time end here, with everything but the search figures computed.
   const cpu = process.cpuUsage(cpuAtStart);
   return {
     search: {
@@ -1473,17 +1486,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       open: count("open") + count("partial"),
     },
     coverage,
-    directed: directedSummary(
-      instructions,
-      files,
-      options.sources,
-      targets,
-      attemptCount,
-      directedTransitions,
-    ),
+    directed,
     crashes: [...crashes.values()],
     traps: traps.map((trap) => trap.report),
-    corpus: corpusResult(),
+    corpus,
   };
 }
 

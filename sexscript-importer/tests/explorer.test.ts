@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { isRecord } from "../src/ast.ts";
 import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
-import { explore } from "../src/explorer-search.ts";
+import { explore, type CorpusEntry } from "../src/explorer-search.ts";
 import {
   loadEngine,
   replay,
@@ -221,6 +221,27 @@ test(
       Math.round((top!.expansions / first.search.expanded) * 1000) / 10,
     ]);
     assert.ok(top!.percent > 50);
+
+    // The budget also ends a corpus replay between its sessions, which need no inputs: the entry is kept unreplayed.
+    const sessions: CorpusEntry = {
+      seed: 1,
+      reason: "coverage",
+      earlier: Array.from({ length: 10 }, () => ({ inputs: [] })),
+      inputs: [],
+    };
+    const replayed = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3,
+      maxStates: 5000,
+      sources: new Map(),
+      diagnostics,
+      corpus: [sessions],
+    });
+    assert.equal(replayed.search.stoppedBy, "operations");
+    assert.equal(replayed.corpus!.replayed, 0);
+    // Entries kept unreplayed come last in the corpus to keep.
+    assert.deepEqual(replayed.corpus!.entries.at(-1), sessions);
   },
 );
 

@@ -10,7 +10,8 @@
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
- * N runtime operations per unit, which makes a run's length deterministic; a time budget then applies only when given.
+ * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
+ * given.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -110,7 +111,11 @@ async function main(args: string[]): Promise<void> {
     values.out === undefined ||
     positionals.length === 0 ||
     (budgetSeconds !== null && !(budgetSeconds > 0)) ||
-    (budgetOps !== null && (!Number.isSafeInteger(budgetOps) || budgetOps < 1)) ||
+    (budgetOps !== null &&
+      // Each round doubles it, and the last round's budget must still be a safe integer.
+      (!Number.isSafeInteger(budgetOps) ||
+        budgetOps < 1 ||
+        !Number.isSafeInteger(budgetOps * 2 ** (rounds - 1)))) ||
     !Number.isSafeInteger(maxStates) ||
     maxStates < 1 ||
     !Number.isSafeInteger(seed) ||
@@ -566,23 +571,28 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
   const lines = [
     "# Explorer summary",
     "",
-    `Explorer \`${text(first.explorer)}\`, seed ${count(first.seed)}, budget ` +
-      `${describeBudget({ budgetSeconds: number(first.budgetSeconds), budgetOps: number(first.budgetOps) })} and ` +
-      `${count(first.maxStates)} states per unit. Reports: \`${out}/<unit>.json\`.`,
+    `Explorer \`${text(first.explorer)}\`, seed ${count(first.seed)}, at most ${count(first.maxStates)} states per ` +
+      `unit; each unit's budget is in its row, as rounds double it. Reports: \`${out}/<unit>.json\`.`,
     "",
-    "| Unit | Coverage | From corpus | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | Open | " +
-      "Operations | Time | CPU | Most expansions at |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Unit | Budget | Coverage | From corpus | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | " +
+      "Open | Operations | Time | CPU | Most expansions at |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const report of reports) {
     if (report.compile === undefined) {
       lines.push(
-        `| ${text(report.unit)} | no report: skipped as exhausted earlier, or its process failed | | | | | | | | | | | | | |`,
+        `| ${text(report.unit)} | | no report: skipped as exhausted earlier, or its process failed | | | | | | | | | | | | | |`,
       );
       continue;
     }
+    const budget = describeBudget({
+      budgetSeconds: number(report.budgetSeconds),
+      budgetOps: number(report.budgetOps),
+    });
     if (fields(report.compile).ok !== true) {
-      lines.push(`| ${text(report.unit)} | does not compile | | | | | | | | | | | | | |`);
+      lines.push(
+        `| ${text(report.unit)} | ${budget} | does not compile | | | | | | | | | | | | | |`,
+      );
       continue;
     }
     const coverage = fields(report.coverage);
@@ -594,12 +604,18 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       ? `${count(fields(corpus.coverageAtStart).percent)}% (${count(corpus.replayed)} of ` +
         `${count(corpus.loaded)} entries replayed, ${count(corpus.stale)} stale; ${count(corpus.written)} kept)`
       : "";
+    // A report from before these measurements has none of them.
+    const measured = (value: unknown, scale = 1, unit = "") => {
+      const found = number(value);
+      return found === null ? "" : `${Math.round(found / scale)}${unit}`;
+    };
     lines.push(
-      `| ${text(report.unit)} | ${count(coverage.percent)}% of ${count(coverage.coverableLines)} lines | ${fromCorpus} | ` +
+      `| ${text(report.unit)} | ${budget} | ${count(coverage.percent)}% of ${count(coverage.coverableLines)} lines | ` +
+        `${fromCorpus} | ` +
         `${count(search.states)} | ${text(search.stoppedBy)} | ${records(report.crashes).length} | ` +
         `${records(report.traps).length} | ${count(endStates.completed)} | ${count(endStates.failed)} | ` +
-        `${count(endStates.stuck)} | ${count(endStates.open)} | ${count(search.operations)} | ` +
-        `${Math.round(count(search.elapsedMs) / 1000)} s | ${Math.round(count(search.cpuMs) / 1000)} s | ` +
+        `${count(endStates.stuck)} | ${count(endStates.open)} | ${measured(search.operations)} | ` +
+        `${measured(search.elapsedMs, 1000, " s")} | ${measured(search.cpuMs, 1000, " s")} | ` +
         `${top === undefined ? "" : `${count(top.percent)}% ${text(top.location)}`} |`,
     );
   }

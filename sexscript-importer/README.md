@@ -279,9 +279,10 @@ first. Waiting states keep their snapshots
 as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
 `--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic
-answers, the corpus replay's included): with it the time budget applies only when `--budget-seconds` is given, and
-directed search looks again every tenth of the work budget instead of every tenth of the time, so a run's length and
-result do not depend on the machine's load.
+answers, the corpus replay's included), checked before each step: a step that started finishes, so a run can go over N
+by the operations of its last step. With it the time budget applies only when `--budget-seconds` is given, and directed
+search looks again every tenth of the work budget instead of every tenth of the time; without an explicit time budget,
+a run's length and result then do not depend on the machine's load.
 
 Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
@@ -333,8 +334,9 @@ The report `<out>/<unit>.json` has these parts:
 - the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out;
 - in `search`, what stopped it (`exhausted`, `budget` for time, `operations` for work, or `maxStates`), the runtime
   operations, the elapsed and CPU time, and `expansionsByPrompt`: the five places where the most expanded states
-  waited (the `path:line` of their pending action, with its prompt) and their share of all expansions. Most expansions
-  at one place usually means a loop the search keeps going round, which is worth fixing before raising the budget.
+  waited (the `path:line` of their pending action, with its prompt) and their share of all expansions. It shows where
+  the search spends its work; most expansions at one place is often a loop the search keeps going round, worth checking
+  before raising the budget, though paths that converge on one prompt can concentrate there too.
 
 A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
