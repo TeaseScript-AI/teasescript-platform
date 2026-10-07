@@ -3,12 +3,18 @@
  * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
- * Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>
+ * Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2]
+ *          [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes.
+ *
+ * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
+ * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
+ * `--rounds N` explores the units N times, with the budget doubled each round, and each round only the units not
+ * exhausted yet.
  *
  * Every crash, trap, and way directed search reached has the path from the start that reaches it (with its earlier
  * sessions and start clock, if any), and so does the first input whose runtime operation threw (an explorer or
@@ -18,14 +24,14 @@
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { isRecord } from "../src/ast.ts";
 import { loadRepositoryPackageScanner } from "../src/compile-check.ts";
 import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
-import { explore, type ExploreResult } from "../src/explorer-search.ts";
+import { explore, type CorpusEntry, type ExploreResult } from "../src/explorer-search.ts";
 import {
   EPOCH_MS,
   loadEngine,
@@ -69,6 +75,8 @@ async function main(args: string[]): Promise<void> {
       trap: { type: "string" },
       error: { type: "boolean", default: false },
       way: { type: "string" },
+      corpus: { type: "string" },
+      rounds: { type: "string", default: "1" },
       "no-summary": { type: "boolean", default: false },
     },
   });
@@ -85,6 +93,7 @@ async function main(args: string[]): Promise<void> {
   const maxStates = Number(values["max-states"]);
   const seed = Number(values.seed);
   const workers = Number(values.workers);
+  const rounds = Number(values.rounds);
   if (
     values.out === undefined ||
     positionals.length === 0 ||
@@ -92,10 +101,14 @@ async function main(args: string[]): Promise<void> {
     !Number.isSafeInteger(maxStates) ||
     maxStates < 1 ||
     !Number.isSafeInteger(seed) ||
-    (workers !== 1 && workers !== 2)
+    (workers !== 1 && workers !== 2) ||
+    !Number.isSafeInteger(rounds) ||
+    rounds < 1 ||
+    (rounds > 1 && values.corpus === undefined)
   ) {
     process.stderr.write(
-      "Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>\n" +
+      "Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2]\n" +
+        "         [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -108,9 +121,61 @@ async function main(args: string[]): Promise<void> {
     process.exit(2);
   }
   await mkdir(out, { recursive: true });
+  const corpus = values.corpus === undefined ? null : path.resolve(values.corpus);
+  if (corpus !== null) await mkdir(corpus, { recursive: true });
+  let remaining = dirs;
+  for (let round = 1; round <= rounds && remaining.length > 0; round += 1) {
+    const budget = budgetSeconds * 2 ** (round - 1);
+    if (rounds > 1)
+      process.stderr.write(`Round ${round}: ${remaining.length} units, ${budget} s each\n`);
+    process.exitCode =
+      (await exploreUnits(
+        remaining,
+        { budgetSeconds: budget, maxStates, seed, corpus },
+        out,
+        workers,
+      )) || process.exitCode;
+    if (corpus === null) break;
+    // A unit goes on while its corpus says it was not exhausted; one that did not compile has no corpus.
+    const going = await Promise.all(
+      remaining.map(
+        async (dir) => (await readCorpus(corpusFile(corpus, dir)))?.exhausted === false,
+      ),
+    );
+    remaining = remaining.filter((_, index) => going[index]);
+  }
+  if (!values["no-summary"]) {
+    const reports = await Promise.all(
+      names.map(async (name) => {
+        const file = path.join(out, `${name}.json`);
+        return fields(await readFile(file, "utf8").then(JSON.parse, () => ({ unit: name })));
+      }),
+    );
+    await writeFile(path.join(out, "summary.md"), summary(reports, out));
+    process.stderr.write(`Wrote ${path.join(out, "summary.md")}.\n`);
+  }
+}
+
+interface RunSettings {
+  budgetSeconds: number;
+  maxStates: number;
+  seed: number;
+  /** The corpus folder, or null without one. */
+  corpus: string | null;
+}
+
+/** Explores units with one budget, in this process or in two; returns 1 when a process failed. */
+async function exploreUnits(
+  dirs: readonly string[],
+  settings: RunSettings,
+  out: string,
+  workers: number,
+): Promise<number> {
+  const { budgetSeconds, maxStates, seed, corpus } = settings;
   if (workers === 2 && dirs.length > 1) {
     const flags = ["--budget-seconds", String(budgetSeconds), "--max-states", String(maxStates)];
     flags.push("--seed", String(seed), "--out", out, "--no-summary");
+    if (corpus !== null) flags.push("--corpus", corpus);
     const groups = [
       dirs.filter((_, index) => index % 2 === 0),
       dirs.filter((_, index) => index % 2 === 1),
@@ -126,37 +191,46 @@ async function main(args: string[]): Promise<void> {
           ),
       ),
     );
-    if (codes.some((code) => code !== 0)) process.exitCode = 1;
-  } else {
-    const engine = await loadEngine();
-    const scan = await loadRepositoryPackageScanner();
-    const explorer = explorerCommit();
-    for (const dir of dirs) {
-      const started = performance.now();
-      process.stderr.write(`Exploring ${path.basename(dir)}...\n`);
-      const settings = { budgetSeconds, maxStates, seed, explorer };
-      const { header, result } = await exploreUnit(engine, scan, dir, settings);
-      const file = path.join(out, `${header.unit}.json`);
-      const report = {
-        ...header,
-        ...(result === null
-          ? {}
-          : { catalog: catalogBlock(result), ...withReplayCommands(result, file) }),
-      };
-      await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
-      const seconds = Math.round((performance.now() - started) / 1000);
-      process.stderr.write(`  ${oneLine(header, result)} (${seconds} s)\n`);
+    return codes.some((code) => code !== 0) ? 1 : 0;
+  }
+  const engine = await loadEngine();
+  const scan = await loadRepositoryPackageScanner();
+  const explorer = explorerCommit();
+  for (const dir of dirs) {
+    const started = performance.now();
+    process.stderr.write(`Exploring ${path.basename(dir)}...\n`);
+    const stored = corpus === null ? null : await readCorpus(corpusFile(corpus, dir));
+    const explored = await exploreUnit(engine, scan, dir, { ...settings, explorer }, stored);
+    if (explored === null) {
+      process.stderr.write("  exhausted in an earlier run with this content and seed: skipped\n");
+      continue;
     }
+    const { header, result } = explored;
+    const file = path.join(out, `${header.unit}.json`);
+    // The report has the corpus counts and file; the entries are in that file only.
+    let corpusReport: Record<string, unknown> | undefined;
+    if (corpus !== null && result?.corpus != null) {
+      const { entries, ...counts } = result.corpus;
+      const written = corpusFile(corpus, dir);
+      const exhausted = result.search.stoppedBy === "exhausted";
+      const bytes = await writeCorpus(written, header, exhausted, entries);
+      corpusReport = { ...counts, file: written, bytes, exhausted };
+    }
+    const report = {
+      ...header,
+      ...(result === null
+        ? {}
+        : {
+            catalog: catalogBlock(result),
+            ...withReplayCommands(result, file),
+            corpus: corpusReport,
+          }),
+    };
+    await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
+    const seconds = Math.round((performance.now() - started) / 1000);
+    process.stderr.write(`  ${oneLine(header, result)} (${seconds} s)\n`);
   }
-  if (!values["no-summary"]) {
-    const reports = await Promise.all(
-      names.map(async (name) =>
-        fields(JSON.parse(await readFile(path.join(out, `${name}.json`), "utf8"))),
-      ),
-    );
-    await writeFile(path.join(out, "summary.md"), summary(reports, out));
-    process.stderr.write(`Wrote ${path.join(out, "summary.md")}.\n`);
-  }
+  return 0;
 }
 
 type Scanner = Awaited<ReturnType<typeof loadRepositoryPackageScanner>>;
@@ -202,13 +276,21 @@ async function loadUnit(engine: Engine, scan: Scanner, dir: string): Promise<Loa
   };
 }
 
+/** Explores one unit from its stored corpus, if any; null when that corpus says this content was exhausted. */
 async function exploreUnit(
   engine: Engine,
   scan: Scanner,
   dir: string,
-  settings: { budgetSeconds: number; maxStates: number; seed: number; explorer: string },
-): Promise<{ header: ReportHeader; result: ExploreResult | null }> {
+  settings: RunSettings & { explorer: string },
+  stored: StoredCorpus | null,
+): Promise<{ header: ReportHeader; result: ExploreResult | null } | null> {
   const unit = await loadUnit(engine, scan, dir);
+  if (
+    stored?.exhausted === true &&
+    stored.contentHash === unit.contentHash &&
+    stored.seed === settings.seed
+  )
+    return null;
   const header: ReportHeader = {
     unit: path.basename(dir),
     dir,
@@ -230,8 +312,98 @@ async function exploreUnit(
       maxStates: settings.maxStates,
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
+      ...(settings.corpus === null ? {} : { corpus: stored?.entries ?? [] }),
     }),
   };
+}
+
+/**
+ * A unit's corpus as stored in `<corpus>/<unit>.json`: the content and seed of the run that wrote it, whether that run
+ * was exhausted, and the entries.
+ */
+interface StoredCorpus {
+  contentHash: string;
+  seed: number;
+  exhausted: boolean;
+  entries: CorpusEntry[];
+}
+
+function corpusFile(corpus: string, dir: string): string {
+  return path.join(corpus, `${path.basename(dir)}.json`);
+}
+
+/**
+ * Reads a corpus file, which is external data by then: null when there is none or it is no JSON (with a warning, and the
+ * run starts without it); entries that do not parse are left out with a warning.
+ */
+async function readCorpus(file: string): Promise<StoredCorpus | null> {
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return null;
+    process.stderr.write(
+      `Warning: ${file} is not a corpus (${String(error)}); starting without it.\n`,
+    );
+    return null;
+  }
+  const stored = fields(value);
+  const entries: CorpusEntry[] = [];
+  const items: unknown[] = Array.isArray(stored.entries) ? stored.entries : [];
+  for (const item of items) {
+    const entry = parseCorpusEntry(item);
+    if (entry !== null) entries.push(entry);
+  }
+  if (entries.length < items.length)
+    process.stderr.write(
+      `Warning: ${file}: ${items.length - entries.length} malformed entries left out.\n`,
+    );
+  return {
+    contentHash: text(stored.contentHash),
+    seed: count(stored.seed),
+    exhausted: stored.exhausted === true,
+    entries,
+  };
+}
+
+function parseCorpusEntry(value: unknown): CorpusEntry | null {
+  if (!isRecord(value) || typeof value.seed !== "number" || !Number.isSafeInteger(value.seed))
+    return null;
+  const { reason } = value;
+  if (reason !== "coverage" && reason !== "crash" && reason !== "trap") return null;
+  const inputs = parseInputs(value.inputs);
+  const earlier = parseEarlier(value.earlier);
+  if (inputs === null || earlier === null) return null;
+  if (value.wallClockMs !== undefined && typeof value.wallClockMs !== "number") return null;
+  return {
+    seed: value.seed,
+    reason,
+    ...(earlier.length === 0 ? {} : { earlier }),
+    ...(typeof value.wallClockMs === "number" ? { wallClockMs: value.wallClockMs } : {}),
+    inputs,
+  };
+}
+
+/** Writes a unit's corpus, one entry per line, through a temporary file; returns its size in bytes. */
+async function writeCorpus(
+  file: string,
+  header: ReportHeader,
+  exhausted: boolean,
+  entries: readonly CorpusEntry[],
+): Promise<number> {
+  const { unit, contentHash, explorer, seed } = header;
+  const head = JSON.stringify({
+    unit,
+    contentHash,
+    explorer,
+    seed,
+    exhausted,
+    writtenAt: new Date().toISOString(),
+  });
+  const body = `${head.slice(0, -1)},"entries":[\n${entries.map((entry) => JSON.stringify(entry)).join(",\n")}\n]}\n`;
+  await writeFile(`${file}.tmp`, body);
+  await rename(`${file}.tmp`, file);
+  return Buffer.byteLength(body);
 }
 
 /** The importer commit a unit was converted with, from its conversion record. */
@@ -304,13 +476,19 @@ function catalogBlock(result: ExploreResult) {
 
 function oneLine(header: ReportHeader, result: ExploreResult | null): string {
   if (result === null) return `does not compile (${header.compile.errors.length} errors)`;
-  const { coverage, search, endStates, crashes, traps, directed } = result;
+  const { coverage, search, endStates, crashes, traps, directed, corpus } = result;
+  const fromCorpus =
+    corpus === null || corpus.loaded === 0
+      ? ""
+      : `${corpus.coverageAtStart.percent}% from ${corpus.replayed} of ${corpus.loaded} corpus entries ` +
+        `(${corpus.stale} stale, ${corpus.replayMs} ms), then `;
   return (
-    `${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
+    `${fromCorpus}${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
     `${crashes.length} crashes, ${traps.length} traps, ` +
     `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
     `directed ${directed.reached.play} play + ${directed.reached.clock} clock of ${directed.targets}, ` +
-    `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})`
+    `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})` +
+    (corpus === null ? "" : `, ${corpus.written} corpus entries kept`)
   );
 }
 
@@ -348,25 +526,37 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     `Explorer \`${text(first.explorer)}\`, seed ${count(first.seed)}, budget ${count(first.budgetSeconds)} s and ` +
       `${count(first.maxStates)} states per unit. Reports: \`${out}/<unit>.json\`.`,
     "",
-    "| Unit | Coverage | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | Open | Time |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Unit | Coverage | From corpus | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | Open | Time |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const report of reports) {
+    if (report.compile === undefined) {
+      lines.push(
+        `| ${text(report.unit)} | no report: exhausted in an earlier run | | | | | | | | | | |`,
+      );
+      continue;
+    }
     if (fields(report.compile).ok !== true) {
-      lines.push(`| ${text(report.unit)} | does not compile | | | | | | | | | |`);
+      lines.push(`| ${text(report.unit)} | does not compile | | | | | | | | | | |`);
       continue;
     }
     const coverage = fields(report.coverage);
     const search = fields(report.search);
     const endStates = fields(report.endStates);
+    const corpus = fields(report.corpus);
+    const fromCorpus = isRecord(report.corpus)
+      ? `${count(fields(corpus.coverageAtStart).percent)}% (${count(corpus.loaded)} entries, ` +
+        `${count(corpus.stale)} stale; ${count(corpus.written)} kept)`
+      : "";
     lines.push(
-      `| ${text(report.unit)} | ${count(coverage.percent)}% of ${count(coverage.coverableLines)} lines | ` +
+      `| ${text(report.unit)} | ${count(coverage.percent)}% of ${count(coverage.coverableLines)} lines | ${fromCorpus} | ` +
         `${count(search.states)} | ${text(search.stoppedBy)} | ${records(report.crashes).length} | ` +
         `${records(report.traps).length} | ${count(endStates.completed)} | ${count(endStates.failed)} | ` +
         `${count(endStates.stuck)} | ${count(endStates.open)} | ${Math.round(count(search.elapsedMs) / 1000)} s |`,
     );
   }
   for (const report of reports) {
+    if (report.compile === undefined) continue;
     lines.push("", `## ${text(report.unit)}`, "");
     const compile = fields(report.compile);
     if (compile.ok !== true) {
