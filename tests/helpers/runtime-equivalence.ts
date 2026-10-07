@@ -418,6 +418,8 @@ function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
     foregroundAction: snapshot.foregroundAction,
     backgroundActions: snapshot.backgroundActions,
     suspendedAction: interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
+    cameraView: snapshot.cameraView,
+    queuedBlocks: snapshot.pendingTimerHandlers.length,
   };
 }
 
