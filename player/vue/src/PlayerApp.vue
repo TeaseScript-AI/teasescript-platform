@@ -238,7 +238,8 @@ const savedData = computed(() =>
 );
 const noSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = Object.freeze({});
 const transcript = computed(() => {
-  if (!session.value) return { key: "empty", entries: [], speakers: noSpeakers, revision: 0 };
+  if (!session.value)
+    return { key: "empty", entries: [], speakers: noSpeakers, revision: 0, jumpedRevision: -1 };
   const future = rewindFuture.value;
   return {
     key: `runtime-${props.player.generation.value}`,
@@ -249,6 +250,7 @@ const transcript = computed(() => {
     speakers:
       future === null ? session.value.speakers : { ...future.speakers, ...session.value.speakers },
     revision: session.value.transcriptRevision,
+    jumpedRevision: props.player.jumpedRevision.value,
   };
 });
 
@@ -457,6 +459,7 @@ async function toggleFullscreen() {
           :entries="transcript.entries"
           :speakers="transcript.speakers"
           :revision="transcript.revision"
+          :jumped-revision="transcript.jumpedRevision"
           :observe-time="player.observe"
           :prepare-input="player.prepareInput"
           :hold-form-drafts="player.rewind.inspecting.value"

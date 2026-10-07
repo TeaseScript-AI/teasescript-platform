@@ -921,6 +921,16 @@ async function choiceLayoutChecks(page) {
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator("[data-foreground-controls] .player-action-button").first().waitFor();
+  // The choices enter the conversation as live play shows them; their layout is where they come to rest.
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.playState !== "running" ||
+          animation.effect?.getComputedTiming().endTime === Infinity,
+      ),
+  );
   const layout = () =>
     page.evaluate(() => {
       const foreground = document.querySelector("[data-foreground-controls]");

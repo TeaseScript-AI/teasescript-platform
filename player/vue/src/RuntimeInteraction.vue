@@ -53,6 +53,8 @@ const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
+  /** The revision through which the transcript shows directly, like history (`PlayerSessionHost.jumpedRevision`). */
+  jumpedRevision?: number;
   transcriptKey: string;
   /** Brings scene time up to date before input and returns the published session. */
   observeTime?: () => PlayerRuntimeSession | null;
@@ -545,6 +547,7 @@ function submit(source: "input" | "button") {
           :entries="entries"
           :speakers="speakers"
           :revision="revision ?? 0"
+          :jumped-revision="jumpedRevision ?? -1"
           :bottom-inset="bottomInset"
         >
           <template #foreground>
