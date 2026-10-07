@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 70;
+export const INSTRUCTION_PLAN_VERSION = 71;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -30,6 +30,17 @@ export interface InstructionPlan {
   readonly temporaryCount: number;
   readonly functions: readonly CompiledFunctionDefinition[];
   readonly instructions: readonly Instruction[];
+  /**
+   * For each storage key written as a string literal that a load gives a type, unique and in key order, the type every
+   * load of the key accepts, which each value saved under the key has to fit (ADR 0021 §6, V30 §25).
+   */
+  readonly storageTypes: readonly StorageTypePlan[];
+}
+
+/** A storage key and the type its stored value has to fit. */
+export interface StorageTypePlan {
+  readonly key: string;
+  readonly type: TypePlan;
 }
 
 /**
@@ -284,6 +295,8 @@ export interface StoreTemporaryInstruction extends InstructionBase {
   readonly temporaryId: number;
   readonly value: ExpressionPlan;
   readonly expectBoolean: boolean;
+  /** For the default of a `load` that runs instructions: the type the default must fit, as the load's result. */
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 /** Captures the resolved output speaker before later say operands run. */
@@ -944,11 +957,16 @@ export interface TemporaryExpressionPlan extends ExpressionPlanBase {
   readonly temporaryId: number;
 }
 
-/** `load <key>[, default: <value>]`: the default is evaluated only when the key is absent. */
+/**
+ * `load <key>, default: <value>`: the default is evaluated only when the key is absent, or holds a value that does not
+ * fit `type`, the load's type (V30 §25). `null` default: a default that runs instructions follows the load; `null`
+ * type: a load that checks nothing.
+ */
 export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
   readonly kind: "storageLoad";
   readonly key: ExpressionPlan;
   readonly default: ExpressionPlan | null;
+  readonly type: TypePlan | null;
 }
 
 /**

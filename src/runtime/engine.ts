@@ -118,6 +118,8 @@ import {
   assertPersistable,
   storageKey,
   WRITE_KEY_MESSAGE,
+  storageKeyPlace,
+  storageKeyType,
   writeScriptStorage,
 } from "./script-storage.js";
 import {
@@ -924,6 +926,8 @@ function executePlannedInstruction(
       if (instruction.expectBoolean && typeof value !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
       }
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
       setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       if (evaluator.trace !== null) {
         const copied =
@@ -1384,7 +1388,7 @@ function executePlannedInstruction(
       showPermanentButton(instruction, snapshot, evaluator, events);
       return;
     case "storageWrite":
-      writeStorage(instruction, snapshot, evaluator, events);
+      writeStorage(plan, instruction, snapshot, evaluator, events);
       return;
     case "playMedia":
       startMedia(plan, instruction, snapshot, evaluator, events);
@@ -3233,6 +3237,7 @@ function showImage(
  * the view changes only when the host reports the write as stored.
  */
 function writeStorage(
+  plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "storageWrite" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
@@ -3249,6 +3254,10 @@ function writeStorage(
     instruction.key.span,
   );
   assertPersistable(value, instruction.span);
+  // A saved value has to fit the key's type, which every load of the key relies on (V30 §25).
+  const type = value === null ? undefined : storageKeyType(plan, key);
+  if (type !== undefined)
+    assertValueType(value, { type, place: storageKeyPlace(key) }, instruction.value!.span);
   if (!snapshot.scriptStoragePersistent) {
     writeScriptStorage(snapshot, key, value);
     evaluator.trace?.storage(key, value);

@@ -1,7 +1,7 @@
 ---
 title: "Saved photo"
 ---
-let previous = load("photo")
+let previous: string? = load("photo", default: null)
 if previous != null {
     say "Your saved photo is back."
     showImage previous

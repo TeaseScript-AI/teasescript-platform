@@ -353,8 +353,8 @@ test("typed storage keeps date and time kinds apart from each other and from tex
       [
         'save toDate("2026-10-04") as "day"',
         'save toTimestamp("2026-10-04T12:00:00Z") as "moment"',
-        'let day: date = load "day"',
-        'let moment: timestamp = load "moment"',
+        'let day: date = load "day", default: toDate("2026-01-01")',
+        'let moment: timestamp = load "moment", default: toTimestamp("2026-01-01T00:00:00Z")',
         "say day.toISO()",
         "say moment.toISO()",
         "exit",
@@ -362,7 +362,10 @@ test("typed storage keeps date and time kinds apart from each other and from tex
     ),
     ["2026-10-04", "2026-10-04T12:00:00Z"],
   );
-  const failure = failureOf('save "2026-10-04" as "day"\nlet day: date = load "day"\nexit');
+  const failure = failureOf(
+    // A key computed at runtime has no type, so its value is checked where it is stored.
+    'save "2026-10-04" as "day"\nlet day: date = load "d" + "ay", default: toDate("2026-01-01")\nexit',
+  );
   assert.notEqual(failure, null);
   assert.match(failure?.message ?? "", /a date/u);
 });

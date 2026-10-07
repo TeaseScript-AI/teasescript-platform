@@ -1975,7 +1975,14 @@ class SemanticValidator {
         if (isDefinitelyNonString(expression.key)) {
           this.#report(semanticCode.invalidStorageKey, LOAD_KEY_MESSAGE, expression.key.span);
         }
-        if (expression.defaultValue !== null) {
+        if (expression.defaultValue === null) {
+          const key = literalText(expression.key);
+          this.#report(
+            semanticCode.argumentCount,
+            `A load needs default:, the value to use while the key has not been saved, as in load(${key === undefined ? "key" : JSON.stringify(key)}, default: 0). Write default: null to check for a missing value with != null.`,
+            expression.span,
+          );
+        } else {
           yield* compileChild(
             this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
           );
@@ -3118,7 +3125,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
 }
 
 const LOAD_KEY_MESSAGE =
-  "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
 
 const NON_STRING_OPERATORS: ReadonlySet<string> = new Set([
   "==",

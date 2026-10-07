@@ -2482,14 +2482,16 @@ export class InstructionCompiler {
   }
 
   /**
-   * Lowers `load`. A default that emits instructions runs only when the stored value is `null`, which means the key
-   * is absent because stored values are never `null`; any other default stays lazy inside the load plan.
+   * Lowers `load`. A default that emits instructions runs only when the load without it gives `null`: the key is absent,
+   * because stored values are never `null`, or holds a value that does not fit the load's type. Any other default stays
+   * lazy inside the load plan.
    */
   *#lowerLoadTask(
     expression: Extract<Expression, { kind: "loadExpression" }>,
   ): CompileTask<LoweredExpression> {
     const key = yield* compileChild(this.#lowerExpressionTask(expression.key));
     const defaultValue = expression.defaultValue;
+    const type = this.typeChecks.get(expression)?.type ?? null;
     if (defaultValue === null || !this.#containsUserCall(defaultValue)) {
       const lowered =
         defaultValue === null ? null : yield* compileChild(this.#lowerExpressionTask(defaultValue));
@@ -2498,6 +2500,7 @@ export class InstructionCompiler {
           kind: "storageLoad",
           key: key.plan,
           default: lowered?.plan ?? null,
+          type,
           span: copySpan(expression.span),
         },
         temporaryIds: [...key.temporaryIds, ...(lowered?.temporaryIds ?? [])],
@@ -2507,7 +2510,13 @@ export class InstructionCompiler {
     this.instructions.push({
       kind: "storeTemporary",
       temporaryId: resultTemporary,
-      value: { kind: "storageLoad", key: key.plan, default: null, span: copySpan(expression.span) },
+      value: {
+        kind: "storageLoad",
+        key: key.plan,
+        default: null,
+        type,
+        span: copySpan(expression.span),
+      },
       expectBoolean: false,
       span: copySpan(expression.span),
     });
@@ -2531,11 +2540,21 @@ export class InstructionCompiler {
     };
     this.instructions.push(conditionalInstruction);
     const lowered = yield* compileChild(this.#lowerExpressionTask(defaultValue));
+    // The default takes the place of the stored value, so it fits the load's type, or is null.
+    const check = this.typeChecks.get(expression);
     this.instructions.push({
       kind: "storeTemporary",
       temporaryId: resultTemporary,
       value: lowered.plan,
       expectBoolean: false,
+      ...(check === undefined
+        ? {}
+        : {
+            typeCheck: {
+              type: { kind: "union", members: [check.type, { kind: "null" }] },
+              place: check.place,
+            },
+          }),
       span: copySpan(defaultValue.span),
     });
     this.instructions[conditional] = {
@@ -3033,6 +3052,7 @@ function assembleExpression(
         kind: "storageLoad",
         key: child(expression.key),
         default: expression.defaultValue === null ? null : child(expression.defaultValue),
+        type: typeChecks.get(expression)?.type ?? null,
         span: copySpan(expression.span),
       };
     case "tagQueryExpression":

@@ -230,7 +230,7 @@ test("compound assignment reads the target before an instruction-emitting operan
   );
   assert.deepEqual(diagnostics("let x = 1\nx += true\nexit"), ["TSV041"]);
   assert.equal(
-    runtimeFailure('let flag = load "flag", default: true\nlet x = 1\nx += flag\nexit'),
+    runtimeFailure('let flag = load "fl" + "ag", default: true\nlet x = 1\nx += flag\nexit'),
     "TSR027",
   );
   assert.deepEqual(diagnostics("y += 1"), ["TSV003"]);
