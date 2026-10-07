@@ -14,6 +14,7 @@ import {
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
+  advancePlayerRuntimeTime,
   answerPlayerRuntimeImage,
   applyPlayerRuntimeStorageEdit,
   completePlayerRuntimeStorageWrite,
@@ -464,4 +465,24 @@ test("session text adds the Stage path, media sources, notice messages, and the 
     choices,
   );
   assert.equal(withoutLog.exported.sections["debugLog"], undefined);
+});
+
+test("a changed message's text is session text, the chat tail shows its current text, and its replay reproduces", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    ['let line = say "Waiting", instant', "wait 1 s", `line.text = "${SECRET}"`, "exit"].join("\n"),
+    { recorder },
+  );
+  session = advancePlayerRuntimeTime(session, 60_000);
+  assert.equal(session.snapshot.status, "halted");
+  const frozen = candidate(session, recorder);
+  const withoutText = (await assembleDebugExport(frozen, NO_PERSONAL_CONTENT)).exported;
+  assert.ok(!(await fileText(withoutText)).includes(SECRET));
+  assert.ok(JSON.stringify(withoutText.sections["eventsTail"]).includes('"messageUpdated"'));
+
+  const everything = (await assembleDebugExport(frozen, all(frozen))).exported;
+  assert.deepEqual(everything.sections["transcriptTail"], [{ speaker: "narrator", text: SECRET }]);
+  const events = JSON.stringify(everything.sections["eventsTail"]);
+  assert.ok(events.includes('"kind":"messageUpdated"') && events.includes(SECRET));
+  assert.equal(replayDebugExport(parseDebugExport(await fileText(everything))).kind, "reproduced");
 });

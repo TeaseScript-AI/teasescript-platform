@@ -54,6 +54,10 @@ specification.
   states through the host's `rewind`; `DebugPanel.vue` and `DebugStatus.vue` present them. In the chat,
   `TranscriptMessage.vue` offers Back to here through `rewindPresentation.ts`, `Transcript.vue` shows the grey future
   `PlayerApp.vue` appends while a state is inspected, and `RewindInspection.vue` is the bar above the composer.
+  `useMessageUpdateAnnouncements.ts` feeds the messages that live play changes in place to
+  `message-update-announcer.ts`, whose text `PlayerApp.vue` puts in a polite status region; `Transcript.vue` reports
+  each measurement to `transcript-measurement.ts`, which keeps the text in view still when a changed message is measured
+  again while the reader scrolls up.
   The preview only passes the initial `?dev` and `time=skip` state.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.

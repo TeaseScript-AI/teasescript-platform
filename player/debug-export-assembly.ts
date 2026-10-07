@@ -402,6 +402,7 @@ function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) 
   const { kind, sequence } = event;
   switch (event.kind) {
     case "say":
+    case "messageUpdated":
     case "playerTranscript":
     case "permanentButtonPressed":
     case "exit":

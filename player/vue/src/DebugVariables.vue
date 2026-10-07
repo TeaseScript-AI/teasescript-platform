@@ -40,9 +40,10 @@ const live = computed(() =>
 );
 
 const outputPages = ref(1);
+// Each message once, as it shows now: a message whose text changed is explained by its latest change.
 const outputs = computed(() => {
   void session.value;
-  return trace.value?.outputs(PLAYER_DEBUG_TRACE_PAGE * outputPages.value) ?? [];
+  return trace.value?.recentMessages(PLAYER_DEBUG_TRACE_PAGE * outputPages.value) ?? [];
 });
 // The newest message stays open by default until the player opens or closes one.
 const chose = ref(false);

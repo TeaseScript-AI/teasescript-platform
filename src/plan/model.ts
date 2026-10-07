@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 66;
+export const INSTRUCTION_PLAN_VERSION = 69;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -389,6 +389,11 @@ export interface SayInstruction extends InstructionBase {
   readonly speakerTemporary?: number;
   readonly contextualSpeakerTemporary?: number;
   readonly textTemporary?: number;
+  /**
+   * Where a `say` used as a value puts the handle of its message, once the message is shown; such a `say` keeps the
+   * markup source of its text for the handle while its output waits behind pacing.
+   */
+  readonly destinationTemporary?: number;
   readonly skipPolicy: "skippable" | "unskippable" | null;
   readonly pacing: ExpressionPlan | "smart" | "instant";
 }
@@ -1005,6 +1010,7 @@ export type TypePlanName =
   | "media"
   | "camera"
   | "permanentButton"
+  | "messageHandle"
   | "script";
 
 export interface TypePropertyPlan {

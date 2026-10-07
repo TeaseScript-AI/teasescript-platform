@@ -292,7 +292,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       "null.length = 0\nexit",
       "TSV043",
-      "Only objects, speakers, and timer and media handles have properties to assign, but this is null.",
+      "Only objects, speakers, and timer, media, and message handles have properties to assign, but this is null.",
       "null",
     ],
     [

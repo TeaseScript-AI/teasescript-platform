@@ -15,17 +15,20 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, type checking,
   and compilation for the implemented TeaseScript subset.
-- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values,
-  variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
-  single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
-  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, `+` on two
+- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values, variables,
+  assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated single-line and block
+  strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion, control flow,
+  deterministic random, weighted choice, and distributions, rounding, numeric, exponential, logarithm, angle,
+  `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, and `takeLast`, `+` on two
   texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and
-  set operations, top-level
-  user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
-  `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
-  `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.
+  set operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR
+  0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers shared
+  by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets from
+  `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
-  call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
+  call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
+  [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
+  boundaries.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
   host-acknowledged atomic writes under [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
   with a Clear saved script data control.
@@ -34,7 +37,9 @@ accept syntax, architecture, or implementation details.
   permanent buttons (`showPermanentButton`, `removePermanentButton`) whose clicks run their blocks like expiry interrupts;
   timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
-  output, typed skip settlement, and interaction/timer composition.
+  output, typed skip settlement, and interaction/timer composition. A `say` used as a value gives a `messageHandle`
+  whose `text` changes the message in place ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows,
+  announces politely, and Debug explains and rewinds.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
   and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and selection of files by
   their header tags (`goto tagged`, `call tagged`, `findScripts`), and blocking or asynchronous `playAudio`/`playVideo`

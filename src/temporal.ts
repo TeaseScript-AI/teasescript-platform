@@ -116,6 +116,11 @@ export function daysBetween(left: DateFields, right: DateFields): number {
   return daysFromEpoch(left) - daysFromEpoch(right);
 }
 
+/** A date and time read as if it were UTC, in milliseconds since the epoch, to measure the time between two. */
+export function dateTimeMilliseconds(fields: DateTimeFields): number {
+  return fieldsAsUtc(fields);
+}
+
 export function compareDates(left: DateFields, right: DateFields): number {
   return Math.sign(daysFromEpoch(left) - daysFromEpoch(right));
 }
@@ -594,7 +599,12 @@ export function temporalContextProblem(value: unknown): string | null {
 }
 
 /** Contexts that `frozenTemporalContext` made: deeply frozen, so snapshots can share them. */
-const frozenContexts = new WeakSet<TemporalContext>();
+const frozenContexts = new WeakSet<object>();
+
+/** Whether `value` is a context that `frozenTemporalContext` made, which every copy of state may share. */
+export function isFrozenTemporalContext(value: unknown): boolean {
+  return typeof value === "object" && value !== null && frozenContexts.has(value);
+}
 
 /**
  * A deeply frozen copy of a valid temporal context, or the context itself when this function froze it. Frozen contexts

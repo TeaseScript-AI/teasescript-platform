@@ -306,6 +306,10 @@ compatibility promises. The comparison includes:
 
 Specialized tests may additionally inspect selected event, call, loop, or prepared-reference boundaries, but they do not replace complete equivalence.
 
+The helper also runs each scenario through a [runtime session](RUNTIME.md#runtime-sessions), uninterrupted and one
+boundary at a time, continuing from a restored or forked session at each boundary, and requires the snapshot API's
+events, outcomes, view, and checkpoint bytes.
+
 The canonical self-contained checkpoint guarantee uses the serialized runtime RNG. A host-provided `RuntimeCapabilities.random` implementation is a compatibility/testing override whose external state is not captured by the runtime snapshot. Tests using that override must explicitly recreate the same deterministic external source and must not present the result as a self-contained checkpoint guarantee.
 
 JSON-safe runtime state at every instruction boundary does not mean production execution must persist after every instruction.
@@ -598,7 +602,9 @@ its `picture-race` package checks that a file chosen for a request a timer's req
 its `picture-camera` and `picture-camera-view` packages check that the camera opens by itself, on the Stage or in the
 script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
 the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
-paperclip stays. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
+paperclip stays. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
+the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
+region, and focus on a link that a change removes stays on its message. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
 with the saved photo's exact bytes and not the unsaved one, a refused copy selects the text, closing releases the file,
 and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file

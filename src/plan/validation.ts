@@ -569,6 +569,7 @@ const INSTRUCTION_FIELDS = fieldsByKind([
     "speakerTemporary",
     "contextualSpeakerTemporary",
     "textTemporary",
+    "destinationTemporary",
     "skipPolicy",
     "pacing",
   ],
@@ -947,6 +948,26 @@ function validateInstruction(
         );
       if (value.textTemporary !== undefined)
         validateTemporaryId(value.textTemporary, `${path}.textTemporary`, temporaryCount, errors);
+      if (value.destinationTemporary !== undefined) {
+        validateTemporaryId(
+          value.destinationTemporary,
+          `${path}.destinationTemporary`,
+          temporaryCount,
+          errors,
+        );
+        if (
+          [value.speakerTemporary, value.contextualSpeakerTemporary, value.textTemporary].includes(
+            value.destinationTemporary,
+          )
+        )
+          errors.push(
+            planError(
+              "TSC002",
+              "A say's result temporary must differ from its prepared operands.",
+              `${path}.destinationTemporary`,
+            ),
+          );
+      }
       if (
         value.skipPolicy !== null &&
         value.skipPolicy !== "skippable" &&
@@ -2062,6 +2083,7 @@ const TYPE_PLAN_NAMES = [
   "media",
   "camera",
   "permanentButton",
+  "messageHandle",
   "script",
 ];
 

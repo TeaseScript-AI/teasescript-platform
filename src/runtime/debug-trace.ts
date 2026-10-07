@@ -68,6 +68,10 @@ export type RuntimeDebugRandomOperation =
   | "chance"
   | "randomInteger"
   | "collectionRandom"
+  | "randomWeighted"
+  | "randomNormal"
+  | "randomBeta"
+  | "randomPert"
   | "interpolation"
   | "shuffle"
   | "tagQuery"
@@ -121,7 +125,11 @@ export type RuntimeDebugRecordDetail =
       /** Set by a debugging tool's edit (`applyExternalStorageEdit`) rather than by the script. */
       readonly edited: boolean;
     }
-  | { readonly kind: "output"; readonly eventSequence: number }
+  /**
+   * The event that showed the text: a `say`, or, for an assignment, a message update, which names its message by the
+   * sequence of its `say`.
+   */
+  | { readonly kind: "output"; readonly eventSequence: number; readonly messageId?: number }
   | {
       readonly kind: "call";
       readonly functionName: string;
@@ -209,7 +217,11 @@ export interface RuntimeDebugTraceOptions {
 /** A source span as the runtime carries it: plan provenance, or a rich span copied from it. */
 type TraceSpan = PlanSourceLocation | SourceSpan;
 
-const STORE = Symbol("runtimeDebugTraceStore");
+/**
+ * The store of each context, kept here rather than on the context, so that nothing a host holds reaches a store, which
+ * runtime operations hand their state.
+ */
+const stores = new WeakMap<RuntimeDebugContext, TraceStore>();
 
 /**
  * An opt-in record of why runtime values have the values they have: a host-owned sidecar that runtime operations
@@ -218,14 +230,14 @@ const STORE = Symbol("runtimeDebugTraceStore");
  * See `docs/RUNTIME.md#debug-trace`.
  */
 export class RuntimeDebugContext {
-  /** @internal */
-  public readonly [STORE]: TraceStore;
+  readonly #store: TraceStore;
 
   public constructor(options: RuntimeDebugTraceOptions = {}) {
-    this[STORE] = new TraceStore(
+    this.#store = new TraceStore(
       positiveLimit(options.maxRecords, RUNTIME_DEBUG_TRACE_LIMITS.maxRecords),
       positiveLimit(options.maxAccountedBytes, RUNTIME_DEBUG_TRACE_LIMITS.maxAccountedBytes),
     );
+    stores.set(this, this.#store);
   }
 
   /**
@@ -233,41 +245,49 @@ export class RuntimeDebugContext {
    * runs. The next operation anchors the epoch at its snapshot.
    */
   public reset(origin: "start" | "restore"): void {
-    this[STORE].reset(origin);
+    this.#store.reset(origin);
   }
 
   public status(): RuntimeDebugTraceStatus {
-    return this[STORE].status();
+    return this.#store.status();
   }
 
   /** A retained record of the current epoch, or `null`. */
   public record(id: number): RuntimeDebugRecord | null {
-    return this[STORE].view(id);
+    return this.#store.view(id);
   }
 
   /** The output record of the `say` event with this sequence in the current epoch, or `null`. */
   public outputRecord(eventSequence: number): number | null {
-    return this[STORE].outputRecord(eventSequence);
+    return this.#store.outputRecord(eventSequence);
   }
 
   /** The newest retained output records, newest first. */
   public outputs(limit = 20): readonly number[] {
-    return this[STORE].newest("output", limit);
+    return this.#store.newest("output", limit);
+  }
+
+  /**
+   * The `limit` messages whose `say` or text changes the trace retains most recently, newest message first, each as the
+   * record of the latest of them: what each message shows now, as far as the trace knows.
+   */
+  public recentMessages(limit = 20): readonly number[] {
+    return this.#store.recentMessages(limit);
   }
 
   /** The record of a variable's current version: a scope ID from the snapshot, or `"global"`. */
   public variableRecord(scope: number | "global", name: string): number | null {
-    return this[STORE].current(bindingKey(scope === "global" ? GLOBAL_SCOPE_ID : scope, name));
+    return this.#store.current(bindingKey(scope === "global" ? GLOBAL_SCOPE_ID : scope, name));
   }
 
   /** The record of the current version of a stored key in the session's storage view, if this epoch wrote it. */
   public storageRecord(key: string): number | null {
-    return this[STORE].current(storageKeyOf(key));
+    return this.#store.current(storageKeyOf(key));
   }
 
   /** The record of the `showImage` or `hideImage` that set the current Stage image. */
   public stageImageRecord(): number | null {
-    return this[STORE].stageImage();
+    return this.#store.stageImage();
   }
 }
 
@@ -278,9 +298,10 @@ export function openDebugTrace(
   snapshot: RuntimeSnapshot,
 ): TraceStore | null {
   if (context === undefined) return null;
+  if (context === null) throw new TypeError("debugTrace must be a RuntimeDebugContext.");
   // A context of another copy of this module is not this trace; the operation runs untraced rather than failing.
-  const store: unknown = context[STORE];
-  return store instanceof TraceStore && store.open(plan, snapshot) ? store : null;
+  const store = stores.get(context);
+  return store !== undefined && store.open(plan, snapshot) ? store : null;
 }
 
 /** Ends an operation: its result snapshot is the one the next operation continues from. */
@@ -1060,6 +1081,31 @@ export class TraceStore {
     this.#stage?.outputs.push(eventSequence);
   }
 
+  /**
+   * A `.text` write that gave the message whose state is `base` new text, emitted as event `eventSequence`: the new
+   * version of its text, with the causes collected so far. The output record of that event, which explains the message
+   * as it shows from then on; it is no message of its own.
+   */
+  messageText(
+    base: string,
+    messageId: number,
+    value: string,
+    span: TraceSpan,
+    eventSequence: number,
+  ): void {
+    const id = this.write(
+      "assignment",
+      partKey(base, { property: "text" }),
+      "message.text",
+      value,
+      span,
+      Object.freeze({ kind: "output", eventSequence, messageId }),
+    );
+    if (id === null || this.#find(id) === undefined) return;
+    this.#outputs.set(eventSequence, id);
+    this.#stage?.outputs.push(eventSequence);
+  }
+
   /** A `say` whose text waits behind pacing; it is emitted by a later operation. */
   holdOutput(instruction: number, deps: DebugDependencies): void {
     if (this.#failure !== null) return;
@@ -1285,6 +1331,24 @@ export class TraceStore {
     return this.#stageImageId;
   }
 
+  recentMessages(limit: number): readonly number[] {
+    // The first record of a message from the newest one back is its latest; one per message, up to `limit` messages.
+    const latest = new Map<number, number>();
+    for (
+      let index = this.#records.length - 1;
+      index >= this.#head && latest.size < limit;
+      index -= 1
+    ) {
+      const record = this.#records[index]!;
+      if (record.detail?.kind !== "output") continue;
+      const messageId = record.detail.messageId ?? record.detail.eventSequence;
+      if (!latest.has(messageId)) latest.set(messageId, record.id);
+    }
+    return Object.freeze(
+      [...latest].sort(([left], [right]) => right - left).map(([, record]) => record),
+    );
+  }
+
   newest(kind: RuntimeDebugRecordKind, limit: number): readonly number[] {
     const ids: number[] = [];
     for (
@@ -1378,7 +1442,7 @@ function argumentKey(callFrameId: number, parameter: string): string {
  * button, the camera view, and the catalog of tagged photos.
  */
 export function stateKey(
-  kind: "speaker" | "timer" | "media" | "button" | "camera" | "photos",
+  kind: "speaker" | "timer" | "media" | "button" | "message" | "camera" | "photos",
   id = 0,
 ): string {
   return `x${kind}:${id}`;

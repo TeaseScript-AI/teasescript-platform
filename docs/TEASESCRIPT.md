@@ -197,6 +197,26 @@ With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySk
 
 `wait` remains separate. It does not become a `say` option and does not consume the pacing gate.
 
+Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
+pacing ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
+it in parentheses, `say("text", pacing)`:
+
+```tease
+let waiting = say "Waiting.", instant
+repeat 2 {
+    wait 1 s
+    waiting.text += "."
+}
+
+let count: integer = 0
+let strokes = say "Strokes: 0", instant
+repeat 50 {
+    wait 1 s
+    count += 1
+    strokes.text = "Strokes: ${count}"
+}
+```
+
 ### Authored `say` message markup
 
 After the final `say` string is evaluated and interpolated, the runtime parses it once using the constrained grammar in
@@ -212,8 +232,9 @@ let name = "**Mistress**"
 say "**Warning:** ${escapeMarkup(name)}, no touching."
 ```
 
-Player-authored transcript entries remain plain text. The canonical specification owns the complete grammar, escaping,
-nesting, recovery, and link rules.
+A message handle's `text` is that evaluated string before parsing, and a new `text` is parsed whole again; interpolation
+is not repeated. Player-authored transcript entries remain plain text. The canonical specification owns the complete
+grammar, escaping, nesting, recovery, and link rules.
 
 ### Bounded-data boundary
 
@@ -268,10 +289,14 @@ The current function subset includes:
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
 Implemented value operations include the V30 §8 text operations, joining two texts or two lists with `+` (§4), list
-`join`, `addAll`, `sort`, and `shuffle`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`, `toNumber`, `toInteger`,
-and `toBoolean` with `default:`, `round`, `floor`, and `ceil`, and `min` and `max`. When the receiver or
-argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` for argument counts and names; other
-values are checked when the operation runs.
+`join`, `addAll`, `sort`, `shuffle`, `take`, and `takeLast`, the `intersection`, `union`, and `difference` of lists and
+sets, the §13 conversions `toString`, `toNumber`, `toInteger`, and `toBoolean` with `default:`, the numeric functions
+`round` (also with `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
+the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
+and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
+`linearRegression`, and `predict`, and the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
+`randomBeta`, and `randomPert`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
+`TSV020`/`TSV022` for argument counts and names; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
 list and set elements, dict values, object properties, parameters, and function results keep one type, including types

@@ -1,4 +1,5 @@
 import {
+  RUNTIME_DEBUG_TRACE_LIMITS,
   runtimeDebugPreview,
   type RuntimeDebugContext,
   type RuntimeDebugRecord,
@@ -7,6 +8,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
+import { quotedText } from "../src/runtime/value-text.js";
 
 /**
  * Player Debug's Variables view (DEBUGGER.md "Player Debug"): live variables grouped by where they live, and the trace's
@@ -57,7 +59,7 @@ export function playerDebugVariables(
       group = { label, variables: [] };
       groups.set(key, group);
     }
-    const preview = runtimeDebugPreview(value);
+    const preview = livePreview(snapshot, value);
     group.variables.push(
       Object.freeze({
         name,
@@ -115,6 +117,24 @@ export function playerDebugVariables(
       Object.freeze({ key, label: group.label, variables: Object.freeze(group.variables) }),
     ),
   );
+}
+
+/** A value as the trace previews it; a message handle also shows the text its message has now. */
+function livePreview(
+  snapshot: RuntimeSnapshot,
+  value: SerializableRuntimeValue,
+): { readonly text: string; readonly truncated: boolean } {
+  const preview = runtimeDebugPreview(value);
+  if (typeof value !== "object" || value === null || value.kind !== "messageHandle") return preview;
+  const text = snapshot.liveMessages.find(
+    (message) => message.messageId === value.messageId,
+  )?.sourceText;
+  if (text === undefined) return preview;
+  const limit = RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters;
+  return {
+    text: `<message ${value.messageId} ${quotedText(text.slice(0, limit))}>`,
+    truncated: text.length > limit,
+  };
 }
 
 /** A row of the derivation tree: a record, a dropped record, a record shown above, or a summary of hidden causes. */
@@ -278,7 +298,10 @@ export function playerDebugTraceRows(
 /** The value a live variable has now, for comparison with an earlier recorded version. */
 export type PlayerDebugLiveValue = (scope: number | "global", name: string) => string | null;
 
-/** The live value of a variable in `snapshot`, previewed as the trace previews it; `null` once it no longer exists. */
+/**
+ * The live value of a variable in `snapshot`, previewed as the trace previews it, a message handle with its message's
+ * text now; `null` once it no longer exists.
+ */
 export function playerDebugLiveValue(snapshot: RuntimeSnapshot): PlayerDebugLiveValue {
   return (scope, name) => {
     const bindings =
@@ -289,7 +312,7 @@ export function playerDebugLiveValue(snapshot: RuntimeSnapshot): PlayerDebugLive
             snapshot.retainedScopes.find((frame) => frame.id === scope)
           )?.bindings;
     const binding = bindings?.find((candidate) => candidate.name === name);
-    return binding === undefined ? null : runtimeDebugPreview(binding.value).text;
+    return binding === undefined ? null : livePreview(snapshot, binding.value).text;
   };
 }
 
@@ -317,6 +340,10 @@ const RANDOM_TITLES = {
   chance: () => "chance()",
   randomInteger: (range: string) => `randomInteger(${range})`,
   collectionRandom: (_range: string, choices: string) => `random pick of ${choices}`,
+  randomWeighted: (_range: string, choices: string) => `weighted pick of ${choices}`,
+  randomNormal: () => "randomNormal()",
+  randomBeta: () => "randomBeta()",
+  randomPert: () => "randomPert()",
   interpolation: (_range: string, choices: string) => `random pick of ${choices} for \${...}`,
   shuffle: (_range: string, choices: string) => `shuffle of ${choices}`,
   tagQuery: (_range: string, choices: string) => `tagged pick of ${choices}`,
@@ -430,12 +457,15 @@ export function playerDebugRecordText(
       break;
   }
   const variable = record.variable;
+  const current = variable === null || live === null ? null : live(variable.scope, variable.name);
+  // The current version of a variable shows its value now only where that reads differently, as a message handle
+  // whose message has new text.
   const now =
     variable === null ||
-    live === null ||
-    trace.variableRecord(variable.scope, variable.name) === record.id
+    (trace.variableRecord(variable.scope, variable.name) === record.id &&
+      current === record.preview)
       ? null
-      : live(variable.scope, variable.name);
+      : current;
   return Object.freeze({
     title,
     value: record.preview,
