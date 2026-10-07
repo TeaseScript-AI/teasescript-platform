@@ -11,7 +11,8 @@ export interface RandomDrawAlternatives {
 /**
  * Outcomes to try at a paused draw besides its natural result, which resuming with `"natural"` tries without recording
  * an input (`docs/RUNTIME.md#controlled-randomness`). A finite support is enumerated in order until `limit`; a
- * continuous one, a large range, and a large shuffle give representative samples and are never `complete`.
+ * continuous one, a large range, and a large shuffle give representative samples and are not `complete`, except a
+ * PERT interval of so few representable numbers that all of them fit.
  */
 export function randomDrawAlternatives(draw: RandomDrawView, limit = 16): RandomDrawAlternatives {
   if (!Number.isSafeInteger(limit) || limit < 0)
