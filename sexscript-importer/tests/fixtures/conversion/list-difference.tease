@@ -1,6 +1,3 @@
-function sexscriptLegacyValue(value) {
-  return value
-}
 function sexscriptLegacyListMinus(items, removed) {
   let kept = []
   for item in items {
@@ -11,7 +8,7 @@ function sexscriptLegacyListMinus(items, removed) {
   return kept
 }
 // Groovy list - value drops the value from a copy of the list; list - otherList drops each of its elements.
-let picked = load "picked", default: sexscriptLegacyValue(null)
+let picked: string? = load "picked", default: null
 function pickToy {
   let toys = ["paddle", "crop", "cane"]
   say "Add the strap?"

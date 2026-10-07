@@ -41,7 +41,8 @@ global enabled = false
 global boost = 1.5
 // A read of a field that a module may test for null keeps its null.
 global title = null
-title = load "demo.title", default: sexscriptLegacyValue(null)
+let savedTitle: string? = load "demo.title", default: null
+title = savedTitle
 function pauseCycle(delay, cycleValue = 60) {
   wait delay / cycleValue
 }

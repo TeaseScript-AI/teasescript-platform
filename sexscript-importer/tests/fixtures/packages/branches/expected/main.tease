@@ -1,9 +1,6 @@
 // The route key only ever holds "rooms", so the garden branch never runs; its missing script becomes exit.
-global function sexscriptLegacyValue(value) {
-  return value
-}
 save "rooms" as "game.route"
-let route = load "game.route", default: sexscriptLegacyValue(null)
+let route: string? = load "game.route", default: null
 switch route {
   case "rooms" {
     goto "rooms.tease"

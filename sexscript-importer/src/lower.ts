@@ -1434,11 +1434,7 @@ export function lowerParsedFile(
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withFillableLoads(
-    withParsedLoads(typedStatements, context.syntheticHelpers),
-    context.syntheticHelpers,
-    shared,
-  );
+  let texts = withFillableLoads(withParsedLoads(typedStatements, context.syntheticHelpers), shared);
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -1641,7 +1637,6 @@ function lowerHelperCompilationUnit(
               withEnforcedTypes([...fieldStatements, ...statements], baseContext),
               baseContext.syntheticHelpers,
             ),
-            baseContext.syntheticHelpers,
             true,
           ),
           diagnostics,

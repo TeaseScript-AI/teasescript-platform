@@ -1,6 +1,7 @@
-import { helperCall, helperStatements, type HelperName } from "./helpers.ts";
+import { helperCall, helperStatements } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
-import { withNestedBlocks } from "./repeated-text.ts";
+import { usedNames } from "./message-handles.ts";
+import { effectBefore, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 /**
@@ -9,9 +10,8 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * whose null reaches nothing that could tell it from an empty value gets the empty value of its type as its default
  * (`load "level", default: 0`), and any other read keeps its null, the script's own test of it.
  *
- * Every `load` has `default:` (#690). A read that keeps its null gets null of a type the compiler cannot know,
- * `load "level", default: sexscriptLegacyValue(null)`, so that it stays as open as legacy's read and its key needs no
- * declared type; a read of a computed key, which has no type, gets `default: null` (emit-tease.ts).
+ * Every `load` has `default:` (#690): a read that keeps its null has `default: null` (emit-tease.ts), and its key, where
+ * written as one literal, a declared type at one of its loads (withDeclaredKeys).
  *
  * withFillableLoads marks those reads in a file (`fill`), after variable typing, which writes the type of each value
  * saved under a literal key on its `save` (`valueType`); withStorageDefaults gives the marked reads their defaults, of
@@ -23,11 +23,7 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * name in the whole file, is such a use; a read or variable compared with null or an empty literal, or passed on,
  * returned, saved, or held in a list or another variable, keeps its null.
  */
-export function withFillableLoads(
-  statements: IrStatement[],
-  helpers: Set<HelperName>,
-  shared: boolean,
-): IrStatement[] {
+export function withFillableLoads(statements: IrStatement[], shared: boolean): IrStatement[] {
   const passed = new Set<string>();
   const usedUp = new Set<IrExpression>();
   const into = new Map<IrExpression, string>();
@@ -51,11 +47,9 @@ export function withFillableLoads(
     // Variables that other files use too (`shared`: a mixin module's, a script's that loads modules, or a helper
     // class's) may be tested there, so only a read used up where it is gets a default.
     const target = shared ? undefined : into.get(value);
-    if (usedUp.has(value) || (target !== undefined && !passed.has(target)))
-      return { ...next, fill: true };
-    // A read that keeps its null gets an open one; withStorageDefaults adds the helper for a marked read that needs it.
-    helpers.add("value");
-    return { ...next, defaultValue: OPEN_NULL };
+    return usedUp.has(value) || (target !== undefined && !passed.has(target))
+      ? { ...next, fill: true }
+      : next;
   };
   const marked = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, marked), mark));
@@ -160,9 +154,9 @@ function telling(value: IrExpression): boolean {
 }
 
 /**
- * The package's literal keys typed from what is saved under them, as the compiler types them: the saves decide, an
- * integer widens to a number, and other mixed types decide no type here; with no typed save, the literal defaults
- * decide. Each read marked by withFillableLoads gets the empty value of its key's type as its default.
+ * Gives each read marked by withFillableLoads the empty value of the type legacy read (`read`) or, for a plain `load`,
+ * of the one type the package's saves give its key (an integer and a number make a number); a read without such a type
+ * keeps its null. Then declares the keys whose reads keep their null or whose values mix types (withDeclaredKeys).
  */
 export function withStorageDefaults(
   programs: readonly MigrationProgram[],
@@ -170,6 +164,7 @@ export function withStorageDefaults(
 ): MigrationProgram[] {
   const saved = new Map<string, Set<string>>();
   const defaulted = new Map<string, Set<string>>();
+  const read = new Map<string, Set<string>>();
   const note = (map: Map<string, Set<string>>, key: string, type: string | null): void => {
     if (type === null) return;
     const types = map.get(key) ?? new Set<string>();
@@ -178,8 +173,10 @@ export function withStorageDefaults(
   };
   const collect = (value: IrExpression): IrExpression => {
     const key = value.kind === "load" ? literalKey(value.key) : null;
-    if (key !== null && value.kind === "load" && value.defaultValue !== undefined)
-      note(defaulted, key, valueType(value.defaultValue));
+    if (key !== null && value.kind === "load") {
+      if (value.defaultValue !== undefined) note(defaulted, key, valueType(value.defaultValue));
+      if (value.read !== undefined) note(read, key, value.read);
+    }
     return mapChildren(value, collect);
   };
   const scan = (items: IrStatement[]): IrStatement[] =>
@@ -193,43 +190,187 @@ export function withStorageDefaults(
   const keyType = (key: string): string | null =>
     keptType(saved.get(key)) ?? (saved.has(key) ? null : keptType(defaulted.get(key)));
 
-  let open = false;
   const fill = (value: IrExpression): IrExpression => {
     const next = mapChildren(value, fill);
-    if (next.kind !== "load") return next;
-    // A read of a literal key the package code made without a default, such as the profile's, keeps an open null.
-    if (next.fill !== true) {
-      if (next.defaultValue !== undefined || literalKey(next.key) === null) return next;
-      open = true;
-      return { ...next, defaultValue: OPEN_NULL };
-    }
+    if (next.kind !== "load" || next.fill !== true) return next;
     const { fill: _fill, ...load } = next;
     const key = literalKey(load.key);
-    // A legacy loadString or loadBoolean read has its own type; a plain load, the type the saves give its key.
     const type = load.read ?? (key === null ? null : keyType(key));
     const empty = type === null ? null : emptyValue(type);
-    open ||= empty === null;
-    return { ...load, defaultValue: empty ?? OPEN_NULL };
+    if (empty === null) return load;
+    if (key !== null) note(defaulted, key, type);
+    return { ...load, defaultValue: empty };
   };
   const block = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), fill));
-  // The open null's helper goes where a read uses it and no definition reaches: main.tease's global functions reach
-  // every file of a package (`shared`), else each file has its own.
+  const filled = programs.map((program) => ({ ...program, statements: block(program.statements) }));
+  // The type a key holds: what its reads read and default to and what is saved under it, a union where they mix.
+  const declaredType = (key: string): string | null =>
+    unionType([...(read.get(key) ?? []), ...(defaulted.get(key) ?? []), ...(saved.get(key) ?? [])]);
+  return withDeclaredKeys(filled, declaredType, shared);
+}
+
+/**
+ * A read that keeps its null (`default: null`), and a read of a key whose values mix types, needs its key's type
+ * declared at one of its loads (#690), which the key's other loads take; the same declaration may repeat. In each file
+ * the first `let` that reads the key gets it (`let level: string? = load "game.level", default: null`, optional where its
+ * read keeps its null), or where no `let` reads the key, the first read in each file inside a statement that runs once,
+ * where nothing with an effect runs before it, moves into one just before that statement (`let savedMode: string? = load "game.mode",
+ * default: null`, then `if savedMode == "" { ... }`). A key that no file can declare so, or whose type nothing tells,
+ * keeps its null of an open type instead, `default: sexscriptLegacyValue(null)`, which needs no declaration.
+ */
+function withDeclaredKeys(
+  programs: readonly MigrationProgram[],
+  declaredType: (key: string) => string | null,
+  shared: boolean,
+): MigrationProgram[] {
+  const nullRead = new Set<string>();
+  const declared = new Set<string>();
+  const letRead = new Set<string>();
+  const reads = (value: IrExpression): IrExpression => {
+    const key = value.kind === "load" ? literalKey(value.key) : null;
+    if (key !== null && value.kind === "load" && value.defaultValue === undefined)
+      nullRead.add(key);
+    return mapChildren(value, reads);
+  };
+  const scan = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => {
+      const key =
+        item.kind === "let" && item.value.kind === "load" ? literalKey(item.value.key) : null;
+      if (key !== null && item.kind === "let")
+        (item.type === undefined ? letRead : declared).add(key);
+      return mapOwnExpressions(withNestedBlocks(item, scan), reads);
+    });
+  for (const program of programs) scan(program.statements);
+  // The keys to declare, with their types.
+  const types = new Map<string, string>();
+  const open = new Set<string>();
+  for (const key of new Set([...nullRead, ...letRead])) {
+    if (declared.has(key)) continue;
+    const type = declaredType(key);
+    if (!nullRead.has(key) && !(type?.includes(" | ") ?? false)) continue;
+    if (type === null) open.add(key);
+    else types.set(key, type);
+  }
+  const optional = (type: string): string => (type.includes(" | ") ? `${type} | null` : `${type}?`);
+  const done = new Set<string>();
+  const declaredPrograms = programs.map((program) => {
+    let taken: Set<string> | null = null;
+    const fresh = (key: string): string => {
+      taken ??= usedNames(program.statements);
+      const last = key
+        .split(".")
+        .at(-1)!
+        .replace(/[^\p{L}\p{N}_]/gu, "");
+      const base = /^\p{L}/u.test(last)
+        ? `saved${last.charAt(0).toUpperCase()}${last.slice(1)}`
+        : "savedValue";
+      let name = base;
+      for (let suffix = 2; taken.has(name); suffix += 1) name = `${base}${suffix}`;
+      taken.add(name);
+      return name;
+    };
+    // Keys this file declares at a `let`, then keys it declares by moving a read.
+    const atLet = new Set<string>();
+    const declare = (items: IrStatement[]): IrStatement[] =>
+      items.map((item) => {
+        const next = withNestedBlocks(item, declare);
+        const key =
+          next.kind === "let" && next.value.kind === "load" ? literalKey(next.value.key) : null;
+        const type = key === null ? undefined : types.get(key);
+        if (
+          key === null ||
+          type === undefined ||
+          atLet.has(key) ||
+          next.kind !== "let" ||
+          next.value.kind !== "load"
+        )
+          return next;
+        atLet.add(key);
+        done.add(key);
+        return { ...next, type: next.value.defaultValue === undefined ? optional(type) : type };
+      });
+    const lifted = new Set<string>();
+    const lift = (items: IrStatement[]): IrStatement[] =>
+      items.flatMap((item): IrStatement[] => {
+        const next = withNestedBlocks(item, lift);
+        if (!LIFTABLE.has(next.kind)) return [next];
+        let moved: IrStatement | null = null;
+        const take = (value: IrExpression): IrExpression => {
+          if (moved !== null) return value;
+          const key = value.kind === "load" ? literalKey(value.key) : null;
+          const type = key === null ? undefined : types.get(key);
+          if (
+            key !== null &&
+            value.kind === "load" &&
+            value.defaultValue === undefined &&
+            type !== undefined &&
+            !letRead.has(key) &&
+            !lifted.has(key) &&
+            !effectBefore(next, value)
+          ) {
+            const name = fresh(key);
+            lifted.add(key);
+            done.add(key);
+            moved = { kind: "let", name, value, type: optional(type), span: next.span };
+            return { kind: "variable", name };
+          }
+          return mapChildren(value, take);
+        };
+        const rewritten = mapOwnExpressions(next, take);
+        return moved === null ? [next] : [moved, rewritten];
+      });
+    return { ...program, statements: lift(declare(program.statements)) };
+  });
+  // A key that no file could declare, as its reads sit only in loops or after effects, keeps an open null too.
+  for (const key of types.keys()) if (!done.has(key)) open.add(key);
+  if (open.size === 0) return declaredPrograms;
+  const opened = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, opened);
+    const key = next.kind === "load" ? literalKey(next.key) : null;
+    return key !== null && next.kind === "load" && next.defaultValue === undefined && open.has(key)
+      ? { ...next, defaultValue: OPEN_NULL }
+      : next;
+  };
+  const block = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), opened));
+  return withOpenNullHelper(
+    declaredPrograms.map((program) => ({ ...program, statements: block(program.statements) })),
+    shared,
+  );
+}
+
+// Statements whose own values are evaluated once, before anything else of theirs runs.
+const LIFTABLE: ReadonlySet<string> = new Set([
+  "if",
+  "say",
+  "let",
+  "assign",
+  "save",
+  "expression",
+  "return",
+]);
+
+/**
+ * The open null's helper goes where a read uses it and no definition reaches: main.tease's global functions reach every
+ * file of a package (`shared`), else each file has its own.
+ */
+function withOpenNullHelper(
+  programs: readonly MigrationProgram[],
+  shared: boolean,
+): MigrationProgram[] {
   const defines = (program: MigrationProgram): boolean =>
     program.statements.some(
       (statement) => statement.kind === "function" && statement.name === OPEN_NULL_HELPER,
     );
+  const uses = (program: MigrationProgram): boolean =>
+    JSON.stringify(program.statements).includes(`"name":"${OPEN_NULL_HELPER}"`);
+  const used = programs.some(uses);
   const definition = helperStatements(new Set(["value"]));
-  const filled = programs.map((program) => {
-    open = false;
-    const statements = block(program.statements);
-    return { program: { ...program, statements }, open };
-  });
-  const anyOpen = filled.some((item) => item.open);
-  return filled.map(({ program, open: uses }, index) => {
+  return programs.map((program, index) => {
     const needs = shared
-      ? index === 0 && anyOpen && !programs.some(defines)
-      : uses && !defines(program);
+      ? index === 0 && used && !programs.some(defines)
+      : uses(program) && !defines(program);
     if (!needs) return program;
     const helper = definition.map((statement): IrStatement =>
       shared && statement.kind === "function" ? { ...statement, global: true } : statement,
@@ -238,9 +379,16 @@ export function withStorageDefaults(
   });
 }
 
-/** Null of a type the compiler cannot know, the value a legacy read gave for a missing key. */
+/** Null of a type the compiler cannot know, which needs no declared type. */
 const OPEN_NULL: IrExpression = helperCall("value", [{ kind: "literal", value: null }]);
 const OPEN_NULL_HELPER = OPEN_NULL.kind === "call" ? OPEN_NULL.name : "";
+
+/** The types as one: an integer and a number make a number; several others, their union; none, null. */
+function unionType(types: readonly string[]): string | null {
+  const members = [...new Set(types.flatMap((type) => type.split(" | ")))];
+  const kept = members.includes("number") ? members.filter((type) => type !== "integer") : members;
+  return kept.length === 0 ? null : kept.join(" | ");
+}
 
 function fillable(value: IrExpression): value is Extract<IrExpression, { kind: "load" }> {
   return (

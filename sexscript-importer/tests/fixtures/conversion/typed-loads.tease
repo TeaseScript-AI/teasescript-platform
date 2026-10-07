@@ -42,7 +42,8 @@ if sexscriptLegacyCompare(lastVersion, 4) > 0 {
 }
 save 100.5 as "game.points"
 let points = 80
-if load("game.points", default: sexscriptLegacyValue(null)) != null {
+let savedPoints: number? = load "game.points", default: null
+if savedPoints != null {
   // NOTE SX_LOAD_KEEPS_VALUE line 9: Groovy stored null in 'points' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
   points = sexscriptLegacyLoadInteger("game.points", points)
 }

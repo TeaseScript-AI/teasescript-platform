@@ -1,6 +1,3 @@
-function sexscriptLegacyValue(value) {
-  return value
-}
 function sexscriptLegacyMenuOptions(texts, first) {
   let options = []
   let position = first
@@ -160,7 +157,8 @@ for it in amounts {
 say labels.join(", ")
 // An Elvis assignment of a value that may be null to a text variable keeps it text: the fallback goes first.
 function pick {
-  return load "x.pick", default: sexscriptLegacyValue(null)
+  let savedPick: string? = load "x.pick", default: null
+  return savedPick
 }
 let word = "none"
 let elvisValue2 = pick()

@@ -5,14 +5,17 @@ speaker system {
   title: "System"
 }
 function sexscriptLegacyAskProfile {
-  if load("intro.name", default: sexscriptLegacyValue(null)) == null {
+  let savedName: string? = load "intro.name", default: null
+  if savedName == null {
     save (askText as system "What is your name?", default: "Slave") as "intro.name"
   }
-  if load("intro.female", default: sexscriptLegacyValue(null)) == null {
+  let savedFemale: boolean? = load "intro.female", default: null
+  if savedFemale == null {
     say as system "Are you a woman ?"
     save (choose yes: "Yes", no: "No") == "yes" as "intro.female"
   }
-  if load("intro.likemale", default: sexscriptLegacyValue(null)) == null {
+  let savedLikemale: boolean? = load "intro.likemale", default: null
+  if savedLikemale == null {
     if load("intro.likefemale", default: sexscriptLegacyValue(null)) == true {
       say as system "Are you also attracted to men ?"
       save (choose yes: "Yes", no: "No") == "yes" as "intro.likemale"
