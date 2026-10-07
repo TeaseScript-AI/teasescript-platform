@@ -591,6 +591,7 @@ const FOR_LOOP_START_FIELDS = [
 const EXPRESSION_FIELDS = fieldsByKind([
   ["literal", "value"],
   ["identifier", "name"],
+  ["debugMode"],
   ["temporary", "temporaryId"],
   ["preparedReference", "temporaryId"],
   ["list", "elements"],
@@ -2120,6 +2121,8 @@ function validateExpressionNode(
       return;
     case "identifier":
       requireString(value.name, `${path}.name`, errors);
+      return;
+    case "debugMode":
       return;
     case "temporary":
     case "preparedReference":

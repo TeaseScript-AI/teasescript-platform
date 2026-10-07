@@ -1128,6 +1128,51 @@ test("timer ranges and handle members are checked by type, wherever the value co
   );
 });
 
+test("a for-loop or randomInteger range takes whole-number bounds, a switch case range any number", () => {
+  // V30 §6: a bound that may hold a fraction is an error, never truncated.
+  assert.deepEqual(mismatches('let count = 5\nfor i in 1..=count / 2 {\n    say "${i}"\n}\nexit'), [
+    [
+      "TSV043",
+      "A for-loop range bound must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+      "count / 2",
+    ],
+  ]);
+  assert.deepEqual(mismatches("let n = 4\nlet r = randomInteger((0..n))\nn = n / 2\nexit"), [
+    [
+      "TSV043",
+      "A randomInteger range bound must be a whole number (integer), but this is a number. 'n' is a number because line 3 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
+      "n",
+    ],
+  ]);
+  assert.deepEqual(
+    codes(
+      'let low: number = 1\nfor i in low..2.0 {\n    say "${i}"\n}\nlet r = randomInteger(low..=6)\nexit',
+    ),
+    [
+      ["TSV043", "low"],
+      ["TSV043", "2.0"],
+      ["TSV043", "low"],
+    ],
+  );
+  // Rounded bounds run; a switch case range matches a fraction; a bound the compiler cannot know is checked at runtime.
+  assert.deepEqual(
+    sayTexts('let count = 5\nfor i in 1..=floor(count / 2) {\n    say "${i}"\n}\nexit'),
+    ["1", "2"],
+  );
+  assert.deepEqual(
+    sayTexts(
+      'let v = 3.7\nswitch v {\n    case 0..4 {\n        say "low"\n    }\n    case 4..=10 {\n        say "high"\n    }\n}\nexit',
+    ),
+    ["low"],
+  );
+  assert.deepEqual(
+    codes(
+      'function count(n) {\n    for i in 1..=n {\n        say "${i}"\n    }\n}\ncount(2.5)\nexit',
+    ),
+    [],
+  );
+});
+
 test("an object that does not fit adds no properties, and annotated functions run", () => {
   assert.deepEqual(codes('let x = { a: 1 }\nx = { b: true, a: "x" }\nx.b = 1\nexit'), [
     ["TSV041", '"x"'],

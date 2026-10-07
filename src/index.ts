@@ -198,6 +198,7 @@ export {
   applyExternalStorageEdit,
   type ExternalStorageEditOutcome,
 } from "./runtime/operations/external-storage-edit.js";
+export { setDebugMode, type DebugModeOutcome } from "./runtime/operations/debug-mode.js";
 export type { RuntimeTemporalCapture } from "./runtime/temporal-captures.js";
 export {
   reportMediaLoad,

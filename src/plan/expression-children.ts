@@ -4,6 +4,7 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
     case "literal":
     case "duration":
     case "identifier":
+    case "debugMode":
     case "temporary":
     case "preparedReference":
       return [];

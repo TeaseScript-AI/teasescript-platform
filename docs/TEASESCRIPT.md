@@ -294,8 +294,8 @@ sets, the §13 conversions `toString`, `toNumber`, `toInteger`, and `toBoolean` 
 `round` (also with `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
 the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
 and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
-`linearRegression`, and `predict`, and the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
-`randomBeta`, and `randomPert`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
+`linearRegression`, and `predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
+`randomBeta`, and `randomPert`, and the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
 `TSV020`/`TSV022` for argument counts and names; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,

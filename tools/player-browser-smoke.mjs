@@ -147,6 +147,7 @@ async function main() {
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await messageUpdatesScenario(cdp, origin);
+      await entrancesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
@@ -154,7 +155,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1060,10 +1061,26 @@ async function smartFollowCheck(cdp) {
   );
 }
 
+// A click at the element's centre once it no longer moves in: a control that live play just showed enters the
+// conversation for a moment, as do the messages it glides up with.
 async function physicalClick(cdp, selector) {
-  const point = await value(
+  const point = await evaluate(
     cdp,
-    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+    `return new Promise((resolve) => {
+      const target = document.querySelector(${JSON.stringify(selector)});
+      const deadline = performance.now() + 2_000;
+      const entering = () =>
+        document.getAnimations().some((animation) =>
+          animation.playState === "running" &&
+          animation.effect?.getComputedTiming().endTime !== Infinity &&
+          animation.effect?.target?.contains(target));
+      const check = () => {
+        if (entering() && performance.now() < deadline) return setTimeout(check, 16);
+        const rect = target.getBoundingClientRect();
+        resolve({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+      };
+      check();
+    })`,
   );
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
@@ -1529,6 +1546,143 @@ async function lateImageScenario(cdp, origin) {
 }
 
 /**
+ * Entrances (`entrances` package): what Start shows appears directly; a message live play adds enters while the
+ * conversation glides up, and the controls of a new interaction glide with the message above them. An update taller
+ * than the view shows directly and stops with its first entry at the top, with Return to latest offered, while later
+ * messages do not move the reader; that also holds for an update of two entries, after the reader scrolled back to the
+ * end. Under reduced motion nothing enters.
+ */
+async function entrancesScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  // Records, every frame, which parts of the conversation an animation moves, and how far the controls are from the
+  // entry above them while the conversation glides.
+  const start = async () => {
+    await navigate(cdp, `${origin}/player/?package=entrances`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await evaluate(
+      cdp,
+      `window.smokeEntrances = new Set();
+      window.smokeControlGaps = new Set();
+      const record = () => {
+        for (const animation of document.getAnimations()) {
+          const target = animation.effect?.target;
+          if (target?.matches?.('.transcript-entry')) window.smokeEntrances.add('row ' + target.dataset.index);
+          else if (target?.matches?.('.transcript-history')) window.smokeEntrances.add('glide');
+          else if (target?.matches?.('[data-foreground-controls]')) window.smokeEntrances.add('controls');
+        }
+        const controls = document.querySelector('[data-foreground-controls]');
+        const above = document.querySelector('.transcript-entry[data-index="2"]');
+        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
+          window.smokeControlGaps.add(Math.round(controls.getBoundingClientRect().top - above.getBoundingClientRect().bottom));
+        requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);`,
+    );
+    await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const entered = () => evaluate(cdp, `return [...window.smokeEntrances].sort()`);
+  const forget = () => evaluate(cdp, `window.smokeEntrances.clear()`);
+  // The top of an entry in the view, as long as it is drawn.
+  const top = (index) => `(() => {
+    const view = document.querySelector('.transcript-scroll').getBoundingClientRect();
+    const row = document.querySelector('.transcript-entry[data-index="${index}"]');
+    return row ? Math.round(row.getBoundingClientRect().top - view.top) : null;
+  })()`;
+  const held = (index) =>
+    `Math.abs(${top(index)} ?? 99) <= 2 && !!document.querySelector('.return-to-latest')`;
+  await start();
+  await waitFor(
+    cdp,
+    `${entries} === 2`,
+    8_000,
+    "The entrances package did not add its second message",
+  );
+  await delay(400);
+  // Start shows its first message directly; the next one enters alone, and the conversation glides up for it.
+  assertEqual(
+    JSON.stringify(await entered()),
+    JSON.stringify(["glide", "row 1"]),
+    "A live message did not enter alone, gliding the conversation up",
+  );
+  // A message with a choice: the controls enter and glide with the message, at one distance below it.
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls]')`, 8_000);
+  await delay(400);
+  const gaps = await evaluate(cdp, `return [...window.smokeControlGaps]`);
+  assertEqual(
+    gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) <= 2,
+    true,
+    `The controls did not glide with the message above them: ${JSON.stringify(gaps)}`,
+  );
+  assertEqual(
+    (await entered()).includes("controls"),
+    true,
+    "The controls of a new interaction did not enter",
+  );
+  // An update of many entries, taller than the view, stops at its first entry, the answer.
+  await forget();
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `${entries} === 19`, 8_000, "The tall update did not arrive");
+  await waitFor(
+    cdp,
+    held(3),
+    4_000,
+    "An update taller than the view did not stop at its first entry with Return to latest",
+  );
+  // The next message and choice arrive below without moving the reader.
+  await waitFor(cdp, `${entries} === 20`, 8_000, "No message arrived after the tall update");
+  await delay(400);
+  assertEqual(
+    Math.abs((await value(cdp, top(3))) ?? 99) <= 2,
+    true,
+    "A message after the tall update moved the reader",
+  );
+  // Scrolled back to the end, the reader follows again: an update of two entries taller than the view stops at its
+  // first entry and shows directly.
+  await evaluate(
+    cdp,
+    `const view = document.querySelector('.transcript-scroll'); view.scrollTop = view.scrollHeight;`,
+  );
+  await waitFor(
+    cdp,
+    `!document.querySelector('.return-to-latest')`,
+    4_000,
+    "Scrolling to the end did not reach it",
+  );
+  await forget();
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `${entries} === 22`, 8_000, "The tall message did not arrive");
+  await waitFor(
+    cdp,
+    held(20),
+    4_000,
+    "A two-entry update taller than the view did not stop at its first entry after the reader returned to the end",
+  );
+  await delay(400);
+  assertEqual(
+    JSON.stringify(await entered()),
+    "[]",
+    "An update taller than the view entered the conversation",
+  );
+  // Reduced motion: the same live message shows without entering.
+  await cdp.call("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+  try {
+    await start();
+    await waitFor(cdp, `${entries} === 2`, 8_000, "The entrances package did not restart");
+    await delay(400);
+    assertEqual(
+      JSON.stringify(await entered()),
+      "[]",
+      "Something entered the conversation under reduced motion",
+    );
+  } finally {
+    await cdp.call("Emulation.setEmulatedMedia", { features: [] });
+  }
+}
+
+/**
  * Messages changed in place (`updates` package): a message whose text grows while it is above the view keeps the text
  * being read still as the reader scrolls up past it, the change adds no entry and is spoken by the status region, and
  * a change that removes the focused link leaves focus on its message.
@@ -1618,8 +1772,8 @@ async function messageUpdatesScenario(cdp, origin) {
 /**
  * Player Debug in the default build: the Debug menu starts off and Settings turns it on for this load. While Debug
  * runs, one countdown line under the foreground names a wait, a timed button, or pacing, but never a blocking timer; it
- * follows jumps, the panel's Debug switch and the Debug menu also while the panel is closed, and never reaches the
- * transcript. `?dev` starts with the menu on.
+ * follows jumps, also +10 s during pacing, the panel's Debug switch and the Debug menu also while the panel is closed,
+ * and never reaches the transcript. `?dev` starts with the menu on.
  */
 async function debugCountdownScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
@@ -1671,6 +1825,14 @@ async function debugCountdownScenario(cdp, origin) {
   // Skip event ends the wait: the blocking timer is a timer, never a wait.
   await skip(none, "A blocking timer showed a countdown");
   await skip(shows("/^Debug · Pacing: (20|1\\d) s remaining$/"), "No countdown for pacing");
+  // +10 s works during pacing: the pause is 10 s shorter, and the next message has not come yet.
+  await physicalClick(cdp, '[data-development-time-action="advance-10s"]');
+  await waitFor(
+    cdp,
+    shows("/^Debug · Pacing: (10|\\d) s remaining$/"),
+    5_000,
+    "+10 s did not advance the pacing",
+  );
   // The timed button consumes the pacing of the message before it.
   await skip(shows("/^Debug · Press within (40|3\\d) s$/"), "No countdown for the timed button");
   // The panel's Debug switch and the Debug menu hide and show it, also while the panel is closed.

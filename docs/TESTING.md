@@ -604,7 +604,11 @@ script's camera window, take a photo of the fake camera's test card after the co
 the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
 paperclip stays. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
 the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
-region, and focus on a link that a change removes stays on its message. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
+region, and focus on a link that a change removes stays on its message. Its `entrances` package checks that what Start
+shows appears directly, a later message enters while the conversation glides up, the controls of a new choice glide
+with the message above them, an update taller than the view shows directly and stops with its first entry at the top
+with Return to latest while later messages do not move the reader, also for a two-entry update after the reader
+scrolled back to the end, and that nothing enters under reduced motion. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
 with the saved photo's exact bytes and not the unsaved one, a refused copy selects the text, closing releases the file,
 and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file
@@ -618,7 +622,8 @@ importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that p
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
 `debug-countdowns` package's countdown line with the Debug panel closed: for its wait, none for its blocking timer, then
-its pacing and its timed button after Skip event; the panel's Debug switch and the Debug menu hide and show it, an untimed
+its pacing, 10 s shorter after +10 s, and its timed button after Skip event; the panel's Debug switch and the Debug menu
+hide and show it, an untimed
 button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. Its Now tab on the
 `debug-now` package, shaped like the Domme3 case, names a nested call chain and two overlapping sounds and the hidden
 timer, and the Stage image as unresolved, failed, hidden, and displayed in turn, and fits the narrow drawer. Its Storage

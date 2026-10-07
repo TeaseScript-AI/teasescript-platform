@@ -418,7 +418,7 @@ let dieRoll = randomInteger(1..=6)
 let index = randomInteger(0..items.length)
 ```
 
-The range itself defines whether the upper bound is inclusive or exclusive. `randomInteger(...)` therefore needs no separate minimum/maximum boundary convention.
+The range itself defines whether the upper bound is inclusive or exclusive. `randomInteger(...)` therefore needs no separate minimum/maximum boundary convention. Its bounds are whole numbers ([§6](#6-range-semantics)).
 
 ### Weighted choice
 **Status:** Accepted (Owner decision, 2026-10-07)
@@ -549,7 +549,7 @@ not (score == 5)
 Parentheses may always override the normal precedence.
 
 ## 6. Range semantics
-**Status:** Accepted
+**Status:** Accepted (whole-number bounds of `for` and `randomInteger`: Owner decision, 2026-10-07)
 
 Ranges use Rust-style bounds:
 
@@ -567,6 +567,12 @@ may produce `5`, `6`, `7`, `8`, or `9`.
 ```
 
 may also produce `10`.
+
+`for` ([§23](#23-loops)) and `randomInteger` ([Randomness](#randomness)) give the whole numbers of a range, so a range
+written as their source or argument needs whole-number bounds: a bound of type `number`, such as `count / 2`, is a
+compile error. Round it with `floor(...)`, `round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other
+bounds, such as one whose type the compiler cannot know or one of a range kept in a variable, are checked when the range
+is used. A `switch` case range matches any number within its bounds ([§32](#32-switch-statements)).
 
 Ranges may also be used in `switch` cases:
 
@@ -1019,7 +1025,7 @@ picks.add("three")    // compile error
 
 ```text
 global strictness = 2
-global level = load "level", default: 1
+global level = load("level", default: 1)
 global answer: string? = null
 ```
 
@@ -1738,7 +1744,7 @@ count is a compile error when the compiler can see it, and runtime error `TSR057
 the newest values:
 
 ```text
-let recent: integer[] = load "pushups", default: []
+let recent: integer[] = load("pushups", default: [])
 recent.add(count)
 save recent.takeLast(20) as "pushups"
 ```
@@ -1782,7 +1788,7 @@ A fair target is one the player reaches in most attempts. `percentile(recent, 10
 attempts reached or beat, so a target there is met about nine times out of ten:
 
 ```text
-let recent: integer[] = load "pushups", default: []
+let recent: integer[] = load("pushups", default: [])
 if recent.length > 0 {
     let target = round(percentile(recent, 10))
     say "Today: at least ${target} push-ups. You managed that nine times out of ten."
@@ -1895,7 +1901,7 @@ if file != null {
 
 Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
 error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A loaded value
-can instead get a default, as in `load "level", default: 1`.
+can instead get a default, as in `load("level", default: 1)`.
 
 ## 19. Choices
 **Status:** Accepted
@@ -2244,7 +2250,7 @@ translated label keeps its saved value:
 ```text
 let toys = dict {}
 for id in toyIds {
-    let owned: boolean = load "toys.${id}", default: false
+    let owned: boolean = load("toys.${id}", default: false)
     toys[id] = { value: owned, text: toyNames[id] }
 }
 let selected = askForm "Which toys do you own?", fields: toys   // a boolean dict
@@ -2273,7 +2279,7 @@ error that names its key.
 Remembered settings are loaded as the starts, and the result is saved:
 
 ```text
-let saved = load "settings", default: { enabled: false, impact: 5 }
+let saved = load("settings", default: { enabled: false, impact: 5 })
 let settings = askForm "Settings", fields: { enabled: saved.enabled, impact: saved.impact }
 save settings as "settings"
 ```
@@ -3032,8 +3038,8 @@ for item in items {
 ```
 
 `for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
-a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
-Each iteration has its own loop variable, which a block created in it keeps
+a range ([§6](#6-range-semantics)), as they were when the loop started: changing the source inside the loop does not
+change what the loop visits. Each iteration has its own loop variable, which a block created in it keeps
 ([§14](#variables-in-timer-media-and-button-blocks)).
 
 With two variables, `for` goes through the entries of a dict, giving each key and its value:
@@ -3097,7 +3103,8 @@ for item in items {
 ```
 
 ## 25. Persistent storage and keys
-**Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05)
+**Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05; key types and wrong stored values:
+Owner decision, 2026-10-07, not yet implemented)
 
 Save or overwrite a value:
 
@@ -3108,19 +3115,55 @@ save playerName as "player.name"
 `save value as key` evaluates the value first, then the key. It creates the key when absent and replaces its value
 when present. Saving `null` removes the key, like `delete`; stored top-level values are never `null`.
 
-`load` has a bounded form and a compact form; the fallback `default:` is optional:
+`load` reads a saved value. Its normal form names the key and, with `default:`, the value to use while the key holds
+none:
 
 ```text
-let playerName = load("player.name")              // null when the key is absent
+let visits = load("visits", default: 0)
+let playerName = load("player.name", default: "")
 let score: number = load("player.score", default: 0)
-let visits = load "visits", default: 0             // compact form
+let nickname = load("player.nickname")             // null when the key holds no value
+let level = load "level", default: 1               // compact form
 ```
 
-`load` evaluates its key first. When the key exists, it returns the stored value with its stored TeaseScript type
-without evaluating the default. When absent, it evaluates and returns the default, or returns `null` without one.
+`load` evaluates its key first. When the key holds a value that fits the key's type, if it has one, `load` returns a
+copy without evaluating the default. Otherwise it evaluates and returns the default, or returns `null` without one.
 `load` never writes: the default is not stored. Only `save` creates or changes a stored value, apart from the Player's
-Debug storage editor, a debugging tool whose edits the next `load` returns (see `RUNTIME.md`, Script storage). An
-explicit target type may determine the intended numeric type of a literal default, as in the `number` example above.
+Debug storage editor, a debugging tool whose edits the next `load` reads like any stored value (see `RUNTIME.md`, Script
+storage).
+
+A key written as one string literal without `${...}`, also in parentheses, is one storage place for the whole script, in
+every file, function, and handler. It keeps one type, like a variable ([§12](#12-variable-declarations),
+[ADR 0021 §6](../decisions/0021-static-types.md)): the values saved under it decide the type, and a default must fit
+that type, or decides it when no save does. Saving `null`, `delete`, and a value whose type the compiler cannot know
+decide nothing. Saving a value of another type is a compile error. To keep values of different types under one key on
+purpose, the save or default that decides the key is a variable with a declared union type:
+
+```text
+let level: integer | string = 5
+save level as "level"      // "level" holds integer | string
+save "expert" as "level"   // valid
+```
+
+For a key of type `T`, `load("k")` without a default is a `T?`, because the key may not have been saved yet, also after
+a `save` in the script. With a default that cannot be `null`, it is a `T`. Using a value that may be missing where a
+value is required is a compile error that names the fix:
+
+```text
+save 3 as "visits"
+let visits = load("visits")
+say visits + 1   // Storage key "visits" may not have been saved yet; give load(…) a default: or check != null first.
+```
+
+A key computed at runtime, such as `"toys.${id}"`, `"toys." + id`, or a variable, has no type for the compiler, and its
+`load` has an unknown type ([§13](#13-explicit-types)).
+
+A stored value that does not fit its key's type, such as a value that an older version of the script saved, is not
+returned. `load` reports developer warning `TSW016`, which names the key and both types, and continues as if the key
+held no value: it evaluates and returns the default, or returns `null`. The stored value stays as it is, and each such
+`load` warns again until a `save` replaces it. A computed key that equals a key with a type is read the same way, and
+its `save` of a value that does not fit raises runtime error `TSR058`, as does a `save` or default whose value the
+compiler cannot know and that does not fit.
 
 The bounded form takes the key and an optional named `default:` inside `()`, where line breaks follow the rules of
 other arguments. Its `)` ends the `load`, also with a space before `(`, so the result combines directly with another
@@ -3164,9 +3207,10 @@ Rules:
 
 - The engine preserves the stored TeaseScript type; scripts do not serialize every value to plain text manually.
 - The physical database representation is an implementation detail and may use typed columns, tagged JSON, or another typed serialization.
-- A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)), or runtime error
-  `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing key, so
-  `let level: integer = load "level"` needs `integer?` or a default when the key may be missing.
+- A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)); the place decides nothing
+  for the key. The compiler checks this where it knows the key's type; otherwise, and for parts of a value whose type it
+  cannot know, runtime error `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing
+  key, so `let level: integer = load("level")` needs `integer?` or a default.
 - Persistent plain data is storable. Timer, media, and message handles and speaker references exist only in the
   current session and cannot be saved, including when nested inside lists or objects (`TSR055`); save a message's
   `text` instead. Nested `null` is allowed.
@@ -3183,7 +3227,7 @@ Rules:
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, and date
 and time values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a
-permanent language limit. The compiler rejects a default whose type is known and does not match. Replacement-value
+permanent language limit. The compiler rejects a default whose type is known and does not fit. Replacement-value
 recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
@@ -3757,10 +3801,11 @@ A valid string reference may replace the missing value.
 ### Invalid number from stored or external data
 
 ```text
-let duration: number = load "settings.duration", default: 0
+let duration: number = load("settings.duration", default: 0)
 ```
 
-A valid number may replace an invalid stored value.
+A valid number may replace an invalid stored value. For a key with a type, `load` already uses its default instead
+([§25](#25-persistent-storage-and-keys)).
 
 ### Invalid list index
 
@@ -4817,6 +4862,7 @@ pow
 mod
 clamp
 pi
+debugMode
 sum
 average
 median
@@ -4893,6 +4939,20 @@ getPlayerHistory
 ```
 
 This protected list may grow when new engine APIs are added. Editor autocomplete should distinguish grammar keywords, protected built-ins, and user-declared identifiers.
+
+### Debug mode
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`debugMode` is a protected, read-only `boolean`: `true` while the host runs the session in Debug, otherwise `false`. A
+script reads it like a variable, and a host cannot configure a global or builtin of that name. The host may change it
+between two statements, so each read gives the current value.
+
+```text
+let answer = askText "Type the line exactly"
+if answer == line or debugMode {
+    completed = true
+}
+```
 
 ## 39. Rejected and reserved syntax
 **Status:** Accepted

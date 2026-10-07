@@ -420,6 +420,7 @@ function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
     suspendedAction: interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
     cameraView: snapshot.cameraView,
     queuedBlocks: snapshot.pendingTimerHandlers.length,
+    debugMode: snapshot.debugMode,
   };
 }
 

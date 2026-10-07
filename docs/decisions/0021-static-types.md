@@ -1,7 +1,7 @@
 # ADR 0021 — Static types: enforcement, unions, type tests, and narrowing
 
 **Status:** Accepted
-**Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04)
+**Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07
 
 ## Context
 
@@ -51,9 +51,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    (ADR 0022 §6) come before all of this, in the order a session sets them up. A project checks its files one after
    another in project order, `main.tease` first and then the others by path, each in the order above; a global
    function's body is checked when a call in any file first needs its result, otherwise after its own file's top level.
-7. A value whose type the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is not
-   rejected at compile time. When it is stored in a place of known type, it is checked at runtime with a
-   source-located error.
+7. A value whose type the compiler cannot know, such as storage under a key without a type (rule 6.5), host data, or an
+   unknown parameter, is not rejected at compile time. When it is stored in a place of known type, it is checked at
+   runtime with a source-located error.
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
    type that does not support it is a compile error, because it would fail at runtime. Type checks apply to all code,
    reachable or not. Conditions and the operands of `and`, `or`, and `not` must be `true` or `false`; there is no
@@ -91,7 +91,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the program-control types
    `range`, `speaker`, `timer`, and `media`.
 4. Unions are usable everywhere a type is allowed. The compiler never infers a union; mixing types without a declared
-   union stays an error whose message points to the union form.
+   union stays an error whose message points to the union form. A storage key holds a union only by rule 6.3.
 5. An operation on a union is allowed when every member supports it with a compatible result. Otherwise the error
    names the test the author needs, for example `'reward' may be text (string). Check it first: if reward is integer
    { ... }`.
@@ -126,9 +126,37 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    assignment inside the loop cancels narrowing at its start. A function or handler body does not inherit narrowed
    facts from the code around it.
 
+### 6. Storage keys
+
+1. A storage key written as one string literal without `${...}`, also in parentheses, as in `save level as "level"` and
+   `load("level", default: 1)`, names one place for the whole script: every file, function, and handler, reachable or
+   not. Keys with the same complete text are the same place. A key computed at runtime, such as `"toys.${id}"`,
+   `"toys." + id`, or a variable, names no place for the compiler: its saves decide nothing, and its loads have an
+   unknown type.
+2. The key keeps one type by rule 1, decided by the values saved under it in checking order (rule 1.6). Saving `null`,
+   `delete`, and a value whose type the compiler cannot know decide nothing; a saved `T?` contributes `T`. Saving a
+   value of another type is an error that names the line that decided the key, and its file when that is another one.
+3. A key holds a union only when the save or default that decides it (rule 6.4) is a variable or parameter with a
+   declared type, or the result of a function with a declared result type. The key then takes that declared type
+   without its `null`, also where narrowing knows a narrower type there (rule 5.2), and the type stays strict like any
+   declared type. A later union does not widen a key that is already decided. Mixing types without such a deciding
+   value is an error that names this fix.
+4. Saves decide before `load` defaults, whatever their order. A default must fit what the saves decide; where they
+   decide nothing, or leave a part open, such as the elements of a saved `[]`, the defaults decide it in checking
+   order. An inferred `integer` widens to `number` by rule 1.2 when a save or default stores a non-whole number. The
+   place that receives a `load` result checks it but decides nothing for the key.
+5. `load(key)` of a key of type `T` is a `T?`, because the key may not have been saved yet, also after a `save` in the
+   script. With a default that cannot be `null`, it is a `T`. Using a `T?` result where a value is required is an error
+   that names both fixes: `Storage key "x" may not have been saved yet; give load(…) a default: or check != null
+   first.` A key that no save or default gives a type loads a value of unknown type.
+6. Stored data can come from an older version of the script, a debugging edit, or an import. Every `load` of a key with
+   a type checks the stored value at runtime; a value that does not fit is treated as absent for that `load`, with a
+   developer warning, and stays stored (V30 §25).
+
 ## Consequences
 
-- Scripts that mixed types silently are rejected with messages that name the fix; existing examples are corrected.
+- Scripts that mixed types silently are rejected with messages that name the fix; existing examples are corrected. This
+  includes values of different types saved under one storage key.
 - Beginners keep writing untyped scripts. Types and tests appear only when an author opts into unions or needs to check
   external data.
 - The instruction plan carries type descriptions for the runtime checks and type tests.
@@ -143,3 +171,10 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 - Requiring a type for `let x = null` and empty lists: explicit, but it makes beginners write types.
 - Keeping an inferred `integer` variable an `integer` after its first value: the plain first-value rule, but
   `let speed = 1` followed by `speed = speed * 1.5` would be an error that beginners do not expect.
+- Storage keys of unknown type: no new syntax, but every loaded value needs a test or a runtime check, and a key that
+  holds an integer in one place and text in another stays hidden until a player reaches it.
+- A key declaration, a typed `save`, or a generic `load`: explicit, but new syntax for what the saves already show.
+- Deleting or converting a stored value that does not fit: keeps storage clean, but destroys data that an older version
+  of the script saved and an author may still want to migrate.
+- Typing families of computed keys by prefix, such as `"toys.${id}"`: prefixes overlap and computed keys can equal a
+  literal key, so a family needs its own explicit form rather than a guessed naming convention.
