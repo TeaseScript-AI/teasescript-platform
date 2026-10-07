@@ -453,12 +453,14 @@ export class RuntimeSession {
 
   /**
    * An independent session with a trusted copy of this session's state, which keeps every record's property order and
-   * so its checkpoint bytes. It shares only the immutable plan and deeply frozen temporal contexts.
+   * so its checkpoint bytes. It shares only the immutable plan and deeply frozen temporal contexts, and keeps each of
+   * this session's capabilities that `options` do not give.
    */
   public fork(options?: RuntimeSessionOptions): RuntimeSession {
     return this.#read((state) => {
+      const given = options === undefined ? undefined : sessionCapabilities(options);
       const capabilities =
-        (options === undefined ? undefined : sessionCapabilities(options)) ?? this.#capabilities;
+        given === undefined ? this.#capabilities : { ...this.#capabilities, ...given };
       return new RuntimeSession(CREATE, this.#plan, copyPlainData(state, "fork"), capabilities);
     });
   }

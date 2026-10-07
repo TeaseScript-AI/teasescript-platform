@@ -428,20 +428,26 @@ test("a fork keeps the property order of an imported snapshot, and an ended sess
     );
 });
 
-test("a fork keeps its parent's capabilities unless its options give others", () => {
-  const plan = compileValidPlan("let value = answer()\nsay value, instant\nexit", {
-    builtins: ["answer"],
-  });
+test("a fork keeps each of its parent's capabilities that its options do not give", () => {
+  const plan = compileValidPlan(
+    'let value = answer()\nlet pick = ["first", "last"].random\nsay "${value} ${pick}", instant\nexit',
+    { builtins: ["answer"] },
+  );
+  const fixed = (value: number) => ({ next: () => value });
   const parent = createRuntimeSession(plan, createImmediatePacingRuntimeSnapshot(plan), {
-    capabilities: { builtins: { answer: () => 42 } },
+    capabilities: { builtins: { answer: () => 42 }, random: fixed(0) },
   });
   const said = (session: RuntimeSession) =>
     session.run().events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
   // EVIDENCE: fixture: an explicit undefined, which an untyped caller may pass, is still no capabilities.
   const explicitlyNone = { capabilities: undefined } as never;
-  for (const options of [undefined, {}, explicitlyNone])
-    assert.deepEqual(said(parent.fork(options)), ["42"]);
-  assert.deepEqual(said(parent.fork({ capabilities: { builtins: { answer: () => 7 } } })), ["7"]);
+  for (const options of [undefined, {}, explicitlyNone, { capabilities: {} }])
+    assert.deepEqual(said(parent.fork(options)), ["42 first"]);
+  // Options replace only the capabilities they give.
+  assert.deepEqual(said(parent.fork({ capabilities: { builtins: { answer: () => 7 } } })), [
+    "7 first",
+  ]);
+  assert.deepEqual(said(parent.fork({ capabilities: { random: fixed(0.99) } })), ["42 last"]);
 });
 
 test("the other host operations, projections, and inspection give the snapshot API's results", () => {

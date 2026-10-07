@@ -975,9 +975,9 @@ operations stay as they are.
   usable; the session reads each option once, so the value it checks is the value it uses. A typed refusal, such as
   `invalidPayload`, changes nothing.
 - **Forks.** `fork()` returns an independent session with a trusted copy of the state, which keeps the property order
-  and therefore the checkpoint bytes, and shares only the immutable plan and deeply frozen temporal contexts. It uses
-  the parent's capabilities unless its options give others; an injected `random` source stays external state that a
-  fork does not copy.
+  and therefore the checkpoint bytes, and shares only the immutable plan and deeply frozen temporal contexts. It keeps
+  each of the parent's capabilities, `builtins` and `random`, that its options do not give; an injected `random` source
+  stays external state that a fork does not copy.
 - **Traces.** A host passes the same `RuntimeDebugContext` to a session's successive operations as to successive
   snapshot results; an operation on another session, such as a fork, starts an `attach` epoch.
 
