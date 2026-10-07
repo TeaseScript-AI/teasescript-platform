@@ -186,6 +186,7 @@ export type HelperName =
   | "listPart"
   | "listMinus"
   | "booleanText"
+  | "button"
   | "loadInteger"
   | "loadFloat"
   | "textMinus"
@@ -263,6 +264,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "loadFirstTrue",
   "loadInteger",
   "loadFloat",
+  "button",
   "indexOf",
   "count",
   "concat",
@@ -1081,6 +1083,34 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
   // zero, and read null for a missing key. The stored value takes the parsed form, so the result is the storage read
   // itself, whose type the compiler checks when it is stored, as for any `load`.
+  // Legacy showButton() with a timeout known only at runtime: the seconds until the click, at most the timeout; a zero
+  // timeout kept the button for its 10 ms safety margin and gave 0, where TeaseScript rejects a zero timeout (#531).
+  button: {
+    name: "sexscriptLegacyShowButton",
+    build: () =>
+      fn(
+        "sexscriptLegacyShowButton",
+        ["text", "timeout"],
+        [
+          ifS(bin("==", v("timeout"), lit(0)), [
+            {
+              kind: "showButton",
+              label: v("text"),
+              timeout: { kind: "duration", value: 10, unit: "ms" },
+              span: null,
+            },
+            ret(lit(0)),
+          ]),
+          ret(
+            bin(
+              "/",
+              { kind: "button", label: v("text"), timeout: v("timeout") },
+              { kind: "duration", value: 1, unit: "s" },
+            ),
+          ),
+        ],
+      ),
+  },
   loadInteger: {
     name: "sexscriptLegacyLoadInteger",
     build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),

@@ -6108,6 +6108,8 @@ function lowerCallStatement(
       const legacyTimeout = buttonTimeout(args[1], node, context);
       if (legacyTimeout === null)
         return [unsupportedStatement(context, node, "SX_BUTTON_TIMEOUT", NEGATIVE_TIMEOUT)];
+      if (legacyTimeout === "computed")
+        return [{ kind: "expression", expression: helperCall("button", [label, timeout!]), span }];
       return [{ kind: "showButton", label, timeout: legacyTimeout ?? timeout, span }];
     }
     case "showPopup":
@@ -14530,6 +14532,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         args.length === 2 ? buttonTimeout(call.arguments[1], node, context) : undefined;
       if (legacyTimeout === null)
         return unsupportedExpression(context, node, "SX_BUTTON_TIMEOUT", NEGATIVE_TIMEOUT);
+      if (legacyTimeout === "computed") return helperCall("button", [args[0]!, args[1]!]);
       if (legacyTimeout !== undefined) {
         // A zero timeout always returned 0 seconds, after the button's 10 ms.
         const root = context.statementRoot;
@@ -14719,19 +14722,21 @@ function buttonTimeout(
   timeoutNode: AstNode | undefined,
   node: AstNode,
   context: LowerContext,
-): IrExpression | null | undefined {
+): IrExpression | null | undefined | "computed" {
   if (timeoutNode === undefined) return undefined;
   const value = staticNumber(timeoutNode, context);
   if (value !== undefined && value < 0) return null;
   if (value === undefined) {
+    // A timeout known only at runtime may be zero, which TeaseScript rejects (#531): a helper keeps the legacy button.
+    context.syntheticHelpers.add("button");
     addDiagnostic(
       context,
-      "SX_BUTTON_TIMEOUT",
-      "warning",
-      "With a zero timeout the legacy button stayed visible for its 10 ms safety margin; TeaseScript rejects a timeout that is not positive (#531), so this button stops the script if its computed timeout is zero or negative.",
+      "SX_BUTTON_COMPUTED_TIMEOUT",
+      "info",
+      "The legacy button with a timeout known only at runtime goes through a helper that keeps a zero timeout's 10 ms button and result of 0 seconds; a negative timeout stops the script, as it did in legacy.",
       node.span,
     );
-    return undefined;
+    return "computed";
   }
   if (value !== 0) return undefined;
   addDiagnostic(

@@ -1,3 +1,10 @@
+function sexscriptLegacyShowButton(text, timeout) {
+  if timeout == 0 {
+    showButton text, timeout: 10 ms
+    return 0
+  }
+  return (showButton text, timeout: timeout) / 1 s
+}
 function sexscriptLegacyTruth(value) {
   if value is boolean {
     return value
@@ -57,4 +64,9 @@ function check(quickValue = reaction < 15) {
   }
 }
 check()
+// A timeout known only at runtime may be zero, where the legacy button stayed for 10 ms and gave 0 seconds.
+let none = randomInteger(0..1)
+sexscriptLegacyShowButton("Now", none)
+let quickest = sexscriptLegacyShowButton("Faster", none)
+say "You took ${quickest} seconds."
 exit

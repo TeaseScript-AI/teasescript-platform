@@ -270,9 +270,10 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` also holds a timestamp difference
   and is shown in text. A zero timeout kept the legacy
   button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`) when the zero is
-  known before the run (a literal, arithmetic on literals, or a variable assigned one such value once); a computed
-  timeout gets a note, since it fails in TeaseScript (#531) if it is zero or negative (6 corpus sites), and a negative
-  one, which failed in legacy too, is reported.
+  known before the run (a literal, arithmetic on literals, or a variable assigned one such value once); a timeout
+  known only at runtime goes through a helper that does the same when it is zero and stops the script when it is
+  negative, as legacy did (`sexscriptLegacyShowButton(text, timeout)`, `SX_BUTTON_COMPUTED_TIMEOUT`), and a negative
+  timeout known before the run is reported.
 - Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
   player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
