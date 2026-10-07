@@ -1158,6 +1158,14 @@ export function clockDifferences(
   return found;
 }
 
+/** Whether an expression reads the clock itself: calls a getter of the current date or time. */
+export function callsClock(expression: unknown): boolean {
+  if (Array.isArray(expression)) return expression.some(callsClock);
+  if (!isRecord(expression)) return false;
+  if (expression.kind === "call" && CLOCK_GETTERS.has(calleeName(expression) ?? "")) return true;
+  return Object.entries(expression).some(([key, item]) => key !== "span" && callsClock(item));
+}
+
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */
 export function keyMatcher(pattern: string): (key: string) => boolean {
   if (!pattern.includes(KEY_PLACEHOLDER)) return (key) => key === pattern;

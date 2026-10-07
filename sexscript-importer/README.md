@@ -320,12 +320,14 @@ work (attempts, next sessions, and expansions in the first place) takes at most 
 
 With `--later`, time only goes forward and is play, as for a player who comes back later. A later session starts
 after the wall clock where the state it continues stands: a minute later, and for a package that reads the clock also
-a day later, and a session chain keeps the gap of the session it continues. For a condition that reads the clock, the
-player continues later (a `later` input: an hour, an evening, a night, a morning, a day, two or three days, a week, 40
-days, or 400 days after the clock where the state stands) just before the step that evaluated it, or a step before
-that, and the rest of that path follows; or that session starts that much later. These steps are play, and a path
-records them: its `later` inputs and each session's start clock. A gap must be positive. Only a session that starts
-before the clock where the state it continues stands, such as one of an old corpus entry, is a clock start.
+a day later, and a session chain keeps the gap of the session it continues. For a condition that reads the clock
+itself, the player continues later (a `later` input: an hour, an evening, a night, a morning, a day, two or three days,
+a week, 40 days, or 400 days after the clock where the state stands) just before the step that evaluated it, or a step
+before that, and the rest of that path follows; for one that reads the clock through a variable, also just before that
+step, or that session starts that much later and its path follows. Like clock attempts, these give their states no
+first place. These steps are play, and a path records them: its `later` inputs and each session's start clock. A gap
+must be positive. Only a session that starts before the clock where the state it continues stands, such as one of an
+old corpus entry, is a clock start.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with

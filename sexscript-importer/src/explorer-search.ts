@@ -9,6 +9,7 @@ import {
   distance,
   goalsFor,
   keyMatcher,
+  callsClock,
   unreachableInstructions,
   type Goal,
   type PlanDiagnostic,
@@ -850,6 +851,8 @@ interface Attempt {
   readonly start: Start | null;
   readonly inputs: readonly ExplorerInput[];
   readonly chain?: string;
+  /** With forward time, an attempt that continues later: like a clock attempt, its states take no first place. */
+  readonly later?: true;
 }
 
 /** A variable whose closeness to a comparison steers the search toward a target. */
@@ -1333,9 +1336,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const work = session.operations;
     // A chain's next session comes from the storage it reached, so its states take no first place of their own.
     const lead: Lead | null =
-      attempt.chain === undefined
-        ? { remaining: ATTEMPT_EXPANSIONS, target: attempt.target }
-        : null;
+      attempt.chain !== undefined
+        ? null
+        : { remaining: attempt.later === true ? 0 : ATTEMPT_EXPANSIONS, target: attempt.target };
     let node: Node;
     let runtime: Runtime | null;
     if (attempt.start !== null) {
@@ -1577,11 +1580,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       } else if (source.kind === "clock" && later) {
         if (timed) continue;
         timed = true;
-        // The player continues later just before the step that evaluated the condition, or a step before it (the
-        // clock may have been read there), and the rest of the path follows; or the whole session starts later.
+        // A condition that reads the clock itself: the player continues later just before the step that evaluated it, or
+        // a step before. One that reads it through a variable, which may have been set when the session started: also
+        // the whole session starts later, and its path follows.
+        const direct = callsClock(
+          instructions[target.instruction]!.condition ??
+            instructions[target.instruction]!.expression,
+        );
         const chain = witnessNode === null ? [] : ancestry(nodes, witnessNode);
         if (witness?.input != null)
-          for (let back = 0; back <= LATER_BACK && back < chain.length; back += 1) {
+          for (let back = 0; back <= (direct ? LATER_BACK : 0) && back < chain.length; back += 1) {
             const at = chain.length - 1 - back;
             for (const gap of LATER_GAPS)
               laterPlan.push({
@@ -1589,15 +1597,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
                 from: chain[at]!.id,
                 start: null,
                 inputs: [{ kind: "later", afterMs: gap }, ...fullPath.slice(at, at + MAX_SUFFIX)],
+                later: true,
               });
           }
-        if (witness !== undefined && fullPath.length <= MAX_SUFFIX)
+        if (
+          witness !== undefined &&
+          (!direct || witnessNode === null) &&
+          fullPath.length <= MAX_SUFFIX
+        )
           for (const gap of LATER_GAPS)
             laterPlan.push({
               target: code,
               from: null,
               start: laterStart(witnessStart.origin, witnessStart.storage, gap),
               inputs: fullPath,
+              later: true,
             });
       } else if (source.kind === "clock") {
         for (const wallClockMs of CLOCK_VARIANTS) {
