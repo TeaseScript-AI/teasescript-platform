@@ -1577,6 +1577,14 @@ test(
           'ratio = loadFloat("game.ratio")',
           "if (ratio == null) ratio = unset",
           'if (ratio == null) show("no ratio")',
+          "def reads = 0",
+          'def keyOf = { reads++; return "game.points" }',
+          "def counted = loadInteger(keyOf())",
+          "if (counted == null) counted = 1 + 1",
+          'def total = loadInteger("game.total")',
+          'def version = loadFloat("game.version")',
+          "if (version == null) version = total",
+          'show("" + counted + " " + reads + " " + (version + 1))',
           "",
         ].join("\n"),
       );
@@ -1601,7 +1609,7 @@ test(
         note(step.events);
       }
       assert.equal(step.snapshot.status, "halted", tease);
-      assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5 100", "no ratio"], tease);
+      assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5 100", "no ratio", "100 1 6.1"], tease);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -45,16 +45,34 @@ export function withParsedLoads(
       helpers.add(helper);
       return helperCall(helper, [key, defaultValue]);
     }
+    helpers.add(helper);
     // A value that may fail or have an effect runs only for a missing key, as the plain read's default does, so the
     // helper gets that read: `sexscriptLegacyLoadInteger("k", load("k", default: 1 / count))`. A key that computes
-    // stays read once, and its value unparsed.
-    if (computes(key) || hasEffect(key)) return next;
-    helpers.add(helper);
+    // something, read twice so, is computed once before its statement (keyed); a read elsewhere, which no legacy
+    // read-then-default code gives, gets the value.
+    if (!repeatable(key)) return helperCall(helper, [key, defaultValue]);
     const { integer: _integer, number: _number, ...raw } = next;
     return helperCall(helper, [key, raw]);
   };
+  let keys = 0;
+  const keyed = (item: IrStatement): IrStatement[] => {
+    if ((item.kind !== "let" || item.global === true) && item.kind !== "assign") return [item];
+    const read = storedRead(item.value);
+    if (
+      read === null ||
+      (read.integer !== true && read.number !== true) ||
+      read.defaultValue === undefined ||
+      settled(read.defaultValue) ||
+      repeatable(read.key)
+    )
+      return [item];
+    keys += 1;
+    const name = `sexscriptLegacyKey${keys}`;
+    const key: IrStatement = { kind: "let", name, value: read.key, span: item.span };
+    return [key, { ...item, value: withKey(item.value, { kind: "variable", name }) }];
+  };
   const block = (items: IrStatement[]): IrStatement[] =>
-    items.map((item) => {
+    items.flatMap(keyed).map((item) => {
       const statement = mapOwnExpressions(withNestedBlocks(item, block), parse);
       return statement.kind === "function"
         ? {
@@ -68,6 +86,27 @@ export function withParsedLoads(
         : statement;
     });
   return block(statements);
+}
+
+/** The read a statement stores, also through a conversion such as `toInteger(read)`; null for another value. */
+function storedRead(value: IrExpression): Extract<IrExpression, { kind: "load" }> | null {
+  if (value.kind === "load") return value;
+  return value.kind === "call" && value.positional.length === 1
+    ? storedRead(value.positional[0]!)
+    : null;
+}
+
+/** The stored value with the key of its read (storedRead) replaced. */
+function withKey(value: IrExpression, key: IrExpression): IrExpression {
+  if (value.kind === "load") return { ...value, key };
+  return value.kind === "call"
+    ? { ...value, positional: [withKey(value.positional[0]!, key)] }
+    : value;
+}
+
+/** Whether evaluating the value twice in a row gives the same value without an effect. */
+function repeatable(value: IrExpression): boolean {
+  return !computes(value) && !hasEffect(value);
 }
 
 /** Whether evaluating the value can neither fail nor have an effect: a literal, a variable, or a list of those. */

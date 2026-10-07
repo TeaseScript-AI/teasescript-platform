@@ -2014,12 +2014,12 @@ export function expressionType(
     }
     case "load":
       // A read with a default has the default's type (#541); without one, a missing key reads null. A legacy
-      // loadFloat() read with a default parses a number (withParsedLoads), or gives the default, which may be null
-      // where its type is not known.
+      // loadFloat() read with a default parses a number (withParsedLoads), or gives the default, which stays open where
+      // it may be null, as a read without a default does.
       if (value.defaultValue === undefined) return { kind: "optional", value: UNKNOWN };
       if (value.number !== true) return type(value.defaultValue);
       return ["null", "optional", "unknown"].includes(type(value.defaultValue).kind)
-        ? { kind: "optional", value: scalar("number") }
+        ? { kind: "optional", value: UNKNOWN }
         : scalar("number");
     case "choice":
       // Numeric choice values are integers (#515).
