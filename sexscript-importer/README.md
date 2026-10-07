@@ -246,49 +246,88 @@ them at the top.
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] <unit-dir>... --out <dir>
-node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --error)
+node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
-`explore` plays each package headlessly in the real runtime (`src/explorer.ts`), without the Player, through every
-branch it can reach within the budget, and replaces playing converted packages by hand to find crashes. Each pending
-action is a branch point. The options are every button and choice option, a form submitted with its starting values or
-cancelled where it offers that, and the default answer of a typed ask with
-boundary values of its type: `0`, `1`, `-1`, `1000000` (and `0.5` for `askNumber`), the text `x`, and dates and times
-at both ends of a day or year. Each constant that the code compares with near the ask adds a candidate, or `c - 1`,
-`c`, and `c + 1` for a number. A button whose result the script keeps (`(showButton …) / 1 s`) can also be pressed
-after the player thinks for just over each compared number of seconds (60 s without one). Waiting for the next
-deadline (a timer, a timeout, or the end of awaited media), and each shown permanent button, are options too. Media
-loads succeed with one second per pass, `takePhoto` finds no camera, `askImage` gets one stored image, pacing is
-instant, and the clock starts at 2026-10-02 12:00 UTC with empty storage.
+`explore` plays each package headlessly in the real runtime, without the Player, through every branch it can reach
+within the budget, and replaces playing converted packages by hand to find crashes. `src/explorer.ts` runs the inputs,
+`src/explorer-search.ts` searches, and `src/explorer-analysis.ts` reads the plan for directed search. Each pending
+action is a branch point. The options are every button and choice option; for a form, its starting values, each toggle
+switched (and all on, all off), each other option of a cycle, each typed field at its bounds, and cancel where the
+form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1`, `1000000` (and
+`0.5` for `askNumber`), the text `x`, and dates and times at both ends of a day or year. Each constant that the code
+compares with near the ask adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. A button whose result the
+script keeps (`(showButton …) / 1 s`) can also be pressed after the player thinks for just over each compared number
+of seconds (60 s without one). Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
+each shown permanent button, are options too. Media loads succeed with one second per pass, `takePhoto` finds no
+camera, `askImage` gets one stored image, pacing is instant, and the clock starts at 2026-10-02 12:00 UTC. The first
+session starts with empty storage. A later session starts from the storage an explored state left, as the player's
+next session would after playing to that point: a few from completed sessions, and chains toward stored values that
+conditions need (below). The explorer never makes up a stored value.
 
 States are deduplicated by a hash of the snapshot that leaves out what no script can observe: event sequence numbers,
 the next free IDs, and the last settlement record. The runtime's own IDs (actions, scopes, call frames, timers, media,
 buttons) are renumbered by rank, because only their equality and order matter. The clock and the random state stay
-in. The search first expands states whose step reached new instructions, then states that look new apart from clock,
-random state, and settled handles (their loop key), and then the repeats, least repeated first; within each group
-the newest state goes first. It stops when every state is expanded, or at the time or state budget.
+in. The search first expands directed states (below), then states whose step reached new instructions in any
+session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
+loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
+first. Waiting states keep their snapshots
+as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
+when every state is expanded and directed search has nothing left to try, or at the time or state budget.
 
-Coverage counts executed plan instructions and maps them to the lines they start on. Steps run instruction by
-instruction with `executeInstruction` to record them. After 200 instructions in a row that were all reached before,
-a step finishes with `run` and the rest of the product's instruction budget. What the step executes after that point
-is not recorded: its lines can show as unvisited, and its conditions as left only one way although play took both
-(for example the code after a long setup loop). Each operation copies and checks the whole snapshot, so this
-recording is what limits the speed on large packages, and on packages with large lists or dicts in their state.
+Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
+the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
+stored value (also by a key template such as `"script${i}.time"`), the clock, or a variable the code assigns. Its
+comparisons with constants give the values that take the missed way. An ask is answered again with them on the path of
+the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
+that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
+that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
+storage closest to it and plays again the path that led there, to raise the value once more, for as long as each
+session gets closer (100 sessions at most). When no explored session gets there, the way stays `unknown` with the
+reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock the player continues at
+other wall clock times (times of day, weekdays, later dates) before that step, as a real player's time varies; a step
+after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
+condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
+share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
+work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations,
+which measure what steps cost.
+
+Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
+trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
+`instructionTrace: true`, and the condition ways come from the trace's branch edges. A build without the trace falls
+back to executing instruction by instruction, which records nothing after 200 known instructions in a row.
+`TEASESCRIPT_DIST` names another repository build to load the compiler and runtime from, for comparisons. Each line has
+a label: `play` when a play step executed it, in any session; `clock` when only steps after the wall clock was set did;
+`unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control
+flow in which a constant condition takes only its one way; and `unknown` otherwise. A condition is constant when it is a
+literal, when the compiler proves it always true or false (`TSV046`), or when it reads only stored keys whose values
+this package fixes: a key no `save` of the package writes is never stored (such as legacy profile keys that other
+scripts wrote), and a key that every save writes as a literal holds one of those literals or nothing. Each
+unreachable range and branch states its reason. When an instruction that ran is found unreachable, the analysis missed a way and
+no line is labelled `unreachable` (`staticContradictions`).
 
 The report `<out>/<unit>.json` has these parts:
 
-- per file: the lines that hold instructions, the visited ones, the percentage, and the unvisited line ranges, each
-  with a `reach` label (only `unknown` so far; `seededState` and `unreachable` are reserved);
-- each condition and loop that play reached but left only one way, with its source, the missed way, and its first
-  line: the targets for a directed search;
-- one crash per runtime failure code and source span, with the shortest input list found from the start;
+- for a unit that compiles, a `catalog` block for the importer catalog's Explorer column: `coveragePercent` by play,
+  the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`) and `firstTrap` (`location`)
+  or `null`, and `reach`, the coverable lines by label (`play`, `clock`, `unreachable`, `unknown`);
+- per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
+  their label;
+- each condition and loop that play reached but left only one way, with its source, the missed way, its first line,
+  what it depends on, the directed attempts, its label, and the reason, when known;
+- `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
+  directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
+- one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
+  there is), and whether that path set the clock;
 - the traps;
 - the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out.
 
-`summary.md` has one table row per unit. `--replay` plays the input list of a crash or trap again with the run's seed,
-prints the transcript, and for a crash exits 0 only when the same failure returns. A runtime operation that throws,
-such as a runtime that rejects a snapshot it produced (`TSR101`), is no crash of the package: the report counts these
-under `search.engineErrors` with the input list of the first, which `--error` replays.
+A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
+and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
+`--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
+session, and for a crash exits 0 only when the same failure returns. A
+runtime operation that throws, such as a runtime that rejects a snapshot it produced (`TSR101`), is no crash of the
+package: the report counts these under `search.engineErrors` with the path of the first, which `--error` replays.
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its

@@ -1,18 +1,20 @@
 /**
  * Explores packages headlessly: plays each package in the real runtime through every branch it can reach within a
- * budget, and reports crashes, line coverage, and loops the player cannot leave. The search is described in
- * `src/explorer.ts`.
+ * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
+ * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>
- *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --error)
+ *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes.
  *
- * Every crash and trap has the input list from the start that reaches it, and so does the first input whose runtime
- * operation threw (an explorer or runtime problem, not a script failure). `--replay` plays it again with the seed of
- * the run, prints the transcript, and for a crash or error exits 0 only when the same failure or error comes back.
+ * Every crash, trap, and way directed search reached has the path from the start that reaches it (with its earlier
+ * sessions and start clock, if any), and so does the first input whose runtime operation threw (an explorer or
+ * runtime problem, not a script failure). `--replay` plays it again with the seed of the run, prints the transcript, and for a crash or
+ * error exits 0 only when the same failure or error comes back. The report of a unit that compiles also has a compact
+ * `catalog` block for the importer catalog's Explorer column.
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -22,13 +24,15 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { isRecord } from "../src/ast.ts";
 import { loadRepositoryPackageScanner } from "../src/compile-check.ts";
+import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
+import { explore, type ExploreResult } from "../src/explorer-search.ts";
 import {
-  explore,
+  EPOCH_MS,
   loadEngine,
   replay,
   type Engine,
-  type ExploreResult,
   type ExplorerInput,
+  type SessionPath,
 } from "../src/explorer.ts";
 import { packageContentHash } from "./catalog.ts";
 
@@ -64,11 +68,17 @@ async function main(args: string[]): Promise<void> {
       crash: { type: "string" },
       trap: { type: "string" },
       error: { type: "boolean", default: false },
+      way: { type: "string" },
       "no-summary": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
-    process.exitCode = await replayCommand(values.replay, values.crash, values.trap, values.error);
+    process.exitCode = await replayCommand(values.replay, {
+      crash: values.crash,
+      trap: values.trap,
+      way: values.way,
+      error: values.error,
+    });
     return;
   }
   const budgetSeconds = Number(values["budget-seconds"]);
@@ -86,7 +96,7 @@ async function main(args: string[]): Promise<void> {
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>\n" +
-        "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --error)\n",
+        "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
   }
@@ -127,7 +137,12 @@ async function main(args: string[]): Promise<void> {
       const settings = { budgetSeconds, maxStates, seed, explorer };
       const { header, result } = await exploreUnit(engine, scan, dir, settings);
       const file = path.join(out, `${header.unit}.json`);
-      const report = { ...header, ...(result === null ? {} : withReplayCommands(result, file)) };
+      const report = {
+        ...header,
+        ...(result === null
+          ? {}
+          : { catalog: catalogBlock(result), ...withReplayCommands(result, file) }),
+      };
       await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
       const seconds = Math.round((performance.now() - started) / 1000);
       process.stderr.write(`  ${oneLine(header, result)} (${seconds} s)\n`);
@@ -150,6 +165,8 @@ interface LoadedUnit {
   sources: { path: string; source: string }[];
   plan: Readonly<Record<string, unknown>> | null;
   errors: string[];
+  /** Every diagnostic with its source offsets, for the constant conditions the compiler proves. */
+  diagnostics: PlanDiagnostic[];
   contentHash: string;
 }
 
@@ -166,10 +183,21 @@ async function loadUnit(engine: Engine, scan: Scanner, dir: string): Promise<Loa
       const line = typeof span.line === "number" ? span.line + 1 : 0;
       return `${String(entry.path ?? "")}:${line} ${String(entry.code ?? "")} ${String(entry.message ?? "")}`;
     });
+  const diagnostics = records(compiled.diagnostics).map((entry) => {
+    const span = fields(entry.span);
+    return {
+      path: text(entry.path),
+      start: count(fields(span.start).offset),
+      end: count(fields(span.end).offset),
+      code: text(entry.code),
+      message: text(entry.message),
+    };
+  });
   return {
     sources: folder.sources,
     plan: isRecord(compiled.plan) ? compiled.plan : null,
     errors,
+    diagnostics,
     contentHash: packageContentHash(folder.sources),
   };
 }
@@ -201,6 +229,7 @@ async function exploreUnit(
       budgetMs: settings.budgetSeconds * 1000,
       maxStates: settings.maxStates,
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
+      diagnostics: unit.diagnostics,
     }),
   };
 }
@@ -242,18 +271,46 @@ function withReplayCommands(result: ExploreResult, file: string) {
           engineErrors.first === null ? null : { ...engineErrors.first, replay: command("error") },
       },
     },
+    directed: {
+      ...result.directed,
+      ways: result.directed.ways.map((way, index) => ({ ...way, replay: command("way", index) })),
+    },
     crashes: result.crashes.map((crash, index) => ({ ...crash, replay: command("crash", index) })),
     traps: result.traps.map((trap, index) => ({ ...trap, replay: command("trap", index) })),
   };
 }
 
+/**
+ * The compact view of an explored unit that the importer catalog shows in its Explorer column, in the shape the
+ * catalog reads: coverage by play, crashes (also those on a path that set the clock), traps, the first of each (a play
+ * crash when there is one), and the coverable lines by reach label. A unit that does not compile has no block; the
+ * catalog reads the rest of the report.
+ */
+function catalogBlock(result: ExploreResult) {
+  const crash = result.crashes.find((entry) => !entry.clock) ?? result.crashes[0];
+  const location = result.traps.flatMap((trap) => trap.locations)[0];
+  return {
+    coveragePercent: result.coverage.percent,
+    crashes: result.crashes.length,
+    traps: result.traps.length,
+    firstCrash:
+      crash === undefined
+        ? null
+        : { code: crash.code, path: crash.path, line: crash.line, message: crash.message },
+    firstTrap: location === undefined ? null : { location },
+    reach: result.coverage.reach,
+  };
+}
+
 function oneLine(header: ReportHeader, result: ExploreResult | null): string {
   if (result === null) return `does not compile (${header.compile.errors.length} errors)`;
-  const { coverage, search, endStates, crashes, traps } = result;
+  const { coverage, search, endStates, crashes, traps, directed } = result;
   return (
     `${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
     `${crashes.length} crashes, ${traps.length} traps, ` +
-    `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open`
+    `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
+    `directed ${directed.reached.play} play + ${directed.reached.clock} clock of ${directed.targets}, ` +
+    `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})`
   );
 }
 
@@ -323,8 +380,8 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     for (const crash of records(report.crashes)) {
       lines.push(
         `- Crash \`${text(crash.code)}\` at \`${text(crash.path)}:${count(crash.line)}:${count(crash.column)}\`: ` +
-          `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs; ` +
-          `\`${text(crash.replay)}\`)`,
+          `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs` +
+          `${crash.clock === true ? ", with the clock set" : ""}${records(crash.earlier).length > 0 ? `, in session ${records(crash.earlier).length + 1}` : ""}; \`${text(crash.replay)}\`)`,
       );
     }
     for (const trap of records(report.traps)) {
@@ -355,8 +412,24 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
           .join(", ")}`,
       );
     }
+    const reach = fields(coverage.reach);
     lines.push(
-      `- Branches reached but left only one way: ${records(coverage.unvisitedBranches).length}`,
+      `- Lines: ${count(reach.play)} play, ${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ` +
+        `${count(reach.unknown)} unknown`,
+    );
+    const directed = fields(report.directed);
+    const reached = fields(directed.reached);
+    const bySource = Object.entries(fields(directed.bySource))
+      .filter(([, value]) => count(fields(value).targets) > 0)
+      .map(
+        ([kind, value]) =>
+          `${kind} ${count(fields(value).reached)}/${count(fields(value).targets)}`,
+      )
+      .join(", ");
+    lines.push(
+      `- Directed search: ${count(reached.play)} play and ${count(reached.clock)} clock of ` +
+        `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
+        `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);
@@ -367,6 +440,24 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** The earlier sessions of a path read back from a report: none when absent, null when malformed. */
+function parseEarlier(value: unknown): SessionPath[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const sessions: SessionPath[] = [];
+  for (const entry of value) {
+    const inputs = isRecord(entry) ? parseInputs(entry.inputs) : null;
+    if (!isRecord(entry) || inputs === null) return null;
+    if (entry.wallClockMs !== undefined && typeof entry.wallClockMs !== "number") return null;
+    sessions.push(
+      typeof entry.wallClockMs === "number"
+        ? { inputs, wallClockMs: entry.wallClockMs }
+        : { inputs },
+    );
+  }
+  return sessions;
 }
 
 /** An input list read back from a report, or null when an input is malformed. */
@@ -396,9 +487,20 @@ function parseInput(value: unknown): ExplorerInput | null {
       return typeof value.text === "string" ? { kind: "text", text: value.text } : null;
     case "image":
       return { kind: "image" };
-    case "form":
-      return value.action === "submit" || value.action === "cancel"
-        ? { kind: "form", action: value.action }
+    case "form": {
+      if (value.action !== "submit" && value.action !== "cancel") return null;
+      if (value.fields === undefined) return { kind: "form", action: value.action };
+      if (!isRecord(value.fields)) return null;
+      const formFields: Record<string, number | string> = {};
+      for (const [id, field] of Object.entries(value.fields)) {
+        if (typeof field !== "number" && typeof field !== "string") return null;
+        formFields[id] = field;
+      }
+      return { kind: "form", action: value.action, fields: formFields };
+    }
+    case "clock":
+      return typeof value.wallClockMs === "number"
+        ? { kind: "clock", wallClockMs: value.wallClockMs }
         : null;
     case "wait":
       return typeof value.untilMs === "number" ? { kind: "wait", untilMs: value.untilMs } : null;
@@ -411,33 +513,51 @@ function parseInput(value: unknown): ExplorerInput | null {
   }
 }
 
-async function replayCommand(
-  file: string,
-  crash: string | undefined,
-  trap: string | undefined,
-  error: boolean,
-): Promise<number> {
+/** Which repro of a report to replay: one crash, trap, or reached way by index, or the first operation that threw. */
+interface ReplayChoice {
+  crash: string | undefined;
+  trap: string | undefined;
+  way: string | undefined;
+  error: boolean;
+}
+
+async function replayCommand(file: string, choice: ReplayChoice): Promise<number> {
+  const { crash, trap, way, error } = choice;
   const value: unknown = JSON.parse(await readFile(file, "utf8"));
   const report = fields(value);
-  const index = Number(crash ?? trap);
+  const index = Number(crash ?? trap ?? way);
   const thrown = fields(report.search).engineErrors;
   const target =
     crash !== undefined
       ? records(report.crashes)[index]
       : trap !== undefined
         ? records(report.traps)[index]
-        : error && isRecord(fields(thrown).first)
-          ? fields(fields(thrown).first)
-          : undefined;
+        : way !== undefined
+          ? records(fields(report.directed).ways)[index]
+          : error && isRecord(fields(thrown).first)
+            ? fields(fields(thrown).first)
+            : undefined;
   if (
-    [crash !== undefined, trap !== undefined, error].filter(Boolean).length !== 1 ||
+    [crash !== undefined, trap !== undefined, way !== undefined, error].filter(Boolean).length !==
+      1 ||
     target === undefined
   ) {
-    process.stderr.write("Name one existing --crash N, --trap N, or --error of the report.\n");
+    process.stderr.write(
+      "Name one existing --crash N, --trap N, --way N, or --error of the report.\n",
+    );
     return 2;
   }
-  const inputs = parseInputs(target.inputs);
-  if (inputs === null || typeof report.seed !== "number" || typeof report.dir !== "string") {
+  // A reached way keeps its path apart; a crash or trap has its inputs, earlier sessions, and clock at the top.
+  const repro = isRecord(target.repro) ? target.repro : target;
+  const inputs = parseInputs(repro.inputs);
+  const earlier = parseEarlier(repro.earlier);
+  const wallClockMs = typeof repro.wallClockMs === "number" ? repro.wallClockMs : EPOCH_MS;
+  if (
+    inputs === null ||
+    earlier === null ||
+    typeof report.seed !== "number" ||
+    typeof report.dir !== "string"
+  ) {
     process.stderr.write(
       "The report has no valid seed, unit folder, or input list for this replay.\n",
     );
@@ -451,7 +571,14 @@ async function replayCommand(
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
-  const replayed = replay(engine, unit.plan, report.seed, inputs);
+  earlier.forEach((session, index) =>
+    process.stdout.write(
+      `Session ${index + 1}: ${session.inputs.map(describeInput).join("; ") || "(no input)"}, then its storage starts the next\n`,
+    ),
+  );
+  if (wallClockMs !== EPOCH_MS)
+    process.stdout.write(`The last session starts at ${new Date(wallClockMs).toISOString()}\n`);
+  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
   const { steps, failure } = replayed;
   for (const step of steps) {
     if (step.input !== null) process.stdout.write(`> ${describeInput(step.input)}\n`);
@@ -490,7 +617,11 @@ function describeInput(input: ExplorerInput): string {
     case "image":
       return "give an image";
     case "form":
-      return input.action === "submit" ? "submit the form" : "cancel the form";
+      return input.action === "cancel"
+        ? "cancel the form"
+        : `submit the form${input.fields === undefined ? "" : ` with ${JSON.stringify(input.fields)}`}`;
+    case "clock":
+      return `continue at ${new Date(input.wallClockMs).toISOString()}`;
     case "wait":
       return `wait until ${input.untilMs / 1000} s`;
     case "press":

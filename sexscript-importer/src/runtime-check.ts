@@ -1,5 +1,6 @@
 import path from "node:path";
 import { isRecord } from "./ast.ts";
+import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
  * Deterministic smoke run of generated TeaseScript in the real runtime: buttons are pressed, each visit of a choice
@@ -79,7 +80,7 @@ export type TeaseProjectRunner = (
   },
 ) => ProjectRunResult;
 
-const repositoryIndexUrl = new URL("../../dist/src/index.js", import.meta.url);
+const repositoryIndexUrl = repositoryBuildUrl("src/index.js");
 
 /** A runtime operation result read field by field; plans and snapshots inside it are passed back unchanged. */
 type RuntimeData = Readonly<Record<string, unknown>>;
