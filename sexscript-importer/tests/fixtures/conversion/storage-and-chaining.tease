@@ -52,7 +52,8 @@ function sexscriptLegacyCompare(left, right) {
 }
 let visits = sexscriptLegacyLoadInteger("training.visits", 0)
 save visits + 1 as "training.visits"
-let title: string? = load "training.title", default: null
+// NOTE SX_LOAD_OPEN_NULL line 5: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+let title = load "training.title", default: sexscriptLegacyValue(null)
 if title == null or title == "" {
   title = "pet"
 }
@@ -114,7 +115,8 @@ say "Best ${best + 1}"
 // default that a read in between uses stays a test.
 let shocks = sexscriptLegacyLoadInteger("training.shocks", 3)
 let tempo = sexscriptLegacyLoadFloat("training.tempo", 0.5)
-let suffix: string? = load "training.suffix", default: null
+// NOTE SX_LOAD_OPEN_NULL line 45: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+let suffix = load "training.suffix", default: sexscriptLegacyValue(null)
 let keyed = load "training.key.${suffix}", default: null
 if suffix == null {
   suffix = "a"

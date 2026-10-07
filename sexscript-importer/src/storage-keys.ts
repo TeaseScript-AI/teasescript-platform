@@ -25,12 +25,14 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  */
 export function withFillableLoads(statements: IrStatement[], shared: boolean): IrStatement[] {
   const passed = new Set<string>();
+  const usedUpNames = new Set<string>();
   const usedUp = new Set<IrExpression>();
   const into = new Map<IrExpression, string>();
   const visit = (value: IrExpression, use: Use): void => {
-    if (value.kind === "variable" && use === "passed") passed.add(value.name);
+    if (value.kind === "variable") (use === "passed" ? passed : usedUpNames).add(value.name);
     if (value.kind === "load" && use === "usedUp") usedUp.add(value);
   };
+  const assigned = assignmentCounts(statements);
   const block = (items: readonly IrStatement[]): void => {
     for (const item of items) {
       statementUses(item, visit, into);
@@ -47,13 +49,39 @@ export function withFillableLoads(statements: IrStatement[], shared: boolean): I
     // Variables that other files use too (`shared`: a mixin module's, a script's that loads modules, or a helper
     // class's) may be tested there, so only a read used up where it is gets a default.
     const target = shared ? undefined : into.get(value);
-    return usedUp.has(value) || (target !== undefined && !passed.has(target))
-      ? { ...next, fill: true }
+    if (usedUp.has(value) || (target !== undefined && !passed.has(target)))
+      return { ...next, fill: true };
+    // A variable read so that the script sets again and uses as a value: legacy filled it in before using it, which
+    // the compiler cannot prove for a declared optional type (withDeclaredKeys).
+    const variable = into.get(value);
+    return variable !== undefined && (assigned.get(variable) ?? 0) > 1 && usedUpNames.has(variable)
+      ? { ...next, open: true }
       : next;
   };
   const marked = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, marked), mark));
   return marked(statements);
+}
+
+/** How often each name is declared or set with `=`, by name in the whole file. */
+function assignmentCounts(statements: readonly IrStatement[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  const count = (name: string): void => {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  };
+  const block = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "let") count(item.name);
+      if (item.kind === "assign" && item.operator === "=" && item.target.kind === "variable")
+        count(item.target.name);
+      withNestedBlocks(item, (body) => {
+        block(body);
+        return body;
+      });
+    }
+  };
+  block(statements);
+  return counts;
 }
 
 /** How a value is used: up, where null acted as an empty value would, or passed on, where it may be told apart. */
@@ -227,10 +255,13 @@ function withDeclaredKeys(
   const nullRead = new Set<string>();
   const declared = new Set<string>();
   const letRead = new Set<string>();
+  const filledIn = new Set<string>();
   const reads = (value: IrExpression): IrExpression => {
     const key = value.kind === "load" ? literalKey(value.key) : null;
-    if (key !== null && value.kind === "load" && value.defaultValue === undefined)
+    if (key !== null && value.kind === "load" && value.defaultValue === undefined) {
       nullRead.add(key);
+      if (value.open === true) filledIn.add(key);
+    }
     return mapChildren(value, reads);
   };
   const scan = (items: IrStatement[]): IrStatement[] =>
@@ -249,7 +280,8 @@ function withDeclaredKeys(
     if (declared.has(key)) continue;
     const type = declaredType(key);
     if (!nullRead.has(key) && !(type?.includes(" | ") ?? false)) continue;
-    if (type === null) open.add(key);
+    // A declaration would type the filled-in read too, so its key keeps open nulls.
+    if (type === null || filledIn.has(key)) open.add(key);
     else types.set(key, type);
   }
   const optional = (type: string): string => (type.includes(" | ") ? `${type} | null` : `${type}?`);
@@ -324,20 +356,63 @@ function withDeclaredKeys(
   });
   // A key that no file could declare, as its reads sit only in loops or after effects, keeps an open null too.
   for (const key of types.keys()) if (!done.has(key)) open.add(key);
-  if (open.size === 0) return declaredPrograms;
-  const opened = (value: IrExpression): IrExpression => {
-    const next = mapChildren(value, opened);
-    const key = next.kind === "load" ? literalKey(next.key) : null;
-    return key !== null && next.kind === "load" && next.defaultValue === undefined && open.has(key)
-      ? { ...next, defaultValue: OPEN_NULL }
-      : next;
-  };
-  const block = (items: IrStatement[]): IrStatement[] =>
-    items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), opened));
+  if (open.size === 0) return declaredPrograms.map(withoutOpenMarks);
   return withOpenNullHelper(
-    declaredPrograms.map((program) => ({ ...program, statements: block(program.statements) })),
+    declaredPrograms.map((program) => {
+      const diagnostics = [...program.diagnostics];
+      const block = (items: IrStatement[]): IrStatement[] =>
+        items.flatMap((item): IrStatement[] => {
+          const nested = withNestedBlocks(item, block);
+          let reason: string | null = null;
+          const opened = (value: IrExpression): IrExpression => {
+            const next = mapChildren(value, opened);
+            if (next.kind !== "load") return next;
+            const { open: _open, ...load } = next;
+            const key = literalKey(load.key);
+            if (key === null || load.defaultValue !== undefined || !open.has(key)) return load;
+            reason ??= filledIn.has(key) ? FILLED_IN : UNDECLARED;
+            return { ...load, defaultValue: OPEN_NULL };
+          };
+          const next = mapOwnExpressions(nested, opened);
+          if (reason === null) return [next];
+          const diagnostic = {
+            code: "SX_LOAD_OPEN_NULL",
+            severity: "warning" as const,
+            message: reason,
+            span: next.span,
+          };
+          diagnostics.push(diagnostic);
+          const line = next.span === null ? "" : ` line ${next.span.line}`;
+          const note: IrStatement = {
+            kind: "comment",
+            text: `// NOTE SX_LOAD_OPEN_NULL${line}: ${reason}`,
+            trailing: false,
+            span: next.span,
+          };
+          return [note, next];
+        });
+      return { ...program, statements: block(program.statements), diagnostics };
+    }),
     shared,
   );
+}
+
+const FILLED_IN =
+  "Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.";
+const UNDECLARED =
+  "Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.";
+
+/** The program without the marks of filled-in reads, whose keys are declared after all. */
+function withoutOpenMarks(program: MigrationProgram): MigrationProgram {
+  const unmark = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, unmark);
+    if (next.kind !== "load" || next.open !== true) return next;
+    const { open: _open, ...load } = next;
+    return load;
+  };
+  const block = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), unmark));
+  return { ...program, statements: block(program.statements) };
 }
 
 // Statements whose own values are evaluated once, before anything else of theirs runs.

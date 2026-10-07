@@ -281,6 +281,8 @@ export type IrExpression =
       number?: true;
       read?: "string" | "boolean";
       fill?: true;
+      /** A read whose variable the script fills in later and uses as a value, which keeps an open null. */
+      open?: true;
     }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each

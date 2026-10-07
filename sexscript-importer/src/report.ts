@@ -9,7 +9,9 @@ import type {
 import { emitTease } from "./emit-tease.ts";
 import { imageCatalog } from "./image-tags.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
-import type { IrStatement, MigrationProgram } from "./ir.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import { withNestedBlocks } from "./repeated-text.ts";
+import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import type { PackageFileReader } from "./java-data.ts";
 import { lowerPackage } from "./package.ts";
 import type { AcceptedForm } from "./workarounds.ts";
@@ -220,6 +222,12 @@ export interface FeasibilityReport {
   /** Texts the legacy display redrew, now one message changed in place (withMessageHandles). */
   messageHandles: { animations: number; counters: number };
   /**
+   * Storage reads of a key written as one literal (storage-keys.ts): with a default of their type (`defaulted`), with
+   * `default: null` and a declared key type (`nullKept`), and the statements whose reads keep a null of an open type
+   * (`open`, `SX_LOAD_OPEN_NULL`).
+   */
+  storageReads: { defaulted: number; nullKept: number; open: number };
+  /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
    * legacy code order, so a jump marks code that moved.
@@ -373,6 +381,7 @@ export function analyzeFeasibility(
     },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
+    storageReads: { defaulted: 0, nullKept: 0, open: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -470,6 +479,14 @@ export function analyzeFeasibility(
     for (const diagnostic of roots) increment(report.rootDiagnosticsByCode, diagnostic.code);
     const backwardLineJumps = isScriptBody ? lineOrderJumps(emitTease(packageProgram)) : 0;
     report.backwardLineJumps += backwardLineJumps;
+    if (isScriptBody || packageProgram.module !== undefined) {
+      const reads = literalStorageReads(packageProgram.statements);
+      report.storageReads.defaulted += reads.defaulted;
+      report.storageReads.nullKept += reads.nullKept;
+      report.storageReads.open += packageProgram.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "SX_LOAD_OPEN_NULL",
+      ).length;
+    }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
       else if (code === "SX_REPEATED_TEXT_SHORTENED") report.repeatedText.shortened += 1;
@@ -862,4 +879,27 @@ export function lineOrderJumps(source: string): number {
     previous = line;
   }
   return jumps;
+}
+
+/** The reads of literal storage keys in the statements, by whether they have a default other than null. */
+function literalStorageReads(statements: readonly IrStatement[]): {
+  defaulted: number;
+  nullKept: number;
+} {
+  const counts = { defaulted: 0, nullKept: 0 };
+  const visit = (value: IrExpression): IrExpression => {
+    if (
+      value.kind === "load" &&
+      value.key.kind === "literal" &&
+      typeof value.key.value === "string"
+    ) {
+      if (value.defaultValue === undefined) counts.nullKept += 1;
+      else if (value.defaultValue.kind !== "call") counts.defaulted += 1;
+    }
+    return mapChildren(value, visit);
+  };
+  const block = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), visit));
+  block([...statements]);
+  return counts;
 }

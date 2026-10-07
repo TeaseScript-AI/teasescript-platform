@@ -161,6 +161,7 @@ for toyValue, value in needed {
 }
 say "Missing: ${missing}"
 // A stored map that may be missing is false when null or empty, as Groovy's null or empty map was.
+// NOTE SX_LOAD_OPEN_NULL line 95: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let remembered = load "toy.remembered", default: sexscriptLegacyValue(null)
 let slot = "first"
 // NOTE SX_DICT_MISSING_KEY line 97: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
