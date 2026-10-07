@@ -2,7 +2,13 @@
 import { ScrollAreaRoot, ScrollAreaViewport } from "reka-ui";
 import ScrollBar from "@/components/ui/scroll-area/ScrollBar.vue";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
+import {
+  elementScroll,
+  measureElement,
+  observeElementRect,
+  useVirtualizer,
+} from "@tanstack/vue-virtual";
+import { ChangedContentMeasurement } from "../../transcript-measurement.js";
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -85,6 +91,18 @@ function itemKeyFor(entries: readonly PlayerTranscriptEntryPresentation[]) {
   }
   return entryKey;
 }
+const measurement = new ChangedContentMeasurement();
+watch(
+  () => props.entries,
+  () => measurement.clear(),
+);
+// Every measurement, equal sizes too, tells which content the row's size was taken with.
+const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
+  const row = props.entries[instance.indexFromElement(element)];
+  if (row !== undefined)
+    measurement.measured(row.id, row.kind === "message" ? row.contentSequence : undefined);
+  return measureElement(element, entry, instance);
+};
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   computed(() => {
     // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
@@ -95,6 +113,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
       getScrollElement: () => scrollElement.value,
       getItemKey: itemKeyFor(entries),
       estimateSize: () => 140,
+      measureElement: measureEntry,
       overscan: 5,
       // A viewport of leading space keeps even a single message scrollable.
       paddingStart: viewportHeight.value,
@@ -130,26 +149,9 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
     };
   }),
 );
-// TanStack compensates a remeasured row above the view except while the reader scrolls up. A message whose text changed
-// since its size was last taken is measured anew as it comes back into view, so it is compensated then too; otherwise
-// the text being read would move by the change. Every other measurement keeps TanStack's own rule.
-const measuredContent = new Map<string | number | bigint, number | undefined>();
-let measuredEntries = props.entries;
-virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
-  if (props.entries !== measuredEntries) {
-    measuredEntries = props.entries;
-    measuredContent.clear();
-  }
-  const entry = props.entries[item.index];
-  const content = entry?.kind === "message" ? entry.contentSequence : undefined;
-  const changed = measuredContent.has(item.key) && measuredContent.get(item.key) !== content;
-  measuredContent.set(item.key, content);
-  const offset = (instance.scrollOffset ?? 0) + instance.scrollAdjustments;
-  const measured = instance.itemSizeCache.get(item.key);
-  if (measured === undefined) return item.start < offset;
-  if (item.start + measured > offset) return false;
-  return instance.scrollDirection !== "backward" || changed;
-};
+// A message whose text changed out of view keeps the text being read in place as it is measured again on the way up.
+virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+  measurement.compensates(item, instance);
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
   const previousDistance =
