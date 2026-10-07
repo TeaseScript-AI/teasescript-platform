@@ -184,6 +184,8 @@ export interface Step {
   readonly snapshot: Data;
   /** Instructions this step executed for the first time, for its kind of coverage (see {@link Session}). */
   readonly newInstructions: number;
+  /** Every instruction the step executed, once each. */
+  readonly instructions: readonly number[];
   /** The last texts said during the step. */
   readonly texts: readonly string[];
   /**
@@ -585,6 +587,7 @@ export class Session {
    */
   #settle(start: Data, clock: boolean): Step {
     const texts: string[] = [];
+    const executed = new Set<number>();
     const ways = new Set<number>();
     let newInstructions = 0;
     let snapshot = start;
@@ -596,7 +599,7 @@ export class Session {
       );
       snapshot = execution.snapshot;
       collectTexts(execution.events, texts);
-      newInstructions += this.#record(execution, clock, ways);
+      newInstructions += this.#record(execution, clock, executed, ways);
       if (snapshot.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
       const action = record(snapshot.foregroundAction);
       if (action.kind === "capture") {
@@ -631,14 +634,20 @@ export class Session {
       snapshot = next;
       waits += 1;
     }
-    return { snapshot, newInstructions, texts: texts.slice(-KEPT_TEXTS), ways: [...ways] };
+    return {
+      snapshot,
+      newInstructions,
+      instructions: [...executed],
+      texts: texts.slice(-KEPT_TEXTS),
+      ways: [...ways],
+    };
   }
 
   /**
-   * Marks an execution's instructions and condition ways as play or clock coverage, and counts the instructions new
-   * to it: new to play for a play step, new to both for a clock one.
+   * Marks an execution's instructions and condition ways as play or clock coverage, adds them to the step's, and counts
+   * the instructions new to it: new to play for a play step, new to both for a clock one.
    */
-  #record(execution: Execution, clock: boolean, ways: Set<number>): number {
+  #record(execution: Execution, clock: boolean, executed: Set<number>, ways: Set<number>): number {
     const visited = clock ? this.clockVisited : this.visited;
     const branches = clock ? this.clockBranches : this.branches;
     let fresh = 0;
@@ -646,6 +655,7 @@ export class Session {
       if (index < 0 || index >= visited.length) continue;
       if (visited[index] === 0 && (!clock || this.visited[index] === 0)) fresh += 1;
       visited[index] = 1;
+      executed.add(index);
     }
     for (const [from, to] of execution.edges) {
       const instruction = this.#instructions[from];

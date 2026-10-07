@@ -142,6 +142,50 @@ test(
 );
 
 test(
+  "a run with the corpus of an earlier run goes on from its coverage, and skips entries a reconversion broke",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const { source, plan, diagnostics } = await fixture(engine);
+    const options = { seed: 1, budgetMs: 60_000, diagnostics, sources: new Map() };
+    // A first run that a state budget stops early, then a second one with its corpus.
+    const first = explore(engine, plan, { ...options, maxStates: 6, corpus: [] });
+    assert.equal(first.search.stoppedBy, "maxStates");
+    const corpus = first.corpus!.entries;
+    const second = explore(engine, plan, { ...options, maxStates: 12, corpus });
+    // The replay rebuilds the first run's coverage by applying each corpus input once, fewer steps than the first run
+    // took; the second run then covers lines the first did not.
+    assert.deepEqual(second.corpus!.coverageAtStart, first.corpus!.coverageAtEnd);
+    assert.deepEqual([second.corpus!.replayed, second.corpus!.stale], [corpus.length, 0]);
+    const inputs = corpus.flatMap((entry) => [
+      ...(entry.earlier ?? []).flatMap((session) => session.inputs),
+      ...entry.inputs,
+    ]);
+    assert.ok(second.corpus!.replaySteps <= inputs.length);
+    assert.ok(second.corpus!.replaySteps < first.search.transitions);
+    assert.ok(second.coverage.visitedLines > first.coverage.visitedLines);
+
+    // A reconversion renames "Stay": each entry that chooses it is stale, and the others still replay.
+    const renamed = source.replace('stay: "Stay"', 'stay: "Remain"');
+    const compiled = engine.call("compileProject", [{ path: "main.tease", source: renamed }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(compiled.plan));
+    const kept = second.corpus!.entries;
+    const third = explore(engine, compiled.plan, { ...options, maxStates: 12, corpus: kept });
+    const staying = kept.filter((entry) =>
+      [...(entry.earlier ?? []).flatMap((session) => session.inputs), ...entry.inputs].some(
+        (input) => input.kind === "option" && input.label === "Stay",
+      ),
+    );
+    assert.ok(staying.length > 0);
+    assert.equal(third.corpus!.stale, staying.length);
+    assert.ok(third.corpus!.coverageAtStart.visitedLines > first.coverage.visitedLines);
+  },
+);
+
+test(
   "a runtime operation that throws is no crash, and its input list replays the throw",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {

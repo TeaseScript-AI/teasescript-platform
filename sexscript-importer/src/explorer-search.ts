@@ -41,6 +41,8 @@ import {
  *   rest, least repeated first; and the newest first.
  * - Directed search (see {@link explore}) aims at each condition that a step reached but left only one way.
  * - Traps are described at {@link findTraps}.
+ * - A corpus carries a run's work to the next one: input lists from the start that together cover what the run
+ *   covered, and reach its crashes and traps (see {@link explore}).
  * - Coverage labels: a line is `play` when a step of play executed it, in any session; `clock` when only steps after
  *   the wall clock was set did; `unreachable` when no execution can reach it from the session start, constant
  *   conditions taking only their one way (a literal, a condition the compiler proves constant, or one that reads only
@@ -114,6 +116,10 @@ interface Node {
   readonly lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
   readonly rank: readonly number[];
+  /** A corpus replay went on from it, so an earlier run expanded it: it comes after every other state. */
+  resumed: boolean;
+  /** With a corpus: the lines and condition ways the step that reached it covered ({@link corpusItems}). */
+  readonly items: Uint32Array;
   status: NodeStatus;
   readonly edges: number[];
   readonly texts: readonly string[];
@@ -128,6 +134,8 @@ export interface ExploreOptions {
   readonly sources: ReadonlyMap<string, string>;
   /** The compiler's diagnostics, whose `TSV046` proves conditions constant. */
   readonly diagnostics: readonly PlanDiagnostic[];
+  /** The corpus of earlier runs, replayed first; given, even empty, the result has the corpus to keep. */
+  readonly corpus?: readonly CorpusEntry[];
 }
 
 /**
@@ -138,6 +146,35 @@ export interface Repro {
   readonly earlier?: readonly SessionPath[];
   readonly wallClockMs?: number;
   readonly inputs: readonly ExplorerInput[];
+}
+
+/** A corpus entry: a path from the start with its seed, kept for the coverage it adds or the crash or trap it reaches. */
+export interface CorpusEntry extends Repro {
+  readonly seed: number;
+  readonly reason: "coverage" | "crash" | "trap";
+}
+
+/** Play coverage: lines as in the report's `coverage`, and the condition ways taken. */
+export interface CoverageCount {
+  percent: number;
+  visitedLines: number;
+  branchWays: number;
+}
+
+/** What a corpus brought to a run, and the corpus to keep after it. */
+export interface CorpusResult {
+  /** Entries given; replayed (entries of another seed, or past the budget, are kept unreplayed); stale; kept. */
+  loaded: number;
+  replayed: number;
+  /** Replayed entries with an input that no longer fits the pending action, or that the runtime rejects. */
+  stale: number;
+  written: number;
+  /** Inputs the replay applied, and the time it took from the budget. */
+  replaySteps: number;
+  replayMs: number;
+  coverageAtStart: CoverageCount;
+  coverageAtEnd: CoverageCount;
+  entries: CorpusEntry[];
 }
 
 /** A crash: one entry per runtime failure code and source span. */
@@ -288,6 +325,8 @@ export interface ExploreResult {
   };
   crashes: CrashReport[];
   traps: TrapReport[];
+  /** With {@link ExploreOptions.corpus}; null without. */
+  corpus: CorpusResult | null;
 }
 
 /**
@@ -477,6 +516,10 @@ interface Left {
  * is reached (a session chain goes on from the storage it reached instead), and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
  * take only their attempt's own steps and otherwise come after all play states. Directed work takes at most
  * {@link DIRECTED_SHARE} of all runtime operations, which measure what steps cost.
+ *
+ * A corpus ({@link ExploreOptions.corpus}) is replayed before the search, from the budget (`replayCorpus`); its
+ * operations are no part of the directed share. The corpus to keep is the result's: the paths to crashes and traps,
+ * then a greedy set cover over the lines and condition ways the run covered, by paths of steps that covered one first.
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
@@ -528,11 +571,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * operations measure its cost, which differs a lot between packages and steps.
    */
   let directedWork = 0;
+  /** Runtime operations of the corpus replay, which are no part of this run's work. */
+  let replayWork = 0;
   let attemptCount = 0;
   let expanded = 0;
   let rejectedInputs = 0;
   let replays = 0;
   const engineErrors: ExploreResult["search"]["engineErrors"] = { count: 0, first: null };
+  const items = options.corpus === undefined ? null : corpusItems(instructions, files);
+  /** With a corpus: the items covered so far, the steps that covered one first, and the state of each crash. */
+  const covered = new Uint8Array(items?.size ?? 0);
+  const candidates: Candidate[] = [];
+  const crashNodes = new Map<string, number>();
+  /** While the corpus is replayed, its open states wait here for the frontier. */
+  let replaying = false;
+  const replayedOpen: number[] = [];
 
   const reproOf = (node: Node | null, input: ExplorerInput | null, startIndex: number): Repro => {
     const inputs = node === null ? [] : pathTo(nodes, node);
@@ -552,19 +605,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     };
   };
 
-  const withinShare = () => directedWork <= session.operations * DIRECTED_SHARE;
+  const withinShare = () => directedWork <= (session.operations - replayWork) * DIRECTED_SHARE;
   const active = (lead: Lead | null): lead is Lead =>
     lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
   /**
-   * The order of a state: play states with a lead first, then play, then clock. Within those, states whose step reached
-   * new instructions first, in any session; otherwise earlier sessions first, so that next sessions do not crowd out
-   * the ones before them; then by tier, repeats, and newest. A clock attempt takes its own steps but no first place
-   * after them, so that play goes first.
+   * The order of a state: play states with a lead first, then play, then clock, then the states an earlier run
+   * expanded. Within those, states whose step reached new instructions first, in any session; otherwise earlier
+   * sessions first, so that next sessions do not crowd out the ones before them; then by tier, repeats, and newest. A
+   * clock attempt takes its own steps but no first place after them, so that play goes first.
    */
   const leads = (node: Node): boolean => !node.clock && active(node.lead);
   const order = (node: Node): readonly number[] => {
     const [tier = 0, ...rest] = node.rank;
     return [
+      node.resumed ? 1 : 0,
       leads(node) ? 0 : node.clock ? 2 : 1,
       tier === 0 ? 0 : 1,
       starts[node.start]!.session,
@@ -586,6 +640,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       (parent?.clock ?? start.wallClockMs !== EPOCH_MS) || (input !== null && isClockInput(input));
     const inherited = lead ?? (parent !== null && active(parent.lead) ? parent.lead : null);
     const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
+    const stepItems = items === null ? NO_ITEMS : items.of(step, clock);
+    let first = false;
+    for (const item of stepItems) {
+      if (covered[item] === 1) continue;
+      covered[item] = 1;
+      first = true;
+    }
+    if (first)
+      candidates.push({ parent: parent?.id ?? null, input, start: startIndex, items: stepItems });
     for (const way of step.ways) {
       const instruction = way >> 1;
       if (!witnesses.has(instruction))
@@ -628,6 +691,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       clock,
       lead: inherited,
       rank: [step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2, repeats, -id],
+      resumed: false,
+      items: stepItems,
       status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
       edges: [],
       texts: step.texts,
@@ -637,8 +702,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     byState.set(keys.state, node.id);
     if (parent !== null) parent.edges.push(node.id);
     if (!clock) remember(step.snapshot, node);
-    if (node.status === "failed")
-      recordCrash(crashes, step, node, start.session, reproOf(parent, input, startIndex));
+    if (node.status === "failed") {
+      const crash = recordCrash(
+        crashes,
+        step,
+        node,
+        start.session,
+        reproOf(parent, input, startIndex),
+      );
+      if (crash !== null) crashNodes.set(crash, node.id);
+    }
     if (node.status === "open") {
       store.put(node.id, step.snapshot, parent === null);
       const ask = node.prompt.instruction;
@@ -647,7 +720,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         if (waiting.length < 5) waiting.push(node.id);
         askNodes.set(ask, waiting);
       }
-      frontier.push(node.id, order(node));
+      if (replaying) replayedOpen.push(node.id);
+      else frontier.push(node.id, order(node));
     }
     loopSeen.set(keys.loop, (loopSeen.get(keys.loop) ?? 0) + 1);
     return node;
@@ -1000,9 +1074,124 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return plan.length > 0 || chained;
   };
 
-  transition(null, null, session.start(starts[0]!), 0, null);
-  let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
   const outOfBudget = () => performance.now() - started >= options.budgetMs;
+  const full = () => outOfBudget() || nodes.length >= options.maxStates;
+
+  /**
+   * Replays the corpus entries of this run's seed, each session from the storage the one before it left, through the
+   * search's own steps, so that their coverage, the storage their sessions left, and their states are there as if this
+   * run had found them. Inputs already applied to a state are not applied again. An entry whose input no longer fits
+   * the pending action ({@link fitsPending}), or that the runtime rejects, is stale: its replay stops there. Entries of
+   * another seed, and those the budget leaves no room for, are kept as they are.
+   */
+  const replayCorpus = (entries: readonly CorpusEntry[], first: Step) => {
+    const began = performance.now();
+    const steps = transitions;
+    const kept: CorpusEntry[] = [];
+    let replayed = 0;
+    let stale = 0;
+    /** The state an input led to from a state, and the start of a session from a state's storage at a wall clock. */
+    const applied = new Map<string, number>();
+    const startFrom = new Map<string, number>([[`-@${EPOCH_MS}`, 0]]);
+    const firstOf = new Map<number, number>([[0, 0]]);
+    /** The storage of ended states, which keep no snapshot. */
+    const ended = new Map<number, readonly StorageEntry[]>();
+    if (nodes[0]!.status !== "open") ended.set(0, storageOf(first.snapshot));
+    const reach = (node: Node, snapshot: Data) => {
+      if (node.status !== "open") ended.set(node.id, storageOf(snapshot));
+    };
+    const sessionStart = (origin: Node | null, wallClockMs: number): number | null => {
+      const key = `${origin?.id ?? "-"}@${wallClockMs}`;
+      const known = startFrom.get(key);
+      if (known !== undefined) return known;
+      const left = origin === null || ended.has(origin.id) ? null : snapshotOf(origin);
+      const storage = origin === null ? [] : left === null ? ended.get(origin.id) : storageOf(left);
+      if (storage === undefined) return null;
+      const sessions = origin === null ? 1 : starts[origin.start]!.session + 1;
+      starts.push({ origin: origin?.id ?? null, storage, wallClockMs, session: sessions });
+      const begun = session.start(starts.at(-1)!);
+      const node = transition(null, null, begun, starts.length - 1, null);
+      reach(node, begun.snapshot);
+      if (origin !== null && wallClockMs === EPOCH_MS) startedFrom.add(JSON.stringify(storage));
+      startFrom.set(key, starts.length - 1);
+      firstOf.set(starts.length - 1, node.id);
+      return starts.length - 1;
+    };
+    /** Applies one session's inputs; the state reached, null when an input does not fit, "full" at a limit. */
+    const walk = (start: number, inputs: readonly ExplorerInput[]): Node | null | "full" => {
+      let node = nodes[firstOf.get(start)!]!;
+      let snapshot: Data | null = null;
+      for (const input of inputs) {
+        if (full()) return "full";
+        const key = `${node.id} ${JSON.stringify(input)}`;
+        const known = applied.get(key);
+        if (known !== undefined) {
+          node = nodes[known]!;
+          snapshot = null;
+          continue;
+        }
+        snapshot ??= node.status === "open" ? snapshotOf(node) : null;
+        if (snapshot === null || !fitsPending(input, session.options(snapshot))) return null;
+        const next = step(node, snapshot, input);
+        if (next === null) return null;
+        const reached = transition(node, input, next, node.start, null);
+        reach(reached, next.snapshot);
+        applied.set(key, reached.id);
+        node = reached;
+        snapshot = next.snapshot.status === "waiting" ? next.snapshot : null;
+      }
+      return node;
+    };
+    const replayEntry = (entry: CorpusEntry): "done" | "stale" | "full" => {
+      let origin: Node | null = null;
+      for (const part of [...(entry.earlier ?? []), entry]) {
+        const start = sessionStart(origin, part.wallClockMs ?? EPOCH_MS);
+        const reached = start === null ? null : walk(start, part.inputs);
+        if (reached === null || reached === "full") return reached ?? "stale";
+        origin = reached;
+      }
+      return "done";
+    };
+    for (const entry of entries) {
+      const outcome = entry.seed !== options.seed || full() ? "full" : replayEntry(entry);
+      if (outcome === "full") kept.push(entry);
+      else replayed += 1;
+      if (outcome === "stale") stale += 1;
+    }
+    return {
+      replayed,
+      stale,
+      kept,
+      replaySteps: transitions - steps,
+      replayMs: performance.now() - began,
+    };
+  };
+
+  /** Lines play visited and the condition ways it took, as the report counts lines. */
+  const coverageCount = (lineIds: Int32Array, lines: number): CoverageCount => {
+    const visited = new Set<number>();
+    session.visited.forEach((value, index) => {
+      if (value === 1 && lineIds[index]! >= 0) visited.add(lineIds[index]!);
+    });
+    let branchWays = 0;
+    for (const taken of session.branches) branchWays += (taken & 1) + (taken >> 1);
+    const percent = lines === 0 ? 100 : Math.round((visited.size / lines) * 1000) / 10;
+    return { percent, visitedLines: visited.size, branchWays };
+  };
+
+  replaying = options.corpus !== undefined;
+  const firstStep = session.start(starts[0]!);
+  transition(null, null, firstStep, 0, null);
+  const replayed = options.corpus === undefined ? null : replayCorpus(options.corpus, firstStep);
+  replaying = false;
+  replayWork = replayed === null ? 0 : session.operations;
+  for (const id of replayedOpen) {
+    const node = nodes[id]!;
+    node.resumed = node.edges.length > 0;
+    frontier.push(id, order(node));
+  }
+  const coverageAtStart = items === null ? null : coverageCount(items.lineIds, items.lines);
+  let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
   let sinceAnalysis = 0;
   let analyzedAt = started;
   search: for (;;) {
@@ -1094,6 +1283,84 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     targets,
   );
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
+  const traps = findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start));
+
+  /**
+   * The corpus to keep: the paths to crashes and traps, then, by greedy set cover, paths of steps that covered a line or
+   * condition way first, until they cover all that this run covered (see {@link cover}); then the entries kept
+   * unreplayed.
+   */
+  const corpusResult = (): CorpusResult | null => {
+    if (items === null || replayed === null || coverageAtStart === null) return null;
+    const stamp = new Uint32Array(items.size);
+    let generation = 0;
+    /**
+     * The items of every step on the path to a state (through its earlier sessions) and of one more step; without the
+     * clock items of what play covered, which no report label needs.
+     */
+    const pathItems = (last: Node | null, startIndex: number, own: Uint32Array) => {
+      generation += 1;
+      const found: number[] = [];
+      let cost = 0;
+      const add = (list: Uint32Array) => {
+        cost += 1;
+        for (const item of list) {
+          if (stamp[item] === generation) continue;
+          stamp[item] = generation;
+          const play = items.playOf(item);
+          if (play < 0 || covered[play] === 0) found.push(item);
+        }
+      };
+      add(own);
+      for (let node = last, start = startIndex; ;) {
+        for (const current of node === null ? [] : ancestry(nodes, node)) add(current.items);
+        const origin = starts[start]!.origin;
+        if (origin === null) break;
+        node = nodes[origin]!;
+        start = node.start;
+      }
+      return { items: Uint32Array.from(found), cost };
+    };
+    const entry = (repro: Repro, reason: CorpusEntry["reason"]): CorpusEntry => ({
+      seed: options.seed,
+      reason,
+      ...(repro.earlier === undefined ? {} : { earlier: repro.earlier }),
+      ...(repro.wallClockMs === undefined ? {} : { wallClockMs: repro.wallClockMs }),
+      inputs: repro.inputs,
+    });
+    const pinned = [
+      ...[...crashNodes].map(([key, id]) => ({ id, entry: entry(crashes.get(key)!, "crash") })),
+      ...traps.map(({ report, entry: id }) => ({ id, entry: entry(report, "trap") })),
+    ];
+    const parentOf = (candidate: Candidate) =>
+      candidate.parent === null ? null : nodes[candidate.parent]!;
+    const kept = cover(
+      candidates.map((candidate) =>
+        pathItems(parentOf(candidate), candidate.start, candidate.items),
+      ),
+      pinned.map(({ id }) => pathItems(nodes[id]!, nodes[id]!.start, NO_ITEMS).items),
+      items.size,
+    );
+    const entries = [
+      ...pinned.map((pin) => pin.entry),
+      ...kept.map((index) => {
+        const candidate = candidates[index]!;
+        return entry(reproOf(parentOf(candidate), candidate.input, candidate.start), "coverage");
+      }),
+      ...replayed.kept,
+    ];
+    return {
+      loaded: options.corpus?.length ?? 0,
+      replayed: replayed.replayed,
+      stale: replayed.stale,
+      written: entries.length,
+      replaySteps: replayed.replaySteps,
+      replayMs: Math.round(replayed.replayMs),
+      coverageAtStart,
+      coverageAtEnd: coverageCount(items.lineIds, items.lines),
+      entries,
+    };
+  };
   return {
     search: {
       states: nodes.length,
@@ -1124,8 +1391,131 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       directedTransitions,
     ),
     crashes: [...crashes.values()],
-    traps: findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start)),
+    traps: traps.map((trap) => trap.report),
+    corpus: corpusResult(),
   };
+}
+
+const NO_ITEMS = new Uint32Array(0);
+
+/** A step that covered a line or condition way first in its run: a candidate corpus entry, as `parent` + `input`. */
+interface Candidate {
+  readonly parent: number | null;
+  readonly input: ExplorerInput | null;
+  readonly start: number;
+  readonly items: Uint32Array;
+}
+
+/**
+ * What a corpus covers, as numbered items: each line holding instructions (by file and line, as the report counts
+ * lines) and each condition way, apart for play and for clock steps.
+ */
+function corpusItems(instructions: readonly Data[], files: readonly string[]) {
+  const ids = new Map<string, number>();
+  const lineIds = Int32Array.from(instructions, (instruction, index) => {
+    const line = compactSpan(instruction.span)?.line;
+    if (line === undefined) return -1;
+    const key = `${files[index]}:${line}`;
+    if (!ids.has(key)) ids.set(key, ids.size);
+    return ids.get(key)!;
+  });
+  const lines = ids.size;
+  const ways = instructions.length * 2;
+  return {
+    lineIds,
+    lines,
+    size: 2 * lines + 2 * ways,
+    /** The play item of a clock item; -1 for a play item. */
+    playOf: (item: number): number =>
+      item < lines || (item >= 2 * lines && item < 2 * lines + ways)
+        ? -1
+        : item < 2 * lines
+          ? item - lines
+          : item - ways,
+    /** A step's items: the lines it executed and the condition ways it took, as play or as clock coverage. */
+    of: (step: Step, clock: boolean): Uint32Array => {
+      const found = new Set<number>();
+      for (const index of step.instructions) {
+        const line = lineIds[index] ?? -1;
+        if (line >= 0) found.add((clock ? lines : 0) + line);
+      }
+      for (const way of step.ways) found.add(2 * lines + (clock ? ways : 0) + way);
+      return Uint32Array.from(found);
+    },
+  };
+}
+
+/**
+ * Greedy set cover of every item the sets hold: with the items of `pinned` covered first, it takes the set that covers
+ * the most items not yet covered (the cheaper one on a tie) until no set adds one, and then drops, latest first, each
+ * taken set whose items the others all cover. Returns the indices of the sets kept, in the order taken.
+ */
+function cover(
+  sets: readonly { items: Uint32Array; cost: number }[],
+  pinned: readonly Uint32Array[],
+  size: number,
+): number[] {
+  const count = new Uint32Array(size);
+  for (const items of pinned) for (const item of items) count[item]! += 1;
+  const gain = (items: Uint32Array) =>
+    items.reduce((sum, item) => sum + (count[item] === 0 ? 1 : 0), 0);
+  // Gains only shrink, so a set whose gain still equals the one it was queued with is the best.
+  const queued = sets.map((set) => gain(set.items));
+  const heap = new Frontier();
+  sets.forEach((set, index) => {
+    if (queued[index]! > 0) heap.push(index, [-queued[index]!, set.cost, index]);
+  });
+  const taken: number[] = [];
+  for (let index = heap.pop(); index !== undefined; index = heap.pop()) {
+    const set = sets[index]!;
+    const now = gain(set.items);
+    if (now === 0) continue;
+    if (now < queued[index]!) {
+      queued[index] = now;
+      heap.push(index, [-now, set.cost, index]);
+      continue;
+    }
+    taken.push(index);
+    for (const item of set.items) count[item]! += 1;
+  }
+  const kept: number[] = [];
+  for (const index of taken.reverse()) {
+    const items = sets[index]!.items;
+    if (items.every((item) => count[item]! >= 2)) for (const item of items) count[item]! -= 1;
+    else kept.push(index);
+  }
+  return kept.reverse();
+}
+
+/**
+ * Whether a corpus input fits the pending action: one of the options the explorer tries there, by kind, label, and
+ * index or ID. A typed answer needs a typed ask, a form a form (with cancel for a cancel), a wait the same deadline;
+ * another wall clock fits any waiting state, and the runtime decides the rest.
+ */
+function fitsPending(input: ExplorerInput, options: readonly ExplorerInput[]): boolean {
+  if (input.kind === "clock") return true;
+  return options.some((option) => {
+    switch (input.kind) {
+      case "option":
+        return (
+          option.kind === "option" && option.index === input.index && option.label === input.label
+        );
+      case "button":
+        return option.kind === "button" && option.label === input.label;
+      case "press":
+        return (
+          option.kind === "press" &&
+          option.buttonId === input.buttonId &&
+          option.label === input.label
+        );
+      case "wait":
+        return option.kind === "wait" && option.untilMs === input.untilMs;
+      case "form":
+        return option.kind === "form" && (input.action === "submit" || option.action === "cancel");
+      default:
+        return option.kind === input.kind;
+    }
+  });
 }
 
 function sessionPath(inputs: readonly ExplorerInput[], wallClockMs: number): SessionPath {
@@ -1185,19 +1575,20 @@ function pathTo(nodes: readonly Node[], node: Node): ExplorerInput[] {
     .filter((input): input is ExplorerInput => input !== null);
 }
 
+/** Counts a failed state in its crash; returns the crash's key when its path is the crash's path now, or null. */
 function recordCrash(
   crashes: Map<string, CrashReport>,
   step: Step,
   node: Node,
   sessions: number,
   repro: Repro,
-): void {
+): string | null {
   const failure = failureOf(step.snapshot);
   const key = `${failure.code}@${failure.path}:${failure.line}:${failure.column}-${failure.endLine}:${failure.endColumn}`;
   const known = crashes.get(key);
   if (known === undefined) {
     crashes.set(key, { ...failure, states: 1, clock: node.clock, ...repro, texts: step.texts });
-    return;
+    return key;
   }
   known.states += 1;
   const knownSessions = 1 + (known.earlier?.length ?? 0);
@@ -1206,7 +1597,7 @@ function recordCrash(
     (known.clock === node.clock &&
       (sessions < knownSessions ||
         (sessions === knownSessions && repro.inputs.length < known.inputs.length)));
-  if (!better) return;
+  if (!better) return null;
   crashes.set(key, {
     ...failure,
     states: known.states,
@@ -1214,6 +1605,7 @@ function recordCrash(
     ...repro,
     texts: step.texts,
   });
+  return key;
 }
 
 /** Plan spans are compact: zero-based start/end line and column, and offsets into the file's source. */
@@ -1504,14 +1896,14 @@ function directedSummary(
  * the player can do nothing and nothing will happen is a `stuck` trap of its own.
  *
  * The verdict covers only the inputs tried: a loop that waits for a typed word the candidates do not contain, or for
- * a clock time the explorer does not try, is reported as a trap.
+ * a clock time the explorer does not try, is reported as a trap. Each trap comes with the state its path leads to.
  */
 function findTraps(
   nodes: readonly Node[],
   instructions: readonly Data[],
   files: readonly string[],
   reproOf: (node: Node) => Repro,
-): TrapReport[] {
+): { report: TrapReport; entry: number }[] {
   const groups = new Map<string, Node[]>();
   for (const node of nodes) {
     const members = groups.get(node.loop);
@@ -1598,8 +1990,8 @@ function findTraps(
       const span = at === null ? null : compactSpan(instructions[at]?.span);
       if (at !== null && span !== null) locations.add(`${files[at]}:${span.line}`);
     }
-    return {
-      kind: cyclic ? ("loop" as const) : ("stuck" as const),
+    const report: TrapReport = {
+      kind: cyclic ? "loop" : "stuck",
       states: members.length,
       feederStates: feeders.get(index) ?? 0,
       locations: [...locations].slice(0, 10),
@@ -1610,14 +2002,15 @@ function findTraps(
       clock: entry.clock,
       ...reproOf(entry),
     };
+    return { report, entry: entry.id };
   });
   // Later sessions meet the same loop with other storage: one trap per kind and place, by its shortest way in.
-  const merged = new Map<string, TrapReport>();
-  for (const trap of traps) {
+  const merged = new Map<string, { report: TrapReport; entry: number }>();
+  for (const { report: trap, entry } of traps) {
     const key = `${trap.kind}@${trap.locations.join("|")}`;
-    const known = merged.get(key);
+    const known = merged.get(key)?.report;
     if (known === undefined) {
-      merged.set(key, trap);
+      merged.set(key, { report: trap, entry });
       continue;
     }
     known.states += trap.states;
@@ -1628,7 +2021,10 @@ function findTraps(
         (trap.earlier?.length ?? 0) * 1_000_000 + trap.inputs.length <
           (known.earlier?.length ?? 0) * 1_000_000 + known.inputs.length);
     if (shorter)
-      merged.set(key, { ...trap, states: known.states, feederStates: known.feederStates });
+      merged.set(key, {
+        report: { ...trap, states: known.states, feederStates: known.feederStates },
+        entry,
+      });
   }
   return [...merged.values()];
 }
