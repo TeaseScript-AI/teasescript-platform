@@ -329,7 +329,7 @@ test(
 );
 
 test(
-  "the inputs of a state come from its runtime session: a caller's compared constants, and the wait a block interrupted",
+  "the inputs of a state come from its runtime session: a caller's compared constants, a compared duration, and the wait a block interrupted",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -351,6 +351,15 @@ test(
       .options(helper.step.runtime)
       .map((input) => (input.kind === "text" ? input.text : input.kind));
     assert.deepEqual(answers, ["0", "1", "-1", "1000000", "4320", "4321", "4322"]);
+
+    // A button whose time the script compares with a duration can also be pressed just after it.
+    const begged = start(
+      'let beg = showButton "Beg"\nif beg >= 15 s {\n  say "Begged."\n}\nexit\n',
+    );
+    assert.deepEqual(begged.session.options(begged.step.runtime), [
+      { kind: "button", label: "Beg" },
+      { kind: "button", label: "Beg", afterMs: 16_000 },
+    ]);
 
     // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
     const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');

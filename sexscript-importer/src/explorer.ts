@@ -650,7 +650,7 @@ export class Session {
       action.owningInstruction,
       ...runtime.callReturnInstructions().toReversed(),
     ].filter((position): position is number => typeof position === "number");
-    const found: Literals = { numbers: [], strings: [] };
+    const found: Literals = { numbers: [], strings: [], durations: [] };
     for (let distance = 0; distance <= LITERAL_WINDOW; distance += 1) {
       for (const position of positions) {
         for (const index of distance === 0
@@ -662,12 +662,15 @@ export class Session {
             if (!found.numbers.includes(value)) found.numbers.push(value);
           for (const value of literals.strings)
             if (!found.strings.includes(value)) found.strings.push(value);
+          for (const value of literals.durations)
+            if (!found.durations.includes(value)) found.durations.push(value);
         }
       }
     }
     return {
       numbers: found.numbers.slice(0, MAX_LITERALS),
       strings: found.strings.slice(0, MAX_LITERALS),
+      durations: found.durations.slice(0, MAX_LITERALS),
     };
   }
 
@@ -743,10 +746,11 @@ const TEMPORAL_ANSWERS: Readonly<Record<string, readonly string[]>> = {
   datetime: ["2026-10-02T12:00", "2026-10-02T00:00", "2026-10-02T23:59"],
 };
 
-/** Constants an instruction compares with. */
+/** Constants an instruction compares with; durations in milliseconds. */
 interface Literals {
   numbers: number[];
   strings: string[];
+  durations: number[];
 }
 
 /** Instructions searched on each side of an ask and of each return point for compared constants. */
@@ -757,11 +761,16 @@ const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">="]);
 /** Text methods whose literal argument an answer can match. */
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
 
-/** The literals an instruction's expressions compare with (`x < 10`, `answer == "yes"`, `answer.contains("no")`). */
+/**
+ * The literals an instruction's expressions compare with (`x < 10`, `answer == "yes"`, `answer.contains("no")`,
+ * `beg < 15 s`).
+ */
 function comparedLiterals(instruction: Data): Literals {
-  const found: Literals = { numbers: [], strings: [] };
+  const found: Literals = { numbers: [], strings: [], durations: [] };
   const take = (value: unknown) => {
     const literal = record(value);
+    if (literal.kind === "duration" && typeof literal.milliseconds === "number")
+      found.durations.push(literal.milliseconds);
     if (literal.kind !== "literal") return;
     if (typeof literal.value === "number") found.numbers.push(literal.value);
     if (typeof literal.value === "string" && literal.value.trim() !== "")
@@ -783,9 +792,15 @@ function comparedLiterals(instruction: Data): Literals {
   return found;
 }
 
-/** Think times before a timed button: just past each compared constant, read as seconds, or {@link THINK_MS}. */
+/**
+ * Think times before a timed button: just past each compared number, read as seconds, and each compared duration, in
+ * whole seconds; {@link THINK_MS} without one.
+ */
 function thinkTimes(literals: Literals): number[] {
-  const seconds = literals.numbers.filter((value) => value >= 1 && value <= 3600);
+  const seconds = [
+    ...literals.numbers,
+    ...literals.durations.map((milliseconds) => milliseconds / 1000),
+  ].filter((value) => value >= 1 && value <= 3600);
   return seconds.length === 0
     ? [THINK_MS]
     : [...new Set(seconds.map((value) => (Math.floor(value) + 1) * 1000))];

@@ -261,8 +261,8 @@ switched (and all on, all off), each other option of a cycle, each typed field a
 form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1`, `1000000` (and
 `0.5` for `askNumber`), the text `x`, and dates and times at both ends of a day or year. Each constant that the code
 compares with near the ask adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. A button whose result the
-script keeps (`(showButton …) / 1 s`) can also be pressed after the player thinks for just over each compared number
-of seconds (60 s without one). Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
+script keeps (`(showButton …) / 1 s`, `beg < 15 s`) can also be pressed after the player thinks for just over each
+compared number of seconds or duration (60 s without one). Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
 each shown permanent button, are options too. Media loads succeed with one second per pass, `takePhoto` finds no
 camera, `askImage` gets one stored image, pacing is instant, and the clock starts at 2026-10-02 12:00 UTC. The first
 session starts with empty storage. A later session starts from the storage an explored state left, as the player's
