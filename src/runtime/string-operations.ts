@@ -15,6 +15,7 @@ import {
 } from "../text-operations.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
+import { boundedText, checkTextLength, MAX_TEXT_LENGTH } from "./text-length.js";
 import { describeRuntimeValue, isDuration } from "./value-predicates.js";
 import {
   createCapturedSerializableList,
@@ -186,6 +187,17 @@ export function callStringMethod(
       return createCapturedSerializableList(parts);
     }
     case "replace": {
+      // Only a longer replacement can make the text longer; then the matches are counted first, unless even a match at
+      // every position keeps it short enough.
+      const growth = texts[1]!.length - texts[0]!.length;
+      if (
+        growth > 0 &&
+        text.length + Math.floor(text.length / texts[0]!.length) * growth > MAX_TEXT_LENGTH
+      ) {
+        let matches = 0;
+        for (const _match of literalMatches(text, texts[0]!, false)) matches += 1;
+        checkTextLength(text.length + matches * growth, "replace", span);
+      }
       let result = "";
       let last = 0;
       for (const match of literalMatches(text, texts[0]!, false)) {
@@ -200,17 +212,23 @@ export function callStringMethod(
       return text.trimStart();
     case "trimEnd":
       return text.trimEnd();
+    // Case mapping can make a text longer, "ß" becoming "SS", by an amount known only once it is mapped.
     case "uppercase":
-      return text.toUpperCase();
+      return boundedText(() => text.toUpperCase(), "uppercase", span);
     case "lowercase":
-      return text.toLowerCase();
+      return boundedText(() => text.toLowerCase(), "lowercase", span);
     case "uppercaseFirst": {
       const codePoint = text.codePointAt(0);
       if (codePoint === undefined) return text;
       const firstText = String.fromCodePoint(codePoint);
-      return firstText.toUpperCase() + text.slice(firstText.length);
+      return boundedText(
+        () => firstText.toUpperCase() + text.slice(firstText.length),
+        "uppercaseFirst",
+        span,
+      );
     }
     case "repeat":
+      checkTextLength(text.length * numbers[0]!, `repeat(${numbers[0]!})`, span);
       return text.repeat(numbers[0]!);
     case "padStart":
     case "padEnd": {
@@ -226,9 +244,13 @@ export function callStringMethod(
       // counted, so the work stays linear in the result.
       while (length < target) {
         const missing = target - length;
-        const padding =
-          fill.repeat(Math.floor(missing / fillLength)) +
-          fill.slice(0, utf16Offset(fill, missing % fillLength));
+        const rest = utf16Offset(fill, missing % fillLength);
+        checkTextLength(
+          result.length + Math.floor(missing / fillLength) * fill.length + rest,
+          `${name}(${target})`,
+          span,
+        );
+        const padding = fill.repeat(Math.floor(missing / fillLength)) + fill.slice(0, rest);
         const before = name === "padStart" ? padding.charCodeAt(padding.length - 1) : last;
         const after = name === "padStart" ? first : padding.charCodeAt(0);
         length +=
