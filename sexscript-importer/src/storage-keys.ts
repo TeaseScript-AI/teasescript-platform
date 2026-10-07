@@ -1,4 +1,4 @@
-import { helperCall, helperStatements } from "./helpers.ts";
+import { helperCall, helperStatements, type HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { usedNames } from "./message-handles.ts";
 import { effectBefore, withNestedBlocks } from "./repeated-text.ts";
@@ -234,6 +234,14 @@ export function withStorageDefaults(
       return mapOwnExpressions(withNestedBlocks(item, scan), collect);
     });
   for (const program of programs) scan(program.statements);
+  // A legacy loadString or loadBoolean read of a key that values of another type are saved under too reads the value
+  // as stored and turns it into the type legacy read (withTypedTextReads).
+  const routed = new Set(
+    [...read].flatMap(([key, types]) =>
+      [...(saved.get(key) ?? [])].some((type) => !types.has(type)) ? [key] : [],
+    ),
+  );
+  for (const key of routed) read.delete(key);
   const keyType = (key: string): string | null =>
     keptType(saved.get(key)) ?? (saved.has(key) ? null : keptType(defaulted.get(key)));
 
@@ -250,7 +258,10 @@ export function withStorageDefaults(
   };
   const block = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), fill));
-  const filled = programs.map((program) => ({ ...program, statements: block(program.statements) }));
+  const filled = withTypedTextReads(programs, routed).map((program) => ({
+    ...program,
+    statements: block(program.statements),
+  }));
   // The type a key holds: what its reads read and default to and what is saved under it, a union where they mix.
   const declaredType = (key: string): string | null =>
     unionType([...(read.get(key) ?? []), ...(defaulted.get(key) ?? []), ...(saved.get(key) ?? [])]);
@@ -259,8 +270,55 @@ export function withStorageDefaults(
       (key) => declaredType(key) === "string",
     ),
   );
-  return withDeclaredKeys(withEmptyText(filled, textKeys), declaredType, shared);
+  return withUsedHelpers(withDeclaredKeys(withEmptyText(filled, textKeys), declaredType), shared);
 }
+
+/**
+ * The legacy loadString and loadBoolean reads of the keys in `routed`, whose saves store values of another type too:
+ * the value is read as stored and becomes text through the text helper, or true only for "true" through the boolean
+ * text helper, as the reads of keys saved as literals do already (SX_LOAD_STRING_TEXT, SX_LOAD_BOOLEAN_TEXT).
+ */
+function withTypedTextReads(
+  programs: readonly MigrationProgram[],
+  routed: ReadonlySet<string>,
+): MigrationProgram[] {
+  if (routed.size === 0) return [...programs];
+  return programs.map((program) => {
+    const diagnostics = [...program.diagnostics];
+    const block = (items: IrStatement[]): IrStatement[] =>
+      items.flatMap((item): IrStatement[] => {
+        const nested = withNestedBlocks(item, block);
+        let code: string | null = null;
+        const route = (value: IrExpression): IrExpression => {
+          const next = mapChildren(value, route);
+          const key = next.kind === "load" ? literalKey(next.key) : null;
+          if (next.kind !== "load" || key === null || next.read === undefined || !routed.has(key))
+            return next;
+          const { read, fill: _fill, open: _open, ...load } = next;
+          code = read === "string" ? "SX_LOAD_STRING_TEXT" : "SX_LOAD_BOOLEAN_TEXT";
+          return helperCall(read === "string" ? "text" : "booleanText", [load]);
+        };
+        const next = mapOwnExpressions(nested, route);
+        if (code === null) return [next];
+        const message = code === "SX_LOAD_STRING_TEXT" ? STRING_TEXT : BOOLEAN_TEXT;
+        diagnostics.push({ code, severity: "warning", message, span: next.span });
+        const line = next.span === null ? "" : ` line ${next.span.line}`;
+        const note: IrStatement = {
+          kind: "comment",
+          text: `// NOTE ${code}${line}: ${message}`,
+          trailing: false,
+          span: next.span,
+        };
+        return [note, next];
+      });
+    return { ...program, statements: block(program.statements), diagnostics };
+  });
+}
+
+const STRING_TEXT =
+  "loadString() read the stored value as text, and the package saves values of another type under this key too, so the value is read as stored and turned into text.";
+const BOOLEAN_TEXT =
+  'loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, so the value is read the same way; a missing value reads as false.';
 
 /**
  * A missing text reads as the empty text (owner decision 2026-10-07): every read of a key that only text is read from
@@ -451,7 +509,6 @@ function isNullLiteral(value: IrExpression): boolean {
 function withDeclaredKeys(
   programs: readonly MigrationProgram[],
   declaredType: (key: string) => string | null,
-  shared: boolean,
 ): MigrationProgram[] {
   const nullRead = new Set<string>();
   const declared = new Set<string>();
@@ -558,44 +615,41 @@ function withDeclaredKeys(
   // A key that no file could declare, as its reads sit only in loops or after effects, keeps an open null too.
   for (const key of types.keys()) if (!done.has(key)) open.add(key);
   if (open.size === 0) return declaredPrograms.map(withoutOpenMarks);
-  return withOpenNullHelper(
-    declaredPrograms.map((program) => {
-      const diagnostics = [...program.diagnostics];
-      const block = (items: IrStatement[]): IrStatement[] =>
-        items.flatMap((item): IrStatement[] => {
-          const nested = withNestedBlocks(item, block);
-          let reason: string | null = null;
-          const opened = (value: IrExpression): IrExpression => {
-            const next = mapChildren(value, opened);
-            if (next.kind !== "load") return next;
-            const { open: _open, ...load } = next;
-            const key = literalKey(load.key);
-            if (key === null || load.defaultValue !== undefined || !open.has(key)) return load;
-            reason ??= filledIn.has(key) ? FILLED_IN : UNDECLARED;
-            return { ...load, defaultValue: OPEN_NULL };
-          };
-          const next = mapOwnExpressions(nested, opened);
-          if (reason === null) return [next];
-          const diagnostic = {
-            code: "SX_LOAD_OPEN_NULL",
-            severity: "warning" as const,
-            message: reason,
-            span: next.span,
-          };
-          diagnostics.push(diagnostic);
-          const line = next.span === null ? "" : ` line ${next.span.line}`;
-          const note: IrStatement = {
-            kind: "comment",
-            text: `// NOTE SX_LOAD_OPEN_NULL${line}: ${reason}`,
-            trailing: false,
-            span: next.span,
-          };
-          return [note, next];
-        });
-      return { ...program, statements: block(program.statements), diagnostics };
-    }),
-    shared,
-  );
+  return declaredPrograms.map((program) => {
+    const diagnostics = [...program.diagnostics];
+    const block = (items: IrStatement[]): IrStatement[] =>
+      items.flatMap((item): IrStatement[] => {
+        const nested = withNestedBlocks(item, block);
+        let reason: string | null = null;
+        const opened = (value: IrExpression): IrExpression => {
+          const next = mapChildren(value, opened);
+          if (next.kind !== "load") return next;
+          const { open: _open, ...load } = next;
+          const key = literalKey(load.key);
+          if (key === null || load.defaultValue !== undefined || !open.has(key)) return load;
+          reason ??= filledIn.has(key) ? FILLED_IN : UNDECLARED;
+          return { ...load, defaultValue: OPEN_NULL };
+        };
+        const next = mapOwnExpressions(nested, opened);
+        if (reason === null) return [next];
+        const diagnostic = {
+          code: "SX_LOAD_OPEN_NULL",
+          severity: "warning" as const,
+          message: reason,
+          span: next.span,
+        };
+        diagnostics.push(diagnostic);
+        const line = next.span === null ? "" : ` line ${next.span.line}`;
+        const note: IrStatement = {
+          kind: "comment",
+          text: `// NOTE SX_LOAD_OPEN_NULL${line}: ${reason}`,
+          trailing: false,
+          span: next.span,
+        };
+        return [note, next];
+      });
+    return { ...program, statements: block(program.statements), diagnostics };
+  });
 }
 
 const FILLED_IN =
@@ -628,36 +682,47 @@ const LIFTABLE: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The open null's helper goes where a read uses it and no definition reaches: main.tease's global functions reach every
- * file of a package (`shared`), else each file has its own.
+ * The helpers that the reads use go where a read uses one and no definition reaches: main.tease's global functions
+ * reach every file of a package (`shared`), else each file has its own.
  */
-function withOpenNullHelper(
+function withUsedHelpers(
   programs: readonly MigrationProgram[],
   shared: boolean,
 ): MigrationProgram[] {
-  const defines = (program: MigrationProgram): boolean =>
-    program.statements.some(
-      (statement) => statement.kind === "function" && statement.name === OPEN_NULL_HELPER,
+  let result = [...programs];
+  for (const helper of ["value", "text", "booleanText"] as const) {
+    const name = helperName(helper);
+    const defines = (program: MigrationProgram): boolean =>
+      program.statements.some(
+        (statement) => statement.kind === "function" && statement.name === name,
+      );
+    const uses = (program: MigrationProgram): boolean =>
+      JSON.stringify(program.statements).includes(`"name":"${name}"`);
+    const used = result.some(uses);
+    if (!used) continue;
+    const definition = helperStatements(new Set([helper])).filter(
+      (statement) => statement.kind === "function" && statement.name === name,
     );
-  const uses = (program: MigrationProgram): boolean =>
-    JSON.stringify(program.statements).includes(`"name":"${OPEN_NULL_HELPER}"`);
-  const used = programs.some(uses);
-  const definition = helperStatements(new Set(["value"]));
-  return programs.map((program, index) => {
-    const needs = shared
-      ? index === 0 && used && !programs.some(defines)
-      : uses(program) && !defines(program);
-    if (!needs) return program;
-    const helper = definition.map((statement): IrStatement =>
-      shared && statement.kind === "function" ? { ...statement, global: true } : statement,
-    );
-    return { ...program, statements: [...helper, ...program.statements] };
-  });
+    const anyDefines = result.some(defines);
+    result = result.map((program, index) => {
+      const needs = shared ? index === 0 && !anyDefines : uses(program) && !defines(program);
+      if (!needs) return program;
+      const added = definition.map((statement): IrStatement =>
+        shared && statement.kind === "function" ? { ...statement, global: true } : statement,
+      );
+      return { ...program, statements: [...added, ...program.statements] };
+    });
+  }
+  return result;
+}
+
+function helperName(helper: HelperName): string {
+  const call = helperCall(helper, []);
+  return call.kind === "call" ? call.name : "";
 }
 
 /** Null of a type the compiler cannot know, which needs no declared type. */
 const OPEN_NULL: IrExpression = helperCall("value", [{ kind: "literal", value: null }]);
-const OPEN_NULL_HELPER = OPEN_NULL.kind === "call" ? OPEN_NULL.name : "";
 
 /** The types as one: an integer and a number make a number; several others, their union; none, null. */
 function unionType(types: readonly string[]): string | null {

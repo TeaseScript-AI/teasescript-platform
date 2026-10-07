@@ -38,3 +38,10 @@ def startedDay = (long) started / 86400
 def since = getTime() - started
 show("Day " + startedDay + ", " + since + " s ago")
 def restart = { save("game.started", getTime()) }
+// A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
+// it into text, or into true only for "true".
+def pick = loadString("game.pick")
+show("Pick " + pick)
+def roll = { save("game.pick", getRandom(6)) }
+if (loadBoolean("game.volume")) show("Loud.")
+def setVolume = { save("game.volume", getRandom(10)) }

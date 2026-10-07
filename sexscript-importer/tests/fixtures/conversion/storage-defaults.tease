@@ -1,3 +1,6 @@
+function sexscriptLegacyBooleanText(value) {
+  return "${value}".lowercase() == "true"
+}
 function sexscriptLegacyText(value): string? {
   if value == null or value == "" {
     return null
@@ -71,5 +74,22 @@ let since = getTimestamp().toSeconds() - started
 say "Day ${startedDay}, ${since} s ago"
 function restart {
   save getTimestamp().toSeconds() as "game.started"
+}
+// A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
+// it into text, or into true only for "true".
+// NOTE SX_LOAD_STRING_TEXT line 43: loadString() read the stored value as text, and the package saves values of another type under this key too, so the value is read as stored and turned into text.
+let savedPick: integer? = load "game.pick", default: null
+let pick = sexscriptLegacyText(savedPick)
+say "Pick ${pick}"
+function roll {
+  save randomInteger(0..6) as "game.pick"
+}
+// NOTE SX_LOAD_BOOLEAN_TEXT line 46: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, so the value is read the same way; a missing value reads as false.
+let savedVolume: integer? = load "game.volume", default: null
+if sexscriptLegacyBooleanText(savedVolume) == true {
+  say "Loud."
+}
+function setVolume {
+  save randomInteger(0..10) as "game.volume"
 }
 exit
