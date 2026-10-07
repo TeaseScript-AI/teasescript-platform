@@ -153,6 +153,10 @@ export {
 } from "./runtime/engine.js";
 export type { RuntimeInstructionTrace } from "./runtime/instruction-trace.js";
 export {
+  randomDrawAlternatives,
+  type RandomDrawAlternatives,
+} from "./runtime/random-alternatives.js";
+export {
   listRandomSites,
   pendingRandomDraw,
   RANDOM_DRAW_KINDS,
