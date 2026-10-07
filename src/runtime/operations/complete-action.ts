@@ -74,6 +74,19 @@ export function completeAction(
   return completed;
 }
 
+/** Completes an action of engine-owned plan/state that already passed complete validation. */
+export function completeValidatedAction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  request: unknown,
+  options: ActionCompletionOptions = {},
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const completed = completeCapturedAction({ plan, snapshot }, request, options, trace);
+  closeDebugTrace(trace, completed);
+  return completed;
+}
+
 function completeCapturedAction(
   captured: CapturedExecutableData,
   request: unknown,

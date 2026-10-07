@@ -75,6 +75,20 @@ export function observeTime(
   return observed;
 }
 
+/** Observes time for engine-owned plan/state that already passed complete validation. */
+export function observeValidatedTime(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  suppliedNowMs: unknown,
+  mediaReports: unknown = [],
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+): PendingActionOperationResult<TimeObservationOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const observed = observeCapturedTime(plan, snapshot, suppliedNowMs, mediaReports, trace);
+  closeDebugTrace(trace, observed);
+  return observed;
+}
+
 function observeCapturedTime(
   plan: InstructionPlan,
   current: RuntimeSnapshot,

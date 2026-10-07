@@ -25,7 +25,9 @@ accept syntax, architecture, or implementation details.
   `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
   `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
-  call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
+  call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
+  [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
+  boundaries.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
   host-acknowledged atomic writes under [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
   with a Clear saved script data control.

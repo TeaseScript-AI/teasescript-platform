@@ -4,7 +4,9 @@ import {
   compileProject,
   compileSource,
   createCheckpoint,
+  createRuntimeSession,
   deserializeCheckpoint,
+  deserializeRuntimeSession,
   executeInstruction,
   interactionDeadlineMs,
   observeTime,
@@ -16,14 +18,18 @@ import {
   validateInstructionPlan,
   type InstructionPlan,
   type InterpreterEvent,
+  type MediaProgressReport,
   type ProjectImageFile,
   type ProjectSourceFile,
   type RuntimeCallFrameSnapshot,
   type RuntimeScriptStorageEntrySnapshot,
+  type RuntimeSession,
+  type RuntimeSessionView,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
-import { timerHandlerDispatchable } from "../../src/runtime/operations/timer-lifecycle.js";
+import { interruptFrame } from "../../src/runtime/activations.js";
+import { executionRunnable } from "../../src/runtime/operations/observe-time.js";
 
 const DEFAULT_EQUIVALENCE_SEED = 0x1234_5678;
 const DEFAULT_INSTRUCTION_GUARD = 2_000;
@@ -61,6 +67,19 @@ interface Servicing {
 
 /** Spacing of the simulated Player's media progress observations. */
 const MEDIA_OBSERVATION_STEP_MS = 250;
+
+/** One host operation: the same step applies to a snapshot through the snapshot API and to a session. */
+type HostStep =
+  | { readonly kind: "execute" }
+  | { readonly kind: "observe"; readonly nowMs: number; readonly reports: MediaProgressReport[] }
+  | { readonly kind: "press"; readonly buttonId: number }
+  | { readonly kind: "load"; readonly mediaId: number; readonly durationMs: number };
+
+interface Operation {
+  readonly events: readonly InterpreterEvent[];
+  readonly instructionsExecuted: number;
+  readonly outcome?: unknown;
+}
 
 export interface RuntimeResumeEquivalenceResult {
   readonly boundaries: readonly RuntimeSnapshot[];
@@ -133,6 +152,27 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: uninterrupted execution must not change its initial snapshot`,
   );
 
+  // Every pass also runs through an engine-owned session (docs/RUNTIME.md#runtime-sessions), which must give the
+  // snapshot API's events, outcomes, and checkpoints. Sessions do not yet take media reports or button clicks.
+  const sessions = options.press === undefined && options.mediaDurationMs === undefined;
+  if (sessions) {
+    const session = createRuntimeSession(plan, initial);
+    const played = runSessionServicingDelays(session, instructionGuard, scenario, servicing);
+    assert.deepEqual(
+      played,
+      uninterrupted.events,
+      `${scenario}: session events differ from the snapshot API`,
+    );
+    assertSameCheckpoint(
+      serializeCheckpoint(session.exportCheckpoint()),
+      serializeCheckpoint(createCheckpoint(plan, uninterrupted.snapshot)),
+      `${scenario}: session final checkpoint`,
+    );
+  }
+  let stepper: RuntimeSession | null = sessions
+    ? createRuntimeSession(plan, steppingInitial)
+    : null;
+
   const boundaries: RuntimeSnapshot[] = [];
   const accumulatedEvents: InterpreterEvent[] = [];
   let boundarySnapshot = steppingInitial;
@@ -144,26 +184,30 @@ export function assertRuntimeResumeEquivalent(
       `${scenario}: instruction-boundary execution exceeded guard ${instructionGuard}`,
     );
 
-    let operation: {
-      readonly snapshot: RuntimeSnapshot;
-      readonly events: readonly InterpreterEvent[];
-    };
-    if (awaitsTime(boundarySnapshot)) {
-      operation = serviceWait(
-        plan,
+    const view = viewOf(boundarySnapshot);
+    const step: HostStep = awaitsTime(view)
+      ? waitStep(
+          view,
+          () => boundarySnapshot,
+          accumulatedEvents,
+          `${scenario}: boundary ${boundary + 1}`,
+          servicing,
+        )
+      : { kind: "execute" };
+    const operation = applyStep(plan, boundarySnapshot, step);
+    assertStepAccepted(step, operation, `${scenario}: boundary ${boundary + 1}`);
+    if (step.kind === "observe") {
+      assert.notDeepEqual(
+        operation.snapshot,
         boundarySnapshot,
-        accumulatedEvents,
-        `${scenario}: boundary ${boundary + 1}`,
-        servicing,
+        `${scenario}: boundary ${boundary + 1}: the observation must make progress`,
       );
-    } else {
-      const executed = executeInstruction(plan, boundarySnapshot);
-      assert.equal(
-        executed.instructionsExecuted,
-        1,
-        `${scenario}: boundary ${boundary + 1} must execute exactly one instruction`,
-      );
-      operation = executed;
+    }
+    if (stepper !== null) {
+      const context = `${scenario}: session boundary ${boundary + 1}`;
+      assert.deepEqual(stepper.view(), view, `${context}: session view differs`);
+      const stepped = applySessionStep(stepper, step);
+      assert.deepEqual(stepped, sameShape(operation), `${context}: session operation differs`);
     }
     boundarySnapshot = operation.snapshot;
     accumulatedEvents.push(...operation.events);
@@ -171,6 +215,15 @@ export function assertRuntimeResumeEquivalent(
 
     const context = `${scenario}: instruction boundary ${boundary} (next ${boundarySnapshot.nextInstruction})`;
     const checkpointJson = serializeCheckpoint(createCheckpoint(plan, boundarySnapshot));
+    if (stepper !== null) {
+      assertSameCheckpoint(
+        serializeCheckpoint(stepper.exportCheckpoint()),
+        checkpointJson,
+        `${context}: session checkpoint`,
+      );
+      // The session continues from a restored copy of this boundary, or from a fork of itself.
+      stepper = boundary % 2 === 0 ? deserializeRuntimeSession(checkpointJson) : stepper.fork();
+    }
     const restored = deserializeCheckpoint(checkpointJson);
 
     const restoredPlanValidation = validateInstructionPlan(restored.plan);
@@ -251,8 +304,18 @@ function runServicingDelays(
   let current = snapshot;
   for (let observations = 0; ; observations += 1) {
     assert.ok(observations <= instructionGuard, `${context}: delay servicing exceeded guard`);
-    if (awaitsTime(current)) {
-      const serviced = serviceWait(plan, current, [...priorEvents, ...events], context, servicing);
+    const view = viewOf(current);
+    if (awaitsTime(view)) {
+      const step = waitStep(view, () => current, [...priorEvents, ...events], context, servicing);
+      const serviced = applyStep(plan, current, step);
+      assertStepAccepted(step, serviced, context);
+      if (step.kind === "observe") {
+        assert.notDeepEqual(
+          serviced.snapshot,
+          current,
+          `${context}: the observation must make progress`,
+        );
+      }
       events.push(...serviced.events);
       current = serviced.snapshot;
       continue;
@@ -264,59 +327,149 @@ function runServicingDelays(
   }
 }
 
-/** The simulated Player's click when `press` gives one, else a time observation. */
-function serviceWait(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  events: readonly InterpreterEvent[],
+/** `runServicingDelays` through a session, deciding from its view; returns the events. */
+function runSessionServicingDelays(
+  session: RuntimeSession,
+  instructionGuard: number,
   context: string,
   servicing: Servicing,
-): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
-  const buttonId = servicing.press?.(snapshot, events) ?? null;
-  if (buttonId === null) return observeDueDelay(plan, snapshot, context, servicing.mediaDurationMs);
-  const pressed = pressPermanentButton(plan, snapshot, buttonId);
-  assert.equal(pressed.outcome.kind, "pressed", `${context}: the simulated click must be accepted`);
-  return pressed;
+): readonly InterpreterEvent[] {
+  const events: InterpreterEvent[] = [];
+  for (let observations = 0; ; observations += 1) {
+    assert.ok(observations <= instructionGuard, `${context}: session servicing exceeded guard`);
+    const view = session.view();
+    if (awaitsTime(view)) {
+      const step = waitStep(view, () => session.exportSnapshot(), events, context, servicing);
+      const serviced = applySessionStep(session, step);
+      assertStepAccepted(step, serviced, context);
+      events.push(...serviced.events);
+      continue;
+    }
+    events.push(...session.run({ instructionBudget: instructionGuard }).events);
+    if (session.view().status !== "waiting") return events;
+  }
+}
+
+function applyStep(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  step: HostStep,
+): Operation & { readonly snapshot: RuntimeSnapshot } {
+  switch (step.kind) {
+    case "execute":
+      return executeInstruction(plan, snapshot);
+    case "observe":
+      return observeTime(plan, snapshot, step.nowMs, step.reports);
+    case "press":
+      return pressPermanentButton(plan, snapshot, step.buttonId);
+    case "load":
+      return reportMediaLoad(plan, snapshot, step.mediaId, {
+        kind: "loaded",
+        durationMs: step.durationMs,
+      });
+  }
+}
+
+function applySessionStep(session: RuntimeSession, step: HostStep): Operation {
+  switch (step.kind) {
+    case "execute":
+      return session.executeInstruction();
+    case "observe":
+      return session.observeTime(step.nowMs, step.reports);
+    case "press":
+    case "load":
+      throw new Error(`Sessions do not take ${step.kind} steps yet.`);
+  }
+}
+
+/** The parts of an operation result that a session result also has. */
+function sameShape(operation: Operation): Operation {
+  return "outcome" in operation
+    ? {
+        events: operation.events,
+        instructionsExecuted: operation.instructionsExecuted,
+        outcome: operation.outcome,
+      }
+    : { events: operation.events, instructionsExecuted: operation.instructionsExecuted };
+}
+
+function assertStepAccepted(step: HostStep, operation: Operation, context: string): void {
+  if (step.kind === "execute")
+    assert.equal(
+      operation.instructionsExecuted,
+      1,
+      `${context} must execute exactly one instruction`,
+    );
+  const outcome =
+    typeof operation.outcome === "object" &&
+    operation.outcome !== null &&
+    "kind" in operation.outcome
+      ? operation.outcome.kind
+      : undefined;
+  if (step.kind === "observe")
+    assert.equal(outcome, "observed", `${context}: delay observation must succeed`);
+  if (step.kind === "press")
+    assert.equal(outcome, "pressed", `${context}: the simulated click must be accepted`);
+  if (step.kind === "load")
+    assert.equal(outcome, "accepted", `${context}: media load must be accepted`);
+}
+
+/** The session view of a snapshot, which the simulated Player decides from. */
+function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
+  return {
+    status: snapshot.status,
+    failure: snapshot.failure,
+    nextInstruction: snapshot.nextInstruction,
+    currentSessionTimeMs: snapshot.currentSessionTimeMs,
+    observedSessionTimeMs: snapshot.observedSessionTimeMs,
+    runnable: executionRunnable(snapshot),
+    foregroundAction: snapshot.foregroundAction,
+    backgroundActions: snapshot.backgroundActions,
+    suspendedAction: interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
+  };
 }
 
 /**
  * Waiting with nothing runnable: only a time observation or a click can make progress. A queued block held behind
  * pacing or a running block is not runnable.
  */
-function awaitsTime(snapshot: RuntimeSnapshot): boolean {
-  return snapshot.status === "waiting" && !timerHandlerDispatchable(snapshot);
+function awaitsTime(view: RuntimeSessionView): boolean {
+  return view.status === "waiting" && !view.runnable;
 }
 
-function observeDueDelay(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
+/** The simulated Player's click when `press` gives one, else a media load or a time observation. */
+function waitStep(
+  view: RuntimeSessionView,
+  snapshot: () => RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  context: string,
+  servicing: Servicing,
+): HostStep {
+  const buttonId = servicing.press?.(snapshot(), events) ?? null;
+  if (buttonId !== null) return { kind: "press", buttonId };
+  return dueDelayStep(view, context, servicing.mediaDurationMs);
+}
+
+function dueDelayStep(
+  view: RuntimeSessionView,
   context: string,
   mediaDurationMs: number | undefined,
-): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
-  const unloaded = snapshot.backgroundActions.find(
+): HostStep {
+  const unloaded = view.backgroundActions.find(
     (action) => action.kind === "media" && !action.media.loaded,
   );
   if (unloaded?.kind === "media") {
     assert.ok(mediaDurationMs !== undefined, `${context}: media scenarios need mediaDurationMs`);
-    const reported = reportMediaLoad(plan, snapshot, unloaded.media.mediaId, {
-      kind: "loaded",
-      durationMs: mediaDurationMs,
-    });
-    assert.equal(reported.outcome.kind, "accepted", `${context}: media load must be accepted`);
-    return reported;
+    return { kind: "load", mediaId: unloaded.media.mediaId, durationMs: mediaDurationMs };
   }
   const deadlines: number[] = [];
-  const playing = snapshot.backgroundActions.flatMap((action) =>
+  const playing = view.backgroundActions.flatMap((action) =>
     action.kind === "media" && action.media.state === "running" ? [action.media] : [],
   );
   if (playing.length > 0) {
-    deadlines.push(snapshot.observedSessionTimeMs + MEDIA_OBSERVATION_STEP_MS);
+    deadlines.push(view.observedSessionTimeMs + MEDIA_OBSERVATION_STEP_MS);
   }
-  for (const action of [
-    snapshot.foregroundAction,
-    ...snapshot.backgroundActions,
-    ...functionFrames(snapshot).map((frame) => frame.timerInterruption?.suspendedAction ?? null),
-  ]) {
+  for (const action of [view.foregroundAction, ...view.backgroundActions, view.suspendedAction]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
     }
@@ -324,7 +477,7 @@ function observeDueDelay(
       deadlines.push(action.timer.deadlineMs);
     }
   }
-  const button = snapshot.foregroundAction;
+  const button = view.foregroundAction;
   const buttonDeadlineMs = button?.kind === "interaction" ? interactionDeadlineMs(button) : null;
   if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   assert.ok(
@@ -345,14 +498,18 @@ function observeDueDelay(
         ]
       : [];
   });
-  const observed = observeTime(plan, snapshot, nowMs, reports);
-  assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
-  assert.notDeepEqual(
-    observed.snapshot,
-    snapshot,
-    `${context}: the observation must make progress`,
+  return { kind: "observe", nowMs, reports };
+}
+
+/** Checkpoint JSON equality, reporting where the bytes first differ rather than both complete checkpoints. */
+function assertSameCheckpoint(actual: string, expected: string, context: string): void {
+  if (actual === expected) return;
+  let index = 0;
+  while (index < actual.length && actual[index] === expected[index]) index += 1;
+  const around = (text: string) => text.slice(Math.max(0, index - 120), index + 120);
+  assert.fail(
+    `${context} differs at byte ${index}:\n  actual:   ${around(actual)}\n  expected: ${around(expected)}`,
   );
-  return observed;
 }
 
 function assertMonotonicEventSequences(events: readonly InterpreterEvent[], context: string): void {
