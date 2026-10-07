@@ -67,8 +67,9 @@ export type IrStatement =
   /**
    * `instant` shows the text without reading time (`say text, instant`); `speaker` says it `as` that speaker, and
    * `prose` shows it as prose rather than a speech bubble (V30 §17). `readingTime` marks a text whose reading time
-   * replaced the legacy wait after it (withReadingTimes), which a later `instant` text must not cut short; `beat` marks
-   * the `instant` text of a beat, a count or a loop's tick, which keeps it.
+   * replaced the legacy wait after it (withReadingTimes), and holds that wait, which a later `instant` text must not
+   * cut short; `beat` marks
+   * an `instant` text that keeps it: a beat, a count or a loop's tick, or a text that keeps its legacy wait before one.
    */
   | (IrBase & {
       kind: "say";
@@ -76,7 +77,7 @@ export type IrStatement =
       instant?: true;
       speaker?: string;
       prose?: true;
-      readingTime?: true;
+      readingTime?: Extract<IrStatement, { kind: "wait" }>;
       beat?: true;
     })
   /** A speaker declaration, global in the package (V30 §37). */

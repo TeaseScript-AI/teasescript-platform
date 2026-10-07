@@ -1461,8 +1461,9 @@ async function convert(
 
 // With the Player's default pacing, a text said at once (`instant`) ends the reading time of the text before it, so a
 // text whose legacy wait the reading time replaced is read in full on every path: after other statements, across a
-// call, after an ask that a condition may skip, on a loop's next pass after `continue`, and where computing a text, a
-// wait, or a value after an ask says it (docs/RUNTIME.md "Pacing gate").
+// call, after an ask that a condition may skip, on a loop's next pass after `continue`, where computing a text, a wait,
+// a value after an ask, or what media show says it, and before a beat, which keeps its timing (docs/RUNTIME.md "Pacing
+// gate").
 test(
   "a reading time that replaced a legacy wait runs in full before the next text",
   { skip: parserUnavailable },
@@ -1484,7 +1485,10 @@ test(
       computedText:
         'def content = { show("Good."); wait(1); return "Hold." }\nshowButton("Start")\nshow(content())\nwait(20)',
       computedWait:
-        'def delay = { show("Good."); wait(1); return 20 }\nshowButton("Start")\nshow("Hold.")\nwait(delay())\nshow("Next.")\nwait(20)',
+        'def delay = { show("Good."); wait(1); return 1 }\nshowButton("Start")\nshow("Hold.")\nwait(delay())\nshow("Next.")\nwait(20)',
+      beat: 'show("Good.")\nwait(1)\nfor (int i = 3; i > 0; i--) {\n show("Starting in " + i)\n wait(1)\n}',
+      media:
+        'def image = { show("Good."); wait(1); return "test.jpg" }\nshowButton("Start")\nsetImage(image())\nshow("Hold.")\nwait(20)',
       askThenText:
         'def content = { show("Good."); wait(1); return true }\nshowButton("Start")\ndef same = getBoolean("Ready?") == content()\nshow("Hold.")\nwait(20)',
     };

@@ -97,7 +97,7 @@ export function withReadingTimes(
         "The legacy wait after this text timed its reading, at most 1.5 times the Player's reading time of the text, so the Player's skippable reading time replaces it.",
         statement,
       );
-      result[index] = { ...statement, readingTime: true };
+      result[index] = { ...statement, readingTime: wait };
       dropped.add(waitIndex);
     });
     return dropped.size === 0 ? result : result.filter((_, index) => !dropped.has(index));
@@ -112,15 +112,68 @@ export function withReadingTimes(
  * without such a reading time, after a button, an ask, or a choice that surely opens, or media, which wait for it, or
  * after literal waits as long as a fixed text's reading time; statements without effects leave this as it is. Anywhere
  * else, at the start of a function, a loop's body, or a script, after a call or a transfer, or where a reading time of
- * a text with values may still run, the text keeps its own reading time instead and waits for the one before it. This
- * runs after the passes that split, shorten, and fold texts, on the texts they leave.
+ * a text with values may still run, the text keeps its own reading time instead and waits for the one before it.
+ *
+ * A beat keeps `instant` (owner decision 2026-10-07), so a text whose replaced reading time may still run when a beat
+ * is said keeps its legacy wait and `instant` instead, as before the rule; a reading time of unknown origin, after a
+ * call or where a loop's earlier pass may have left one, gives way to the beat. This runs after the passes that split,
+ * shorten, and fold texts, on the texts they leave.
  */
 export function withoutCutReadingTimes(
   statements: IrStatement[],
   diagnostics: MigrationDiagnostic[],
 ): IrStatement[] {
+  // The replaced legacy waits whose texts keep them for a beat after them.
+  const restored = new Set<WaitStatement>();
+  let current = statements;
+  for (;;) {
+    const found = new Set<WaitStatement>();
+    walkTexts(current, (wait) => found.add(wait), null);
+    const added = [...found].filter((wait) => !restored.has(wait));
+    if (added.length === 0) break;
+    for (const wait of added) restored.add(wait);
+    current = withRestoredWaits(current, restored, diagnostics);
+  }
+  return walkTexts(current, () => {}, diagnostics);
+}
+
+type WaitStatement = Extract<IrStatement, { kind: "wait" }>;
+
+/**
+ * The reading time that may still run: `left` milliseconds (0 for none, Infinity for one of unknown length) from the
+ * texts whose replaced waits `sources` holds, and possibly others of unknown origin.
+ */
+interface Running {
+  left: number;
+  sources: ReadonlySet<WaitStatement>;
+}
+
+const NONE: Running = { left: 0, sources: new Set() };
+const UNKNOWN_TIME = (sources: ReadonlySet<WaitStatement>): Running => ({
+  left: Infinity,
+  sources,
+});
+
+function joined(first: Running, second: Running): Running {
+  if (first.left === 0) return second;
+  if (second.left === 0) return first;
+  return {
+    left: Math.max(first.left, second.left),
+    sources: new Set([...first.sources, ...second.sources]),
+  };
+}
+
+/**
+ * One walk over the statements: takes `instant` away where a reading time may still run, and reports to `beat` the
+ * replaced waits whose reading time a beat would end. `diagnostics` is null for a walk that only looks.
+ */
+function walkTexts(
+  statements: IrStatement[],
+  beat: (wait: WaitStatement) => void,
+  diagnostics: MigrationDiagnostic[] | null,
+): IrStatement[] {
   const paced = (statement: IrStatement): void => {
-    diagnostics.push({
+    diagnostics?.push({
       code: "SX_WAIT_KEPT_PACED",
       severity: "info",
       message:
@@ -128,108 +181,162 @@ export function withoutCutReadingTimes(
       span: statement.span,
     });
   };
-  // A walk gives the statements and the reading time, in milliseconds, that may still run after them: 0 for none,
-  // Infinity for one of unknown length.
-  const walk = (items: readonly IrStatement[], running: number): [IrStatement[], number] => {
-    const result: IrStatement[] = [];
-    let left = running;
-    for (const item of items) {
-      const [statement, after] = step(item, left);
-      result.push(statement);
-      left = after;
-    }
-    return [result, left];
+  const after = (values: readonly IrExpression[], running: Running): Running => {
+    const left = afterValues(values, running.left);
+    return left === 0 ? NONE : left === Infinity ? UNKNOWN_TIME(running.sources) : running;
   };
-  const step = (item: IrStatement, running: number): [IrStatement, number] => {
+  const own = (statement: IrStatement, running: Running): Running => {
+    if (LEAVING.has(statement.kind)) return UNKNOWN_TIME(running.sources);
+    const values: IrExpression[] = [];
+    mapOwnExpressions(statement, (value) => {
+      values.push(value);
+      return value;
+    });
+    return after(values, running);
+  };
+  const walk = (items: readonly IrStatement[], running: Running): [IrStatement[], Running] => {
+    const result: IrStatement[] = [];
+    let state = running;
+    for (const item of items) {
+      const [statement, next] = step(item, state);
+      result.push(statement);
+      state = next;
+    }
+    return [result, state];
+  };
+  const step = (item: IrStatement, running: Running): [IrStatement, Running] => {
     // A message kept in a handle (withMessageHandles) is said as a `say` is, after its text is computed.
     if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
       const { instant, ...message } = item.value;
-      const before = afterValues([message.value], running);
-      if (instant !== true || before === 0) return [item, 0];
+      const before = after([message.value], running);
+      if (instant !== true || before.left === 0) return [item, NONE];
       paced(item);
-      return [{ ...item, value: message }, 0];
+      return [{ ...item, value: message }, NONE];
     }
     switch (item.kind) {
       case "say": {
         // The text is computed first, which may say something itself.
-        const before = afterExpressions(item, running);
+        const before = own(item, running);
         if (item.instant === true) {
-          // A beat stays as the legacy script timed it.
-          if (before === 0 || item.beat === true) return [item, 0];
+          if (before.left === 0) return [item, NONE];
+          // A beat stays as the legacy script timed it; the texts whose reading time it would end keep their waits.
+          if (item.beat === true) {
+            before.sources.forEach(beat);
+            return [item, NONE];
+          }
           paced(item);
           const { instant: _instant, ...rest } = item;
-          return [rest, 0];
+          return [rest, NONE];
         }
-        return [item, item.readingTime === true ? readingLength(item.value) : 0];
+        return [
+          item,
+          item.readingTime === undefined
+            ? NONE
+            : { left: readingLength(item.value), sources: new Set([item.readingTime]) },
+        ];
       }
       case "wait": {
         const { duration } = item;
         if (duration.kind !== "literal" || typeof duration.value !== "number")
-          return [item, afterExpressions(item, running)];
+          return [item, own(item, running)];
         const milliseconds = item.unit === "ms" ? duration.value : duration.value * 1000;
-        return [item, Math.max(0, running - milliseconds)];
+        const left = running.left - milliseconds;
+        return [item, left > 0 ? { ...running, left } : NONE];
       }
       case "showButton":
+        return [item, NONE];
+      // Media wait for the reading time first and then compute what they show, which may say something itself.
       case "showImage":
       case "hideImage":
       case "playAudio":
-        return [item, 0];
+        return [item, own(item, NONE)];
       case "if": {
-        const before = afterExpressions(item, running);
+        const before = own(item, running);
         const [then, afterThen] = walk(item.then, before);
         const [otherwise, afterElse] = walk(item.else, before);
-        return [{ ...item, then, else: otherwise }, Math.max(afterThen, afterElse)];
+        return [{ ...item, then, else: otherwise }, joined(afterThen, afterElse)];
       }
       case "switch": {
-        const before = afterExpressions(item, running);
-        let most = 0;
+        const before = own(item, running);
+        let most = NONE;
         const cases = item.cases.map((switchCase) => {
-          const [body, after] = walk(switchCase.body, before);
-          most = Math.max(most, after);
+          const [body, next] = walk(switchCase.body, before);
+          most = joined(most, next);
           return { ...switchCase, body };
         });
         const [fallback, afterDefault] = walk(item.default, before);
-        return [{ ...item, cases, default: fallback }, Math.max(most, afterDefault)];
+        return [{ ...item, cases, default: fallback }, joined(most, afterDefault)];
       }
       case "while":
       case "repeat":
       case "for": {
-        // A pass of the body may follow another pass or a `continue`, so it starts unknown.
-        const [body] = walk(item.body, Infinity);
+        // A pass of the body may follow another pass or a `continue`, so it starts unknown, with what came before.
+        const [body] = walk(item.body, UNKNOWN_TIME(running.sources));
         const next = { ...item, body };
-        return [next, transparent(item) ? running : Infinity];
+        return [next, transparent(item) ? running : UNKNOWN_TIME(running.sources)];
       }
       case "function":
-        return [{ ...item, body: walk(item.body, Infinity)[0] }, running];
+        return [{ ...item, body: walk(item.body, UNKNOWN_TIME(new Set()))[0] }, running];
       case "permanentButton":
         return [
-          item.body === undefined ? item : { ...item, body: walk(item.body, Infinity)[0] },
+          item.body === undefined
+            ? item
+            : { ...item, body: walk(item.body, UNKNOWN_TIME(new Set()))[0] },
           running,
         ];
       default:
-        return [item, transparent(item) ? running : afterExpressions(item, running)];
+        return [item, transparent(item) ? running : own(item, running)];
     }
   };
-  return walk(statements, Infinity)[0];
+  return walk(statements, UNKNOWN_TIME(new Set()))[0];
+}
+
+/**
+ * The statements with the replaced waits in `restored` back after their texts, after the last paragraph of a split
+ * text, and a text that was not split said at once again, as before the rule.
+ */
+function withRestoredWaits(
+  statements: IrStatement[],
+  restored: ReadonlySet<WaitStatement>,
+  diagnostics: MigrationDiagnostic[],
+): IrStatement[] {
+  const block = (items: IrStatement[]): IrStatement[] => {
+    const nested = items.map((item) => withNestedBlocks(item, block));
+    const pieces = new Map<WaitStatement, number>();
+    for (const item of nested)
+      if (item.kind === "say" && item.readingTime !== undefined && restored.has(item.readingTime))
+        pieces.set(item.readingTime, (pieces.get(item.readingTime) ?? 0) + 1);
+    if (pieces.size === 0) return nested;
+    const seen = new Map<WaitStatement, number>();
+    return nested.flatMap((item): IrStatement[] => {
+      if (item.kind !== "say" || item.readingTime === undefined || !restored.has(item.readingTime))
+        return [item];
+      const wait = item.readingTime;
+      const count = (seen.get(wait) ?? 0) + 1;
+      seen.set(wait, count);
+      const { readingTime: _readingTime, ...text } = item;
+      if (count < pieces.get(wait)!) return [text];
+      diagnostics.push({
+        code: "SX_WAIT_FOR_BEAT",
+        severity: "info",
+        message:
+          "The legacy wait after this text stays, and the text is said at once again: a beat that follows, which keeps its timing, would cut its reading time short.",
+        span: item.span,
+      });
+      // Said at once again, the text keeps that as a beat does, and the texts before it keep their waits in turn.
+      return [pieces.get(wait) === 1 ? { ...text, instant: true, beat: true } : text, wait];
+    });
+  };
+  return block(statements);
 }
 
 // Statements after which nothing runs on the straight path, or that run code elsewhere.
 const LEAVING: ReadonlySet<string> = new Set(["goto", "exit", "return", "break", "continue"]);
 
 /**
- * The reading time that may run after a statement's own expressions: unknown after an effect such as a call, which
- * may say a text; otherwise none after an ask, a button, or a choice that surely opens; and as before without effects.
+ * The reading time that may run after values are computed: unknown after an effect such as a call, which may say a
+ * text; otherwise none after an ask, a button, or a choice that surely opens; and as before without effects.
  */
-function afterExpressions(statement: IrStatement, running: number): number {
-  if (LEAVING.has(statement.kind)) return Infinity;
-  const values: IrExpression[] = [];
-  mapOwnExpressions(statement, (value) => {
-    values.push(value);
-    return value;
-  });
-  return afterValues(values, running);
-}
-
 function afterValues(values: readonly IrExpression[], running: number): number {
   if (values.some(effectBesidesAsks)) return Infinity;
   return values.some(surelyAsks) ? 0 : running;
