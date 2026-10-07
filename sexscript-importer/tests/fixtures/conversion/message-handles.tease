@@ -90,4 +90,21 @@ while c <= 2 {
   wait 5
   c += 1
 }
+let words = ["First", "Second", "Third"]
+say "Word ${words[0]} count 0"
+for w in 1..=2 {
+  let dropped = words.removeAt(0)
+  say "Word ${words[0]} count ${w}"
+  wait 5
+}
+let chapter = "First"
+function advance {
+  chapter = "Second"
+}
+say "Chapter ${chapter}: 0"
+for a in 1..=2 {
+  advance()
+  say "Chapter ${chapter}: ${a}"
+  wait 5
+}
 exit

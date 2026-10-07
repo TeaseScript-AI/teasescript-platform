@@ -18,7 +18,7 @@ type Token = { char: string } | { key: string; value: IrExpression };
  * 2026-10-07):
  * - an animation, texts that each add only punctuation to the one before, with only waits between them (growing
  *   dots), becomes one `let line = say first, instant` and a `line.text += added` per step, or `= text` where the step
- *   is no plain extension or its values are computed, such as a random draw, which each step makes anew;
+ *   is no plain extension; a text with a value computed anew, such as a random draw, is no step;
  * - a counter, a loop whose body says one text with a count, a variable the loop steps or a range loop's own, where the
  *   last text said before the loop, with only statements without effects in between, is the same line with a number
  *   or a placeholder in place of the count (`20 jerks` and `${i} jerks`) or the same text, becomes a
@@ -232,32 +232,42 @@ function counts(loop: Extract<IrStatement, { kind: "while" | "for" | "repeat" }>
   return names;
 }
 
-/** The names the statements write, also through a member, an element, or a method of the value. */
-function written(statements: readonly IrStatement[]): Set<string> {
+/**
+ * The names the statements may change: those they write, also through a member or an element, those whose method any
+ * of their expressions calls, which may change the value (`words.remove(0)`), and every name where they call script
+ * code, which may write any (null).
+ */
+function written(statements: readonly IrStatement[]): Set<string> | null {
   const names = new Set<string>();
+  let calls = false;
   const base = (value: IrExpression): string | null =>
     value.kind === "variable"
       ? value.name
       : value.kind === "property" || value.kind === "index" || value.kind === "methodCall"
         ? base(value.target)
         : null;
+  const expression = (value: IrExpression): IrExpression => {
+    if (value.kind === "methodCall") {
+      const receiver = base(value.target);
+      if (receiver !== null) names.add(receiver);
+    }
+    if (value.kind === "call" && (value.local === true || value.name === "sexscriptLegacyCall"))
+      calls = true;
+    return mapChildren(value, expression);
+  };
   const visit = (item: IrStatement): void => {
     if (item.kind === "let") names.add(item.name);
-    const target =
-      item.kind === "assign"
-        ? base(item.target)
-        : item.kind === "expression"
-          ? base(item.expression)
-          : null;
+    const target = item.kind === "assign" ? base(item.target) : null;
     if (target !== null) names.add(target);
     if (item.kind === "for") names.add(item.variable);
+    mapOwnExpressions(item, expression);
     withNestedBlocks(item, (body) => {
       body.forEach(visit);
       return body;
     });
   };
   statements.forEach(visit);
-  return names;
+  return calls ? null : names;
 }
 
 // A number or a placeholder for one: digits, punctuation, and spaces.
@@ -325,9 +335,9 @@ function sameLine(
   );
 }
 
-/** Whether the value reads one of the names. */
-function readsAny(value: IrExpression, names: ReadonlySet<string>): boolean {
-  if (value.kind === "variable") return names.has(value.name);
+/** Whether the value reads one of the names; every name for null. */
+function readsAny(value: IrExpression, names: ReadonlySet<string> | null): boolean {
+  if (value.kind === "variable") return names === null || names.has(value.name);
   let found = false;
   mapChildren(value, (child) => {
     found ||= readsAny(child, names);

@@ -76,3 +76,18 @@ for (int c = 1; c <= 2; c++) {
     show("Chapter " + title + ": " + c)
     wait(5)
 }
+def words = ["First", "Second", "Third"]
+show("Word " + words[0] + " count 0")
+for (w in 1..2) {
+    def dropped = words.remove(0)
+    show("Word " + words[0] + " count " + w)
+    wait(5)
+}
+def chapter = "First"
+def advance = { chapter = "Second" }
+show("Chapter " + chapter + ": 0")
+for (a in 1..2) {
+    advance()
+    show("Chapter " + chapter + ": " + a)
+    wait(5)
+}

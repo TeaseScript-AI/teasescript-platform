@@ -573,13 +573,14 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Updatable messages (owner decision 2026-10-07, V30 "Updatable messages"): the legacy display was redrawn to
   animate a text or to count, where TeaseScript changes a shown message in place. An animation, texts that each add
   only punctuation to the one before with only waits between them, becomes `let line = say "Deciding.", instant` and
-  `line.text += "."` per step, or `= text` where a step is no plain extension or its values are computed, such as a
-  random draw that each step made anew (`SX_MESSAGE_ANIMATION`, counted as `messageHandles.animations`). A loop whose
+  `line.text += "."` per step, or `= text` where a step is no plain extension; a text with a value computed anew,
+  such as a random draw, is no step (`SX_MESSAGE_ANIMATION`, counted as `messageHandles.animations`). A loop whose
   body says one text with a count, a variable the loop steps with `+=` or `-=` or a range loop's own, where the last
   text said before the loop, with only statements without effects in between, is the same line with a number or a
   placeholder in place of the count (`20 jerks` before `${i} jerks`, only digits, punctuation, and spaces around the
-  count) or the same text, becomes `let counter = say …, instant` before the loop and `counter.text = …` in it, as
-  Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`). The waits between the steps stay as they
+  count) or the same text, and whose other values the loop cannot change (no write, method call, or call of script
+  code in its body that may reach them), becomes `let counter = say …, instant` before the loop and `counter.text = …`
+  in it, as Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`). The waits between the steps stay as they
   are, since the pacing rule below only touches waits right after a `say`; other loops keep one message per pass, a
   module's code outside its functions keeps its texts, and a later text that repeats a handle's current text says only
   what it adds.
