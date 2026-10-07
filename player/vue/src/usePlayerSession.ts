@@ -186,7 +186,30 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (options.capabilities?.camera === true || options.capturedMedia !== undefined)
       ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
       : undefined;
-  const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
+  const storageProvider = capturedMediaPersistence ?? options.scriptStorage;
+  // Every change this Player makes to the stored values goes through here, which keeps the values the next Start loads
+  // (`storedEntries`) equal to what the provider holds, so Play again starts without reading storage again. A failed
+  // change leaves them as they were; session-local values (`null`) stay session-local.
+  const scriptStorage: ScriptStorageProvider | undefined = storageProvider && {
+    scope: storageProvider.scope,
+    load: () => storageProvider.load(),
+    write: (key, value) =>
+      seeding(storageProvider.write(key, value), () => seedNextStart(key, value)),
+    replace: (entries) =>
+      seeding(storageProvider.replace(entries), () => {
+        if (storedEntries.value !== null) storedEntries.value = [...entries];
+      }),
+    clear: () =>
+      seeding(storageProvider.clear(), () => {
+        if (storedEntries.value !== null) storedEntries.value = [];
+      }),
+  };
+  // Seeds once the provider stored the change, before its caller learns of it, and hands the caller the provider's own
+  // promise, so the change settles for it exactly as it would without seeding.
+  function seeding(change: Promise<void>, seed: () => void): Promise<void> {
+    change.then(seed, () => {});
+    return change;
+  }
   // Changes whenever the session camera may have opened, failed, ended, or been released.
   const cameraRevision = ref(0);
   const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
@@ -515,8 +538,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else {
           savedDataRevision.value++;
-          // Play again starts from the values the provider now holds.
-          seedNextStart(write!.key, write!.value);
           for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
         }
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
@@ -537,7 +558,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the script's own write waits for the host, an edit is not taken: it would have to come between that write and the
   // script. A write the script issues while an edit is being stored settles as usual first.
   let editChain: Promise<unknown> = Promise.resolve();
-  /** Puts a stored edit or script write into the values the next Start loads, as the provider now holds them. */
+  /** Puts a stored value into the values the next Start loads, as the provider now holds them; see `scriptStorage`. */
   function seedNextStart(key: string, value: SerializableRuntimeValue) {
     const entries = storedEntries.value;
     if (entries === null) return;
@@ -640,8 +661,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         return failed("The change could not be saved in this browser. Nothing changed.");
       }
       savedDataRevision.value++;
-      // The next Start loads the stored values as they are now.
-      seedNextStart(key, value);
       while (
         !retired() &&
         session.value !== null &&
@@ -652,10 +671,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       scriptWritesStored.delete(stored);
     }
     if (retired()) return { kind: "saved", live: false };
-    if (stored.has(key)) {
-      seedNextStart(key, stored.get(key)!);
-      return { kind: "overtaken" };
-    }
+    if (stored.has(key)) return { kind: "overtaken" };
     if (!liveSession()) return { kind: "saved", live: false };
     const latest = session.value!;
     const edited = applyPlayerRuntimeStorageEdit(latest, { key, value });
@@ -687,7 +703,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     clearing.value = true;
     try {
       await scriptStorage.clear();
-      storedEntries.value = [];
       savedDataRevision.value++;
       // Debug's rewind could restore the saved data cleared now, so its history ends.
       rewindRetirements.value++;
@@ -959,9 +974,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
     if (disposed || generation.value !== owner || !inspecting.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
-    // Only a replacement in the provider changes what the next Start loads; a session-local state leaves it.
-    if (scriptStorage && adopted.scriptStoragePersistent)
-      storedEntries.value = adopted.scriptStorage;
     savedDataRevision.value++;
     rewindAdopted?.();
     inspecting.value = false;
