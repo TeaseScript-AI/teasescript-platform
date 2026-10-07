@@ -5,7 +5,7 @@ function sexscriptLegacyValue(value) {
   return value
 }
 function sexscriptLegacyText(value): string? {
-  if value == null or value == "" {
+  if value == null {
     return null
   }
   return "${value}"
@@ -95,7 +95,7 @@ function setVolume {
 }
 // A null the script sets a text variable to is the empty text too; a value of a type that the importer cannot tell
 // keeps the read of an open type.
-let dompic: string = load "game.dompic", default: ""
+let dompic = load "game.dompic", default: ""
 say "Reset the picture?"
 if (choose yes: "Yes", no: "No") == "yes" {
   dompic = ""
@@ -115,7 +115,7 @@ if outfit == null or outfit == "" {
 let names = ["a", "b"]
 let n = 0
 while n < 2 {
-  names[n] = load "game.name${n}", default: ""
+  names[n] = load "game.name${n}", default: sexscriptLegacyValue("")
   n += 1
 }
 say names.join(", ")
@@ -128,4 +128,25 @@ if sexscriptLegacyBooleanText(load("game.flag", default: "")) == true {
 function keepAnswer {
   save answer as "game.flag"
 }
+// A function's own variable is apart from another function's of the same name.
+function readName {
+  let ret = load "game.player", default: "Guest"
+  return ret
+}
+function decide {
+  let ret = null
+  say "Ready?"
+  ret = (choose yes: "Yes", no: "No") == "yes"
+  return ret
+}
+say "${readName()} ${decide()}"
+// A read of a computed key has no type, also where it keeps its null.
+let slot = 2
+let saved = load "game.slot${slot}", default: sexscriptLegacyValue(null)
+if saved == null {
+  say "Empty slot."
+}
+let counted: integer | string | null = 0
+// NOTE SX_LOAD_KEEPS_VALUE line 73: Groovy stored null in 'counted' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+counted = load "game.count${slot}", default: counted
 exit

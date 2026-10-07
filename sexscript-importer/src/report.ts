@@ -226,7 +226,8 @@ export interface FeasibilityReport {
    * `default: null` and a declared key type (`nullKept`), and the statements whose reads keep a null of an open type
    * (`open`, `SX_LOAD_OPEN_NULL`); text reads whose null the script told apart, now the empty text (`textEmpty`,
    * `SX_LOAD_TEXT_EMPTY`), and their null tests and nulls set, now the empty text (`textTests`,
-   * `SX_LOAD_TEXT_NULL_TEST`, `SX_LOAD_TEXT_NULL_SET`).
+   * `SX_LOAD_TEXT_NULL_TEST`, `SX_LOAD_TEXT_NULL_SET`); reads of computed keys that keep an open null
+   * (`computedOpen`, `SX_LOAD_COMPUTED_OPEN`).
    */
   storageReads: {
     defaulted: number;
@@ -234,6 +235,7 @@ export interface FeasibilityReport {
     open: number;
     textEmpty: number;
     textTests: number;
+    computedOpen: number;
   };
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
@@ -389,7 +391,14 @@ export function analyzeFeasibility(
     },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
-    storageReads: { defaulted: 0, nullKept: 0, open: 0, textEmpty: 0, textTests: 0 },
+    storageReads: {
+      defaulted: 0,
+      nullKept: 0,
+      open: 0,
+      textEmpty: 0,
+      textTests: 0,
+      computedOpen: 0,
+    },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -497,6 +506,7 @@ export function analyzeFeasibility(
       report.storageReads.textEmpty += count("SX_LOAD_TEXT_EMPTY");
       report.storageReads.textTests +=
         count("SX_LOAD_TEXT_NULL_TEST") + count("SX_LOAD_TEXT_NULL_SET");
+      report.storageReads.computedOpen += count("SX_LOAD_COMPUTED_OPEN");
     }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;

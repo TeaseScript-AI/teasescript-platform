@@ -139,7 +139,7 @@ let permissions: object[] = [
   { title: "Play", chance: 55, flag: "deny.play" }
 ]
 let permission = permissions[randomInteger(0..2)]
-if permission.flag != null and load(permission.flag, default: null) != null {
+if permission.flag != null and load(permission.flag, default: sexscriptLegacyValue(null)) != null {
   say "Not now"
 }
 // A null test of a computed key of a dict without stored nulls asks for the key once.
@@ -155,7 +155,7 @@ if not skipped.contains(sections[section]) {
 let needed = dict{ rope: "rope", rubber_bands: "rubber bands" }
 let missing = ""
 for toyValue, value in needed {
-  if load("toys.${toyValue}", default: null) != true {
+  if load("toys.${toyValue}", default: sexscriptLegacyValue(null)) != true {
     missing += "${value} "
   }
 }

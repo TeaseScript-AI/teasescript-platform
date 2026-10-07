@@ -26,7 +26,7 @@ function sexscriptLegacyAskProfile {
   let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.dildo"] {
-    if load(profileToysKey, default: null) == null {
+    if load(profileToysKey, default: sexscriptLegacyValue(null)) == null {
       profileToysFields[profileToysKey] = { value: false, text: ["dildo"][profileToysIndex] }
     }
     profileToysIndex += 1

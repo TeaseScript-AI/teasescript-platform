@@ -174,7 +174,7 @@ function joinNames {
   let next: string = "0"
   let i = 0
   while next != "" {
-    next = load "names.${i}", default: ""
+    next = load "names.${i}", default: sexscriptLegacyValue("")
     if next == "" {
       say "End"
     } else if all == "0" {
@@ -193,7 +193,7 @@ say "Names ${joined.length}"
 let implement: string? = "nothing"
 function pickOwned(keys) {
   for key in keys {
-    if load(key, default: null) != true {
+    if load(key, default: sexscriptLegacyValue(null)) != true {
       keys = sexscriptLegacyListMinus(keys, [key])
     }
   }

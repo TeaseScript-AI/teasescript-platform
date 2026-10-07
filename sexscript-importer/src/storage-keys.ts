@@ -1,4 +1,4 @@
-import { helperCall, helperStatements, type HelperName } from "./helpers.ts";
+import { helperCall, helperDefinitionOrder, helperStatements, type HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { usedNames } from "./message-handles.ts";
 import { effectBefore, withNestedBlocks } from "./repeated-text.ts";
@@ -200,6 +200,39 @@ function telling(value: IrExpression): boolean {
   return value.value === null || value.value === "" || value.value === 0 || value.value === false;
 }
 
+/**
+ * A read of a computed key has no type (#690): one that keeps its null gets null of an open type,
+ * `default: sexscriptLegacyValue(null)`, as `default: null` would type its value as null, so that it stays as open as
+ * legacy's read (`SX_LOAD_COMPUTED_OPEN`, counted).
+ */
+function withOpenComputedReads(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  return programs.map((program) => {
+    const diagnostics = [...program.diagnostics];
+    let span: IrStatement["span"] = null;
+    const opened = (value: IrExpression): IrExpression => {
+      const next = mapChildren(value, opened);
+      if (next.kind !== "load" || next.defaultValue !== undefined || literalKey(next.key) !== null)
+        return next;
+      diagnostics.push({
+        code: "SX_LOAD_COMPUTED_OPEN",
+        severity: "info",
+        message: "A read of a computed key has no type; it keeps legacy's null of an open type.",
+        span,
+      });
+      return { ...next, defaultValue: OPEN_NULL };
+    };
+    // The generated helpers read their keys as they are written (helpers.ts).
+    const block = (items: IrStatement[]): IrStatement[] =>
+      items.map((item) => {
+        if (helperDefinitionOrder(item) >= 0) return item;
+        const next = withNestedBlocks(item, block);
+        span = next.span;
+        return mapOwnExpressions(next, opened);
+      });
+    return { ...program, statements: block(program.statements), diagnostics };
+  });
+}
+
 /** The variables that a legacy text read (`loadString`) starts or is set to, by name. */
 function textVariables(statements: readonly IrStatement[]): Set<string> {
   const names = new Set<string>();
@@ -314,7 +347,9 @@ export function withStorageDefaults(
     ),
   );
   return withUsedHelpers(
-    withDeclaredKeys(withEmptyText(filled, textKeys), declaredType, layout.published),
+    withOpenComputedReads(
+      withDeclaredKeys(withEmptyText(filled, textKeys), declaredType, layout.published),
+    ),
     shared,
     layout.main,
   );
@@ -403,16 +438,21 @@ const BOOLEAN_TEXT =
 
 /**
  * A missing text reads as the empty text (owner decision 2026-10-07): every read of a key that only text is read from
- * and saved under gets `default: ""`, also where the script tests it for null, and those tests test for the empty text
- * instead, `x == null` as `x == ""`, of the read itself or of the variable it is read into, by name in its file or, for
- * a global, in every file; where the variable may hold null from another value too, the test takes both,
- * `x == null or x == ""`. A null saved under the key is the empty text too. A stored empty text so counts as missing.
+ * and saved under, and a legacy text read of a computed key, gets `default: ""` (of an open type for a computed key,
+ * which stays untyped), also where the script tests it for null, and those tests test for the empty text instead,
+ * `x == null` as `x == ""`, of the read itself or of the variable it is read into, also through copies, parameters,
+ * and results it reaches; where the variable may hold null from another value too, the test takes both,
+ * `x == null or x == ""`. A null that the script saves under the key or sets the variable to is the empty text too. A
+ * variable is the binding its name resolves to: a function's own variable or parameter, or else the file's, or a
+ * global's in every file. A stored empty text so counts as missing.
  */
 function withEmptyText(
   programs: readonly MigrationProgram[],
   textKeys: ReadonlySet<string>,
 ): MigrationProgram[] {
-  // A read of a text key, a legacy text read of a computed key, and the stored text of a key of mixed values.
+  const EMPTY: IrExpression = { kind: "literal", value: "" };
+  const computedText = (value: IrExpression): boolean =>
+    value.kind === "load" && literalKey(value.key) === null && value.read === "string";
   const textRead = (value: IrExpression): boolean => {
     if (value.kind !== "load") return false;
     const key = literalKey(value.key);
@@ -424,96 +464,21 @@ function withEmptyText(
       value.parts.length === 1 &&
       "value" in value.parts[0]! &&
       value.parts[0].value.kind === "load");
-  // The variables text is read into, and those that may also hold another value, such as null.
-  const receivers = programs.map(() => new Set<string>());
-  const globals = new Set<string>();
-  const mixed = new Set<string>();
-  // Variables the script sets to null, which are mixed unless text is read into them.
-  const nulled = new Set<string>();
   const textual = (value: IrExpression): boolean =>
     text(value) ||
     value.kind === "template" ||
     (value.kind === "literal" && typeof value.value === "string") ||
     (value.kind === "input" && value.input === "askText");
-  // Further variables the text reaches: copies of it, parameters it is passed to, and results of functions that return
-  // it, which may hold null from elsewhere too, so their tests take both.
+  // Each program's bindings: `function:name` for a function's own variable or parameter, `:name` for the file's.
+  const scopes = programs.map((program) => functionLocals(program.statements));
+  const resolve = (index: number, fn: string | null, name: string): string =>
+    fn !== null && scopes[index]!.get(fn)?.has(name) === true ? `${fn}:${name}` : `:${name}`;
+  const receivers = programs.map(() => new Set<string>());
   const reached = programs.map(() => new Set<string>());
-  programs.forEach((program, index) => {
-    const copies: Array<[string, IrExpression]> = [];
-    const functions = new Map<string, Extract<IrStatement, { kind: "function" }>>();
-    const returning = new Set<string>();
-    const calls: Extract<IrExpression, { kind: "call" }>[] = [];
-    let current: string | null = null;
-    const collectCalls = (value: IrExpression): IrExpression => {
-      if (value.kind === "call" && value.local === true) calls.push(value);
-      return mapChildren(value, collectCalls);
-    };
-    const visit = (items: readonly IrStatement[]): void => {
-      for (const item of items) {
-        const target =
-          item.kind === "let"
-            ? item.name
-            : item.kind === "assign" && item.operator === "=" && item.target.kind === "variable"
-              ? item.target.name
-              : null;
-        if (target !== null && (item.kind === "let" || item.kind === "assign")) {
-          if (text(item.value)) {
-            receivers[index]!.add(target);
-            if (item.kind === "let" && item.global === true) globals.add(target);
-          }
-          // A null set to a variable that text is read into is the empty text there (withEmptyText's statements).
-          if (!textual(item.value) && !isNullLiteral(item.value)) mixed.add(target);
-          if (isNullLiteral(item.value)) nulled.add(target);
-          copies.push([target, item.value]);
-        }
-        if (item.kind === "return" && item.value !== null && current !== null)
-          copies.push([`return:${current}`, item.value]);
-        mapOwnExpressions(item, collectCalls);
-        if (item.kind === "function") {
-          functions.set(item.name, item);
-          const outer = current;
-          current = item.name;
-          visit(item.body);
-          current = outer;
-          continue;
-        }
-        withNestedBlocks(item, (body) => {
-          visit(body);
-          return body;
-        });
-      }
-    };
-    visit(program.statements);
-    const holds = (value: IrExpression): boolean =>
-      text(value) ||
-      (value.kind === "variable" &&
-        (receivers[index]!.has(value.name) || reached[index]!.has(value.name))) ||
-      (value.kind === "call" && value.local === true && returning.has(value.name));
-    for (let changed = true; changed;) {
-      changed = false;
-      const reach = (name: string): void => {
-        if (name.startsWith("return:")) {
-          const fn = name.slice("return:".length);
-          if (!returning.has(fn)) {
-            returning.add(fn);
-            changed = true;
-          }
-        } else if (!receivers[index]!.has(name) && !reached[index]!.has(name)) {
-          reached[index]!.add(name);
-          changed = true;
-        }
-      };
-      for (const [target, value] of copies) if (holds(value)) reach(target);
-      for (const call of calls) {
-        const parameters = functions.get(call.name)?.parameters ?? [];
-        call.positional.forEach((argument, position) => {
-          const parameter = parameters[position];
-          if (parameter !== undefined && holds(argument)) reach(parameter.name);
-        });
-      }
-    }
-  });
-  // A variable declared global that text is read into in any file is tested as text in every file.
+  const mixed = programs.map(() => new Set<string>());
+  const nulled = programs.map(() => new Set<string>());
+  const others = programs.map(() => new Map<string, Set<string>>());
+  const globals = new Set<string>();
   const declaredGlobal = new Set(
     programs.flatMap((program) =>
       program.statements.flatMap((statement) =>
@@ -521,111 +486,197 @@ function withEmptyText(
       ),
     ),
   );
-  for (const names of receivers)
-    for (const name of names) if (declaredGlobal.has(name)) globals.add(name);
-  // A variable set to null that no text is read into holds null besides its other values.
-  for (const name of nulled)
-    if (!globals.has(name) && !receivers.some((names) => names.has(name))) mixed.add(name);
-  const EMPTY: IrExpression = { kind: "literal", value: "" };
+  programs.forEach((program, index) => {
+    const copies: Array<[string, IrExpression, string | null]> = [];
+    const functions = new Map<string, Extract<IrStatement, { kind: "function" }>>();
+    const returning = new Set<string>();
+    const calls: Array<[Extract<IrExpression, { kind: "call" }>, string | null]> = [];
+    const visit = (items: readonly IrStatement[], fn: string | null): void => {
+      const collectCalls = (value: IrExpression): IrExpression => {
+        if (value.kind === "call" && value.local === true) calls.push([value, fn]);
+        return mapChildren(value, collectCalls);
+      };
+      for (const item of items) {
+        const name =
+          item.kind === "let"
+            ? item.name
+            : item.kind === "assign" && item.operator === "=" && item.target.kind === "variable"
+              ? item.target.name
+              : null;
+        if (name !== null && (item.kind === "let" || item.kind === "assign")) {
+          const target = resolve(index, fn, name);
+          if (text(item.value)) receivers[index]!.add(target);
+          if (isNullLiteral(item.value)) nulled[index]!.add(target);
+          else if (!textual(item.value)) mixed[index]!.add(target);
+          if (!text(item.value)) {
+            const types = others[index]!.get(target) ?? new Set<string>();
+            types.add(
+              isNullLiteral(item.value)
+                ? "null"
+                : item.value.kind === "load"
+                  ? "unknown"
+                  : (valueType(item.value) ?? "unknown"),
+            );
+            others[index]!.set(target, types);
+          }
+          copies.push([target, item.value, fn]);
+        }
+        if (item.kind === "return" && item.value !== null && fn !== null)
+          copies.push([`return:${fn}`, item.value, fn]);
+        mapOwnExpressions(item, collectCalls);
+        if (item.kind === "function") {
+          functions.set(item.name, item);
+          visit(item.body, item.name);
+          continue;
+        }
+        withNestedBlocks(item, (body) => {
+          visit(body, fn);
+          return body;
+        });
+      }
+    };
+    visit(program.statements, null);
+    const holds = (value: IrExpression, fn: string | null): boolean => {
+      if (text(value)) return true;
+      if (value.kind === "variable") {
+        const binding = resolve(index, fn, value.name);
+        return receivers[index]!.has(binding) || reached[index]!.has(binding);
+      }
+      return value.kind === "call" && value.local === true && returning.has(value.name);
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      const reach = (binding: string): void => {
+        if (binding.startsWith("return:")) {
+          const fn = binding.slice("return:".length);
+          if (!returning.has(fn)) {
+            returning.add(fn);
+            changed = true;
+          }
+        } else if (!receivers[index]!.has(binding) && !reached[index]!.has(binding)) {
+          reached[index]!.add(binding);
+          changed = true;
+        }
+      };
+      for (const [target, value, fn] of copies) if (holds(value, fn)) reach(target);
+      for (const [call, fn] of calls) {
+        const callee = functions.get(call.name);
+        call.positional.forEach((argument, position) => {
+          const parameter = callee?.parameters[position];
+          if (parameter !== undefined && holds(argument, fn))
+            reach(`${call.name}:${parameter.name}`);
+        });
+      }
+    }
+    for (const binding of receivers[index]!)
+      if (binding.startsWith(":") && declaredGlobal.has(binding.slice(1)))
+        globals.add(binding.slice(1));
+  });
   return programs.map((program, index) => {
     const diagnostics = [...program.diagnostics];
     const note = (code: string, message: string, span: IrStatement["span"]): void => {
       diagnostics.push({ code, severity: "info", message, span });
     };
-    let span: IrStatement["span"] = null;
-    const tested = (value: IrExpression): boolean =>
-      text(value) ||
-      (value.kind === "variable" &&
-        (receivers[index]!.has(value.name) ||
-          globals.has(value.name) ||
-          reached[index]!.has(value.name)));
-    const rewrite = (value: IrExpression): IrExpression => {
-      const next = mapChildren(value, rewrite);
-      if (next.kind === "load" && textRead(next)) {
-        const { open: _open, ...load } = next;
-        if (load.defaultValue !== undefined) return load;
-        note(
-          "SX_LOAD_TEXT_EMPTY",
-          "Legacy read null for a missing text, which reads as the empty text now.",
-          span,
-        );
-        return { ...load, defaultValue: EMPTY };
-      }
-      if (next.kind !== "binary" || (next.operator !== "==" && next.operator !== "!=")) return next;
-      const side = isNullLiteral(next.right)
-        ? next.left
-        : isNullLiteral(next.left)
-          ? next.right
-          : null;
-      if (side === null || !tested(side)) return next;
-      note(
-        "SX_LOAD_TEXT_NULL_TEST",
-        "Legacy tested this text for null, which a missing text was; it tests for the empty text now.",
-        span,
+    const isReceiver = (binding: string): boolean =>
+      receivers[index]!.has(binding) || (binding.startsWith(":") && globals.has(binding.slice(1)));
+    // A text variable holds null only where the script sets it so and no text is read into it, or other values.
+    const holdsNull = (binding: string): boolean =>
+      mixed[index]!.has(binding) || (nulled[index]!.has(binding) && !isReceiver(binding));
+    const typeOf = (binding: string): { type?: string; open?: true } => {
+      const given = [...(others[index]!.get(binding) ?? [])].filter(
+        (type) => type !== "string" && !(type === "null" && isReceiver(binding)),
       );
-      const empty: IrExpression = {
-        kind: "binary",
-        operator: next.operator,
-        left: side,
-        right: EMPTY,
-      };
-      const both =
-        side.kind === "variable" &&
-        (mixed.has(side.name) ||
-          (reached[index]!.has(side.name) && !receivers[index]!.has(side.name)));
-      if (!both) return empty;
-      return {
-        kind: "binary",
-        operator: next.operator === "==" ? "or" : "and",
-        left: next,
-        right: empty,
-      };
-    };
-    // A text variable that the script gives other values too holds them as well: null makes it optional, values the
-    // importer knows here a union, and a value of a type it cannot tell keeps the read of an open type.
-    const others = otherValueTypes(program.statements);
-    const typeOf = (name: string): { type?: string; open?: true } => {
-      const given = [...(others.get(name) ?? [])].filter((type) => type !== "string");
       if (given.length === 0) return {};
       if (given.includes("unknown")) return { open: true };
       const held = unionType(["string", ...given.filter((type) => type !== "null")])!;
       if (!given.includes("null")) return { type: held };
       return { type: held.includes(" | ") ? `${held} | null` : `${held}?` };
     };
-    // Variables declared elsewhere that text is read into, which then hold text too.
     const widened = new Set<string>();
-    const block = (items: IrStatement[]): IrStatement[] =>
+    const block = (items: IrStatement[], fn: string | null): IrStatement[] =>
       items.flatMap((item): IrStatement[] => {
-        const nested = withNestedBlocks(item, block);
-        span = nested.span;
+        const nested =
+          item.kind === "function"
+            ? { ...item, body: block(item.body, item.name) }
+            : withNestedBlocks(item, (body) => block(body, fn));
+        const span = nested.span;
+        const tested = (value: IrExpression): boolean => {
+          if (text(value)) return true;
+          if (value.kind !== "variable") return false;
+          const binding = resolve(index, fn, value.name);
+          return isReceiver(binding) || reached[index]!.has(binding);
+        };
+        const rewrite = (value: IrExpression): IrExpression => {
+          const next = mapChildren(value, rewrite);
+          if (next.kind === "load" && textRead(next)) {
+            const { open: _open, ...load } = next;
+            if (load.defaultValue !== undefined) return load;
+            note(
+              "SX_LOAD_TEXT_EMPTY",
+              "Legacy read null for a missing text, which reads as the empty text now.",
+              span,
+            );
+            // A computed key has no type, so its default keeps an open one.
+            return {
+              ...load,
+              defaultValue: computedText(load) ? helperCall("value", [EMPTY]) : EMPTY,
+            };
+          }
+          if (next.kind !== "binary" || (next.operator !== "==" && next.operator !== "!="))
+            return next;
+          const side = isNullLiteral(next.right)
+            ? next.left
+            : isNullLiteral(next.left)
+              ? next.right
+              : null;
+          if (side === null || !tested(side)) return next;
+          note(
+            "SX_LOAD_TEXT_NULL_TEST",
+            "Legacy tested this text for null, which a missing text was; it tests for the empty text now.",
+            span,
+          );
+          const empty: IrExpression = {
+            kind: "binary",
+            operator: next.operator,
+            left: side,
+            right: EMPTY,
+          };
+          if (side.kind !== "variable") return empty;
+          const binding = resolve(index, fn, side.name);
+          const both = holdsNull(binding) || (reached[index]!.has(binding) && !isReceiver(binding));
+          return both
+            ? {
+                kind: "binary",
+                operator: next.operator === "==" ? "or" : "and",
+                left: next,
+                right: empty,
+              }
+            : empty;
+        };
         let next = mapOwnExpressions(nested, rewrite);
         const key = next.kind === "save" ? literalKey(next.key) : null;
         if (next.kind === "save" && key !== null && textKeys.has(key) && isNullLiteral(next.value))
           return [{ ...next, value: EMPTY }];
-        // Null set to a variable that text is read into is the empty text, which its tests test for.
-        const set =
+        const name =
           next.kind === "let"
             ? next.name
             : next.kind === "assign" && next.operator === "=" && next.target.kind === "variable"
               ? next.target.name
               : null;
-        if (
-          set !== null &&
-          (next.kind === "let" || next.kind === "assign") &&
-          isNullLiteral(next.value) &&
-          (receivers[index]!.has(set) || globals.has(set))
-        ) {
+        if (name === null || (next.kind !== "let" && next.kind !== "assign")) return [next];
+        const binding = resolve(index, fn, name);
+        // Null set to a variable that text is read into is the empty text, which its tests test for.
+        if (isNullLiteral(next.value) && isReceiver(binding)) {
           note(
             "SX_LOAD_TEXT_NULL_SET",
             "Legacy set this text to null, missing; it is the empty text now.",
-            next.span,
+            span,
           );
           return [{ ...next, value: EMPTY }];
         }
-        if (next.kind === "assign" && next.target.kind === "variable" && text(next.value))
-          widened.add(next.target.name);
+        if (next.kind === "assign" && text(next.value)) widened.add(binding);
         if (next.kind !== "let" || !text(next.value) || next.type !== undefined) return [next];
-        const held = typeOf(next.name);
+        const held = typeOf(binding);
         if (held.type !== undefined) return [{ ...next, type: held.type }];
         if (held.open !== true) return [next];
         next = { ...next, value: helperCall("value", [next.value]) };
@@ -633,36 +684,61 @@ function withEmptyText(
           code: "SX_LOAD_OPEN_NULL",
           severity: "warning",
           message: OPEN_TEXT,
-          span: next.span,
+          span,
         });
-        const line = next.span === null ? "" : ` line ${next.span.line}`;
+        const line = span === null ? "" : ` line ${span.line}`;
         return [
           {
             kind: "comment",
             text: `// NOTE SX_LOAD_OPEN_NULL${line}: ${OPEN_TEXT}`,
             trailing: false,
-            span: next.span,
+            span,
           },
           next,
         ];
       });
-    const statements = block(program.statements);
+    const statements = block(program.statements, null);
     // A variable that text is read into after another value started it holds both; one that holds only text, whose
     // null tests test for the empty text now, holds no null.
-    const widen = (items: IrStatement[]): IrStatement[] =>
+    const widen = (items: IrStatement[], fn: string | null): IrStatement[] =>
       items.map((item) => {
-        const next = withNestedBlocks(item, widen);
+        if (item.kind === "function") return { ...item, body: widen(item.body, item.name) };
+        const next = withNestedBlocks(item, (body) => widen(body, fn));
         if (next.kind !== "let") return next;
-        const reads = widened.has(next.name) || text(next.value);
-        if (next.type === "string?" && reads && !mixed.has(next.name))
+        const binding = resolve(index, fn, next.name);
+        const reads = widened.has(binding) || text(next.value);
+        if (next.type === "string?" && reads && !holdsNull(binding))
           return { ...next, type: "string" };
-        if (next.type !== undefined || !widened.has(next.name)) return next;
+        if (next.type !== undefined || !widened.has(binding)) return next;
         const start = valueType(next.value);
         if (start === null || start === "string") return next;
         return { ...next, type: `${unionType([start, "string"])!} | null` };
       });
-    return { ...program, statements: widen(statements), diagnostics };
+    return { ...program, statements: widen(statements, null), diagnostics };
   });
+}
+
+/** Each function's own variables and parameters, by the function's name. */
+function functionLocals(statements: readonly IrStatement[]): Map<string, Set<string>> {
+  const locals = new Map<string, Set<string>>();
+  const visit = (items: readonly IrStatement[], names: Set<string> | null): void => {
+    for (const item of items) {
+      if (item.kind === "function") {
+        const own = new Set(item.parameters.map((parameter) => parameter.name));
+        locals.set(item.name, own);
+        visit(item.body, own);
+        continue;
+      }
+      if (item.kind === "let" && names !== null) names.add(item.name);
+      if (item.kind === "for" && names !== null) names.add(item.variable);
+      withNestedBlocks(item, (body) => {
+        visit(body, names);
+        return body;
+      });
+    }
+  };
+  visit(statements, null);
+  return locals;
 }
 
 const OPEN_TEXT =

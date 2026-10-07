@@ -61,3 +61,13 @@ show(names.join(", "))
 def answer = loadString("game.answer")
 if (loadBoolean("game.flag") == true) show("Flagged.")
 def keepAnswer = { save("game.flag", answer) }
+// A function's own variable is apart from another function's of the same name.
+def readName = { def ret = loadString("game.player"); if (ret == null) ret = "Guest"; return ret }
+def decide = { def ret = null; ret = getBoolean("Ready?"); return ret }
+show(readName() + " " + decide())
+// A read of a computed key has no type, also where it keeps its null.
+def slot = 2
+def saved = load("game.slot" + slot)
+if (saved == null) show("Empty slot.")
+def counted = 0
+counted = loadString("game.count" + slot)
