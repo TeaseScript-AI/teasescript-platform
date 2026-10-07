@@ -1,6 +1,5 @@
-import path from "node:path";
 import { isRecord } from "./ast.ts";
-import { repositoryBuildUrl } from "./repository-build.ts";
+import { loadEngine, type Data, type Engine, type Runtime } from "./explorer.ts";
 
 /**
  * Deterministic smoke run of generated TeaseScript in the real runtime: buttons are pressed, each visit of a choice
@@ -8,6 +7,8 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  * through fixed answers, waits and timers advance simulated time, and media plays in simulated real time after a
  * successful load of one second per pass. The wall clock starts at 2026-10-02 12:00 UTC and follows simulated time.
  * It proves that one path through the script executes without runtime errors; it does not explore every branch.
+ * Each run drives one engine-owned runtime session (`docs/RUNTIME.md#runtime-sessions`), which keeps the state
+ * between operations; the run exports the state once, at its end, for the storage it leaves.
  *
  * `failed` includes `TSR037`: the product's default instruction budget between two events, which the Player uses
  * as well. `stepLimit` is inconclusive.
@@ -44,7 +45,10 @@ export interface SmokeRunOptions {
   visits?: Map<unknown, number>;
   /** Advanced with simulated time; a flow passes one clock through all of its scripts. */
   clock?: SmokeClock;
-  /** Script storage the run starts with and leaves its writes in; a flow passes one map through its scripts. */
+  /**
+   * Script storage the run starts with and leaves its writes in; a flow passes one map through its scripts. A run
+   * whose runtime operation throws leaves it unchanged.
+   */
   storage?: Map<string, RuntimeValue>;
 }
 
@@ -75,55 +79,13 @@ export type TeaseProjectRunner = (
   options?: {
     maxSteps?: number;
     images?: ReadonlyArray<{ path: string; keywords: readonly string[] }>;
-    /** The storage the run starts with and leaves its saved values in; empty by default. */
+    /**
+     * The storage the run starts with and leaves its saved values in, unchanged when a runtime operation throws;
+     * empty by default.
+     */
     storage?: Map<string, RuntimeValue>;
   },
 ) => ProjectRunResult;
-
-const repositoryIndexUrl = repositoryBuildUrl("src/index.js");
-
-/** A runtime operation result read field by field; plans and snapshots inside it are passed back unchanged. */
-type RuntimeData = Readonly<Record<string, unknown>>;
-
-interface RuntimeApi {
-  call: (name: string, ...args: unknown[]) => RuntimeData;
-  /** Playback records of the active media, from mediaPlaybackProjection(). */
-  media: (snapshot: RuntimeData) => RuntimeData[];
-}
-
-const RUNTIME_OPERATIONS = [
-  "compileSource",
-  "compileProject",
-  "createFreshRuntimeSnapshot",
-  "run",
-  "completeAction",
-  "observeTime",
-  "reportMediaLoad",
-];
-
-async function loadRuntimeApi(): Promise<RuntimeApi> {
-  const module: unknown = await import(repositoryIndexUrl.href);
-  const exported = (name: string) => {
-    const value = isRecord(module) ? module[name] : undefined;
-    if (typeof value !== "function") throw new Error(`Repository build does not export ${name}().`);
-    return value;
-  };
-  const operations = new Map(RUNTIME_OPERATIONS.map((name) => [name, exported(name)]));
-  const projection = exported("mediaPlaybackProjection");
-  return {
-    call: (name, ...args) => {
-      const operation = operations.get(name);
-      if (operation === undefined) throw new Error(`Unknown runtime operation ${name}.`);
-      const value: unknown = operation(...args);
-      if (!isRecord(value)) throw new Error(`${name}() returned an unexpected result shape.`);
-      return value;
-    },
-    media: (snapshot) => {
-      const value: unknown = projection(snapshot);
-      return Array.isArray(value) ? value.filter(isRecord) : [];
-    },
-  };
-}
 
 const NOT_COMPILED = {
   status: "failed",
@@ -133,13 +95,13 @@ const NOT_COMPILED = {
 
 /** Runs one source as the `main.tease` of a single-file project. */
 export async function loadRepositoryRunner(): Promise<TeaseRunner> {
-  const api = await loadRuntimeApi();
+  const engine = await loadEngine();
   return (source, builtins, options = {}) => {
-    const compiled = api.call("compileSource", source, { builtins: Object.keys(builtins) });
+    const compiled = engine.compileSource(source, { builtins: Object.keys(builtins) });
     const { status, failure, steps } = !isRecord(compiled.plan)
       ? NOT_COMPILED
       : smokeRun(
-          api,
+          engine,
           compiled.plan,
           builtins,
           options.maxSteps ?? 2000,
@@ -160,14 +122,14 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
 
 /** Compiles the files of a project into one plan and runs it from `main.tease`, transfers included. */
 export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner> {
-  const api = await loadRuntimeApi();
+  const engine = await loadEngine();
   // Runs of the same files with the same host functions reuse the last plan; only the plan is kept, not the
   // compilation's parser trees, which a run does not need.
   let last: {
     files: readonly ProjectSource[];
     builtins: string;
     images: unknown;
-    plan: RuntimeData | null;
+    plan: Data | null;
   } | null = null;
   return (files, builtins, options = {}) => {
     const names = Object.keys(builtins).sort().join("\n");
@@ -178,7 +140,7 @@ export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner>
       last.images === options.images;
     let plan = reused ? last!.plan : null;
     if (!reused) {
-      const compiled = api.call("compileProject", files, {
+      const compiled = engine.compileProject(files, {
         builtins: Object.keys(builtins),
         ...(options.images === undefined ? {} : { images: options.images }),
       });
@@ -188,7 +150,7 @@ export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner>
     return plan === null
       ? NOT_COMPILED
       : smokeRun(
-          api,
+          engine,
           plan,
           builtins,
           options.maxSteps ?? 2000,
@@ -213,8 +175,8 @@ function isRuntimeValue(value: unknown): value is RuntimeValue {
 const MEDIA_PASS_MS = 1000;
 
 function smokeRun(
-  api: RuntimeApi,
-  plan: RuntimeData,
+  engine: Engine,
+  plan: Data,
   builtins: Readonly<Record<string, HostFunction>>,
   maxSteps: number,
   visits: Map<unknown, number>,
@@ -252,14 +214,18 @@ function smokeRun(
   const scriptStorage = [...storage]
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, value]) => ({ key, value }));
-  let snapshot: RuntimeData = api.call("createFreshRuntimeSnapshot", plan, {
-    seed: 12345,
-    baseDelayMs: 0,
-    delayPerWordMs: 0,
-    delayPerCharacterMs: 0,
-    scriptStorage,
-    wallClockMs: SMOKE_EPOCH_MS + clock.nowMs,
-  });
+  const runtime: Runtime = engine.createFreshRuntimeSession(
+    plan,
+    {
+      seed: 12345,
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+      scriptStorage,
+      wallClockMs: SMOKE_EPOCH_MS + clock.nowMs,
+    },
+    { capabilities },
+  );
   const clockStart = clock.nowMs;
   let now = 0;
   // When each playback segment was last reported, keyed by media ID and segment.
@@ -271,16 +237,16 @@ function smokeRun(
   ): ProjectRunResult => ({ status, failure, steps });
   const harness = (message: string, steps: number): ProjectRunResult =>
     done("stuck", { code: "HARNESS", message, line: null, path: null }, steps);
-  // Operations return `{ snapshot, outcome, ... }`; the fresh snapshot is the snapshot itself.
-  const advance = (result: RuntimeData): void => {
-    const next = api.call("run", plan, result.snapshot, capabilities).snapshot;
-    if (!isRecord(next)) throw new Error("run() returned no snapshot.");
-    snapshot = next;
+  const mediaPlayback = (): Data[] => runtime.project("mediaPlaybackProjection");
+  // The session's status, failure, and pending actions after the last run.
+  let view: Data = runtime.view();
+  const advance = (): void => {
+    runtime.call("run");
+    view = runtime.view();
   };
   // Advances simulated time; all running media, foreground or background, plays on in real time.
-  const observe = (until: number): RuntimeData => {
-    const reports = api
-      .media(snapshot)
+  const observe = (until: number): void => {
+    const reports = mediaPlayback()
       .filter((media) => media.state === "running" && media.loaded === true)
       .map((media) => {
         const key = `${String(media.mediaId)}:${String(media.segment)}`;
@@ -296,12 +262,12 @@ function smokeRun(
       });
     now = until;
     clock.nowMs = clockStart + now;
-    return api.call("observeTime", plan, snapshot, now, reports);
+    runtime.call("observeTime", now, reports);
   };
   const terminal = (steps: number): ProjectRunResult | null => {
-    if (snapshot.status === "halted") return done("halted", null, steps);
-    if (snapshot.status !== "failed") return null;
-    const failure = isRecord(snapshot.failure) ? snapshot.failure : {};
+    if (view.status === "halted") return done("halted", null, steps);
+    if (view.status !== "failed") return null;
+    const failure = isRecord(view.failure) ? view.failure : {};
     const start = isRecord(failure.span) && isRecord(failure.span.start) ? failure.span.start : {};
     return done(
       "failed",
@@ -314,8 +280,9 @@ function smokeRun(
       steps,
     );
   };
-  // Leaves the run's storage writes in the shared map however the run ends.
+  // Leaves the run's storage writes in the shared map.
   const keepStorage = (): void => {
+    const snapshot = runtime.exportSnapshot();
     storage.clear();
     const entries = Array.isArray(snapshot.scriptStorage) ? snapshot.scriptStorage : [];
     for (const entry of entries.filter(isRecord)) {
@@ -325,15 +292,15 @@ function smokeRun(
     }
   };
   const runActions = (): ProjectRunResult => {
-    advance({ snapshot });
+    advance();
     for (let steps = 0; steps < maxSteps; steps += 1) {
       const ended = terminal(steps);
       if (ended !== null) return ended;
-      const action = isRecord(snapshot.foregroundAction) ? snapshot.foregroundAction : null;
+      const action = isRecord(view.foregroundAction) ? view.foregroundAction : null;
       if (action === null) return done("stuck", null, steps);
       if (action.kind === "capture") {
         // No camera is configured, so takePhoto() returns null, as it does in a Player without one.
-        const completion = api.call("completeAction", plan, snapshot, {
+        const completion = runtime.call("completeAction", {
           actionId: action.actionId,
           actionKind: "capture",
           payload: { kind: "unavailable", reason: "unconfigured" },
@@ -342,16 +309,14 @@ function smokeRun(
         if (outcome.kind !== "completed" && outcome.kind !== "executionPending") {
           return harness(`Camera answer rejected: ${JSON.stringify(outcome)}`, steps);
         }
-        advance(completion);
+        advance();
         continue;
       }
       if (action.kind === "interaction") {
         const visit = visits.get(action.owningInstruction) ?? 0;
         // An image request (askImage) is answered with one stored image that the harness vouches for.
-        const completion = api.call(
+        const completion = runtime.call(
           "completeAction",
-          plan,
-          snapshot,
           {
             actionId: action.actionId,
             actionKind: "interaction",
@@ -366,17 +331,18 @@ function smokeRun(
         } else if (outcome.kind !== "executionPending") {
           return harness(`Interaction answer rejected: ${JSON.stringify(outcome)}`, steps);
         }
-        advance(completion);
+        advance();
         continue;
       }
       if (typeof action.deadlineMs === "number") {
-        advance(observe(Math.max(now + 1, action.deadlineMs)));
+        observe(Math.max(now + 1, action.deadlineMs));
+        advance();
         continue;
       }
       if (action.kind === "mediaPlayback") {
-        const media = api.media(snapshot).find((entry) => entry.mediaId === action.mediaId);
-        if (media !== undefined && media.loaded !== true) {
-          const loaded = api.call("reportMediaLoad", plan, snapshot, action.mediaId, {
+        const playback = mediaPlayback().find((entry) => entry.mediaId === action.mediaId);
+        if (playback !== undefined && playback.loaded !== true) {
+          const loaded = runtime.call("reportMediaLoad", action.mediaId, {
             kind: "loaded",
             durationMs: MEDIA_PASS_MS,
           });
@@ -384,19 +350,19 @@ function smokeRun(
           if (outcome.kind === "invalidReport") {
             return harness(`Media load report rejected: ${JSON.stringify(outcome)}`, steps);
           }
-          advance(loaded);
+          advance();
           continue;
         }
       }
-      advance(observe(now + MEDIA_PASS_MS));
+      observe(now + MEDIA_PASS_MS);
+      advance();
     }
     return terminal(maxSteps) ?? done("stepLimit", null, maxSteps);
   };
-  try {
-    return runActions();
-  } finally {
-    keepStorage();
-  }
+  // An operation that throws ends the session (no later call, export included, works); its error propagates.
+  const result = runActions();
+  keepStorage();
+  return result;
 }
 
 const TEXT_ANSWERS = ["answer", "yes", "no"];
@@ -405,7 +371,7 @@ const NUMBER_ANSWERS = [1, 3, 10, 0];
 /** The stored image a smoke run answers image requests with. */
 const SMOKE_IMAGE = "smoke-image";
 
-function interactionAnswer(action: RuntimeData, visit: number) {
+function interactionAnswer(action: Data, visit: number) {
   if (isRecord(action.ui) && action.ui.kind === "image")
     return { kind: "image", reference: SMOKE_IMAGE };
   // A form (askForm, askBooleans) is submitted with its starting values.
