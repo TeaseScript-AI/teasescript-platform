@@ -308,8 +308,7 @@ Specialized tests may additionally inspect selected event, call, loop, or prepar
 
 The helper also runs each scenario through a [runtime session](RUNTIME.md#runtime-sessions), uninterrupted and one
 boundary at a time, continuing from a restored or forked session at each boundary, and requires the snapshot API's
-events, outcomes, view, and checkpoint bytes. Scenarios with simulated media or permanent-button input skip that pass
-until sessions take those operations.
+events, outcomes, view, and checkpoint bytes.
 
 The canonical self-contained checkpoint guarantee uses the serialized runtime RNG. A host-provided `RuntimeCapabilities.random` implementation is a compatibility/testing override whose external state is not captured by the runtime snapshot. Tests using that override must explicitly recreate the same deterministic external source and must not present the result as a self-contained checkpoint guarantee.
 

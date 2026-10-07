@@ -45,6 +45,19 @@ export function recordContinueCapture(
   return recorded;
 }
 
+/** Records a Continue capture for engine-owned plan/state that already passed complete validation. */
+export function recordValidatedContinueCapture(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capture: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+): PendingActionOperationResult<ContinueCaptureOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const recorded = recordCapturedContinueCapture({ plan, snapshot }, capture);
+  closeDebugTrace(trace, recorded);
+  return recorded;
+}
+
 function recordCapturedContinueCapture(
   captured: CapturedExecutableData,
   capture: unknown,

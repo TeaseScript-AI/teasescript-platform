@@ -2,21 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyExternalStorageEdit,
   CheckpointError,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSession,
   createRuntimeSession,
   executeInstruction,
+  inspectRuntimeState,
+  mediaPlaybackProjection,
   observeTime,
+  permanentButtonProjection,
+  pressPermanentButton,
+  recordContinueCapture,
+  reportMediaLoad,
   restoreRuntimeSession,
   run,
   RuntimeDataError,
   RuntimeDebugContext,
   RuntimeSessionError,
   serializeCheckpoint,
+  stageProjection,
+  updateInteraction,
   type InstructionPlan,
+  type RuntimeOperationResult,
   type RuntimeSession,
+  type RuntimeSessionResult,
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
@@ -416,4 +427,108 @@ test("a fork keeps its parent's capabilities unless its options give others", ()
   for (const options of [undefined, {}, explicitlyNone])
     assert.deepEqual(said(parent.fork(options)), ["42"]);
   assert.deepEqual(said(parent.fork({ capabilities: { builtins: { answer: () => 7 } } })), ["7"]);
+});
+
+test("the other host operations, projections, and inspection give the snapshot API's results", () => {
+  const plan = compileValidPlan(`let count = 0
+showPermanentButton "Add one" {
+    count += 1
+    say "count \${count}"
+}
+let beat = playAudio(file: "beat.mp3", async: true)
+let settings = askForm "Settings", fields: {
+    enabled: { value: false, description: "Turn it on" },
+    intensity: ["Low", "High"]
+}, submit: "Continue"
+say "level \${settings.intensity}"
+exit
+`);
+  const start = 1_700_000_000_000;
+  let snapshot = createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: start });
+  const session = createRuntimeSession(plan, snapshot);
+  const outcomes: string[] = [];
+  const same = (
+    legacy: RuntimeOperationResult,
+    operate: (current: RuntimeSession) => RuntimeSessionResult,
+  ) => {
+    snapshot = legacy.snapshot;
+    const { snapshot: _, ...expected } = legacy;
+    assert.deepEqual(operate(session), expected);
+    const outcome: unknown = "outcome" in legacy ? legacy.outcome : null;
+    if (typeof outcome === "object" && outcome !== null && "kind" in outcome)
+      outcomes.push(String(outcome.kind));
+    assert.equal(serializeCheckpoint(session.exportCheckpoint()), checkpointOf(plan, snapshot));
+    assert.deepEqual(session.stageProjection(), stageProjection(snapshot));
+    assert.deepEqual(session.mediaPlaybackProjection(), mediaPlaybackProjection(snapshot));
+    assert.deepEqual(session.permanentButtonProjection(), permanentButtonProjection(snapshot));
+  };
+  const form = () => snapshot.foregroundAction!.actionId;
+  const update = (fieldId: string, optionIndex: number) => ({
+    actionId: form(),
+    actionKind: "interaction",
+    interactionKind: "form",
+    update: { kind: "select", fieldId, optionIndex },
+  });
+
+  // The script waits for its audio to load; a click before the form opens must wait for execution.
+  same(run(plan, snapshot), (current) => current.run());
+  same(reportMediaLoad(plan, snapshot, 99, { kind: "loaded", durationMs: 1 }), (current) =>
+    current.reportMediaLoad(99, { kind: "loaded", durationMs: 1 }),
+  );
+  same(reportMediaLoad(plan, snapshot, 1, { kind: "loaded", durationMs: 5_000 }), (current) =>
+    current.reportMediaLoad(1, { kind: "loaded", durationMs: 5_000 }),
+  );
+  same(pressPermanentButton(plan, snapshot, 1), (current) => current.pressPermanentButton(1));
+  same(run(plan, snapshot), (current) => current.run());
+  same(pressPermanentButton(plan, snapshot, 99), (current) => current.pressPermanentButton(99));
+  same(pressPermanentButton(plan, snapshot, 1), (current) => current.pressPermanentButton(1));
+  same(run(plan, snapshot), (current) => current.run());
+  same(updateInteraction(plan, snapshot, update("missing", 0)), (current) =>
+    current.updateInteraction(update("missing", 0)),
+  );
+  same(updateInteraction(plan, snapshot, update("intensity", 1)), (current) =>
+    current.updateInteraction(update("intensity", 1)),
+  );
+  same(applyExternalStorageEdit(plan, snapshot, { key: "" }), (current) =>
+    current.applyExternalStorageEdit({ key: "" }),
+  );
+  same(applyExternalStorageEdit(plan, snapshot, { key: "level", value: 7 }), (current) =>
+    current.applyExternalStorageEdit({ key: "level", value: 7 }),
+  );
+  same(recordContinueCapture(plan, snapshot, { wallClockMs: "soon" }), (current) =>
+    current.recordContinueCapture({ wallClockMs: "soon" }),
+  );
+  same(recordContinueCapture(plan, snapshot, { wallClockMs: start + 60_000 }), (current) =>
+    current.recordContinueCapture({ wallClockMs: start + 60_000 }),
+  );
+  const submit = {
+    actionId: form(),
+    actionKind: "interaction",
+    interactionKind: "form",
+    payload: { kind: "submit" },
+  };
+  same(completeAction(plan, snapshot, submit), (current) => current.completeAction(submit));
+  const reports = [{ mediaId: 1, segment: 0, progressMs: 1_000 }];
+  same(observeTime(plan, snapshot, 1_000, reports), (current) =>
+    current.observeTime(1_000, reports),
+  );
+  same(run(plan, snapshot), (current) => current.run());
+  assert.equal(session.view().status, "halted");
+  // Each operation was both refused and accepted.
+  assert.deepEqual(outcomes, [
+    "unknownMedia",
+    "accepted",
+    "executionPending",
+    "unknownButton",
+    "pressed",
+    "invalidPayload",
+    "updated",
+    "invalidEdit",
+    "applied",
+    "invalidCapture",
+    "recorded",
+    "completed",
+    "observed",
+  ]);
+  assert.deepEqual(session.inspect(), inspectRuntimeState(plan, snapshot));
 });

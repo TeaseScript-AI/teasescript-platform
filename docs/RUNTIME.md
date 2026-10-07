@@ -932,17 +932,20 @@ operations stay as they are.
   as `restoreCheckpoint` and `deserializeCheckpoint` do. The last `options` argument may give `capabilities`, which
   every operation of the session and of its forks uses. Sessions come only from these factories and `fork()`; the state
   lives in a private field, and `session.plan` is the validated, deeply frozen plan.
-- **Operations.** `run`, `stepToEvent`, `executeInstruction`, `observeTime`, and `completeAction` take the arguments and
-  options of the snapshot API without plan, snapshot, and capabilities, and run the same engine on the session's state.
-  Host requests, observations, and capability results keep their complete capture and validation; the state itself is
-  not captured or validated again. An operation started while another operation of the same session runs, such as
-  from a builtin, throws `RuntimeSessionError`; through a builtin that becomes the usual `TSR012` failure.
+- **Operations.** `run`, `stepToEvent`, `executeInstruction`, `observeTime`, `completeAction`, `updateInteraction`,
+  `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and `applyExternalStorageEdit` take the arguments
+  and options of the snapshot API without plan, snapshot, and capabilities, and run the same engine on the session's
+  state. Host requests, observations, and capability results keep their complete capture and validation; the state
+  itself is not captured or validated again. An operation started while another operation of the same session runs, such
+  as from a builtin, throws `RuntimeSessionError`; through a builtin that becomes the usual `TSR012` failure.
 - **Results.** An operation returns `events`, `instructionsExecuted`, `instructionTrace` when requested, and `outcome`
-  where the snapshot API has one, as deeply frozen copies that share nothing with the session's state. `view()`
-  returns the operational state a host acts on, also detached and frozen: `status`, `failure`, `nextInstruction`,
-  both session times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, and
-  `suspendedAction`, the foreground action of the path a running block interrupted. Variables, storage, and other
-  script data are read from an export.
+  where the snapshot API has one, as deeply frozen copies that share nothing with the session's state. `view()` returns
+  the operational state a host acts on, also detached and frozen: `status`, `failure`, `nextInstruction`, both session
+  times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, and
+  `suspendedAction`, the foreground action of the path a running block interrupted. `stageProjection()`,
+  `mediaPlaybackProjection()`, and `permanentButtonProjection()` give what the functions of those names give for a
+  snapshot, also detached and frozen. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after
+  capturing and validating the whole state. Variables, storage, and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
   plain data that later operations do not change; importing it again crosses the external-data boundary.
 - **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An

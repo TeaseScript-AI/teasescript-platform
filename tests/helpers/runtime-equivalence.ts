@@ -153,25 +153,20 @@ export function assertRuntimeResumeEquivalent(
   );
 
   // Every pass also runs through an engine-owned session (docs/RUNTIME.md#runtime-sessions), which must give the
-  // snapshot API's events, outcomes, and checkpoints. Sessions do not yet take media reports or button clicks.
-  const sessions = options.press === undefined && options.mediaDurationMs === undefined;
-  if (sessions) {
-    const session = createRuntimeSession(plan, initial);
-    const played = runSessionServicingDelays(session, instructionGuard, scenario, servicing);
-    assert.deepEqual(
-      played,
-      uninterrupted.events,
-      `${scenario}: session events differ from the snapshot API`,
-    );
-    assertSameCheckpoint(
-      serializeCheckpoint(session.exportCheckpoint()),
-      serializeCheckpoint(createCheckpoint(plan, uninterrupted.snapshot)),
-      `${scenario}: session final checkpoint`,
-    );
-  }
-  let stepper: RuntimeSession | null = sessions
-    ? createRuntimeSession(plan, steppingInitial)
-    : null;
+  // snapshot API's events, outcomes, and checkpoints.
+  const session = createRuntimeSession(plan, initial);
+  const played = runSessionServicingDelays(session, instructionGuard, scenario, servicing);
+  assert.deepEqual(
+    played,
+    uninterrupted.events,
+    `${scenario}: session events differ from the snapshot API`,
+  );
+  assertSameCheckpoint(
+    serializeCheckpoint(session.exportCheckpoint()),
+    serializeCheckpoint(createCheckpoint(plan, uninterrupted.snapshot)),
+    `${scenario}: session final checkpoint`,
+  );
+  let stepper = createRuntimeSession(plan, steppingInitial);
 
   const boundaries: RuntimeSnapshot[] = [];
   const accumulatedEvents: InterpreterEvent[] = [];
@@ -203,27 +198,23 @@ export function assertRuntimeResumeEquivalent(
         `${scenario}: boundary ${boundary + 1}: the observation must make progress`,
       );
     }
-    if (stepper !== null) {
-      const context = `${scenario}: session boundary ${boundary + 1}`;
-      assert.deepEqual(stepper.view(), view, `${context}: session view differs`);
-      const stepped = applySessionStep(stepper, step);
-      assert.deepEqual(stepped, sameShape(operation), `${context}: session operation differs`);
-    }
+    const sessionContext = `${scenario}: session boundary ${boundary + 1}`;
+    assert.deepEqual(stepper.view(), view, `${sessionContext}: session view differs`);
+    const stepped = applySessionStep(stepper, step);
+    assert.deepEqual(stepped, sameShape(operation), `${sessionContext}: session operation differs`);
     boundarySnapshot = operation.snapshot;
     accumulatedEvents.push(...operation.events);
     boundary += 1;
 
     const context = `${scenario}: instruction boundary ${boundary} (next ${boundarySnapshot.nextInstruction})`;
     const checkpointJson = serializeCheckpoint(createCheckpoint(plan, boundarySnapshot));
-    if (stepper !== null) {
-      assertSameCheckpoint(
-        serializeCheckpoint(stepper.exportCheckpoint()),
-        checkpointJson,
-        `${context}: session checkpoint`,
-      );
-      // The session continues from a restored copy of this boundary, or from a fork of itself.
-      stepper = boundary % 2 === 0 ? deserializeRuntimeSession(checkpointJson) : stepper.fork();
-    }
+    assertSameCheckpoint(
+      serializeCheckpoint(stepper.exportCheckpoint()),
+      checkpointJson,
+      `${context}: session checkpoint`,
+    );
+    // The session continues from a restored copy of this boundary, or from a fork of itself.
+    stepper = boundary % 2 === 0 ? deserializeRuntimeSession(checkpointJson) : stepper.fork();
     const restored = deserializeCheckpoint(checkpointJson);
 
     const restoredPlanValidation = validateInstructionPlan(restored.plan);
@@ -377,8 +368,9 @@ function applySessionStep(session: RuntimeSession, step: HostStep): Operation {
     case "observe":
       return session.observeTime(step.nowMs, step.reports);
     case "press":
+      return session.pressPermanentButton(step.buttonId);
     case "load":
-      throw new Error(`Sessions do not take ${step.kind} steps yet.`);
+      return session.reportMediaLoad(step.mediaId, { kind: "loaded", durationMs: step.durationMs });
   }
 }
 

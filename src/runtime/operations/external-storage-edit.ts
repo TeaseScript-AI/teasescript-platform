@@ -42,6 +42,19 @@ export function applyExternalStorageEdit(
   return applied;
 }
 
+/** Applies a storage edit to engine-owned plan/state that already passed complete validation. */
+export function applyValidatedStorageEdit(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  edit: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+): PendingActionOperationResult<ExternalStorageEditOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const applied = applyCapturedStorageEdit(snapshot, edit, trace);
+  closeDebugTrace(trace, applied);
+  return applied;
+}
+
 function applyCapturedStorageEdit(
   current: RuntimeSnapshot,
   edit: unknown,
