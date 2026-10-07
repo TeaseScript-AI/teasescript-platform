@@ -56,7 +56,7 @@ let title = load "training.title"
 if title == null or title == "" {
   title = "pet"
 }
-if load("training.finished") == true {
+if load("training.finished", default: false) == true {
   say "Welcome back, ${title}"
   goto "finished.tease"
 }
@@ -101,7 +101,7 @@ if (choose yes: "Yes", no: "No") == "yes" {
 // loadString() read a stored number as text.
 save 2 as "training.version"
 // NOTE SX_LOAD_STRING_TEXT line 36: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
-if sexscriptLegacyText(load("training.version", default: 0)) == "2" {
+if sexscriptLegacyText(load("training.version")) == "2" {
   say "Version 2"
 }
 // An online read with a default for a missing value reads with that default.

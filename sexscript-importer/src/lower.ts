@@ -9997,7 +9997,14 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
     // A missing key (or a stored null) reads as null, which Groovy treats like the type's false value.
     const key = lowerExpression(legacyLoad.key, context);
     if (key === null) return null;
-    const read = (): IrExpression => ({ kind: "load", key });
+    // The read keeps the type legacy read, which its default takes (storage-keys.ts).
+    const typed =
+      legacyLoad.falseValue.value === false
+        ? { read: "boolean" as const }
+        : legacyLoad.falseValue.value === ""
+          ? { read: "string" as const }
+          : {};
+    const read = (): IrExpression => ({ kind: "load", key, ...typed });
     if (legacyLoad.falseValue.value === false) {
       return {
         kind: "binary",

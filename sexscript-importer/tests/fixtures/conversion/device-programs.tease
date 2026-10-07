@@ -50,7 +50,7 @@ let switchbox_onText = ""
 let path = ""
 let estim_start = load "training.estim_start", default: ""
 let estim_finish = load "training.estim_finish", default: ""
-let lock_start = load "training.lock", default: ""
+let lock_start = load "training.lock"
 let arm_finish = load "training.disarm", default: ""
 // NOTE SX_DEVICE_STATE line 7: useFile() ran the device command in lock_start on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Lock: LOCKED".
 if lock_start != "" {

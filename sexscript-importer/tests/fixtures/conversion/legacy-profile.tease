@@ -43,7 +43,7 @@ say "Hello, ${load("intro.name", default: "")}, my good ${gender}"
 if load("intro.likemale", default: false) == true {
   say "You like men too"
 }
-if load("toys.dildo") != true {
+if load("toys.dildo", default: false) != true {
   say "A dildo or dildo alternative is needed"
 }
 exit

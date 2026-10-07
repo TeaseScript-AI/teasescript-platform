@@ -1,3 +1,9 @@
+function sexscriptLegacyText(value): string? {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
 // A read whose null the script never tests gets the empty value of the type legacy read as its default, text for
 // loadString and false for loadBoolean; a plain load gets the one the saves under its key give.
 let name = load "game.name", default: ""
@@ -20,5 +26,36 @@ if level == null {
 say "Level ${level}"
 if load("game.seen") == null {
   save true as "game.seen"
+}
+// So does a read whose value reaches a test for null or for an empty value through a variable, an argument, or a
+// comparison, and the text that loadString read of a key the package saves numbers under.
+let stored = load "game.stored"
+let copy = stored
+if copy == null {
+  say "Nothing stored."
+}
+function check(value) {
+  if value == null {
+    say "Nothing given."
+  }
+}
+check(load("game.given"))
+if load("game.mode") == "" {
+  say "No mode."
+}
+// NOTE SX_LOAD_STRING_TEXT line 26: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+let version: string? = sexscriptLegacyText(load("game.version"))
+if version == null {
+  say "No version."
+}
+function upgrade {
+  save 2 as "game.version"
+}
+// A list of lists the saves give a key reads as an empty list.
+let grid = load "game.grid", default: []
+// NOTE SX_LENGTH_RECEIVER line 31: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Rows: ${grid.length}"
+function reset2 {
+  save [[0]] as "game.grid"
 }
 exit

@@ -3,52 +3,145 @@ import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 /**
- * A storage key written as one literal keeps one type for the whole script, which the values saved under it decide,
- * and a `load` of it without `default:` may be null, which a value cannot be used as (ADR 0021 §6, V30 §25). Legacy
- * `load()` read null for a missing key, which most scripts never tested: a read whose null nothing tests gets the
- * empty value of its key's type as its default (`load "level", default: 0`), what a script that read null then mostly
- * showed or counted with, and where the script tests the value it read for null, the read stays as it is.
+ * A storage key written as one literal keeps one type for the whole script, and a `load` of it without `default:` may
+ * be null, which a value cannot be used as (ADR 0021 §6, V30 §25). Legacy `load()` read null for a missing key: a read
+ * whose null reaches nothing that could tell it from an empty value gets the empty value of its type as its default
+ * (`load "level", default: 0`), and any other read keeps its null, the script's own test of it.
  *
  * withFillableLoads marks those reads in a file (`fill`), after variable typing, which writes the type of each value
- * saved under a literal key on its `save` (`valueType`); withStorageDefaults decides each key's type from the saves of
- * the whole package and gives the marked reads their defaults.
+ * saved under a literal key on its `save` (`valueType`); withStorageDefaults gives the marked reads their defaults, of
+ * the type legacy read (`read`) or, for a plain `load`, of the type the saves of the whole package give the key.
+ *
+ * A read's value is used up where null and the empty value act alike or the script failed or showed `null`: as text,
+ * in arithmetic or an order comparison, as a condition, as the receiver of a member, method, or index, and compared
+ * with a literal that is neither null nor empty. A read into a variable is marked where every use of the variable, by
+ * name in the whole file, is such a use; a read or variable compared with null or an empty literal, or passed on,
+ * returned, saved, or held in a list or another variable, keeps its null.
  */
 export function withFillableLoads(statements: IrStatement[]): IrStatement[] {
-  const tested = nullTestedNames(statements);
-  const mark = (value: IrExpression): IrExpression => {
-    // A read that a test for null compares stays as it is: `load("k") == null`.
-    if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
-      const left =
-        isNull(value.right) && value.left.kind === "load" ? value.left : mark(value.left);
-      const right =
-        isNull(value.left) && value.right.kind === "load" ? value.right : mark(value.right);
-      return { ...value, left, right };
-    }
-    const next = mapChildren(value, mark);
-    return fillable(next) ? { ...next, fill: true } : next;
+  const passed = new Set<string>();
+  const usedUp = new Set<IrExpression>();
+  const into = new Map<IrExpression, string>();
+  const visit = (value: IrExpression, use: Use): void => {
+    if (value.kind === "variable" && use === "passed") passed.add(value.name);
+    if (value.kind === "load" && use === "usedUp") usedUp.add(value);
   };
-  const block = (items: IrStatement[]): IrStatement[] =>
-    items.map((item) => {
-      const statement = withNestedBlocks(item, block);
-      // A read into a variable that the script tests for null keeps its null.
-      const target =
-        statement.kind === "let"
-          ? statement.name
-          : statement.kind === "assign" &&
-              statement.operator === "=" &&
-              statement.target.kind === "variable"
-            ? statement.target.name
-            : null;
-      if (
-        target !== null &&
-        (statement.kind === "let" || statement.kind === "assign") &&
-        statement.value.kind === "load" &&
-        tested.has(target)
-      )
-        return statement;
-      return mapOwnExpressions(statement, mark);
-    });
-  return block(statements);
+  const block = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      statementUses(item, visit, into);
+      withNestedBlocks(item, (body) => {
+        block(body);
+        return body;
+      });
+    }
+  };
+  block(statements);
+  const mark = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, mark);
+    const target = into.get(value);
+    const fills = usedUp.has(value) || (target !== undefined && !passed.has(target));
+    return fills && fillable(next) ? { ...next, fill: true } : next;
+  };
+  const marked = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => mapOwnExpressions(withNestedBlocks(item, marked), mark));
+  return marked(statements);
+}
+
+/** How a value is used: up, where null acted as an empty value would, or passed on, where it may be told apart. */
+type Use = "usedUp" | "passed";
+
+const USED_UP_OPERATORS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">=", "and", "or"]);
+
+/** Visits the values a statement evaluates with their uses; a read a variable is set to goes in `into`. */
+function statementUses(
+  item: IrStatement,
+  visit: (value: IrExpression, use: Use) => void,
+  into: Map<IrExpression, string>,
+): void {
+  const uses = (value: IrExpression, use: Use): void => valueUses(value, use, visit);
+  switch (item.kind) {
+    case "let":
+      if (item.value.kind === "load") into.set(item.value, item.name);
+      uses(item.value, "passed");
+      return;
+    case "assign":
+      if (item.target.kind === "variable") {
+        if (item.operator === "=" && item.value.kind === "load")
+          into.set(item.value, item.target.name);
+        if (item.operator !== "=") uses(item.target, "usedUp");
+      } else uses(item.target, "usedUp");
+      uses(item.value, item.operator === "=" ? "passed" : "usedUp");
+      return;
+    case "say":
+    case "if":
+    case "while":
+    case "repeat":
+    case "for":
+    case "wait":
+    case "expression":
+      mapOwnExpressions(item, (value) => {
+        uses(value, "usedUp");
+        return value;
+      });
+      return;
+    case "save":
+      uses(item.key, "usedUp");
+      uses(item.value, "passed");
+      return;
+    default:
+      mapOwnExpressions(item, (value) => {
+        uses(value, "passed");
+        return value;
+      });
+  }
+}
+
+function valueUses(
+  value: IrExpression,
+  use: Use,
+  visit: (value: IrExpression, use: Use) => void,
+): void {
+  visit(value, use);
+  const uses = (child: IrExpression, childUse: Use): void => valueUses(child, childUse, visit);
+  switch (value.kind) {
+    case "template":
+      for (const part of value.parts) if ("value" in part) uses(part.value, "usedUp");
+      return;
+    case "binary":
+      if (value.operator === "==" || value.operator === "!=") {
+        uses(value.left, telling(value.right) ? "passed" : "usedUp");
+        uses(value.right, telling(value.left) ? "passed" : "usedUp");
+        return;
+      }
+      uses(value.left, USED_UP_OPERATORS.has(value.operator) ? "usedUp" : "passed");
+      uses(value.right, USED_UP_OPERATORS.has(value.operator) ? "usedUp" : "passed");
+      return;
+    case "unary":
+      uses(value.value, "usedUp");
+      return;
+    case "property":
+      uses(value.target, "usedUp");
+      return;
+    case "methodCall":
+      uses(value.target, "usedUp");
+      for (const argument of value.arguments) uses(argument, "passed");
+      return;
+    case "index":
+      uses(value.target, "usedUp");
+      uses(value.index, "usedUp");
+      return;
+    default:
+      mapChildren(value, (child) => {
+        uses(child, "passed");
+        return child;
+      });
+  }
+}
+
+/** Whether a comparison with this value could tell null from an empty value: anything but a literal that is neither. */
+function telling(value: IrExpression): boolean {
+  if (value.kind !== "literal") return true;
+  return value.value === null || value.value === "" || value.value === 0 || value.value === false;
 }
 
 /**
@@ -111,10 +204,6 @@ function literalKey(key: IrExpression): string | null {
   return key.kind === "literal" && typeof key.value === "string" ? key.value : null;
 }
 
-function isNull(value: IrExpression): boolean {
-  return value.kind === "literal" && value.value === null;
-}
-
 /** The one type of a key's values: an integer and a number make a number; other mixes, none. */
 function keptType(types: ReadonlySet<string> | undefined): string | null {
   if (types === undefined || types.size === 0) return null;
@@ -133,6 +222,11 @@ function valueType(value: IrExpression): string | null {
       return null;
     case "template":
       return "string";
+    case "list": {
+      const types = new Set(value.items.map(valueType));
+      const [only] = types;
+      return types.size === 1 && only !== null && only !== undefined ? `${only}[]` : null;
+    }
     case "binary":
       return ["==", "!=", "<", "<=", ">", ">=", "and", "or"].includes(value.operator)
         ? "boolean"
@@ -156,29 +250,6 @@ function emptyValue(type: string): IrExpression | null {
   if (type === "integer" || type === "number") return { kind: "literal", value: 0 };
   if (type === "string") return { kind: "literal", value: "" };
   if (type === "boolean") return { kind: "literal", value: false };
-  if (/^[\w ]+\[\]$/u.test(type)) return { kind: "list", items: [] };
+  if (type.endsWith("[]")) return { kind: "list", items: [] };
   return null;
-}
-
-/** Names of the variables the program compares with null (`x == null`, `x != null`). */
-function nullTestedNames(statements: readonly IrStatement[]): Set<string> {
-  const names = new Set<string>();
-  const visit = (value: IrExpression): IrExpression => {
-    if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
-      if (value.left.kind === "variable" && isNull(value.right)) names.add(value.left.name);
-      if (value.right.kind === "variable" && isNull(value.left)) names.add(value.right.name);
-    }
-    return mapChildren(value, visit);
-  };
-  const block = (items: readonly IrStatement[]): void => {
-    for (const item of items) {
-      mapOwnExpressions(item, visit);
-      withNestedBlocks(item, (body) => {
-        block(body);
-        return body;
-      });
-    }
-  };
-  block(statements);
-  return names;
 }
