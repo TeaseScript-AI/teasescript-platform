@@ -1716,6 +1716,8 @@ max(scores)             // 18
   the number of values minus 1.
 - `sum`, `min`, and `max` of integers are integers; `average`, `median`, `percentile`, and `stddev` of numbers are
   numbers. Durations give durations, and `min` and `max` give the chosen value.
+- The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
+  on every device, also for values that cancel or are very large or very small.
 - Durations are of one family: exact time, days and weeks, or months and years. `average`, `median`, `percentile`,
   and `stddev` need exact durations, because days, weeks, months, and years have no fixed length.
 - An empty list, and a list of one value for `stddev`, is runtime error `TSR018`. A percentage outside 0 through 100
@@ -1759,6 +1761,7 @@ let expected = predict(trend, toDate("2026-10-31"))
   first point's x, 0 without `x:`.
 - `predict(line, x)` is `intercept + slope × (x − start)`, for an x of the start's kind: a number, or a date and time
   value of the same kind, measured in days.
+- Like the statistics, `linearRegression` and `predict` compute exactly and round each result once.
 - Fewer than 2 points is runtime error `TSR018`, and points that all have the same x `TSR036`. Values of other kinds,
   `x:` without `y:`, and a `predict` x of another kind than the start are compile errors when the types show them and
   runtime errors otherwise (`TSR060`, and `TSR059` for `predict`).

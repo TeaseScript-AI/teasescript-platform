@@ -172,6 +172,11 @@ test("statistics and trends keep their precision for equal, close, tiny, and hug
         // A horizontal line predicts its value even where the distance to its start overflows.
         'let level = linearRegression([{ x: -1e308, y: 1 }, { x: -1e308 + 1e292, y: 1 }], x: "x", y: "y")',
         'say "${predict(level, 1e308)}"',
+        // Large values that cancel leave the small one, and a line's intercept may cancel a change that overflows.
+        'say "${sum([1e308, -1e308, 1e-100])} ${average([1e308, -1e308, 1e-100])}"',
+        'let rising = linearRegression([{ x: -1e308, y: -1e308 }, { x: 0, y: 0 }], x: "x", y: "y")',
+        'say "${predict(rising, 1e308)}"',
+        'say linearRegression([{ x: -5e-324, y: 1e308 }, { x: 0, y: 0 }, { x: 5e-324, y: 1e308 }], x: "x", y: "y").slope',
         "exit",
       ].join("\n"),
     ),
@@ -181,6 +186,9 @@ test("statistics and trends keep their precision for equal, close, tiny, and hug
       "{ slope: 1e-200, intercept: 0, r2: 1, start: 0 }",
       "1",
       "1",
+      "1e-100 3.3333333333333336e-101",
+      "1e+308",
+      "0",
     ],
   );
 });
@@ -205,6 +213,34 @@ test("possibly null lists and values of list functions need a check first", () =
   );
   assert.deepEqual(diagnostics("let samples: integer?[] = [1, null]\nsay sum(samples)\nexit"), [
     ["TSV043", "sum(...) needs numbers or durations, not null.", "samples"],
+  ]);
+  // Known elements and a known property name are checked also where the property's type stays unknown.
+  assert.deepEqual(
+    diagnostics('let samples: object?[] = [null]\nsay sum(samples, by: "n")\nexit'),
+    [
+      [
+        "TSV043",
+        "sum(...) needs a list of objects for by:, not a list that holds null.",
+        "samples",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    diagnostics('let samples: (object | integer)[] = [1]\nsay sum(samples, by: "n")\nexit'),
+    [
+      [
+        "TSV043",
+        "sum(...) needs a list of objects for by:, not a list that holds a whole number (integer).",
+        "samples",
+      ],
+    ],
+  );
+  assert.deepEqual(diagnostics(`${DYNAMIC}say sum(dynamic([{ n: 1 }]), by: 1)\nexit`), [
+    [
+      "TSV043",
+      "sum(...) needs the name of a property as its by:, not a whole number (integer).",
+      "1",
+    ],
   ]);
 });
 

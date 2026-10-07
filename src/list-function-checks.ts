@@ -211,6 +211,18 @@ function valuesType(
   option: string,
 ): StaticType {
   const { name, typeOf } = context;
+  // The property name is checked whatever the compiler knows about the list.
+  let key: string | undefined;
+  if (property !== undefined) {
+    const propertyType = typeOf(property);
+    if (!isAssignable(STRING_TYPE, forUse(propertyType)))
+      problem(
+        context,
+        `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(forUse(propertyType))}.`,
+        property,
+      );
+    else key = staticVisibleText(property);
+  }
   const type = forUse(typeOf(list));
   if (!isKnown(type)) return UNKNOWN_TYPE;
   const lists = members(type).map(resolved);
@@ -224,28 +236,21 @@ function valuesType(
     lists.map((member) => (member.kind === "list" ? member.element : UNKNOWN_TYPE)),
   );
   if (property === undefined) return element;
-  const propertyType = typeOf(property);
-  if (!isAssignable(STRING_TYPE, forUse(propertyType))) {
+  // Every element the compiler knows must be an object, also when the property's type stays unknown.
+  const parts = members(element).map(resolved);
+  const notObject = parts.find((member) => isKnown(member) && member.kind !== "object");
+  if (notObject !== undefined) {
     problem(
       context,
-      `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(forUse(propertyType))}.`,
-      property,
+      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeValue(notObject)}.`,
+      list,
     );
     return UNKNOWN_TYPE;
   }
-  const key = staticVisibleText(property);
   const found: StaticType[] = [];
-  for (const member of members(element).map(resolved)) {
-    if (!isKnown(member)) return UNKNOWN_TYPE;
-    if (member.kind !== "object") {
-      problem(
-        context,
-        `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeValue(member)}.`,
-        list,
-      );
+  for (const member of parts) {
+    if (member.kind !== "object" || member.properties === null || key === undefined)
       return UNKNOWN_TYPE;
-    }
-    if (member.properties === null || key === undefined) return UNKNOWN_TYPE;
     const value = member.properties.get(key);
     if (value === undefined) {
       problem(
