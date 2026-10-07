@@ -327,7 +327,11 @@ function predictType(context: Context): StaticType {
   const line = call.arguments[0]!.value;
   const x = call.arguments[1]!.value;
   const type = forUse(typeOf(line));
-  if (!isKnown(type)) return UNKNOWN_TYPE;
+  if (!isKnown(type)) {
+    // Whatever the line, x is a number or a date and time value that is measured in days.
+    valueKind(context, forUse(typeOf(x)), ["number", "date", "datetime", "timestamp"], x);
+    return UNKNOWN_TYPE;
+  }
   const object = resolved(type);
   const property = (key: string): StaticType | undefined =>
     object.kind === "object" ? (object.properties?.get(key) ?? undefined) : undefined;
@@ -394,7 +398,11 @@ function weightedType(context: Context): StaticType {
   const source = call.arguments.find((argument) => argument.kind === "positionalArgument")!.value;
   const weight = named(call, "weight");
   const type = forUse(typeOf(source));
-  if (!isKnown(type)) return UNKNOWN_TYPE;
+  if (!isKnown(type)) {
+    // Only a list takes weight:, which names a property whatever the list holds.
+    if (weight !== undefined) valuesType(context, source, weight, "weight");
+    return UNKNOWN_TYPE;
+  }
   const value = resolved(type);
   if (value.kind === "dict") {
     if (weight !== undefined)

@@ -1,10 +1,4 @@
-import {
-  addDurationParts,
-  durationFamily,
-  durationParts,
-  storedDuration,
-  type DurationParts,
-} from "../duration.js";
+import { durationFamily, durationParts, storedDuration, type DurationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
@@ -170,14 +164,27 @@ export function listStatistic(
   const share = percentile ? percentage(positional[1]!, span) : 0;
   const amounts = amountsOf(name, values, name !== "sum", span);
   if (amounts.kind === "durations" && name === "sum") {
-    const total = amounts.values.reduce((sum, parts) => addDurationParts(sum, parts));
+    // Exact like the other statistics: months and days as whole numbers, and milliseconds rounded once.
+    let months = 0n;
+    let days = 0n;
+    for (const parts of amounts.values) {
+      months += BigInt(parts.months);
+      days += BigInt(parts.days);
+    }
+    const milliseconds = quotient(
+      sum(amounts.values.map((parts) => exact(parts.milliseconds))),
+      ONE,
+    );
+    const limit = BigInt(Number.MAX_SAFE_INTEGER);
     if (
-      !Number.isFinite(total.milliseconds) ||
-      !Number.isSafeInteger(total.months) ||
-      !Number.isSafeInteger(total.days)
+      !Number.isFinite(milliseconds) ||
+      months > limit ||
+      months < -limit ||
+      days > limit ||
+      days < -limit
     )
       throw fault("TSR036", `${name}(...) gives a duration too long to represent.`, span);
-    return storedDuration(total);
+    return storedDuration({ months: Number(months), days: Number(days), milliseconds });
   }
   const numbers =
     amounts.kind === "numbers" ? amounts.values : amounts.values.map((parts) => parts.milliseconds);

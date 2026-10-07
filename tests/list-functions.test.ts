@@ -177,6 +177,8 @@ test("statistics and trends keep their precision for equal, close, tiny, and hug
         'let rising = linearRegression([{ x: -1e308, y: -1e308 }, { x: 0, y: 0 }], x: "x", y: "y")',
         'say "${predict(rising, 1e308)}"',
         'say linearRegression([{ x: -5e-324, y: 1e308 }, { x: 0, y: 0 }, { x: 5e-324, y: 1e308 }], x: "x", y: "y").slope',
+        // Duration sums are exact too, in milliseconds and in whole days.
+        'say "${sum([1e16 ms, 1 ms, -1e16 ms])} ${sum([9007199254740991 d, 2 d, -9007199254740991 d])} ${sum([-5 s, 5 s])}"',
         "exit",
       ].join("\n"),
     ),
@@ -189,6 +191,7 @@ test("statistics and trends keep their precision for equal, close, tiny, and hug
       "1e-100 3.3333333333333336e-101",
       "1e+308",
       "0",
+      "1 ms 2 d 0 s",
     ],
   );
 });
@@ -235,6 +238,23 @@ test("possibly null lists and values of list functions need a check first", () =
       ],
     ],
   );
+  assert.deepEqual(
+    diagnostics(`${DYNAMIC}say randomWeighted(dynamic([{ p: 1 }]), weight: null)\nexit`),
+    [
+      [
+        "TSV043",
+        "randomWeighted(...) needs the name of a property as its weight:, not null.",
+        "null",
+      ],
+    ],
+  );
+  assert.deepEqual(diagnostics(`${DYNAMIC}say predict(dynamic(1), "x")\nexit`), [
+    [
+      "TSV043",
+      "predict(...) needs numbers, dates, datetimes, or timestamps, not text (string).",
+      '"x"',
+    ],
+  ]);
   assert.deepEqual(diagnostics(`${DYNAMIC}say sum(dynamic([{ n: 1 }]), by: 1)\nexit`), [
     [
       "TSV043",
