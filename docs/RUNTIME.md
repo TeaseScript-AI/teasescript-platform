@@ -1068,6 +1068,12 @@ not language; without it every draw is natural and costs one more check.
   `executeInstruction` stops after its instruction and catch-up, and catch-up continues to the observed time. The outcome
   is `{ kind: "resolved", forced }`. A paused draw resumes on the session generator, so this throws with an injected
   `capabilities.random`.
+- **Exploring.** A host branches by forking a session at a paused draw and resolving the draw differently on each
+  fork. `randomDrawAlternatives(draw, limit = 16)` gives the outcomes to try besides the natural result, which
+  `"natural"` tries without recording an input: a finite support in order up to `limit`, otherwise representative
+  values, such as both ends and the middle of a large range or the mean and one and three spreads either side for
+  `randomNormal`. Its `complete` says whether the natural result and the alternatives are every outcome the draw can
+  produce.
 - **Undoing a unit.** The engine restores the generator, the event sequence, scene time, and the loop frames, and drops
   the unit's events and trace records. A unit that can change other state before one of its draws keeps a copy of the
   state while control can pause: an instruction with a list, set, dict, timer, or media method, `removePermanentButton`,
