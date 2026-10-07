@@ -1072,9 +1072,10 @@ not language; without it every draw is natural and costs one more check.
   state while control can pause: an instruction with a list, set, dict, timer, or media method, `removePermanentButton`,
   or a `timer.remaining` assignment followed by a draw; an `end` that leaves its activation before drawing a glob
   fallback; and the return from a timer, media, or button block, whose catch-up may draw.
-- **Restore.** Validation checks a pending draw's support and outcomes, its natural result sampled again from its
-  `drawId`, and a continuation that fits the state. If executing the unit again does not reach the draw as recorded, at
-  its site and with its natural result, which only data the engine did not make can cause, the call throws `TSR101`.
+- **Restore.** Validation checks a pending draw's support and outcomes, its site among the plan's sites, its natural
+  result sampled again from its `drawId`, and a continuation that fits the state. If executing the unit again does not
+  reach the draw as recorded, at its site and with its natural result, which only data the engine did not make can
+  cause, the call throws `TSR101`.
 
 ## Date and time context
 

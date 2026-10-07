@@ -280,11 +280,10 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
             if (part.kind === "expression") add(file, part.expression.span, "interpolation");
       });
     }
-    if (drawsTimerDuration(instruction)) {
-      add(file, instruction.duration.span, "duration");
-      if (instruction.kind === "startTimer" && instruction.repeat)
-        add(file, instruction.duration.span, "timerRepeat");
-    }
+    if (drawsTimerDuration(instruction)) add(file, instruction.duration.span, "duration");
+    // Every repeating timer's rounds draw where its duration stands once its record holds a range.
+    if (instruction.kind === "startTimer" && instruction.repeat)
+      add(file, instruction.duration.span, "timerRepeat");
     if (instruction.kind === "transfer" && "pick" in instruction.destination)
       add(file, instruction.span, "glob");
     if (instruction.kind === "end" && globFallback) add(file, instruction.span, "glob");
@@ -871,6 +870,7 @@ const PENDING_KEYS = [
 export function validateRandomControl(
   value: unknown,
   snapshot: Readonly<Record<string, unknown>>,
+  plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
   if (value === null) return;
@@ -907,6 +907,8 @@ export function validateRandomControl(
   }
   if (!sameNatural(resampledNatural(support, draw.drawId), draw.natural))
     errors.push("Runtime pending random draw's natural result does not follow from its draw ID.");
+  if (plan !== undefined && !randomSitesOf(plan).ids.has(draw.site))
+    errors.push("Runtime pending random draw names a site the plan does not have.");
   const { unit, root, instructionBudget, instructionsUsed, eventsBefore } = pending;
   if (unit !== "instruction" && unit !== "dueWork")
     errors.push("Runtime pending random draw unit is invalid.");

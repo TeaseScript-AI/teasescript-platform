@@ -731,6 +731,7 @@ test("restore rejects a pending draw that the engine could not have made", () =>
   const changes = [
     (pending: { draw: Record<string, unknown> }) =>
       (pending.draw.natural = { kind: "number", value: 6 }),
+    (pending: { draw: Record<string, unknown> }) => (pending.draw.site = "main.tease:9:9"),
     (pending: { draw: Record<string, unknown> }) =>
       (pending.draw.support = { kind: "integer", min: 6, max: 1 }),
     (pending: Record<string, unknown>) => (pending.root = "dueWork"),
@@ -741,9 +742,14 @@ test("restore rejects a pending draw that the engine could not have made", () =>
     change(corrupt.snapshot.randomControl.pending);
     assertCheckpointRejected(corrupt, "TSK002");
   }
-  // A site the draw does not have fails once resuming meets the draw elsewhere.
-  const moved = JSON.parse(checkpoint);
-  moved.snapshot.randomControl.pending.draw.site = "main.tease:9:9";
+  // Another site of the plan passes restore, and fails once resuming meets the draw at its own site.
+  const twoSites = compileValidPlan(
+    "let a = randomInteger(1..=6)\nlet b = randomInteger(1..=6)\nexit",
+  );
+  const first = createFreshRuntimeSession(twoSites, {}, { randomControl: {} });
+  first.run();
+  const moved = JSON.parse(JSON.stringify(first.exportCheckpoint()));
+  moved.snapshot.randomControl.pending.draw.site = listRandomSites(twoSites)[1]!.id;
   const restored = restoreRuntimeSession(moved);
   assert.throws(
     () =>
@@ -805,5 +811,33 @@ test("an earlier chosen outcome restored outside its draw's support fails cleanl
   assert.throws(
     () => restored.resumeRandomDraw({ drawId, outcome: "natural" }),
     (error: unknown) => error instanceof Error && error.name === "RuntimeDataError",
+  );
+});
+
+test("a repeating timer's rounds draw at a listed site, also from a restored record that holds a range", () => {
+  const plan = project(
+    "let t = timer(duration: 2, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit",
+  );
+  const session = createFreshRuntimeSession(plan, { seed: 123 });
+  session.run();
+  // Restore admits a repeating timer record with a range whatever its duration was written as.
+  const checkpoint = JSON.parse(JSON.stringify(session.exportCheckpoint()));
+  const timer = checkpoint.snapshot.backgroundActions.find(
+    (action: { kind: string }) => action.kind === "timer",
+  ).timer;
+  Object.assign(timer, {
+    range: { start: 1, end: 3, inclusive: true },
+    repeatDurationMs: null,
+    anchoredRounds: null,
+  });
+  const restored = restoreRuntimeSession(checkpoint, { randomControl: {} });
+  restored.observeTime(2000);
+  const draw = restored.view().randomDraw!;
+  assert.equal(draw.kind, "timerRepeat");
+  assert.ok(listRandomSites(plan).some((site) => site.id === draw.site));
+  assert.doesNotThrow(() => restoreRuntimeSession(restored.exportCheckpoint()));
+  assert.equal(
+    restored.resumeRandomDraw({ drawId: draw.drawId, outcome: "natural" }).outcome.kind,
+    "resolved",
   );
 });
