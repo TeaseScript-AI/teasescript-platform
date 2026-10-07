@@ -103,6 +103,8 @@ export type RuntimeDebugRecordDetail =
       /** The generator state before and after; `null` for a random source the host injected. */
       readonly stateBefore: number | null;
       readonly stateAfter: number | null;
+      /** Whether the host chose the outcome (`docs/RUNTIME.md#controlled-randomness`); the generator drew anyway. */
+      readonly forced: boolean;
     }
   | {
       readonly kind: "input";
@@ -334,7 +336,7 @@ interface TraceRecord {
   previewTruncated: boolean;
   readonly dependencies: readonly number[];
   readonly omitted: number;
-  readonly detail: RuntimeDebugRecordDetail | null;
+  detail: RuntimeDebugRecordDetail | null;
   readonly control: number | null;
   bytes: number;
   /** Further index keys that name this record, dropped with it. */
@@ -389,6 +391,8 @@ interface Stage {
   readonly lastRandom: TraceRecord | null;
   readonly versions: Map<string, number | undefined>;
   readonly outputs: number[];
+  /** The stage this one is staged inside, such as a `say` inside an instruction that a random draw may undo. */
+  readonly outer: Stage | null;
 }
 
 /** Bytes counted for a record besides its text, and for a version-index entry besides its key. */
@@ -488,7 +492,7 @@ export class TraceStore {
   close(snapshot: RuntimeSnapshot): void {
     if (this.#failure !== null) return;
     this.#last = new WeakRef(snapshot);
-    if (this.#stage !== null) this.#endStage(this.#stage);
+    while (this.#stage !== null) this.#endStage(this.#stage);
   }
 
   #clear(): void {
@@ -964,6 +968,7 @@ export class TraceStore {
           draws,
           stateBefore,
           stateAfter,
+          forced: false,
         }),
       );
       this.#lastRandom = this.#find(id) ?? null;
@@ -971,6 +976,13 @@ export class TraceStore {
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  /** The last draw took an outcome the host chose instead of its natural one. */
+  forcedRandom(): void {
+    const record = this.#lastRandom;
+    if (this.#failure !== null || record === null || record.detail?.kind !== "random") return;
+    record.detail = Object.freeze({ ...record.detail, forced: true });
   }
 
   /** The value the last draw selected or produced. */
@@ -1147,14 +1159,26 @@ export class TraceStore {
       lastRandom: this.#lastRandom,
       versions: new Map(),
       outputs: [],
+      outer: this.#stage,
     };
     this.#stage = stage;
     return stage;
   }
 
+  /** Keeps a stage's records. Inside another stage they become that stage's, which may still undo them. */
   commit(stage: Stage | null): void {
     if (stage === null || this.#stage !== stage) return;
-    this.#endStage(stage);
+    const outer = stage.outer;
+    if (outer === null) this.#endStage(stage);
+    else {
+      this.#stage = outer;
+      // The outer stage undoes a key to the version before it; a key it has not changed yet takes this stage's.
+      for (const [key, previous] of stage.versions) {
+        if (outer.versions.has(key)) this.#bytes -= undoBytes(key);
+        else outer.versions.set(key, previous);
+      }
+      outer.outputs.push(...stage.outputs);
+    }
     if (this.#failure !== null) return;
     try {
       this.#evict();
@@ -1283,22 +1307,24 @@ export class TraceStore {
    * entry.
    */
   #forgetUndo(key: string, dropped: number): void {
-    const undo = this.#stage?.versions;
-    if (undo === undefined || !undo.has(key)) return;
-    const previous = undo.get(key);
-    const gone =
-      previous === undefined || previous === dropped || this.#find(previous) === undefined;
-    if (!gone) return;
-    if (this.#versions.has(key)) undo.set(key, undefined);
-    else {
-      undo.delete(key);
-      this.#bytes -= undoBytes(key);
+    for (let stage = this.#stage; stage !== null; stage = stage.outer) {
+      const undo = stage.versions;
+      if (!undo.has(key)) continue;
+      const previous = undo.get(key);
+      const gone =
+        previous === undefined || previous === dropped || this.#find(previous) === undefined;
+      if (!gone) continue;
+      if (this.#versions.has(key)) undo.set(key, undefined);
+      else {
+        undo.delete(key);
+        this.#bytes -= undoBytes(key);
+      }
     }
   }
 
-  /** Ends a stage: its undo entries stop counting. */
+  /** Ends a stage: its undo entries stop counting, and its outer stage, if any, is the current one again. */
   #endStage(stage: Stage): void {
-    this.#stage = null;
+    this.#stage = stage.outer;
     for (const key of stage.versions.keys()) this.#bytes -= undoBytes(key);
   }
 

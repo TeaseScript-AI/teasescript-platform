@@ -1,3 +1,5 @@
+import type { RandomDrawPendingOutcome } from "../random-control.js";
+import { randomDrawPending } from "./observe-time.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { cloneCaptures } from "../captures.js";
 import type { PermanentButtonPressedEvent } from "../events.js";
@@ -16,6 +18,7 @@ import {
 import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 
 export type PermanentButtonPressOutcome =
+  | RandomDrawPendingOutcome
   /** The click is queued; the next run starts the button's block. */
   | { readonly kind: "pressed"; readonly buttonId: number }
   /** The button's block is queued or running, so the button is inactive. */
@@ -66,6 +69,8 @@ function pressCapturedPermanentButton(
   buttonId: unknown,
 ): PendingActionOperationResult<PermanentButtonPressOutcome> {
   const current = captured.snapshot;
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   if (!positiveSafeInteger(buttonId)) {
     return pendingResult(current, [], {
       kind: "invalidPayload",

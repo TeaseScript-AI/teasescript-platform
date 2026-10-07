@@ -1,3 +1,4 @@
+import type { RandomControl } from "../random-control.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../captures.js";
 import type { InterpreterEvent } from "../events.js";
@@ -103,6 +104,7 @@ export function returnFromTimerHandler(
   frame: RuntimeCallFrameSnapshot,
   events: InterpreterEvent[],
   trace: TraceStore | null,
+  control: RandomControl | null,
 ): void {
   leaveScopes(snapshot, frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
@@ -114,7 +116,7 @@ export function returnFromTimerHandler(
   snapshot.nextInstruction = frame.returnInstruction;
   restoreSuspendedAction(plan, snapshot, frame, events);
   // Due work that waited behind this block continues in scene-time order, including a restored overdue delay.
-  processDueWork(plan, snapshot, events, trace);
+  processDueWork(plan, snapshot, events, trace, control);
 }
 
 function restoreSuspendedAction(

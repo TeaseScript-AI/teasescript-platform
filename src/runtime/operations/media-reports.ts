@@ -12,15 +12,17 @@ import {
   warnUnreachableCues,
 } from "./media-lifecycle.js";
 import type { PendingActionOperationResult } from "./model.js";
-import { processDueWork } from "./observe-time.js";
+import {
+  catchUp,
+  catchUpPolicy,
+  catchUpResult,
+  randomDrawPending,
+  type CatchUpOptions,
+} from "./observe-time.js";
+import type { RandomDrawPendingOutcome, RandomPolicy } from "../random-control.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
-import {
-  closeDebugTrace,
-  openDebugTrace,
-  type RuntimeDebugContext,
-  type TraceStore,
-} from "../debug-trace.js";
+import { closeDebugTrace, openDebugTrace, type TraceStore } from "../debug-trace.js";
 
 /** The Player's load result for one media ID. */
 export type MediaLoadReport =
@@ -35,7 +37,8 @@ export type MediaReportOutcome =
   | { readonly kind: "unknownMedia"; readonly mediaId: number }
   /** Scene time has not caught up with the observed time, or a due block runs first; run the engine and retry. */
   | { readonly kind: "executionPending"; readonly mediaId: number }
-  | { readonly kind: "invalidReport"; readonly message: string };
+  | { readonly kind: "invalidReport"; readonly message: string }
+  | RandomDrawPendingOutcome;
 
 /**
  * Records the Player's load result at the observed time, once execution has caught up with it. A loaded source makes duration-dependent state authoritative and releases an
@@ -46,11 +49,12 @@ export function reportMediaLoad(
   snapshot: RuntimeSnapshot,
   mediaId: unknown,
   report: unknown,
-  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+  options: CatchUpOptions = {},
 ): PendingActionOperationResult<MediaReportOutcome> {
   const captured = captureExecutableData(plan, snapshot);
+  const policy = catchUpPolicy(captured.plan, options);
   const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const reported = reportCapturedMediaLoad(captured, mediaId, report, trace);
+  const reported = reportCapturedMediaLoad(captured, mediaId, report, trace, policy);
   closeDebugTrace(trace, reported);
   return reported;
 }
@@ -61,10 +65,12 @@ export function reportValidatedMediaLoad(
   snapshot: RuntimeSnapshot,
   mediaId: unknown,
   report: unknown,
-  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+  options: CatchUpOptions & { readonly randomPolicy?: RandomPolicy | null } = {},
 ): PendingActionOperationResult<MediaReportOutcome> {
+  const policy =
+    options.randomPolicy === undefined ? catchUpPolicy(plan, options) : options.randomPolicy;
   const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const reported = reportCapturedMediaLoad({ plan, snapshot }, mediaId, report, trace);
+  const reported = reportCapturedMediaLoad({ plan, snapshot }, mediaId, report, trace, policy);
   closeDebugTrace(trace, reported);
   return reported;
 }
@@ -74,8 +80,11 @@ function reportCapturedMediaLoad(
   mediaId: unknown,
   report: unknown,
   trace: TraceStore | null,
+  policy: RandomPolicy | null,
 ): PendingActionOperationResult<MediaReportOutcome> {
   const current = captured.snapshot;
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   const parsed = parseLoadReport(report);
   if (!isMediaId(mediaId) || parsed === null) {
     return pendingResult(current, [], {
@@ -119,8 +128,8 @@ function reportCapturedMediaLoad(
       releaseMediaWait(captured.plan, current, mediaId, "loaded", events, span);
     }
   }
-  processDueWork(captured.plan, current, events, trace);
-  return pendingResult(current, events, { kind: "accepted" });
+  const control = catchUp(captured.plan, current, events, trace, policy);
+  return catchUpResult(current, events, { kind: "accepted" } as const, control);
 }
 
 function isMediaId(value: unknown): value is number {

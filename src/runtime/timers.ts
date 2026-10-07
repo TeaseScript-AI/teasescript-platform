@@ -226,17 +226,19 @@ export function expireTimerRound(
     );
     return;
   }
+  // The next round is drawn before the timer changes, so a paused draw leaves the timer as it was.
+  const roundDurationMs =
+    timer.repeatDurationMs ??
+    (timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000);
   timer.elapsedMs = timerElapsedMs(timer, endedAtMs);
   timer.runningSinceMs = endedAtMs;
+  timer.roundDurationMs = roundDurationMs;
   if (timer.repeatDurationMs !== null) {
-    timer.roundDurationMs = timer.repeatDurationMs;
     timer.anchoredRounds = 0;
     timer.deadlineMs = anchoredDeadlineMs(endedAtMs, 0, timer.repeatDurationMs);
   } else {
-    timer.roundDurationMs =
-      timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000;
     timer.anchoredRounds = null;
-    timer.deadlineMs = endedAtMs + timer.roundDurationMs;
+    timer.deadlineMs = endedAtMs + roundDurationMs;
   }
 }
 

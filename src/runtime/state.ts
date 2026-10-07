@@ -1,5 +1,10 @@
 import { isOneOf } from "../plan/validation-support.js";
 import {
+  cloneRandomControl,
+  validateRandomControl,
+  type RuntimeRandomControlSnapshot,
+} from "./random-control.js";
+import {
   DEFAULT_TEMPORAL_CONTEXT,
   frozenTemporalContext,
   isValidEpochMilliseconds,
@@ -112,7 +117,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 57;
+export const RUNTIME_SNAPSHOT_VERSION = 58;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -164,6 +169,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextPermanentButtonId",
   "liveMessages",
   "debugMode",
+  "randomControl",
   "maxCallDepth",
   "status",
   "failure",
@@ -455,6 +461,11 @@ export interface RuntimeSnapshot {
   readonly liveMessages: RuntimeLiveMessageSnapshot[];
   /** What the protected `debugMode` reads: whether the host runs the session in Debug. Only the host changes it. */
   debugMode: boolean;
+  /**
+   * Controlled randomness (docs/RUNTIME.md#controlled-randomness): how many chosen outcomes this state's history
+   * accepted, and a draw the engine paused at; `null` until a host chooses an outcome or pauses.
+   */
+  randomControl: RuntimeRandomControlSnapshot | null;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -645,6 +656,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextPermanentButtonId: 1,
     liveMessages: [],
     debugMode,
+    randomControl: null,
     maxCallDepth,
     status: "ready",
     failure: null,
@@ -746,6 +758,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
     liveMessages: snapshot.liveMessages.map((message) => ({ ...message })),
     debugMode: snapshot.debugMode,
+    randomControl: cloneRandomControl(snapshot.randomControl),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -1306,6 +1319,7 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   if (typeof value.debugMode !== "boolean") errors.push("Runtime debugMode must be a boolean.");
+  validateRandomControl(value.randomControl, value, plan, errors);
   validateInteractionResultHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");
