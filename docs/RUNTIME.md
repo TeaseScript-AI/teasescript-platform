@@ -1151,12 +1151,12 @@ state.
 
 `completeAction` with `payload: { kind: "submit" }` commits the text being edited, requires a value for every required
 field, and settles with the answers in field order: an object of properties, a dict of entries, or a list of booleans,
-with `null` for an optional field without a value. The transcript is the line of what was chosen
-([V30](specifications/accepted-syntaxes-v30.md#forms)), with a date or time answer in the
-player's presentation at completion, as a date or time ask's line is; answers too long for one transcript line are
-refused. A refusal leaves the form open. The settlement records the definition, and validation checks its result
-against it and its transcript as text, since a later capture may change the presentation; the result handoff is checked
-against the plan's shape.
+with `null` for an optional field without a value. The transcript is the plain text of the summary of every field
+([V30](specifications/accepted-syntaxes-v30.md#forms)), with a date or time answer in the player's presentation at
+completion, as a date or time ask's line is; answers too long for one transcript line are refused. The Player rebuilds
+the per-line summary from the settlement's definition and result. A refusal leaves the form open. The settlement records
+the definition, and validation checks its result against it and its transcript as text, since a later capture may change
+the presentation; the result handoff is checked against the plan's shape.
 A form with `timeout` and `onTimeout` carries its limit in its UI as `timeout: { milliseconds, onTimeout }` and as the
 action's `timeoutMs`; like a button's timeout, reaching `createdAtMs + timeoutMs` is a time settlement (`timedOut`,
 no transcript) whose result is the answers as they stand, without the draft, or `null`.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
-import { Undo2, Variable } from "@lucide/vue";
+import { Check, Square, Undo2, Variable } from "@lucide/vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,23 @@ const avatarStyle = computed(() => ({
             :authored-ink="appearance.authoredInk"
             :authored-background="appearance.panel !== null"
           />
+          <!-- A submitted form: every field with its state, one per line; screen readers read the plain text. -->
+          <template v-else-if="entry.kind === 'message' && entry.formSummary"
+            ><span class="sr-only">Submitted form: {{ entry.text }}</span
+            ><span aria-hidden="true" class="grid gap-1 text-left" data-form-summary
+              ><span
+                v-for="(line, index) in entry.formSummary"
+                :key="index"
+                class="flex items-center gap-2"
+                :data-form-summary-line="line.kind === 'toggle' ? (line.on ? 'on' : 'off') : 'value'"
+                ><template v-if="line.kind === 'toggle'"
+                  ><Check v-if="line.on" class="size-4 shrink-0" /><Square
+                    v-else
+                    class="size-4 shrink-0" /><span>{{ line.label }}</span></template
+                ><template v-else>{{ line.label }}: {{ line.value }}</template></span
+              ></span
+            ></template
+          >
           <template v-else
             ><span
               v-if="entry.kind === 'message' && entry.responseKind"

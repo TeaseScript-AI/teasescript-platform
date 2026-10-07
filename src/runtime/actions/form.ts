@@ -826,11 +826,15 @@ export function submitForm(
   );
   if (missing !== undefined) return refused(`That is wrong. ${missing.text} needs a value.`);
   const answers = ui.fields.map((field, index) => formAnswer(field, values[index]!));
-  const transcriptText = formOverviewText(ui, values, presentation);
+  const result = formResult(ui, answers);
+  // The transcript text comes from the result, as the Player's summary of the settlement does.
+  const summary = formSummaryOf(ui, result, presentation);
+  if (summary === null) throw new Error("A form's own result holds its answers.");
+  const transcriptText = formSummaryText(summary);
   // Every answer is shown in full; answers too long for one transcript line are refused rather than cut.
   if (!interactionStringFits(transcriptText))
     return refused("That is wrong. These answers are too long to send at once.");
-  return { ok: true, result: formResult(ui, answers), transcriptText };
+  return { ok: true, result, transcriptText };
 }
 
 /**
@@ -876,30 +880,76 @@ function formAnswer(field: FormField, value: RuntimeFormValue): SerializableRunt
   return typeof value === "object" && value !== null ? { ...value } : value;
 }
 
+/** One line of a submitted form's summary: a toggle with its state, or another field with its value as shown. */
+export type FormSummaryLine =
+  | { readonly kind: "toggle"; readonly label: string; readonly on: boolean }
+  | { readonly kind: "value"; readonly label: string; readonly value: string };
+
 /**
- * The player's transcript line for a submitted form (V30 askForm; owner decision 2026-10-07): in field order, the label
- * of each toggle that is on, and `label: value` for each other field with a value, as its button shows it, joined with
- * `, `; `Nothing selected` when that leaves nothing.
+ * The summary of a form's settled `result` (V30 askForm; owner decision 2026-10-07): every field in field order, a
+ * toggle with its state and any other field with its value as its button shows it, `Not set` for an optional field
+ * without one; `null` when the result is not one this form returns.
  */
-function formOverviewText(
+export function formSummaryOf(
+  ui: FormUi,
+  result: unknown,
+  presentation: TemporalContext["presentation"],
+): readonly FormSummaryLine[] | null {
+  const values = formValuesOf(ui, result);
+  return values === null ? null : formSummaryLines(ui, values, presentation);
+}
+
+function formSummaryLines(
   ui: FormUi,
   values: readonly RuntimeFormValue[],
   presentation: TemporalContext["presentation"],
-): string {
-  const parts: string[] = [];
-  ui.fields.forEach((field, index) => {
+): readonly FormSummaryLine[] {
+  return ui.fields.map((field, index): FormSummaryLine => {
     const value = values[index] ?? null;
-    if (field.kind === "boolean") {
-      const option = field.options?.find((candidate) => candidate.value === value);
-      if (field.options === null) {
-        if (value === true) parts.push(field.text);
-      } else if (option !== undefined) parts.push(`${field.text}: ${option.text}`);
-    } else if (field.kind === "cycle") {
-      const option = typeof value === "number" ? field.options[value] : undefined;
-      if (option !== undefined) parts.push(`${field.text}: ${option.text}`);
-    } else if (value !== null) parts.push(`${field.text}: ${formValueText(value, presentation)}`);
+    if (field.kind === "boolean" && field.options === null)
+      return { kind: "toggle", label: field.text, on: value === true };
+    const shown =
+      field.kind === "boolean"
+        ? field.options?.find((option) => option.value === value)?.text
+        : field.kind === "cycle"
+          ? typeof value === "number"
+            ? field.options[value]?.text
+            : undefined
+          : value === null
+            ? "Not set"
+            : formValueText(value, presentation);
+    return { kind: "value", label: field.text, value: shown ?? "" };
   });
-  return parts.length === 0 ? "Nothing selected" : parts.join(", ");
+}
+
+/**
+ * The plain text of a form's summary, for the transcript, exports, and screen readers: `✓ label` or `✗ label` for a
+ * toggle and `label: value` for any other field, joined with `, `.
+ */
+function formSummaryText(lines: readonly FormSummaryLine[]): string {
+  return lines
+    .map((line) =>
+      line.kind === "toggle"
+        ? `${line.on ? "✓" : "✗"} ${line.label}`
+        : `${line.label}: ${line.value}`,
+    )
+    .join(", ");
+}
+
+/**
+ * The field values a form's settled `result` holds, as its form state holds them (a cycle by its option's index), or
+ * `null` when the result is not one this form returns.
+ */
+function formValuesOf(ui: FormUi, result: unknown): readonly RuntimeFormValue[] | null {
+  const answers = formAnswersOf(ui, result);
+  if (answers === null) return null;
+  return ui.fields.map((field, index) => {
+    const answer = answers[index]!;
+    if (field.kind === "cycle")
+      return field.options.findIndex((option) => serializableEquals(option.value, answer));
+    // EVIDENCE: validation: formAnswersOf checked every answer as a value of its field.
+    return answer as RuntimeFormValue;
+  });
 }
 
 function refused(message: string): { readonly ok: false; readonly message: string } {

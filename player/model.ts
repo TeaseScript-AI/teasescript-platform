@@ -43,9 +43,18 @@ export interface PlayerMessagePresentation {
   /** Completed choice, button, or form, distinct from a free-text or numeric response. */
   readonly responseKind?: "choice" | "button" | "form";
   readonly presentation?: MessagePresentation;
+  /**
+   * A submitted form's answer: every field in field order, a toggle with its state and any other field with its value
+   * as shown, which the Player shows one per line; `text` is its plain form.
+   */
+  readonly formSummary?: readonly PlayerFormSummaryLine[];
   /** A message of the later state Debug's rewind can restore, which the inspected state has not reached; shown grey. */
   readonly future?: true;
 }
+
+export type PlayerFormSummaryLine =
+  | { readonly kind: "toggle"; readonly label: string; readonly on: boolean }
+  | { readonly kind: "value"; readonly label: string; readonly value: string };
 
 export interface PlayerSessionEventPresentation {
   readonly kind: "session-event";

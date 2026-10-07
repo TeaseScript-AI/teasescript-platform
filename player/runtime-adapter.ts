@@ -52,6 +52,7 @@ import {
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { currentTemporalContext } from "../src/runtime/state.js";
 import { formValueText } from "../src/interaction-answers.js";
+import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { runValidatedState } from "../src/runtime/engine.js";
@@ -1633,7 +1634,7 @@ export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
 } {
   const entries: PlayerTranscriptEntryPresentation[] = [];
   const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
-  appendTranscript(entries, new Map(), speakers, events);
+  appendTranscript(entries, new Map(), speakers, events, DEFAULT_TEMPORAL_CONTEXT.presentation);
   return { entries, speakers };
 }
 
@@ -1656,8 +1657,11 @@ function appendTranscript(
   rows: Map<number, number>,
   speakers: Record<string, PlayerSpeakerPresentation>,
   events: readonly InterpreterEvent[],
+  presentation: TemporalContext["presentation"],
 ) {
   const responseKinds = new Map<number, "choice" | "button" | "form">();
+  // A submitted form's answer shows every field with its state, one per line (V30 askForm).
+  const formSummaries = new Map<number, readonly FormSummaryLine[]>();
   for (const event of events) {
     if (
       event.kind === "actionCompleted" &&
@@ -1668,6 +1672,9 @@ function appendTranscript(
         event.settlement.interactionKind === "form")
     ) {
       responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
+      const { ui, result } = event.settlement;
+      const summary = ui.kind === "form" ? formSummaryOf(ui, result, presentation) : null;
+      if (summary !== null) formSummaries.set(event.settlement.transcriptEventSequence, summary);
     }
   }
   for (const event of events) {
@@ -1696,6 +1703,9 @@ function appendTranscript(
           ...(responseKinds.has(event.sequence)
             ? { responseKind: responseKinds.get(event.sequence)! }
             : {}),
+          ...(formSummaries.has(event.sequence)
+            ? { formSummary: formSummaries.get(event.sequence)! }
+            : {}),
         }),
       );
     }
@@ -1716,7 +1726,13 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript index for every session.
   const messageRows = session.transcriptMessageRows as Map<number, number>;
   for (const event of events) retainedEvents.push(event);
-  appendTranscript(transcriptEntries, messageRows, speakers, events);
+  appendTranscript(
+    transcriptEntries,
+    messageRows,
+    speakers,
+    events,
+    currentTemporalContext(session.snapshot).presentation,
+  );
   return Object.freeze({
     ...session,
     events: retainedEvents,

@@ -3861,12 +3861,27 @@ async function formsScenario(cdp, origin) {
     "The toggle is not pressed",
   );
   await evaluate(cdp, `${submit}.click()`);
-  // Submitting adds one transcript line of what was chosen: the toggles that are on, in field order.
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry[data-speaker-id="user"]')].some((entry) => entry.innerText.endsWith("Rope, key"))`,
-    8_000,
-    "Submitting did not add the line of what was chosen",
+  // Submitting adds one answer listing every toggle with its state, one per line; screen readers read its plain text.
+  const summary = `document.querySelector('[data-form-summary]')`;
+  await waitFor(cdp, `!!${summary}`, 8_000, "Submitting did not add the form's summary");
+  assertEqual(
+    await value(
+      cdp,
+      `[...${summary}.querySelectorAll('[data-form-summary-line="on"]')].map((line) => line.textContent.trim()).join(", ")`,
+    ),
+    "Rope, key",
+    "The summary does not show the toggles that are on",
+  );
+  assertEqual(
+    await value(cdp, `${summary}.querySelectorAll('[data-form-summary-line="off"]').length`),
+    41,
+    "The summary does not list the toggles that are off",
+  );
+  const plain = await value(cdp, `${summary}.previousElementSibling.textContent`);
+  assertEqual(
+    plain.startsWith("Submitted form: ✓ Rope, ✗ ") && plain.endsWith(", ✓ key"),
+    true,
+    `The summary's plain text is ${plain}`,
   );
   await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
   assertEqual(

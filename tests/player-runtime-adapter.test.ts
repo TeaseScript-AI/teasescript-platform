@@ -1012,10 +1012,16 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
       entry.kind === "message" ? (entry.responseKind ?? null) : null,
     ]),
     [
-      ["Rope, cuffs, Pace: Fast", "form"],
+      ["✓ Rope, ✓ cuffs, Pace: Fast", "form"],
       ["true Fast", null],
     ],
   );
+  const answer = done.session.transcriptEntries[0]!;
+  assert.deepEqual(answer.kind === "message" ? answer.formSummary : undefined, [
+    { kind: "toggle", label: "Rope", on: true },
+    { kind: "toggle", label: "cuffs", on: true },
+    { kind: "value", label: "Pace", value: "Fast" },
+  ]);
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
@@ -1099,7 +1105,7 @@ test("a typed form field opens in the composer, keeps its draft through a restor
   const done = submitPlayerRuntimeForm(day2.session, "2026-10-05")!;
   assert.equal(done.outcome.kind, "completed");
   assert.deepEqual(done.session.transcriptEntries.map((entry) => entry.text).slice(-2), [
-    "Impact: 7, day: 2026-10-05",
+    "Impact: 7, weight: Not set, day: 2026-10-05",
     "7 null 2026-10-05",
   ]);
 });

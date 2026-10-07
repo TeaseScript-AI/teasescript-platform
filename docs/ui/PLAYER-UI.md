@@ -815,10 +815,11 @@ and is marked current. Enter commits it and returns focus to the field's button;
 the composer notice. While a field is edited, **Back** (and Escape in the input) closes it and drops the text, and
 **Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every
 control keeps the action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and
-adds nothing to the transcript; submitting adds the line of what was chosen
-([V30](../specifications/accepted-syntaxes-v30.md#forms)) with the `›` response marker. Exact unambiguous text of one
-field label or of the submit or cancel button activates it from the composer, as for `choose`. A form with a time limit
-closes at it without a transcript line, as a `showButton` timeout does.
+adds nothing to the transcript; submitting adds the player's answer listing every field
+([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
+of the `›` response marker; screen readers read its plain text. Exact unambiguous text of one field label or of the
+submit or cancel button activates it from the composer, as for `choose`. A form with a time limit closes at it without
+a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
