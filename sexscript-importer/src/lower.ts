@@ -41,7 +41,7 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
 import { withParagraphs } from "./paragraphs.ts";
-import { withReadingTimes } from "./reading-time.ts";
+import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
 import {
   enforceVariableTypes,
@@ -1423,27 +1423,21 @@ export function lowerParsedFile(
     if (!callsFunction([typedStatements, others], "sexscriptLegacyTruth"))
       context.syntheticHelpers.delete("truth");
   }
+  // The passes over the typed statements, in this order: a button's seconds kept as a duration, empty texts dropped,
+  // legacy waits replaced by reading time, repeated texts shortened, texts folded into asks, paragraphs split, and
+  // `instant` taken away where it would cut a reading time short.
+  const { diagnostics } = context;
+  let texts = withElapsedDurations(typedStatements, diagnostics, mixin !== null);
+  texts = withoutBlankText(texts, diagnostics, mixin === null);
+  texts = withReadingTimes(texts, diagnostics);
+  texts = withoutRepeatedText(texts, diagnostics);
+  texts = withAskQuestions(texts, diagnostics);
+  texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
+  texts = withoutCutReadingTimes(texts, diagnostics);
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
-    ...withParagraphs(
-      withAskQuestions(
-        withoutRepeatedText(
-          withReadingTimes(
-            withoutBlankText(
-              withElapsedDurations(typedStatements, context.diagnostics, mixin !== null),
-              context.diagnostics,
-              mixin === null,
-            ),
-            context.diagnostics,
-          ),
-          context.diagnostics,
-        ),
-        context.diagnostics,
-      ),
-      context.diagnostics,
-      options.keepParagraphs === true,
-    ),
+    ...texts,
   ];
   if (body?.kind !== "block") {
     addDiagnostic(
@@ -1622,13 +1616,17 @@ function lowerHelperCompilationUnit(
       lowered.leadingComments = leadingComments;
     statements.push(lowered);
   }
-  const typedStatements = withReadingTimes(
-    withElapsedDurations(
-      withEnforcedTypes([...fieldStatements, ...statements], baseContext),
-      baseContext.diagnostics,
-      false,
+  const { diagnostics } = baseContext;
+  const typedStatements = withoutCutReadingTimes(
+    withReadingTimes(
+      withElapsedDurations(
+        withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+        diagnostics,
+        false,
+      ),
+      diagnostics,
     ),
-    baseContext.diagnostics,
+    diagnostics,
   );
   return {
     sourceName: file.sourceName,

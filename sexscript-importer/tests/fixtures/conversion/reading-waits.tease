@@ -9,10 +9,21 @@ say "Breathe."
 say "Ready?"
 showButton "Yes"
 
-// A text after one whose wait went keeps its reading time before its own long wait.
+// A text that would appear at once keeps its reading time where the reading time of a text whose wait went may still
+// run, also across other statements and branches, so that the text before it is read first; a button ends it.
 say "Good."
+let reps = 20
 say "Now hold it."
+wait 30
+if reps > 10 {
+  say "Steady."
+}
+say "Now relax."
 wait 20
+say "Look at me."
+showButton "Done"
+say "Stay there.", instant
+wait 30
 
 // A kept wait after a split text keeps what the earlier paragraphs' reading time leaves.
 say "First paragraph has a few words."

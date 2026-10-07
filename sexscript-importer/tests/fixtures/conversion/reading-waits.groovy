@@ -12,11 +12,24 @@ show("Ready?")
 wait(1)
 showButton("Yes")
 
-// A text after one whose wait went keeps its reading time before its own long wait.
+// A text that would appear at once keeps its reading time where the reading time of a text whose wait went may still
+// run, also across other statements and branches, so that the text before it is read first; a button ends it.
 show("Good.")
 wait(1)
+int reps = 20
 show("Now hold it.")
+wait(30)
+if (reps > 10) {
+    show("Steady.")
+    wait(1)
+}
+show("Now relax.")
 wait(20)
+show("Look at me.")
+wait(1)
+showButton("Done")
+show("Stay there.")
+wait(30)
 
 // A kept wait after a split text keeps what the earlier paragraphs' reading time leaves.
 show("First paragraph has a few words.\n\nSecond paragraph.\n\nLast one.")

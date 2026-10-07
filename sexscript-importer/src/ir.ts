@@ -66,9 +66,17 @@ export interface IrFunctionParameter {
 export type IrStatement =
   /**
    * `instant` shows the text without reading time (`say text, instant`); `speaker` says it `as` that speaker, and
-   * `prose` shows it as prose rather than a speech bubble (V30 §17).
+   * `prose` shows it as prose rather than a speech bubble (V30 §17). `readingTime` marks a text whose reading time
+   * replaced the legacy wait after it (withReadingTimes), which a later `instant` text must not cut short.
    */
-  | (IrBase & { kind: "say"; value: IrExpression; instant?: true; speaker?: string; prose?: true })
+  | (IrBase & {
+      kind: "say";
+      value: IrExpression;
+      instant?: true;
+      speaker?: string;
+      prose?: true;
+      readingTime?: true;
+    })
   /** A speaker declaration, global in the package (V30 §37). */
   | (IrBase & {
       kind: "speaker";

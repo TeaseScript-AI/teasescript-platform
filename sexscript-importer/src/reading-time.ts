@@ -1,6 +1,7 @@
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
+import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
 // The Player's default reading time of a `say` (docs/RUNTIME.md "Smart-autoplay session settings").
@@ -18,9 +19,8 @@ const visibleText = await loadVisibleText();
  * time, goes and the Player's reading time takes over; this includes a wait before a button or an ask, where the player
  * decides when to go on (owner decisions 2026-10-07). A longer wait is time for an action or a task and stays
  * (`afterText`), as does any other wait. A text before a wait that stays appears without reading time (`instant`, owner
- * decision 2026-10-05), so that the wait alone sets its timing, except right after a text whose wait the reading time
- * replaced: `instant` would cut that reading time short, and the wait, longer than the text's own reading time, still
- * sets the timing.
+ * decision 2026-10-05), so that the wait alone sets its timing; withoutCutReadingTimes takes it away again where it
+ * would cut short a reading time that replaced a wait.
  *
  * The reading time is measured on the whole legacy text, before withParagraphs splits it and withoutRepeatedText
  * shortens it, as the visible text of its message markup; a value interpolated at runtime counts as empty, so the
@@ -36,13 +36,10 @@ export function withReadingTimes(
   };
   const block = (items: IrStatement[]): IrStatement[] => {
     const nested = items.map((item) => withNestedBlocks(item, block));
-    // The index of the next and of the previous statement that is no blank line or comment, -1 for none.
+    // The index of the next statement that is no blank line or comment, -1 for none.
     const next: number[] = Array.from(nested, () => -1);
-    const previous: number[] = Array.from(nested, () => -1);
     for (let index = nested.length - 2; index >= 0; index -= 1)
       next[index] = significant(nested[index + 1]!) ? index + 1 : next[index + 1]!;
-    for (let index = 1; index < nested.length; index += 1)
-      previous[index] = significant(nested[index - 1]!) ? index - 1 : previous[index - 1]!;
     const result = [...nested];
     const dropped = new Set<number>();
     nested.forEach((statement, index) => {
@@ -58,14 +55,6 @@ export function withReadingTimes(
       }
       if (milliseconds > READING_WAIT_RATIO * shortestReadingTime(statement.value)) {
         result[waitIndex] = { ...wait, afterText: true };
-        if (dropped.has(previous[index]!)) {
-          report(
-            "SX_WAIT_KEPT_PACED",
-            "The legacy wait after this text is longer than 1.5 times the text's reading time, so it stays; the text keeps its reading time, which the wait covers, so that the text before it is read first.",
-            statement,
-          );
-          return;
-        }
         report(
           "SX_WAIT_KEPT",
           "The legacy wait after this text is longer than 1.5 times the text's reading time, time for an action or a task, so it stays and the text appears without reading time.",
@@ -79,11 +68,122 @@ export function withReadingTimes(
         "The legacy wait after this text timed its reading, at most 1.5 times the Player's reading time of the text, so the Player's skippable reading time replaces it.",
         statement,
       );
+      result[index] = { ...statement, readingTime: true };
       dropped.add(waitIndex);
     });
     return dropped.size === 0 ? result : result.filter((_, index) => !dropped.has(index));
   };
   return block(statements);
+}
+
+/**
+ * `instant` also ends the reading time of the text before it while that still runs (docs/RUNTIME.md, "`instant`, `0`,
+ * and `wait`"), so a text keeps no `instant` where the reading time of a text whose legacy wait it replaced
+ * (`readingTime`) may still run: on some path from that text, with no button, ask, or media in between and less
+ * waiting than its reading time. The text then waits for that reading time and keeps its own, which the wait after it,
+ * if any, overlaps. This runs after the passes that split, shorten, and fold texts, on the texts they leave.
+ */
+export function withoutCutReadingTimes(
+  statements: IrStatement[],
+  diagnostics: MigrationDiagnostic[],
+): IrStatement[] {
+  // A walk gives the statements and the reading time, in milliseconds, that may still run after them (0 for none);
+  // a trial walk, which finds what a loop's body leaves running, reports nothing.
+  const walk = (items: IrStatement[], running: number, trial = false): [IrStatement[], number] => {
+    const result: IrStatement[] = [];
+    let left = running;
+    for (const item of items) {
+      const [statement, after] = step(item, left, trial);
+      result.push(statement);
+      left = after;
+    }
+    return [result, left];
+  };
+  const step = (item: IrStatement, running: number, trial: boolean): [IrStatement, number] => {
+    if (item.kind === "function") return [{ ...item, body: walk(item.body, 0, trial)[0] }, running];
+    if (item.kind === "permanentButton")
+      return [
+        item.body === undefined ? item : { ...item, body: walk(item.body, 0, trial)[0] },
+        running,
+      ];
+    const left = ENDS_READING.has(item.kind) || asks(item) ? 0 : running;
+    switch (item.kind) {
+      case "say": {
+        if (item.instant === true && left > 0) {
+          if (!trial)
+            diagnostics.push({
+              code: "SX_WAIT_KEPT_PACED",
+              severity: "info",
+              message:
+                "This text keeps its reading time: `instant` would cut short the reading time of a text before it that replaced a legacy wait; the text waits for that one first.",
+              span: item.span,
+            });
+          const { instant: _instant, ...paced } = item;
+          return [paced, shortestReadingTime(item.value)];
+        }
+        if (item.instant === true) return [item, 0];
+        return [item, item.readingTime === true ? shortestReadingTime(item.value) : 0];
+      }
+      case "wait": {
+        const { duration } = item;
+        if (duration.kind !== "literal" || typeof duration.value !== "number") return [item, left];
+        const milliseconds = item.unit === "ms" ? duration.value : duration.value * 1000;
+        return [item, Math.max(0, left - milliseconds)];
+      }
+      case "if": {
+        const [then, afterThen] = walk(item.then, left, trial);
+        const [otherwise, afterElse] = walk(item.else, left, trial);
+        return [{ ...item, then, else: otherwise }, Math.max(afterThen, afterElse)];
+      }
+      case "switch": {
+        let most = item.default.length === 0 ? left : 0;
+        const cases = item.cases.map((switchCase) => {
+          const [body, after] = walk(switchCase.body, left, trial);
+          most = Math.max(most, after);
+          return { ...switchCase, body };
+        });
+        const [fallback, afterDefault] = walk(item.default, left, trial);
+        return [{ ...item, cases, default: fallback }, Math.max(most, afterDefault)];
+      }
+      case "while":
+      case "repeat":
+      case "for": {
+        // A loop's body starts after what came before it or after its own end.
+        const entry = Math.max(left, walk(item.body, left, true)[1]);
+        const [body, after] = walk(item.body, entry, trial);
+        return [{ ...item, body }, Math.max(left, after)];
+      }
+      default:
+        return [item, left];
+    }
+  };
+  return walk(statements, 0)[0];
+}
+
+// A button ends the reading time before it, and media wait for it (docs/RUNTIME.md "Media pacing barrier").
+const ENDS_READING: ReadonlySet<string> = new Set([
+  "showButton",
+  "showImage",
+  "hideImage",
+  "playAudio",
+]);
+
+/** Whether the statement's own expressions ask, show a button, or offer a choice, which ends a reading time. */
+function asks(statement: IrStatement): boolean {
+  let found = false;
+  const visit = (value: IrExpression): IrExpression => {
+    if (
+      value.kind === "input" ||
+      value.kind === "button" ||
+      value.kind === "choice" ||
+      value.kind === "listChoice" ||
+      (value.kind === "call" && value.name === "askImage")
+    )
+      found = true;
+    return mapChildren(value, visit);
+  };
+  mapOwnExpressions(statement, visit);
+  return found;
 }
 
 function significant(statement: IrStatement): boolean {

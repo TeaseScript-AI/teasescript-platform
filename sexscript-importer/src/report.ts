@@ -195,8 +195,8 @@ export interface FeasibilityReport {
   };
   /**
    * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
-   * than 1.5 times it (`keptPaced` where the text keeps its reading time after a replaced wait); kept waits after a
-   * split text that withParagraphs `shortened` or `dropped`.
+   * than 1.5 times it; `keptPaced` texts that keep their reading time where a replaced wait's may still run; kept
+   * waits after a split text that withParagraphs `shortened` or `dropped`.
    */
   readingWaits: {
     replaced: number;
