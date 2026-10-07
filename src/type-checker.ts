@@ -3116,7 +3116,7 @@ class TypeChecker {
           if (givenKind !== "never" && !isAssignable(read, given))
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(kept.at)}, so its default cannot be ${describeValue(given)}. Use a default of that type, or null.`,
+              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(kept.at)}, so its default cannot be ${describeValue(given)}.`,
               expression.defaultValue!.span,
             );
         } else {
@@ -3140,7 +3140,7 @@ class TypeChecker {
             const both = union([kept.type, read]);
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is loaded as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` Load it as one type, or declare its type once, as in 'let value: ${typeName(both)} = load(...)'.` : " Load it as one type."}`,
+              `${storageLabel(key)} is loaded as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
               expression.span,
             );
           }
@@ -6767,8 +6767,8 @@ function storagePlace(key: string, kept: StorageKeyType, text: PlaceText): Place
     fix: (value) => {
       const both = union([type, value]);
       return isAnnotatable(both)
-        ? ` Convert the value, use another key, or declare a type that takes both, as in 'let value: ${typeName(both)} = load(...)'.`
-        : " Convert the value or use another key.";
+        ? ` To allow it, declare a type that includes it, as in 'let value: ${typeName(both)} = load(...)'.`
+        : "";
     },
   };
 }

@@ -64,7 +64,7 @@ export function storedValueMismatch(
     mismatch.path === ""
       ? `is ${describeValue(value)}`
       : `has ${describeValue(mismatch.value)} at ${mismatch.path}`;
-  return `Storage key ${JSON.stringify(key)} is loaded as ${describeType(type)} here, but the saved value ${saved}. This load ignores it; it stays saved until a save replaces it.`;
+  return `Storage key ${JSON.stringify(key)} is loaded as ${describeType(type)} here, but the saved value ${saved}. This load uses its default; the saved value is kept.`;
 }
 
 interface TypeMismatch {

@@ -141,7 +141,7 @@ test("loads of one key agree on its type, across files", () => {
       [
         "b.tease",
         "TSV041",
-        `Storage key "level" is loaded as a whole number (integer) on line 1 of main.tease, so it cannot be loaded as text (string) here. Load it as one type, or declare its type once, as in 'let value: integer | string = load(...)'.`,
+        `Storage key "level" is loaded as a whole number (integer) on line 1 of main.tease, so it cannot be loaded as text (string) here. To allow both, declare its type at one load, as in 'let value: integer | string = load(...)'.`,
       ],
     ],
   );
@@ -159,7 +159,7 @@ test("loads of one key agree on its type, across files", () => {
     [
       [
         "b.tease",
-        'Storage key "level" is declared as a whole number (integer) or text (string) on line 2, so its default cannot be true or false (boolean). Use a default of that type, or null.',
+        'Storage key "level" is declared as a whole number (integer) or text (string) on line 2, so its default cannot be true or false (boolean).',
       ],
     ],
   );
@@ -194,20 +194,20 @@ test("a save fits every load of its key, and a key that is never loaded is not c
   assert.deepEqual(errors('let level = load("level", default: 1)\nsave "high" as "level"\nexit'), [
     [
       "TSV041",
-      `Storage key "level" is loaded as a whole number (integer) on line 1, so it cannot save text (string). Convert the value, use another key, or declare a type that takes both, as in 'let value: integer | string = load(...)'.`,
+      `Storage key "level" is loaded as a whole number (integer) on line 1, so it cannot save text (string). To allow it, declare a type that includes it, as in 'let value: integer | string = load(...)'.`,
       '"high"',
     ],
   ]);
   // A declared type decides; without one, the narrowest load does: a number does not fit a load of a whole number.
   assert.deepEqual(
     errors('let any: number = load("score", default: 0)\nsave "high" as "score"\nexit')[0]?.[1],
-    `Storage key "score" is declared as a number on line 1, so it cannot save text (string). Convert the value, use another key, or declare a type that takes both, as in 'let value: number | string = load(...)'.`,
+    `Storage key "score" is declared as a number on line 1, so it cannot save text (string). To allow it, declare a type that includes it, as in 'let value: number | string = load(...)'.`,
   );
   assert.deepEqual(
     errors(
       'let any = load("score", default: 0.5)\nlet whole = load("score", default: 0)\nsave 2.5 as "score"\nexit',
     )[0]?.[1],
-    `Storage key "score" is loaded as a whole number (integer) on line 2, so it cannot save a number. Convert the value, use another key, or declare a type that takes both, as in 'let value: number = load(...)'.`,
+    `Storage key "score" is loaded as a whole number (integer) on line 2, so it cannot save a number. To allow it, declare a type that includes it, as in 'let value: number = load(...)'.`,
   );
   // A save checked before the load in checking order is checked too, and a list literal element by element.
   assert.deepEqual(
@@ -293,7 +293,7 @@ test("a stored value of another type is ignored with a warning, kept, and replac
     scriptStorage: [{ key: "level", value: "high" }],
   });
   const warning =
-    'Storage key "level" is loaded as a whole number (integer) here, but the saved value is text (string). This load ignores it; it stays saved until a save replaces it.';
+    'Storage key "level" is loaded as a whole number (integer) here, but the saved value is text (string). This load uses its default; the saved value is kept.';
   // A load through a computed key has no type, so it returns the stored value as it is.
   assert.deepEqual(warnings(result.events), [
     ["TSW016", warning],
@@ -333,7 +333,7 @@ test("a stored value of another type is ignored with a warning, kept, and replac
   assert.deepEqual(warnings(kept.events), [
     [
       "TSW016",
-      'Storage key "scores" is loaded as a list (integer[]) here, but the saved value has text (string) at [1]. This load ignores it; it stays saved until a save replaces it.',
+      'Storage key "scores" is loaded as a list (integer[]) here, but the saved value has text (string) at [1]. This load uses its default; the saved value is kept.',
     ],
   ]);
   assert.deepEqual(binding(kept.finalSnapshot, "scores"), { kind: "list", items: [0] });
