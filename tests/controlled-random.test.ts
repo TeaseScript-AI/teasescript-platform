@@ -111,6 +111,19 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       ].join("\n"),
     ),
   }),
+  /** A timer whose operands change state before it draws its ranged duration. */
+  timerOperands: () => ({
+    stepMs: 2000,
+    plan: project(
+      [
+        'let labels = ["first", "second", "third"]',
+        "let t = timer(duration: 1..=2, async: true, label: labels.removeFirst())",
+        'say "${labels.length} ${t.label}"',
+        "wait 3 s",
+        "exit",
+      ].join("\n"),
+    ),
+  }),
   /** A host builtin called before a draw of the same instruction. */
   builtinBeforeDraw: () => ({
     stepMs: 2000,

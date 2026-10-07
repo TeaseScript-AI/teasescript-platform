@@ -476,11 +476,14 @@ function analyseChangesBeforeDraw(instruction: Instruction): boolean {
   )
     return true;
   const facts = instructionExpressions(instruction).map(analyseExpression);
+  // A timer draws its ranged duration after evaluating all of its operands.
+  const drawsLast = instruction.kind === "startTimer" && mayBeRange(instruction.duration);
   // Within one expression the evaluation order decides; across expressions any order counts.
   return facts.some(
     (fact, index) =>
       fact.changeBeforeDraw ||
-      (fact.changes && facts.some((other, position) => position !== index && other.draws)),
+      (fact.changes &&
+        (drawsLast || facts.some((other, position) => position !== index && other.draws))),
   );
 }
 
