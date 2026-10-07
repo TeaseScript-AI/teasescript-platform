@@ -578,7 +578,8 @@ const PURE_METHODS: ReadonlySet<string> = new Set([
 export function ownEffect(value: IrExpression): boolean {
   switch (value.kind) {
     case "call":
-      return !PURE_CALLS.has(value.name);
+      // A function of the script may have any effect, whatever its name.
+      return value.local === true || !PURE_CALLS.has(value.name);
     case "methodCall":
       return !PURE_METHODS.has(value.name);
     case "input":

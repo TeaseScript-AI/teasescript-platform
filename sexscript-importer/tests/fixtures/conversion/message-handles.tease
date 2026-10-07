@@ -119,12 +119,12 @@ for p in 1..=2 {
 }
 let step = 0
 function ready {
-  step += 1
   part = "Step ${step}"
   return step < 3
 }
 say "Part ${part}: ${step}"
 while ready() {
+  step += 1
   say "Part ${part}: ${step}"
   wait 5
 }
@@ -134,5 +134,12 @@ function pause {
 }
 say "${part}."
 wait pause()
+say "${part}.."
+function floorValue {
+  part = "Fourth"
+  return 1
+}
+say "${part}.", instant
+wait floorValue()
 say "${part}.."
 exit

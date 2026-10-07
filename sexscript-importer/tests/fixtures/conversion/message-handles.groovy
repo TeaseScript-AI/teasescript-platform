@@ -100,13 +100,18 @@ for (p in 1..2) {
     wait(5)
 }
 def step = 0
-def ready = { step++; part = "Step " + step; return step < 3 }
+def ready = { part = "Step " + step; return step < 3 }
 show("Part " + part + ": " + step)
 while (ready()) {
+    step++
     show("Part " + part + ": " + step)
     wait(5)
 }
 def pause = { part = "Third"; return 1 }
 show(part + ".")
 wait(pause())
+show(part + "..")
+def floor = { part = "Fourth"; return 1 }
+show(part + ".")
+wait(floor())
 show(part + "..")
