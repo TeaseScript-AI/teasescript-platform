@@ -2156,11 +2156,16 @@ function lowerStatementList(
     if (consumed.has(index)) continue;
     // A getBooleans whose null result the next statement tests offers the dialog's Cancel (cancelledBooleans).
     const booleansStart = context.diagnostics.length;
+    // Comments before the ask stay before it rather than going into the branch of the test.
+    const commentsStart = context.comments.next;
+    const booleansSpan = statementSpan(statements[index]!);
+    const booleansComments = takeCommentsBefore(context, booleansSpan);
     const cancelled = cancelledBooleans(statements, index, context);
-    if (cancelled !== null) {
-      const first = statementSpan(statements[index]!);
-      emitComments(takeCommentsBefore(context, first));
-      if (first !== null) result.push(...paragraphBreak(context, previousEndLine, first.line));
+    if (cancelled === null) context.comments.next = commentsStart;
+    else {
+      emitComments(booleansComments);
+      if (booleansSpan !== null)
+        result.push(...paragraphBreak(context, previousEndLine, booleansSpan.line));
       result.push(...diagnosticNotes(context, booleansStart), ...cancelled);
       const last = statementSpan(statements[index + 1]!);
       if (last !== null) previousEndLine = last.endLine;
@@ -3122,10 +3127,12 @@ function hoistDeferred(
     variables.set(name, inferType(part, context.types));
     const listElements = new Map(context.types.listElements ?? []);
     const receiver = part === deferred ? asNode(deferred.object) : null;
-    const result =
-      loop?.name === "collect" ? closureResult(closureArgument(loop.arguments)!.closure) : null;
+    // collect() without a closure keeps each element as it is, as findAll keeps those it selects.
+    const closure = loop?.name === "collect" ? closureArgument(loop.arguments) : null;
+    const result = closure === null ? null : closureResult(closure.closure);
     const elements =
-      loop?.name === "findAll" && receiver !== null
+      (loop?.name === "findAll" || (loop?.name === "collect" && closure === null)) &&
+      receiver !== null
         ? listElementType(receiver, context)
         : result !== null
           ? inferType(result.value, context.types)
@@ -3675,6 +3682,7 @@ const PURE_OBJECT_METHODS = new Set([
   "isEmpty",
   "length",
   "size",
+  "split",
   "toLowerCase",
   "toString",
   "toUpperCase",
@@ -6514,7 +6522,8 @@ function fieldLabel(name: string): string {
 /**
  * `x = getBooleans(...)` followed by `if (x != null) { ... } else { ... }`, or `x == null` with the branches the other
  * way round: the legacy dialog's Cancel gave null, so the form offers Cancel (V30 §20), and x takes the answers only
- * when the player did not cancel, so it keeps its list type. Null for other statements.
+ * when the player did not cancel, so it keeps its list type. `def x = getBooleans(...)` followed by such a test
+ * declares x with the answers, null after a Cancel. Null for other statements.
  */
 function cancelledBooleans(
   statements: readonly AstNode[],
@@ -6524,7 +6533,11 @@ function cancelledBooleans(
   const statement = statements[index]!;
   const next = statements[index + 1];
   const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-  if (expression?.kind !== "binary" || text(expression.operator) !== "=" || next?.kind !== "if")
+  const declared = expression?.kind === "declaration";
+  if (
+    (!declared && (expression?.kind !== "binary" || text(expression.operator) !== "=")) ||
+    next?.kind !== "if"
+  )
     return null;
   const name = variableName(asNode(expression.left));
   const right = asNode(expression.right);
@@ -6536,7 +6549,14 @@ function cancelledBooleans(
     call.arguments.length !== 3
   )
     return null;
-  const condition = asNode(next.condition);
+  // A declared x keeps the test as written, so it may also start a chain such as `x == null || !x[0]`.
+  let condition = asNode(next.condition);
+  while (
+    declared &&
+    condition?.kind === "binary" &&
+    (condition.operator === "||" || condition.operator === "&&")
+  )
+    condition = asNode(condition.left);
   const operator = condition?.kind === "binary" ? text(condition.operator) : null;
   const left = asNode(condition?.left);
   const other = asNode(condition?.right);
@@ -6549,19 +6569,43 @@ function cancelledBooleans(
           ? other
           : null;
   if (variableName(tested) !== name) return null;
+  // The whole statement lowers, so parts computed first, such as a collect() of the texts, stay before the ask.
+  const diagnostics = context.diagnostics.length;
   context.cancelBooleans = true;
-  let asked: IrExpression | null;
+  let prelude: IrStatement[], lowered: IrStatement[], postlude: IrStatement[];
   try {
-    asked = lowerExpression(right, context);
+    [prelude, lowered, postlude] = withSurroundings(context, statement);
   } finally {
     delete context.cancelBooleans;
   }
-  if (asked === null) return null;
+  lowered = [...prelude, ...lowered];
+  const asked = lowered.at(-1);
+  // A variable declared with the answers has no earlier value to keep, so it may be null after a Cancel.
+  const assigned =
+    !declared &&
+    asked?.kind === "assign" &&
+    asked.operator === "=" &&
+    asked.target.kind === "variable" &&
+    asked.target.name === name
+      ? asked
+      : null;
+  const shaped = declared ? asked?.kind === "let" && asked.name === name : assigned !== null;
+  if (postlude.length > 0 || !shaped) {
+    context.diagnostics.splice(diagnostics);
+    return null;
+  }
+  const askedEnd = statementSpan(statement)?.endLine ?? null;
+  const between = takeCommentsBefore(context, statementSpan(next)).map((comment) =>
+    commentStatement(comment, askedEnd),
+  );
+  if (assigned === null) return [...lowered, ...between, ...withSurroundings(context, next).flat()];
   const answers = freshName("answers", context);
   const answered = asNode(operator === "!=" ? next.then : next.else);
   const cancelled = asNode(operator === "!=" ? next.else : next.then);
   return [
-    { kind: "let", name: answers, value: asked, span: statement.span ?? null },
+    ...lowered.slice(0, -1),
+    { kind: "let", name: answers, value: assigned.value, span: statement.span ?? null },
+    ...between,
     {
       kind: "if",
       condition: {
@@ -11888,7 +11932,8 @@ function textOperation(
       // Java split() takes a regular expression and drops trailing empty parts.
       const separator = literalText(argumentsNodes[0]);
       if (argumentsNodes.length !== 1 || separator === null || separator === "") return undefined;
-      if (/[\\^$.|?*+()[\]{}]/u.test(separator)) return undefined;
+      // Plain characters, and metacharacters escaped as in the patterns `\|` or `\.`, match themselves.
+      if (!/^(?:[^\\^$.|?*+()[\]{}]|\\[^A-Za-z0-9])+$/u.test(separator)) return undefined;
       addDiagnostic(
         context,
         "SX_SPLIT_TRAILING_EMPTY",
@@ -11896,8 +11941,13 @@ function textOperation(
         "Java split() drops trailing empty parts; TeaseScript split() keeps them.",
         node.span,
       );
-      operation = "split";
-      break;
+      const target = lowerExpression(targetNode, context);
+      if (target === null) return null;
+      return member(
+        "split",
+        [{ kind: "literal", value: separator.replace(/\\(.)/gu, "$1") }],
+        target,
+      );
     }
     case "substring":
       if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;

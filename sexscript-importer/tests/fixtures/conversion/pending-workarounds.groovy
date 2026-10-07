@@ -2,9 +2,12 @@
 // getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
 def toys = getBooleans("Which toys do you have?", ["Paddle", "Crop"], [true, false])
 def clothes = [false]
-clothes = getBooleans("What do you own?", ["Collar"], clothes)
+def owned = [[label: "Collar"]]
+clothes = getBooleans("What do you own?", owned.collect { it.label }, clothes)
 if (clothes != null) save("clothes.collar", clothes[0])
 else show("Nothing changed")
+def gags = getBooleans("Which gags do you have?", ["Ball gag"], [false])
+if (gags == null || gags[0] == false) show("No gag today")
 if (toys[0] == true) show("Fetch the paddle")
 // showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.
 showPopup("Time for a break")
