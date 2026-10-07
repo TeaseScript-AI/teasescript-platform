@@ -1,6 +1,3 @@
-function sexscriptLegacyValue(value) {
-  return value
-}
 let name = askText "What is your name?"
 let weight = askNumber "Your weight?", default: 0
 say "Hello ${name}, you said ${weight}."
@@ -40,9 +37,8 @@ question = "Kneel?"
 say question
 let kneel = (choose yes: "Yes", no: "No") == "yes"
 // A question read from storage may be null, which kept the current text, so it is still tested.
-// NOTE SX_LOAD_OPEN_NULL line 24: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
-let stored = load "question", default: sexscriptLegacyValue(null)
-if stored != null {
+let stored = load "question", default: ""
+if stored != "" {
   say stored
 }
 let answer = askText

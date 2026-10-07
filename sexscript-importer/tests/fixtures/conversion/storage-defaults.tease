@@ -1,8 +1,5 @@
-function sexscriptLegacyValue(value) {
-  return value
-}
 function sexscriptLegacyText(value): string? {
-  if value == null {
+  if value == null or value == "" {
     return null
   }
   return "${value}"
@@ -20,10 +17,9 @@ say "Rounds won: ${rounds}"
 function reset {
   save 0 as "game.rounds"
 }
-// A read that the script tests for null keeps it.
-// NOTE SX_LOAD_OPEN_NULL line 11: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
-let level = load "game.level", default: sexscriptLegacyValue(null)
-if level == null {
+// A missing text reads as the empty text, which its null tests test for; another value keeps its null.
+let level = load "game.level", default: ""
+if level == "" {
   level = "easy"
   save level as "game.level"
 }
@@ -32,25 +28,27 @@ let savedSeen: boolean? = load "game.seen", default: null
 if savedSeen == null {
   save true as "game.seen"
 }
-// So does a read whose value reaches a test for null or for an empty value through a variable, an argument, or a
-// comparison, and the text that loadString read of a key the package saves numbers under.
-let stored: string? = load "game.stored", default: null
+// A copy of the text, or a parameter it is passed to, may hold null from elsewhere too, so its tests take both; the
+// text that loadString read of a key the package saves numbers under keeps its null.
+let stored = load "game.stored", default: ""
 let copy = stored
-if copy == null {
+if copy == null or copy == "" {
   say "Nothing stored."
 }
 function check(value) {
-  if value == null {
+  if value == null or value == "" {
     say "Nothing given."
   }
 }
-let savedGiven: string? = load "game.given", default: null
-check(savedGiven)
-let savedMode: string? = load "game.mode", default: null
-if savedMode == "" {
+check(load("game.given", default: ""))
+if load("game.mode", default: "") == "" {
   say "No mode."
 }
-// NOTE SX_LOAD_STRING_TEXT line 26: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+// A null saved under the key removes it, so the key reads as the empty text again.
+function resetMode {
+  delete "game.mode"
+}
+// NOTE SX_LOAD_STRING_TEXT line 28: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
 let savedVersion: integer? = load "game.version", default: null
 let version: string? = sexscriptLegacyText(savedVersion)
 if version == null {
@@ -61,7 +59,7 @@ function upgrade {
 }
 // A list of lists the saves give a key reads as an empty list.
 let grid = load "game.grid", default: []
-// NOTE SX_LENGTH_RECEIVER line 31: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+// NOTE SX_LENGTH_RECEIVER line 33: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 say "Rows: ${grid.length}"
 function reset2 {
   save [[0]] as "game.grid"

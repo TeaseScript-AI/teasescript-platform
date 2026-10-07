@@ -42,8 +42,8 @@ say "Red: ${hasWord(tags, "red")}, in text: ${hasWord("a red door", "red")}"
 say "Tags: ${describe(tags)}"
 say "Zeros: ${zeros([0, 3, 0])}, lowest: ${lowest([4, 2, 9])}"
 say "Colon at ${colon("key: value")}"
-let answer: string? = load "answer", default: null
-if answer != null and answer.contains("yes") {
+let answer = load "answer", default: ""
+if answer != "" and answer.contains("yes") {
   say "Agreed"
 }
 exit

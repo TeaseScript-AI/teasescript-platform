@@ -224,9 +224,16 @@ export interface FeasibilityReport {
   /**
    * Storage reads of a key written as one literal (storage-keys.ts): with a default of their type (`defaulted`), with
    * `default: null` and a declared key type (`nullKept`), and the statements whose reads keep a null of an open type
-   * (`open`, `SX_LOAD_OPEN_NULL`).
+   * (`open`, `SX_LOAD_OPEN_NULL`); text reads whose null the script told apart, now the empty text (`textEmpty`,
+   * `SX_LOAD_TEXT_EMPTY`), and their null tests, now tests for the empty text (`textTests`, `SX_LOAD_TEXT_NULL_TEST`).
    */
-  storageReads: { defaulted: number; nullKept: number; open: number };
+  storageReads: {
+    defaulted: number;
+    nullKept: number;
+    open: number;
+    textEmpty: number;
+    textTests: number;
+  };
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
@@ -381,7 +388,7 @@ export function analyzeFeasibility(
     },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
-    storageReads: { defaulted: 0, nullKept: 0, open: 0 },
+    storageReads: { defaulted: 0, nullKept: 0, open: 0, textEmpty: 0, textTests: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -483,9 +490,11 @@ export function analyzeFeasibility(
       const reads = literalStorageReads(packageProgram.statements);
       report.storageReads.defaulted += reads.defaulted;
       report.storageReads.nullKept += reads.nullKept;
-      report.storageReads.open += packageProgram.diagnostics.filter(
-        (diagnostic) => diagnostic.code === "SX_LOAD_OPEN_NULL",
-      ).length;
+      const count = (code: string): number =>
+        packageProgram.diagnostics.filter((diagnostic) => diagnostic.code === code).length;
+      report.storageReads.open += count("SX_LOAD_OPEN_NULL");
+      report.storageReads.textEmpty += count("SX_LOAD_TEXT_EMPTY");
+      report.storageReads.textTests += count("SX_LOAD_TEXT_NULL_TEST");
     }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;

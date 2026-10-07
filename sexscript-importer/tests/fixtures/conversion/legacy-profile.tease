@@ -5,8 +5,7 @@ speaker system {
   title: "System"
 }
 function sexscriptLegacyAskProfile {
-  let savedName: string? = load "intro.name", default: null
-  if savedName == null {
+  if load("intro.name", default: "") == "" {
     save (askText as system "What is your name?", default: "Slave") as "intro.name"
   }
   let savedFemale: boolean? = load "intro.female", default: null

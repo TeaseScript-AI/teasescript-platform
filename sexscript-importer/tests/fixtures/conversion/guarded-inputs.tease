@@ -1,12 +1,8 @@
-function sexscriptLegacyValue(value) {
-  return value
-}
 // A question that && or || guards is asked only where Groovy's short circuit reached it.
-// NOTE SX_LOAD_OPEN_NULL line 2: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
-let name = load "training.name", default: sexscriptLegacyValue(null)
+let name = load "training.name", default: ""
 while true {
   let answered = false
-  if name == null {
+  if name == "" {
     answered = true
   } else {
     say "Is ${name} your name?"
