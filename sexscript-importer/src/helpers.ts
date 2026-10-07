@@ -1271,7 +1271,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // The items a Groovy loop visited: the characters of text, the elements of anything else.
+  // The items a Groovy loop visited: none of null, the characters of text, the elements of anything else.
   items: {
     name: "sexscriptLegacyItems",
     build: () =>
@@ -1279,6 +1279,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyItems",
         ["value"],
         [
+          ifS(bin("==", v("value"), lit(null)), [ret({ kind: "list", items: [] })]),
           ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
             ret({ kind: "methodCall", target: v("value"), name: "split", arguments: [lit("")] }),
           ]),

@@ -8007,7 +8007,7 @@ function lowerIterated(
   // Groovy iterated text by character.
   const type = node.kind === "range" || provenList ? 0 : inferType(node, context.types);
   if ((type & STRING) !== 0) {
-    if (onlyOf(type, STRING | NULL))
+    if (onlyOf(type, STRING))
       return {
         kind: "methodCall",
         target: collection,
@@ -8018,7 +8018,7 @@ function lowerIterated(
       context,
       "SX_ITEMS_OF_TEXT",
       "info",
-      "Groovy iterated text by character and a list by element; this value is not proven to be one of them, so a helper splits text into its characters.",
+      "Groovy iterated text by character, a list by element, and null not at all; this value is not proven to be one of them, so a helper splits text into its characters and makes null an empty list.",
       node.span,
     );
     return useHelper(context, "items", [collection]);

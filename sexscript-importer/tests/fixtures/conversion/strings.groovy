@@ -28,3 +28,6 @@ def code = "ABCDOEFO"
 def cut = 3
 def stars = { count -> return "*" * count }
 show(code[0..2] + code[-2..-1] + code[1..<cut] + code[cut..-1] + (code - "O") + stars(cut))
+// Groovy iterated null zero times.
+def picked = getSelectedValue("Pick one?", ["none", "red"]) == "none" ? null : "red"
+for (c in picked) show(c)
