@@ -532,7 +532,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
   for (const report of reports) {
     if (report.compile === undefined) {
       lines.push(
-        `| ${text(report.unit)} | no report: exhausted in an earlier run | | | | | | | | | | |`,
+        `| ${text(report.unit)} | no report: skipped as exhausted earlier, or its process failed | | | | | | | | | | |`,
       );
       continue;
     }
@@ -545,8 +545,8 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     const endStates = fields(report.endStates);
     const corpus = fields(report.corpus);
     const fromCorpus = isRecord(report.corpus)
-      ? `${count(fields(corpus.coverageAtStart).percent)}% (${count(corpus.loaded)} entries, ` +
-        `${count(corpus.stale)} stale; ${count(corpus.written)} kept)`
+      ? `${count(fields(corpus.coverageAtStart).percent)}% (${count(corpus.replayed)} of ` +
+        `${count(corpus.loaded)} entries replayed, ${count(corpus.stale)} stale; ${count(corpus.written)} kept)`
       : "";
     lines.push(
       `| ${text(report.unit)} | ${count(coverage.percent)}% of ${count(coverage.coverableLines)} lines | ${fromCorpus} | ` +

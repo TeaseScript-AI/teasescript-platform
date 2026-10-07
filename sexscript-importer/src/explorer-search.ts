@@ -516,6 +516,10 @@ interface Left {
  * is reached (a session chain goes on from the storage it reached instead), and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
  * take only their attempt's own steps and otherwise come after all play states. Directed work takes at most
  * {@link DIRECTED_SHARE} of all runtime operations, which measure what steps cost.
+ *
+ * A corpus ({@link ExploreOptions.corpus}) is replayed before the search, from the budget (`replayCorpus`); its
+ * operations are no part of the directed share. The corpus to keep is the result's: the paths to crashes and traps,
+ * then a greedy set cover over the lines and condition ways the run covered, by paths of steps that covered one first.
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
@@ -1486,7 +1490,7 @@ function cover(
 /**
  * Whether a corpus input fits the pending action: one of the options the explorer tries there, by kind, label, and
  * index or ID. A typed answer needs a typed ask, a form a form (with cancel for a cancel), a wait the same deadline;
- * a later wall clock fits any waiting state, and the runtime decides the rest.
+ * another wall clock fits any waiting state, and the runtime decides the rest.
  */
 function fitsPending(input: ExplorerInput, options: readonly ExplorerInput[]): boolean {
   if (input.kind === "clock") return true;
