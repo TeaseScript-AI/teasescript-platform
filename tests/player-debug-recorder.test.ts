@@ -440,6 +440,16 @@ test("after a call the recording could not keep, an error still continues from t
   const continued = submitPlayerRuntimeComposer(session, "ok")!.session;
   assert.equal(continued.state.status, "halted");
   assert.equal(continued.transcriptEntries.at(-1)?.text, "ok");
+
+  // Two such answers in a row, the second one's run throwing: the state after the first.
+  const twice = submitPlayerRuntimeComposer(
+    createPlayerRuntimeSession(`let first = askText "First"\n${checked}`, {
+      recorder: new DebugRecorder({ argumentBytes: 50 }),
+    }),
+    "a".repeat(100),
+  )!.session;
+  continues(twice, () => submitPlayerRuntimeComposer(twice, "b".repeat(100)));
+  assert.equal(submitPlayerRuntimeComposer(twice, "ok")!.session.state.status, "halted");
 });
 
 test("a refusal the host does not keep leaves the later publications recoverable", () => {

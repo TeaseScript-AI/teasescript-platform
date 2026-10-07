@@ -218,6 +218,9 @@ export class DebugRecorder {
     // A call that continues one the log could not keep cannot be replayed either.
     if (this.#plan === null || (this.#broken && continuation)) return null;
     try {
+      // After a call it could not keep, the log starts again at the Player's next call before anything else, so that
+      // the latest publication stays recoverable also when this call cannot be kept either.
+      if (this.#broken) this.#restart(input);
       // JSON would turn a value such as NaN into null and replay a different call, and a cycle has no JSON form, so
       // such a call is not recorded; the engine's own validation then still refuses or admits it.
       if (!captureExternalData(args).ok) {
@@ -231,22 +234,14 @@ export class DebugRecorder {
         this.#skip("A recorded call was larger than the recording keeps.", input);
         return null;
       }
-      // The log starts again only before a call of the Player, after a call it could not keep or when it would outgrow
-      // its limits; a continuation always stays with the call it continues. A call of the Player starts from the state
-      // of the latest publication, so the new anchor is that publication's state.
+      // The log also starts again before a call of the Player that would outgrow its limits; a continuation always
+      // stays with the call it continues.
       if (
-        this.#broken ||
-        (!continuation &&
-          (this.#operations.length + 2 > this.#limits.operations ||
-            this.#argumentBytes + bytes > this.#limits.argumentBytes))
-      ) {
-        this.#anchor = input();
-        if (this.#published !== null)
-          this.#published = { revision: this.#published.revision, operations: 0 };
-        this.#operations = [];
-        this.#argumentBytes = 0;
-        this.#broken = false;
-      }
+        !continuation &&
+        (this.#operations.length + 2 > this.#limits.operations ||
+          this.#argumentBytes + bytes > this.#limits.argumentBytes)
+      )
+        this.#restart(input);
       this.#argumentBytes += bytes;
       // A copy: the recording must not change when the Player reuses an object it passed.
       const copy: unknown = JSON.parse(json);
@@ -256,6 +251,18 @@ export class DebugRecorder {
       this.#skip("The recorder could not copy a call.", null);
       return null;
     }
+  }
+
+  /**
+   * Starts the log again from `input`, the state a call of the Player starts from, which is the latest publication's.
+   */
+  #restart(input: () => RuntimeSnapshot): void {
+    this.#anchor = input();
+    if (this.#published !== null)
+      this.#published = { revision: this.#published.revision, operations: 0 };
+    this.#operations = [];
+    this.#argumentBytes = 0;
+    this.#broken = false;
   }
 
   /**
