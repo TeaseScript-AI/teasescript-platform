@@ -283,6 +283,17 @@ export class RuntimeSession {
     return this.#read((state) => published(permanentButtonProjection(state)));
   }
 
+  /**
+   * The instruction where each active call continues when it returns, outermost first: after a function or file call,
+   * or where a running timer, media, or button block resumes the path it interrupted. The work is proportional to the
+   * call depth.
+   */
+  public callReturnInstructions(): readonly number[] {
+    return this.#read((state) =>
+      Object.freeze(state.callFrames.map((frame) => frame.returnInstruction)),
+    );
+  }
+
   /** `inspectRuntimeState`'s debugger inspection, which captures and validates the whole state first. */
   public inspect(): RuntimeInspectionResult {
     return this.#read((state) => inspectRuntimeState(this.#plan, state));
