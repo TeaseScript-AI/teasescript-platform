@@ -37,7 +37,7 @@ question = "Kneel?"
 say question
 let kneel = (choose yes: "Yes", no: "No") == "yes"
 // A question read from storage may be null, which kept the current text, so it is still tested.
-let stored = load "question"
+let stored = load "question", default: null
 if stored != null {
   say stored
 }

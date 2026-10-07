@@ -2,15 +2,15 @@ speaker system {
   title: "System"
 }
 function sexscriptLegacyAskProfile {
-  if load("intro.name") == null {
+  if load("intro.name", default: null) == null {
     save (askText as system "What is your name?", default: "Slave") as "intro.name"
   }
-  if load("intro.female") == null {
+  if load("intro.female", default: null) == null {
     say as system "Are you a woman ?"
     save (choose yes: "Yes", no: "No") == "yes" as "intro.female"
   }
-  if load("intro.likemale") == null {
-    if load("intro.likefemale") == true {
+  if load("intro.likemale", default: null) == null {
+    if load("intro.likefemale", default: null) == true {
       say as system "Are you also attracted to men ?"
       save (choose yes: "Yes", no: "No") == "yes" as "intro.likemale"
     } else {
@@ -20,7 +20,7 @@ function sexscriptLegacyAskProfile {
   let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.dildo"] {
-    if load(profileToysKey) == null {
+    if load(profileToysKey, default: null) == null {
       profileToysFields[profileToysKey] = { value: false, text: ["dildo"][profileToysIndex] }
     }
     profileToysIndex += 1

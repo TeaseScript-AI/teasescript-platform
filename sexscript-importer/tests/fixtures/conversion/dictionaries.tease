@@ -136,7 +136,7 @@ let permissions: object[] = [
   { title: "Play", chance: 55, flag: "deny.play" }
 ]
 let permission = permissions[randomInteger(0..2)]
-if permission.flag != null and load(permission.flag) != null {
+if permission.flag != null and load(permission.flag, default: null) != null {
   say "Not now"
 }
 // A null test of a computed key of a dict without stored nulls asks for the key once.
@@ -152,13 +152,13 @@ if not skipped.contains(sections[section]) {
 let needed = dict{ rope: "rope", rubber_bands: "rubber bands" }
 let missing = ""
 for toyValue, value in needed {
-  if load("toys.${toyValue}") != true {
+  if load("toys.${toyValue}", default: null) != true {
     missing += "${value} "
   }
 }
 say "Missing: ${missing}"
 // A stored map that may be missing is false when null or empty, as Groovy's null or empty map was.
-let remembered = load "toy.remembered"
+let remembered = load "toy.remembered", default: null
 let slot = "first"
 // NOTE SX_DICT_MISSING_KEY line 97: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 if remembered != null and remembered.length > 0 {

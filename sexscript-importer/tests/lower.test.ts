@@ -225,7 +225,12 @@ test("lowers nullable legacy scalar storage reads to read-only TeaseScript load"
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ['let enabled = load "feature.enabled"', 'let raw = load "legacy.raw"', "exit", ""].join("\n"),
+    [
+      'let enabled = load "feature.enabled", default: null',
+      'let raw = load "legacy.raw", default: null',
+      "exit",
+      "",
+    ].join("\n"),
   );
 });
 

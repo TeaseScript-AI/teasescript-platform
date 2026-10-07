@@ -5,7 +5,7 @@ function sexscriptLegacyAskProfile {
   let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.crop", "toys.paddle"] {
-    if load(profileToysKey) == null {
+    if load(profileToysKey, default: null) == null {
       profileToysFields[profileToysKey] = { value: false, text: ["crop / cane", "paddle"][profileToysIndex] }
     }
     profileToysIndex += 1
@@ -23,7 +23,7 @@ function sexscriptLegacyValue(value) {
   return value
 }
 function sexscriptLegacyLoadInteger(key, whenMissing = null) {
-  let value = load key
+  let value = load key, default: null
   if value == null {
     return whenMissing
   }

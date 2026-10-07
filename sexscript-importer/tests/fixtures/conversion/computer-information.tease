@@ -2,16 +2,16 @@ speaker system {
   title: "System"
 }
 function sexscriptLegacyAskOnce(key, question) {
-  if load(key) == null {
+  if load(key, default: null) == null {
     save (askText as system question) as key
   }
-  return load key
+  return load key, default: null
 }
 function sexscriptLegacyDeviceId {
-  if load("system.deviceId") == null {
+  if load("system.deviceId", default: null) == null {
     save "${randomInteger(0..2147483647)}" as "system.deviceId"
   }
-  return load "system.deviceId"
+  return load "system.deviceId", default: null
 }
 // Information the player's computer provided is asked once from the player, as the system speaker, and saved.
 // NOTE SX_OS_INFO line 2: System.getProperty("user.name") read the player's account name from the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "intro.name".

@@ -3,7 +3,7 @@ global function sexscriptLegacyValue(value) {
   return value
 }
 global function sexscriptLegacyLoadInteger(key, whenMissing = null) {
-  let value = load key
+  let value = load key, default: null
   if value == null {
     return whenMissing
   }

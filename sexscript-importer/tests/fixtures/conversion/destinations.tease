@@ -2,7 +2,7 @@ function sexscriptLegacyValue(value) {
   return value
 }
 function sexscriptLegacyLoadInteger(keyValue, whenMissing = null) {
-  let value = load keyValue
+  let value = load keyValue, default: null
   if value == null {
     return whenMissing
   }

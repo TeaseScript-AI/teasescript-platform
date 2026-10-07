@@ -8,7 +8,7 @@ function sexscriptLegacyListMinus(items, removed) {
   return kept
 }
 // Groovy list - value drops the value from a copy of the list; list - otherList drops each of its elements.
-let picked = load "picked"
+let picked = load "picked", default: null
 function pickToy {
   let toys = ["paddle", "crop", "cane"]
   say "Add the strap?"
@@ -29,7 +29,7 @@ say "Rounds left: ${rounds.length}"
 // A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
 function pickOwned(itemKeys) {
   for key in itemKeys {
-    if load(key) != true {
+    if load(key, default: null) != true {
       itemKeys = sexscriptLegacyListMinus(itemKeys, [key])
     }
   }

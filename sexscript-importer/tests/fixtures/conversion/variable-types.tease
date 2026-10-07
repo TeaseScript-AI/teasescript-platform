@@ -8,14 +8,14 @@ function sexscriptLegacyValue(value) {
   return value
 }
 function sexscriptLegacyLoadInteger(key, whenMissing = null) {
-  let value = load key
+  let value = load key, default: null
   if value == null {
     return whenMissing
   }
   return sexscriptLegacyValue(toInteger(value))
 }
 function sexscriptLegacyLoadFloat(key, whenMissing = null) {
-  let value = load key
+  let value = load key, default: null
   if value == null {
     return whenMissing
   }
@@ -174,7 +174,7 @@ function joinNames {
   let next: string? = "0"
   let i = 0
   while next != null {
-    next = load "names.${i}"
+    next = load "names.${i}", default: null
     if next == null {
       say "End"
     } else if all == "0" {
@@ -193,7 +193,7 @@ say "Names ${joined.length}"
 let implement: string? = "nothing"
 function pickOwned(keys) {
   for key in keys {
-    if load(key) != true {
+    if load(key, default: null) != true {
       keys = sexscriptLegacyListMinus(keys, [key])
     }
   }

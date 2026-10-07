@@ -368,9 +368,9 @@ export function emitExpression(expression: IrExpression): string {
       return `${operand(expression.target, POSTFIX)}.${expression.name}(${args.join(", ")})`;
     }
     case "load":
-      // Inside a larger expression a read takes its bounded form, `load("k") == null` (V30 §25); a whole statement
-      // value keeps the compact one (see emitValue).
-      return `load(${emitExpression(expression.key)}${expression.defaultValue === undefined ? "" : `, default: ${emitExpression(expression.defaultValue)}`})`;
+      // Inside a larger expression a read takes its bounded form, `load("k", default: null) == null` (V30 §25); a
+      // whole statement value keeps the compact one (see emitValue).
+      return `load(${emitExpression(expression.key)}, default: ${loadDefault(expression)})`;
     case "input": {
       // Inside a larger expression an ask takes its parenthesized form, `askInteger(default: 0) + 1` (V30 §20); a
       // whole statement value keeps the compact one (see emitValue).
@@ -663,9 +663,7 @@ function emitValue(expression: IrExpression): string {
   if (expression.kind === "message")
     return `say ${expression.speaker === undefined ? "" : `as ${expression.speaker} `}${emitExpression(expression.value)}${expression.instant === true ? ", instant" : ""}`;
   if (expression.kind === "load")
-    return expression.defaultValue === undefined
-      ? `load ${operand(expression.key, POSTFIX)}`
-      : emitLoadDefault(expression);
+    return `load ${operand(expression.key, POSTFIX)}, default: ${loadDefault(expression)}`;
   if (expression.kind === "input") return compactInput(expression);
   return expression.kind === "choice" || expression.kind === "listChoice"
     ? emitChoice(expression)
@@ -696,9 +694,12 @@ function askArguments(expression: Extract<IrExpression, { kind: "input" }>): str
   ];
 }
 
-/** `load key, default: value` (#541). */
-function emitLoadDefault(expression: Extract<IrExpression, { kind: "load" }>): string {
-  return `load ${operand(expression.key, POSTFIX)}, default: ${emitExpression(expression.defaultValue!)}`;
+/**
+ * A read's `default:`, which every `load` has (#690): its own, or null, which a missing key read in legacy, where the
+ * script may tell it from a value (storage-keys.ts).
+ */
+function loadDefault(expression: Extract<IrExpression, { kind: "load" }>): string {
+  return expression.defaultValue === undefined ? "null" : emitExpression(expression.defaultValue);
 }
 
 function operand(expression: IrExpression, minimum: number): string {
