@@ -114,6 +114,19 @@ test("editor help and formatting cover showButton used as a value with a timeout
   );
 });
 
+test("formatting and help reach a say used as a value, which keeps its parentheses where they are written", () => {
+  const document = createLanguageDocument(
+    "file:///main.tease",
+    'let line = say   "Waiting."  ,instant\nlet lines = [say("A" ,instant), say   ("B")]\nexit',
+  );
+  assert.equal(
+    formatLanguageDocument(document).text,
+    'let line = say "Waiting.", instant\nlet lines = [say("A", instant), say ("B")]\nexit',
+  );
+  const hover = languageHover(document, languagePositionAt(document, document.text.indexOf('"A"')));
+  assert.ok(hover?.contents.some((line) => line.includes("messageHandle")));
+});
+
 const DEEP_SAY = 'say   "deep"  ,instant';
 
 /** The deepest `say` has irregular owned whitespace, so formatting that stops descending leaves it unchanged. */

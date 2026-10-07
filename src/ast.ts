@@ -67,14 +67,27 @@ export interface SpeakerSetterStatement {
   readonly span: SourceSpan;
 }
 
-export interface SayStatement {
+/**
+ * Shared data of `say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] text [, pacing]`, also
+ * in its bounded form, whose parentheses hold the text and pacing.
+ */
+export interface SayParts {
   readonly presentation: ObjectLiteral | null;
-  readonly kind: "sayStatement";
   readonly speaker: Identifier | null;
   readonly skipPolicy: "skippable" | "unskippable" | null;
   readonly value: Expression;
   readonly pacing: Expression | "instant" | null;
   readonly span: SourceSpan;
+}
+
+/** A message whose handle is not used. */
+export interface SayStatement extends SayParts {
+  readonly kind: "sayStatement";
+}
+
+/** A message used as a value; it evaluates to the `messageHandle` of the message once it is shown. */
+export interface SayExpression extends SayParts {
+  readonly kind: "sayExpression";
 }
 
 /**
@@ -430,7 +443,8 @@ export type TypeName =
   | "range"
   | "speaker"
   | "timer"
-  | "media";
+  | "media"
+  | "messageHandle";
 
 /** A written type: a name, `T[]`, `T set`, `T dict`, `T?`, or a union `A | B`. Parentheses only group. */
 export type TypeAnnotation = NamedType | CollectionType | OptionalType | UnionType;
@@ -594,6 +608,7 @@ export type Expression =
   | BinaryExpression
   | RangeExpression
   | InteractionExpression
+  | SayExpression
   | ShowButtonExpression
   | TimerExpression
   | PlayMediaExpression
