@@ -7,9 +7,16 @@ line.text += " ."
 wait 1
 line.text += " ."
 wait 1
-let line2 = say "Thinking .", instant
+// A text that repeats the animation's last step says only what it adds.
+say "Now begin."
+// A step whose values have effects, such as a random draw, says its whole text anew.
+let line2 = say "Pick ${randomInteger(0..100)}.", instant
+wait 1
+line2.text = "Pick ${randomInteger(0..100)}.."
+wait 1
+let line3 = say "Thinking .", instant
 wait 0.5
-line2.text = "Thinking  .."
+line3.text = "Thinking  .."
 wait 0.5
 // A loop that shows the line said before it again with a new count changes that line in place.
 let message = "Count them."
@@ -37,10 +44,35 @@ while i > 17 {
   wait 1
   i -= 1
 }
-// A loop whose text is no new count of the line before it says each text as a message of its own.
+// A loop whose text is no new count of the line before it, or that follows a call, says each text as a message of its
+// own, as does a text that is no text.
 say "Get ready!"
 for s in 1..=2 {
   say "Shock ${s} of 2"
+  wait 5
+}
+let questions = ["Ready?", "Sure?"]
+say "Question 1"
+let q = 1
+while q <= 2 {
+  say "Question ${q}: ${questions[q - 1]}"
+  wait 5
+  q += 1
+}
+function countdown {
+  say "Get set"
+}
+say "Round 0"
+countdown()
+for r in 1..=2 {
+  say "Round ${r}"
+  wait 5
+}
+let n = 0
+say n
+for k in 1..=2 {
+  n += 1
+  say n
   wait 5
 }
 exit

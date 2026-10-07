@@ -571,13 +571,16 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Updatable messages (owner decision 2026-10-07, V30 "Updatable messages"): the legacy display was redrawn to
   animate a text or to count, where TeaseScript changes a shown message in place. An animation, texts that each add
   only punctuation to the one before with only waits between them, becomes `let line = say "Deciding.", instant` and
-  `line.text += "."` (or `= text`) per step (`SX_MESSAGE_ANIMATION`, counted as `messageHandles.animations`). A loop
-  whose body says one text with a value computed at runtime, where the last text said before the loop, with nothing
-  that says, asks, or shows a button in between, is the same line with a count or placeholder in place of the value
-  (`20 jerks` before `${i} jerks`, or the same text with its values), becomes `let counter = say …, instant` before
-  the loop and `counter.text = …` in it, as Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`).
-  The waits between the steps stay as they are, since the pacing rule below only touches waits right after a `say`;
-  other loops keep one message per pass, and a module's code outside its functions keeps its texts.
+  `line.text += "."` per step, or `= text` where a step is no plain extension or its values are computed, such as a
+  random draw that each step made anew (`SX_MESSAGE_ANIMATION`, counted as `messageHandles.animations`). A loop whose
+  body says one text with a count, a variable the loop steps with `+=` or `-=` or a range loop's own, where the last
+  text said before the loop, with only statements without effects in between, is the same line with a number or a
+  placeholder in place of the count (`20 jerks` before `${i} jerks`, only digits, punctuation, and spaces around the
+  count) or the same text, becomes `let counter = say …, instant` before the loop and `counter.text = …` in it, as
+  Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`). The waits between the steps stay as they
+  are, since the pacing rule below only touches waits right after a `say`; other loops keep one message per pass, a
+  module's code outside its functions keeps its texts, and a later text that repeats a handle's current text says only
+  what it adds.
 - Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
   the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
   more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an

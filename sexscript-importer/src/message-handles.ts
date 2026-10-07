@@ -1,19 +1,21 @@
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
-import { addedText, addsOnlyMarks, withNestedBlocks } from "./repeated-text.ts";
+import { addedText, addsOnlyMarks, hasEffect, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 type Say = Extract<IrStatement, { kind: "say" }>;
-type Token = { char: string } | { key: string };
+type Token = { char: string } | { key: string; value: IrExpression };
 
 /**
  * The legacy display showed one text, so authors redrew it to animate it or to count; TeaseScript can change a shown
  * message in place through its handle (V30 "Updatable messages"), which the owner wanted for these (decision
  * 2026-10-07):
  * - an animation, texts that each add only punctuation to the one before, with only waits between them (growing
- *   dots), becomes one `let line = say first, instant` and a `line.text += added` (or `= text`) per step;
- * - a counter, a loop whose body says one text with a value computed at runtime, where the last text said before the
- *   loop is the same line with a count or a placeholder in place of the value (`20 jerks` and `${i} jerks`), becomes a
+ *   dots), becomes one `let line = say first, instant` and a `line.text += added` per step, or `= text` where the step
+ *   is no plain extension or its values are computed, such as a random draw, which each step makes anew;
+ * - a counter, a loop whose body says one text with a count, a variable the loop steps or a range loop's own, where the
+ *   last text said before the loop, with only statements without effects in between, is the same line with a number
+ *   or a placeholder in place of the count (`20 jerks` and `${i} jerks`) or the same text, becomes a
  *   `let counter = say before, instant` and a `counter.text = text` in the loop.
  * The waits between the steps stay as they are: they are the animation's or the count's timing, and withReadingTimes,
  * which runs after this, only touches waits right after a `say`. The system speaker's texts stay, and so does a module's
@@ -87,7 +89,8 @@ export function withMessageHandles(
       result[index] = handle(first, name);
       for (let step = 1; step < says.length; step += 1) {
         const say = says[step]!;
-        const added = addedText(says[step - 1]!.value, say.value);
+        const earlier = says[step - 1]!.value;
+        const added = computes(earlier) ? null : addedText(earlier, say.value);
         result[steps[step]!] = {
           kind: "assign",
           target: textOf(name),
@@ -108,13 +111,13 @@ export function withMessageHandles(
       const says = loop.body.filter((item): item is Say => item.kind === "say");
       if (says.length !== 1) return;
       const inLoop = says[0]!;
-      if (!shown(inLoop) || !computed(inLoop.value)) return;
-      // The last text said before the loop, with nothing that says, asks, or shows a button in between.
+      if (!shown(inLoop)) return;
+      // The last text said before the loop, with only statements without effects in between.
       let at = index - 1;
       while (at >= 0 && quiet(result[at]!)) at -= 1;
       const before = result[at];
       if (before === undefined || !shown(before) || !sameVoice(before, inLoop)) return;
-      if (!sameLine(before.value, inLoop.value)) return;
+      if (!sameLine(before.value, inLoop.value, loop)) return;
       const name = fresh("counter");
       report(
         "SX_MESSAGE_COUNTER",
@@ -171,61 +174,87 @@ function textOf(name: string): IrExpression {
   return { kind: "property", target: { kind: "variable", name }, name: "text" };
 }
 
-/** Whether a statement before a counter's loop leaves the text before it shown: it says, asks, and offers nothing. */
+// Statements that leave the text on display as it is when their expressions have no effect.
+const QUIET: ReadonlySet<string> = new Set([
+  "blank",
+  "comment",
+  "wait",
+  "let",
+  "assign",
+  "save",
+  "delete",
+  "showImage",
+  "hideImage",
+  "playAudio",
+]);
+
+/** Whether a statement before a counter's loop leaves the text before it on display: it has no effect but media. */
 function quiet(statement: IrStatement): boolean {
-  if (statement.kind === "say" || statement.kind === "showButton" || statement.kind === "showPopup")
-    return false;
+  if (!QUIET.has(statement.kind)) return false;
   let calm = true;
+  mapOwnExpressions(statement, (value) => {
+    calm &&= !hasEffect(value);
+    return value;
+  });
+  return calm;
+}
+
+/** The names a loop counts with: those its body steps with `+=` or `-=` (or `x = x ± n`), and a range loop's own. */
+function counts(loop: Extract<IrStatement, { kind: "while" | "for" | "repeat" }>): Set<string> {
+  const names = new Set<string>();
+  if (loop.kind === "for" && loop.collection.kind === "range") names.add(loop.variable);
+  for (const item of loop.body) {
+    if (item.kind !== "assign" || item.target.kind !== "variable") continue;
+    const name = item.target.name;
+    const { value } = item;
+    if (
+      item.operator !== "=" ||
+      (value.kind === "binary" &&
+        (value.operator === "+" || value.operator === "-") &&
+        value.left.kind === "variable" &&
+        value.left.name === name)
+    )
+      names.add(name);
+  }
+  return names;
+}
+
+/** The names the statements write. */
+function written(statements: readonly IrStatement[]): Set<string> {
+  const names = new Set<string>();
   const visit = (item: IrStatement): void => {
-    if (item.kind === "say" || item.kind === "showButton" || item.kind === "showPopup")
-      calm = false;
-    mapOwnExpressions(item, (value) => {
-      if (asks(value)) calm = false;
-      return value;
-    });
+    if (item.kind === "let") names.add(item.name);
+    if (item.kind === "assign" && item.target.kind === "variable") names.add(item.target.name);
+    if (item.kind === "for") names.add(item.variable);
     withNestedBlocks(item, (body) => {
       body.forEach(visit);
       return body;
     });
   };
-  visit(statement);
-  return calm;
+  statements.forEach(visit);
+  return names;
 }
 
-function asks(value: IrExpression): boolean {
-  if (
-    value.kind === "input" ||
-    value.kind === "choice" ||
-    value.kind === "listChoice" ||
-    value.kind === "button" ||
-    value.kind === "message" ||
-    (value.kind === "call" && value.name === "askImage")
-  )
-    return true;
-  let found = false;
-  mapChildren(value, (child) => {
-    found ||= asks(child);
-    return child;
-  });
-  return found;
-}
-
-/** Whether a text holds a value computed at runtime, which changes as the loop goes round. */
-function computed(value: IrExpression): boolean {
-  return tokens(value).some((token) => "key" in token);
-}
-
-// A count or a placeholder for one: digits, punctuation, and spaces.
+// A number or a placeholder for one: digits, punctuation, and spaces.
 const COUNT = /^[\s\d.,:;!?()\-–—]*$/u;
 
 /**
- * Whether the text said before a counter's loop and the text in the loop are one line: the same text with a value, or
- * the same around the part that changes, where the text before has a count or a placeholder (or nothing) and the
- * loop's text a computed value, and the same part holds a word or a value of its own.
+ * Whether the text said before a counter's loop and the text in the loop are one line that shows a count: the same
+ * text, holding a count and otherwise only values the loop does not change, or the same around the part that changes,
+ * where the text before has a number or a placeholder (or nothing) and the loop's text one count with only digits,
+ * punctuation, and spaces around it, and the same part holds a word or a value of its own.
  */
-function sameLine(before: IrExpression, inLoop: IrExpression): boolean {
+function sameLine(
+  before: IrExpression,
+  inLoop: IrExpression,
+  loop: Extract<IrStatement, { kind: "while" | "for" | "repeat" }>,
+): boolean {
   const first = tokens(before);
   const next = tokens(inLoop);
+  if (first === null || next === null) return false;
+  const counted = counts(loop);
+  const isCount = (token: Token): boolean =>
+    "value" in token && token.value.kind === "variable" && counted.has(token.value.name);
   const same = (left: Token, right: Token): boolean =>
     "char" in left
       ? "char" in right && left.char === right.char
@@ -243,26 +272,71 @@ function sameLine(before: IrExpression, inLoop: IrExpression): boolean {
   const shared = [...first.slice(0, start), ...first.slice(first.length - end)];
   const was = first.slice(start, first.length - end);
   const now = next.slice(start, next.length - end);
-  // The same text with the same values shows them anew, as a count kept in a variable.
-  if (was.length === 0 && now.length === 0) return next.some((token) => "key" in token);
+  if (was.length === 0 && now.length === 0) {
+    const changed = written(loop.body);
+    const values = next.filter((token) => "value" in token);
+    return (
+      values.some(isCount) &&
+      values.every(
+        (token) =>
+          isCount(token) ||
+          ("value" in token && !hasEffect(token.value) && !readsAny(token.value, changed)),
+      )
+    );
+  }
+  const nowValues = now.filter((token) => "value" in token);
   return (
-    shared.some((token) => "key" in token || /\p{L}/u.test(token.char)) &&
+    shared.some((token) => "value" in token || /\p{L}/u.test(token.char)) &&
     was.every((token) => "char" in token && COUNT.test(token.char)) &&
-    now.some((token) => "key" in token)
+    nowValues.length === 1 &&
+    isCount(nowValues[0]!) &&
+    now.every((token) => "value" in token || COUNT.test(token.char))
   );
 }
 
-/** A text as its characters and values; any other value is one value. */
-function tokens(value: IrExpression): Token[] {
-  if (value.kind === "literal" && typeof value.value === "string")
-    return [...value.value].map((char) => ({ char }));
-  if (value.kind === "template")
-    return value.parts.flatMap((part): Token[] =>
-      "text" in part
-        ? [...part.text].map((char) => ({ char }))
-        : [{ key: JSON.stringify(part.value) }],
-    );
-  return [{ key: JSON.stringify(value) }];
+/** Whether a value calls, asks, or reads storage, which may give another result each time, as a random draw does. */
+function computes(value: IrExpression): boolean {
+  if (
+    value.kind === "call" ||
+    value.kind === "methodCall" ||
+    value.kind === "input" ||
+    value.kind === "choice" ||
+    value.kind === "listChoice" ||
+    value.kind === "button" ||
+    value.kind === "message" ||
+    value.kind === "load" ||
+    (value.kind === "property" && value.name === "random")
+  )
+    return true;
+  let found = false;
+  mapChildren(value, (child) => {
+    found ||= computes(child);
+    return child;
+  });
+  return found;
+}
+
+/** Whether the value reads one of the names. */
+function readsAny(value: IrExpression, names: ReadonlySet<string>): boolean {
+  if (value.kind === "variable") return names.has(value.name);
+  let found = false;
+  mapChildren(value, (child) => {
+    found ||= readsAny(child, names);
+    return child;
+  });
+  return found;
+}
+
+/** A literal text or a template as its characters and values; null for any other value. */
+function tokens(value: IrExpression): Token[] | null {
+  if (value.kind === "literal")
+    return typeof value.value === "string" ? [...value.value].map((char) => ({ char })) : null;
+  if (value.kind !== "template") return null;
+  return value.parts.flatMap((part): Token[] =>
+    "text" in part
+      ? [...part.text].map((char) => ({ char }))
+      : [{ key: JSON.stringify(part.value), value: part.value }],
+  );
 }
 
 /** Every name the statements use or declare, so that a handle's name is new. */

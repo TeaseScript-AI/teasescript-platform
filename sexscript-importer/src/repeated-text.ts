@@ -19,7 +19,7 @@ export function withoutRepeatedText(
     diagnostics.push({ code, severity: "info", message, span: statement.span });
   };
   const block = (items: IrStatement[]): IrStatement[] => {
-    let previous: { tokens: Token[]; say: Extract<IrStatement, { kind: "say" }> } | null = null;
+    let previous: Shown | null = null;
     // Whether only waits came after the previous text.
     let onlyWaits = true;
     const result: IrStatement[] = [];
@@ -90,6 +90,14 @@ export function withoutRepeatedText(
         onlyWaits = true;
         continue;
       }
+      // A message kept in a handle (withMessageHandles) shows its text, and a change of its text shows the new one.
+      const handle = handleText(statement, previous?.handle === undefined ? null : previous);
+      if (handle !== undefined) {
+        previous = handle;
+        onlyWaits = true;
+        result.push(statement);
+        continue;
+      }
       if (!keepsText(statement)) previous = null;
       if (statement.kind !== "wait" && statement.kind !== "comment" && statement.kind !== "blank")
         onlyWaits = false;
@@ -98,6 +106,39 @@ export function withoutRepeatedText(
     return result;
   };
   return block(statements);
+}
+
+/** The text on display: the last text said, or the current text of a message kept in a handle (`handle`). */
+type Shown = { tokens: Token[]; say: Extract<IrStatement, { kind: "say" }>; handle?: string };
+
+/**
+ * The text on display after a statement that creates a message handle or changes its text, null where that text is
+ * not known; undefined for any other statement. `shown` is what a handle showed before.
+ */
+function handleText(statement: IrStatement, shown: Shown | null): Shown | null | undefined {
+  if (statement.kind === "let" && statement.value.kind === "message") {
+    const { value, speaker } = statement.value;
+    const tokens = textTokens(value);
+    if (tokens === null) return null;
+    const say: Extract<IrStatement, { kind: "say" }> = {
+      kind: "say",
+      value,
+      ...(speaker === undefined ? {} : { speaker }),
+      span: statement.span,
+    };
+    return { tokens, say, handle: statement.name };
+  }
+  if (
+    statement.kind !== "assign" ||
+    statement.target.kind !== "property" ||
+    statement.target.name !== "text" ||
+    statement.target.target.kind !== "variable"
+  )
+    return undefined;
+  const name = statement.target.target.name;
+  const tokens = textTokens(statement.value);
+  if (shown?.handle !== name || tokens === null) return null;
+  return { ...shown, tokens: statement.operator === "+=" ? [...shown.tokens, ...tokens] : tokens };
 }
 
 type WaitStatement = Extract<IrStatement, { kind: "wait" }>;
@@ -340,6 +381,7 @@ export function withoutRepeatedChainText<
       kind === "listChoice" ||
       kind === "input" ||
       kind === "button" ||
+      kind === "message" ||
       kind === "function"
     )
       return false;

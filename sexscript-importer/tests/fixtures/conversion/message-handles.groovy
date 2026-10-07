@@ -7,6 +7,13 @@ show("Wait. .")
 wait(1)
 show("Wait. . .")
 wait(1)
+// A text that repeats the animation's last step says only what it adds.
+show("Wait. . . Now begin.")
+// A step whose values have effects, such as a random draw, says its whole text anew.
+show("Pick " + getRandom(100) + ".")
+wait(1)
+show("Pick " + getRandom(100) + "..")
+wait(1)
 show("Thinking .")
 wait(0.5)
 show("Thinking  ..")
@@ -27,9 +34,30 @@ for (int i = 19; i > 17; i--) {
     show(i + " jerks")
     wait(1)
 }
-// A loop whose text is no new count of the line before it says each text as a message of its own.
+// A loop whose text is no new count of the line before it, or that follows a call, says each text as a message of its
+// own, as does a text that is no text.
 show("Get ready!")
 for (s in 1..2) {
     show("Shock " + s + " of 2")
+    wait(5)
+}
+def questions = ["Ready?", "Sure?"]
+show("Question 1")
+for (int q = 1; q <= 2; q++) {
+    show("Question " + q + ": " + questions[q - 1])
+    wait(5)
+}
+def countdown = { show("Get set") }
+show("Round 0")
+countdown()
+for (r in 1..2) {
+    show("Round " + r)
+    wait(5)
+}
+def n = 0
+show(n)
+for (k in 1..2) {
+    n++
+    show(n)
     wait(5)
 }
