@@ -26,13 +26,28 @@ import type {
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
-import { escapeMarkup } from "../message-markup.js";
+import { escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import {
+  LIST_STATISTICS,
+  linearRegression,
+  listStatistic,
+  listValues,
+  predict,
+  weightedChoices,
+  weightedIndex,
+} from "./list-statistics.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector } from "./instruction-trace.js";
-import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
+import type {
+  DeveloperWarningEvent,
+  InterpreterEvent,
+  MessageUpdatedEvent,
+  OutputSpeaker,
+} from "./events.js";
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
   GLOBAL_SCOPE_ID,
@@ -107,6 +122,7 @@ import {
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
+  type SerializableMessageHandle,
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
@@ -131,6 +147,7 @@ import {
   isTemporal,
   isTimerHandle,
   isMediaHandle,
+  isMessageHandle,
   isCameraView,
   isPermanentButton,
 } from "./value-predicates.js";
@@ -191,9 +208,7 @@ import {
   isConversionResult,
   isTemporalConversionResult,
   numberFromText,
-  rounded,
   MIN_MAX_BUILTINS,
-  ROUNDING_BUILTINS,
   temporalTextProblem,
   withoutNegativeZero,
   type ConversionName,
@@ -354,6 +369,7 @@ export class Evaluator {
     if (isTimerHandle(value)) return stateKey("timer", value.timerId);
     if (isMediaHandle(value)) return stateKey("media", value.mediaId);
     if (isPermanentButton(value)) return stateKey("button", value.buttonId);
+    if (isMessageHandle(value)) return stateKey("message", value.messageId);
     if (isCameraView(value)) return stateKey("camera");
     return null;
   }
@@ -395,7 +411,9 @@ export class Evaluator {
           ? "media"
           : isCameraView(value)
             ? "camera"
-            : "permanent button";
+            : isMessageHandle(value)
+              ? "message"
+              : "permanent button";
     this.trace!.writeState(
       part === "whole" || part === "timed" ? "mutation" : "assignment",
       key,
@@ -545,6 +563,18 @@ export class Evaluator {
                   frame.descriptor.path.push({ kind: "index", index });
                   frame.value = base.items[index]!;
                 }
+              } else if (isMessageHandle(base)) {
+                // A message's text is state of the message, outside the value that holds the handle, so the
+                // reference keeps the text read now, as it would keep a text variable's value.
+                const text = this.#getProperty(base, expression.name, expression.span);
+                frame.descriptor = {
+                  rootFrameId: null,
+                  rootName: null,
+                  path: [],
+                  capturedRoot: text,
+                  detached: true,
+                };
+                frame.value = text;
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
                 frame.value = this.#getProperty(base, expression.name, expression.span);
@@ -1107,9 +1137,13 @@ export class Evaluator {
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
+      if (isMessageHandle(object)) {
+        this.#assignMessageProperty(object, target.name, value, target.span);
+        return;
+      }
       throw fault(
         "TSR003",
-        "Only objects, speakers, timer and media handles, and camera views have assignable properties.",
+        "Only objects, speakers, timer, media, and message handles, and camera views have assignable properties.",
         target.span,
       );
     }
@@ -1178,6 +1212,7 @@ export class Evaluator {
         !isSpeakerReference(object) &&
         !isTimerHandle(object) &&
         !isMediaHandle(object) &&
+        !isMessageHandle(object) &&
         !isCameraView(object)
       ) {
         throw fault(
@@ -1252,6 +1287,8 @@ export class Evaluator {
             "contains",
             "toSet",
             "join",
+            "take",
+            "takeLast",
           ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
@@ -1663,10 +1700,15 @@ export class Evaluator {
       const name = expression.callee.name;
       if (isConversionName(name))
         return this.#conversionBuiltin(name, positional, named, expression.span);
-      if (ROUNDING_BUILTINS.has(name))
-        return this.#roundingBuiltin(name, positional, named, expression.span);
+      if (NUMERIC_FUNCTIONS.has(name))
+        return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
+      if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
+      if (name === "linearRegression") return linearRegression(positional, named, expression.span);
+      if (name === "predict") return predict(positional, named, expression.span);
+      if (name === "randomWeighted")
+        return this.#randomWeighted(positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
       if (name === "removePermanentButton") {
         const removed = this.#removePermanentButton(positional, named, expression.span);
@@ -1741,7 +1783,7 @@ export class Evaluator {
       if (containsRuntimeIdentity(copied)) {
         throw fault(
           "TSR013",
-          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer, media, or message handle or a speaker reference, which only the runtime creates.`,
           expression.span,
         );
       }
@@ -1948,6 +1990,23 @@ export class Evaluator {
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "take":
+        case "takeLast": {
+          expect(1);
+          const count = positional[0]!;
+          if (typeof count !== "number" || !Number.isInteger(count) || count < 0)
+            throw fault(
+              "TSR057",
+              `${name}() needs a whole number of at least 0, not ${typeof count === "number" ? count : describeRuntimeValue(count)}.`,
+              span,
+            );
+          // A count beyond the length takes the whole list.
+          return createCapturedSerializableList(
+            name === "take"
+              ? receiver.items.slice(0, count)
+              : receiver.items.slice(Math.max(0, receiver.items.length - count)),
+          );
+        }
         case "sort":
         case "shuffle":
           expect(0);
@@ -2252,6 +2311,67 @@ export class Evaluator {
       return;
     }
     view.placement = value;
+  }
+
+  /** The index of a message handle's live record; snapshot validation keeps one for every handle the state holds. */
+  #liveMessage(handle: SerializableMessageHandle, span: SourceSpan): number {
+    const messages = this.snapshot.liveMessages;
+    let low = 0;
+    let high = messages.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      const id = messages[middle]!.messageId;
+      if (id === handle.messageId) return middle;
+      if (id < handle.messageId) low = middle + 1;
+      else high = middle - 1;
+    }
+    throw fault("TSR053", "Message handle refers to no message.", span);
+  }
+
+  /**
+   * `message.text = …` gives the shown message new text in place, which an event tells; the same text again changes
+   * nothing. Its speaker, presentation, and place in the conversation stay, and no pacing starts.
+   */
+  #assignMessageProperty(
+    handle: SerializableMessageHandle,
+    name: string,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): void {
+    if (name !== "text")
+      throw fault(
+        "TSR003",
+        `Message handle property '${name}' cannot be assigned; assign text.`,
+        span,
+      );
+    if (typeof value !== "string")
+      throw fault(
+        "TSR050",
+        `Message text must be text (string), not ${describeRuntimeValue(value)}.`,
+        span,
+      );
+    const index = this.#liveMessage(handle, span);
+    if (this.snapshot.liveMessages[index]!.sourceText === value) return;
+    const content = parseMessageMarkup(value);
+    const sequence = takeSequence(this.snapshot);
+    this.events.push(
+      Object.freeze({
+        kind: "messageUpdated",
+        sequence,
+        messageId: handle.messageId,
+        content,
+        text: content.visibleText,
+        span: copySpan(span),
+      } satisfies MessageUpdatedEvent),
+    );
+    this.snapshot.liveMessages[index] = { messageId: handle.messageId, sourceText: value };
+    this.trace?.messageText(
+      stateKey("message", handle.messageId),
+      handle.messageId,
+      value,
+      span,
+      sequence,
+    );
   }
 
   #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {
@@ -2561,12 +2681,24 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    if (positional.length < 2 || Object.keys(named).length !== 0)
+    // One list, optionally with by:, chooses among its values (V30 §16).
+    const list = positional.length === 1 && Object.keys(named).every((key) => key === "by");
+    if ((positional.length < 2 || Object.keys(named).length !== 0) && !list)
       throw fault(
         "TSR028",
-        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total).`,
+        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total), or one list, such as ${name}(scores).`,
         span,
       );
+    if (list) {
+      const values = listValues(name, positional[0]!, named.by, span);
+      if (values.length === 0)
+        throw fault(
+          "TSR018",
+          `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`,
+          span,
+        );
+      positional = values;
+    }
     const numbers = positional.every((value) => typeof value === "number");
     const first = positional[0]!;
     const temporals = positional.filter(
@@ -2622,22 +2754,71 @@ export class Evaluator {
     return cloneSerializableValue(best);
   }
 
-  #roundingBuiltin(
+  /** One key of a dict, or element of a list, chosen with one draw, with the chance of its share of the weight. */
+  #randomWeighted(
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const { choices, weights } = weightedChoices(positional, named, span);
+    const draw = this.#findRandom(span, "randomWeighted", choices.length);
+    const chosen = cloneSerializableValue(choices[weightedIndex(weights, draw)]!);
+    this.trace?.randomResult(chosen);
+    return chosen;
+  }
+
+  /** A numeric function of numbers (V30 §13); a call without a result fails. */
+  #numericFunction(
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): number {
-    if (positional.length !== 1 || Object.keys(named).length !== 0)
-      throw fault("TSR028", `${name}(...) takes one number, such as ${name}(2.5).`, span);
-    const value = positional[0];
-    if (typeof value !== "number")
+    const { parameters, named: names = [], example, apply, random } = NUMERIC_FUNCTIONS.get(name)!;
+    if (
+      positional.length !== parameters.length ||
+      Object.keys(named).some((key) => !names.includes(key))
+    )
       throw fault(
-        "TSR059",
-        `${name}(...) needs a number, not ${describeRuntimeValue(value!)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        "TSR028",
+        `${name}(...) takes ${parameters.length === 1 ? "one number" : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
         span,
       );
-    return rounded(name, value);
+    const number = (value: SerializableRuntimeValue, place: string): number => {
+      if (typeof value === "number") return value;
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        span,
+      );
+    };
+    const numbers = positional.map((value) => number(value, ""));
+    const options = Object.fromEntries(
+      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
+    );
+    const invalid = random?.(numbers);
+    if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
+    // A trace records a random function's draws as one record, like a shuffle.
+    const before = random === undefined || this.trace === null ? null : this.#randomState();
+    let draws = 0;
+    const result = apply(numbers, options, () => {
+      draws += 1;
+      return this.#drawRandom(span);
+    });
+    if (random !== undefined)
+      this.trace?.random(
+        // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
+        name as RuntimeDebugRandomOperation,
+        span,
+        null,
+        null,
+        before,
+        this.#randomState(),
+        draws,
+      );
+    if (typeof result !== "number") throw fault(result.code, result.failure, span);
+    if (random !== undefined) this.trace?.randomResult(result);
+    return result;
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
@@ -2796,6 +2977,11 @@ export class Evaluator {
       if (property === undefined)
         throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
       return property;
+    }
+    if (isMessageHandle(value)) {
+      if (name !== "text")
+        throw fault("TSR017", `Message handles have no property '${name}'; use text.`, span);
+      return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }

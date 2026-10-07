@@ -358,3 +358,149 @@ function sourcePosition(source: string, offset: number) {
 
   return { offset, line, column };
 }
+
+test("say used as a value takes its text and pacing compact or in parentheses, while statements keep grouped values", () => {
+  const parts = (source: string) => {
+    const result = parse(source);
+    assert.deepEqual(result.diagnostics, [], source);
+    const statement = result.program.statements[0]!;
+    const say =
+      statement.kind === "sayStatement"
+        ? statement
+        : statement.kind === "letStatement" && statement.initializer.kind === "sayExpression"
+          ? statement.initializer
+          : null;
+    assert.ok(say !== null, source);
+    return [
+      statement.kind,
+      say.speaker?.name ?? null,
+      say.presentation === null ? null : say.presentation.properties.length,
+      say.skipPolicy,
+      say.value.kind,
+      say.pacing === null || say.pacing === "instant" ? say.pacing : say.pacing.kind,
+    ];
+  };
+  const value = (rest: string) => [
+    "letStatement",
+    ...rest.split(" ").map((part) => (part === "-" ? null : part)),
+  ];
+  assert.deepEqual(
+    parts('let line = say "Waiting.", instant'),
+    value("- - - stringLiteral instant"),
+  );
+  assert.deepEqual(
+    parts('let line = say("Strokes: 0", instant)'),
+    value("- - - stringLiteral instant"),
+  );
+  assert.deepEqual(parts('let line = say ("x")'), value("- - - stringLiteral -"));
+  // A mode with its options, then the parentheses; a skip word before parentheses is the modifier.
+  assert.deepEqual(
+    parts('let line = say as vera prose(color: "white") unskippable ("Waiting.", instant)'),
+    ["letStatement", "vera", 2, "unskippable", "stringLiteral", "instant"],
+  );
+  assert.deepEqual(parts('let line = say bubble() ("Plain", 2)'), [
+    "letStatement",
+    null,
+    1,
+    null,
+    "stringLiteral",
+    "numberLiteral",
+  ]);
+  // A call of a function named like a mode keeps its meaning.
+  assert.deepEqual(parts('let line = say bubble("x")'), value("- - - callExpression -"));
+  assert.deepEqual(parts("let line = say skippable"), value("- - - identifier -"));
+  // A statement reads parentheses as the bounded form only when a comma follows their first value.
+  assert.deepEqual(parts('say("text")'), [
+    "sayStatement",
+    null,
+    null,
+    null,
+    "parenthesizedExpression",
+    null,
+  ]);
+  assert.deepEqual(parts("say (a + b), instant"), [
+    "sayStatement",
+    null,
+    null,
+    null,
+    "parenthesizedExpression",
+    "instant",
+  ]);
+  assert.deepEqual(parts("say (a) + b"), [
+    "sayStatement",
+    null,
+    null,
+    null,
+    "binaryExpression",
+    null,
+  ]);
+  assert.deepEqual(parts('say("Hi", instant)'), [
+    "sayStatement",
+    null,
+    null,
+    null,
+    "stringLiteral",
+    "instant",
+  ]);
+  assert.deepEqual(parts("say unskippable(index)"), [
+    "sayStatement",
+    null,
+    null,
+    null,
+    "callExpression",
+    null,
+  ]);
+  assert.deepEqual(parts('say bubble() ("Plain", instant)'), [
+    "sayStatement",
+    null,
+    1,
+    null,
+    "stringLiteral",
+    "instant",
+  ]);
+
+  // Other parentheses group a value as before, also where that value is malformed.
+  const grouped = (source: string) => {
+    const result = parse(source);
+    return [
+      result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span.start.offset]),
+      result.program.statements.map((statement) => [
+        statement.kind,
+        statement.span.start.offset,
+        statement.span.end.offset,
+      ]),
+    ];
+  };
+  assert.deepEqual(grouped('say ("x") +\nexit'), [
+    [
+      ["TSP012", 12],
+      ["TSP006", 12],
+    ],
+    [],
+  ]);
+  assert.deepEqual(grouped('say ("x"), instant, foo\nexit'), [
+    [["TSP002", 18]],
+    [
+      ["sayStatement", 0, 18],
+      ["exitStatement", 24, 28],
+    ],
+  ]);
+
+  // The parentheses end the say, so commas and operators after them belong to the enclosing expression.
+  const source = 'let lines = [say("A", instant), say(\n    "B",\n    instant\n).text]';
+  const result = parse(source);
+  assert.deepEqual(result.diagnostics, []);
+  const list = result.program.statements[0];
+  assert.ok(list?.kind === "letStatement" && list.initializer.kind === "listLiteral");
+  const [first, second] = list.initializer.elements;
+  assert.equal(first?.kind, "sayExpression");
+  assert.deepEqual(
+    first?.span,
+    sourceSpan(source, source.indexOf("say"), source.indexOf("),") + 1),
+  );
+  assert.equal(second?.kind, "propertyAccessExpression");
+  assert.deepEqual(
+    parse('let line = say("Hi", instant').diagnostics.map((diagnostic) => diagnostic.message),
+    ["Expected ')' after the text and pacing of 'say'."],
+  );
+});

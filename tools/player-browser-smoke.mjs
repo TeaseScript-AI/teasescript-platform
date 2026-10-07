@@ -146,6 +146,7 @@ async function main() {
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
+      await messageUpdatesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
@@ -153,7 +154,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1524,6 +1525,93 @@ async function lateImageScenario(cdp, origin) {
     await value(cdp, `document.querySelectorAll('[data-player-notice]').length`),
     0,
     "A late failure of a removed image was reported",
+  );
+}
+
+/**
+ * Messages changed in place (`updates` package): a message whose text grows while it is above the view keeps the text
+ * being read still as the reader scrolls up past it, the change adds no entry and is spoken by the status region, and
+ * a change that removes the focused link leaves focus on its message.
+ */
+async function messageUpdatesScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=updates`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  await waitFor(cdp, `${entries} === 43`, 8_000, "The updates package did not show its messages");
+  const viewport = `document.querySelector('.transcript-scroll')`;
+  // Measure the counter at its first height, then read further down, with the counter above the view.
+  await evaluate(cdp, `${viewport}.focus(); return true;`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
+  await delay(300);
+  // Far enough down that the counter is no longer rendered, so its change is measured only on the way back up.
+  const counterShown = `[...document.querySelectorAll('.transcript-entry')].some((row) => row.textContent.includes('Strokes:'))`;
+  for (let step = 0; step < 20 && (await value(cdp, counterShown)); step += 1) {
+    await evaluate(cdp, `${viewport}.scrollTop += 200; return true;`);
+    await delay(100);
+  }
+  assertEqual(await value(cdp, counterShown), false, "The counter stayed rendered");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-message-update-announcement]')?.textContent.includes('Strokes: 1')`,
+    10_000,
+    "The counter's change was not announced",
+  );
+  assertEqual(await value(cdp, entries), 43, "A changed message added an entry");
+  // Scroll up step by step past the changed counter: the text in view moves exactly as far as each step.
+  const rect = await value(
+    cdp,
+    `(() => { const box = ${viewport}.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`,
+  );
+  const tops = `Object.fromEntries([...document.querySelectorAll('.transcript-entry')].map((row) => [row.dataset.messageId, row.getBoundingClientRect().top]))`;
+  let passed = false;
+  let observed = 0;
+  for (let step = 0; step < 40 && !passed; step += 1) {
+    passed = await value(cdp, counterShown);
+    const before = await value(cdp, tops);
+    await cdp.call("Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      ...rect,
+      deltaX: 0,
+      deltaY: -60,
+    });
+    await delay(250);
+    const after = await value(cdp, tops);
+    const moved = new Set(
+      Object.keys(before)
+        .filter((id) => id in after && before[id] > rect.y - 100 && before[id] < rect.y + 100)
+        .map((id) => Math.round(after[id] - before[id])),
+    );
+    if (moved.size > 0) {
+      observed += 1;
+      assertEqual(
+        [...moved].join(),
+        "60",
+        "The text in view jumped while scrolling up past a changed message",
+      );
+    }
+  }
+  passed ||= await value(cdp, counterShown);
+  assertEqual(passed, true, "Scrolling up did not reach the changed counter");
+  assertEqual(observed > 0, true, "Scrolling up compared no text in view");
+  // Focus on a link that a change removes stays on its message.
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
+  await waitFor(
+    cdp,
+    `!!document.querySelector('.transcript-entry a[href="https://example.com/rules"]')`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelector('.transcript-entry a[href="https://example.com/rules"]').focus({ preventScroll: true }); return true;`,
+  );
+  await waitFor(
+    cdp,
+    `document.activeElement?.matches('.transcript-entry[tabindex="-1"]') && document.activeElement.textContent.includes('The rules are gone.')`,
+    16_000,
+    "Focus did not stay on the message whose link a change removed",
   );
 }
 

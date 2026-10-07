@@ -358,9 +358,12 @@ Examples:
 let total = score + bonus
 let remaining = total - used
 let doubled = amount * 2
-let average = total / count
+let perRound = total / count
 let remainder = amount % 2
 ```
+
+`%` gives the remainder of a division with the sign of the dividend: `-7 % 3` is `-1` and `7 % -3` is `1`.
+[`mod`](#numeric-functions) gives it the sign of the divisor instead.
 
 Dividing numbers always returns a `number`, also when the result is whole. Storing it where an `integer` is required needs
 explicit rounding ([§13](#13-explicit-types)):
@@ -416,6 +419,43 @@ let index = randomInteger(0..items.length)
 ```
 
 The range itself defines whether the upper bound is inclusive or exclusive. `randomInteger(...)` therefore needs no separate minimum/maximum boundary convention.
+
+### Weighted choice
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`randomWeighted` chooses with a chance in proportion to a weight. Given a dict, it returns one of its keys, weighted by
+the values; given a list of objects and `weight:`, it returns a copy of one element, like `.random`, weighted by that
+property:
+
+```text
+let exercise = randomWeighted(dict{ "10 squats": 3, "5 min plank": 1 })   // squats three times as often
+let task = randomWeighted(tasks, weight: "chance")
+```
+
+Weights are numbers of at least 0, and at least one is above 0; an element of weight 0 is never chosen. Each call makes
+one draw of the session RNG. An empty dict or list is runtime error `TSR018`, a negative weight or no weight above 0
+`TSR039`, and a weight that is not a number `TSR060`; a weight of another type or a missing property is a compile error
+when the compiler can see it.
+
+### Random distributions
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+```text
+let pause = randomNormal(30, 5)            // around 30, mostly between 20 and 40
+let share = randomBeta(2, 5)               // from 0 through 1, mostly low
+let reps = round(randomPert(5, 10, 20))    // from 5 through 20, most likely near 10
+```
+
+- `randomNormal(mean, spread)` draws from the normal distribution with that mean and standard deviation; `spread` is
+  at least 0. Each call makes two draws of the session RNG.
+- `randomBeta(alpha, beta)` draws a number from 0 through 1 from the beta distribution, for `alpha` and `beta` above 0.
+- `randomPert(min, mostLikely, max)` draws from `min` through `max`, most often near `mostLikely`, from the PERT
+  distribution: `min + (max - min) × randomBeta(1 + 4 × (mostLikely - min) / (max - min), 1 + 4 × (max - mostLikely) /
+  (max - min))`, for `min <= mostLikely <= max`. With `min` equal to `max` it returns `min`.
+- `randomBeta` and `randomPert` sample by rejection: a call makes at least 6 draws, about 6 to 8 on average, and at
+  most 386. The number depends only on the parameters and the draws, so replay and checkpoint resume repeat it.
+- Each returns a `number`. Invalid parameters are a compile error when the compiler can see them, and runtime error
+  `TSR039` otherwise; a `randomNormal` result too large to represent is `TSR036`.
 
 ## 5. Logical and comparison operators
 **Status:** Accepted
@@ -760,7 +800,8 @@ playAudio "door.mp3"
 ```
 
 `say` shows a list, set, dict, or object in code-like notation; only `${...}` interpolation selects one random element
-from a list ([§16](#16-lists)).
+from a list ([§16](#16-lists)). Used as a value, `say` gives a handle whose text can change in place, and also has a form
+in parentheses, `say("Strokes: 0", instant)` ([Updatable messages](#updatable-messages)).
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
@@ -1040,8 +1081,8 @@ duration
 ```
 
 The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
-program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), and `script` (a script
-reference, [§29](#29-script-files-and-paths)). A type is a type name
+program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), `messageHandle` (a shown
+message, [§37](#updatable-messages)), and `script` (a script reference, [§29](#29-script-files-and-paths)). A type is a type name
 or one of these forms ([ADR 0021](../decisions/0021-static-types.md)):
 
 ```text
@@ -1230,8 +1271,9 @@ floor(-2.5)  // -3
 ceil(-2.5)   // -2
 ```
 
-`min(...)` and `max(...)` return the smallest or largest of two or more values, which are all numbers, all durations
-of one family, or all date and time values of one kind ([§35](#35-date-time-durations-and-timestamps)). The result is
+`min(...)` and `max(...)` return the smallest or largest of two or more values, or of the values of one list
+([§16](#statistics)), which are all numbers, all durations of one family, or all date and time values of one kind
+([§35](#35-date-time-durations-and-timestamps)). The result is
 an `integer` when every argument is an `integer`, a `number` otherwise, and for durations and date and time values the
 chosen value itself. Mixing numbers, durations, duration families, or temporal kinds, other values, `null`, and named
 arguments are compile errors when the types show them, and runtime errors otherwise:
@@ -1241,6 +1283,82 @@ let minutes = min(20, 5 + punishments)
 let pause = max(1 minute, remaining)
 let boundedLevel = max(1, min(level, 10))
 ```
+
+### Numeric functions
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+These functions take numbers and return a number:
+
+| Function | Result |
+| --- | --- |
+| `abs(value)` | the distance from 0: `abs(-2.5)` is `2.5` |
+| `sign(value)` | `-1`, `0`, or `1` |
+| `sqrt(value)` | the square root |
+| `pow(base, exponent)` | the base raised to the exponent |
+| `mod(value, divisor)` | the remainder with the sign of the divisor: `mod(-1, 3)` is `2`, where `-1 % 3` is `-1` |
+| `clamp(value, min, max)` | the value, raised to `min` or lowered to `max`: `clamp(15, 1, 10)` is `10` |
+| `round(value, decimals: n)` | the value rounded to `n` decimal places |
+
+`pi` is the number π, `3.141592653589793`. Like the functions, it is a protected name ([§38](#protected-engine-names)).
+
+```text
+pow(2, 10)                       // 1024
+pow(10, -2)                      // 0.01
+pow(8, 1 / 3)                    // 2
+round(2.675, decimals: 2)        // 2.68
+round(pi * 2 * 2, decimals: 2)   // 12.57
+```
+
+- `abs`, `mod`, and `clamp` return an `integer` when every argument is one, and `sign` always does. `sqrt` and
+  `round(value, decimals: n)` return a `number`, also when the result is whole. `pow` returns an `integer` when its base
+  is an `integer` and its exponent a whole number of at least 0 that the compiler can see, as in `pow(side, 2)`, and a
+  `number` otherwise. `round`, `floor`, or `ceil` makes another result whole.
+- `round(value, decimals: n)` rounds the number as it is written, a half away from zero, to `n` decimal places, a whole
+  number of at least 0: `round(2.675, decimals: 2)` is `2.68`, although the nearest binary number to 2.675 lies slightly
+  below it. Without `decimals:`, `round` returns an `integer` as described above.
+- A call without a result fails: `sqrt` of a negative number, `pow` of 0 to a negative exponent, `pow` of a negative
+  base to an exponent that is not whole, a `pow` result too large to represent, `mod` by 0, `clamp` with `min` above
+  `max`, and `decimals:` that is negative or not whole. It is a compile error when the compiler can see the arguments,
+  and otherwise runtime error `TSR036` for a result that is not a finite number and `TSR039` for an argument out of
+  range. A `pow` result too small to represent is 0.
+- Every argument is a number. Other values, `null`, another number of arguments, and other named arguments are compile
+  errors when the types show them, and runtime errors otherwise.
+- `sqrt` and `pow` give the same result on every device and browser.
+- Considered and left out: the operators `**` and `^`, the constant `e`, `log(x, base)`, hyperbolic functions,
+  factorial, `gcd`, bitwise operations, and general number formatting.
+
+### Exponentials, logarithms, and angles
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+| Function | Result |
+| --- | --- |
+| `exp(value)` | e raised to the value |
+| `ln(value)` | the natural logarithm, for a value above 0 |
+| `log10(value)` | the logarithm to base 10, for a value above 0: `log10(1000)` is `3` |
+| `sin(degrees)`, `cos(degrees)`, `tan(degrees)` | the sine, cosine, or tangent of an angle in degrees |
+| `asin(value)`, `acos(value)` | the angle in degrees of a sine or cosine from -1 through 1 |
+| `atan(value)` | the angle in degrees of a tangent, between -90 and 90 |
+| `atan2(y, x)` | the angle in degrees of the direction from the origin to the point (x, y), above -180 and up to 180 |
+
+Angles are in degrees, both the argument of `sin`, `cos`, and `tan` and the result of `asin`, `acos`, `atan`, and
+`atan2`. `asin` gives -90 through 90, `acos` 0 through 180, and `atan2(0, 0)` is 0. Each function returns a `number`.
+
+```text
+sin(30)          // 0.5
+cos(90)          // 0
+tan(45)          // 1
+atan2(1, -1)     // 135
+log10(0.001)     // -3
+round(exp(1), decimals: 5)   // 2.71828
+```
+
+- A call without a finite result fails like the other numeric functions: `ln` or `log10` of a number of at most 0,
+  `asin` or `acos` of a number outside -1 through 1, `tan` of an odd multiple of 90, and `exp` of a number too large.
+  It is a compile error when the compiler can see the arguments, and runtime error `TSR036` otherwise.
+- The results are the same on every device and browser, because the engine computes them with its own arithmetic
+  instead of the browser's. They are the nearest number to the exact result in all but extremely rare cases. Exact
+  angles give exact results, such as `sin(30)` and `cos(90)`, and `log10` of a power of ten as written, such as `0.001`,
+  is exactly that power.
 
 ## 14. Scope
 **Status:** Accepted
@@ -1396,6 +1514,8 @@ items.join(", ")
 items.intersection(other)
 items.union(other)
 items.difference(other)
+items.take(3)
+items.takeLast(3)
 ```
 
 `removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
@@ -1608,6 +1728,97 @@ queue.addAll(nextRound)           // queue itself grows
 ```
 
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
+
+### Parts of a list
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`take(count)` and `takeLast(count)` return a new list of the first or the last `count` elements, in order, and leave
+the list unchanged. A count beyond the length gives the whole list. The count is a whole number of at least 0; another
+count is a compile error when the compiler can see it, and runtime error `TSR057` otherwise. A rolling window keeps only
+the newest values:
+
+```text
+let recent: integer[] = load "pushups", default: []
+recent.add(count)
+save recent.takeLast(20) as "pushups"
+```
+
+### Statistics
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`sum`, `average`, `median`, `percentile`, and `stddev` describe the values of a list, and `min` and `max` also take one
+list ([§13](#type-conversion)):
+
+```text
+let scores = [12, 15, 11, 18, 16]
+
+sum(scores)             // 72
+average(scores)         // 14.4
+median(scores)          // 15
+percentile(scores, 25)  // 12
+stddev(scores)          // 2.8809720581775866
+max(scores)             // 18
+```
+
+- The values are numbers or durations, and for `min` and `max` also date and time values of one kind
+  ([§35](#35-date-time-durations-and-timestamps)). With `by:`, the values are a property of a list of objects:
+  `median(sessions, by: "count")`.
+- `percentile(list, p)` is the value that `p` percent of the values lie at or below, for `p` from 0 through 100: in
+  ascending order, the value at rank p/100 × (n − 1), between the two nearest values in proportion. `percentile(list,
+  50)` is the median, the middle value or the average of the two middle values.
+- `stddev` is the sample standard deviation: the square root of the summed squared distances to the average, divided by
+  the number of values minus 1.
+- `sum`, `min`, and `max` of integers are integers; `average`, `median`, `percentile`, and `stddev` of numbers are
+  numbers. Durations give durations, and `min` and `max` give the chosen value.
+- The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
+  on every device, also for values that cancel or are very large or very small.
+- Durations are of one family: exact time, days and weeks, or months and years. `average`, `median`, `percentile`,
+  and `stddev` need exact durations, because days, weeks, months, and years have no fixed length.
+- An empty list, and a list of one value for `stddev`, is runtime error `TSR018`. A percentage outside 0 through 100
+  is a compile error when the compiler can see it, and runtime error `TSR039` otherwise. Values of other or mixed kinds,
+  and a missing `by:` property, are compile errors when the types show them, and runtime error `TSR060` otherwise.
+
+A fair target is one the player reaches in most attempts. `percentile(recent, 10)` is the value that 90% of the recent
+attempts reached or beat, so a target there is met about nine times out of ten:
+
+```text
+let recent: integer[] = load "pushups", default: []
+if recent.length > 0 {
+    let target = round(percentile(recent, 10))
+    say "Today: at least ${target} push-ups. You managed that nine times out of ten."
+}
+```
+
+### Trends
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`linearRegression` fits the straight line that comes closest to the points of a list, by least squares, and `predict`
+reads the line at another point:
+
+```text
+let laps = linearRegression([62 s, 60 s, 59 s, 57 s])
+say "You gain ${-laps.slope} per lap."              // 1.6 s
+say "Next lap: ${predict(laps, 4)}"                 // 55.5 s
+
+let trend = linearRegression(sessions, x: "day", y: "count")
+say "About ${round(trend.slope, decimals: 1)} more each day."
+let expected = predict(trend, toDate("2026-10-31"))
+```
+
+- `linearRegression(list)` takes the list's values as y, numbers or exact durations, at x = 0, 1, 2, and so on. With
+  `y:`, the y values are a property of a list of objects, and `x:` names a property for x as well: numbers, or dates,
+  datetimes, or timestamps of one kind, measured in days, with a time of day as a fraction of a day. Without `x:`, x is
+  the index.
+- The result is an object `{ slope, intercept, r2, start }`. `slope` is the change of y per step of x, or per day, and
+  is a duration when y is. `intercept` is the line's value at the first point of the list, not at x = 0. `r2`, from 0
+  to 1, is the share of the variation of y that the line explains; it is 1 when every y is the same. `start` is the
+  first point's x, 0 without `x:`.
+- `predict(line, x)` is `intercept + slope × (x − start)`, for an x of the start's kind: a number, or a date and time
+  value of the same kind, measured in days.
+- Like the statistics, `linearRegression` and `predict` compute exactly and round each result once.
+- Fewer than 2 points is runtime error `TSR018`, and points that all have the same x `TSR036`. Values of other kinds,
+  `x:` without `y:`, and a `predict` x of another kind than the start are compile errors when the types show them and
+  runtime errors otherwise (`TSR060`, and `TSR059` for `predict`).
 
 ## 17. Return statements
 **Status:** Accepted
@@ -2956,8 +3167,9 @@ Rules:
 - A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)), or runtime error
   `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing key, so
   `let level: integer = load "level"` needs `integer?` or a default when the key may be missing.
-- Persistent plain data is storable. Timer handles, media handles, and speaker references exist only in the current
-  session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
+- Persistent plain data is storable. Timer, media, and message handles and speaker references exist only in the
+  current session and cannot be saved, including when nested inside lists or objects (`TSR055`); save a message's
+  `text` instead. Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
 - A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
   media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage
@@ -3858,10 +4070,12 @@ Meanings:
 
 **Status:** Accepted (Owner-approved extension for #422 and #426).
 
-The compact `say` form extends the ADR 0018 pacing syntax:
+The compact `say` form extends the ADR 0018 pacing syntax; the bounded form holds the text and pacing in parentheses
+([Updatable messages](#updatable-messages)):
 
 ```text
 say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] text [, pacing]
+say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] (text [, pacing])
 ```
 
 Brackets denote optional parts. `bubble` and `prose` may appear without parentheses; parentheses contain ordinary
@@ -3907,6 +4121,52 @@ belong to the Player presentation design. These defaults do not introduce a new 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
 context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
 properties. The resulting presentation is captured with the message across pacing waits and checkpoint restore.
+
+### Updatable messages
+
+**Status:** Accepted (Owner decision on #512, 2026-10-07).
+
+A `say` used as a value shows its message as usual and gives a `messageHandle` for it. Its one property, `text`, reads
+the message's current text and changes it in place:
+
+```text
+let line = say "Waiting.", instant
+wait 1 s
+line.text += "."
+line.text = "Ready."
+
+let counter: messageHandle = say("Strokes: 0", instant)
+let strokes = [say("First", instant), say("Second", instant)]
+```
+
+- **Forms.** A compact `say` value takes its text and pacing up to the end of its statement, so a comma after the text
+  is its pacing. In a list, a call, or another expression, use the bounded form: its parentheses hold the text and
+  pacing, and the `say` ends at its `)`, so `say("A").text` reads the new message's text. Before parentheses, a mode is
+  written with its options, `say bubble() ("Plain", instant)`, since `say bubble("x")` shows the value of a call to a
+  function `bubble`. As a value, `skippable` or `unskippable` before parentheses is the modifier:
+  `let line = say unskippable ("Wait", instant)`. A `say` statement keeps the rule above: `say unskippable("Wait")`
+  calls a function `unskippable`, so a statement writes `say unskippable "Wait"`.
+- **Statements.** A bare `say` is unchanged and gives no handle. It also takes the bounded form, `say("Hi", instant)`,
+  when a comma follows the first value in its parentheses; other parentheses group a value as before, as in
+  `say ("A"), instant` and `say (a) + b`. A `say` at the start of a line outside brackets begins a statement.
+- **Evaluation.** Speaker, options, text, and pacing evaluate once in source order, and pacing works as for any `say`.
+  The handle exists once the message is shown: a value that waits behind an earlier message's pacing is shown first. A
+  `say` that does not run, as in `false and say("x") == line`, shows nothing. Global and speaker start values and
+  function parameter defaults cannot say.
+- **`text`.** Reading it gives the text as written, with its markup and after `${...}`, such as `"**Ready**"`. Assigning
+  text, or appending with `+=`, replaces the message's text and parses it whole; the message keeps its speaker,
+  presentation, and place in the conversation, and the conversation shows only its current text. The same text again
+  changes nothing, and `""` empties the message without removing it. A text write starts no pacing and waits for none;
+  use `wait` between changes. `text` takes only text: write `"Strokes: ${count}"` for a number. A handle has no other
+  property, no methods, and no operators besides `==` and `!=`.
+- **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the
+  same message, and `==` compares messages, not texts. A message stays changeable while a handle to it remains, also
+  an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller, or a block.
+  `say line` shows `<message N>`; `${line}` and `toString(line)` are errors, so use `line.text`. A handle belongs to its
+  session: `save` refuses it ([§25](#25-persistent-storage-and-keys)), and saved data and host values cannot hold one.
+- **Types.** `messageHandle` is a protected type name ([§38](#38-keywords-and-protected-built-ins)) that annotations
+  and unions use like `timer`; `message` remains an ordinary name. A literal replacement text assigned with `=` to what
+  can only be a message handle has its markup colours checked like the text of `say`.
 
 ### Authored colours
 
@@ -4529,6 +4789,7 @@ dict
 object
 range
 media
+messageHandle
 script
 ```
 
@@ -4549,6 +4810,34 @@ floor
 ceil
 min
 max
+abs
+sign
+sqrt
+pow
+mod
+clamp
+pi
+sum
+average
+median
+percentile
+stddev
+linearRegression
+predict
+randomWeighted
+randomNormal
+randomBeta
+randomPert
+exp
+ln
+log10
+sin
+cos
+tan
+asin
+acos
+atan
+atan2
 toString
 toNumber
 toInteger

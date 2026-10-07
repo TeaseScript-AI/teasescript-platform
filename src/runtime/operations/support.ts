@@ -15,6 +15,7 @@ import {
 import {
   captureRuntimeSnapshotWithValidatedPlan,
   cloneInteractionUi,
+  dropUnreachableMessages,
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
@@ -182,12 +183,14 @@ export function captureExecutableData(
   return Object.freeze({ plan: capturedPlan.plan, snapshot: capturedSnapshot.snapshot });
 }
 
+/** The result of a public operation, whose state no longer keeps the messages its handles cannot reach. */
 export function result(
   snapshot: RuntimeSnapshot,
   events: readonly InterpreterEvent[],
   instructionsExecuted: number,
   instructionTrace: InstructionTraceCollector | null = null,
 ): RuntimeOperationResult {
+  dropUnreachableMessages(snapshot);
   const executed = { snapshot, events: Object.freeze([...events]), instructionsExecuted };
   return Object.freeze(
     instructionTrace === null

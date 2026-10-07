@@ -322,18 +322,18 @@ test("a message explains its interpolated value through a call, its parameters, 
 test("recursion and same-named variables keep each call's and each block's own variables apart", () => {
   const played = traced(
     [
-      "function sum(n) {",
+      "function addUp(n) {",
       "    if n == 0 {",
       "        return 0",
       "    }",
-      "    let rest = sum(n - 1)",
+      "    let rest = addUp(n - 1)",
       "    return n + rest",
       "}",
       "function title {",
       '    let n = "three"',
       "    return n",
       "}",
-      "let total = sum(3)",
+      "let total = addUp(3)",
       "let name = title()",
       "for pass in 1..=2 {",
       "    let step = pass * 10",
@@ -347,7 +347,7 @@ test("recursion and same-named variables keep each call's and each block's own v
     (interpolation) => causes(played.trace, interpolation)[0]!,
   );
   assert.deepEqual([total!.target, total!.preview], ["total", "6"]);
-  // Another function's `n` is not any call of sum's parameter.
+  // Another function's `n` is not any call of addUp's parameter.
   assert.deepEqual(
     lineage(played.trace, name!.id).map((step) => [step.kind, step.target, step.preview]),
     [
@@ -368,7 +368,7 @@ test("recursion and same-named variables keep each call's and each block's own v
   const parameters = lineage(played.trace, total!.id).filter(
     (candidate) => candidate.kind === "parameter",
   );
-  // sum(0) returns a literal 0, which depends on no parameter.
+  // addUp(0) returns a literal 0, which depends on no parameter.
   assert.deepEqual(parameters.map((parameter) => parameter.preview).sort(), ["1", "2", "3"]);
   for (const parameter of parameters) {
     const [argument] = causes(played.trace, parameter);
@@ -1379,14 +1379,14 @@ test("a small byte budget evicts by size, and wide expressions keep at most the 
   const plan = compile(
     [
       ...names.map((name, index) => `let ${name} = ${index}`),
-      `let sum = ${names.join(" + ")}`,
-      'say "${sum}"',
+      `let total = ${names.join(" + ")}`,
+      'say "${total}"',
       "exit",
     ].join("\n"),
   );
   const wide = new RuntimeDebugContext();
   const played = play(plan, { trace: wide });
-  const sum = record(wide, wide.variableRecord(played.snapshot.frames[0]!.id, "sum"));
+  const sum = record(wide, wide.variableRecord(played.snapshot.frames[0]!.id, "total"));
   assert.equal(sum.dependencies.length, RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies);
   assert.equal(sum.omittedDependencies, 50 - RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies);
 
@@ -1419,4 +1419,49 @@ test("a deserialized checkpoint traced from its restore matches the untraced con
   assert.deepEqual(withTrace.events, withoutTrace.events);
   assert.equal(trace.status().origin, "restore");
   assert.equal(trace.status().rngAnchorState, waiting.rng.state);
+});
+
+test("a message's text is state of its message: aliases share it, an append builds on it, a replacement does not", () => {
+  const played = traced(
+    [
+      'let line = say "Waiting", instant',
+      "let alias = line",
+      'let first = "!"',
+      "alias.text += first",
+      'let second = "?"',
+      "line.text += second",
+      'let fresh = "Ready"',
+      "alias.text = fresh",
+      "say line.text, instant",
+      "exit",
+    ].join("\n"),
+  );
+  const updates = played.events.filter((event) => event.kind === "messageUpdated");
+  const [appended, again, replaced] = updates.map((event) =>
+    record(played.trace, played.trace.outputRecord(event.sequence)),
+  );
+  assert.deepEqual(
+    [appended, again, replaced].map((update) => [update!.kind, update!.target, update!.preview]),
+    [
+      ["assignment", "message.text", '"Waiting!"'],
+      ["assignment", "message.text", '"Waiting!?"'],
+      ["assignment", "message.text", '"Ready"'],
+    ],
+  );
+  const named = (update: RuntimeDebugRecord) =>
+    lineage(played.trace, update.id).map((cause) => cause.target);
+  // The second append reads the text the first one wrote, through the other name for the message.
+  assert.ok(lineage(played.trace, again!.id).some((cause) => cause.id === appended!.id));
+  assert.ok(named(again!).includes("second"));
+  // A replacement depends on its value only.
+  assert.ok(named(replaced!).includes("fresh"));
+  assert.ok(!lineage(played.trace, replaced!.id).some((cause) => cause.id === again!.id));
+  // Reading the text later finds its latest change.
+  const shown = outputOf(played, "Ready");
+  assert.ok(lineage(played.trace, shown.id).some((cause) => cause.id === replaced!.id));
+  // A change is no message of its own.
+  assert.deepEqual(
+    played.trace.outputs().map((id) => record(played.trace, id).kind),
+    ["output", "output"],
+  );
 });

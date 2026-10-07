@@ -15,6 +15,7 @@ import type {
   MediaParts,
   Program,
   ScalarTypeName,
+  SayParts,
   ShowButtonParts,
   ShowPermanentButtonParts,
   SpeakerDeclaration,
@@ -26,6 +27,7 @@ import type {
   TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
+import { messageColorDiagnostics } from "./authored-presentation.js";
 import {
   globMatches,
   isPathGlob,
@@ -38,6 +40,7 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import {
   askOperands,
   expressionChildren,
+  sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
@@ -84,6 +87,8 @@ import {
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
+import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
+import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import {
   compareDurationParts,
   divideDurationParts,
@@ -1189,12 +1194,14 @@ class TypeChecker {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
         if (
           containsType(value, (part) =>
-            ["speaker", "timer", "media", "camera", "permanentButton"].includes(part.kind),
+            ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(
+              part.kind,
+            ),
           )
         )
           this.#report(
             typeCode.invalidOperand,
-            `Speakers, camera views, permanent buttons, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
+            `Speakers, camera views, permanent buttons, and timer, media, or message handles cannot be saved, but this is ${describeValue(value)}.${containsType(value, (part) => part.kind === "messageHandle") ? " Save a message's text with its text property, as in 'save line.text as \"status\"'." : ""}`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
@@ -1554,10 +1561,7 @@ class TypeChecker {
     return continues || continued || breaks.length > 0;
   }
 
-  *#sayTask(
-    statement: Extract<Statement, { kind: "sayStatement" }>,
-    scope: Scope,
-  ): CompileTask<void> {
+  *#sayTask(statement: SayParts, scope: Scope): CompileTask<void> {
     if (statement.presentation !== null)
       yield* compileChild(this.#expressionTask(statement.presentation, scope));
     yield* compileChild(this.#expressionTask(statement.value, scope));
@@ -1672,6 +1676,19 @@ class TypeChecker {
         'Camera placement must be "window" or "stage".',
         statement.value.span,
       );
+  }
+
+  /**
+   * The markup colours of literal text written to what can only be a message handle, checked as `say` checks its text;
+   * text the compiler cannot know falls back when it is shown.
+   */
+  #checkMessageText(object: StaticType, statement: AssignmentStatement): void {
+    const receivers = members(nonNullType(object));
+    if (
+      receivers.length > 0 &&
+      receivers.every((member) => resolved(member).kind === "messageHandle")
+    )
+      this.diagnostics.push(...messageColorDiagnostics(statement.value));
   }
 
   *#assignmentTask(statement: AssignmentStatement, scope: Scope): CompileTask<void> {
@@ -1802,6 +1819,8 @@ class TypeChecker {
           this.#suspend();
           this.#checkCameraPlacement(object, statement);
         }
+        if (name === "text" && statement.operator === "=")
+          this.#checkMessageText(object, statement);
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
@@ -2959,6 +2978,10 @@ class TypeChecker {
       case "showCameraExpression":
         this.#suspend();
         return { kind: "camera" };
+      case "sayExpression":
+        yield* compileChild(this.#sayTask(expression, scope));
+        this.#suspend();
+        return { kind: "messageHandle" };
       case "showPermanentButtonExpression":
         yield* compileChild(this.#permanentButtonTask(expression, scope));
         return { kind: "permanentButton" };
@@ -4410,7 +4433,10 @@ class TypeChecker {
             ? method === "add"
               ? "Dicts have no method 'add'; store a value by its key, as in dict[key] = value."
               : `Dicts have no method '${method}'; use contains, remove, clear, or get.`
-            : failing.kind === "timer" || failing.kind === "media" || failing.kind === "camera"
+            : failing.kind === "timer" ||
+                failing.kind === "media" ||
+                failing.kind === "camera" ||
+                failing.kind === "messageHandle"
               ? handleMemberMessage(failing.kind, method, "call")
               : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
@@ -4491,6 +4517,8 @@ class TypeChecker {
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    if (method === "take" || method === "takeLast")
+      return { kind: "list", element: copyType(value.element) };
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
     if (operand !== undefined && problems.length === 0) {
@@ -4571,12 +4599,106 @@ class TypeChecker {
     );
   }
 
+  /**
+   * Checks the arguments of a numeric function and gives its result type (V30 §13). A call whose arguments the compiler
+   * can see and that has no finite result is a compile error.
+   */
+  #numericFunctionType(
+    name: string,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const numeric = NUMERIC_FUNCTIONS.get(name)!;
+    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const fitting = problems.every((problem) => problem.kind === "invalidOperand");
+    // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
+    // #504 Q1).
+    const several = fitting
+      ? expression.arguments.flatMap((item, index) =>
+          members(values[index]!).length > 1 ? [{ item, type: values[index]! }] : [],
+        )
+      : [];
+    const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
+    this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
+    for (const { item, type } of several)
+      this.#reportUnless(type, isNumeric, item.value, `${name}(...) takes a number`);
+    const input = (item: CallArgument | undefined, index: number): NumericArgument => {
+      if (item === undefined || !fitting) return { type: "unknown", known: undefined };
+      const parts = members(nonNullTypeForUse(values[index]!));
+      const known = this.#known(item.value);
+      return {
+        type:
+          parts.length === 0 || !parts.every(isNumeric)
+            ? "unknown"
+            : parts.every((part) => isScalar(part, "integer"))
+              ? "integer"
+              : "number",
+        known: typeof known === "number" ? known : undefined,
+      };
+    };
+    const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
+    const inputs = numeric.parameters.map((_, index) =>
+      input(positional[index], expression.arguments.indexOf(positional[index]!)),
+    );
+    const named: Record<string, NumericArgument> = {};
+    expression.arguments.forEach((item, index) => {
+      if (item.kind === "namedArgument") named[item.name.name] = input(item, index);
+    });
+    const all = [...inputs, ...Object.values(named)];
+    if (problems.length === 0 && all.every((one) => one.known !== undefined)) {
+      const known = inputs.map((one) => one.known!);
+      // A random result is never computed here; only its arguments are checked.
+      const result =
+        numeric.random !== undefined
+          ? numeric.random(known)
+          : numeric.apply(
+              known,
+              Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
+              () => {
+                throw new Error(`${name}(...) draws no random numbers.`);
+              },
+            );
+      if (result !== undefined && typeof result !== "number")
+        this.#report(typeCode.invalidOperand, result.failure, expression.span);
+    }
+    const result = numeric.result(inputs, named);
+    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+  }
+
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
   #builtinType(
     name: string,
     expression: CallExpression,
     values: readonly StaticType[],
   ): StaticType {
+    if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
+    // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
+    const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
+    const list =
+      positional.length === 1 &&
+      members(nonNullTypeForUse(this.#typeOf(positional[0]!.value))).some(
+        (member) => !isKnown(member) || resolved(member).kind === "list",
+      );
+    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list)) {
+      // An argument that may be null names the check first (ADR 0021 rule 1.9); the checks below use its other members.
+      expression.arguments.forEach((item, index) => {
+        const all = members(values[index]!);
+        const passing = all.filter((member) => member.kind !== "null");
+        if (passing.length > 0 && passing.length < all.length)
+          this.#reportMayBe(item.value, NULL_TYPE, passing);
+      });
+      const check = listFunctionCheck(
+        name,
+        expression,
+        (item) => this.#typeOf(item),
+        (item) => {
+          const known = this.#known(item);
+          return typeof known === "number" ? known : undefined;
+        },
+      );
+      this.#reportProblems(check.problems);
+      return check.type;
+    }
     const argument = expression.arguments[0];
     const value = values[0];
     // A built-in that takes fixed positional arguments checks their values only when their number is right.
@@ -4613,22 +4735,6 @@ class TypeChecker {
             "removePermanentButton(...) takes the identifier that showPermanentButton gives",
           );
         return NULL_TYPE;
-      case "round":
-      case "floor":
-      case "ceil":
-        {
-          const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
-          // A union or a possibly null number names the test or the check first (ADR 0021 rule 3.5, #504 Q1).
-          if (
-            problems.every((problem) => problem.kind === "invalidOperand") &&
-            argument !== undefined &&
-            value !== undefined &&
-            members(value).length > 1
-          )
-            this.#reportUnless(value, isNumeric, argument.value, `${name}(...) takes a number`);
-          else this.#reportProblems(problems);
-        }
-        return INTEGER_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
@@ -4826,7 +4932,10 @@ class TypeChecker {
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
         : value.kind === "dict"
           ? `Dicts have no property '${name}'; use length, keys, or values, or read a value by its key, as in ${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}].`
-          : value.kind === "timer" || value.kind === "media" || value.kind === "camera"
+          : value.kind === "timer" ||
+              value.kind === "media" ||
+              value.kind === "camera" ||
+              value.kind === "messageHandle"
             ? handleMemberMessage(value.kind, name, "read")
             : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
@@ -6027,6 +6136,7 @@ function programEffects(program: Program): ProgramEffects {
       if (
         loop !== null &&
         (expression.kind === "interactionExpression" ||
+          expression.kind === "sayExpression" ||
           expression.kind === "showButtonExpression" ||
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
@@ -6360,11 +6470,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
     case "speakerDeclaration":
       return statement.properties.map((property) => property.value);
     case "sayStatement":
-      return [
-        ...(statement.presentation === null ? [] : [statement.presentation]),
-        statement.value,
-        ...(statement.pacing === null || statement.pacing === "instant" ? [] : [statement.pacing]),
-      ];
+      return sayOperands(statement);
     case "showButtonStatement":
       return showButtonOperands(statement);
     case "waitStatement":
@@ -6404,6 +6510,7 @@ function expressionParts(expression: Expression): readonly Expression[] {
   if (expression.kind === "interactionExpression")
     return [...askOperands(expression), ...expression.options.map((option) => option.expression)];
   if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
+  if (expression.kind === "sayExpression") return sayOperands(expression);
   return expressionChildren(expression);
 }
 
@@ -6611,13 +6718,17 @@ function findDecidedSlot(type: StaticType): SourceSpan | null {
 
 // Types of new places --------------------------------------------------------------------------------------------------
 
-/** The value type of a timer, media, or camera view handle property, or `undefined` when it cannot be read or assigned. */
+/**
+ * The value type of a timer, media, message, or camera view handle property, or `undefined` when it cannot be read or
+ * assigned.
+ */
 function handlePropertyType(
-  handle: "timer" | "media" | "camera",
+  handle: HandleKind,
   name: string,
   use: "read" | "assign",
 ): StaticType | undefined {
   if (handle === "camera") return name === "placement" ? STRING_TYPE : undefined;
+  if (handle === "messageHandle") return name === "text" ? STRING_TYPE : undefined;
   if (handle === "timer") {
     switch (name) {
       case "remaining":
@@ -6678,6 +6789,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "timer":
     case "media":
     case "camera":
+    case "messageHandle":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
@@ -6699,7 +6811,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   const value = resolved(type);
   if (value.kind === "timer" || value.kind === "media")
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
-  if (value.kind === "camera") return undefined;
+  if (value.kind === "camera" || value.kind === "messageHandle") return undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -6722,6 +6834,10 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "sort":
     case "shuffle":
       return value.kind === "list" ? NULL_TYPE : undefined;
+    // A part of a list is a new list.
+    case "take":
+    case "takeLast":
+      return value.kind === "list" ? { kind: "list", element: copyType(value.element) } : undefined;
     // A set operation builds a new collection of the receiver's kind.
     case "intersection":
     case "union":
@@ -6838,7 +6954,12 @@ function assignableProperty(
   name: string,
 ):
   { readonly type: StaticType | null } | { readonly problem: string; readonly receiver?: boolean } {
-  if (member.kind === "timer" || member.kind === "media" || member.kind === "camera") {
+  if (
+    member.kind === "timer" ||
+    member.kind === "media" ||
+    member.kind === "camera" ||
+    member.kind === "messageHandle"
+  ) {
     const type = handlePropertyType(member.kind, name, "assign");
     return type === undefined
       ? { problem: handleMemberMessage(member.kind, name, "assign") }
@@ -6861,7 +6982,7 @@ function assignableProperty(
     return {
       problem: isScalar(member, "string")
         ? `Text cannot be changed, so '${name}' cannot be assigned. Assign a new text to the variable instead.`
-        : `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(member)}.`,
+        : `Only objects, speakers, and timer, media, and message handles have properties to assign, but this is ${describeValue(member)}.`,
       receiver: true,
     };
   const type = member.kind === "object" ? member.properties?.get(name) : undefined;
@@ -6980,6 +7101,7 @@ const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "range",
   "timer",
   "media",
+  "messageHandle",
   "camera",
   "permanentButton",
   "speaker",
@@ -7147,6 +7269,8 @@ function isChoiceValue(member: StaticType): boolean {
   return isShowable(member) && !isScalar(member, "script");
 }
 
+const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
+
 /** The result types of the built-ins that take fixed positional arguments. */
 const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["random", NUMBER_TYPE],
@@ -7245,12 +7369,19 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The message for a timer, media, or camera view handle member that does not exist or cannot be assigned. */
+/** The kinds of handle whose properties scripts read or assign. */
+type HandleKind = "timer" | "media" | "camera" | "messageHandle";
+
+/** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(
-  handle: "timer" | "media" | "camera",
+  handle: HandleKind,
   name: string,
   use: "read" | "assign" | "call",
 ): string {
+  if (handle === "messageHandle")
+    return use === "call"
+      ? `Message handles have no method '${name}'; change the message with its text property.`
+      : `Message handles have no property '${name}'; use text.`;
   if (handle === "camera")
     return use === "call"
       ? `Camera views have no method '${name}'; hide them with hideCamera.`

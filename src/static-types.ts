@@ -41,9 +41,12 @@ export type StaticType =
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
   /**
    * `camera` is the handle of a camera view (`let view = showCamera`), and `permanentButton` the identifier of a
-   * permanent button; scripts cannot name either as a type.
+   * permanent button; scripts cannot name either as a type. `messageHandle` is the handle of a shown message.
    */
-  | { readonly kind: "range" | "timer" | "media" | "camera" | "permanentButton" | "speaker" }
+  | {
+      readonly kind:
+        "range" | "timer" | "media" | "camera" | "permanentButton" | "messageHandle" | "speaker";
+    }
   | OpenType;
 
 /** A list, set, or dict type. */
@@ -400,6 +403,7 @@ function namedType(name: TypeName): StaticType {
     case "speaker":
     case "timer":
     case "media":
+    case "messageHandle":
       return { kind: name };
     default:
       return scalar(name);
@@ -1569,6 +1573,8 @@ export function describeValue(type: StaticType): string {
       return "a camera view";
     case "permanentButton":
       return "a permanent button";
+    case "messageHandle":
+      return "a message handle";
     default:
       return `a ${value.kind}`;
   }

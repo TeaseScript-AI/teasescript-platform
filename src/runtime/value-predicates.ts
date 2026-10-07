@@ -15,6 +15,7 @@ import type {
   SerializableTimerHandle,
   SerializableMediaHandle,
   SerializablePermanentButtonHandle,
+  SerializableMessageHandle,
   SerializableCameraViewHandle,
   SerializableScriptReference,
 } from "./serializable-values.js";
@@ -63,6 +64,12 @@ export function isPermanentButton(
   return typeof value === "object" && value !== null && value.kind === "permanentButtonHandle";
 }
 
+export function isMessageHandle(
+  value: SerializableRuntimeValue,
+): value is SerializableMessageHandle {
+  return typeof value === "object" && value !== null && value.kind === "messageHandle";
+}
+
 export function isCameraView(
   value: SerializableRuntimeValue,
 ): value is SerializableCameraViewHandle {
@@ -94,6 +101,8 @@ export function describeRuntimeValue(value: SerializableRuntimeValue): string {
       return "a camera view";
     case "permanentButtonHandle":
       return "a permanent button";
+    case "messageHandle":
+      return "a message handle";
     case "datetime":
       return "a date and time";
     case "script":

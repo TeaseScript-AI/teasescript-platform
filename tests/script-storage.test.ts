@@ -26,7 +26,7 @@ const keyMessage = "Storage key must be a string.";
 const loadKeyMessage =
   "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
 const unstorableMessage =
-  "save cannot store a timer handle, media handle, or speaker reference; they exist only in the current session.";
+  "save cannot store a timer, media, or message handle or a speaker reference; they exist only in the current session.";
 
 /** The compact and the bounded spelling of `load`, which behave the same. */
 const loadSpellings = [
@@ -587,7 +587,7 @@ test("a bounded load ends at its ')', also with a space before '(' and options o
       'save [10, 20] as "list"',
       'save { name: "Ada" } as "record"',
       'function key(prefix) { return "${prefix}st" }',
-      'let sum = load ("n", default: 0) + 1',
+      'let total = load ("n", default: 0) + 1',
       'let fallbackSum = load("missing", default: 3) * 2',
       'let second = load(key("li"))[1]',
       'let name = load("record").name',
@@ -602,7 +602,7 @@ test("a bounded load ends at its ')', also with a space before '(' and options o
     ].join("\n"),
   );
   const bound = (name: string) => binding(result.finalSnapshot, name);
-  assert.equal(bound("sum"), 3);
+  assert.equal(bound("total"), 3);
   assert.equal(bound("fallbackSum"), 6);
   assert.equal(bound("second"), 20);
   assert.equal(bound("name"), "Ada");
@@ -733,12 +733,12 @@ test("save rejects session handles and speaker references at the top level and n
     "let handle = timer async 1 s",
     'let handle = playAudio async "a.mp3"',
     "speaker vera {}\nlet handle = vera",
+    'let handle = say "Shown", instant',
   ]) {
     for (const value of ["handle", "{ nested: [handle] }"]) {
       // `dynamic` hides the value's type from the compiler, which rejects a known speaker or handle before runtime.
-      const compiled = plan(
-        `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"\nexit`,
-      );
+      const source = `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"\nexit`;
+      const compiled = plan(source);
       let result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
       if (declaration.includes("playAudio")) {
         assert.equal(result.snapshot.status, "waiting");

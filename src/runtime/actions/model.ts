@@ -98,6 +98,8 @@ export interface RuntimePreparedSayOutputSnapshot {
   readonly speaker: import("../events.js").OutputSpeaker | null;
   readonly content: MessageMarkup;
   readonly text: string;
+  /** The markup source of `content`, kept only for a `say` whose result is a message handle. */
+  readonly sourceText?: string;
   readonly durationMs: number;
   readonly skippable: boolean;
 }

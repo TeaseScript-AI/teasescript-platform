@@ -29,6 +29,8 @@ test("downstream expression frames traverse each public stage and resume on a co
         ['nested index', 'let x=[0]\\nlet result='+'x['.repeat(depth)+'0'+']'.repeat(depth)+'\\nexit',0],
         ['groups and range', 'let result=randomInteger('+'('.repeat(depth)+'1'+')'.repeat(depth)+'..2)\\nexit',1],
         ['mixed', 'let result='+'[escapeMarkup('.repeat(depth)+'"x"'+')][0]'.repeat(depth)+'\\nexit','x'],
+        // Whether 'bubble' is a mode or a call is decided by parsing ahead, which must not parse nested values again.
+        ['say values in calls', 'function bubble(value) {return "x"}\\nlet result=('+'say bubble('.repeat(depth)+'1'+'), instant'.repeat(depth)+').text\\nexit','x'],
       ];
       for(const [name,source,expected] of families) {
         let stage='parse';

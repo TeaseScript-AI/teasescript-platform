@@ -1317,6 +1317,7 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   } else if (
     instruction.kind === "prepareInteractionSpeaker" ||
     instruction.kind === "prepareReference" ||
+    instruction.kind === "say" ||
     instruction.kind === "callFunction" ||
     instruction.kind === "interaction" ||
     instruction.kind === "capture" ||

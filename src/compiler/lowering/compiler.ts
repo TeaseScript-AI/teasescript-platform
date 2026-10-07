@@ -2,6 +2,7 @@ import type {
   Block,
   Expression,
   TimerParts,
+  SayParts,
   MediaParts,
   FunctionDeclaration,
   GlobalStatement,
@@ -36,6 +37,7 @@ import type {
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
+  SayInstruction,
   CallArgumentPlan,
   TemplatePartPlan,
   TemporaryExpressionPlan,
@@ -307,131 +309,9 @@ export class InstructionCompiler {
           span: copySpan(statement.span),
         });
         return;
-      case "sayStatement": {
-        const textCanSuspend =
-          statement.presentation !== null || this.#containsUserCall(statement.value);
-        const pacingCanSuspend =
-          statement.pacing !== null &&
-          statement.pacing !== "instant" &&
-          this.#containsUserCall(statement.pacing);
-        if (!textCanSuspend && !pacingCanSuspend) {
-          const lowered = this.#lowerExpression(statement.value);
-          const loweredPacing =
-            statement.pacing === null || statement.pacing === "instant"
-              ? null
-              : this.#lowerExpression(statement.pacing);
-          this.instructions.push({
-            kind: "say",
-            presentation: null,
-            speaker: statement.speaker?.name ?? null,
-            value: lowered.plan,
-            skipPolicy: statement.skipPolicy,
-            pacing:
-              statement.pacing === null
-                ? "smart"
-                : loweredPacing === null
-                  ? "instant"
-                  : loweredPacing.plan,
-            span: copySpan(statement.span),
-          });
-          this.#emitTemporaryCleanup(
-            [...lowered.temporaryIds, ...(loweredPacing?.temporaryIds ?? [])],
-            statement.span,
-          );
-          return;
-        }
-        const speakerTemporary = this.#allocateTemporary();
-        this.instructions.push({
-          kind: "prepareSaySpeaker",
-          speaker: statement.speaker?.name ?? null,
-          destinationTemporary: speakerTemporary,
-          span: copySpan(statement.span),
-        });
-        const contextualSpeakerTemporary = this.#allocateTemporary();
-        this.instructions.push({
-          kind: "prepareSayContextualSpeaker",
-          speakerTemporary,
-          destinationTemporary: contextualSpeakerTemporary,
-          span: copySpan(statement.span),
-        });
-        const loweredPresentation =
-          statement.presentation === null
-            ? null
-            : this.#materializeExpression(
-                this.#lowerSayPayload(statement.presentation, contextualSpeakerTemporary),
-                statement.presentation.span,
-              );
-        const lowered = this.#lowerSayPayload(statement.value, contextualSpeakerTemporary);
-        if (!pacingCanSuspend) {
-          const loweredPacing =
-            statement.pacing === null || statement.pacing === "instant"
-              ? null
-              : this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary);
-          this.instructions.push({
-            kind: "say",
-            presentation: loweredPresentation?.plan ?? null,
-            speaker: statement.speaker?.name ?? null,
-            value: lowered.plan,
-            speakerTemporary,
-            contextualSpeakerTemporary,
-            skipPolicy: statement.skipPolicy,
-            pacing:
-              statement.pacing === null
-                ? "smart"
-                : loweredPacing === null
-                  ? "instant"
-                  : loweredPacing.plan,
-            span: copySpan(statement.span),
-          });
-          this.#emitTemporaryCleanup(
-            [
-              speakerTemporary,
-              contextualSpeakerTemporary,
-              ...(loweredPresentation?.temporaryIds ?? []),
-              ...lowered.temporaryIds,
-              ...(loweredPacing?.temporaryIds ?? []),
-            ],
-            statement.span,
-          );
-          return;
-        }
-        const textTemporary = this.#allocateTemporary();
-        this.instructions.push({
-          kind: "prepareSayText",
-          value: lowered.plan,
-          destinationTemporary: textTemporary,
-          span: copySpan(statement.value.span),
-        });
-        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.value.span);
-        const loweredPacing = this.#materializeExpression(
-          this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary),
-          statement.pacing.span,
-        );
-        const pacing = loweredPacing.plan;
-        this.instructions.push({
-          kind: "say",
-          presentation: loweredPresentation?.plan ?? null,
-          speaker: statement.speaker?.name ?? null,
-          value: lowered.plan,
-          speakerTemporary,
-          contextualSpeakerTemporary,
-          textTemporary,
-          skipPolicy: statement.skipPolicy,
-          pacing,
-          span: copySpan(statement.span),
-        });
-        this.#emitTemporaryCleanup(
-          [
-            speakerTemporary,
-            contextualSpeakerTemporary,
-            textTemporary,
-            ...(loweredPresentation?.temporaryIds ?? []),
-            ...(loweredPacing?.temporaryIds ?? []),
-          ],
-          statement.span,
-        );
+      case "sayStatement":
+        yield* compileChild(this.#lowerSayTask(statement, false));
         return;
-      }
       case "showButtonStatement":
         yield* compileChild(this.#lowerShowButtonTask(statement, false));
         return;
@@ -906,6 +786,151 @@ export class InstructionCompiler {
    * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
    * duration, display, then label; operands written in another order are materialized first in source order.
    */
+  /**
+   * A `say`: plain when no operand emits instructions, otherwise with its speaker, context, and, before a pacing that
+   * emits instructions, its text prepared. Used as a value, it gets a temporary for the handle of its message, which
+   * the instruction sets once the message is shown.
+   */
+  *#lowerSayTask(say: SayParts, value: boolean): CompileTask<LoweredExpression | null> {
+    const textCanSuspend = say.presentation !== null || this.#containsUserCall(say.value);
+    const pacingCanSuspend =
+      say.pacing !== null && say.pacing !== "instant" && this.#containsUserCall(say.pacing);
+    const pacingOf = (lowered: LoweredExpression | null): SayInstruction["pacing"] =>
+      say.pacing === null ? "smart" : lowered === null ? "instant" : lowered.plan;
+    let destinationTemporary: number | undefined;
+    const result = (): LoweredExpression | null =>
+      destinationTemporary === undefined
+        ? null
+        : {
+            plan: {
+              kind: "temporary",
+              temporaryId: destinationTemporary,
+              span: copySpan(say.span),
+            },
+            temporaryIds: [destinationTemporary],
+          };
+    if (!textCanSuspend && !pacingCanSuspend) {
+      const lowered = yield* compileChild(this.#lowerExpressionTask(say.value));
+      const loweredPacing =
+        say.pacing === null || say.pacing === "instant"
+          ? null
+          : yield* compileChild(this.#lowerExpressionTask(say.pacing));
+      if (value) destinationTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker: say.speaker?.name ?? null,
+        value: lowered.plan,
+        skipPolicy: say.skipPolicy,
+        pacing: pacingOf(loweredPacing),
+        ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
+        span: copySpan(say.span),
+      });
+      this.#emitTemporaryCleanup(
+        [...lowered.temporaryIds, ...(loweredPacing?.temporaryIds ?? [])],
+        say.span,
+      );
+      return result();
+    }
+    const speakerTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSaySpeaker",
+      speaker: say.speaker?.name ?? null,
+      destinationTemporary: speakerTemporary,
+      span: copySpan(say.span),
+    });
+    const contextualSpeakerTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSayContextualSpeaker",
+      speakerTemporary,
+      destinationTemporary: contextualSpeakerTemporary,
+      span: copySpan(say.span),
+    });
+    const loweredPresentation =
+      say.presentation === null
+        ? null
+        : this.#materializeExpression(
+            yield* compileChild(
+              this.#lowerInteractionPayloadTask(say.presentation, contextualSpeakerTemporary),
+            ),
+            say.presentation.span,
+          );
+    const lowered = yield* compileChild(
+      this.#lowerInteractionPayloadTask(say.value, contextualSpeakerTemporary),
+    );
+    if (!pacingCanSuspend) {
+      const loweredPacing =
+        say.pacing === null || say.pacing === "instant"
+          ? null
+          : yield* compileChild(
+              this.#lowerInteractionPayloadTask(say.pacing, contextualSpeakerTemporary),
+            );
+      if (value) destinationTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "say",
+        presentation: loweredPresentation?.plan ?? null,
+        speaker: say.speaker?.name ?? null,
+        value: lowered.plan,
+        speakerTemporary,
+        contextualSpeakerTemporary,
+        skipPolicy: say.skipPolicy,
+        pacing: pacingOf(loweredPacing),
+        ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
+        span: copySpan(say.span),
+      });
+      this.#emitTemporaryCleanup(
+        [
+          speakerTemporary,
+          contextualSpeakerTemporary,
+          ...(loweredPresentation?.temporaryIds ?? []),
+          ...lowered.temporaryIds,
+          ...(loweredPacing?.temporaryIds ?? []),
+        ],
+        say.span,
+      );
+      return result();
+    }
+    const textTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSayText",
+      value: lowered.plan,
+      destinationTemporary: textTemporary,
+      span: copySpan(say.value.span),
+    });
+    this.#emitTemporaryCleanup(lowered.temporaryIds, say.value.span);
+    const loweredPacing = this.#materializeExpression(
+      yield* compileChild(
+        this.#lowerInteractionPayloadTask(say.pacing!, contextualSpeakerTemporary),
+      ),
+      say.pacing!.span,
+    );
+    if (value) destinationTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "say",
+      presentation: loweredPresentation?.plan ?? null,
+      speaker: say.speaker?.name ?? null,
+      value: lowered.plan,
+      speakerTemporary,
+      contextualSpeakerTemporary,
+      textTemporary,
+      skipPolicy: say.skipPolicy,
+      pacing: loweredPacing.plan,
+      ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
+      span: copySpan(say.span),
+    });
+    this.#emitTemporaryCleanup(
+      [
+        speakerTemporary,
+        contextualSpeakerTemporary,
+        textTemporary,
+        ...(loweredPresentation?.temporaryIds ?? []),
+        ...loweredPacing.temporaryIds,
+      ],
+      say.span,
+    );
+    return result();
+  }
+
   *#lowerTimerTask(timer: TimerParts, value: boolean): CompileTask<LoweredExpression | null> {
     const dynamicDisplay = typeof timer.display === "object" ? timer.display : null;
     const operands = [timer.duration, dynamicDisplay, timer.label].filter(
@@ -1276,6 +1301,11 @@ export class InstructionCompiler {
     if (expression.kind === "showButtonExpression") {
       const lowered = yield* compileChild(this.#lowerShowButtonTask(expression, true));
       if (lowered === null) throw new TypeError("A showButton value lowered without a result.");
+      return lowered;
+    }
+    if (expression.kind === "sayExpression") {
+      const lowered = yield* compileChild(this.#lowerSayTask(expression, true));
+      if (lowered === null) throw new TypeError("A say value lowered without a handle.");
       return lowered;
     }
     if (expression.kind === "timerExpression") {
@@ -2208,10 +2238,6 @@ export class InstructionCompiler {
     return destinationTemporary;
   }
 
-  #lowerInteractionPayload(expression: Expression, speakerTemporary: number): LoweredExpression {
-    return runCompileTask(this.#lowerInteractionPayloadTask(expression, speakerTemporary));
-  }
-
   *#lowerInteractionPayloadTask(
     expression: Expression,
     speakerTemporary: number,
@@ -2223,10 +2249,6 @@ export class InstructionCompiler {
     } finally {
       this.#contextualSpeakerTemporary = previous;
     }
-  }
-
-  #lowerSayPayload(expression: Expression, speakerTemporary: number): LoweredExpression {
-    return this.#lowerInteractionPayload(expression, speakerTemporary);
   }
 
   *#lowerInteractionPayloadsTask(
@@ -2627,6 +2649,7 @@ export class InstructionCompiler {
 
       if (
         current.expression.kind === "interactionExpression" ||
+        current.expression.kind === "sayExpression" ||
         current.expression.kind === "showButtonExpression" ||
         current.expression.kind === "timerExpression" ||
         current.expression.kind === "playMediaExpression" ||
@@ -3012,13 +3035,14 @@ function assembleExpression(
     case "tagQueryExpression":
       return tagQueryPlan(expression, tagQueryOperands(expression).map(child));
     case "interactionExpression":
+    case "sayExpression":
     case "showButtonExpression":
     case "timerExpression":
     case "playMediaExpression":
     case "showCameraExpression":
     case "showPermanentButtonExpression":
       throw new TypeError(
-        "Interactions, timers, media, camera views, and permanent buttons must be lowered before expression-plan compilation.",
+        "Messages, interactions, timers, media, camera views, and permanent buttons must be lowered before expression-plan compilation.",
       );
     case "typeTestExpression":
       return typeTestPlan(expression, child(expression.value));

@@ -48,6 +48,19 @@ export function pressPermanentButton(
   return pressed;
 }
 
+/** Clicks a permanent button of engine-owned plan/state that already passed complete validation. */
+export function pressValidatedPermanentButton(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  buttonId: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+): PendingActionOperationResult<PermanentButtonPressOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const pressed = pressCapturedPermanentButton({ plan, snapshot }, buttonId);
+  closeDebugTrace(trace, pressed);
+  return pressed;
+}
+
 function pressCapturedPermanentButton(
   captured: CapturedExecutableData,
   buttonId: unknown,

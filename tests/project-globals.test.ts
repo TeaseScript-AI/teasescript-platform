@@ -640,7 +640,7 @@ test("speakers are global: declared anywhere in any file and known in every file
   assert.deepEqual(
     diagnostics([
       main,
-      { path: "shop.tease", source: 'global shop = "Corner"\nglobal sign = shop, default: ""' },
+      { path: "shop.tease", source: 'global shop = "Corner"\nglobal caption = shop, default: ""' },
     ]),
     [["shop.tease", "TSV052", 2]],
   );

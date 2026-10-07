@@ -152,6 +152,18 @@ export {
 } from "./runtime/engine.js";
 export type { RuntimeInstructionTrace } from "./runtime/instruction-trace.js";
 export {
+  createFreshRuntimeSession,
+  createRuntimeSession,
+  deserializeRuntimeSession,
+  restoreRuntimeSession,
+  RuntimeSessionError,
+  type RuntimeSession,
+  type RuntimeSessionOptions,
+  type RuntimeSessionOutcomeResult,
+  type RuntimeSessionResult,
+  type RuntimeSessionView,
+} from "./runtime/session.js";
+export {
   completeAction,
   type ActionCompletionOptions,
 } from "./runtime/operations/complete-action.js";

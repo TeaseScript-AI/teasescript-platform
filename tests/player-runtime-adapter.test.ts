@@ -1169,3 +1169,55 @@ test("a form's cancel button and its exact text cancel the form", () => {
     null,
   );
 });
+
+test("a message update replaces its row in place, keeping its identity, speaker, and presentation", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      "speaker vera {",
+      '    name: "Vera"',
+      '    color: "#aa3366"',
+      "}",
+      "speaker coach {",
+      '    name: "Coach"',
+      "}",
+      "speaker vera",
+      'let line = say "Waiting.", instant',
+      'say as coach "Meanwhile", instant',
+      "wait 1 s",
+      'line.text += "."',
+      'line.text = "**Ready**"',
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+  );
+  const [created, other] = session.transcriptEntries;
+  assert.ok(created?.kind === "message" && other?.kind === "message");
+  assert.equal(created.text, "Waiting.");
+  const revision = session.transcriptRevision;
+  const restorePoint = createPlayerRuntimeRestorePoint(session);
+
+  session = observePlayerRuntimeTime(session, 1_000)!.session;
+  const updated = session.transcriptEntries[0];
+  assert.ok(updated?.kind === "message");
+  // The same row, at the same place, with the new content; the update is the event Explain values explains.
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => [entry.id, entry.text]),
+    [
+      [created.id, "Ready"],
+      [other.id, "Meanwhile"],
+    ],
+  );
+  assert.equal(updated.speakerId, created.speakerId);
+  assert.deepEqual(updated.presentation, created.presentation);
+  assert.equal(updated.content?.blocks[0]?.kind, "paragraph");
+  const lastUpdate = session.events.findLast((event) => event.kind === "messageUpdated");
+  assert.equal(updated.contentSequence, lastUpdate?.sequence);
+  assert.ok(session.transcriptRevision > revision);
+  // Rows are replaced, never changed: the earlier row still shows the earlier text.
+  assert.equal(created.text, "Waiting.");
+
+  // A restore rebuilds the same rows; one from before the update shows the text it had then.
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  assert.equal(restorePlayerRuntimeSession(restorePoint).transcriptEntries[0]?.text, "Waiting.");
+});

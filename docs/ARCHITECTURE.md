@@ -118,6 +118,8 @@ execute instructions without duplicating operation logic. Whole-snapshot
 construction, cloning, validation orchestration, and cross-state coordination
 remain in `src/runtime/state.ts`; the internal `src/runtime/action-validation.ts`
 module owns pending-action, settlement, pacing-gate, and handoff validation.
+`src/runtime/session.ts` owns the engine-owned runtime session, which runs those operations and the engine on state it
+keeps private ([`RUNTIME.md`](RUNTIME.md#runtime-sessions)).
 `src/runtime/engine.ts` owns execution orchestration and instruction dispatch;
 `src/runtime/evaluator.ts` owns expression evaluation, builtin calls, and the
 binding, speaker, and collection operations used while evaluating. The internal
