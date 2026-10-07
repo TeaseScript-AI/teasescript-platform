@@ -188,6 +188,7 @@ export type HelperName =
   | "booleanText"
   | "button"
   | "value"
+  | "missingText"
   | "loadInteger"
   | "loadFloat"
   | "textMinus"
@@ -265,6 +266,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "random",
   "loadFirstTrue",
   "value",
+  "missingText",
   "loadInteger",
   "loadFloat",
   "button",
@@ -1117,6 +1119,17 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   value: {
     name: "sexscriptLegacyValue",
     build: () => fn("sexscriptLegacyValue", ["value"], [ret(v("value"))]),
+  },
+  // A text that legacy tested for null, missing, which a missing text read now gives as the empty text; the value may
+  // hold null from elsewhere too, so both count, and a call that gives it runs once.
+  missingText: {
+    name: "sexscriptLegacyMissingText",
+    build: () =>
+      fn(
+        "sexscriptLegacyMissingText",
+        ["value"],
+        [ret(bin("or", bin("==", v("value"), lit(null)), bin("==", v("value"), lit(""))))],
+      ),
   },
   // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
   // zero, and read null for a missing key, which the script could replace with a value of its own (`whenMissing`). The

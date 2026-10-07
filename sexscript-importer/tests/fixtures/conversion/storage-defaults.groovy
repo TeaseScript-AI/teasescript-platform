@@ -15,13 +15,15 @@ if (level == null) {
 }
 show("Level " + level)
 if (load("game.seen") == null) save("game.seen", true)
-// A copy of the text, or a parameter it is passed to, may hold null from elsewhere too, so its tests take both; the
-// text that loadString read of a key the package saves numbers under keeps its null.
+// A copy of the text, or a parameter it is passed to, tests for the empty text too, and one that holds values of
+// another type as well tests for both; the text that loadString read of a key the package saves numbers under keeps
+// its null.
 def stored = loadString("game.stored")
 def copy = stored
 if (copy == null) show("Nothing stored.")
 def check = { value -> if (value == null) show("Nothing given.") }
 check(loadString("game.given"))
+check(3)
 if (loadString("game.mode") == "") show("No mode.")
 // A null saved under the key removes it, so the key reads as the empty text again.
 def resetMode = { save("game.mode", null) }
@@ -89,3 +91,30 @@ if (picks[0] == null) show("No pick.")
 def counts = [1, 2]
 counts[1] = load("game.count" + slot)
 show("Count " + (counts[1] + 1))
+// A text that a function returns tests for the empty text where the script tests the call for null, also in a
+// parameter's default, and a copy that the script sets to null holds the empty text.
+def readNote = { -> return loadString("game.note") }
+if (readNote() == null) show("No note.")
+def noted = { note, missing = (note == null) -> return missing }
+show("Missing " + noted(loadString("game.note")))
+def noteCopy = readNote()
+noteCopy = null
+if (noteCopy == null) show("Cleared.")
+// A result that may be a value the importer cannot tell too tests for both, calling the function once.
+def oldHints = load("game.oldHints")
+def readHint = { -> if (getBoolean("A hint?")) return loadString("game.hint"); return oldHints }
+if (readHint() == null) show("No hint.")
+// A variable is apart from another of the same name in another block.
+def work = { ->
+    if (getBoolean("Read?")) { def v = loadString("game.work"); show("Work " + v) }
+    if (getBoolean("Ask?")) { def v = getString("Your name?", "x"); if (v == null) show("No name.") }
+}
+work()
+// A key read both as text and as a flag reads the stored value and turns it into each.
+save("game.choice", "true")
+def choiceText = loadString("game.choice")
+if (loadBoolean("game.choice")) show("Chosen " + choiceText)
+// A computed key's read that a list of a known type takes as a new item reads the items' empty value where missing.
+def hints = ["first"]
+hints.add(load("game.hint" + slot))
+show("Hints " + hints.size())

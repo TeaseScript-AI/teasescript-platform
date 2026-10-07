@@ -162,7 +162,7 @@ function pick {
 let word = "none"
 let elvisValue2 = pick()
 word = ""
-if elvisValue2 != null and elvisValue2 != "" and elvisValue2 != "" {
+if elvisValue2 != "" and elvisValue2 != "" {
   word = elvisValue2
 }
 // NOTE SX_LENGTH_RECEIVER line 52: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
