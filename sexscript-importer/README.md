@@ -322,21 +322,24 @@ work (attempts, next sessions, and expansions in the first place) takes at most 
 
 With `--later`, time only goes forward and is play, as for a player who comes back later. The explorer reads each
 comparison in a condition that reads the clock (`hour >= 18`, `getTimestamp().toSeconds() - lastVisit > day`), also
-through variables computed from the clock and helpers that return one part of the date or time, and evaluates it in a
-state at any later wall clock, with the state's variables and stored values. A state that waits where such a
-condition was read next gets time steps: `later` inputs to just past each moment one of those comparisons comes out
-the other way (the next 18:01, the next weekday, saved time plus a day and a minute, inside or past a window), within
-400 days, each tried once per cell and outcome; where the condition was first read, the state the step left gets
+through variables computed from the clock in one way and helpers that return one part of the date or time (exactly
+when they only return it; a helper that adjusts it is an approximation), and evaluates it in a state at a later wall
+clock, with the state's variables and stored values. A state that waits where such a condition was read next gets
+time steps: `later` inputs to just past the first moment, within 400 days, at which one of those comparisons comes out
+the other way, as far as the explorer finds it: at the second, minute, hour, or day boundaries where a compared part
+of the date or time changes, where compared elapsed times meet, or else by sampling at doublings of a minute and
+halving (the next 18:01, the next weekday, saved time plus a day and a minute, inside or past a window). Each is tried
+once per cell and outcome; where the condition was first read, the state the step left, or the session start, gets
 them too. Their outcomes at a state's wall clock are part of its cell, so a new outcome or change of one counts as
 reaching something new. A later session starts a minute after the wall clock where the state it continues stands,
 and also at the time steps of the clock conditions its first state reads; a session chain keeps the gap of the session
-it continues. Only for a clock condition the explorer cannot read (a value from a helper with control flow, a variable
-computed in more than one way) does it try a fixed ladder instead: continuing an hour, an evening, a night, a
-morning, a day, two or three days, a week, 40 days, or 400 days later just before the step that read it, or starting
-that session that much later. All these steps are play, and a path records them: its `later` inputs and each
-session's start clock. A gap must be positive. Only a session that starts before the clock where the state it
-continues stands, such as one of an old corpus entry, is a clock start. The report's `search.time` counts the
-conditions that read the clock, the places they were read after, and the time steps taken by states and sessions.
+it continues. For a clock condition the explorer cannot read, or reads only through an approximate helper, it also
+tries a fixed ladder: continuing an hour, an evening, a night, a morning, a day, two or three days, a week, 40 days,
+or 400 days later just before the step that read it, or starting that session that much later. All these steps are
+play, and a path records them: its `later` inputs and each session's start clock. A gap must be positive. Only a
+session that starts before the clock where the state it continues stands, such as one of an old corpus entry, is a
+clock start. The report's `search.time` counts the conditions that read the clock, the places they were read after,
+and the time steps taken by states and sessions.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with

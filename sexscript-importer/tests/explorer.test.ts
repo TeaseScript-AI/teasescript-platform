@@ -490,6 +490,14 @@ test(
       ),
       [{ kind: "button", label: "Two" }],
     );
+    // A difference the variable lost before the comparison times nothing either.
+    assert.deepEqual(
+      timedStart(
+        'let a = getTimestamp().toSeconds()\nshowButton "Three"\nlet took = getTimestamp().toSeconds() - a\n' +
+          'took = 0\nif took < 5 {\n  say "Fast."\n}\nexit\n',
+      ),
+      [{ kind: "button", label: "Three" }],
+    );
 
     // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
     const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');
@@ -571,10 +579,17 @@ test(
       ],
       [
         "helper",
-        'function hourNow {\n  return getDateTime().hour\n}\nshowButton "Check"\nif hourNow() >= 22 {\n' +
+        'function hourNow {\n  return getDateTime().hour\n}\nshowButton "Check"\nif hourNow() == 17 {\n' +
           '  say "Hit."\n}\nexit\n',
         true,
       ],
+      [
+        "exact elapsed",
+        'let start = getTimestamp().toSeconds()\nshowButton "Go"\nlet took = getTimestamp().toSeconds() - start\n' +
+          'if took == 300 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      ["session start", 'if getDateTime().hour >= 22 {\n  say "Hit."\n}\nexit\n', true],
       [
         "repeated without cells",
         'let n = 0\nwhile n < 2 {\n  showButton "Go"\n  n += 1\n}\nif getDateTime().hour >= 22 {\n' +
@@ -606,18 +621,20 @@ test(
       assert.equal(result.coverage.reach.clock, 0, name);
     }
 
-    // A variable computed from the clock in two ways cannot be computed again: its comparison reads as unknown.
-    const ambiguous =
-      'let hour = getDateTime().hour\nshowButton "Go"\nhour = getDateTime().hour + 1\nif hour == 14 {\n' +
-      '  say "Hit."\n}\nexit\n';
-    const { plan } = engine.compileProject([{ path: "main.tease", source: ambiguous }], {
-      builtins: [],
-    });
-    assert.ok(isRecord(plan));
-    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
-    const model = clockModel(plan, instructions);
-    const [comparison] = [...model.comparisons.values()][0]!;
-    assert.equal(holdsAt(comparison!, model, timeContext({}), EPOCH_MS), undefined);
+    // A variable computed from the clock in two ways, or updated from itself, cannot be computed again: its comparison
+    // reads as unknown, whatever the variable holds in the state.
+    for (const update of ["hour = getDateTime().hour + 1", "hour += 100"]) {
+      const source = `let hour = getDateTime().hour\nshowButton "Go"\n${update}\nif hour == 14 {\n  say "Hit."\n}\nexit\n`;
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const model = clockModel(plan, instructions);
+      const [comparison] = [...model.comparisons.values()][0]!;
+      const bound = timeContext({ globals: [{ name: "hour", value: 14 }] });
+      assert.equal(holdsAt(comparison!, model, bound, EPOCH_MS), undefined, update);
+    }
   },
 );
 

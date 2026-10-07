@@ -1197,6 +1197,8 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
     return at === null || from === null || from >= at ? null : { from, at };
   };
   const differences: (ClockDifference & { readonly name: string | null })[] = [];
+  /** The difference each variable holds, by name, as of the instruction looked at; another value ends it. */
+  const held = new Map<string, ClockDifference>();
   const add = (difference: ClockDifference, constant: unknown) => {
     const duration = record(constant);
     if (typeof constant === "number" && !difference.numbers.includes(constant))
@@ -1219,8 +1221,11 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
     if (name !== null) {
       // A variable holds a clock read from a bare read on; any other value it is set to ends that.
       const difference = readsOf(instruction.value, index);
-      if (difference !== null)
-        differences.push({ name, ...difference, numbers: [], durations: [] });
+      if (difference !== null) {
+        const taken = { name, ...difference, numbers: [], durations: [] };
+        differences.push(taken);
+        held.set(name, taken);
+      } else held.delete(name);
       if (difference === null && readAt(instruction.value, index) === index) reads.set(name, index);
       else reads.delete(name);
     }
@@ -1237,14 +1242,15 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
         add(own, constant);
       }
       const names = namesIn(subject);
-      for (const difference of differences)
+      for (const name of names) {
+        const difference = held.get(name);
         if (
-          difference.name !== null &&
-          names.has(difference.name) &&
+          difference !== undefined &&
           index > difference.at &&
           index - difference.at <= TIMING_WINDOW
         )
           add(difference, constant);
+      }
     };
     for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);
     const walk = (expression: unknown): void => {

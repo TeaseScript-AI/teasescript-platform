@@ -992,13 +992,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const wallEnd: number[] = [];
   /**
    * The start of a session from an explored state's storage (`origin`; the first session for none), `gap` after the
-   * wall clock where that state stands; a play start.
+   * wall clock where that state stands: a play start for a positive gap, as time goes forward.
    */
   const laterStart = (origin: number | null, storage: readonly StorageEntry[], gap: number) => ({
     origin,
     storage,
     wallClockMs: (origin === null ? EPOCH_MS : wallEnd[origin]!) + gap,
-    clock: false,
+    clock: gap <= 0,
     session: origin === null ? 1 : starts[nodes[origin]!.start]!.session + 1,
   });
   /** A plan that reads the clock gets a next day's session too. */
@@ -1026,8 +1026,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /** Time steps tried, from a cell (or a session start's storage) to the outcomes they lead to. */
   const timeStepsTried = new Set<string>();
-  /** The first state of each session start, by the start's index. */
+  /** The first state of each session start, by the start's index; and the state of one that ended in its first step. */
   const firstNodeOf = new Map<number, number>([[0, 0]]);
+  const startSnapshots = new Map<number, Data>();
   const timeStepsTaken = { steps: 0, sessions: 0 };
   /**
    * The time steps of a state that waits where a clock condition is read next: for each of those comparisons that
@@ -1373,6 +1374,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const first = session.start(start);
     const node = transition(null, null, first, starts.length - 1, lead);
     firstNodeOf.set(starts.length - 1, node.id);
+    // A session that ends in its first step keeps no snapshot; its time steps read the state it ended in.
+    if (later && first.snapshot.status !== "waiting")
+      startSnapshots.set(starts.length - 1, first.snapshot);
     return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null };
   };
 
@@ -1465,16 +1469,19 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     } else {
       const start = starts[job.start]!;
       const first = firstNodeOf.get(job.start);
-      const snapshot = first === undefined ? null : store.get(first);
+      const snapshot =
+        first === undefined ? null : (store.get(first) ?? startSnapshots.get(job.start) ?? null);
       const gaps =
         snapshot === null || first === undefined
           ? []
           : timeSteps(snapshot, null, wallEnd[first]!, `start ${job.start}`).map(
               (gap) => wallEnd[first]! + gap,
             );
+      // Only later than where the session's origin stands: a start of an old corpus entry may be earlier.
+      const origin = start.origin === null ? EPOCH_MS : wallEnd[start.origin]!;
       for (const at of gaps) {
         if (outOfBudget()) break;
-        const origin = start.origin === null ? EPOCH_MS : wallEnd[start.origin]!;
+        if (at - origin <= 0) continue;
         startSession(laterStart(start.origin, start.storage, at - origin), null);
         timeStepsTaken.sessions += 1;
       }
@@ -1759,7 +1766,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         if (
           context !== null &&
           comparisons.some(
-            (comparison) => times !== null && holdsAt(comparison, times, context, at) !== undefined,
+            (comparison) =>
+              times !== null &&
+              comparison.exact &&
+              holdsAt(comparison, times, context, at) !== undefined,
           )
         )
           continue;
@@ -1892,6 +1902,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       startFrom.set(key, starts.length - 1);
       firstOf.set(starts.length - 1, node.id);
       firstNodeOf.set(starts.length - 1, node.id);
+      if (later && begun.snapshot.status !== "waiting")
+        startSnapshots.set(starts.length - 1, begun.snapshot);
       return starts.length - 1;
     };
     /**
@@ -1980,6 +1992,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   replaying = options.corpus !== undefined;
   const firstStep = session.start(starts[0]!);
   transition(null, null, firstStep, 0, null);
+  if (later && firstStep.snapshot.status !== "waiting") startSnapshots.set(0, firstStep.snapshot);
   const replayed = options.corpus === undefined ? null : replayCorpus(options.corpus, firstStep);
   replaying = false;
   replayWork = replayed === null ? 0 : session.operations;
@@ -2378,9 +2391,10 @@ function cover(
   return kept.reverse();
 }
 
-/** An input as one of the choices at a prompt: the input itself, apart from labels that only explain it. */
+/** An input as one of the choices at a prompt: the input itself, apart from its label, which only explains it. */
 function inputKey(input: ExplorerInput): string {
-  return JSON.stringify(input, (key, value: unknown) => (key === "label" ? undefined : value));
+  const { label: _label, ...choice } = { label: undefined, ...input };
+  return JSON.stringify(choice);
 }
 
 /**
