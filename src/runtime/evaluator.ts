@@ -2774,7 +2774,7 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): number {
-    const { parameters, named: names = [], example, apply } = NUMERIC_FUNCTIONS.get(name)!;
+    const { parameters, named: names = [], example, apply, random } = NUMERIC_FUNCTIONS.get(name)!;
     if (
       positional.length !== parameters.length ||
       Object.keys(named).some((key) => !names.includes(key))
@@ -2796,8 +2796,28 @@ export class Evaluator {
     const options = Object.fromEntries(
       Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
     );
-    const result = apply(numbers, options);
+    const invalid = random?.(numbers);
+    if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
+    // A trace records a random function's draws as one record, like a shuffle.
+    const before = random === undefined || this.trace === null ? null : this.#randomState();
+    let draws = 0;
+    const result = apply(numbers, options, () => {
+      draws += 1;
+      return this.#drawRandom(span);
+    });
+    if (random !== undefined)
+      this.trace?.random(
+        // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
+        name as RuntimeDebugRandomOperation,
+        span,
+        null,
+        null,
+        before,
+        this.#randomState(),
+        draws,
+      );
     if (typeof result !== "number") throw fault(result.code, result.failure, span);
+    if (random !== undefined) this.trace?.randomResult(result);
     return result;
   }
 
