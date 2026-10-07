@@ -13,6 +13,7 @@ import { runsNothing } from "../activation-validation.js";
 import { innermostFileCallIndex } from "../activations.js";
 import { leaveScopes, sweepRetainedScopes } from "../captures.js";
 import { RuntimeFault } from "../errors.js";
+import { messageText } from "../text-length.js";
 import type { Evaluator } from "../evaluator.js";
 import { drawFromSessionGenerator, sampleIndex } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
@@ -212,9 +213,9 @@ function resolveComputed(
         : plan.files[file]!.labels.find((candidate) => candidate.name === label)?.instruction;
   const problem =
     file < 0
-      ? `This ${keyword} names the file '${path}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
+      ? `This ${keyword} names the file '${messageText(path)}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
       : target === undefined
-        ? `This ${keyword} names label '${label}' of '${path}', but that file has no such label.`
+        ? `This ${keyword} names label '${messageText(label!)}' of '${path}', but that file has no such label.`
         : keyword !== "call" && runsNothing(plan, file)
           ? `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
           : null;

@@ -514,6 +514,8 @@ test("an operation that would make a text longer than any text can be fails with
   // Doubling builds long texts without copying them.
   const doubled = (times: number, text = "x") =>
     [`let s = "${text}"`, `repeat ${times} {`, "    s = s + s", "}"].join("\n");
+  const high = String.fromCharCode(0xd800);
+  const low = String.fromCharCode(0xdc00);
   for (const [source, line, message] of [
     [
       'let s = "x".repeat(9007199254740991)\nexit',
@@ -535,6 +537,12 @@ test("an operation that would make a text longer than any text can be fails with
       1,
       `Text too long: padEnd(600000000) would make a text of about 600,000,000 characters; ${limit}`,
     ],
+    // Lone surrogates join while padding, so the length the text would reach is not known.
+    [
+      `let s = "${high}".padEnd(536870889, "${low}")\nexit`,
+      1,
+      `Text too long: padEnd(536870889) would make a text; ${limit}`,
+    ],
     [
       `${doubled(30)}\nexit`,
       3,
@@ -555,6 +563,21 @@ test("an operation that would make a text longer than any text can be fails with
       5,
       `Text too long: replace would make a text of about 671,088,640 characters; ${limit}`,
     ],
+    [
+      'let s = "ß".repeat(268435445).uppercase()\nexit',
+      1,
+      `Text too long: uppercase would make a text of about 536,870,890 characters; ${limit}`,
+    ],
+    [
+      'let s = escapeMarkup("-".repeat(268435445))\nexit',
+      1,
+      `Text too long: escapeMarkup would make a text of about 536,870,890 characters; ${limit}`,
+    ],
+    [
+      'let s = "x".repeat(268435444)\nlet answers = askForm fields: { a: { value: true, description: s }, b: { value: true, description: s } }\nexit',
+      2,
+      `Text too long: askForm would make a text of about 536,870,897 characters; ${limit}`,
+    ],
     // Quoting doubles each line break, so the notation of one text is too long.
     [
       `${doubled(28, "\\n")}\nsay [s], instant\nexit`,
@@ -562,9 +585,14 @@ test("an operation that would make a text longer than any text can be fails with
       `Text too long: say would make a text; ${limit}`,
     ],
     [
-      'let s = "ß".repeat(268435445).uppercase()\nexit',
-      1,
-      `Text too long: uppercase would make a text; ${limit}`,
+      `${doubled(28, "\\n")}\nlet t = "\${script("main.tease", label: s)}"\nexit`,
+      5,
+      `Text too long: script(…) would make a text of about 536,870,943 characters; ${limit}`,
+    ],
+    [
+      `${doubled(28, "\\n")}\nlet t = timer(duration: 1 s, async: true, label: s)\nsay t, instant\nexit`,
+      6,
+      `Text too long: say would make a text of about 536,870,932 characters; ${limit}`,
     ],
   ] as const) {
     const failure = runValidSource(source).snapshot.failure;
@@ -574,4 +602,28 @@ test("an operation that would make a text longer than any text can be fails with
       source,
     );
   }
+});
+
+test("an error message cuts the script's text it quotes, and a text no check foresaw still fails with TSR084", (context) => {
+  const key = "k".repeat(2_000);
+  const missing = runValidSource(
+    `let key = "${key}"\nlet stock = dict{ "a": 1 }\nlet count = stock[key]\nexit`,
+  ).snapshot.failure;
+  assert.deepEqual(
+    [missing?.code, missing?.message],
+    ["TSR061", `Dictionary has no key "${"k".repeat(1_024)}…". Check stock.contains(key) first.`],
+  );
+  // V8 says that a text is too long with this error.
+  context.mock.method(String.prototype, "toUpperCase", () => {
+    throw new RangeError("Invalid string length");
+  });
+  const failure = runValidSource('let s = "a"\nlet shout = s.uppercase()\nexit').snapshot.failure;
+  assert.deepEqual(
+    [failure?.code, failure === null ? null : failure.span.start.line + 1, failure?.message],
+    [
+      "TSR084",
+      2,
+      "Text too long: this line would make a text; a text can hold at most about 536 million.",
+    ],
+  );
 });

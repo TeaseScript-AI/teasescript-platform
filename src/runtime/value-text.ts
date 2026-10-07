@@ -13,7 +13,7 @@ import {
 } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import { MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
+import { checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import type {
   SerializableRuntimeDictEntry,
   SerializableRuntimeProperty,
@@ -102,17 +102,31 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
   if (isDuration(value)) return formatDuration(durationParts(value));
-  if (isScriptReference(value)) return scriptNotation(value);
+  if (isScriptReference(value)) return scriptNotation(value, span);
   throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
 }
 
 /**
  * A script reference as the call that makes it: `script("rooms/hall.tease", label: "start")`. A `limit` cuts its texts
- * before they are quoted.
+ * before they are quoted. Notation longer than any text can be fails with `TSR084` for `script(…)`.
  */
-function scriptNotation(value: SerializableScriptReference, limit = Infinity): string {
-  const label = value.label === null ? "" : `, label: ${quotedText(prefix(value.label, limit))}`;
-  return `script(${quotedText(prefix(value.path, limit))}${label})`;
+function scriptNotation(
+  value: SerializableScriptReference,
+  span: SourceSpan,
+  limit = Infinity,
+): string {
+  const path = prefix(value.path, limit);
+  const label = value.label === null ? null : prefix(value.label, limit);
+  // `script(`, `)`, and `, label: ` around the quoted texts.
+  const around = 8 + (label === null ? 0 : 9);
+  // Quoting adds two quotes and at most one escape for each character, so only texts that could get too long are measured.
+  if ((path.length + (label?.length ?? 0)) * 2 + 4 + around > MAX_TEXT_LENGTH)
+    checkTextLength(
+      quotedLength(path) + (label === null ? 0 : quotedLength(label)) + around,
+      "script(…)",
+      span,
+    );
+  return `script(${quotedText(path)}${label === null ? "" : `, label: ${quotedText(label)}`})`;
 }
 
 /** At most the first `limit` characters of `text`. */
@@ -289,7 +303,7 @@ function writeNotation(
     )
       output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
-    else if (isScriptReference(current)) output.push(scriptNotation(current, limit));
+    else if (isScriptReference(current)) output.push(scriptNotation(current, span, limit));
     else output.push(plainScalarText(current, span));
     for (let index = before; index < output.length; index += 1) {
       tooLong(output[index]!.length);
@@ -300,6 +314,25 @@ function writeNotation(
   return length > limit
     ? { text: text.slice(0, limit), truncated: true }
     : { text, truncated: false };
+}
+
+/**
+ * `text` quoted with `before` and `after` around it, or `TSR084` for `operation` when that would be longer than any text
+ * can be.
+ */
+export function quotedTextWithin(
+  before: string,
+  text: string,
+  after: string,
+  operation: string,
+  span: SourceSpan,
+): string {
+  // Quoting adds two quotes and at most one escape for each character, so only a text that could get too long is
+  // measured.
+  const around = before.length + after.length;
+  if (text.length * 2 + 2 + around > MAX_TEXT_LENGTH)
+    checkTextLength(quotedLength(text) + around, operation, span);
+  return `${before}${quotedText(text)}${after}`;
 }
 
 /** The length of `quotedText(text)`, found without writing it: each character it escapes adds one. */

@@ -48,6 +48,7 @@ export type {
   RuntimeCapabilityCall,
 } from "./evaluator.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import { textTooLong } from "./text-length.js";
 import {
   assertCounterCanAdvance,
   assertEventSequenceCapacity,
@@ -319,10 +320,15 @@ function executeInstructionBoundary(
       snapshot.interactionResultHandoff = null;
     }
   } catch (error) {
-    if (!(error instanceof RuntimeFault)) throw error;
+    // A text too long that no check foresaw still fails as one, on V8, which says so with this message.
+    const failure =
+      error instanceof RangeError && error.message === "Invalid string length"
+        ? textTooLong("this line", instruction.span, null)
+        : error;
+    if (!(failure instanceof RuntimeFault)) throw error;
     failSnapshot(
       snapshot,
-      error.toInfo(),
+      failure.toInfo(),
       instructionSourcePath(plan, instructionIndex),
       context.events,
     );

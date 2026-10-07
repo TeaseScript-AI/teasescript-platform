@@ -1,5 +1,6 @@
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
+import { RUNTIME_DEBUG_TRACE_LIMITS } from "./debug-trace.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 
@@ -37,20 +38,50 @@ export function checkTextLength(length: number, operation: string, span: SourceS
 }
 
 /**
- * The text that `build`, one native text operation whose length is not known before, makes; `TSR084` when it would be
- * longer than any text can be, whether the host refuses to build it or builds it after all.
+ * Text from the script as an error message quotes it: cut to the length Debug previews a value with, ending with "…"
+ * when cut, so that a message never gets too long itself.
  */
-export function boundedText(build: () => string, operation: string, span: SourceSpan): string {
-  let text: string;
-  try {
-    text = build();
-  } catch (error) {
-    // A single native text operation throws a RangeError only when its result is too long to build.
-    if (error instanceof RangeError) throw textTooLong(operation, span, null);
-    throw error;
+export function messageText(text: string): string {
+  const limit = RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters;
+  if (text.length <= limit) return text;
+  // A surrogate pair stays whole.
+  const end = isHighSurrogateAt(text, limit - 1) ? limit - 1 : limit;
+  return `${text.slice(0, end)}…`;
+}
+
+function isHighSurrogateAt(text: string, index: number): boolean {
+  const unit = text.charCodeAt(index);
+  return unit >= 0xd800 && unit <= 0xdbff;
+}
+
+/** How many UTF-16 code units each BMP code unit becomes in upper and lower case, filled in as met; 0 until then. */
+const UPPER_WIDTHS = new Uint8Array(0x10000);
+const LOWER_WIDTHS = new Uint8Array(0x10000);
+
+/**
+ * The length, in UTF-16 code units, of `text` in upper or lower case, found without mapping it whole. The
+ * locale-independent mapping changes a character's length the same wherever it stands, so mapping one code point at a
+ * time gives the same length.
+ */
+export function caseMappedLength(text: string, upper: boolean): number {
+  const widths = upper ? UPPER_WIDTHS : LOWER_WIDTHS;
+  let length = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    const next = text.charCodeAt(index + 1);
+    if (code >= 0xd800 && code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+      const pair = text.slice(index, index + 2);
+      length += (upper ? pair.toUpperCase() : pair.toLowerCase()).length;
+      index += 1;
+      continue;
+    }
+    if (widths[code] === 0) {
+      const character = String.fromCharCode(code);
+      widths[code] = (upper ? character.toUpperCase() : character.toLowerCase()).length;
+    }
+    length += widths[code]!;
   }
-  if (text.length > MAX_TEXT_LENGTH) throw textTooLong(operation, span, null);
-  return text;
+  return length;
 }
 
 /** A whole number with thousands separators, such as 9,007,199,254,740,991. */

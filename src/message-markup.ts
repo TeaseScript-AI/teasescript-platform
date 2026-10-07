@@ -297,6 +297,21 @@ export function isMessageMarkup(value: unknown): value is MessageMarkup {
   return visibleTextFromBlocks(blocks) === value.visibleText;
 }
 
+/** The ASCII codes of `ESCAPABLE_CHARACTERS`, each a single UTF-16 code unit, as 1 in a table of all ASCII codes. */
+const ESCAPABLE_CODES = Uint8Array.from({ length: 0x80 }, (_unused, code) =>
+  ESCAPABLE_CHARACTERS.has(String.fromCharCode(code)) ? 1 : 0,
+);
+
+/** The length of `escapeMarkup(text)`, found without writing it: each character it escapes adds a backslash. */
+export function escapedMarkupLength(text: string): number {
+  let length = text.length;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) length += ESCAPABLE_CODES[code]!;
+  }
+  return length;
+}
+
 export function escapeMarkup(text: string): string {
   const escaped: string[] = [];
   for (const character of text) {
