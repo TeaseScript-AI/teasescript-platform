@@ -1490,6 +1490,9 @@ test(
       longBeat: 'show("Good.")\nwait(1)\nshow("3")\nwait(3)',
       number: 'show("Good.")\nwait(1)\nshow(3)\nwait(1)',
       animation: 'show("Good.")\nwait(1)\nshow("Wait.")\nwait(1)\nshow("Wait..")\nwait(1)',
+      splitBeat: 'show("Good.")\nwait(1)\nshow("!\\n\\n?")\nwait(1)',
+      splitTick:
+        'for (int i = 3; i > 0; i--) {\n show("First part.\\n\\nSecond part.\\n\\nStarting in " + i)\n wait(1)\n}',
       media:
         'def image = { show("Good."); wait(1); return "test.jpg" }\nshowButton("Start")\nsetImage(image())\nshow("Hold.")\nwait(20)',
       askThenText:

@@ -605,7 +605,7 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   number (`SX_WAIT_BEAT`, `beats`), and a loop's tick, a wait of a second at most after a text the loop's body builds
   anew each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`); animations and counters keep theirs as
   updatable messages (above), whose first message keeps `instant` as a beat does. A beat split into paragraphs keeps
-  `instant` on its last paragraph, so the text shows whole at once. A beat keeps its `instant`, so a text whose
+  `instant` on every paragraph, so the text shows whole at once. A beat keeps its `instant`, so a text whose
   replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead, a beat itself
   in turn unless it was split (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or
   from a loop's earlier pass, gives way to the beat.

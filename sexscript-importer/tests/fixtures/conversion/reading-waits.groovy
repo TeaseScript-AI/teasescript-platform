@@ -73,7 +73,7 @@ show("Wait..")
 wait(1)
 show("Wait...")
 wait(1)
-// The last paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
+// Every paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
 for (int left = 3; left > 0; left--) {
     show("Starting soon.\n\nStarting in " + left)
     wait(1)

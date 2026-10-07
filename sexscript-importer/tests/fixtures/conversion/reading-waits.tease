@@ -74,10 +74,10 @@ line.text += "."
 wait 1
 line.text += "."
 wait 1
-// The last paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
+// Every paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
 left = 3
 while left > 0 {
-  say "Starting soon."
+  say "Starting soon.", instant
   say "Starting in ${left}", instant
   wait 1
   left -= 1

@@ -24,8 +24,8 @@ const BLANK_LINES = /\n(?:[^\S\n]*\n)+/u;
  * and with the same speaker; a blank line inside an interpolated value stays.
  * - A `say` becomes one `say` per paragraph, each with the Player's reading time (owner decision 2026-10-07): a text
  *   that was `instant` because a legacy `wait` follows loses it, since `instant` would also skip the reading time of
- *   the paragraph before it, except the last paragraph of a beat (withReadingTimes), so that the beat's text shows
- *   whole at once. A kept wait after it (withReadingTimes) keeps only what the reading time of the paragraphs before
+ *   the paragraph before it, except the paragraphs of a beat (withReadingTimes), so that the beat's text shows whole
+ *   at once. A kept wait after it (withReadingTimes) keeps only what the reading time of the paragraphs before
  *   the last leaves (shortenedWait); any other `wait` stays as it is.
  * - An ask's question (said before the field opens, also after withAskQuestions made a `say` its question) says the
  *   paragraphs before the one that asks (questionAt), or before the last where none does, before the asking statement,
@@ -92,13 +92,10 @@ export function withParagraphs(
         readBefore = split.paragraphs
           .slice(0, -1)
           .reduce((total, value) => total + shortestReadingTime(value), 0);
-        // A beat's last paragraph keeps `instant`, so that the text shows whole at once, as legacy showed it, and its wait
+        // A beat's paragraphs keep `instant`, so that the text shows whole at once, as legacy showed it, and its wait
         // keeps the beat.
-        const last = split.paragraphs.length - 1;
-        return split.paragraphs.map((value, index) =>
-          beat === true && index === last
-            ? { ...paced, value, instant: true, beat }
-            : { ...paced, value },
+        return split.paragraphs.map((value) =>
+          beat === true ? { ...paced, value, instant: true, beat } : { ...paced, value },
         );
       }
       const ask = ASKING_STATEMENTS.has(statement.kind) ? soleAsk(statement) : null;
