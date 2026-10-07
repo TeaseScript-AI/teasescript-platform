@@ -210,9 +210,12 @@ export function wallClockOf(snapshot: Data): number {
   for (const candidate of list(snapshot.temporalCaptures))
     if (typeof candidate.boundaryMs === "number" && candidate.boundaryMs <= now)
       capture = candidate;
-  return typeof capture?.epochMs === "number" && typeof capture.boundaryMs === "number"
-    ? capture.epochMs + now - capture.boundaryMs
-    : EPOCH_MS + now;
+  // Session times may hold fractions of a millisecond; the runtime rounds a wall clock to whole ones.
+  return Math.round(
+    typeof capture?.epochMs === "number" && typeof capture.boundaryMs === "number"
+      ? capture.epochMs + now - capture.boundaryMs
+      : EPOCH_MS + now,
+  );
 }
 
 /** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
@@ -568,7 +571,7 @@ export class Session {
       case "later":
         if (!(input.afterMs > 0 && Number.isSafeInteger(input.afterMs))) return false;
         result = runtime.call("recordContinueCapture", {
-          wallClockMs: Math.round(wallClockOf(runtime.exportTrustedSnapshot()) + input.afterMs),
+          wallClockMs: wallClockOf(runtime.exportTrustedSnapshot()) + input.afterMs,
         });
         accepted = "recorded";
         break;
