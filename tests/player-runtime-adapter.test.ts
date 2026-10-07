@@ -1025,7 +1025,7 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
-test("a submitted cycle shows the option it showed among options with the same value, also after a restore", () => {
+test("a cycle whose options share its value is answered with the option it showed, as one line", () => {
   const session = createPlayerRuntimeSession(
     [
       "let answers = askForm fields: {",
@@ -1039,16 +1039,17 @@ test("a submitted cycle shows the option it showed among options with the same v
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(stepped.session));
   const done = submitPlayerRuntimeForm(restored)!;
   assert.equal(done.outcome.kind, "completed");
+  // The result cannot tell the options apart, so the Player shows the transcript text, not a line per field.
   for (const shown of [
     done.session,
     restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(done.session)),
   ]) {
     const answer = shown.transcriptEntries.find(
-      (entry) => entry.kind === "message" && entry.formSummary !== undefined,
+      (entry) => entry.kind === "message" && entry.responseKind === "form",
     );
     assert.deepEqual(answer?.kind === "message" ? [answer.text, answer.formSummary] : undefined, [
       "Pace: Fast",
-      [{ kind: "value", label: "Pace", value: "Fast" }],
+      undefined,
     ]);
   }
 });

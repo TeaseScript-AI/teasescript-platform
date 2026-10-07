@@ -1672,9 +1672,8 @@ function appendTranscript(
         event.settlement.interactionKind === "form")
     ) {
       responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
-      const { ui, result, transcriptText } = event.settlement;
-      const summary =
-        ui.kind === "form" ? formSummaryOf(ui, result, transcriptText, presentation) : null;
+      const { ui, result } = event.settlement;
+      const summary = ui.kind === "form" ? formSummaryOf(ui, result, presentation) : null;
       if (summary !== null) formSummaries.set(event.settlement.transcriptEventSequence, summary);
     }
   }

@@ -883,63 +883,19 @@ export type FormSummaryLine =
   | { readonly kind: "value"; readonly label: string; readonly value: string };
 
 /**
- * The summary of a form's settlement (V30 askForm; owner decision 2026-10-07): every field in field order, a toggle
- * with its state and any other field with its value as its button showed it, `Not set` for an optional field without
- * one; `null` when `result` is not one this form returns. A value is taken as its `transcriptText` shows it, since the
- * result cannot tell cycle options with the same value apart and a date or time was shown in the presentation of its
- * moment; when the text is not this result's summary, the values are shown in `presentation`.
+ * The summary of a form's settled `result` (V30 askForm; owner decision 2026-10-07): every field in field order, a
+ * toggle with its state and any other field with its value as its button shows it, `Not set` for an optional field
+ * without one. `null` when the result is not one this form returns, or when it cannot tell which option a cycle
+ * showed, because several of its options have the returned value; the transcript text, built from the form's state,
+ * says it.
  */
 export function formSummaryOf(
   ui: FormUi,
   result: unknown,
-  transcriptText: unknown,
   presentation: TemporalContext["presentation"],
 ): readonly FormSummaryLine[] | null {
   const values = formValuesOf(ui, result);
-  if (values === null) return null;
-  const lines = formSummaryLines(ui, values, presentation);
-  const shown = typeof transcriptText === "string" ? shownSummary(lines, transcriptText) : null;
-  return shown ?? lines;
-}
-
-/**
- * `lines` with each value as `text` shows it, or `null` when `text` is not their summary: their toggles and labels
- * in order, with any values between them.
- */
-function shownSummary(
-  lines: readonly FormSummaryLine[],
-  text: string,
-): readonly FormSummaryLine[] | null {
-  const shown: FormSummaryLine[] = [];
-  let position = 0;
-  for (const [index, line] of lines.entries()) {
-    const start = `${index === 0 ? "" : ", "}${line.kind === "toggle" ? formSummaryText([line]) : `${line.label}: `}`;
-    if (!text.startsWith(start, position)) return null;
-    position += start.length;
-    if (line.kind === "toggle") {
-      shown.push(line);
-      continue;
-    }
-    const following = lines[index + 1];
-    const next =
-      following === undefined
-        ? null
-        : `, ${following.kind === "toggle" ? formSummaryText([following]) : `${following.label}: `}`;
-    // The value as computed when the text holds it; otherwise up to the next field, such as another option's text.
-    const end =
-      text.startsWith(line.value, position) &&
-      (next === null
-        ? position + line.value.length === text.length
-        : text.startsWith(next, position + line.value.length))
-        ? position + line.value.length
-        : next === null
-          ? text.length
-          : text.indexOf(next, position);
-    if (end < 0) return null;
-    shown.push({ ...line, value: text.slice(position, end) });
-    position = end;
-  }
-  return position === text.length ? shown : null;
+  return values === null ? null : formSummaryLines(ui, values, presentation);
 }
 
 function formSummaryLines(
@@ -981,18 +937,26 @@ function formSummaryText(lines: readonly FormSummaryLine[]): string {
 
 /**
  * The field values a form's settled `result` holds, as its form state holds them (a cycle by its option's index), or
- * `null` when the result is not one this form returns.
+ * `null` when the result is not one this form returns or a cycle's value is that of several of its options.
  */
 function formValuesOf(ui: FormUi, result: unknown): readonly RuntimeFormValue[] | null {
   const answers = formAnswersOf(ui, result);
   if (answers === null) return null;
-  return ui.fields.map((field, index) => {
+  const values: RuntimeFormValue[] = [];
+  for (const [index, field] of ui.fields.entries()) {
     const answer = answers[index]!;
-    if (field.kind === "cycle")
-      return field.options.findIndex((option) => serializableEquals(option.value, answer));
-    // EVIDENCE: validation: formAnswersOf checked every answer as a value of its field.
-    return answer as RuntimeFormValue;
-  });
+    if (field.kind !== "cycle") {
+      // EVIDENCE: validation: formAnswersOf checked every answer as a value of its field.
+      values.push(answer as RuntimeFormValue);
+      continue;
+    }
+    const shown = field.options.flatMap((option, optionIndex) =>
+      serializableEquals(option.value, answer) ? [optionIndex] : [],
+    );
+    if (shown.length !== 1) return null;
+    values.push(shown[0]!);
+  }
+  return values;
 }
 
 function refused(message: string): { readonly ok: false; readonly message: string } {
