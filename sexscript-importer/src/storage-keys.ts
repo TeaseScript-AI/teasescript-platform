@@ -18,7 +18,8 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * the type legacy read (`read`) or, for a plain `load`, of the type the saves of the whole package give the key.
  *
  * A read's value is used up where null and the empty value act alike or the script failed or showed `null`: as text,
- * in arithmetic or an order comparison, as a condition, as the receiver of a member, method, or index, and compared
+ * in arithmetic, an order comparison, or a built-in that computes with a number (`toInteger`, `floor`, ...), as a
+ * condition, as the receiver of a member, method, or index, and compared
  * with a literal that is neither null nor empty. A read into a variable is marked where every use of the variable, by
  * name in the whole file, is such a use; a read or variable compared with null or an empty literal, or passed on,
  * returned, saved, or held in a list or another variable, keeps its null.
@@ -88,6 +89,18 @@ function assignmentCounts(statements: readonly IrStatement[]): Map<string, numbe
 type Use = "usedUp" | "passed";
 
 const USED_UP_OPERATORS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">=", "and", "or"]);
+const NUMERIC_CALLS = new Set([
+  "toInteger",
+  "toNumber",
+  "floor",
+  "ceil",
+  "round",
+  "abs",
+  "sqrt",
+  "pow",
+  "min",
+  "max",
+]);
 
 /** Visits the values a statement evaluates with their uses; a read a variable is set to goes in `into`. */
 function statementUses(
@@ -166,6 +179,12 @@ function valueUses(
     case "index":
       uses(value.target, "usedUp");
       uses(value.index, "usedUp");
+      return;
+    case "call":
+      // A built-in that computes with a number failed for null, as legacy's arithmetic and casts did.
+      for (const argument of value.positional)
+        uses(argument, value.local !== true && NUMERIC_CALLS.has(value.name) ? "usedUp" : "passed");
+      for (const argument of Object.values(value.named)) uses(argument, "passed");
       return;
     default:
       mapChildren(value, (child) => {

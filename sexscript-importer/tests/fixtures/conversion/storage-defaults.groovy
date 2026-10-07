@@ -30,3 +30,9 @@ def upgrade = { save("game.version", 2) }
 def grid = load("game.grid")
 show("Rows: " + grid.size())
 def reset2 = { save("game.grid", [[0]]) }
+// A number a built-in computes with was there, or legacy failed, so it reads as 0 where missing, as Domme3's start time.
+def started = load("game.started")
+def startedDay = (long) started / 86400
+def since = getTime() - started
+show("Day " + startedDay + ", " + since + " s ago")
+def restart = { save("game.started", getTime()) }
