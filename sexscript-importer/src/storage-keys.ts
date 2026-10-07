@@ -676,9 +676,10 @@ function isNullLiteral(value: IrExpression): boolean {
  * A read that keeps its null (`default: null`), and a read of a key whose values mix types, needs its key's type
  * declared at one of its loads (#690), which the key's other loads take; the same declaration may repeat. In each
  * published file the first `let` that reads the key gets it (`let level: integer? = load "game.level", default: null`,
- * optional where its read keeps its null), widened by the other values the script gives that variable, or where no
- * `let` reads the key, the first read in each file inside a statement that runs once, where nothing with an effect runs
- * before it and no `and` or `or` may skip it, moves into one just before that statement (`let savedLevel: integer? =
+ * optional where its read keeps its null), widened by the other values the script gives that variable, or in a file
+ * where no `let` reads the key, the first read inside a statement that runs once, where nothing with an effect runs
+ * before it and no `and` or `or` may skip it, moves into one just before that statement, so that each file declares
+ * the keys it reads itself and compiles on its own (`let savedLevel: integer? =
  * load "game.level", default: null`). A key that no published file can declare so, or whose type nothing tells, keeps
  * its null of an open type instead, `default: sexscriptLegacyValue(null)`, which needs no declaration.
  */
@@ -788,7 +789,7 @@ function withDeclaredKeys(
             value.kind === "load" &&
             value.defaultValue === undefined &&
             type !== undefined &&
-            !letRead.has(key) &&
+            !atLet.has(key) &&
             !lifted.has(key) &&
             !effectBefore(next, value)
           ) {
