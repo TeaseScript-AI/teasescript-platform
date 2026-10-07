@@ -1618,8 +1618,8 @@ async function messageUpdatesScenario(cdp, origin) {
 /**
  * Player Debug in the default build: the Debug menu starts off and Settings turns it on for this load. While Debug
  * runs, one countdown line under the foreground names a wait, a timed button, or pacing, but never a blocking timer; it
- * follows jumps, the panel's Debug switch and the Debug menu also while the panel is closed, and never reaches the
- * transcript. `?dev` starts with the menu on.
+ * follows jumps, also +10 s during pacing, the panel's Debug switch and the Debug menu also while the panel is closed,
+ * and never reaches the transcript. `?dev` starts with the menu on.
  */
 async function debugCountdownScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
@@ -1671,6 +1671,14 @@ async function debugCountdownScenario(cdp, origin) {
   // Skip event ends the wait: the blocking timer is a timer, never a wait.
   await skip(none, "A blocking timer showed a countdown");
   await skip(shows("/^Debug · Pacing: (20|1\\d) s remaining$/"), "No countdown for pacing");
+  // +10 s works during pacing: the pause is 10 s shorter, and the next message has not come yet.
+  await physicalClick(cdp, '[data-development-time-action="advance-10s"]');
+  await waitFor(
+    cdp,
+    shows("/^Debug · Pacing: (10|\\d) s remaining$/"),
+    5_000,
+    "+10 s did not advance the pacing",
+  );
   // The timed button consumes the pacing of the message before it.
   await skip(shows("/^Debug · Press within (40|3\\d) s$/"), "No countdown for the timed button");
   // The panel's Debug switch and the Debug menu hide and show it, also while the panel is closed.

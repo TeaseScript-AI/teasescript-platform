@@ -282,6 +282,7 @@ test("after a jump the device plays from the jumped playhead and measures on fro
 // The composable, loaded through the build tool like the Player loads it.
 interface DevelopmentTimeHost {
   readonly autoSkip: Ref<boolean>;
+  readonly canAdvance: Readonly<Ref<boolean>>;
   advanceBy(milliseconds: number): Promise<void>;
 }
 interface SessionHost {
@@ -423,6 +424,42 @@ test("+10 s continues after the host stores a block's write, at the block's scen
     [2_000],
   );
   assert.deepEqual(logged, ["⏩ 10 s skipped"]);
+});
+
+test("+10 s works during chat pacing, also from a pending save, and not after the session ended", async (context) => {
+  let answer = () => {};
+  const { player, time, logged } = await mount(
+    context,
+    'save 1 as "seen"\nsay "First", 20\nsay "Second"\nlet done = showButton "Done"\nexit',
+    { autoSkip: false },
+    {
+      scope: "test",
+      load: async () => [],
+      write: () => new Promise<void>((resolve) => (answer = resolve)),
+      replace: async () => {},
+      clear: async () => {},
+    },
+  );
+  // The jump starts while the host stores the save and continues once it answered.
+  assert.equal(player.session.value!.snapshot.foregroundAction?.kind, "storageWrite");
+  assert.equal(time.canAdvance.value, true);
+  const jumped = time.advanceBy(10_000);
+  await later();
+  answer();
+  await jumped;
+  let session = player.session.value!;
+  assert.ok(session.snapshot.observedSessionTimeMs >= 10_000);
+  assert.equal(session.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.deepEqual(said(session), ["First"], "First paces for 20 s");
+  // A jump during the pause passes its end, and the next message follows.
+  assert.equal(time.canAdvance.value, true);
+  await time.advanceBy(10_000);
+  session = player.session.value!;
+  assert.deepEqual(said(session), ["First", "Second"]);
+  assert.deepEqual(logged, ["⏩ 10 s skipped", "⏩ 10 s skipped"]);
+  player.update(activatePlayerRuntimeButton(session)!.session);
+  assert.equal(player.session.value!.snapshot.status, "halted");
+  assert.equal(time.canAdvance.value, false);
 });
 
 test("auto-skip completes waits but leaves the player's think time and background timers real", async (context) => {

@@ -97,7 +97,7 @@ const tab = defineModel<string>("tab", { default: "now" });
         </CollapsibleTrigger>
         <CollapsibleContent class="text-muted-foreground">
           Skip event jumps to the next wait, timer, pacing pause, or audio cue or end. +10 s and +1
-          min advance time while the script waits for your input.
+          min advance time; messages, waits and timers in the skipped span still happen.
         </CollapsibleContent>
       </Collapsible>
       <div class="grid grid-cols-3 gap-2">
