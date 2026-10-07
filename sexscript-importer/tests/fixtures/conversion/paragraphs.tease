@@ -1,9 +1,12 @@
-function sexscriptLegacyLoadInteger(key) {
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   let value = load key
-  if value != null {
-    save toInteger(value) as key
+  if value == null {
+    return whenMissing
   }
-  return load key
+  return sexscriptLegacyValue(toInteger(value))
 }
 // The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
 // the Player's reading time.

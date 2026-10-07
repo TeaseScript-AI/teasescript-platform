@@ -1,9 +1,19 @@
-function sexscriptLegacyLoadInteger(key) {
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   let value = load key
-  if value != null {
-    save toInteger(value) as key
+  if value == null {
+    return whenMissing
   }
-  return load key
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacyLoadFloat(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toNumber(value))
 }
 function sexscriptLegacyCompare(left, right) {
   if left == null {
@@ -26,7 +36,7 @@ function sexscriptLegacyCompare(left, right) {
 // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping the fraction toward
 // zero; a missing key read null.
 save "5.1" as "game.version"
-let lastVersion = toNumber(load("game.version", default: 0))
+let lastVersion = sexscriptLegacyLoadFloat("game.version", 0)
 if sexscriptLegacyCompare(lastVersion, 4) > 0 {
   say "Welcome back."
 }
@@ -34,7 +44,7 @@ save 100.5 as "game.points"
 let points = 80
 if load("game.points") != null {
   // NOTE SX_LOAD_KEEPS_VALUE line 9: Groovy stored null in 'points' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
-  points = toInteger(load("game.points", default: points))
+  points = sexscriptLegacyLoadInteger("game.points", points)
 }
 say "You have ${points} points."
 let missing = sexscriptLegacyLoadInteger("game.missing")
@@ -45,7 +55,7 @@ if missing == null {
 let version: number = 0
 function readVersion {
   // NOTE SX_LOAD_KEEPS_VALUE line 15: Groovy stored null in 'version' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
-  version = toNumber(load("game.version", default: version))
+  version = sexscriptLegacyLoadFloat("game.version", version)
 }
 readVersion()
 say "Version ${version}"

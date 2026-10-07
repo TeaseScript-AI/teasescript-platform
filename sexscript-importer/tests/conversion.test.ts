@@ -1535,7 +1535,71 @@ test(
   },
 );
 
+// Legacy loadInteger() and loadFloat() parsed the stored text, loadInteger() dropping the fraction toward zero, and left
+// the stored text as it was; a value the script used for a missing key stays as it is. Half of a whole number keeps
+// its fraction through a later subtraction (RCA 2026-10-07 #1, #2, #4).
+test(
+  "typed storage reads give the values legacy gave and keep what is stored",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probes use.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-loads-"));
+    try {
+      const file = path.join(directory, "loads.groovy");
+      writeFileSync(
+        file,
+        [
+          'save("game.version", "5.1")',
+          'show("" + loadInteger("game.version") + " " + loadFloat("game.version") + " " + loadString("game.version"))',
+          'save("game.points", 100.5)',
+          "def points = 80",
+          'if (loadInteger("game.points") != null) points = loadInteger("game.points")',
+          'def missing = loadInteger("game.missing")',
+          "if (missing == null) missing = 0.5",
+          'save("game.total", 13)',
+          'def s1 = loadInteger("game.total")',
+          "def s2 = 0",
+          "def s3 = 0",
+          "s2 = s1 / 2",
+          "s3 = s1 - s2",
+          'show("" + points + " " + missing + " " + s2 + " " + s3)',
+          "",
+        ].join("\n"),
+      );
+      const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+      const { plan } = compileSource(tease);
+      assert.ok(plan !== undefined, tease);
+      const said: string[] = [];
+      const note = (events: readonly PacedEvent[]): void => {
+        for (const event of events)
+          if (event.kind === "say" && event.text !== undefined) said.push(event.text);
+      };
+      let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      note(step.events);
+      for (let turn = 0; turn < 20 && step.snapshot.status === "waiting"; turn += 1) {
+        const observed = observeTime(
+          plan,
+          step.snapshot,
+          step.snapshot.foregroundAction?.deadlineMs ?? NaN,
+        );
+        note(observed.events);
+        step = run(plan, observed.snapshot);
+        note(step.events);
+      }
+      assert.equal(step.snapshot.status, "halted", tease);
+      assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5"], tease);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 interface PacedEvent {
+  kind?: string;
+  text?: string;
   settlement?: { settlementKind?: string };
 }
 interface PacedSnapshot {

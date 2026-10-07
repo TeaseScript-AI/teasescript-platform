@@ -187,6 +187,7 @@ export type HelperName =
   | "listMinus"
   | "booleanText"
   | "button"
+  | "value"
   | "loadInteger"
   | "loadFloat"
   | "textMinus"
@@ -243,6 +244,7 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
+  if (needed.has("loadInteger") || needed.has("loadFloat")) needed.add("value");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -262,6 +264,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "stopBackgroundSounds",
   "random",
   "loadFirstTrue",
+  "value",
   "loadInteger",
   "loadFloat",
   "button",
@@ -356,25 +359,27 @@ const forS = (variable: string, collection: IrExpression, body: IrStatement[]): 
   body,
   span: null,
 });
-/** A storage read whose stored value the conversion parses first, keeping null for a missing key. */
+/** A storage read whose stored value the conversion parses, with `whenMissing` for a missing key. */
 function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrStatement {
-  const stored: IrExpression = { kind: "load", key: v("key") };
-  return fn(
+  return {
+    kind: "function",
     name,
-    ["key"],
-    [
-      letS("value", stored),
-      ifS(bin("!=", v("value"), lit(null)), [
-        {
-          kind: "save",
-          key: v("key"),
-          value: { kind: "call", name: conversion, positional: [v("value")], named: {} },
-          span: null,
-        },
-      ]),
-      ret(stored),
+    parameters: [
+      { name: "key", defaultValue: null },
+      { name: "whenMissing", defaultValue: lit(null) },
     ],
-  );
+    body: [
+      letS("value", { kind: "load", key: v("key") }),
+      ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
+      ret({
+        kind: "call",
+        name: "sexscriptLegacyValue",
+        positional: [{ kind: "call", name: conversion, positional: [v("value")], named: {} }],
+        named: {},
+      }),
+    ],
+    span: null,
+  };
 }
 
 const fn = (name: string, parameters: string[], body: IrStatement[]): IrStatement => ({
@@ -1080,9 +1085,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     },
   },
   // Legacy loadBoolean(): a stored value read as text is true only as "true" in any case; a missing one is false here.
-  // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
-  // zero, and read null for a missing key. The stored value takes the parsed form, so the result is the storage read
-  // itself, whose type the compiler checks when it is stored, as for any `load`.
   // Legacy showButton() with a timeout known only at runtime: the seconds until the click, at most the timeout; a zero
   // timeout kept the button for its 10 ms safety margin and gave 0, where TeaseScript rejects a zero timeout (#531).
   button: {
@@ -1111,6 +1113,14 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
+  // A value whose type the compiler leaves open, as it does a storage read's.
+  value: {
+    name: "sexscriptLegacyValue",
+    build: () => fn("sexscriptLegacyValue", ["value"], [ret(v("value"))]),
+  },
+  // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
+  // zero, and read null for a missing key, which the script could replace with a value of its own (`whenMissing`). The
+  // parsed value passes through `value`, so that its type stays open, as a storage read's does.
   loadInteger: {
     name: "sexscriptLegacyLoadInteger",
     build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),

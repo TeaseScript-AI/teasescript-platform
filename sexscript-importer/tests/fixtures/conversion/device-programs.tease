@@ -1,9 +1,12 @@
-function sexscriptLegacyLoadInteger(key) {
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   let value = load key
-  if value != null {
-    save toInteger(value) as key
+  if value == null {
+    return whenMissing
   }
-  return load key
+  return sexscriptLegacyValue(toInteger(value))
 }
 let sexscriptLegacyDeviceButtons = dict{}
 function sexscriptLegacyShowDevice(device, state) {

@@ -783,6 +783,20 @@ function analyse(
         return change(() => (target.optional = true));
       return;
     }
+    // A legacy loadFloat() read parses a number, which a whole-number variable widens to hold.
+    const read =
+      statement.kind === "assign" || statement.kind === "let" ? statement.value : undefined;
+    const held = nonNull(bindingType(target) ?? UNKNOWN);
+    if (
+      read?.kind === "load" &&
+      read.number === true &&
+      held.kind === "scalar" &&
+      held.name === "integer" &&
+      target.declaration !== null &&
+      !target.integer &&
+      !target.widened
+    )
+      return change(() => (target.widened = true));
     // A storage read is checked when stored; it may be null, which matters only where the program tests the variable
     // for null and so expects one. Elsewhere a missing key would stop the script where the variable's type cannot hold
     // null, so the read keeps the variable's value then.
@@ -806,19 +820,8 @@ function analyse(
         statement.target.kind === "variable" &&
         type !== undefined &&
         type.kind !== "optional"
-      ) {
+      )
         analysis.loadDefaults.add(statement);
-        // A legacy loadFloat() read parses a number, which a whole-number variable widens to hold.
-        if (
-          statement.value.number === true &&
-          type.kind === "scalar" &&
-          type.name === "integer" &&
-          target.declaration !== null &&
-          !target.integer &&
-          !target.widened
-        )
-          return change(() => (target.widened = true));
-      }
       return;
     }
     const type = bindingType(target);

@@ -19,12 +19,15 @@ function sexscriptLegacyAskProfile {
 }
 // NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (toys.crop, toys.paddle) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
 sexscriptLegacyAskProfile()
-function sexscriptLegacyLoadInteger(key) {
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   let value = load key
-  if value != null {
-    save toInteger(value) as key
+  if value == null {
+    return whenMissing
   }
-  return load key
+  return sexscriptLegacyValue(toInteger(value))
 }
 function sexscriptLegacyCompare(left, right) {
   if left == null {

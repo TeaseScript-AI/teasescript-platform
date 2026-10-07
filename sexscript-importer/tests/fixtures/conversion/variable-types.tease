@@ -4,19 +4,22 @@ function sexscriptLegacyCall(action, args): boolean | number | null {
     return chanceOrFlag(args[0])
   }
 }
-function sexscriptLegacyLoadInteger(key) {
-  let value = load key
-  if value != null {
-    save toInteger(value) as key
-  }
-  return load key
+function sexscriptLegacyValue(value) {
+  return value
 }
-function sexscriptLegacyLoadFloat(key) {
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   let value = load key
-  if value != null {
-    save toNumber(value) as key
+  if value == null {
+    return whenMissing
   }
-  return load key
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacyLoadFloat(key, whenMissing = null) {
+  let value = load key
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toNumber(value))
 }
 function sexscriptLegacyText(value): string? {
   if value == null {
