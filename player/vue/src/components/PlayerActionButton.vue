@@ -106,13 +106,17 @@ const material = computed(() =>
   min-width: 0;
   max-width: 55ch;
 }
+/* Hover and press change only the fill and shadows: the rim keeps its colour, overriding the shared button rule's
+   border, so no line appears, and nothing changes size. Only keyboard focus draws an outline. */
 .player-action-button:hover:not(:disabled, [aria-disabled="true"]) {
+  border-color: var(--story-choice-rim);
   background: linear-gradient(var(--story-choice-hover-top), var(--story-choice-hover-bottom));
   box-shadow: inset 0 1px 0 #ffffff35, 0 1px 0 var(--story-choice-depth), 0 3px 5px #00000024;
 }
 .player-action-button:active:not(:disabled, [aria-disabled="true"]) {
+  border-color: var(--story-choice-rim);
   background: var(--story-choice-pressed);
-  box-shadow: inset 0 1px 2px #00000022;
+  box-shadow: inset 0 1px 2px #00000022, 0 1px 0 var(--story-choice-depth);
 }
 /* Disabled actions use the shared theme roles, not opacity over an arbitrary background. */
 .player-action-button:disabled,
