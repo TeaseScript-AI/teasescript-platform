@@ -958,6 +958,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
     session.timedWith.set(button, expressions);
   session.clockDifferences.push(...clockDifferences(flow, instructions));
+  /** The conditions that compare a difference of clock reads around a button. */
+  const measured = new Set(session.clockDifferences.flatMap((difference) => difference.conditions));
   const constants = constantConditions(instructions, files, options.diagnostics);
   // Conditions that read only stored keys whose values this package fixes have one value too.
   const fixed = new Map<number, { value: boolean; reason: string }>();
@@ -1768,6 +1770,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       } else if (source.kind === "clock" && later) {
         if (timed) continue;
         timed = true;
+        // A condition that compares how long the player took between two clock reads (a reaction, a hold) is reached
+        // by thinking before the button between them, which its options have; coming back later changes nothing.
+        if (measured.has(target.instruction)) continue;
         // A condition whose clock comparisons can be read where it was evaluated gets time steps there instead.
         const comparisons = times?.comparisons.get(target.instruction) ?? [];
         const before = witnessNode === null ? null : snapshotOf(witnessNode);

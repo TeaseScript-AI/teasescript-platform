@@ -1181,6 +1181,8 @@ export interface Constants {
 export interface ClockDifference extends Constants {
   readonly from: number;
   readonly at: number;
+  /** The conditions that compare it: they time what happens between the reads, not when the player comes back. */
+  readonly conditions: number[];
 }
 
 /**
@@ -1212,7 +1214,8 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
   const differences: (ClockDifference & { readonly name: string | null })[] = [];
   /** The difference each variable holds, by name, as of the instruction looked at; another value ends it. */
   const held = new Map<string, ClockDifference>();
-  const add = (difference: ClockDifference, constant: unknown) => {
+  const add = (difference: ClockDifference, constant: unknown, condition: number) => {
+    if (!difference.conditions.includes(condition)) difference.conditions.push(condition);
     const duration = record(constant);
     if (typeof constant === "number" && !difference.numbers.includes(constant))
       difference.numbers.push(constant);
@@ -1232,13 +1235,14 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
           ? instruction.name
           : null;
     if (name !== null) {
-      // A variable holds a clock read from a bare read on; any other value it is set to ends that.
+      // A variable holds a clock read from a bare read on, and a difference until it is set to a value not computed from
+      // itself (`took = took / 1000` keeps it).
       const difference = readsOf(instruction.value, index);
       if (difference !== null) {
-        const taken = { name, ...difference, numbers: [], durations: [] };
+        const taken = { name, ...difference, numbers: [], durations: [], conditions: [] };
         differences.push(taken);
         held.set(name, taken);
-      } else held.delete(name);
+      } else if (!namesIn(instruction.value).has(name)) held.delete(name);
       if (difference === null && readAt(instruction.value, index) === index) reads.set(name, index);
       else reads.delete(name);
     }
@@ -1250,9 +1254,9 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
     const compared = (subject: unknown, constant: unknown) => {
       const taken = readsOf(subject, index);
       if (taken !== null) {
-        const own = { name: null, ...taken, numbers: [], durations: [] };
+        const own = { name: null, ...taken, numbers: [], durations: [], conditions: [] };
         differences.push(own);
-        add(own, constant);
+        add(own, constant, index);
       }
       const names = namesIn(subject);
       for (const name of names) {
@@ -1262,7 +1266,7 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
           index > difference.at &&
           index - difference.at <= TIMING_WINDOW
         )
-          add(difference, constant);
+          add(difference, constant, index);
       }
     };
     for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);
@@ -1283,7 +1287,13 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
   });
   return differences
     .filter((difference) => difference.numbers.length + difference.durations.length > 0)
-    .map(({ from, at, numbers, durations }) => ({ from, at, numbers, durations }));
+    .map(({ from, at, numbers, durations, conditions }) => ({
+      from,
+      at,
+      numbers,
+      durations,
+      conditions,
+    }));
 }
 
 /** Whether an expression reads the clock itself: calls a getter of the current date or time. */
