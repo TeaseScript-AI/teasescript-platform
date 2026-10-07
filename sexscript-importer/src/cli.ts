@@ -35,8 +35,14 @@ const acceptedArgument = rawArgs.find(
 );
 const accepted: ReadonlySet<AcceptedForm> =
   acceptedArgument === undefined ? new Set() : parseAcceptedForms(acceptedArgument.slice(11));
+// `--keep-paragraphs` keeps texts with blank lines as one message each (a unit's keepParagraphs).
+const keepParagraphs = rawArgs.includes("--keep-paragraphs");
 const args = rawArgs.filter(
-  (arg) => arg !== "--compile" && arg !== "--run" && arg !== acceptedArgument,
+  (arg) =>
+    arg !== "--compile" &&
+    arg !== "--run" &&
+    arg !== acceptedArgument &&
+    arg !== "--keep-paragraphs",
 );
 
 if (command === "inventory") {
@@ -52,11 +58,11 @@ if (command === "inventory") {
     (finalPackageDir !== null && !compileRequested)
   ) {
     fail(
-      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--accepted[=ids]] <ast.json|script.groovy|source-dir> [...]",
+      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--accepted[=ids]] [--keep-paragraphs] <ast.json|script.groovy|source-dir> [...]",
     );
   }
   const files = await readReportInputs(args);
-  const options: FeasibilityOptions = { accepted };
+  const options: FeasibilityOptions = { accepted, keepParagraphs };
   if (compileRequested) options.compiler = await loadRepositoryProjectCompiler();
   if (runRequested) options.runner = await loadRepositoryProjectRunner();
   // A scripts folder's data folder holds the media that image counts read and the files that file tests read.
@@ -75,18 +81,20 @@ if (command === "inventory") {
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
   if (args.length !== 1)
-    fail("Usage: node src/cli.ts convert [--accepted[=ids]] <script.groovy|ast.json>");
+    fail(
+      "Usage: node src/cli.ts convert [--accepted[=ids]] [--keep-paragraphs] <script.groovy|ast.json>",
+    );
   const input = args[0]!;
   const parsed = input.toLowerCase().endsWith(".groovy")
     ? await parseGroovySource(input)
     : await readParsedFile(input);
-  const program = lowerParsedFile(parsed, { accepted });
+  const program = lowerParsedFile(parsed, { accepted, keepParagraphs });
   process.stdout.write(emitTease(program));
   reportDiagnostics(program);
 } else if (command === "convert-package") {
   if (args.length !== 2) {
     fail(
-      "Usage: node src/cli.ts convert-package [--compile] [--accepted[=ids]] <source-dir> <output-dir>",
+      "Usage: node src/cli.ts convert-package [--compile] [--accepted[=ids]] [--keep-paragraphs] <source-dir> <output-dir>",
     );
   }
   const compiler = compileRequested ? await loadRepositoryProjectCompiler() : undefined;
@@ -135,6 +143,7 @@ async function convertPackage(
   const versions = await releases(sourceRoot);
   const lowered = lowerPackage(parsed, {
     accepted,
+    keepParagraphs,
     media,
     files,
     readFile: packageFileReader(dataRoot),

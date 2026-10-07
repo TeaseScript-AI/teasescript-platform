@@ -2304,6 +2304,7 @@ export function mapChildren(
         ...(value.question === undefined ? {} : { question: map(value.question) }),
         ...(value.fields === undefined ? {} : { fields: map(value.fields) }),
         ...(value.submit === undefined ? {} : { submit: map(value.submit) }),
+        ...(value.outro === undefined ? {} : { outro: map(value.outro) }),
         ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
       };
     case "range":

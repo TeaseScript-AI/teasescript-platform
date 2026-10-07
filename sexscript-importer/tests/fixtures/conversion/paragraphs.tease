@@ -1,0 +1,57 @@
+// The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
+// the Player's reading time; a wait after the text stays after its last paragraph.
+let name = "Ann"
+say "Do you deserve a break?"
+say "Well, ${name}, let's check."
+wait 3
+say "You are late."
+say "Kneel."
+// An ask's question keeps its last paragraph; the others are said before the ask.
+say "These are the rules."
+say "Count every stroke."
+let strokes = askInteger "How many strokes?", default: 5
+// Blank lines that lay out columns, a ruled line, or a block of values stay in one message.
+say """
+  Your status:
+
+  Strokes:   ${strokes}
+  Rounds:    3
+"""
+say """
+  LEVEL 1
+
+  ----------
+
+  Fight!
+"""
+// A blank line in a value built at runtime stays.
+let note = """
+  first
+
+  second
+"""
+say note
+// A form's question keeps its first paragraph, the intro, and says the others after the form's fields as its outro.
+let pics = load("game.pics") == true
+let rounds = load "game.rounds"
+if rounds == null or rounds == 0 {
+  rounds = 3
+}
+// NOTE SX_SETTINGS_FORM line 19: The legacy script asked these 2 settings one after the other and saved each; one form asks them together, with each question as the field's description.
+let settings = askForm "Settings", fields: {
+  pics: { type: "boolean", value: pics, text: "Pics", options: [
+    { value: true, text: "Yes" },
+    { value: false, text: "No" }
+  ], description: "Take pictures?" },
+  rounds: { type: "integer", value: rounds, text: "Rounds", description: "How many rounds?" }
+}, outro: """
+  You can change how the game plays.
+
+  Each setting is saved at once.
+"""
+pics = settings.pics
+save pics as "game.pics"
+rounds = settings.rounds
+save rounds as "game.rounds"
+say "Pictures ${pics}, rounds ${rounds}"
+exit

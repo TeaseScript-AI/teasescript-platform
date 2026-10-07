@@ -260,7 +260,7 @@ function hasCall(value: unknown): boolean {
   return Object.values(value).some(hasCall);
 }
 
-function withNestedBlocks(
+export function withNestedBlocks(
   statement: IrStatement,
   map: (body: IrStatement[]) => IrStatement[],
 ): IrStatement {
@@ -437,7 +437,7 @@ export function withoutRepeatedChainText<
   });
 }
 
-const ASKING_STATEMENTS = new Set([
+export const ASKING_STATEMENTS: ReadonlySet<string> = new Set([
   "let",
   "assign",
   "expression",

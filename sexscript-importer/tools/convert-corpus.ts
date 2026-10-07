@@ -73,6 +73,8 @@ export interface ConversionRecord {
   readonly inputs: Readonly<Record<string, string>>;
   /** The manual patches applied, in order, with the SHA-256 of each diff file or output-patch entry. */
   readonly patches: ReadonlyArray<{ id: string; layer: "source" | "output"; sha256: string }>;
+  /** Why the unit keeps texts with blank lines as one message each, from its manifest; absent where they split. */
+  readonly keepParagraphs?: string;
   /** The unit's status from the merged corpus's `unit.json`, such as `unfinished-content-stub`; null for none. */
   readonly unitStatus: string | null;
   readonly exitCode: number;
@@ -295,6 +297,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     const { exitCode, stderr } = await run(process.execPath, [
       cliPath,
       "convert-package",
+      ...(patches?.keepParagraphs == null ? [] : ["--keep-paragraphs"]),
       path.join(unitRoot, "scripts"),
       packageRoot,
     ]);
@@ -311,7 +314,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     step = "media";
     const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
     step = "report";
-    const report = await unitReport(unitRoot, packageRoot);
+    const report = await unitReport(unitRoot, packageRoot, patches?.keepParagraphs != null);
     const record: ConversionRecord = {
       source: path.join(corpusRoot, id),
       converter: options.converter,
@@ -324,6 +327,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
               layer,
               sha256: patches.hashes.get(patchId)!,
             })),
+      ...(patches?.keepParagraphs == null ? {} : { keepParagraphs: patches.keepParagraphs }),
       unitStatus: await unitStatus(corpusRoot, id),
       exitCode,
       ...media,
@@ -387,7 +391,7 @@ export async function reportUnit(options: UnitOptions): Promise<UnitResult | "re
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
     step = "report";
-    const report = await unitReport(unitRoot, published);
+    const report = await unitReport(unitRoot, published, patches?.keepParagraphs != null);
     const temporary = path.join(published, ".report.json.tmp");
     await writeFile(temporary, `${JSON.stringify(report)}\n`);
     await rename(temporary, path.join(published, ".report.json"));
@@ -489,11 +493,16 @@ async function linkMedia(
  * The importer's report of a unit's sources, with compiler checks and smoke runs, and with `finalPackage` checking
  * the package as written. A report that fails or is not a JSON object fails the unit.
  */
-async function unitReport(unitRoot: string, packageRoot: string): Promise<Record<string, unknown>> {
+async function unitReport(
+  unitRoot: string,
+  packageRoot: string,
+  keepParagraphs: boolean,
+): Promise<Record<string, unknown>> {
   const { exitCode, stdout, stderr } = await run(process.execPath, [
     cliPath,
     "report",
     "--run",
+    ...(keepParagraphs ? ["--keep-paragraphs"] : []),
     "--package",
     packageRoot,
     path.join(unitRoot, "scripts"),

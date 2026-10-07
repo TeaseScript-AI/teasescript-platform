@@ -148,6 +148,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
           ...(value.question === undefined ? {} : { question: expression(value.question) }),
           ...(value.fields === undefined ? {} : { fields: expression(value.fields) }),
           ...(value.submit === undefined ? {} : { submit: expression(value.submit) }),
+          ...(value.outro === undefined ? {} : { outro: expression(value.outro) }),
           ...(value.defaultValue === undefined
             ? {}
             : { defaultValue: expression(value.defaultValue) }),

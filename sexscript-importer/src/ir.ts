@@ -267,6 +267,8 @@ export type IrExpression =
       fields?: IrExpression;
       /** The text of an `askForm`'s submit button. */
       submit?: IrExpression;
+      /** The prose an `askForm` says after its question when it opens, after the fields' descriptions. */
+      outro?: IrExpression;
       /** Asks `as` this speaker. */
       speaker?: string;
     }

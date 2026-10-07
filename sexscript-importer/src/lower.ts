@@ -40,6 +40,7 @@ import {
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
+import { withParagraphs } from "./paragraphs.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -102,6 +103,8 @@ export type HelperRegistry = ReadonlyMap<string, ReadonlyMap<string, HelperFunct
 
 export interface LowerOptions {
   helperRegistry?: HelperRegistry;
+  /** Keeps a text with blank lines as one message instead of one per paragraph (withParagraphs), for a whole unit. */
+  keepParagraphs?: boolean;
   /** Functions defined anywhere in the package, such as runtime-loaded mixin methods. */
   packageFunctions?: ReadonlySet<string>;
   /** Runtime-loaded mixin modules of the package. */
@@ -1421,12 +1424,16 @@ export function lowerParsedFile(
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
-    ...withAskQuestions(
-      withoutRepeatedText(
-        withoutBlankText(typedStatements, context.diagnostics, mixin === null),
+    ...withParagraphs(
+      withAskQuestions(
+        withoutRepeatedText(
+          withoutBlankText(typedStatements, context.diagnostics, mixin === null),
+          context.diagnostics,
+        ),
         context.diagnostics,
       ),
       context.diagnostics,
+      options.keepParagraphs === true,
     ),
   ];
   if (body?.kind !== "block") {

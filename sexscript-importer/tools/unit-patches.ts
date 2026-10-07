@@ -52,6 +52,11 @@ export interface UnitPatches {
   readonly patches: readonly UnitPatch[];
   /** SHA-256 of each patch by id: its diff file, or its manifest entry. */
   readonly hashes: ReadonlyMap<string, string>;
+  /**
+   * Why the unit keeps texts with blank lines as one message each, where its blank lines are layout, such as ASCII
+   * art or tables (`"keepParagraphs": { "reason": ... }` in the manifest); null where texts split into paragraphs.
+   */
+  readonly keepParagraphs: string | null;
 }
 
 /** A patch that is invalid, stale, or does not apply. */
@@ -81,8 +86,21 @@ export async function readUnitPatches(
   } catch (error) {
     throw new PatchError(`${where} is not JSON: ${String(error)}`);
   }
-  if (!isRecord(manifest) || !onlyKeys(manifest, ["patches"]) || !Array.isArray(manifest.patches))
+  if (
+    !isRecord(manifest) ||
+    !onlyKeys(manifest, ["patches", "keepParagraphs"]) ||
+    !Array.isArray(manifest.patches)
+  )
     throw new PatchError(`${where} must be an object with a "patches" list`);
+  const keep = manifest.keepParagraphs;
+  if (
+    keep !== undefined &&
+    (!isRecord(keep) ||
+      !onlyKeys(keep, ["reason"]) ||
+      typeof keep.reason !== "string" ||
+      keep.reason.trim() === "")
+  )
+    throw new PatchError(`${where} has a "keepParagraphs" that is not { "reason": text }`);
   const patches: UnitPatch[] = [];
   const hashes = new Map<string, string>();
   for (const [index, entry] of manifest.patches.entries()) {
@@ -97,7 +115,12 @@ export async function readUnitPatches(
     } else hashes.set(patch.id, sha256(JSON.stringify(entry)));
     patches.push(patch);
   }
-  return { folder, patches, hashes };
+  return {
+    folder,
+    patches,
+    hashes,
+    keepParagraphs: isRecord(keep) && typeof keep.reason === "string" ? keep.reason : null,
+  };
 }
 
 /** The unit files a diff changes, by their paths from the unit folder. */

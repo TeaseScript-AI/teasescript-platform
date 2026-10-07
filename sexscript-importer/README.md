@@ -202,6 +202,9 @@ Script-specific fixes stay out of the converter (owner decision 2026-10-05). The
   count, fails the unit for review. An anchor needs code: generated `// NOTE` and `// TODO` lines move as the converter
   changes. A patch that removes a TODO needs its diagnostic actually resolved.
 - Every patch needs an `id` and a `reason`; `category` is free text, such as the inspection category.
+- `"keepParagraphs": { "reason": "…" }` beside `"patches"` keeps each text with blank lines as one message for the
+  whole unit, where its blank lines are layout, such as ASCII art, tables, or stat blocks, that the converter does not
+  recognize as such (see COMPATIBILITY-GAPS.md). Conversion then passes `--keep-paragraphs` to `convert-package`.
 
 The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
 page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and
