@@ -532,3 +532,30 @@ exit
   ]);
   assert.deepEqual(session.inspect(), inspectRuntimeState(plan, snapshot));
 });
+
+test("callReturnInstructions gives where each active call continues, outermost first", () => {
+  const plan = compileValidPlan(`function inner(first) {
+    let answer = choose first, "b"
+    return answer
+}
+function outer(first) {
+    let picked = inner(first)
+    return picked
+}
+let result = outer("a")
+say result, instant
+exit
+`);
+  const session = createRuntimeSession(plan, createImmediatePacingRuntimeSnapshot(plan));
+  session.run();
+  const returns = session.callReturnInstructions();
+  assert.equal(returns.length, 2);
+  assert.deepEqual(
+    returns,
+    session.exportSnapshot().callFrames.map((frame) => frame.returnInstruction),
+  );
+  assert.ok(Object.isFrozen(returns));
+  session.completeAction(choiceRequest(session, 1));
+  session.run();
+  assert.deepEqual(session.callReturnInstructions(), []);
+});
