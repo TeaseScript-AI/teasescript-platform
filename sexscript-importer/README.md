@@ -280,7 +280,7 @@ buttons) are renumbered by rank, because only their equality and order matter. T
 in. The search first expands directed states (below), then states whose step reached new instructions in any
 session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
-first. With `--cells`, the search ranks states by cells. A cell is where a state waits (its pending action, the return
+first. The search ranks states by cells (`--no-cells` switches this off). A cell is where a state waits (its pending action, the return
 points of its calls, and the pass of each `for` and `repeat` loop) with the bucket of each value that conditions compare
 with constants: each variable and stored key (also through the data flow, each key a key template matches apart) a
 comparison reads, or its length, bucketed as unset, `null`, `true` or `false`, a compared text or other text, or a

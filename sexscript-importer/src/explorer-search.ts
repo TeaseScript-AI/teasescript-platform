@@ -173,7 +173,7 @@ export interface ExploreOptions {
   /**
    * Cell ranking ({@link Cells}): among states that reached nothing new, those whose cell was expanded least go first,
    * and a step that shows a compared slot's value or change of value for the first time counts as reaching something
-   * new. Off by default.
+   * new. On unless `false`.
    */
   readonly cells?: boolean;
   /**
@@ -925,7 +925,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   const allConstants = new Map(constants);
   for (const [index, found] of fixed) allConstants.set(index, found.value);
-  const cells = options.cells === true ? new Cells(comparedSlots(flow, instructions)) : null;
+  const cells = options.cells === false ? null : new Cells(comparedSlots(flow, instructions));
   const elseIfs =
     options.realign === true ? elseIfChains(instructions) : new Map<number, number[]>();
   const store = new SnapshotStore();
