@@ -215,9 +215,9 @@ function resolveComputed(
     file < 0
       ? `This ${keyword} names the file '${messageText(path)}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
       : target === undefined
-        ? `This ${keyword} names label '${messageText(label!)}' of '${path}', but that file has no such label.`
+        ? `This ${keyword} names label '${messageText(label!)}' of '${messageText(path)}', but that file has no such label.`
         : keyword !== "call" && runsNothing(plan, file)
-          ? `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+          ? `'${messageText(path)}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
           : null;
   if (problem !== null) throw new RuntimeFault("TSR069", problem, copySpan(span));
   return { file, target: target! };

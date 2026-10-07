@@ -3186,7 +3186,7 @@ function planLabel(plan: ExpressionPlan): string | null {
     } else break;
   }
   if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
-    return quotedText(current.value);
+    return quotedText(messageText(current.value));
   if (current.kind !== "identifier") return null;
   names.push(current.name);
   return names.reverse().join(".");

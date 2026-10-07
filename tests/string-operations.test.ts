@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { constants } from "node:buffer";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
 import { MAX_TEXT_LENGTH } from "../src/runtime/text-length.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
@@ -612,6 +612,28 @@ test("an error message cuts the script's text it quotes, and a text no check for
   assert.deepEqual(
     [missing?.code, missing?.message],
     ["TSR061", `Dictionary has no key "${"k".repeat(1_024)}…". Check stock.contains(key) first.`],
+  );
+  const literal = runValidSource(`let stock = dict{ "a": 1 }\nlet count = stock["${key}"]\nexit`)
+    .snapshot.failure;
+  const cut = `"${"k".repeat(1_024)}…"`;
+  assert.equal(
+    literal?.message,
+    `Dictionary has no key ${cut}. Check stock.contains(${cut}) first.`,
+  );
+  const path = `${"d".repeat(2_000)}.tease`;
+  const project = compileProject([
+    {
+      path: "main.tease",
+      source: `let target = "${path}"\ncall script(target, label: "missing")\nexit`,
+    },
+    { path, source: "exit" },
+  ]);
+  assert.ok(project.plan !== null);
+  const unlabeled = run(project.plan, createImmediatePacingRuntimeSnapshot(project.plan)).snapshot
+    .failure;
+  assert.equal(
+    unlabeled?.message,
+    `This call names label 'missing' of '${"d".repeat(1_024)}…', but that file has no such label.`,
   );
   // V8 says that a text is too long with this error.
   context.mock.method(String.prototype, "toUpperCase", () => {

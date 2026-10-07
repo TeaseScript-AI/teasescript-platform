@@ -116,6 +116,8 @@ export function materializeForm(
   const fields: FormField[] = [];
   const values: RuntimeFormValue[] = [];
   const descriptions: { readonly label: string; readonly description: string }[] = [];
+  // The length of the description lines, without the line breaks between them, counted as they are added.
+  let described = 0;
   // Fields and their options share the interaction's entry limit, checked as each field is added.
   let entries = 0;
   const add = (field: FormField, value: RuntimeFormValue) => {
@@ -183,10 +185,9 @@ export function materializeForm(
         // Escaping puts a backslash before some characters, so only a label that could get too long is measured first.
         if (field.field.text.length * 2 > MAX_TEXT_LENGTH)
           checkTextLength(escapedMarkupLength(field.field.text), "askForm", span);
-        descriptions.push({
-          label: escapeMarkup(field.field.text),
-          description: field.description,
-        });
+        const label = escapeMarkup(field.field.text);
+        descriptions.push({ label, description: field.description });
+        described += label.length + 3 + field.description.length;
       }
     }
   }
@@ -195,7 +196,7 @@ export function materializeForm(
   if (mismatch !== null)
     throw new RuntimeFault(
       "TSR058",
-      `askForm field '${mismatch.field.id}' was checked to answer ${describeType(mismatch.type)}, but it can answer ${describeValue(mismatch.answer)}. Write type: where the field's starting object is created, so the compiler sees its kind.`,
+      `askForm field '${messageText(mismatch.field.id)}' was checked to answer ${describeType(mismatch.type)}, but it can answer ${describeValue(mismatch.answer)}. Write type: where the field's starting object is created, so the compiler sees its kind.`,
       copySpan(span),
     );
   const timeout = formTimeout(timeoutValue, onTimeout, span);
@@ -209,10 +210,7 @@ export function materializeForm(
       );
   }
   // Each description is `<label> — <description>` on a line of its own, and the outro follows after a blank line.
-  const lines = descriptions.reduce(
-    (length, { label, description }) => length + label.length + 3 + description.length + 1,
-    -Math.min(1, descriptions.length),
-  );
+  const lines = described + Math.max(0, descriptions.length - 1);
   checkTextLength(lines + (outro ? outro.length + (lines > 0 ? 2 : 0) : 0), "askForm", span);
   const prose = [
     descriptions.map(({ label, description }) => `${label} — ${description}`).join("\n"),
