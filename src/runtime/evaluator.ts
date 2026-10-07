@@ -65,6 +65,7 @@ import {
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
 import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
+import { boundedText, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -230,6 +231,13 @@ export interface RuntimeCapabilities {
 }
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
+
+/** `text` with `part` of a `"${...}"` text appended; `TSR084` when the text would be too long. */
+function templateText(text: string, part: string, span: SourceSpan): string {
+  // The later placeholders have not run yet, so the length the whole text would reach is not known.
+  if (text.length + part.length > MAX_TEXT_LENGTH) throw textTooLong("${…}", span, null);
+  return text + part;
+}
 
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
@@ -802,7 +810,11 @@ export class Evaluator {
             const part = expression.parts[frame.index - 1]!;
             if (part.kind === "expression") {
               if (trace === null)
-                frame.text += this.interpolationText(result.value, part.expression.span);
+                frame.text = templateText(
+                  frame.text,
+                  this.interpolationText(result.value, part.expression.span),
+                  expression.span,
+                );
               else {
                 // A list's selection draw belongs to the placeholder, whose text the string then depends on.
                 const placeholder = finished?.deps ?? emptyDependencies();
@@ -810,7 +822,7 @@ export class Evaluator {
                 const text = this.interpolationText(result.value, part.expression.span);
                 trace.focus(frame.deps!, null, false);
                 trace.interpolation(placeholder, text, part.expression.span);
-                frame.text += text;
+                frame.text = templateText(frame.text, text, expression.span);
               }
             }
           }
@@ -819,7 +831,8 @@ export class Evaluator {
             expression.parts[frame.index]!.kind === "text"
           ) {
             const part = expression.parts[frame.index++]!;
-            if (part.kind === "text") frame.text += part.value;
+            if (part.kind === "text")
+              frame.text = templateText(frame.text, part.value, expression.span);
           }
           if (frame.index < expression.parts.length) {
             const part = expression.parts[frame.index++]!;
@@ -1414,13 +1427,17 @@ export class Evaluator {
       }
       displayName = explicit;
     } else {
-      const derived = [
+      const parts = [
         this.#speakerText(speaker, "title", span) ?? this.#speakerText(speaker, "shortTitle", span),
         this.#speakerText(speaker, "firstName", span),
         this.#speakerText(speaker, "lastName", span),
-      ]
-        .filter((part): part is string => part !== null && part.length > 0)
-        .join(" ");
+      ].filter((part): part is string => part !== null && part.length > 0);
+      checkTextLength(
+        parts.reduce((length, part) => length + part.length + 1, -1),
+        "say",
+        span,
+      );
+      const derived = parts.join(" ");
       displayName = derived.length === 0 ? speaker.identifier : derived;
       fallback = derived.length === 0;
     }
@@ -1475,9 +1492,15 @@ export class Evaluator {
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
     // A script reference shows as the call that makes it, which is notation too.
-    return isVisibleScalar(value) && !isScriptReference(value)
-      ? visibleText(value, span, currentTemporalContext(this.snapshot))
-      : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
+    if (isVisibleScalar(value) && !isScriptReference(value))
+      return visibleText(value, span, currentTemporalContext(this.snapshot));
+    const notation = valueNotation(
+      value,
+      span,
+      (handle) => this.#handleNotation(handle, span),
+      "say",
+    );
+    return boundedText(() => escapeMarkup(notation), "say", span);
   }
 
   /**
@@ -1618,7 +1641,10 @@ export class Evaluator {
     left: SerializableRuntimeValue,
     right: SerializableRuntimeValue,
   ): SerializableRuntimeValue {
-    if (typeof left === "string" && typeof right === "string") return left + right;
+    if (typeof left === "string" && typeof right === "string") {
+      checkTextLength(left.length + right.length, "joining with +", expression.span);
+      return left + right;
+    }
     if (isList(left) && isList(right))
       return createCapturedSerializableList(left.items.concat(right.items));
     throw fault(
@@ -2046,7 +2072,14 @@ export class Evaluator {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
           const separator = (positional[0] as string | undefined) ?? ", ";
-          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+          const texts = receiver.items.map((item) => this.#joinedText(item, span));
+          checkTextLength(
+            texts.reduce((length, text) => length + text.length, 0) +
+              separator.length * Math.max(0, texts.length - 1),
+            "join",
+            span,
+          );
+          return texts.join(separator);
         }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);

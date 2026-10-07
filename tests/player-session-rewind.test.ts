@@ -8,6 +8,7 @@ import type { DebugRecorder } from "../player/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
   playerRuntimeForeground,
+  restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -269,10 +270,12 @@ const script = [
   "exit",
 ].join("\n");
 
-async function start(context: TestContext, host: RewindHost, source = script) {
+const SCOPES_USED_UP = /nextScopeId cannot be advanced safely/u;
+
+async function start(context: TestContext, host: RewindHost) {
   await host.loadScriptStorage();
   host.prepare((recording) =>
-    createPlayerRuntimeSession(source, { ...host.scriptStorageOptions(), ...recording }),
+    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
   );
   host.activate();
   await settle(context);
@@ -336,25 +339,33 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
 
 test("after an engine call throws, the export, Back, Forward, and Return work from the state the Player showed", async (context) => {
   const { host, rewind } = createHost(context, memoryStorage().provider);
-  // A text longer than JavaScript can hold throws in the middle of the run after the second answer.
-  await start(
-    context,
-    host,
-    [
-      'let first = choose "One", "Two"',
-      'say "first ${first}", instant',
-      'let second = choose "Red", "Long"',
-      'if second == "Long" {',
-      '  let long = "x".repeat(9007199254740991)',
-      "}",
-      'say "second ${second}", instant',
-      "exit",
-    ].join("\n"),
+  // With the scope IDs used up, the run after the second answer throws (TSR101) when it enters the block, an error no
+  // script reaches otherwise.
+  const source = [
+    'let first = choose "One", "Two"',
+    'say "first ${first}", instant',
+    'let second = choose "Red", "Long"',
+    'if second == "Long" {',
+    '  say "deep", instant',
+    "}",
+    'say "second ${second}", instant',
+    "exit",
+  ].join("\n");
+  await host.loadScriptStorage();
+  const started = createPlayerRuntimeSession(source, host.scriptStorageOptions());
+  const usedUp = JSON.stringify({
+    ...playerRuntimeSnapshot(started),
+    nextScopeId: Number.MAX_SAFE_INTEGER,
+  });
+  host.prepare(({ recorder }) =>
+    restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events, recorder),
   );
+  host.activate();
+  await settle(context);
   await choose(context, host, "One");
   const tip = host.session.value!;
   const shown = playerRuntimeSnapshot(tip);
-  await assert.rejects(choose(context, host, "Long"), RangeError);
+  await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
   assert.equal(host.session.value, tip);
 
   const candidate = await host.debugExportCandidate({});
@@ -362,17 +373,16 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   assert.deepEqual(
     candidate.recording?.operations.map((operation) => [operation.kind, operation.thrown]),
     [
-      ["run", null],
       ["completeAction", null],
       ["run", null],
       ["completeAction", null],
-      ["run", "RangeError"],
+      ["run", "RuntimeDataError"],
     ],
   );
   assert.equal(candidate.recording?.complete, true);
 
   // After another error, Back keeps the state it left, the one the Player showed, for Forward.
-  await assert.rejects(choose(context, host, "Long"), RangeError);
+  await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
   assert.equal(await rewind.back(0), true);
   assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "choose");
   assert.equal(await rewind.forward(), true);
