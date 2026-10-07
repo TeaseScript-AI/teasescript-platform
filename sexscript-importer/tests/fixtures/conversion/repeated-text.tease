@@ -6,10 +6,13 @@ say "Do you accept?"
 if (choose yes: "Yes", no: "No") == "yes" {
   say "Good."
 }
-// Growing dots, which only add punctuation between waits, are an animation and stay.
-say "Deciding."
-say "Deciding.."
-say "Deciding..."
+// Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
+let line = say "Deciding.", instant
+wait 1
+line.text += "."
+wait 1
+line.text += "."
+wait 1
 // A question that repeats the text before it asks without saying it again.
 let days = askInteger "How many days?", default: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.

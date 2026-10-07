@@ -43,6 +43,7 @@ import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repea
 import { withParagraphs } from "./paragraphs.ts";
 import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
+import { withMessageHandles } from "./message-handles.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1424,13 +1425,15 @@ export function lowerParsedFile(
       context.syntheticHelpers.delete("truth");
   }
   // The passes over the typed statements, in this order: a button's seconds kept as a duration, empty texts dropped,
-  // legacy waits replaced by reading time, repeated texts shortened, texts folded into asks, paragraphs split, and
-  // `instant` taken away where it would cut a reading time short.
+  // animations and counters made messages that change in place, legacy waits replaced by reading time, repeated texts
+  // shortened, texts folded into asks, paragraphs split, and `instant` taken away where it would cut a reading time
+  // short.
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
   let texts = withElapsedDurations(typedStatements, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
+  texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withReadingTimes(texts, diagnostics);
   texts = withoutRepeatedText(texts, diagnostics);
   texts = withAskQuestions(texts, diagnostics);
@@ -1621,10 +1624,14 @@ function lowerHelperCompilationUnit(
   const { diagnostics } = baseContext;
   const typedStatements = withoutCutReadingTimes(
     withReadingTimes(
-      withElapsedDurations(
-        withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+      withMessageHandles(
+        withElapsedDurations(
+          withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+          diagnostics,
+          true,
+        ),
         diagnostics,
-        true,
+        false,
       ),
       diagnostics,
     ),
@@ -2529,6 +2536,7 @@ function hasIrCall(expression: IrExpression): boolean {
     case "load":
       return true;
     case "button":
+    case "message":
       return true;
     case "literal":
     case "duration":

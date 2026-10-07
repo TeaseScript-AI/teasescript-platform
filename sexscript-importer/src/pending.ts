@@ -159,6 +159,8 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
           label: expression(value.label),
           timeout: value.timeout === null ? null : expression(value.timeout),
         };
+      case "message":
+        return { ...value, value: expression(value.value) };
       case "literal":
       case "duration":
       case "variable":

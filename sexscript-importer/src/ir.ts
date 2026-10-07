@@ -297,6 +297,11 @@ export type IrExpression =
       value: number;
       unit: "s" | "ms" | "min" | "h" | "day" | "week" | "month" | "year";
     }
+  /**
+   * A `say` used as a value: it shows its text as a `say` statement does and gives the message's handle, whose `text`
+   * changes the message in place (V30 "Updatable messages").
+   */
+  | { kind: "message"; value: IrExpression; instant?: true; speaker?: string }
   /** `showButton label, timeout: t` used as a value: the elapsed duration until the click or the timeout (#531). */
   | { kind: "button"; label: IrExpression; timeout: IrExpression | null }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }

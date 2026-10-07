@@ -152,6 +152,23 @@ function textValue(tokens: readonly Token[]): IrExpression {
   return { kind: "template", parts };
 }
 
+/** Whether the text `next` adds only punctuation to the text `earlier`, a step of an animation such as growing dots. */
+export function addsOnlyMarks(earlier: IrExpression, next: IrExpression): boolean {
+  const before = textTokens(earlier);
+  const after = textTokens(next);
+  return before !== null && after !== null && growsByMarks(before, after);
+}
+
+/** What the text `next` adds after the whole text `earlier`, exactly as written; null where it does not start with it. */
+export function addedText(earlier: IrExpression, next: IrExpression): IrExpression | null {
+  const before = textTokens(earlier);
+  const after = textTokens(next);
+  if (before === null || after === null || after.length <= before.length) return null;
+  return before.every((token, index) => sameToken(token, after[index]!))
+    ? textValue(after.slice(before.length))
+    : null;
+}
+
 /** Whether `next` is `earlier` in full, whitespace runs alike, followed by punctuation and whitespace only. */
 function growsByMarks(earlier: readonly Token[], next: readonly Token[]): boolean {
   const flat = (tokens: readonly Token[]): string =>
@@ -492,6 +509,7 @@ function ownEffect(value: IrExpression): boolean {
     case "choice":
     case "listChoice":
     case "button":
+    case "message":
       return true;
     default:
       return false;

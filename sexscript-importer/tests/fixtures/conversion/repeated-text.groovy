@@ -5,7 +5,7 @@ show("I will decide when you get to cum from now on.")
 wait(5)
 if (getBoolean("I will decide when you get to cum from now on \n\n" +
     "Do you accept?")) show("Good.")
-// Growing dots, which only add punctuation between waits, are an animation and stay.
+// Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
 show("Deciding.")
 wait(1)
 show("Deciding..")

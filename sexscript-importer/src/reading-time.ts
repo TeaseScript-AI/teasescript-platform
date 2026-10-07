@@ -107,19 +107,29 @@ export function withoutCutReadingTimes(
         running,
       ];
     const left = ENDS_READING.has(item.kind) || asks(item) ? 0 : running;
+    const paced = (statement: IrStatement): void => {
+      if (!trial)
+        diagnostics.push({
+          code: "SX_WAIT_KEPT_PACED",
+          severity: "info",
+          message:
+            "This text keeps its reading time: `instant` would cut short the reading time of a text before it that replaced a legacy wait; the text waits for that one first.",
+          span: statement.span,
+        });
+    };
+    // A message kept in a handle (withMessageHandles) is said as a `say` is.
+    if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
+      const { instant, ...message } = item.value;
+      if (instant !== true || left === 0) return [item, 0];
+      paced(item);
+      return [{ ...item, value: message }, shortestReadingTime(message.value)];
+    }
     switch (item.kind) {
       case "say": {
         if (item.instant === true && left > 0) {
-          if (!trial)
-            diagnostics.push({
-              code: "SX_WAIT_KEPT_PACED",
-              severity: "info",
-              message:
-                "This text keeps its reading time: `instant` would cut short the reading time of a text before it that replaced a legacy wait; the text waits for that one first.",
-              span: item.span,
-            });
-          const { instant: _instant, ...paced } = item;
-          return [paced, shortestReadingTime(item.value)];
+          paced(item);
+          const { instant: _instant, ...rest } = item;
+          return [rest, shortestReadingTime(item.value)];
         }
         if (item.instant === true) return [item, 0];
         return [item, item.readingTime === true ? shortestReadingTime(item.value) : 0];

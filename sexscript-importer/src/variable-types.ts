@@ -1937,6 +1937,8 @@ export function expressionType(
     case "duration":
     case "button":
       return scalar("duration");
+    case "message":
+      return UNKNOWN;
     case "template":
       return scalar("string");
     case "variable":
@@ -2350,5 +2352,7 @@ export function mapChildren(
         label: map(value.label),
         timeout: value.timeout === null ? null : map(value.timeout),
       };
+    case "message":
+      return { ...value, value: map(value.value) };
   }
 }

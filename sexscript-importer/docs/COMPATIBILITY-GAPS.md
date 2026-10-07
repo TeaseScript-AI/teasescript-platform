@@ -568,6 +568,16 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   counted as `missingMedia` in the report, 190 paths in 18 selected units; a photo the package copies to the path is
   no missing file). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General MIDI soundfont, then
   ffmpeg).
+- Updatable messages (owner decision 2026-10-07, V30 "Updatable messages"): the legacy display was redrawn to
+  animate a text or to count, where TeaseScript changes a shown message in place. An animation, texts that each add
+  only punctuation to the one before with only waits between them, becomes `let line = say "Deciding.", instant` and
+  `line.text += "."` (or `= text`) per step (`SX_MESSAGE_ANIMATION`, counted as `messageHandles.animations`). A loop
+  whose body says one text with a value computed at runtime, where the last text said before the loop, with nothing
+  that says, asks, or shows a button in between, is the same line with a count or placeholder in place of the value
+  (`20 jerks` before `${i} jerks`, or the same text with its values), becomes `let counter = say …, instant` before
+  the loop and `counter.text = …` in it, as Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`).
+  The waits between the steps stay as they are, since the pacing rule below only touches waits right after a `say`;
+  other loops keep one message per pass, and a module's code outside its functions keeps its texts.
 - Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
   the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
   more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an
@@ -582,7 +592,7 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is
   dropped, joining the waits around it; a text that adds only punctuation, with only waits between, is an animation
-  such as growing dots and stays (owner decision 2026-10-06, counted as `animation`). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
+  such as growing dots, which becomes one updatable message (below). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
   the repeat ends at a word boundary, and only literal text and interpolations of identical expressions compare. Any
   other statement, a nested block, or a call in an image or sound starts over. The display also kept the last text
   across a chain to the next script: before a `goto` to a script whose start shows the same literal texts again, with

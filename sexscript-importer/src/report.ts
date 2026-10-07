@@ -213,6 +213,8 @@ export interface FeasibilityReport {
    * (`compared`), and variables that hold such a duration (`variables`).
    */
   buttonDurations: { compared: number; variables: number };
+  /** Texts the legacy display redrew, now one message changed in place (withMessageHandles). */
+  messageHandles: { animations: number; counters: number };
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
@@ -357,6 +359,7 @@ export function analyzeFeasibility(
     },
     readingWaits: { replaced: 0, kept: 0, keptPaced: 0, shortened: 0, dropped: 0 },
     buttonDurations: { compared: 0, variables: 0 },
+    messageHandles: { animations: 0, counters: 0 },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -479,6 +482,8 @@ export function analyzeFeasibility(
       else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
       else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;
       else if (code === "SX_BUTTON_DURATION_VARIABLE") report.buttonDurations.variables += 1;
+      else if (code === "SX_MESSAGE_ANIMATION") report.messageHandles.animations += 1;
+      else if (code === "SX_MESSAGE_COUNTER") report.messageHandles.counters += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;
