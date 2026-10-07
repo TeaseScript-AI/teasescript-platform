@@ -27,9 +27,10 @@ const visibleText = await loadVisibleText();
  * The reading time is measured on the whole legacy text, before withParagraphs splits it and withoutRepeatedText
  * shortens it, as the visible text of its message markup; a value interpolated at runtime counts as empty, so the
  * measure is the shortest reading time the text can have. A wait stays as it is where another wait follows it, a pause
- * the author made; after the system speaker's text, which the importer adds; and where it is a loop's tick, a second
- * at most after a text the loop's body builds anew each pass, as a clock or a countdown does (whether such ticks
- * should become reading time is open to the owner).
+ * the author made; after the system speaker's text, which the importer adds; and where it keeps a beat (owner decision
+ * 2026-10-07): after a text without letters, which has nothing to read (`3`, `...`), and a loop's tick, a second at
+ * most after a text the loop's body builds anew each pass, as a clock or a countdown does. A beat's text keeps
+ * `instant`. Animations keep their waits as updatable messages (withMessageHandles).
  */
 export function withReadingTimes(
   statements: IrStatement[],
@@ -71,6 +72,16 @@ export function withReadingTimes(
         result[index] = { ...statement, instant: true };
         return;
       }
+      // A text without letters, such as `3` or `...`, has nothing to read: its wait is a beat, as of a countdown.
+      if (letterless(statement.value)) {
+        report(
+          "SX_WAIT_BEAT",
+          "This text has no words to read, a count or a pause such as `3` or `...`, so the legacy wait after it is its beat, which stays, and the text appears without reading time.",
+          statement,
+        );
+        result[index] = { ...statement, instant: true, beat: true };
+        return;
+      }
       // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown.
       if (loopBody && milliseconds <= TICK_MS && builtAtRuntime(statement.value)) {
         report(
@@ -78,7 +89,7 @@ export function withReadingTimes(
           "The legacy wait after this text, which the loop builds anew each pass, is the loop's tick, a clock or a countdown, so it stays and the text appears without reading time.",
           statement,
         );
-        result[index] = { ...statement, instant: true, tick: true };
+        result[index] = { ...statement, instant: true, beat: true };
         return;
       }
       report(
@@ -143,8 +154,8 @@ export function withoutCutReadingTimes(
         // The text is computed first, which may say something itself.
         const before = afterExpressions(item, running);
         if (item.instant === true) {
-          // A loop's tick stays as the legacy script timed it.
-          if (before === 0 || item.tick === true) return [item, 0];
+          // A beat stays as the legacy script timed it.
+          if (before === 0 || item.beat === true) return [item, 0];
           paced(item);
           const { instant: _instant, ...rest } = item;
           return [rest, 0];
@@ -287,6 +298,16 @@ function readingLength(value: IrExpression): number {
 
 function significant(statement: IrStatement): boolean {
   return statement.kind !== "blank" && statement.kind !== "comment";
+}
+
+/** Whether a fixed text shows no letter, as a count or a pause does (`3`, `?`, `. . .`). */
+function letterless(value: IrExpression): boolean {
+  return (
+    value.kind === "literal" &&
+    typeof value.value === "string" &&
+    value.value.trim() !== "" &&
+    !/\p{L}/u.test(visibleText(value.value))
+  );
 }
 
 /** Whether a text holds a value computed at runtime, or is one. */

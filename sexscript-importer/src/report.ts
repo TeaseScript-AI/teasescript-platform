@@ -198,13 +198,14 @@ export interface FeasibilityReport {
   };
   /**
    * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
-   * than 1.5 times it, or kept as a loop's `ticks`; `keptPaced` texts that keep their reading time where a replaced
+   * than 1.5 times it, or kept as the `beats` of texts without letters or a loop's `ticks`; `keptPaced` texts that keep their reading time where a replaced
    * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`.
    */
   readingWaits: {
     replaced: number;
     kept: number;
     keptPaced: number;
+    beats: number;
     ticks: number;
     shortened: number;
     dropped: number;
@@ -358,7 +359,15 @@ export function analyzeFeasibility(
       layout: 0,
       kept: 0,
     },
-    readingWaits: { replaced: 0, kept: 0, keptPaced: 0, ticks: 0, shortened: 0, dropped: 0 },
+    readingWaits: {
+      replaced: 0,
+      kept: 0,
+      keptPaced: 0,
+      beats: 0,
+      ticks: 0,
+      shortened: 0,
+      dropped: 0,
+    },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
     backwardLineJumps: 0,
@@ -479,6 +488,7 @@ export function analyzeFeasibility(
       else if (code === "SX_WAIT_READING") report.readingWaits.replaced += 1;
       else if (code === "SX_WAIT_KEPT") report.readingWaits.kept += 1;
       else if (code === "SX_WAIT_KEPT_PACED") report.readingWaits.keptPaced += 1;
+      else if (code === "SX_WAIT_BEAT") report.readingWaits.beats += 1;
       else if (code === "SX_WAIT_TICK") report.readingWaits.ticks += 1;
       else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
       else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;

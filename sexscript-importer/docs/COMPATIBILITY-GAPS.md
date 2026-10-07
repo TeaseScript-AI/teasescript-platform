@@ -597,9 +597,10 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   `keptPaced`). A fixed text's own reading time is shorter than the literal kept wait after it, so only a pending
   reading time delays it; a text with values, or one before a computed wait, may also make the pause longer by its
   own reading time. Computed waits, a wait that another wait follows, waits after
-  the importer's system texts, and a loop's tick, a wait of a second at most after a text the loop's body builds anew
-  each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`; whether ticks should become reading time is open
-  to the owner), keep their `instant` text as before.
+  the importer's system texts, and beats keep their `instant` text as before. Beats (owner decision 2026-10-07): the
+  wait after a text without letters, a count or a pause such as `3` or `. . .` (`SX_WAIT_BEAT`, `beats`), and a loop's
+  tick, a wait of a second at most after a text the loop's body builds anew each pass, as in a countdown or a clock
+  (`SX_WAIT_TICK`, `ticks`); animations keep theirs as updatable messages (above).
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is

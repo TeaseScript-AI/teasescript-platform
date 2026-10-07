@@ -32,8 +32,12 @@ showButton("Done")
 show("Stay there.")
 wait(30)
 
-// A wait of a second at most after a text that a loop builds anew each pass is the loop's tick, as in a countdown, and
-// stays with its text said at once.
+// A count without letters keeps its beat, and so does a wait of a second at most after a text that a loop builds anew
+// each pass, the loop's tick; their texts are said at once.
+show("3")
+wait(1)
+show("2")
+wait(1)
 for (int left = 3; left > 0; left--) {
     show("Starting in " + left)
     wait(1)
