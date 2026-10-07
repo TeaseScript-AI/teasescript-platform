@@ -73,6 +73,7 @@ import type {
   PlayerFormFieldPresentation,
   PlayerFormPresentation,
   PlayerForegroundPresentation,
+  PlayerMessagePresentation,
   PlayerPermanentButtonPresentation,
   PlayerTimerPresentation,
   PlayerSpeakerPresentation,
@@ -94,6 +95,8 @@ export interface PlayerRuntimeSession {
   readonly snapshot: RuntimeSnapshot;
   readonly events: readonly InterpreterEvent[];
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
+  /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
+  readonly transcriptMessageRows: ReadonlyMap<number, number>;
   readonly transcriptRevision: number;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   /** Records the session's engine calls for a debug export; it never changes them. */
@@ -1628,6 +1631,7 @@ function emptySession(
     debugTrace,
     events: [],
     transcriptEntries: [],
+    transcriptMessageRows: new Map(),
     transcriptRevision: 0,
     speakers: { ...DEFAULT_SPEAKERS },
   });
@@ -1653,14 +1657,27 @@ export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
 } {
   const entries: PlayerTranscriptEntryPresentation[] = [];
   const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
-  appendTranscript(entries, speakers, events);
+  appendTranscript(entries, new Map(), speakers, events);
   return { entries, speakers };
 }
 
-// Appends the entries `events` present, in order, and the speakers they name. A choice, button, or form answer is
+/** The script message `entryId` names in the session's transcript, as it shows now, or `null` for any other entry. */
+export function playerRuntimeTranscriptMessage(
+  session: PlayerRuntimeSession,
+  entryId: string,
+): PlayerMessagePresentation | null {
+  const sequence = playerRuntimeTranscriptEventSequence(entryId);
+  const index = sequence === null ? undefined : session.transcriptMessageRows.get(sequence);
+  const entry = index === undefined ? undefined : session.transcriptEntries[index];
+  return entry?.kind === "message" ? entry : null;
+}
+
+// Folds `events` into the transcript, in order: each message or answer appends its entry, keyed by the event that
+// created it, and the speakers they name. `rows` indexes the script messages. A choice, button, or form answer is
 // marked by its settlement, which the same operation emits.
 function appendTranscript(
   transcriptEntries: PlayerTranscriptEntryPresentation[],
+  rows: Map<number, number>,
   speakers: Record<string, PlayerSpeakerPresentation>,
   events: readonly InterpreterEvent[],
 ) {
@@ -1681,6 +1698,7 @@ function appendTranscript(
     if (event.kind === "say") {
       const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
       if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
+      rows.set(event.sequence, transcriptEntries.length);
       transcriptEntries.push(
         Object.freeze({
           kind: "message",
@@ -1688,6 +1706,7 @@ function appendTranscript(
           speakerId,
           text: event.text,
           content: event.content,
+          contentSequence: event.sequence,
           presentation: event.presentation,
         }),
       );
@@ -1718,8 +1737,10 @@ function appendRuntimeEvents(
   const retainedEvents = session.events as InterpreterEvent[];
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
+  // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript index for every session.
+  const messageRows = session.transcriptMessageRows as Map<number, number>;
   for (const event of events) retainedEvents.push(event);
-  appendTranscript(transcriptEntries, speakers, events);
+  appendTranscript(transcriptEntries, messageRows, speakers, events);
   return Object.freeze({
     ...session,
     events: retainedEvents,

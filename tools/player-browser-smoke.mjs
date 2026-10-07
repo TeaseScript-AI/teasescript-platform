@@ -1074,6 +1074,37 @@ async function physicalClick(cdp, selector) {
   }
 }
 
+/**
+ * A physical click once the element stands still and nothing covers its centre. After a session is replaced, as by
+ * Debug's rewind, the transcript remounts, measures its rows, and follows its end, so controls that are already present
+ * move for a few frames, partly under the bar above the composer; a click in that window lands elsewhere.
+ */
+async function settledClick(cdp, selector, timeout = 5_000) {
+  const settled = await evaluate(
+    cdp,
+    `return new Promise((resolve) => {
+      const deadline = performance.now() + ${timeout};
+      let previous = null;
+      let stillFrames = 0;
+      const check = () => {
+        const target = document.querySelector(${JSON.stringify(selector)});
+        const rect = target?.getBoundingClientRect();
+        const position = rect ? [rect.left, rect.top, rect.width, rect.height].join() : null;
+        const centre = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const uncovered = !!centre && target.contains(centre);
+        stillFrames = position !== null && position === previous && uncovered ? stillFrames + 1 : 0;
+        previous = position;
+        if (stillFrames >= 3) resolve(true);
+        else if (performance.now() > deadline) resolve(false);
+        else requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    })`,
+  );
+  if (!settled) throw new Error(`${selector} did not come to rest uncovered`);
+  await physicalClick(cdp, selector);
+}
+
 // A real Space key: unless a handler prevents its default, it types a space into the focused field.
 async function pressSpace(cdp) {
   for (const type of ["keyDown", "keyUp"]) {
@@ -4090,7 +4121,7 @@ async function debugRewindScenario(cdp, origin) {
       cdp,
       `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).setAttribute('data-smoke-answer', '')`,
     );
-    await physicalClick(cdp, "[data-smoke-answer]");
+    await settledClick(cdp, "[data-smoke-answer]");
   };
   // Back to here on the player's answer with this text, scrolled into view first.
   const backToHere = async (text) => {
@@ -4104,7 +4135,7 @@ async function debugRewindScenario(cdp, origin) {
       cdp,
       `document.querySelectorAll('[data-smoke-back]').forEach((button) => button.removeAttribute('data-smoke-back')); const button = [...document.querySelectorAll('.transcript-entry:not([data-future])')].find((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]')).querySelector('[data-back-to-here]'); button.setAttribute('data-smoke-back', ''); button.scrollIntoView({ block: 'center' });`,
     );
-    await physicalClick(cdp, "[data-smoke-back]");
+    await settledClick(cdp, "[data-smoke-back]");
     await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
   };
   const json = (expression) => `JSON.stringify(${expression})`;
@@ -4132,14 +4163,14 @@ async function debugRewindScenario(cdp, origin) {
     "The grey future, its label, or the earlier answer",
   );
   // Forward restores the later state, still inspected; Return reinstates the session.
-  await physicalClick(cdp, "[data-rewind-forward]");
+  await settledClick(cdp, "[data-rewind-forward]");
   await waitFor(
     cdp,
     `${futureText}.length === 0 && ${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["Red", "Fail"]))} && !!document.querySelector('[data-rewind-inspection]') && document.querySelector('[data-rewind-forward]').disabled`,
     5_000,
     "Forward did not restore the later state",
   );
-  await physicalClick(cdp, "[data-rewind-return]");
+  await settledClick(cdp, "[data-rewind-return]");
   await waitFor(
     cdp,
     `!document.querySelector('[data-rewind-inspection]') && ${activeText}.includes('first One')`,
@@ -4174,7 +4205,7 @@ async function debugRewindScenario(cdp, origin) {
   await answer("Fail");
   await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`);
   await backToHere("Fail");
-  await physicalClick(cdp, "[data-rewind-forward]");
+  await settledClick(cdp, "[data-rewind-forward]");
   await waitFor(
     cdp,
     `!!document.querySelector('[data-runtime-failure]') && !!document.querySelector('[data-rewind-inspection]')`,

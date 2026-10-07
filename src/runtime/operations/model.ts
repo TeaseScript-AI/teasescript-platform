@@ -1,11 +1,14 @@
 import type { RuntimeActionSettlementSnapshot } from "../actions/model.js";
 import type { InterpreterEvent } from "../events.js";
+import type { RuntimeInstructionTrace } from "../instruction-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
 
 export interface RuntimeOperationResult {
   readonly snapshot: RuntimeSnapshot;
   readonly events: readonly InterpreterEvent[];
   readonly instructionsExecuted: number;
+  /** Present only when `run`, `stepToEvent`, or `executeInstruction` was called with `instructionTrace: true`. */
+  readonly instructionTrace?: RuntimeInstructionTrace;
 }
 
 export type TimeObservationOutcome =
