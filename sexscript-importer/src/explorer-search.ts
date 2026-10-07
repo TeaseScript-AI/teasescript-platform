@@ -1162,7 +1162,7 @@ function storageDistance(
 function describeNeed(key: string, goal: Goal): string {
   const name = key.replaceAll("\u0000", "*");
   if (goal.comparison !== null)
-    return `${name} ${goal.comparison.operator} ${goal.comparison.constant}`;
+    return `${name} ${goal.comparison.operator} ${JSON.stringify(goal.comparison.shown)}`;
   const values = goal.candidates.map((candidate) =>
     typeof candidate === "object" ? "nothing stored" : JSON.stringify(candidate),
   );

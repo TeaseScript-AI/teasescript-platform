@@ -814,8 +814,15 @@ export interface Goal {
   readonly source: Source;
   /** For an ask, answer texts; for a stored key, values; for a variable, the constant and comparison to approach. */
   readonly candidates: readonly Candidate[];
-  /** For a variable: the comparison that takes the missed way, for measuring how close a state is to it. */
-  readonly comparison: { readonly operator: string; readonly constant: number } | null;
+  /**
+   * For a variable: the comparison that takes the missed way, for measuring how close a state is to it. A boolean
+   * constant is measured as 0 or 1; `shown` keeps the constant as the condition writes it, for notes.
+   */
+  readonly comparison: {
+    readonly operator: string;
+    readonly constant: number;
+    readonly shown: number | boolean;
+  } | null;
 }
 
 /**
@@ -853,7 +860,11 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
           subject.kind === "identifier" &&
           subject.name === source.name) ||
           source.kind === "storage")
-          ? { operator: holds, constant }
+          ? {
+              operator: holds,
+              constant,
+              shown: typeof atom.constant === "boolean" ? atom.constant : constant,
+            }
           : null;
       // A stored value or the clock is worth trying even unsolved: with storage sessions left, or other times.
       if (candidates.length === 0 && source.kind !== "storage" && source.kind !== "clock") continue;

@@ -96,9 +96,15 @@ if pick == "count" {
   if getTime().hour >= 22 {
     say "Late."
   }
+  if (load "fixture.badge") == true {
+    say "Badge holder."
+  }
   exit
 }
 while true {
   say "You are stuck."
   showButton "Again"
+}
+function awardBadge {
+  save getTime().hour > 30 as "fixture.badge"
 }

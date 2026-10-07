@@ -133,6 +133,11 @@ test(
       branch('(load "fixture.level") == 2')?.reason ?? "",
       /every save of fixture\.level is a literal/u,
     );
+    // A stored boolean that no explored session saved: the note shows the constant as the condition writes it.
+    assert.equal(
+      branch('(load "fixture.badge") == true')?.reason,
+      "needs fixture.badge == true; no explored session stored it",
+    );
   },
 );
 
