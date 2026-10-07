@@ -108,10 +108,10 @@ const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instan
   return measureElement(element, entry, instance);
 };
 // What live play adds enters the conversation, and while the reader follows the newest content, the conversation glides
-// up to make room (PLAYER-UI.md "Message presentation and provenance"). History shows directly: what the transcript
-// shows when it mounts, for a new session, a restored state, or Debug's rewind; another list of entries, such as when an
-// inspected state is adopted; what development time jumps publish; and more than an update can show entering: many
-// entries at once, or, while following, more than a viewport of new content.
+// up to make room (PLAYER-UI.md "Entering content"). History shows directly: what the transcript shows when it mounts,
+// for a new session, a restored state, or Debug's rewind, and the first entries of an empty transcript; another list of
+// entries, such as when an inspected state is adopted; what development time jumps publish; and more than an update can
+// show entering: many entries at once, or, while following, more than a viewport of new content.
 const ENTERING_AT_MOST = 8;
 // How long after a live update the scroll corrections that follow it still glide.
 const LIVE_UPDATE_MS = 250;
@@ -142,12 +142,15 @@ watch(
     shown = { entries: props.entries, length: props.entries.length, revision: props.revision ?? 0 };
     if (shown.revision === previous.revision && shown.entries === previous.entries) return;
     const added = props.entries.slice(previous.length);
+    // The first entries of a transcript open it, also when the script shows them only once the host answered.
+    const opening = previous.length === 0;
     firstNewEntry =
-      following.value && props.entries === previous.entries && added.length > 0
+      following.value && props.entries === previous.entries && added.length > 0 && !opening
         ? previous.length
         : null;
     if (
       initialPositioning ||
+      opening ||
       reducedMotion.value === "reduce" ||
       props.entries !== previous.entries ||
       shown.revision <= (props.jumpedRevision ?? -1) ||
@@ -209,7 +212,8 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
         void nextTick(() => {
           const element = scrollElement.value;
           const before = element?.scrollTop ?? 0;
-          // Following never scrolls the first entry of an update out of view: there the reader starts reading.
+          // Following never scrolls the first entry of an update out of view: there the reader starts reading
+          // (PLAYER-UI.md "Smart follow and return to latest").
           const first =
             options.adjustments === undefined && firstNewEntry !== null
               ? instance.measurementsCache[firstNewEntry]?.start

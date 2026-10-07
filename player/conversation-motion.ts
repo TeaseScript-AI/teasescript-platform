@@ -1,14 +1,14 @@
 /**
- * How what newly appears in the conversation enters during live play (PLAYER-UI.md "Message presentation and
- * provenance"): it fades in while sliding up, and when the reader follows the newest content, the conversation glides up
- * to make room instead of jumping. The scroll position itself still moves at once, so following, measurement, and
+ * How what newly appears in the conversation enters during live play (PLAYER-UI.md "Entering content"): it fades in
+ * while sliding up, and when the reader follows the newest content, the conversation glides up to make room instead of
+ * jumping. The scroll position itself still moves at once, so following, measurement, and
  * reading history keep their rules; only what is drawn eases toward it. Framework-independent.
  */
 
 /** The length of an entrance and of the glide that makes room for it. */
 export const CONVERSATION_ENTRANCE_MS = 200;
 /** How far an entering element rises while it fades in. */
-export const CONVERSATION_ENTRANCE_RISE_PX = 8;
+const CONVERSATION_ENTRANCE_RISE_PX = 8;
 const EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
 /** The part of the Web Animations API the conversation uses. */
