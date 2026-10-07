@@ -149,10 +149,11 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   where Java counted UTF-16 units, `trim()` also removes non-breaking spaces, and `uppercaseFirst()` turns a leading
   `ß` into `SS`. A literal with a character outside the Basic Multilingual Plane, such as an emoji, gets a `NOTE` on a
   length, `substring`, `indexOf`, or `lastIndexOf` (`SX_TEXT_CODE_POINTS`); text known only at runtime does not. Java
-  `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`). Groovy `join()` printed nested
-  lists and maps, which the accepted `join()` rejects, so a list known to hold them is reported (`SX_LIST_JOIN`), also
-  when they reach it through an alias (`ys = xs`) or a later `add`, `<<`, or `+=`; a list whose element types are not
-  proven gets a note (0 corpus sites).
+  `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`); a separator whose
+  regular-expression metacharacters are escaped, as `"\\|"` or `/\./`, splits at the plain character. Groovy
+  `join()` printed nested lists and maps, which the accepted `join()` rejects, so a list known to hold them is
+  reported (`SX_LIST_JOIN`), also when they reach it through an alias (`ys = xs`) or a later `add`, `<<`, or `+=`; a
+  list whose element types are not proven gets a note (0 corpus sites).
 - Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`), and generic `load()` decoded a stored
   string `"null"` as null. Since `save null` removes the key on `main` too (#484), a typed read followed by a null
   default (`x = loadInteger(k)`, then `if (x == null) x = d`) becomes `load k, default: d` (#541), 101 corpus sites
@@ -361,9 +362,10 @@ operations (#508, PR #518), single-field prefill (#510, merged as #514), and dic
 #536) were candidates here and are now accepted; the importer emits them by default.
 
 1. **Regular expressions.** Two patterns have marked workarounds (`split(/\s+/)` and `replaceAll(/<[^>]*>/, "")`,
-   `SX_REGEX_WORKAROUND`); 39 other pattern sites in 14 selected units remain manual work, as does a locale argument
-   (`toLowerCase(Locale.ENGLISH)`). A synchronous `.ts` text library, once package-library linkage exists, would cover
-   the patterns.
+   `SX_REGEX_WORKAROUND`), and a `split()` separator with escaped metacharacters splits at the plain character; 34
+   other pattern sites in 9 selected units remain manual work (24 `split` and `replaceAll` calls, 10 `=~` operators),
+   as does a locale argument (`toLowerCase(Locale.ENGLISH)`). A synchronous `.ts` text library, once package-library
+   linkage exists, would cover the patterns.
 2. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
    `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
    product question, not syntax. Meanwhile the player's language (`Locale.getDefault().getLanguage()`) becomes English,
@@ -591,7 +593,7 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-07, at importer `777b12c2` with `main` `068015e2` merged in. The
+Measured on the selected large corpus on 2026-10-07, at importer `3a92a3e4` with `main` `068015e2` merged in. The
 class tables of unconverted code and compile errors below are from 2026-10-06, at importer `e32615c6`.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
@@ -608,7 +610,7 @@ class tables of unconverted code and compile errors below are from 2026-10-06, a
 | Compile and play to the end from `main.tease` in the smoke run | 133 |
 | Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 133, 54, 21, 1, 1 |
 
-Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,451 root errors remain.
+Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,441 root errors remain.
 
 **Smoke runs:**
 - **The step limit is inconclusive** (21 units). Most of these are loops that wait for a typed text or a time.
