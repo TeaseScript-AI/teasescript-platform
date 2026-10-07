@@ -49,4 +49,15 @@ function readVersion {
 }
 readVersion()
 say "Version ${version}"
+// Half of a stored whole number may hold a fraction, and so does what is left of it.
+save 13 as "game.total"
+function halves {
+  let s1 = sexscriptLegacyLoadInteger("game.total")
+  let s2: number = 0
+  let s3: number = 0
+  s2 = s1 / 2
+  s3 = s1 - s2
+  say "${s2} and ${s3}"
+}
+halves()
 exit

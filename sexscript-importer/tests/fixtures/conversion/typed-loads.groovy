@@ -15,3 +15,14 @@ def version = 0
 def readVersion = { version = loadFloat("game.version") }
 readVersion()
 show("Version " + version)
+// Half of a stored whole number may hold a fraction, and so does what is left of it.
+save("game.total", 13)
+def halves = {
+    def s1 = loadInteger("game.total")
+    def s2 = 0
+    def s3 = 0
+    s2 = s1 / 2
+    s3 = s1 - s2
+    show("" + s2 + " and " + s3)
+}
+halves()

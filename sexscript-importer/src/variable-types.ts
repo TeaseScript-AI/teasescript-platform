@@ -1789,6 +1789,17 @@ function arithmeticType(
     (left.kind === "unknown" || right.kind === "unknown")
   )
     return scalar("number");
+  // Subtraction, multiplication, and the remainder take only numbers in legacy code, so a value not proven a number
+  // with a number that may hold a fraction gives a number too (`s1 - s2`, with `s2 = s1 / 2`).
+  const fractional = (type: TeaseType): boolean => type.kind === "scalar" && type.name === "number";
+  if (
+    (operator === "-" || operator === "*" || operator === "%") &&
+    plain(left) &&
+    plain(right) &&
+    (left.kind === "unknown" || right.kind === "unknown") &&
+    (fractional(left) || fractional(right))
+  )
+    return scalar("number");
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
