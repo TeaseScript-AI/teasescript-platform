@@ -454,6 +454,33 @@ test(
 );
 
 test(
+  "with compared answers, a typed ask is also answered with what the code compares the answer with in that state, such as the line to type",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let lines = ["I will obey.", "I am sorry."]\nlet count = 0\nwhile count < 2 {\n  let line = lines[count]\n' +
+      '  let typed = askText "Type: ${line}"\n  if typed == line {\n    count += 1\n  } else {\n    say "Wrong."\n  }\n}\n' +
+      'say "Done."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 5000,
+      sources: new Map(),
+      diagnostics: [],
+      comparedAnswers: true,
+    });
+    // Each pass asks for another line; typing it is the only way out of the loop.
+    assert.equal(result.search.stoppedBy, "exhausted");
+    assert.equal(result.endStates.completed, 1);
+    assert.ok(result.crashes.length === 0 && result.traps.length === 0);
+  },
+);
+
+test(
   "with forward time, the late hour is play: later sessions start after the clock their origin ended at, and a later gap must be positive",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {

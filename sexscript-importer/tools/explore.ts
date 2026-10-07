@@ -4,7 +4,8 @@
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
- *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] <unit-dir>... --out <dir>
+ *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
+ *          <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -13,8 +14,8 @@
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
  * given.
  *
- * `--cells` ranks states by cells, and `--later` makes time go forward as play (see `src/explorer-search.ts`); `--no-…`
- * switches each off.
+ * `--cells` ranks states by cells, `--later` makes time go forward as play, and `--compared-answers` answers typed asks
+ * with what the code compares the answer with (see `src/explorer-search.ts`); `--no-…` switches each off.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -91,6 +92,7 @@ async function main(args: string[]): Promise<void> {
       summary: { type: "boolean", default: true },
       cells: { type: "boolean", default: false },
       later: { type: "boolean", default: false },
+      "compared-answers": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -133,7 +135,8 @@ async function main(args: string[]): Promise<void> {
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
-        "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] <unit-dir>... --out <dir>\n" +
+        "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
+        "         <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -167,7 +170,11 @@ async function main(args: string[]): Promise<void> {
           maxStates,
           seed,
           corpus,
-          strategies: { cells: values.cells, later: values.later },
+          strategies: {
+            cells: values.cells,
+            later: values.later,
+            comparedAnswers: values["compared-answers"],
+          },
         },
         out,
         workers,
@@ -201,7 +208,7 @@ interface RunSettings {
   /** The corpus folder, or null without one. */
   corpus: string | null;
   /** The search strategies that can be switched off (see `ExploreOptions`). */
-  strategies: { cells: boolean; later: boolean };
+  strategies: { cells: boolean; later: boolean; comparedAnswers: boolean };
 }
 
 /** Explores units with one budget, in this process or in two; returns 1 when a process failed. */
@@ -225,8 +232,10 @@ async function exploreUnits(
     if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
     if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
     if (corpus !== null) flags.push("--corpus", corpus);
-    for (const [name, on] of Object.entries(strategies))
-      flags.push(on ? `--${name}` : `--no-${name}`);
+    for (const [name, on] of Object.entries(strategies)) {
+      const flag = name.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
+      flags.push(on ? `--${flag}` : `--no-${flag}`);
+    }
     const groups = [
       dirs.filter((_, index) => index % 2 === 0),
       dirs.filter((_, index) => index % 2 === 1),

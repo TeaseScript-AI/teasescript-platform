@@ -2,6 +2,7 @@ import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
 import {
   comparedSlots,
+  comparedWithAsks,
   constantConditions,
   DataFlow,
   distance,
@@ -178,6 +179,12 @@ export interface ExploreOptions {
    * of at other wall clocks. Only a start before the clock its origin ended at is a `clock` start. Off by default.
    */
   readonly later?: boolean;
+  /**
+   * Typed answers from compared values: a typed ask is also answered with the values, in the state at the ask, of what
+   * the code compares its answer with (`comparedWithAsks`), such as the line it asks the player to type; and directed
+   * search also aims answers at asks whose prompt the code computes. Off by default.
+   */
+  readonly comparedAnswers?: boolean;
 }
 
 /**
@@ -882,7 +889,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const instructions = list(plan.instructions);
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
-  const flow = new DataFlow(plan, instructions);
+  const flow = new DataFlow(plan, instructions, {
+    computedPrompts: options.comparedAnswers === true,
+  });
+  if (options.comparedAnswers === true)
+    for (const [ask, expressions] of comparedWithAsks(flow, instructions))
+      session.comparedWith.set(ask, expressions);
   const constants = constantConditions(instructions, files, options.diagnostics);
   // Conditions that read only stored keys whose values this package fixes have one value too.
   const fixed = new Map<number, { value: boolean; reason: string }>();
@@ -1756,7 +1768,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       node.status = "expanded";
       continue;
     }
-    const inputs = session.options(base);
+    const inputs = session.options(base, base.view(), () => stored ?? base.exportTrustedSnapshot());
     if (inputs.length === 0) {
       node.status = "stuck";
       store.drop(node.id);

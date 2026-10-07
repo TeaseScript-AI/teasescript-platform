@@ -317,7 +317,15 @@ export class DataFlow {
   /** Variables whose every assignment is the same `load`, by name; null for any other variable. */
   readonly #loads = new Map<string, LoadAlias | null>();
 
-  constructor(plan: Data, instructions: readonly Data[]) {
+  /**
+   * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
+   * the typed ask it is; without it, only an ask with a fixed prompt is.
+   */
+  constructor(
+    plan: Data,
+    instructions: readonly Data[],
+    settings: { computedPrompts?: boolean } = {},
+  ) {
     const functions = list(plan.functions);
     const functionOf = new Map<number, number>();
     for (const definition of functions) {
@@ -331,7 +339,9 @@ export class DataFlow {
         typeof instruction.destinationTemporary !== "number"
       )
         return;
-      const ui = record(instruction.ui);
+      const ui = record(
+        instruction.ui ?? (settings.computedPrompts === true ? instruction.preparedUi : undefined),
+      );
       if (ui.kind === "text" || ui.kind === "number" || ui.kind === "temporal")
         this.#typedAsks.add(index);
       this.#temporary(instruction.destinationTemporary).asks.add(index);
@@ -971,6 +981,98 @@ export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Sl
     numbers: [...numbers].sort((left, right) => left - right),
     durations: [...durations].sort((left, right) => left - right),
   }));
+}
+
+/** Comparison operators whose sides the explorer reads as compared values. */
+const COMPARED = new Set(["==", "!=", "<", "<=", ">", ">="]);
+const ARITHMETIC = new Set(["+", "-", "*", "/", "%"]);
+
+/**
+ * Whether the explorer can read an expression's value from a state: it reads variables, through properties, indices,
+ * and arithmetic, and is no literal of its own.
+ */
+function readable(expression: unknown, top = true): boolean {
+  const value = record(expression);
+  switch (value.kind) {
+    case "literal":
+      return !top;
+    case "identifier":
+      return true;
+    case "group":
+      return readable(value.expression, top);
+    case "unary":
+      return value.operator === "-" && readable(value.operand, top);
+    case "binary":
+      return (
+        ARITHMETIC.has(String(value.operator)) &&
+        readable(value.left, false) &&
+        readable(value.right, false) &&
+        (!top || namesIn(value).size > 0)
+      );
+    case "property":
+      return readable(value.object, false) && namesIn(value).size > 0;
+    case "index":
+      return (
+        readable(value.object, false) && readable(value.index, false) && namesIn(value).size > 0
+      );
+    default:
+      return false;
+  }
+}
+
+/**
+ * The expressions the code compares typed answers with, by the instruction of the ask: in each comparison or text test
+ * (`answer == line`, `answer.contains(word)`) whose one side comes from a typed ask's answer (`DataFlow.flowOf`, also
+ * for an ask whose prompt is computed), the other side when its value can be read from a state (variables, properties,
+ * indices, and arithmetic), at most four per ask.
+ */
+export function comparedWithAsks(
+  flow: DataFlow,
+  instructions: readonly Data[],
+): Map<number, unknown[]> {
+  const typed = (index: number) => {
+    const instruction = record(instructions[index]);
+    const ui = record(instruction.ui ?? instruction.preparedUi);
+    return ui.kind === "text" || ui.kind === "number";
+  };
+  const found = new Map<number, Map<string, unknown>>();
+  const pair = (answer: unknown, other: unknown) => {
+    if (!readable(other)) return;
+    for (const ask of flow.flowOf(answer).asks) {
+      if (!typed(ask)) continue;
+      const known = found.get(ask) ?? new Map<string, unknown>();
+      const key = JSON.stringify(other, (name, item: unknown) =>
+        name === "span" ? undefined : item,
+      );
+      if (known.size < 4) known.set(key, other);
+      found.set(ask, known);
+    }
+  };
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "binary" && COMPARED.has(String(value.operator))) {
+      pair(value.left, value.right);
+      pair(value.right, value.left);
+    }
+    const callee = record(value.callee);
+    if (
+      value.kind === "call" &&
+      callee.kind === "property" &&
+      TEXT_TESTS.has(String(callee.name))
+    ) {
+      for (const argument of list(value.arguments)) {
+        pair(callee.object, argument.value);
+        pair(argument.value, callee.object);
+      }
+    }
+    for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+  };
+  instructions.forEach(walk);
+  return new Map([...found].map(([ask, expressions]) => [ask, [...expressions.values()]]));
 }
 
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */

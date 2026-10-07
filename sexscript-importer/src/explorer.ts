@@ -340,6 +340,11 @@ export class Session {
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
   /**
+   * The expressions the code compares a typed ask's answer with (`comparedWithAsks`), by the ask's instruction: their
+   * values in the state at the ask are answers too, such as the line the script asks the player to type.
+   */
+  readonly comparedWith = new Map<number, readonly unknown[]>();
+  /**
    * Runtime operations called so far, a deterministic measure of the work the session's steps took: fresh sessions,
    * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
    */
@@ -404,8 +409,11 @@ export class Session {
     return this.#apply(runtime, input, clock) !== null;
   }
 
-  /** The inputs the player has in the state of `runtime` (whose `view` it is); none in an ended state. */
-  options(runtime: Runtime, view: Data = runtime.view()): ExplorerInput[] {
+  /**
+   * The inputs the player has in the state of `runtime` (whose `view` it is); none in an ended state. `state` gives its
+   * snapshot, for the values a typed answer is compared with ({@link comparedWith}); without it, those are left out.
+   */
+  options(runtime: Runtime, view: Data = runtime.view(), state?: () => Data): ExplorerInput[] {
     if (view.status !== "waiting") return [];
     const options: ExplorerInput[] = [];
     const action = record(view.foregroundAction);
@@ -413,11 +421,16 @@ export class Session {
     if (action.kind === "interaction") {
       const ui = record(action.ui);
       const literals = this.#nearbyLiterals(runtime, action);
-      const directed =
-        typeof action.owningInstruction === "number"
-          ? (this.directedAnswers.get(action.owningInstruction) ?? [])
-          : [];
-      options.push(...interactionOptions(ui, literals, directed, record(action.form)));
+      const ask = typeof action.owningInstruction === "number" ? action.owningInstruction : null;
+      const directed = ask === null ? [] : (this.directedAnswers.get(ask) ?? []);
+      const expressions = ask === null ? undefined : this.comparedWith.get(ask);
+      const compared =
+        expressions === undefined || state === undefined
+          ? []
+          : comparedValues(expressions, state(), ui.kind === "number" ? ui.integer === true : null);
+      options.push(
+        ...interactionOptions(ui, literals, [...compared, ...directed], record(action.form)),
+      );
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
       // happens meanwhile.
       if (
@@ -822,6 +835,111 @@ function comparedLiterals(instruction: Data): Literals {
   };
   walk(instruction);
   return found;
+}
+
+/** Values a typed answer is compared with, tried per ask. */
+const MAX_COMPARED_VALUES = 3;
+
+/**
+ * The values of compared expressions in a state, as answers to a typed ask: texts for a text ask (`integer` null); for a
+ * number ask (`integer` tells whether it takes integers only), each number `v` as `v - 1`, `v`, and `v + 1`. Variables
+ * are read from their innermost binding.
+ */
+function comparedValues(
+  expressions: readonly unknown[],
+  snapshot: Data,
+  integer: boolean | null,
+): string[] {
+  const bindings = new Map<string, unknown>();
+  for (const binding of list(snapshot.globals))
+    if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  for (const frame of list(snapshot.frames))
+    for (const binding of list(frame.bindings))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  const found = new Set<string>();
+  for (const expression of expressions) {
+    const value = valueOf(expression, bindings);
+    if (integer === null && typeof value === "string" && value.trim() !== "") found.add(value);
+    if (integer !== null && typeof value === "number" && (!integer || Number.isSafeInteger(value)))
+      for (const near of [value - 1, value, value + 1]) found.add(String(near));
+    if (found.size >= MAX_COMPARED_VALUES) break;
+  }
+  return [...found];
+}
+
+/** A runtime value as the explorer reads it: a scalar, a composite record, or undefined for none it can read. */
+type ReadValue = string | number | boolean | null | Data | undefined;
+
+function readValue(value: unknown): ReadValue {
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+    ? value
+    : isRecord(value)
+      ? value
+      : undefined;
+}
+
+/** An expression's value in a state, from its variables' values, or undefined when it cannot be read. */
+function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): ReadValue {
+  const value = record(expression);
+  switch (value.kind) {
+    case "literal":
+      return readValue(value.value);
+    case "identifier":
+      return typeof value.name === "string" ? readValue(bindings.get(value.name)) : undefined;
+    case "group":
+      return valueOf(value.expression, bindings);
+    case "unary": {
+      const operand = valueOf(value.operand, bindings);
+      return value.operator === "-" && typeof operand === "number" ? -operand : undefined;
+    }
+    case "binary": {
+      const left = valueOf(value.left, bindings);
+      const right = valueOf(value.right, bindings);
+      if (value.operator === "+" && typeof left === "string" && typeof right === "string")
+        return left + right;
+      if (typeof left !== "number" || typeof right !== "number") return undefined;
+      switch (value.operator) {
+        case "+":
+          return left + right;
+        case "-":
+          return left - right;
+        case "*":
+          return left * right;
+        case "/":
+          return right === 0 ? undefined : left / right;
+        case "%":
+          return right === 0 ? undefined : left % right;
+        default:
+          return undefined;
+      }
+    }
+    case "property": {
+      const object = valueOf(value.object, bindings);
+      const holder = record(object);
+      if (value.name === "length")
+        return typeof object === "string"
+          ? [...object].length
+          : Array.isArray(holder.items)
+            ? holder.items.length
+            : undefined;
+      const properties = holder.kind === "object" ? list(holder.properties) : [];
+      return readValue(properties.find((property) => property.name === value.name)?.value);
+    }
+    case "index": {
+      const object = record(valueOf(value.object, bindings));
+      const index = valueOf(value.index, bindings);
+      if (object.kind === "list" && typeof index === "number" && Array.isArray(object.items))
+        return readValue(object.items.at(index));
+      if (object.kind === "dict" && typeof index === "string")
+        return readValue(list(object.entries).find((entry) => entry.key === index)?.value);
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
 }
 
 /**

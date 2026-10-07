@@ -249,7 +249,8 @@ them at the top.
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
-  [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] <unit-dir>... --out <dir>
+  [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
+  <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -260,7 +261,11 @@ action is a branch point. The options are every button and choice option; for a 
 switched (and all on, all off), each other option of a cycle, each typed field at its bounds, and cancel where the
 form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1`, `1000000` (and
 `0.5` for `askNumber`), the text `x`, and dates and times at both ends of a day or year. Each constant that the code
-compares with near the ask adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. A button whose result the
+compares with near the ask adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. With `--compared-answers`, a
+text or number ask is also answered with the values, in the state at the ask, of what the code compares its answer
+with (a variable, or a property, index, or sum of variables, found through the data flow), such as the line a script
+asks the player to type: three at most, and `v - 1`, `v`, and `v + 1` for a number `v`; and directed search (below)
+also answers asks whose prompt the code computes (`askText "Type: ${line}"`), which it otherwise leaves out. A button whose result the
 script keeps (`(showButton …) / 1 s`, `beg < 15 s`) can also be pressed after the player thinks for just over each
 compared number of seconds or duration (60 s without one). Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
 each shown permanent button, are options too. Media loads succeed with one second per pass, `takePhoto` finds no
