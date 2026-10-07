@@ -48,6 +48,13 @@
       "category": "b",
       "reason": "One spanking picture is set with the literal path Domme/Domme43.jpg, a folder the unit does not have; Domme43.jpg exists only in Domme3/Domme0/, and the other Domme43 reference and the rest of the sequence use imagePath+\"Domme43.jpg\", which resolves there. Use imagePath.",
       "diff": "spanking-image-path.diff"
+    },
+    {
+      "id": "reminder-loop",
+      "layer": "source",
+      "category": "e",
+      "reason": "In reminder mode the loop keeps the saved assignment (dassignmentid) instead of picking one, and some assignments end only when a condition holds, such as assignment 45 when domme3.sissy is on; after settings turned that off, no case set endReached and the loop ran forever, in Groovy too. When a reminded assignment did not end the loop, leave reminder mode so that the next pass picks another assignment.",
+      "diff": "reminder-loop.diff"
     }
   ]
 }

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "deny-orgasm-time",
+      "layer": "source",
+      "category": "e",
+      "reason": "Two failure branches announce a 72 h and a 24 h orgasm denial but save true under jewell.deny_Orgasm, whose readers (trainStrapon.groovy and others) compare it with getTime() as an expiry time, so the next read failed (legacy loadInteger parsed \"true\" and threw). Save the expiry times, getTime()+72*3600 and getTime()+24*3600, as trainStrapon.groovy's own failure branches do.",
+      "diff": "deny-orgasm-time.diff"
+    }
+  ]
+}
