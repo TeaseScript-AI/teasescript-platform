@@ -16,12 +16,13 @@ type Token = { char: string } | { key: string; value: IrExpression };
  * The legacy display showed one text, so authors redrew it to animate it or to count; TeaseScript can change a shown
  * message in place through its handle (V30 "Updatable messages"), which the owner wanted for these (decision
  * 2026-10-07):
- * - an animation, texts that each add only punctuation to the one before, with only waits between them (growing
- *   dots), becomes one `let line = say first, instant` and a `line.text += added` per step, or `= text` where the step
+ * - an animation, texts that each add only punctuation to the one before, with only waits without effects between them
+ *   (growing dots), becomes one `let line = say first, instant` and a `line.text += added` per step, or `= text` where the step
  *   is no plain extension; a text with a value computed anew, such as a random draw, is no step;
  * - a counter, a loop whose body says one text with a count, a variable the loop steps or a range loop's own, where the
  *   last text said before the loop, with only statements without effects in between, is the same line with a number
- *   or a placeholder in place of the count (`20 jerks` and `${i} jerks`) or the same text, becomes a
+ *   or a placeholder in place of the count (`20 jerks` and `${i} jerks`) or the same text, whose other values neither
+ *   those statements nor the loop change, becomes a
  *   `let counter = say before, instant` and a `counter.text = text` in the loop.
  * The waits between the steps stay as they are: they are the animation's or the count's timing, and withReadingTimes,
  * which runs after this, only touches waits right after a `say`. The system speaker's texts stay, and so does a module's
@@ -66,7 +67,8 @@ export function withMessageHandles(
     for (let index = 0; index < result.length; index += 1) {
       const first = result[index]!;
       if (!shown(first)) continue;
-      // The steps: each next text, with only waits, blank lines, and comments before it, adds only punctuation.
+      // The steps: each next text, with only waits without effects, blank lines, and comments before it, adds only
+      // punctuation.
       const steps = [index];
       const says: Say[] = [first];
       for (let at = index + 1; at < result.length; at += 1) {
@@ -74,7 +76,7 @@ export function withMessageHandles(
         if (
           item.kind === "blank" ||
           item.kind === "comment" ||
-          (item.kind === "wait" && !item.visible)
+          (item.kind === "wait" && !item.visible && quiet(item))
         )
           continue;
         const last = says.at(-1)!;
@@ -123,7 +125,7 @@ export function withMessageHandles(
       while (at >= 0 && quiet(result[at]!)) at -= 1;
       const before = result[at];
       if (before === undefined || !shown(before) || !sameVoice(before, inLoop)) return;
-      if (!sameLine(before.value, inLoop.value, loop)) return;
+      if (!sameLine(before.value, inLoop.value, loop, result.slice(at + 1, index))) return;
       const name = fresh("counter");
       report(
         "SX_MESSAGE_COUNTER",
@@ -275,7 +277,8 @@ const COUNT = /^[\s\d.,:;!?()\-–—]*$/u;
 
 /**
  * Whether the text said before a counter's loop and the text in the loop are one line that shows a count: the same
- * text, holding a count and otherwise only values the loop does not change, or the same around the part that changes,
+ * text, holding a count and otherwise only values that neither the loop nor the statements `between` the text and the
+ * loop change, or the same around the part that changes,
  * where the text before has a number or a placeholder (or nothing) and the loop's text one count with only digits,
  * punctuation, and spaces around it, and the same part holds a word or a value of its own.
  */
@@ -283,6 +286,7 @@ function sameLine(
   before: IrExpression,
   inLoop: IrExpression,
   loop: Extract<IrStatement, { kind: "while" | "for" | "repeat" }>,
+  between: readonly IrStatement[],
 ): boolean {
   const first = tokens(before);
   const next = tokens(inLoop);
@@ -308,7 +312,7 @@ function sameLine(
   const was = first.slice(start, first.length - end);
   const now = next.slice(start, next.length - end);
   if (was.length === 0 && now.length === 0) {
-    const changed = written(loop.body);
+    const changed = written([...between, loop]);
     const values = next.filter((token) => "value" in token);
     return (
       values.some(isCount) &&
@@ -321,7 +325,7 @@ function sameLine(
   }
   const nowValues = now.filter((token) => "value" in token);
   // The values around the count show the same each time round.
-  const changed = written(loop.body);
+  const changed = written([...between, loop]);
   const stable = shared.every(
     (token) => !("value" in token) || (!computes(token.value) && !readsAny(token.value, changed)),
   );

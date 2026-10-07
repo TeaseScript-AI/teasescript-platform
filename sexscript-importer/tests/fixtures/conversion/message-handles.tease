@@ -75,7 +75,8 @@ for k in 1..=2 {
   say n
   wait 5
 }
-// Nor does a loop whose text grows by text, or whose other values the loop changes.
+// Nor does a loop whose text grows by text, or whose other values the loop, its condition, or the statements before it
+// change, nor an animation whose wait runs script code.
 let story = "First"
 say "Story: ${story}"
 for p in 1..=2 {
@@ -109,4 +110,29 @@ for a in 1..=2 {
   say "Chapter ${chapter}: ${a}"
   wait 5
 }
+let part = "First"
+say "Part ${part}: 0"
+part = "Second"
+for p in 1..=2 {
+  say "Part ${part}: ${p}"
+  wait 5
+}
+let step = 0
+function ready {
+  step += 1
+  part = "Step ${step}"
+  return step < 3
+}
+say "Part ${part}: ${step}"
+while ready() {
+  say "Part ${part}: ${step}"
+  wait 5
+}
+function pause {
+  part = "Third"
+  return 1
+}
+say "${part}."
+wait pause()
+say "${part}.."
 exit

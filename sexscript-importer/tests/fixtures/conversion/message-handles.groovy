@@ -61,7 +61,8 @@ for (k in 1..2) {
     show(n)
     wait(5)
 }
-// Nor does a loop whose text grows by text, or whose other values the loop changes.
+// Nor does a loop whose text grows by text, or whose other values the loop, its condition, or the statements before it
+// change, nor an animation whose wait runs script code.
 def story = "First"
 show("Story: " + story)
 for (p in 1..2) {
@@ -91,3 +92,21 @@ for (a in 1..2) {
     show("Chapter " + chapter + ": " + a)
     wait(5)
 }
+def part = "First"
+show("Part " + part + ": 0")
+part = "Second"
+for (p in 1..2) {
+    show("Part " + part + ": " + p)
+    wait(5)
+}
+def step = 0
+def ready = { step++; part = "Step " + step; return step < 3 }
+show("Part " + part + ": " + step)
+while (ready()) {
+    show("Part " + part + ": " + step)
+    wait(5)
+}
+def pause = { part = "Third"; return 1 }
+show(part + ".")
+wait(pause())
+show(part + "..")
