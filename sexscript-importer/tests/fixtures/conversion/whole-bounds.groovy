@@ -7,8 +7,11 @@ for (i in 0..half) {
     show("Up to " + i)
 }
 (0..<half).each { show("Below " + it) }
+// Java's nextInt took a whole number only, here one a variable that may hold a fraction holds.
+def bound = 2.5
+bound = 4
 Random dice = new Random()
-show("Drawn " + dice.nextInt(half))
+show("Drawn " + dice.nextInt(bound))
 int whole = 3
 whole.times { show("Again " + it) }
 for (i in 0..<whole) {

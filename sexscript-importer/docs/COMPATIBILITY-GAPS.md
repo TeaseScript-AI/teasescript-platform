@@ -239,10 +239,11 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - `break`/`continue` with a label leave an outer loop; TeaseScript jumps affect only the innermost loop, so they are
   reported. A statement that only computes a value (often `==` written for `=`) had no effect and is dropped with a
   `NOTE`.
-- A loop's range and a `randomInteger` draw end at a whole number (#689). A bound that may hold a fraction, by the
-  importer's types, ends where Groovy stopped: `n.times` loops `0..toInteger(n)`, an inclusive range ends at
-  `floor(b)`, an exclusive one and `nextInt(b)` at `ceil(b)` (`0..<2.5` went through 0, 1, and 2; `SX_RANGE_FLOOR`);
-  whole bounds stay as written.
+- A loop's range and a `randomInteger` draw end at a whole number (#689). A bound written in the loop or the draw
+  that may hold a fraction, by the importer's types, ends where Groovy stopped: `n.times` loops `0..toInteger(n)`, an
+  inclusive range ends at `floor(b)`, an exclusive one at `ceil(b)` (`0..<2.5` went through 0, 1, and 2;
+  `SX_RANGE_FLOOR`), as does `nextInt(b)`, which Java called with a whole number only; whole bounds stay as written.
+  A range kept in a variable and a descending range with a fractional bound are not rounded.
 - Known residual differences, found by adversarial review and left as is because they need unusual input or fail
   loudly: Groovy integer ranges contain only whole numbers, while a converted range case also matches a fractional
   value; a `times` count or list index that is fractional, where the importer cannot tell, or negative only at runtime
