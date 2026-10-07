@@ -249,7 +249,7 @@ them at the top.
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
-  [--corpus <corpus-dir> [--rounds N]] <unit-dir>... --out <dir>
+  [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -275,7 +275,15 @@ buttons) are renumbered by rank, because only their equality and order matter. T
 in. The search first expands directed states (below), then states whose step reached new instructions in any
 session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
-first. Waiting states keep their snapshots
+first. With `--cells`, the search ranks states by cells. A cell is where a state waits (its pending action, the return
+points of its calls, and the pass of each `for` and `repeat` loop) with the bucket of each value that conditions compare
+with constants: each variable and stored key (also through the data flow) a comparison reads, bucketed as unset,
+`null`, `true` or `false`, a compared text or other text, or a number's place among its compared constants (below, at,
+between, or above them). A step that shows such a value, or a change of one, for the first time counts as reaching new
+instructions, and among the other states those of the cells expanded least go first. States of one cell differ only in
+what no condition tells apart, so a loop that keeps making such states, such as a counter no condition reads, no longer
+takes most of the search; the report's `search.cells` counts the slots, cells, values, and changes found. Waiting
+states keep their snapshots
 as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
 `--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic

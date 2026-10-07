@@ -369,3 +369,30 @@ test(
     ]);
   },
 );
+
+test(
+  "with cells, a state's cell is where it waits and the buckets of what conditions compare: each pass of a for loop is a cell, and a counter's values between its compared constants share one",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let n = 0\nfor pass in 1..=2 {\n  showButton "Round"\n}\nwhile n < 100 {\n  showButton "Go"\n  n += 1\n' +
+      '  if n == 3 {\n    say "Three."\n  }\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 80,
+      maxStates: 5000,
+      sources: new Map(),
+      diagnostics: [],
+      cells: true,
+    });
+    // `n` is compared with 3 and 100. The 40 states are two passes of "Round", then "Go" with `n` below 3, at 3, and
+    // between 3 and 100; `n` changed bucket twice.
+    assert.equal(result.search.states, 40);
+    assert.deepEqual(result.search.cells, { slots: 1, cells: 5, values: 3, transitions: 2 });
+  },
+);

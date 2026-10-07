@@ -274,6 +274,22 @@ function keyText(expression: unknown): string | null {
     .join("");
 }
 
+/** The variables an expression reads; a called function's name is no variable. */
+function namesIn(expression: unknown): Set<string> {
+  const names = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (isRecord(value)) {
+      if (value.kind === "identifier" && typeof value.name === "string") names.add(value.name);
+      const callee = value.kind === "call" && record(value.callee).kind === "identifier";
+      for (const [key, item] of Object.entries(value))
+        if (key !== "span" && !(callee && key === "callee")) walk(item);
+    }
+  };
+  walk(expression);
+  return names;
+}
+
 /** The name a call calls, for a plain name or a method. */
 function calleeName(call: Data): string | null {
   const callee = record(call.callee);
@@ -416,20 +432,8 @@ export class DataFlow {
       ...[...flow.keys].map((key) => ({ kind: "storage" as const, key })),
       ...(flow.clock ? [{ kind: "clock" as const }] : []),
     ];
-    const names = new Set<string>();
-    const walk = (value: unknown): void => {
-      if (Array.isArray(value)) value.forEach(walk);
-      else if (isRecord(value)) {
-        if (value.kind === "identifier" && typeof value.name === "string") names.add(value.name);
-        // A called function's name is no variable.
-        const callee = value.kind === "call" && record(value.callee).kind === "identifier";
-        for (const [key, item] of Object.entries(value))
-          if (key !== "span" && !(callee && key === "callee")) walk(item);
-      }
-    };
-    walk(expression);
     // A variable is a source of its own when the code assigns it: it counts, or no ask, key, or clock reaches it.
-    for (const name of names) {
+    for (const name of namesIn(expression)) {
       const known = this.#variables.get(name);
       const external =
         known !== undefined && (known.asks.size > 0 || known.keys.size > 0 || known.clock);
@@ -883,6 +887,58 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     if (!known) goals.push({ source, candidates: [], comparison: null });
   }
   return goals;
+}
+
+/**
+ * A value that the plan's conditions compare with constants: a named binding (`length` for `name.length`), or a stored
+ * key, by its text or a pattern with {@link KEY_PLACEHOLDER} parts; with those constants.
+ */
+export interface Slot {
+  readonly kind: "binding" | "storage";
+  readonly name: string;
+  readonly length: boolean;
+  /** The numbers it is compared with, ascending, and the texts. */
+  readonly numbers: readonly number[];
+  readonly strings: ReadonlySet<string>;
+}
+
+/**
+ * The slots of every condition and `while` loop: in each of their comparisons with a constant, the bindings the compared
+ * side names and the stored keys its value comes from (`DataFlow.flowOf`), each with the constant. Slots compared with
+ * no constant are left out, as nothing tells which of their values differ.
+ */
+export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Slot[] {
+  const slots = new Map<string, { slot: Slot; numbers: Set<number>; strings: Set<string> }>();
+  const add = (kind: Slot["kind"], name: string, length: boolean, constant: Atom["constant"]) => {
+    const id = `${kind}:${name}${length ? ".length" : ""}`;
+    let known = slots.get(id);
+    if (known === undefined) {
+      const numbers = new Set<number>();
+      const strings = new Set<string>();
+      known = { slot: { kind, name, length, numbers: [], strings }, numbers, strings };
+      slots.set(id, known);
+    }
+    if (typeof constant === "number") known.numbers.add(constant);
+    if (typeof constant === "string") known.strings.add(constant);
+  };
+  for (const instruction of instructions) {
+    const conditional =
+      instruction.kind === "jumpIfFalse" ||
+      (instruction.kind === "loopStart" && instruction.loopKind === "while");
+    if (!conditional) continue;
+    for (const atom of atomsFor(instruction.condition ?? instruction.expression, true)) {
+      const subject = record(atom.subject);
+      const object = record(subject.object);
+      if (subject.kind === "property" && subject.name === "length" && object.kind === "identifier")
+        add("binding", String(object.name), true, atom.constant);
+      else for (const name of namesIn(atom.subject)) add("binding", name, false, atom.constant);
+      for (const key of flow.flowOf(atom.subject).keys) add("storage", key, false, atom.constant);
+    }
+  }
+  return [...slots.values()].map(({ slot, numbers }) => ({
+    ...slot,
+    numbers: [...numbers].sort((left, right) => left - right),
+  }));
 }
 
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */

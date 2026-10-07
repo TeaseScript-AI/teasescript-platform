@@ -4,7 +4,7 @@
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
- *          [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>
+ *          [--corpus <dir> [--rounds N]] [--[no-]cells] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -12,6 +12,8 @@
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
  * given.
+ *
+ * `--cells` ranks states by cells (see `src/explorer-search.ts`); `--no-cells` switches it off.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -69,6 +71,7 @@ async function main(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
+    allowNegative: true,
     options: {
       "budget-seconds": { type: "string" },
       "budget-ops": { type: "string" },
@@ -84,6 +87,7 @@ async function main(args: string[]): Promise<void> {
       corpus: { type: "string" },
       rounds: { type: "string", default: "1" },
       "no-summary": { type: "boolean", default: false },
+      cells: { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -126,7 +130,7 @@ async function main(args: string[]): Promise<void> {
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
-        "         [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>\n" +
+        "         [--corpus <dir> [--rounds N]] [--[no-]cells] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -153,8 +157,12 @@ async function main(args: string[]): Promise<void> {
         `Round ${round}: ${remaining.length} units, ${describeBudget(budgets)} each\n`,
       );
     process.exitCode =
-      (await exploreUnits(remaining, { ...budgets, maxStates, seed, corpus }, out, workers)) ||
-      process.exitCode;
+      (await exploreUnits(
+        remaining,
+        { ...budgets, maxStates, seed, corpus, strategies: { cells: values.cells } },
+        out,
+        workers,
+      )) || process.exitCode;
     if (corpus === null) break;
     // A unit goes on while its corpus says it was not exhausted; one that did not compile has no corpus.
     const going = await Promise.all(
@@ -183,6 +191,8 @@ interface RunSettings {
   seed: number;
   /** The corpus folder, or null without one. */
   corpus: string | null;
+  /** The search strategies that can be switched off (see `ExploreOptions`). */
+  strategies: { cells: boolean };
 }
 
 /** Explores units with one budget, in this process or in two; returns 1 when a process failed. */
@@ -192,7 +202,7 @@ async function exploreUnits(
   out: string,
   workers: number,
 ): Promise<number> {
-  const { budgetSeconds, budgetOps, maxStates, seed, corpus } = settings;
+  const { budgetSeconds, budgetOps, maxStates, seed, corpus, strategies } = settings;
   if (workers === 2 && dirs.length > 1) {
     const flags = [
       "--max-states",
@@ -206,6 +216,8 @@ async function exploreUnits(
     if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
     if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
     if (corpus !== null) flags.push("--corpus", corpus);
+    for (const [name, on] of Object.entries(strategies))
+      flags.push(on ? `--${name}` : `--no-${name}`);
     const groups = [
       dirs.filter((_, index) => index % 2 === 0),
       dirs.filter((_, index) => index % 2 === 1),
@@ -342,6 +354,7 @@ async function exploreUnit(
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
       ...(settings.corpus === null ? {} : { corpus: stored?.entries ?? [] }),
+      ...settings.strategies,
     }),
   };
 }

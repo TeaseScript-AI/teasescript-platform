@@ -1,6 +1,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
 import {
+  comparedSlots,
   constantConditions,
   DataFlow,
   distance,
@@ -9,6 +10,7 @@ import {
   unreachableInstructions,
   type Goal,
   type PlanDiagnostic,
+  type Slot,
 } from "./explorer-analysis.ts";
 import {
   EPOCH_MS,
@@ -39,7 +41,9 @@ import {
  * - Search order: play states of a directed attempt first ({@link Lead}), then play states, then clock ones; within
  *   each, states whose step reached new instructions first, in any session; then, earlier sessions first, states that
  *   differ from every explored one in more than clock, random state, and settled handles (their loop key), then the
- *   rest, least repeated first; and the newest first.
+ *   rest, least repeated first; and the newest first. With cells ({@link Cells}), a step that shows a compared value or
+ *   change of value for the first time counts as reaching new instructions, and the states of the cells expanded least
+ *   go before the more repeated ones.
  * - Directed search (see {@link explore}) aims at each condition that a step reached but left only one way.
  * - Traps are described at {@link findTraps}.
  * - A corpus carries a run's work to the next one: input lists from the start that together cover what the run
@@ -117,6 +121,9 @@ interface Node {
   readonly lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
   readonly rank: readonly number[];
+  /** With cells ({@link ExploreOptions.cells}): its cell, and the ID of its slot values; -1 without. */
+  readonly cell: number;
+  readonly values: number;
   /** A corpus replay went on from it, so an earlier run expanded it: it comes after every other state. */
   resumed: boolean;
   /** With a corpus: the lines and condition ways the step that reached it covered ({@link corpusItems}). */
@@ -146,6 +153,12 @@ export interface ExploreOptions {
   readonly diagnostics: readonly PlanDiagnostic[];
   /** The corpus of earlier runs, replayed first; given, even empty, the result has the corpus to keep. */
   readonly corpus?: readonly CorpusEntry[];
+  /**
+   * Cell ranking ({@link Cells}): among states that reached nothing new, those whose cell was expanded least go first,
+   * and a step that shows a compared slot's value or change of value for the first time counts as reaching something
+   * new. Off by default.
+   */
+  readonly cells?: boolean;
 }
 
 /**
@@ -316,6 +329,8 @@ export interface ExploreResult {
     expansionsByPrompt: PromptShare[];
     /** The compressed snapshot store: its largest size, the snapshots it dropped, and the replays that made up for them. */
     store: { peakBytes: number; evicted: number; replays: number };
+    /** With cells: the compared slots, and the cells, slot values, and changes of a slot's value found. */
+    cells?: { slots: number; cells: number; values: number; transitions: number };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -405,6 +420,11 @@ class Frontier {
     return this.#items.length;
   }
 
+  /** The rank of the state that comes first. */
+  peek(): readonly number[] | undefined {
+    return this.#items[0]?.rank;
+  }
+
   push(node: number, rank: readonly number[]): void {
     const items = this.#items;
     items.push({ node, rank });
@@ -434,6 +454,174 @@ class Frontier {
     }
     return top.node;
   }
+}
+
+/**
+ * The cells of the search ({@link ExploreOptions.cells}). A state's cell is where it waits (its pending action, the
+ * return points of its active calls, and the pass of each active `for` and `repeat` loop, as those loops make progress)
+ * with the bucket of each compared slot's value (`comparedSlots`): unset, null, a boolean, a compared text or other
+ * text, or a number's place among the constants it is compared with, such as below, at, or above `15` for `t < 15`.
+ * States of one cell differ only in what no condition tells apart, so the search expands the cells expanded least
+ * first. The buckets are read from the step's snapshot, from the slots' bindings and storage entries only.
+ */
+class Cells {
+  readonly slots: readonly Slot[];
+  /** Expansions by cell. */
+  readonly expansions: number[] = [];
+  /** Binding slots by name, and storage slots by stored key (found by key or pattern once per key). */
+  readonly #byName = new Map<string, number[]>();
+  readonly #byKey = new Map<string, readonly number[]>();
+  readonly #patterns: readonly {
+    readonly slot: number;
+    readonly matches: (key: string) => boolean;
+  }[];
+  /** Per slot, its buckets seen so far by text, numbered from 1 (0 is unset). */
+  readonly #buckets: Map<string, number>[];
+  /** The slot values seen, as `slot:bucket` lists, by ID; each one's slots and buckets, in slot order. */
+  readonly #values = new Map<string, number>();
+  readonly #vectors: Int32Array[] = [];
+  readonly #cells = new Map<string, number>();
+  /** Changes of a slot's bucket seen (`slot:from:to`), and the pairs of slot values compared for them. */
+  readonly #transitions = new Set<string>();
+  readonly #pairs = new Set<string>();
+
+  constructor(slots: readonly Slot[]) {
+    this.slots = slots;
+    const patterns: { slot: number; matches: (key: string) => boolean }[] = [];
+    slots.forEach((slot, index) => {
+      if (slot.kind === "storage") patterns.push({ slot: index, matches: keyMatcher(slot.name) });
+      else this.#byName.set(slot.name, [...(this.#byName.get(slot.name) ?? []), index]);
+    });
+    this.#patterns = patterns;
+    this.#buckets = slots.map(() => new Map());
+  }
+
+  get stats() {
+    return {
+      slots: this.slots.length,
+      cells: this.#cells.size,
+      values: this.#buckets.reduce((sum, buckets) => sum + buckets.size, 0),
+      transitions: this.#transitions.size,
+    };
+  }
+
+  /**
+   * The cell of a waiting state, and the ID of its slot values; `novel` when a slot shows a value, or a change of value
+   * from the state before (`from`, the ID of its slot values), seen for the first time.
+   */
+  of(
+    snapshot: Data,
+    waitsAt: number | null,
+    from: number | null,
+  ): { cell: number; values: number; novel: boolean } {
+    let novel = false;
+    const found = new Map<number, number>();
+    const put = (slot: number, value: unknown) => {
+      if (found.has(slot)) return;
+      const text = bucket(this.slots[slot]!, value);
+      const buckets = this.#buckets[slot]!;
+      let id = buckets.get(text);
+      if (id === undefined) {
+        id = buckets.size + 1;
+        buckets.set(text, id);
+        novel = true;
+      }
+      found.set(slot, id);
+    };
+    // The innermost binding of a name first.
+    const scopes = [...list(snapshot.frames).toReversed(), { bindings: snapshot.globals }];
+    for (const scope of scopes) {
+      for (const binding of list(scope.bindings)) {
+        const slots = typeof binding.name === "string" ? this.#byName.get(binding.name) : undefined;
+        for (const slot of slots ?? []) put(slot, binding.value);
+      }
+    }
+    for (const entry of list(snapshot.scriptStorage)) {
+      const key = entry.key;
+      if (typeof key !== "string") continue;
+      let slots = this.#byKey.get(key);
+      if (slots === undefined) {
+        slots = this.#patterns.filter(({ matches }) => matches(key)).map(({ slot }) => slot);
+        this.#byKey.set(key, slots);
+      }
+      for (const slot of slots) put(slot, entry.value);
+    }
+    const vector = Int32Array.from([...found].sort(([left], [right]) => left - right).flat());
+    const text = vector.join(",");
+    let values = this.#values.get(text);
+    if (values === undefined) {
+      values = this.#vectors.length;
+      this.#values.set(text, values);
+      this.#vectors.push(vector);
+    }
+    if (from !== null && from !== values && !this.#pairs.has(`${from}>${values}`)) {
+      this.#pairs.add(`${from}>${values}`);
+      for (const change of changes(this.#vectors[from]!, vector)) {
+        if (this.#transitions.has(change)) continue;
+        this.#transitions.add(change);
+        novel = true;
+      }
+    }
+    const returns = list(snapshot.callFrames).map((frame) => frame.returnInstruction);
+    const loops = list(snapshot.loopFrames).map((frame) =>
+      frame.kind === "for"
+        ? `f${String(frame.position)}`
+        : frame.kind === "repeat"
+          ? `r${String(frame.remaining)}`
+          : "w",
+    );
+    const place = `${waitsAt ?? "-"}/${returns.join("/")}/${loops.join("/")}|${values}`;
+    let cell = this.#cells.get(place);
+    if (cell === undefined) {
+      cell = this.#cells.size;
+      this.#cells.set(place, cell);
+      this.expansions.push(0);
+    }
+    return { cell, values, novel };
+  }
+}
+
+/** A value's bucket for a slot (see {@link Cells}). */
+function bucket(slot: Slot, value: unknown): string {
+  if (slot.length) {
+    const items = record(value).items;
+    const length =
+      typeof value === "string" ? value.length : Array.isArray(items) ? items.length : null;
+    return length === null ? "other" : numberBucket(slot.numbers, length);
+  }
+  if (value === null) return "null";
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "number") return numberBucket(slot.numbers, value);
+  if (typeof value === "string") return slot.strings.has(value) ? JSON.stringify(value) : "text";
+  return "other";
+}
+
+/** A number's place among ascending constants: at one (`=c`), or how many are below it (`#n`). */
+function numberBucket(constants: readonly number[], value: number): string {
+  let below = 0;
+  for (const constant of constants) {
+    if (constant === value) return `=${constant}`;
+    if (constant < value) below += 1;
+  }
+  return `#${below}`;
+}
+
+/** The changes of a slot's bucket between two slot value lists (`slot, bucket, ...` in slot order), as `slot:from:to`. */
+function changes(from: Int32Array, to: Int32Array): string[] {
+  const found: string[] = [];
+  let left = 0;
+  let right = 0;
+  while (left < from.length || right < to.length) {
+    const leftSlot = left < from.length ? from[left]! : Infinity;
+    const rightSlot = right < to.length ? to[right]! : Infinity;
+    const slot = Math.min(leftSlot, rightSlot);
+    const before = leftSlot === slot ? from[left + 1]! : 0;
+    const after = rightSlot === slot ? to[right + 1]! : 0;
+    if (before !== after) found.push(`${slot}:${before}:${after}`);
+    if (leftSlot === slot) left += 2;
+    if (rightSlot === slot) right += 2;
+  }
+  return found;
 }
 
 function before(left: readonly number[], right: readonly number[]): boolean {
@@ -566,6 +754,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   const allConstants = new Map(constants);
   for (const [index, found] of fixed) allConstants.set(index, found.value);
+  const cells = options.cells === true ? new Cells(comparedSlots(flow, instructions)) : null;
   const store = new SnapshotStore();
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
@@ -649,6 +838,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       tier === 0 ? 0 : 1,
       starts[node.start]!.session,
       tier,
+      // With cells, the states of the cell expanded least first.
+      ...(cells === null ? [] : [cells.expansions[node.cell]!]),
       ...rest,
     ];
   };
@@ -697,6 +888,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           repro: reproOf(parent, input, startIndex),
         };
     }
+    const waitsAt = record(step.snapshot.foregroundAction).owningInstruction;
+    // A step to a known state also records the slot values and changes it shows.
+    const place =
+      cells?.of(
+        step.snapshot,
+        typeof waitsAt === "number" ? waitsAt : null,
+        parent === null ? null : parent.values,
+      ) ?? null;
     const keys = stateKeys(step.snapshot);
     const known = byState.get(keys.state);
     if (known !== undefined) {
@@ -705,7 +904,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return node;
     }
     const status = step.snapshot.status;
-    const waitsAt = record(step.snapshot.foregroundAction).owningInstruction;
     const repeats = loopSeen.get(keys.loop) ?? 0;
     const id = nodes.length;
     const node: Node = {
@@ -717,7 +915,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       start: startIndex,
       clock,
       lead: inherited,
-      rank: [step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2, repeats, -id],
+      rank: [
+        step.newInstructions > 0 || place?.novel === true ? 0 : repeats === 0 ? 1 : 2,
+        repeats,
+        -id,
+      ],
+      cell: place?.cell ?? -1,
+      values: place?.values ?? -1,
       resumed: false,
       items: stepItems,
       status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
@@ -1305,6 +1509,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         continue;
       }
     }
+    // With cells, a state whose cell was expanded since it was queued goes back when another one now comes first.
+    if (cells !== null && frontier.size > 0) {
+      const own = order(node);
+      if (before(frontier.peek()!, own)) {
+        frontier.push(node.id, own);
+        continue;
+      }
+    }
     const leading = leads(node);
     if (leading && node.lead !== null) node.lead.remaining -= 1;
     // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
@@ -1322,6 +1534,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     expanded += 1;
     sinceAnalysis += 1;
+    if (cells !== null) cells.expansions[node.cell]! += 1;
     const at = expansionsAt.get(node.waitsAt);
     if (at === undefined)
       expansionsAt.set(node.waitsAt, { expansions: 1, prompt: node.prompt.text });
@@ -1478,6 +1691,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           };
         }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
+      ...(cells === null ? {} : { cells: cells.stats }),
     },
     endStates: {
       completed: count("completed"),
