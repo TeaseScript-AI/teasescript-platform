@@ -948,9 +948,9 @@ operations stay as they are.
   `callReturnInstructions()` gives where each active call continues when it returns, outermost first, in work
   proportional to the call depth. For a debugger, `callStack()` gives each active call's kind, function, call site,
   return position, scope depth, and the kind of block that interrupted it, also in work proportional to the call depth;
-  `variables()` gives the globals, scopes, kept scopes, and the current text of each message with a handle, in work
-  proportional to the variables and their values; and `temporalPresentation()` gives the date and time presentation in
-  force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
+  `variablePreviews()` gives the globals, scopes, and kept scopes with bounded previews of their values, and the current
+  text of each message with a handle, in work proportional to the number of variables and those texts, not to the size
+  of the values; and `temporalPresentation()` gives the date and time presentation in force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
   whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
   plain data that later operations do not change; importing it again crosses the external-data boundary.
