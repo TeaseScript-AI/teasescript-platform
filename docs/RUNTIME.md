@@ -944,8 +944,8 @@ operations stay as they are.
   times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, and
   `suspendedAction`, the foreground action of the path a running block interrupted. `stageProjection()`,
   `mediaPlaybackProjection()`, and `permanentButtonProjection()` give what the functions of those names give for a
-  snapshot, also detached and frozen. Variables, storage, and other script data are read through `inspect()`, which
-  returns `inspectRuntimeState`'s result and so captures and validates the whole state, or from an export.
+  snapshot, also detached and frozen. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after
+  capturing and validating the whole state. Variables, storage, and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
   plain data that later operations do not change; importing it again crosses the external-data boundary.
 - **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An
