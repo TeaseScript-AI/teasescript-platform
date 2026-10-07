@@ -19,7 +19,6 @@ import {
 } from "../src/index.js";
 import { parse } from "../src/parser.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { withMessageSays } from "./helpers/message-says.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
@@ -734,13 +733,12 @@ test("save rejects session handles and speaker references at the top level and n
     "let handle = timer async 1 s",
     'let handle = playAudio async "a.mp3"',
     "speaker vera {}\nlet handle = vera",
-    'let handle = timer(duration: 1 ms, async: true, label: "Shown")',
+    'let handle = say "Shown", instant',
   ]) {
     for (const value of ["handle", "{ nested: [handle] }"]) {
       // `dynamic` hides the value's type from the compiler, which rejects a known speaker or handle before runtime.
       const source = `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"\nexit`;
-      // The last declaration stands for a `say` whose result is a message handle.
-      const compiled = declaration.includes("1 ms") ? withMessageSays(plan(source)) : plan(source);
+      const compiled = plan(source);
       let result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
       if (declaration.includes("playAudio")) {
         assert.equal(result.snapshot.status, "waiting");

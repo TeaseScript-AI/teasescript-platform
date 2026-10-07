@@ -127,6 +127,11 @@ test("rejects invalid constant colours and presentation options at compile time"
     ['speaker vera { color: "not-a-color" }', "TSC008", '"not-a-color"'],
     ['speaker vera { prose: { background: "not-a-color" } }', "TSC008", '"not-a-color"'],
     ['say "[color=not-a-color]x[/color]"', "TSC008", '"[color=not-a-color]x[/color]"'],
+    [
+      'let line = say "x"\nline.text = "[color=not-a-color]x[/color]"',
+      "TSC008",
+      '"[color=not-a-color]x[/color]"',
+    ],
     ['say prose(align: "diagonal") "x"', "TSC008", '"diagonal"'],
     ['say prose(align: "left", align: "right") "x"', "TSP004", "align"],
     ['say prose(unknown: "x") "x"', "TSP004", "unknown"],

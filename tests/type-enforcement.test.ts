@@ -562,7 +562,7 @@ test("a set compares its members with ==, and only objects and handles take prop
   assert.deepEqual(mismatches("let xs = [1]\nxs.length = 2\nexit"), [
     [
       "TSV043",
-      "Only objects, speakers, and timer and media handles have properties to assign, but this is a list (integer[]).",
+      "Only objects, speakers, and timer, media, and message handles have properties to assign, but this is a list (integer[]).",
       "xs",
     ],
   ]);
@@ -1407,5 +1407,83 @@ test("a choice result has the type of its values, and an option without a writte
       'let option = { text: "Yes" }\nlet answer: string = choose option\nlet other = choose [option]\nsay "${other}"\nexit',
     ),
     [],
+  );
+});
+
+test("a message handle has one text property, takes text, and stays out of text, storage, and start values", () => {
+  const codes = (source: string) =>
+    mismatches(`let line = say "Waiting", instant\n${source}\nexit`).map(([code, message]) => [
+      code,
+      message,
+    ]);
+  assert.deepEqual(
+    codes('let shown: string = line.text\nline.text = "Ready"\nline.text += "."'),
+    [],
+  );
+  assert.deepEqual(codes("line.text = 5"), [
+    [
+      "TSV041",
+      "'line.text' holds text (string), so it cannot be set to a whole number (integer). To show it as text, write \"${5}\".",
+    ],
+  ]);
+  assert.deepEqual(codes('line.text -= "."'), [
+    ["TSV041", "'line.text' holds text (string), so text (string) cannot be subtracted from it."],
+  ]);
+  for (const [source, message] of [
+    ['line.color = "red"', "Message handles have no property 'color'; use text."] as const,
+    ["say line.speaker", "Message handles have no property 'speaker'; use text."],
+    [
+      "line.stop()",
+      "Message handles have no method 'stop'; change the message with its text property.",
+    ],
+  ] as const)
+    assert.deepEqual(codes(source), [["TSV043", message]], source);
+  assert.equal(codes('say "${line}"')[0]?.[0], "TSV042");
+  assert.equal(codes("say toString(line)")[0]?.[0], "TSV043");
+  assert.match(codes('save [line] as "k"')[0]?.[1] ?? "", /cannot be saved.*text property/u);
+  assert.deepEqual(codes('save line.text as "status"'), []);
+  assert.equal(codes('let other: string = say "x"')[0]?.[0], "TSV041");
+  // `message` stays an ordinary name; `messageHandle` is the type's.
+  assert.deepEqual(mismatches("let message = 1\nsay message\nexit"), []);
+  assert.equal(mismatches("let messageHandle = 1\nexit")[0]?.[0], "TSV001");
+  // Showing a message is an effect that start values and parameter defaults cannot have.
+  assert.equal(mismatches('global greeting = say "Hi"\nexit')[0]?.[0], "TSV055");
+  assert.equal(mismatches('speaker vera {\n    displayName: say "Hi"\n}\nexit')[0]?.[0], "TSV055");
+  assert.equal(mismatches('function f(m = say "Hi") {\n}\nexit')[0]?.[0], "TSV032");
+  // A handle that may be null is checked first, and a nullable global can take one later.
+  assert.match(
+    mismatches('function f(m: messageHandle?) {\n    m.text = "z"\n}\nexit')[0]?.[1] ?? "",
+    /may be null/u,
+  );
+  assert.deepEqual(
+    mismatches(
+      'global status: messageHandle? = null\nstatus = say "Ready", instant\nif status != null {\n    status.text = "Set"\n}\nexit',
+    ).filter(([code]) => code !== "TSV046"),
+    [],
+  );
+});
+
+test("a say statement that calls skippable or unskippable names the forms that show the text", () => {
+  assert.deepEqual(mismatches('say unskippable("Hi")\nexit'), [
+    [
+      "TSV018",
+      "Unknown function 'unskippable'. To say a message unskippable, write its text without parentheses, as in 'say unskippable \"Hi\"'; only a say used as a value, such as 'let line = say unskippable (\"Hi\", instant)', takes its text in parentheses.",
+      "unskippable",
+    ],
+  ]);
+  // A function of that name keeps being called, as before, also one the host provides.
+  assert.deepEqual(
+    mismatches('function unskippable(text) {\n    return text\n}\nsay unskippable("Hi")\nexit'),
+    [],
+  );
+  for (const name of ["skippable", "unskippable"])
+    assert.deepEqual(
+      compileSource(`say ${name}("Hi"), instant\nexit`, { builtins: [name] }).diagnostics,
+      [],
+    );
+  // The call is checked as any other.
+  assert.deepEqual(
+    mismatches("say unskippable(a: 1, a: 2)\nexit").map(([code]) => code),
+    ["TSV023", "TSV018"],
   );
 });

@@ -15,7 +15,6 @@ import {
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
-import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan } from "./helpers/message-says.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
 // transcript rebuilt from the events that led to it (DEBUGGER.md "Rewind").
@@ -254,18 +253,15 @@ test("the grey future is the transcript of the state Forward restores after the 
 
 test("Back and Forward show a changed message as each state had it, and the grey future does not repeat it", async () => {
   const first = createPlayerRuntimeSession(
-    messageSayPlan(
-      [
-        MESSAGE_TEXT_FUNCTIONS,
-        'let strokes = timer(duration: 1 ms, async: true, label: "Strokes: 0")',
-        'let first = choose "One", "Two"',
-        'setText(strokes, "Strokes: 1")',
-        'let second = choose "Red", "Blue"',
-        'setText(strokes, "Strokes: 50")',
-        'say "done", instant',
-        "exit",
-      ].join("\n"),
-    ),
+    [
+      'let strokes = say "Strokes: 0", instant',
+      'let first = choose "One", "Two"',
+      'strokes.text = "Strokes: 1"',
+      'let second = choose "Red", "Blue"',
+      'strokes.text = "Strokes: 50"',
+      'say "done", instant',
+      "exit",
+    ].join("\n"),
   );
   const history = new DebugHistory(first.plan, Promise.resolve(null));
   history.follow(first, unmarked);

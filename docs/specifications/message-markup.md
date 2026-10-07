@@ -14,7 +14,9 @@ The markup input of `say` is an ordinary TeaseScript string. The engine evaluate
 exactly once, performs any visible-text value conversion already required by `say`, and then parses the complete
 resulting string as message markup. An interpolated formatted fragment therefore participates in the same parse as surrounding
 text. An author uses `escapeMarkup()` when interpolated text must remain literal. The code-like notation `say` shows for
-a value other than a scalar is such literal text: the engine passes it through `escapeMarkup()` before the parse.
+a value other than a scalar is such literal text: the engine passes it through `escapeMarkup()` before the parse. A
+message's [`text`](accepted-syntaxes-v30.md#updatable-messages) is this evaluated string, not its visible text; writing
+new `text` parses the complete new string the same way, without evaluating anything again.
 
 The markup layer applies only to authored Standard-chat `say` output. Player-authored transcript entries remain plain
 text. Markup is presentation syntax rather than TeaseScript program syntax, so malformed markup in a dynamically

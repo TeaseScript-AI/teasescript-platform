@@ -5,7 +5,6 @@ import { createServer } from "vite";
 
 import type * as Adapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
-import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan } from "./helpers/message-says.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):
@@ -108,21 +107,18 @@ async function settle(context: TestContext, ms: number) {
   await nextTick();
 }
 
-const plan = messageSayPlan(
-  [
-    MESSAGE_TEXT_FUNCTIONS,
-    'let line = timer(duration: 1 ms, async: true, label: "Waiting")',
-    'let answer = askText "Go?"',
-    'setText(line, "Ready ${answer}")',
-    'let more = askText "More?"',
-    'setText(line, "Done")',
-    "exit",
-  ].join("\n"),
-);
+const SOURCE = [
+  'let line = say "Waiting", instant',
+  'let answer = askText "Go?"',
+  'line.text = "Ready ${answer}"',
+  'let more = askText "More?"',
+  'line.text = "Done"',
+  "exit",
+].join("\n");
 
 test("a change that live play publishes is spoken, and a restored or new session speaks none of its history", async (context) => {
   const { host, spoken } = createHost(context);
-  host.prepare(() => adapter.createPlayerRuntimeSession(plan));
+  host.prepare(() => adapter.createPlayerRuntimeSession(SOURCE));
   await host.activate();
   await settle(context, 0);
   // The message itself is no change.
@@ -141,7 +137,7 @@ test("a change that live play publishes is spoken, and a restored or new session
 
   // A change made before a new generation is never spoken after it.
   host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);
-  host.prepare(() => adapter.createPlayerRuntimeSession(plan));
+  host.prepare(() => adapter.createPlayerRuntimeSession(SOURCE));
   await host.activate();
   await settle(context, 10_000);
   assert.equal(spoken.value, "");

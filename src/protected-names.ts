@@ -54,6 +54,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "object",
   "range",
   "media",
+  "messageHandle",
   "script",
 ] as const);
 

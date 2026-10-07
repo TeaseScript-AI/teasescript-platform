@@ -12,6 +12,7 @@ import type {
   DurationUnit,
   Identifier,
   InteractionChoiceOption,
+  SayParts,
   ShowButtonParts,
   ShowPermanentButtonParts,
   TimerParts,
@@ -48,6 +49,7 @@ import {
   expressionChildren,
   mediaHandlerBlocks,
   mediaOperands,
+  sayOperands,
   showButtonOptions,
   tagQueryOperands,
 } from "./expression-children.js";
@@ -533,6 +535,8 @@ class SemanticValidator {
 
   /** The innermost statement being checked, which decides whether what it holds can run. */
   #statement: Statement | null = null;
+  /** The value of each `say` statement, whose call of an unknown `skippable` or `unskippable` gets a hint. */
+  readonly #sayStatementValues = new WeakSet<Expression>();
 
   /** The `script(...)` call that a transfer statement being checked names directly, as in `goto script("a.tease")`. */
   #directTarget: {
@@ -1282,35 +1286,9 @@ class SemanticValidator {
       case "speakerSetterStatement":
         this.#validateSpeakerReference(statement.speaker.name, statement.speaker.span, scope);
         return;
-      case "sayStatement": {
-        const contextualSpeaker =
-          statement.speaker === null
-            ? "speaker"
-            : this.#validateSpeakerReference(statement.speaker.name, statement.speaker.span, scope)
-              ? statement.speaker.name
-              : null;
-        if (statement.presentation !== null) {
-          this.#validateExpression(statement.presentation, scope, contextualSpeaker);
-          for (const property of statement.presentation.properties)
-            this.#diagnostics.push(
-              ...presentationPropertyDiagnostics(property.name.name, property.value),
-            );
-        }
-        this.#diagnostics.push(...messageColorDiagnostics(statement.value));
-        this.#validateExpression(statement.value, scope, contextualSpeaker);
-        if (statement.pacing !== null && statement.pacing !== "instant") {
-          this.#validateExpression(statement.pacing, scope, contextualSpeaker);
-          const known = staticNumber(statement.pacing);
-          if (known !== undefined && known < 0) {
-            this.#report(
-              semanticCode.invalidRepeatCount,
-              "Say pacing must not be negative.",
-              statement.pacing.span,
-            );
-          }
-        }
+      case "sayStatement":
+        yield* compileChild(this.#validateSayTask(statement, scope, true));
         return;
-      }
       case "showButtonStatement":
         yield* compileChild(this.#validateShowButtonTask(statement, scope));
         return;
@@ -1783,9 +1761,11 @@ class SemanticValidator {
               ? "Media playback is not supported in function parameter defaults."
               : blockingInteraction.kind === "showCameraExpression"
                 ? "Camera views are not supported in function parameter defaults."
-                : isTakePhotoCall(blockingInteraction)
-                  ? "Camera capture is not supported in function parameter defaults."
-                  : "Blocking interactions are not supported in function parameter defaults.",
+                : blockingInteraction.kind === "sayExpression"
+                  ? "A say is not supported in function parameter defaults."
+                  : isTakePhotoCall(blockingInteraction)
+                    ? "Camera capture is not supported in function parameter defaults."
+                    : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -2051,9 +2031,15 @@ class SemanticValidator {
               expression.callee.span,
             );
           } else if (!this.#reportFileName(name, expression.callee.span)) {
+            // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text.
+            const hint =
+              this.#sayStatementValues.has(expression) &&
+              (name === "skippable" || name === "unskippable")
+                ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'; only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
+                : "";
             this.#report(
               semanticCode.unknownFunction,
-              `Unknown function '${name}'.`,
+              `Unknown function '${name}'.${hint}`,
               expression.callee.span,
             );
           }
@@ -2155,6 +2141,9 @@ class SemanticValidator {
           this.#validateExpressionTask(expression.value, scope, contextualSpeaker),
         );
         return;
+      case "sayExpression":
+        yield* compileChild(this.#validateSayTask(expression, scope, false));
+        return;
       case "tagQueryExpression":
         for (const operand of tagQueryOperands(expression)) {
           yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
@@ -2162,6 +2151,39 @@ class SemanticValidator {
         return;
     }
     expression satisfies never;
+  }
+
+  /** A `say`, as a statement or a value: its operands under the speaker it chooses, and its presentation and pacing. */
+  *#validateSayTask(parts: SayParts, scope: SemanticScope, statement: boolean): CompileTask<void> {
+    const contextualSpeaker =
+      parts.speaker === null
+        ? "speaker"
+        : this.#validateSpeakerReference(parts.speaker.name, parts.speaker.span, scope)
+          ? parts.speaker.name
+          : null;
+    if (parts.presentation !== null) {
+      yield* compileChild(
+        this.#validateExpressionTask(parts.presentation, scope, contextualSpeaker),
+      );
+      for (const property of parts.presentation.properties)
+        this.#diagnostics.push(
+          ...presentationPropertyDiagnostics(property.name.name, property.value),
+        );
+    }
+    this.#diagnostics.push(...messageColorDiagnostics(parts.value));
+    if (statement) this.#sayStatementValues.add(parts.value);
+    yield* compileChild(this.#validateExpressionTask(parts.value, scope, contextualSpeaker));
+    if (parts.pacing !== null && parts.pacing !== "instant") {
+      yield* compileChild(this.#validateExpressionTask(parts.pacing, scope, contextualSpeaker));
+      const known = staticNumber(parts.pacing);
+      if (known !== undefined && known < 0) {
+        this.#report(
+          semanticCode.invalidRepeatCount,
+          "Say pacing must not be negative.",
+          parts.pacing.span,
+        );
+      }
+    }
   }
 
   #validateStorageKey(key: Expression, scope: SemanticScope, message: string): void {
@@ -2771,6 +2793,7 @@ class SemanticValidator {
       const expression = work.pop()!;
       switch (expression.kind) {
         case "interactionExpression":
+        case "sayExpression":
         case "showButtonExpression":
         case "timerExpression":
         case "playMediaExpression":
@@ -2778,7 +2801,7 @@ class SemanticValidator {
         case "showPermanentButtonExpression":
           this.#report(
             semanticCode.invalidStartValue,
-            `${subject} cannot ask the player, wait, or play media: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs.${speaker ? "" : ` Give it a plain start value, and assign the answer later, as in '${owner.name.name} = ...'.`}`,
+            `${subject} cannot say, ask the player, wait, or play media: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs.${speaker ? "" : ` Give it a plain start value, and assign the answer later, as in '${owner.name.name} = ...'.`}`,
             expression.span,
           );
           continue;
@@ -3026,6 +3049,7 @@ function findFirstInteraction(
       | "showButtonExpression"
       | "playMediaExpression"
       | "showCameraExpression"
+      | "sayExpression"
       | "callExpression";
   }
 > | null {
@@ -3037,6 +3061,7 @@ function findFirstInteraction(
       current.kind === "showButtonExpression" ||
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
+      current.kind === "sayExpression" ||
       (current.kind === "callExpression" &&
         (isTakePhotoCall(current) || isAskImageCall(current) || isAskBooleansCall(current)))
     )
@@ -3075,7 +3100,8 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
     expression.kind === "showCameraExpression" ||
-    expression.kind === "showPermanentButtonExpression"
+    expression.kind === "showPermanentButtonExpression" ||
+    expression.kind === "sayExpression"
   );
 }
 
@@ -3138,19 +3164,21 @@ function visitExpression(
     const current = work.pop()!;
     if (current.kind === "identifier") visitor(current);
     const children =
-      current.kind === "interactionExpression"
-        ? [
-            ...(current.speaker === null ? [] : [current.speaker]),
-            ...askOperands(current),
-            ...current.options.map((option) => option.expression),
-          ]
-        : current.kind === "showButtonExpression"
+      current.kind === "sayExpression"
+        ? [...(current.speaker === null ? [] : [current.speaker]), ...sayOperands(current)]
+        : current.kind === "interactionExpression"
           ? [
               ...(current.speaker === null ? [] : [current.speaker]),
-              current.label,
-              ...showButtonOptions(current).map((option) => option.value),
+              ...askOperands(current),
+              ...current.options.map((option) => option.expression),
             ]
-          : expressionChildren(current);
+          : current.kind === "showButtonExpression"
+            ? [
+                ...(current.speaker === null ? [] : [current.speaker]),
+                current.label,
+                ...showButtonOptions(current).map((option) => option.value),
+              ]
+            : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
 }

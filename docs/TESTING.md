@@ -603,7 +603,9 @@ its `picture-race` package checks that a file chosen for a request a timer's req
 its `picture-camera` and `picture-camera-view` packages check that the camera opens by itself, on the Stage or in the
 script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
 the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
-paperclip stays. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
+paperclip stays. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
+the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
+region, and focus on a link that a change removes stays on its message. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
 with the saved photo's exact bytes and not the unsaved one, a refused copy selects the text, closing releases the file,
 and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file

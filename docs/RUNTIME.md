@@ -1228,7 +1228,8 @@ is held. The Player shows the view whenever the restored or current snapshot say
 
 ## Message handles
 
-A `say` instruction may carry a `destinationTemporary`: it then puts a message handle there once its message is shown.
+A `say` used as a value ([V30 §37](specifications/accepted-syntaxes-v30.md#updatable-messages)) lowers to a `say`
+instruction with a `destinationTemporary`: it puts a message handle there once its message is shown.
 Direct output and instant output that supersedes a pacing gate show it at once. Output staged behind an earlier gate
 gives no handle and creates no record until the gate releases it; its prepared output keeps the markup source of its
 text as `sourceText` meanwhile, which snapshot validation requires exactly for a result-bearing `say` and checks against

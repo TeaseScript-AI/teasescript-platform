@@ -3,6 +3,7 @@ import type {
   Expression,
   InteractionExpression,
   MediaParts,
+  SayParts,
   ShowButtonParts,
   TagQueryExpression,
 } from "./ast.js";
@@ -24,6 +25,19 @@ export function askOperands(expression: InteractionExpression): readonly Express
     named.reverse();
   return expression.question === null ? named : [expression.question, ...named];
 }
+
+/**
+ * The operands of a `say` in evaluation order: its presentation options, its text, then its pacing. They are evaluated
+ * for the speaker the `say` chooses, so walkers that keep a speaker context take them through this.
+ */
+export function sayOperands(parts: SayParts): readonly Expression[] {
+  return [
+    ...(parts.presentation === null ? [] : [parts.presentation]),
+    parts.value,
+    ...(parts.pacing === null || parts.pacing === "instant" ? [] : [parts.pacing]),
+  ];
+}
+
 export function expressionChildren(expression: Expression): readonly Expression[] {
   switch (expression.kind) {
     case "booleanLiteral":
@@ -37,6 +51,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
       );
     case "identifier":
     case "interactionExpression":
+    case "sayExpression":
     case "showButtonExpression":
     case "showCameraExpression":
       return [];

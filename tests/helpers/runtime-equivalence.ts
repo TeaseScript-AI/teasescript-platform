@@ -49,8 +49,6 @@ export interface RuntimeResumeEquivalenceOptions {
   readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
   /** How the session ends: `halted` by default, or `failed` for a scenario that ends with a runtime error. */
   readonly ending?: "halted" | "failed";
-  /** Turns the compiled plan into the trusted plan that runs, such as one with result-bearing says. */
-  readonly transformPlan?: (plan: InstructionPlan) => InstructionPlan;
   /**
    * Permanent button scenarios: whenever execution waits, the simulated Player first clicks the button this returns,
    * deciding from the state and every event so far, and observes time only when it returns `null`.
@@ -114,7 +112,7 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: source must compile without diagnostics`,
   );
   assert.notEqual(compiled.plan, null, `${scenario}: compilation must produce a plan`);
-  const plan = options.transformPlan?.(compiled.plan!) ?? compiled.plan!;
+  const plan = compiled.plan!;
 
   const initialPlanValidation = validateInstructionPlan(plan);
   assert.equal(

@@ -780,7 +780,8 @@ playAudio "door.mp3"
 ```
 
 `say` shows a list, set, dict, or object in code-like notation; only `${...}` interpolation selects one random element
-from a list ([§16](#16-lists)).
+from a list ([§16](#16-lists)). Used as a value, `say` gives a handle whose text can change in place, and also has a form
+in parentheses, `say("Strokes: 0", instant)` ([Updatable messages](#updatable-messages)).
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
@@ -1060,8 +1061,8 @@ duration
 ```
 
 The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
-program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), and `script` (a script
-reference, [§29](#29-script-files-and-paths)). A type is a type name
+program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), `messageHandle` (a shown
+message, [§37](#updatable-messages)), and `script` (a script reference, [§29](#29-script-files-and-paths)). A type is a type name
 or one of these forms ([ADR 0021](../decisions/0021-static-types.md)):
 
 ```text
@@ -3113,8 +3114,9 @@ Rules:
 - A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)), or runtime error
   `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing key, so
   `let level: integer = load "level"` needs `integer?` or a default when the key may be missing.
-- Persistent plain data is storable. Timer handles, media handles, and speaker references exist only in the current
-  session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
+- Persistent plain data is storable. Timer, media, and message handles and speaker references exist only in the
+  current session and cannot be saved, including when nested inside lists or objects (`TSR055`); save a message's
+  `text` instead. Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
 - A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
   media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage
@@ -4015,10 +4017,12 @@ Meanings:
 
 **Status:** Accepted (Owner-approved extension for #422 and #426).
 
-The compact `say` form extends the ADR 0018 pacing syntax:
+The compact `say` form extends the ADR 0018 pacing syntax; the bounded form holds the text and pacing in parentheses
+([Updatable messages](#updatable-messages)):
 
 ```text
 say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] text [, pacing]
+say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] (text [, pacing])
 ```
 
 Brackets denote optional parts. `bubble` and `prose` may appear without parentheses; parentheses contain ordinary
@@ -4064,6 +4068,52 @@ belong to the Player presentation design. These defaults do not introduce a new 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
 context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
 properties. The resulting presentation is captured with the message across pacing waits and checkpoint restore.
+
+### Updatable messages
+
+**Status:** Accepted (Owner decision on #512, 2026-10-07).
+
+A `say` used as a value shows its message as usual and gives a `messageHandle` for it. Its one property, `text`, reads
+the message's current text and changes it in place:
+
+```text
+let line = say "Waiting.", instant
+wait 1 s
+line.text += "."
+line.text = "Ready."
+
+let counter: messageHandle = say("Strokes: 0", instant)
+let strokes = [say("First", instant), say("Second", instant)]
+```
+
+- **Forms.** A compact `say` value takes its text and pacing up to the end of its statement, so a comma after the text
+  is its pacing. In a list, a call, or another expression, use the bounded form: its parentheses hold the text and
+  pacing, and the `say` ends at its `)`, so `say("A").text` reads the new message's text. Before parentheses, a mode is
+  written with its options, `say bubble() ("Plain", instant)`, since `say bubble("x")` shows the value of a call to a
+  function `bubble`. As a value, `skippable` or `unskippable` before parentheses is the modifier:
+  `let line = say unskippable ("Wait", instant)`. A `say` statement keeps the rule above: `say unskippable("Wait")`
+  calls a function `unskippable`, so a statement writes `say unskippable "Wait"`.
+- **Statements.** A bare `say` is unchanged and gives no handle. It also takes the bounded form, `say("Hi", instant)`,
+  when a comma follows the first value in its parentheses; other parentheses group a value as before, as in
+  `say ("A"), instant` and `say (a) + b`. A `say` at the start of a line outside brackets begins a statement.
+- **Evaluation.** Speaker, options, text, and pacing evaluate once in source order, and pacing works as for any `say`.
+  The handle exists once the message is shown: a value that waits behind an earlier message's pacing is shown first. A
+  `say` that does not run, as in `false and say("x") == line`, shows nothing. Global and speaker start values and
+  function parameter defaults cannot say.
+- **`text`.** Reading it gives the text as written, with its markup and after `${...}`, such as `"**Ready**"`. Assigning
+  text, or appending with `+=`, replaces the message's text and parses it whole; the message keeps its speaker,
+  presentation, and place in the conversation, and the conversation shows only its current text. The same text again
+  changes nothing, and `""` empties the message without removing it. A text write starts no pacing and waits for none;
+  use `wait` between changes. `text` takes only text: write `"Strokes: ${count}"` for a number. A handle has no other
+  property, no methods, and no operators besides `==` and `!=`.
+- **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the
+  same message, and `==` compares messages, not texts. A message stays changeable while a handle to it remains, also
+  an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller, or a block.
+  `say line` shows `<message N>`; `${line}` and `toString(line)` are errors, so use `line.text`. A handle belongs to its
+  session: `save` refuses it ([§25](#25-persistent-storage-and-keys)), and saved data and host values cannot hold one.
+- **Types.** `messageHandle` is a protected type name ([§38](#38-keywords-and-protected-built-ins)) that annotations
+  and unions use like `timer`; `message` remains an ordinary name. A literal replacement text assigned with `=` to what
+  can only be a message handle has its markup colours checked like the text of `say`.
 
 ### Authored colours
 
@@ -4686,6 +4736,7 @@ dict
 object
 range
 media
+messageHandle
 script
 ```
 

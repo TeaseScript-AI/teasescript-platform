@@ -22,7 +22,6 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
-import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan } from "./helpers/message-says.js";
 
 /*
  * Player Debug's Variables view (DEBUGGER.md "Player Debug") as the Player derives it from a session and its value trace:
@@ -347,20 +346,17 @@ test("a changed message is explained by its latest change, also in Recent chat, 
   const trace = new RuntimeDebugContext();
   const session = advancePlayerRuntimeTime(
     createPlayerRuntimeSession(
-      messageSayPlan(
-        [
-          MESSAGE_TEXT_FUNCTIONS,
-          "let count = 0",
-          'let strokes = timer(duration: 1 ms, async: true, label: "Strokes: 0")',
-          "repeat 2 {",
-          "    count += 1",
-          '    setText(strokes, "Strokes: ${count}")',
-          "}",
-          'say "Later", instant',
-          "wait 1 s",
-          "exit",
-        ].join("\n"),
-      ),
+      [
+        "let count = 0",
+        'let strokes = say "Strokes: 0", instant',
+        "repeat 2 {",
+        "    count += 1",
+        '    strokes.text = "Strokes: ${count}"',
+        "}",
+        'say "Later", instant',
+        "wait 1 s",
+        "exit",
+      ].join("\n"),
       { debugTrace: trace },
     ),
     500,
@@ -398,19 +394,16 @@ test("a changed message is explained by its latest change, also in Recent chat, 
 });
 
 test("Recent chat shows a message changed while Debug runs, also one said before", () => {
-  const plan = messageSayPlan(
-    [
-      MESSAGE_TEXT_FUNCTIONS,
-      'let line = timer(duration: 1 ms, async: true, label: "Waiting")',
-      "wait 1 s",
-      'setText(line, "Ready")',
-      "wait 1 s",
-      "exit",
-    ].join("\n"),
-  );
+  const source = [
+    'let line = say "Waiting", instant',
+    "wait 1 s",
+    'line.text = "Ready"',
+    "wait 1 s",
+    "exit",
+  ].join("\n");
   const trace = new RuntimeDebugContext();
   const session = advancePlayerRuntimeTime(
-    withPlayerRuntimeDebugTrace(createPlayerRuntimeSession(plan), trace),
+    withPlayerRuntimeDebugTrace(createPlayerRuntimeSession(source), trace),
     1_000,
   );
   assert.equal(session.transcriptEntries[0]?.text, "Ready");

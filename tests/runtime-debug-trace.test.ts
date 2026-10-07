@@ -44,7 +44,6 @@ import {
 } from "../player/runtime-adapter.js";
 import { TraceStore } from "../src/runtime/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { MESSAGE_TEXT_FUNCTIONS, withMessageSays } from "./helpers/message-says.js";
 
 /*
  * The opt-in debug trace (docs/RUNTIME.md#debug-trace) explains values with what execution actually computed. Every
@@ -162,12 +161,9 @@ function play(plan: InstructionPlan, options: PlayOptions = {}): Played {
 /** Plays traced and untraced; the trace must not change any state, event, or checkpoint. */
 function traced(
   source: string | readonly ProjectSourceFile[],
-  options: Omit<PlayOptions, "trace"> & {
-    /** Turns the compiled plan into the trusted plan that runs. */
-    readonly transformPlan?: (plan: InstructionPlan) => InstructionPlan;
-  } = {},
+  options: Omit<PlayOptions, "trace"> = {},
 ): Played & { readonly trace: RuntimeDebugContext; readonly plan: InstructionPlan } {
-  const plan = options.transformPlan?.(compile(source)) ?? compile(source);
+  const plan = compile(source);
   const trace = new RuntimeDebugContext();
   const withTrace = play(plan, { ...options, trace });
   const withoutTrace = play(plan, options);
@@ -1428,19 +1424,17 @@ test("a deserialized checkpoint traced from its restore matches the untraced con
 test("a message's text is state of its message: aliases share it, an append builds on it, a replacement does not", () => {
   const played = traced(
     [
-      MESSAGE_TEXT_FUNCTIONS,
-      'let line = timer(duration: 1 ms, async: true, label: "Waiting")',
+      'let line = say "Waiting", instant',
       "let alias = line",
       'let first = "!"',
-      "appendText(alias, first)",
+      "alias.text += first",
       'let second = "?"',
-      "appendText(line, second)",
+      "line.text += second",
       'let fresh = "Ready"',
-      "setText(alias, fresh)",
-      "say textOf(line), instant",
+      "alias.text = fresh",
+      "say line.text, instant",
       "exit",
     ].join("\n"),
-    { transformPlan: withMessageSays },
   );
   const updates = played.events.filter((event) => event.kind === "messageUpdated");
   const [appended, again, replaced] = updates.map((event) =>

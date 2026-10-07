@@ -16,7 +16,6 @@ import {
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../src/index.js";
 import { utc } from "./helpers/temporal-fixtures.js";
-import { MESSAGE_TEXT_FUNCTIONS, withMessageSays } from "./helpers/message-says.js";
 
 import {
   activatePlayerRuntimeButton,
@@ -1173,28 +1172,23 @@ test("a form's cancel button and its exact text cancel the form", () => {
 
 test("a message update replaces its row in place, keeping its identity, speaker, and presentation", () => {
   let session = createPlayerRuntimeSession(
-    withMessageSays(
-      compileSource(
-        [
-          MESSAGE_TEXT_FUNCTIONS,
-          "speaker vera {",
-          '    name: "Vera"',
-          '    color: "#aa3366"',
-          "}",
-          "speaker coach {",
-          '    name: "Coach"',
-          "}",
-          "speaker vera",
-          'let line = timer(duration: 1 ms, async: true, label: "Waiting.")',
-          'say as coach "Meanwhile", instant',
-          "wait 1 s",
-          'appendText(line, ".")',
-          'setText(line, "**Ready**")',
-          "wait 1 s",
-          "exit",
-        ].join("\n"),
-      ).plan!,
-    ),
+    [
+      "speaker vera {",
+      '    name: "Vera"',
+      '    color: "#aa3366"',
+      "}",
+      "speaker coach {",
+      '    name: "Coach"',
+      "}",
+      "speaker vera",
+      'let line = say "Waiting.", instant',
+      'say as coach "Meanwhile", instant',
+      "wait 1 s",
+      'line.text += "."',
+      'line.text = "**Ready**"',
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
   );
   const [created, other] = session.transcriptEntries;
   assert.ok(created?.kind === "message" && other?.kind === "message");

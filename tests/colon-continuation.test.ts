@@ -164,9 +164,9 @@ test("a speaker property without a continued value keeps the following declarati
 test("a missing value on the colon's own line keeps its single-line recovery", () => {
   // Without a newline after ':' nothing continues, so the first diagnostic stays on the colon's line.
   for (const source of [
-    'speaker vera {\n    displayName: say "x"\n}\nexit',
+    "speaker vera {\n    displayName: exit\n}\nexit",
     'speaker vera {\n    displayName: title: "C"\n}',
-    'let r = choose coast: say "x"\nexit',
+    "let r = choose coast: exit\nexit",
     'let r = choose coast: b: "B"',
     'say prose(background: align: "left") "T"',
     "let o = { a: b: 1 }",
@@ -177,12 +177,12 @@ test("a missing value on the colon's own line keeps its single-line recovery", (
   }
 
   // A statement after the colon is where the value is missing; the choice keeps it as the next statement.
-  const speaker = parse('speaker vera {\n    displayName: say "x"\n}\nexit');
+  const speaker = parse("speaker vera {\n    displayName: exit\n}\nexit");
   assert.deepEqual(root(speaker), ["TSP006", 1, 17]);
   assert.deepEqual(kinds(speaker), ["speakerDeclaration", "exitStatement"]);
-  const choice = parse('let r = choose coast: say "x"\nexit');
+  const choice = parse("let r = choose coast: exit\nexit");
   assert.deepEqual(root(choice), ["TSP030", 0, 22]);
-  assert.deepEqual(kinds(choice), ["letStatement", "sayStatement", "exitStatement"]);
+  assert.deepEqual(kinds(choice), ["letStatement", "exitStatement", "exitStatement"]);
 
   // The end of the file directly after the colon reports the missing option, not a missing option list.
   const atEnd = parse("let r = choose coast:");
