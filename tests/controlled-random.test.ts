@@ -124,6 +124,20 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       ].join("\n"),
     ),
   }),
+  /** A blocking timer whose operands change state before it draws its ranged duration. */
+  blockingTimer: () => ({
+    stepMs: 2000,
+    plan: project(
+      [
+        'let labels = ["first", "second", "third"]',
+        'let shown = ["visible", "hidden", "mystery"]',
+        "timer(duration: 1..=2, display: shown.removeFirst(), label: labels.removeFirst())",
+        "timer 1..=3",
+        'say "${labels.length} ${shown.length}", instant',
+        "exit",
+      ].join("\n"),
+    ),
+  }),
   /** A host builtin called before a draw of the same instruction. */
   builtinBeforeDraw: () => ({
     stepMs: 2000,
@@ -717,7 +731,6 @@ test("restore rejects a pending draw that the engine could not have made", () =>
   const changes = [
     (pending: { draw: Record<string, unknown> }) =>
       (pending.draw.natural = { kind: "number", value: 6 }),
-    (pending: { draw: Record<string, unknown> }) => (pending.draw.site = "main.tease:9:9"),
     (pending: { draw: Record<string, unknown> }) =>
       (pending.draw.support = { kind: "integer", min: 6, max: 1 }),
     (pending: Record<string, unknown>) => (pending.root = "dueWork"),
@@ -728,6 +741,15 @@ test("restore rejects a pending draw that the engine could not have made", () =>
     change(corrupt.snapshot.randomControl.pending);
     assertCheckpointRejected(corrupt, "TSK002");
   }
+  // A site the draw does not have fails once resuming meets the draw elsewhere.
+  const moved = JSON.parse(checkpoint);
+  moved.snapshot.randomControl.pending.draw.site = "main.tease:9:9";
+  const restored = restoreRuntimeSession(moved);
+  assert.throws(
+    () =>
+      restored.resumeRandomDraw({ drawId: restored.view().randomDraw!.drawId, outcome: "natural" }),
+    (error: unknown) => error instanceof Error && error.name === "RuntimeDataError",
+  );
 });
 
 test("a paused step or single instruction finishes as that operation would have", () => {

@@ -1319,7 +1319,7 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   if (typeof value.debugMode !== "boolean") errors.push("Runtime debugMode must be a boolean.");
-  validateRandomControl(value.randomControl, value, plan, errors);
+  validateRandomControl(value.randomControl, value, errors);
   validateInteractionResultHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");

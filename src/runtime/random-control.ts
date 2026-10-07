@@ -280,9 +280,10 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
             if (part.kind === "expression") add(file, part.expression.span, "interpolation");
       });
     }
-    if (instruction.kind === "startTimer" && mayBeRange(instruction.duration)) {
+    if (drawsTimerDuration(instruction)) {
       add(file, instruction.duration.span, "duration");
-      if (instruction.repeat) add(file, instruction.duration.span, "timerRepeat");
+      if (instruction.kind === "startTimer" && instruction.repeat)
+        add(file, instruction.duration.span, "timerRepeat");
     }
     if (instruction.kind === "transfer" && "pick" in instruction.destination)
       add(file, instruction.span, "glob");
@@ -323,9 +324,19 @@ function randomSiteAt(
     : siteId(plan.files[file]!.path, span.start.line, span.start.column);
 }
 
-/** A timer duration that is not a number or duration written in the source may be a range. */
-function mayBeRange(expression: ExpressionPlan): boolean {
-  return expression.kind !== "literal" && expression.kind !== "duration";
+/**
+ * Whether an instruction may draw a timer's duration from a range, after evaluating all its operands: a timer, blocking
+ * or not, whose duration is not a number or duration written in the source.
+ */
+function drawsTimerDuration(
+  instruction: Instruction,
+): instruction is Extract<Instruction, { kind: "startTimer" | "wait" }> {
+  return (
+    (instruction.kind === "startTimer" ||
+      (instruction.kind === "wait" && instruction.command === "timer")) &&
+    instruction.duration.kind !== "literal" &&
+    instruction.duration.kind !== "duration"
+  );
 }
 
 function drawKindOf(node: ExpressionPlan): RandomDrawKind | null {
@@ -476,8 +487,7 @@ function analyseChangesBeforeDraw(instruction: Instruction): boolean {
   )
     return true;
   const facts = instructionExpressions(instruction).map(analyseExpression);
-  // A timer draws its ranged duration after evaluating all of its operands.
-  const drawsLast = instruction.kind === "startTimer" && mayBeRange(instruction.duration);
+  const drawsLast = drawsTimerDuration(instruction);
   // Within one expression the evaluation order decides; across expressions any order counts.
   return facts.some(
     (fact, index) =>
@@ -861,7 +871,6 @@ const PENDING_KEYS = [
 export function validateRandomControl(
   value: unknown,
   snapshot: Readonly<Record<string, unknown>>,
-  plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
   if (value === null) return;
@@ -898,8 +907,6 @@ export function validateRandomControl(
   }
   if (!sameNatural(resampledNatural(support, draw.drawId), draw.natural))
     errors.push("Runtime pending random draw's natural result does not follow from its draw ID.");
-  if (plan !== undefined && !randomSitesOf(plan).ids.has(draw.site))
-    errors.push("Runtime pending random draw names a site the plan does not have.");
   const { unit, root, instructionBudget, instructionsUsed, eventsBefore } = pending;
   if (unit !== "instruction" && unit !== "dueWork")
     errors.push("Runtime pending random draw unit is invalid.");
