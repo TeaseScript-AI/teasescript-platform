@@ -64,6 +64,13 @@ import {
   type PreparedReferenceStep,
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
+import {
+  sampleChance,
+  sampleIndex,
+  sampleOrder,
+  sampleRangeInteger,
+  type PrimitiveDraw,
+} from "./random-draws.js";
 import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
 import {
   SET_OPERATIONS,
@@ -556,10 +563,7 @@ export class Evaluator {
                     ? 0
                     : expression.name === "last"
                       ? base.items.length - 1
-                      : Math.floor(
-                          this.#findRandom(expression.span, "collectionRandom", base.items.length) *
-                            base.items.length,
-                        );
+                      : this.#drawIndex(expression.span, "collectionRandom", base.items.length);
                 if (expression.name === "random") trace?.randomResult(base.items[index]!);
                 if (isSet(base)) {
                   // A set member is read as a copy: changing it must not change the set or its uniqueness.
@@ -2028,7 +2032,10 @@ export class Evaluator {
             receiver,
             name === "sort"
               ? sortOrder(receiver.items, span)
-              : this.#shuffleOrder(receiver.items.length, span),
+              : // A trace records the whole shuffle as one record of its draws, not each swap.
+                this.#draw(span, "shuffle", receiver.items.length, null, (draw) =>
+                  sampleOrder(draw, receiver.items.length),
+                ),
           );
           return null;
         case "intersection":
@@ -2510,8 +2517,7 @@ export class Evaluator {
         query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
         query.span,
       );
-    const picked =
-      found[Math.floor(this.#findRandom(query.span, "tagQuery", found.length) * found.length)]!;
+    const picked = found[this.#drawIndex(query.span, "tagQuery", found.length)]!;
     this.trace?.randomResult(picked);
     return picked;
   }
@@ -2527,18 +2533,33 @@ export class Evaluator {
     return value;
   }
 
-  /** One draw for `operation`, which a debug trace records with the generator state around it. */
-  #findRandom(
+  /**
+   * One semantic draw for `operation`: `sample` turns the primitive draws it takes into the outcome, and a debug trace
+   * records them as one record with the generator state around them. Every random operation of an expression draws
+   * through here.
+   */
+  #draw<T>(
     span: SourceSpan,
     operation: RuntimeDebugRandomOperation,
     choices: number | null,
-    range: SerializableRuntimeRange | null = null,
-  ): number {
+    range: SerializableRuntimeRange | null,
+    sample: (draw: PrimitiveDraw) => T,
+  ): T {
     const trace = this.trace;
     const before = trace === null ? null : this.#randomState();
-    const random = this.#drawRandom(span);
-    trace?.random(operation, span, choices, range, before, this.#randomState());
-    return random;
+    let draws = 0;
+    const outcome = sample(() => {
+      draws += 1;
+      return this.#drawRandom(span);
+    });
+    if (trace !== null && draws > 0)
+      trace.random(operation, span, choices, range, before, this.#randomState(), draws);
+    return outcome;
+  }
+
+  /** The index of one of `count` equally likely outcomes. */
+  #drawIndex(span: SourceSpan, operation: RuntimeDebugRandomOperation, count: number): number {
+    return this.#draw(span, operation, count, null, (draw) => sampleIndex(draw, count));
   }
 
   /** The session generator's state, or `null` when the host injected the random source. */
@@ -2565,7 +2586,7 @@ export class Evaluator {
 
   #randomBuiltin(call: RuntimeCapabilityCall): number {
     this.#expectBuiltinArguments("random", call, 0);
-    const random = this.#findRandom(call.span, "random", null);
+    const random = this.#draw(call.span, "random", null, null, (draw) => draw());
     this.trace?.randomResult(random);
     return random;
   }
@@ -2580,7 +2601,9 @@ export class Evaluator {
         call.span,
       );
     }
-    const chosen = this.#findRandom(call.span, "chance", null) * 100 < percent;
+    const chosen = this.#draw(call.span, "chance", null, null, (draw) =>
+      sampleChance(draw, percent),
+    );
     this.trace?.randomResult(chosen);
     return chosen;
   }
@@ -2606,8 +2629,9 @@ export class Evaluator {
     if (length < 1) {
       throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
-    const drawn =
-      range.start + Math.floor(this.#findRandom(span, operation, length, range) * length);
+    const drawn = this.#draw(span, operation, length, range, (draw) =>
+      sampleRangeInteger(draw, range, length),
+    );
     this.trace?.randomResult(drawn);
     return drawn;
   }
@@ -2775,8 +2799,10 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const { choices, weights } = weightedChoices(positional, named, span);
-    const draw = this.#findRandom(span, "randomWeighted", choices.length);
-    const chosen = cloneSerializableValue(choices[weightedIndex(weights, draw)]!);
+    const index = this.#draw(span, "randomWeighted", choices.length, null, (draw) =>
+      weightedIndex(weights, draw()),
+    );
+    const chosen = cloneSerializableValue(choices[index]!);
     this.trace?.randomResult(chosen);
     return chosen;
   }
@@ -2813,23 +2839,17 @@ export class Evaluator {
     const invalid = random?.(numbers);
     if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
     // A trace records a random function's draws as one record, like a shuffle.
-    const before = random === undefined || this.trace === null ? null : this.#randomState();
-    let draws = 0;
-    const result = apply(numbers, options, () => {
-      draws += 1;
-      return this.#drawRandom(span);
-    });
-    if (random !== undefined)
-      this.trace?.random(
-        // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
-        name as RuntimeDebugRandomOperation,
-        span,
-        null,
-        null,
-        before,
-        this.#randomState(),
-        draws,
-      );
+    const result =
+      random === undefined
+        ? apply(numbers, options, NO_DRAWS)
+        : this.#draw(
+            span,
+            // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
+            name as RuntimeDebugRandomOperation,
+            null,
+            null,
+            (draw) => apply(numbers, options, draw),
+          );
     if (typeof result !== "number") throw fault(result.code, result.failure, span);
     if (random !== undefined) this.trace?.randomResult(result);
     return result;
@@ -2864,23 +2884,6 @@ export class Evaluator {
     return argument.items;
   }
 
-  /**
-   * A uniform random order of `length` items as their old indexes (Fisher–Yates), drawing `length - 1` numbers from the
-   * session RNG, or none for fewer than two items, so replay and checkpoint resume reproduce it.
-   */
-  #shuffleOrder(length: number, span: SourceSpan): number[] {
-    const order = Array.from({ length }, (_, index) => index);
-    // A trace records the whole shuffle as one record of its draws, not each swap.
-    const before = this.trace === null ? null : this.#randomState();
-    for (let index = length - 1; index > 0; index -= 1) {
-      const other = Math.floor(this.#drawRandom(span) * (index + 1));
-      [order[index], order[other]] = [order[other]!, order[index]!];
-    }
-    if (length > 1)
-      this.trace?.random("shuffle", span, length, null, before, this.#randomState(), length - 1);
-    return order;
-  }
-
   /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
   #reorderList(list: SerializableRuntimeList, order: readonly number[]): void {
     const newIndexOf: number[] = [];
@@ -2912,7 +2915,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    const item = items[Math.floor(this.#findRandom(span, operation, items.length) * items.length)]!;
+    const item = items[this.#drawIndex(span, operation, items.length)]!;
     this.trace?.randomResult(item);
     return item;
   }
@@ -3080,6 +3083,11 @@ export class Evaluator {
 }
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
+
+/** The draws of a numeric function that is not random: it never takes one. */
+const NO_DRAWS: PrimitiveDraw = () => {
+  throw new Error("A numeric function that is not random drew a random number.");
+};
 
 /** List, set, and dict methods that change their receiver in place. */
 const MUTATING_METHODS: ReadonlySet<string> = new Set([
