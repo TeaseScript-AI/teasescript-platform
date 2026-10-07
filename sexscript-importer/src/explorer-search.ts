@@ -15,6 +15,7 @@ import {
   type PlanDiagnostic,
   type Slot,
 } from "./explorer-analysis.ts";
+import { clockModel, flipGap, holdsAt, timeContext } from "./explorer-time.ts";
 import {
   EPOCH_MS,
   failureOf,
@@ -111,6 +112,8 @@ const NEXT_DAY_GAP = 24 * 3_600_000;
 /** With realignment: inputs a replay may skip, and buttons it may press that its path does not have, per replay. */
 const MAX_SKIPS = 8;
 const MAX_FORCED = 8;
+/** With forward time: the time steps a state gets at most. */
+const MAX_TIME_STEPS = 6;
 /** With forward time: steps before the step that evaluated a clock condition at which the player may also continue. */
 const LATER_BACK = 1;
 
@@ -335,12 +338,30 @@ export interface TrapReport extends Repro {
   clock: boolean;
 }
 
-/** The expansions of states that wait at one place: its `path:line`, and the prompt of the first one expanded there. */
+/**
+ * The expansions of states that wait at one place: its `path:line`, the prompt of the first one expanded there, and how
+ * many expansions were productive: a step from them reached new instructions, a cell or slot value or change of value
+ * not seen before (with cells), or a state closer to a directed comparison. `kind` reads the place (see
+ * {@link hotspotKind}).
+ */
 export interface PromptShare {
   location: string;
   prompt: string;
   expansions: number;
   percent: number;
+  productive: number;
+  kind: "hub" | "progressing loop" | "spiral";
+}
+
+/**
+ * What a place where expansions wait is: a `spiral` when fewer than half of its expansions were productive, as when the
+ * search goes round a loop that changes nothing any condition reads; else a `hub` when steps by two or more inputs
+ * were productive, as at a menu many paths pass; else a `progressing loop`, one input taken again and again with
+ * something new each time, as a counter that moves toward a compared constant.
+ */
+function hotspotKind(expansions: number, productive: number, inputs: number): PromptShare["kind"] {
+  if (productive * 2 < expansions) return "spiral";
+  return inputs >= 2 ? "hub" : "progressing loop";
 }
 
 export interface ExploreResult {
@@ -656,10 +677,11 @@ class Cells {
     snapshot: Data,
     waitsAt: number | null,
     from: number | null,
-  ): { cell: number; values: number; novel: boolean } {
+    clock: readonly (readonly [string, string])[] = [],
+  ): { cell: number; values: number; novel: boolean; fresh: boolean } {
     let novel = false;
     const found = new Map<number, number>();
-    const put = (slot: number, key: string, value: unknown) => {
+    const note = (key: string, text: string) => {
       let source = this.#sources.get(key);
       if (source === undefined) {
         source = this.#buckets.length;
@@ -667,7 +689,6 @@ class Cells {
         this.#buckets.push(new Map());
       }
       if (found.has(source)) return;
-      const text = bucket(this.slots[slot]!, value);
       const buckets = this.#buckets[source]!;
       let id = buckets.get(text);
       if (id === undefined) {
@@ -677,6 +698,10 @@ class Cells {
       }
       found.set(source, id);
     };
+    const put = (slot: number, key: string, value: unknown) =>
+      note(key, bucket(this.slots[slot]!, value));
+    // With forward time, whether each clock comparison read after where the state waits holds at its wall clock.
+    for (const [key, text] of clock) note(key, text);
     // The innermost binding of a name in scope first, then the globals; each scope kept for a block is read apart, as
     // which of them a block sees depends on the call that kept it.
     const read = (scopes: readonly Data[], key: (slot: number, scope: number) => string) =>
@@ -727,12 +752,13 @@ class Cells {
     );
     const place = `${waitsAt ?? "-"}/${returns.join("/")}/${loops.join("/")}|${values}`;
     let cell = this.#cells.get(place);
+    const fresh = cell === undefined;
     if (cell === undefined) {
       cell = this.#cells.size;
       this.#cells.set(place, cell);
       this.expansions.push(0);
     }
-    return { cell, values, novel };
+    return { cell, values, novel, fresh };
   }
 }
 
@@ -966,6 +992,55 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   /** A plan that reads the clock gets a next day's session too. */
   const readsClock = later && instructions.some((instruction) => flow.flowOf(instruction).clock);
+  /**
+   * With forward time: the clock comparisons of the plan, and where the player waits right before a step evaluates
+   * one, by where the state waits (its pending action's instruction, or `start` for a session start), with those
+   * conditions. A state that waits there gets time steps ({@link timeSteps}), and the comparisons' outcomes at its wall
+   * clock are part of its cell.
+   */
+  const times = later ? clockModel(plan, instructions) : null;
+  const clockAfter = new Map<string, Set<number>>();
+  const clockKey = (waitsAt: unknown) => (typeof waitsAt === "number" ? String(waitsAt) : "start");
+  /** The outcomes of the clock comparisons read after where a state waits, at a wall clock: `1`, `0`, or `?`. */
+  const outcomes = (snapshot: Data, waitsAt: unknown, now: number): [string, string][] => {
+    const after = times === null ? undefined : clockAfter.get(clockKey(waitsAt));
+    if (times === null || after === undefined) return [];
+    const context = timeContext(snapshot);
+    return [...after].flatMap((instruction) =>
+      times.comparisons.get(instruction)!.map((comparison, index): [string, string] => {
+        const holds = holdsAt(comparison, times, context, now);
+        return [`clock:${instruction}:${index}`, holds === undefined ? "?" : holds ? "1" : "0"];
+      }),
+    );
+  };
+  /** Time steps tried, from a cell (or a session start's storage) to the outcomes they lead to. */
+  const timeStepsTried = new Set<string>();
+  /**
+   * The time steps of a state that waits where a clock condition is read next: for each of those comparisons that
+   * comes out the other way within the horizon, a `later` input just past that moment (`flipGap`); nearest first, at
+   * most {@link MAX_TIME_STEPS}, and each only once from one cell (`from`) to the outcomes it leads to, so that time,
+   * which never ends, adds only the states that compare differently.
+   */
+  const timeSteps = (snapshot: Data, waitsAt: unknown, now: number, from: string): number[] => {
+    const after = times === null ? undefined : clockAfter.get(clockKey(waitsAt));
+    if (times === null || after === undefined) return [];
+    const context = timeContext(snapshot);
+    const gaps = new Set<number>();
+    for (const instruction of after)
+      for (const comparison of times.comparisons.get(instruction)!) {
+        const gap = flipGap(comparison, times, context, now);
+        if (gap !== null) gaps.add(gap);
+      }
+    const steps: number[] = [];
+    for (const gap of [...gaps].sort((left, right) => left - right)) {
+      const to = `${from}>${JSON.stringify(outcomes(snapshot, waitsAt, now + gap))}`;
+      if (timeStepsTried.has(to)) continue;
+      timeStepsTried.add(to);
+      steps.push(gap);
+      if (steps.length >= MAX_TIME_STEPS) break;
+    }
+    return steps;
+  };
   /** A start is a clock start when it says so; without forward time, when it is not at the play clock. */
   const clockStart = (start: Start): boolean => start.clock ?? start.wallClockMs !== EPOCH_MS;
   /** With forward time, a start before the clock where its origin stands, or before the play clock, is a clock start. */
@@ -995,6 +1070,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** Storage that started a next session without a target. */
   const startedFrom = new Set<string>([JSON.stringify([])]);
   let transitions = 0;
+  /** Whether the step {@link transition} last took reached something new, for the productive expansions. */
+  let lastStepNew = false;
   /** Steps of directed attempts. */
   let directedTransitions = 0;
   /**
@@ -1083,6 +1160,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       candidates.push({ parent: parent?.id ?? null, input, start: startIndex, items: stepItems });
     for (const way of step.ways) {
       const instruction = way >> 1;
+      if (times?.comparisons.has(instruction) === true) {
+        const at = clockKey(parent?.waitsAt);
+        clockAfter.set(at, (clockAfter.get(at) ?? new Set()).add(instruction));
+      }
       if (!witnesses.has(instruction))
         witnesses.set(instruction, { node: parent?.id ?? null, start: startIndex, input });
       const target = targets.get(way);
@@ -1110,7 +1191,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         step.snapshot,
         typeof waitsAt === "number" ? waitsAt : null,
         parent === null ? null : parent.values,
+        step.snapshot.status === "waiting"
+          ? outcomes(step.snapshot, waitsAt, wallClockOf(step.snapshot))
+          : [],
       ) ?? null;
+    lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
     const keys = stateKeys(step.snapshot);
     const known = byState.get(keys.state);
     if (known !== undefined) {
@@ -1520,8 +1605,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       startedFrom.add(key);
       const work = session.operations;
       if (later) {
+        // A minute later, and at the time steps of the clock conditions a session start reads, from the storage it
+        // starts with; a day later when none can be read.
         startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
-        if (readsClock) startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
+        const storage = { scriptStorage: entry.entries };
+        const steps = timeSteps(
+          storage,
+          null,
+          wallEnd[entry.node]! + NEXT_SESSION_GAP,
+          `storage ${key}`,
+        );
+        for (const gap of steps)
+          startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
+        if (steps.length === 0 && readsClock)
+          startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
       } else
         startSession(
           {
@@ -1581,6 +1678,19 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       } else if (source.kind === "clock" && later) {
         if (timed) continue;
         timed = true;
+        // A condition whose clock comparisons can be read where it was evaluated gets time steps there instead.
+        const comparisons = times?.comparisons.get(target.instruction) ?? [];
+        const before = witnessNode === null ? null : snapshotOf(witnessNode);
+        const context =
+          times === null ? null : timeContext(before ?? { scriptStorage: witnessStart.storage });
+        const at = witnessNode === null ? witnessStart.wallClockMs : wallEnd[witnessNode.id]!;
+        if (
+          context !== null &&
+          comparisons.some(
+            (comparison) => times !== null && holdsAt(comparison, times, context, at) !== undefined,
+          )
+        )
+          continue;
         // A condition that reads the clock itself: the player continues later just before the step that evaluated it, or
         // a step before. One that reads it through a variable, which may have been set when the session started: also
         // the whole session starts later, and its path follows.
@@ -1811,7 +1921,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let analyzedAt = started;
   let analyzedOps = 0;
   /** Expansions by where the expanded state waited, with the prompt of the first one. */
-  const expansionsAt = new Map<number | null, { expansions: number; prompt: string }>();
+  const expansionsAt = new Map<
+    number | null,
+    { expansions: number; prompt: string; productive: number; inputs: Set<string> }
+  >();
   search: for (;;) {
     const stop = spent();
     if (stop !== null) {
@@ -1872,6 +1985,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       continue;
     }
     const inputs = session.options(base, base.view(), () => stored ?? base.exportTrustedSnapshot());
+    // With forward time, a state that waits where a clock condition is read next can also continue later.
+    if (times !== null && clockAfter.has(clockKey(node.waitsAt)))
+      for (const gap of timeSteps(
+        stored ?? base.exportTrustedSnapshot(),
+        node.waitsAt,
+        wallEnd[node.id]!,
+        node.cell >= 0 ? `cell ${node.cell}` : `state ${node.id}`,
+      ))
+        inputs.push({ kind: "later", afterMs: gap });
     if (inputs.length === 0) {
       node.status = "stuck";
       store.drop(node.id);
@@ -1880,10 +2002,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     expanded += 1;
     sinceAnalysis += 1;
     if (cells !== null) cells.expansions[node.cell]! += 1;
-    const at = expansionsAt.get(node.waitsAt);
-    if (at === undefined)
-      expansionsAt.set(node.waitsAt, { expansions: 1, prompt: node.prompt.text });
-    else at.expansions += 1;
+    let at = expansionsAt.get(node.waitsAt);
+    if (at === undefined) {
+      at = { expansions: 0, prompt: node.prompt.text, productive: 0, inputs: new Set() };
+      expansionsAt.set(node.waitsAt, at);
+    }
+    at.expansions += 1;
+    let productive = false;
     node.status = "partial";
     const closeness =
       distanceTargets.length === 0 ? [] : distances(stored ?? base.exportTrustedSnapshot());
@@ -1901,7 +2026,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
       transition(node, input, next, node.start, closer < 0 ? null : closerLead(closer));
+      if (lastStepNew || closer >= 0) {
+        productive = true;
+        at.inputs.add(inputKey(input));
+      }
     }
+    if (productive) at.productive += 1;
     node.status = "expanded";
   }
 
@@ -2024,7 +2154,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       expansionsByPrompt: [...expansionsAt]
         .sort((left, right) => right[1].expansions - left[1].expansions)
         .slice(0, 5)
-        .map(([at, { expansions, prompt }]) => {
+        .map(([at, { expansions, prompt, productive, inputs }]) => {
           const span = at === null ? null : compactSpan(instructions[at]?.span);
           return {
             location:
@@ -2034,6 +2164,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             prompt,
             expansions,
             percent: Math.round((expansions / expanded) * 1000) / 10,
+            productive,
+            kind: hotspotKind(expansions, productive, inputs.size),
           };
         }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
@@ -2142,6 +2274,22 @@ function cover(
     else kept.push(index);
   }
   return kept.reverse();
+}
+
+/** An input as one of the choices at a prompt: its kind with its option, button, or typed answer. */
+function inputKey(input: ExplorerInput): string {
+  switch (input.kind) {
+    case "option":
+      return `option ${input.index}`;
+    case "button":
+      return `button ${input.afterMs ?? 0}`;
+    case "text":
+      return `text ${input.text}`;
+    case "press":
+      return `press ${input.label}`;
+    default:
+      return input.kind;
+  }
 }
 
 /**

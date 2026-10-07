@@ -554,7 +554,7 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
     `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})` +
     (corpus === null ? "" : `, ${corpus.written} corpus entries kept`) +
     `, ${search.operations} operations, ${Math.round(search.cpuMs / 1000)} s CPU` +
-    (top === undefined ? "" : `, ${top.percent}% of expansions at ${top.location}`)
+    (top === undefined ? "" : `, ${top.percent}% of expansions at ${top.location} (${top.kind})`)
   );
 }
 
@@ -650,7 +650,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
         `${records(report.traps).length} | ${count(endStates.completed)} | ${count(endStates.failed)} | ` +
         `${count(endStates.stuck)} | ${count(endStates.open)} | ${measured(search.operations)} | ` +
         `${measured(search.elapsedMs, 1000, " s")} | ${measured(search.cpuMs, 1000, " s")} | ` +
-        `${top === undefined ? "" : `${count(top.percent)}% ${text(top.location)}`} |`,
+        `${top === undefined ? "" : `${count(top.percent)}% ${text(top.location)}${typeof top.kind === "string" ? ` (${top.kind})` : ""}`} |`,
     );
   }
   for (const report of reports) {

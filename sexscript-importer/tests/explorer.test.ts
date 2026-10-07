@@ -550,12 +550,12 @@ test(
 );
 
 test(
-  "with forward time, the late hour is play: later sessions start after the clock their origin ended at, and a later gap must be positive",
+  "with forward time, the late hour is play: the player continues when a clock condition comes out the other way, later sessions start after the clock their origin ended at, and a later gap must be positive",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    const { source, plan, diagnostics } = await fixture(engine);
+    const { source, plan, diagnostics, lineOf } = await fixture(engine);
     const result = explore(engine, plan, {
       seed: 1,
       budgetMs: 60_000,
@@ -563,15 +563,26 @@ test(
       sources: new Map([["main.tease", source]]),
       diagnostics,
       later: true,
+      corpus: [],
     });
     assert.equal(result.search.stoppedBy, "exhausted");
-    // The late hour is reached by a session that starts later, as a player would come back: play, not clock.
-    const late = result.directed.ways.find((entry) => entry.condition === "getTime().hour >= 22");
-    assert.equal(late?.reach, "play");
+    // The late hour is play: before the button after which the hour is read, the player continues at 22:01.
+    const file = result.coverage.files.find((entry) => entry.path === "main.tease")!;
+    const late = lineOf('say "Late."');
+    assert.ok(
+      !file.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return late >= from && late <= to;
+      }),
+    );
     assert.equal(result.coverage.reach.clock, 0);
-    const replayed = replay(engine, plan, 1, late!.repro.inputs, {
-      earlier: late!.repro.earlier ?? [],
-      wallClockMs: late!.repro.wallClockMs ?? EPOCH_MS,
+    // The corpus keeps the path, with its later input, and replaying it says "Late.".
+    const kept = result.corpus!.entries.find((entry) =>
+      entry.inputs.some((input) => input.kind === "later"),
+    )!;
+    const replayed = replay(engine, plan, 1, kept.inputs, {
+      earlier: kept.earlier ?? [],
+      wallClockMs: kept.wallClockMs ?? EPOCH_MS,
     });
     assert.ok(replayed.steps.some((step) => step.texts.includes("Late.")));
     // A next session starts after the clock where the session it continues ended.

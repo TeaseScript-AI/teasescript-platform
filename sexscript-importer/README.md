@@ -364,9 +364,13 @@ The report `<out>/<unit>.json` has these parts:
 - the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out;
 - in `search`, what stopped it (`exhausted`, `budget` for time, `operations` for work, or `maxStates`), the runtime
   operations, the elapsed and CPU time, and `expansionsByPrompt`: the five places where the most expanded states
-  waited (the `path:line` of their pending action, with its prompt) and their share of all expansions. It shows where
-  the search spends its work; most expansions at one place is often a loop the search keeps going round, worth checking
-  before raising the budget, though paths that converge on one prompt can concentrate there too.
+  waited (the `path:line` of their pending action, with its prompt), their share of all expansions, how many of those
+  were `productive` (a step from them reached new instructions, a cell or slot value or change of value not seen
+  before, or a state closer to a directed comparison), and their `kind`: a `spiral` when fewer than half were
+  productive, such as a loop that changes nothing any condition reads, worth checking before raising the budget; else
+  a `hub` when steps by two or more inputs were productive, such as a menu many paths pass; else a `progressing loop`,
+  one input taken again and again with something new each time, such as a counter that moves toward a compared
+  constant.
 
 A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
