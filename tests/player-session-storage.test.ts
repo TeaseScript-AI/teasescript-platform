@@ -236,7 +236,7 @@ test("Vue host reports rejected writes in a later task and preserves the previou
   });
   const pending = await start(
     host,
-    'save "new" as "answer"\nlet answer = load "answer"\nsay answer, instant\nexit',
+    'save "new" as "answer"\nlet answer: string? = load "answer", default: null\nsay answer, instant\nexit',
   );
   persistence.reject(new Error("Write denied"));
   await nextTick();
@@ -306,7 +306,10 @@ test("Vue host reloads before each Start and falls back to session-local storage
     replace: async () => {},
     clear: async () => {},
   });
-  const first = await start(host, 'let answer = load "answer"\nsay answer, instant\nexit');
+  const first = await start(
+    host,
+    'let answer: integer? = load "answer", default: null\nsay answer, instant\nexit',
+  );
   assert.equal(playerRuntimeSnapshot(first).scriptStoragePersistent, true);
   assert.deepEqual(
     first.transcriptEntries.map((entry) => entry.text),
@@ -316,7 +319,7 @@ test("Vue host reloads before each Start and falls back to session-local storage
 
   const local = await start(
     host,
-    'save "local" as "answer"\nlet answer = load "answer"\nsay answer, instant\nexit',
+    'save "local" as "answer"\nlet answer: string? = load "answer", default: null\nsay answer, instant\nexit',
   );
   assert.deepEqual(host.scriptStorageOptions(), {});
   assert.equal(playerRuntimeSnapshot(local).scriptStoragePersistent, false);
@@ -333,7 +336,10 @@ test("Vue host reloads before each Start and falls back to session-local storage
     [["storage-unavailable", "info"]],
   );
 
-  const recovered = await start(host, 'let answer = load "answer"\nsay answer, instant\nexit');
+  const recovered = await start(
+    host,
+    'let answer: integer? = load "answer", default: null\nsay answer, instant\nexit',
+  );
   assert.equal(loads, 3);
   assert.equal(playerRuntimeSnapshot(recovered).scriptStoragePersistent, true);
   // A successful load withdraws the unavailable-storage notice.
@@ -359,7 +365,10 @@ test("Vue host clears once, and no Start begins until the clear settles", async 
   });
   await host.loadScriptStorage();
   host.prepare(() =>
-    createPlayerRuntimeSession('let answer = load "answer"\nexit', host.scriptStorageOptions()),
+    createPlayerRuntimeSession(
+      'let answer: string? = load "answer", default: null\nexit',
+      host.scriptStorageOptions(),
+    ),
   );
   const first = host.clearScriptStorage();
   assert.equal(host.canClearScriptStorage.value, false);
@@ -783,7 +792,7 @@ test("while the script's own write waits for the host, an edit is not taken and 
   const { host } = createHost(context, storage.provider);
   const pending = await start(
     host,
-    'save 1 as "k"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit',
+    'save 1 as "k"\nlet loaded: integer? = load("k", default: null)\nsay "${loaded}", instant\nexit',
   );
   assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: undefined }), {
     kind: "busy",
@@ -816,7 +825,7 @@ test("a write the script issues while an edit is stored settles first: another k
       const { host } = createHost(subtest, ordered);
       await start(
         host,
-        `let go = showButton "Go"\nsave 1 as "${scriptKey}"\nlet again = showButton "Again"\nlet loaded = load("k")\nsay "\${loaded}", instant\nexit`,
+        `let go = showButton "Go"\nsave 1 as "${scriptKey}"\nlet again = showButton "Again"\nlet loaded: integer? = load("k", default: null)\nsay "\${loaded}", instant\nexit`,
       );
       const edit = host.editSavedData({ key: "k", value: 2, expected: 0 });
       for (let turn = 0; turn < 5; turn += 1) await nextTick();
@@ -913,7 +922,7 @@ test("a stored edit reaches the session even when storage cannot be read afterwa
   const { host } = createHost(context, storage.provider);
   await start(
     host,
-    'let go = showButton "Go"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit',
+    'let go = showButton "Go"\nlet loaded: integer? = load("k", default: null)\nsay "${loaded}", instant\nexit',
   );
   assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: 0 }), {
     kind: "saved",

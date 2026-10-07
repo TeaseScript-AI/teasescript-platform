@@ -30,8 +30,9 @@ accept syntax, architecture, or implementation details.
   [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
   boundaries, on which the Player runs its sessions, and [controlled randomness](docs/RUNTIME.md#controlled-randomness),
   with which a host chooses random outcomes or pauses at draws.
-- **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
-  host-acknowledged atomic writes under [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
+- **Script storage:** `save`/`load`/`delete`, required lazy defaults, typed loads that ignore stored values of another
+  type, a validated checkpointed session view, and host-acknowledged atomic writes under
+  [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
   with a Clear saved script data control.
 - **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;

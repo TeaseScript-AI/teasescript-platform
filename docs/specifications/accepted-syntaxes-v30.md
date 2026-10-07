@@ -1165,7 +1165,7 @@ After a test, the compiler knows the narrower type:
 - `x != null` and `x == null` narrow like `x is not null` and `x is null`.
 
 ```text
-let saved = load "level"
+let saved: integer | string = load("level", default: 0)
 if saved is not integer {
     exit
 }
@@ -2367,8 +2367,9 @@ Rules:
   `default: "${count}"` to offer a number as text. A non-whole `askInteger` default is an error, never rounded.
 - A default that is `null` or blank text (empty or only whitespace) when the input opens prefills nothing: the field
   starts empty, as without `default:`. A prefill can therefore come from a value that may not exist yet, such as
-  `askText "Your name?", default: load "name"` on a first play. A default known at compile time to be `null` or blank,
-  such as `default: ""` or `default: null`, is a compile error; remove `default:` to start with an empty field.
+  `askText "Your name?", default: load("name", default: "")` on a first play. A default known at compile time to be
+  `null` or blank, such as `default: ""` or `default: null`, is a compile error; remove `default:` to start with an
+  empty field.
 - The compiler rejects a default that it knows is invalid, and its error names the fix. Any other default is checked
   when the input opens; an invalid one is a runtime error, and the input does not open.
 - `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
@@ -3110,8 +3111,8 @@ for item in items {
 ```
 
 ## 25. Persistent storage and keys
-**Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05; key types and wrong stored values:
-Owner decision, 2026-10-07, not yet implemented)
+**Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05; required default, load types, and wrong
+stored values: Owner decision, 2026-10-07)
 
 Save or overwrite a value:
 
@@ -3122,62 +3123,53 @@ save playerName as "player.name"
 `save value as key` evaluates the value first, then the key. It creates the key when absent and replaces its value
 when present. Saving `null` removes the key, like `delete`; stored top-level values are never `null`.
 
-`load` reads a saved value. Its normal form names the key and, with `default:`, the value to use while the key holds
-none:
+`load` reads a saved value. It names the key and, with `default:`, the value to use while the key holds none:
 
 ```text
 let visits = load("visits", default: 0)
 let playerName = load("player.name", default: "")
-let score: number = load("player.score", default: 0)
-let nickname = load("player.nickname")             // null when the key holds no value
-let level = load "level", default: 1               // compact form
+let level: integer | string = load("level", default: 1)
+let nickname: string? = load("player.nickname", default: null)   // null while the key holds no value
+let score = load "score", default: 0                              // compact form
 ```
 
-`load` evaluates its key first. When the key holds a value that fits the key's type, if it has one, `load` returns a
-copy without evaluating the default. Otherwise it evaluates and returns the default, or returns `null` without one.
-`load` never writes: the default is not stored. Only `save` creates or changes a stored value, apart from the Player's
-Debug storage editor, a debugging tool whose edits the next `load` reads like any stored value (see `RUNTIME.md`, Script
-storage).
+`default:` is required: a `load` without it is a compile error that names the fix, also `default: null` for a value
+that may be missing. `load` evaluates its key first. When the key holds a value that fits the load's type, `load`
+returns a copy without evaluating the default. Otherwise it evaluates and returns the default. `load` never writes: the
+default is not stored. Only `save` creates or changes a stored value, apart from the Player's Debug storage editor, a
+debugging tool whose edits the next `load` reads like any stored value (see `RUNTIME.md`, Script storage).
 
-A key written as one string literal without `${...}`, also in parentheses, is one storage place for the whole script, in
-every file, function, and handler. It keeps one type, like a variable ([§12](#12-variable-declarations),
-[ADR 0021 §6](../decisions/0021-static-types.md)): the values saved under it decide the type, and a default must fit
-that type, or decides it when no save does. Saving `null`, `delete`, and a value whose type the compiler cannot know
-decide nothing. Saving a value of another type is a compile error. To keep values of different types under one key on
-purpose, the save or default that decides the key is a variable with a declared union type:
+A `load` of a key written as one string literal without `${...}`, also in parentheses, reads the stored value as the
+declared type of the variable it starts or is assigned to, such as `integer | string` above, or else as the type that
+another load of the key declares, in any file, or else as its default's type
+([ADR 0021 §6](../decisions/0021-static-types.md)). A key is declared at most once: two loads that declare different
+types are a compile error. `default: null` makes the result the key's declared type made optional, such as `string?`;
+without a declared type for the key it is a compile error that names the fix. A default of a type the compiler cannot
+know, without a declared type, gives a value of unknown type ([§13](#13-explicit-types)). Loads without a declared type
+agree: of two load types, one accepts every value of the other, as `number` does `integer`, or the later load is a
+compile error. A `save` under the key must fit the type of every load of it, or it is a compile error; saves never
+decide the type, and a key that no load reads is not checked:
 
 ```text
-let level: integer | string = 5
-save level as "level"      // "level" holds integer | string
-save "expert" as "level"   // valid
+let level = load("level", default: 1)
+save "high" as "level"   // compile error: "level" is loaded as a whole number (integer) on line 1
 ```
 
-For a key of type `T`, `load("k")` without a default is a `T?`, because the key may not have been saved yet, also after
-a `save` in the script. With a default that cannot be `null`, it is a `T`. Using a value that may be missing where a
-value is required is a compile error that names the fix:
+A key computed at runtime, such as `"toys.${id}"`, `"toys." + id`, or a variable, has no type, and its `load` gives a
+value of unknown type.
 
-```text
-save 3 as "visits"
-let visits = load("visits")
-say visits + 1   // Storage key "visits" may not have been saved yet; give load(…) a default: or check != null first.
-```
+A stored value that does not fit the load's type, such as a value that an older version of the script saved, is not
+returned. `load` reports developer warning `TSW016`, which names the key and both types, and evaluates and returns the
+default. The stored value stays as it is, and each such `load` warns again until a `save` replaces it. A saved value
+that the compiler cannot know, also under a computed key that equals a key a load reads, must fit the type every load
+of that key accepts, or the `save` raises runtime error `TSR058`.
 
-A key computed at runtime, such as `"toys.${id}"`, `"toys." + id`, or a variable, has no type for the compiler, and its
-`load` has an unknown type ([§13](#13-explicit-types)).
-
-A stored value that does not fit its key's type, such as a value that an older version of the script saved, is not
-returned. `load` reports developer warning `TSW016`, which names the key and both types, and continues as if the key
-held no value: it evaluates and returns the default, or returns `null`. The stored value stays as it is, and each such
-`load` warns again until a `save` replaces it. A computed key that equals a key with a type is read the same way, and
-its `save` of a value that does not fit raises runtime error `TSR058`, as does a `save` or default whose value the
-compiler cannot know and that does not fit.
-
-The bounded form takes the key and an optional named `default:` inside `()`, where line breaks follow the rules of
-other arguments. Its `)` ends the `load`, also with a space before `(`, so the result combines directly with another
+The bounded form takes the key and the named `default:` inside `()`, where line breaks follow the rules of other
+arguments. Its `)` ends the `load`, also with a space before `(`, so the result combines directly with another
 expression:
 
 ```text
-load("k") == null
+load("k", default: null) == null
 load("a", default: 0) + 1
 ```
 
@@ -3188,9 +3180,9 @@ to give the fallback to `load`, as in `load(askText("Key?"), default: "none")` o
 `load((choose a: "x", b: "y"), default: "z")`; without the inner parentheses, the choice gets a third option labelled
 `default`. Inside `()`, `[]`, and object literals, where a line
 break does not end an expression, the comma may also start the next line. Group a compact `load`, as in
-`(load "k") == null`, before combining its result with another expression. Without parentheses, `load "k" == null`
-uses `"k" == null` as the key, which is not a string. Group a nested compact `load` used as a key too.
-A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
+`(load "k", default: null) == null`, before combining its result with another expression. Without parentheses,
+`load "k" == null` uses `"k" == null` as the key, which is not a string. Group a nested compact `load` used as a key
+too. A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
 `save askText as "name"` asks and stores the answer, while an interaction with its own speaker clause is grouped, as in
 `save (askText as mistress "Name?") as "name"`. A default may suspend, such as
 `load "name", default: askText "Your name?"`; it starts only when the key is absent and can resume across checkpoint
@@ -3214,10 +3206,9 @@ Rules:
 
 - The engine preserves the stored TeaseScript type; scripts do not serialize every value to plain text manually.
 - The physical database representation is an implementation detail and may use typed columns, tagged JSON, or another typed serialization.
-- A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)); the place decides nothing
-  for the key. The compiler checks this where it knows the key's type; otherwise, and for parts of a value whose type it
-  cannot know, runtime error `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing
-  key, so `let level: integer = load("level")` needs `integer?` or a default.
+- A loaded value that the compiler cannot know, through a computed key or a default of unknown type, must fit the type
+  of the place that receives it ([§13](#13-explicit-types)), or runtime error `TSR058` is raised; so does a default of
+  unknown type that does not fit the declared type of the variable it starts.
 - Persistent plain data is storable. Timer, media, and message handles and speaker references exist only in the
   current session and cannot be saved, including when nested inside lists or objects (`TSR055`); save a message's
   `text` instead. Nested `null` is allowed.
@@ -3228,14 +3219,14 @@ Rules:
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
-  `Storage key must be a string. To compare the loaded value, write 'load("k") == null'.`
+  `Storage key must be a string. To compare the loaded value, write 'load("k", default: null) == null'.`
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, and date
 and time values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a
-permanent language limit. The compiler rejects a default whose type is known and does not fit. Replacement-value
-recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
+permanent language limit. The compiler rejects a default whose type is known and does not fit the declared type.
+Replacement-value recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
 
@@ -3811,8 +3802,8 @@ A valid string reference may replace the missing value.
 let duration: number = load("settings.duration", default: 0)
 ```
 
-A valid number may replace an invalid stored value. For a key with a type, `load` already uses its default instead
-([§25](#25-persistent-storage-and-keys)).
+A valid number may replace an invalid stored value. A `load` already uses its default for a stored value that does
+not fit its type ([§25](#25-persistent-storage-and-keys)).
 
 ### Invalid list index
 

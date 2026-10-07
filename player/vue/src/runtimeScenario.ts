@@ -25,7 +25,7 @@ speaker mistressVera {
 speaker mistressVera
 showImage "images/playroom.svg"
 playAudio async "sounds/command-chime.wav"
-let previous: string? = load "camera.photo"
+let previous: string? = load "camera.photo", default: null
 if previous != null {
     showImage previous
     say "Look what I kept from last time.", instant

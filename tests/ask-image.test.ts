@@ -314,7 +314,7 @@ test("a computed source or filter that the request cannot use fails before it as
   ];
   for (const [stored, message] of cases) {
     const { snapshot } = started(
-      'let kinds = load "kinds"\nlet pick = askImage(types: kinds)\nexit',
+      'let kinds = load "" + "kinds", default: null\nlet pick = askImage(types: kinds)\nexit',
       { scriptStorage: [{ key: "kinds", value: stored }] },
     );
     assert.equal(snapshot.status, "failed", JSON.stringify(stored));
@@ -322,15 +322,20 @@ test("a computed source or filter that the request cannot use fails before it as
     assert.match(snapshot.failure?.message ?? "", message);
   }
   const { snapshot } = started(
-    'let off = load "off"\nlet pick = askImage(allowCamera: off, allowFile: off)\nexit',
+    'let off = load "" + "off", default: null\nlet pick = askImage(allowCamera: off, allowFile: off)\nexit',
     { scriptStorage: [{ key: "off", value: false }] },
   );
   assert.equal(snapshot.status, "failed");
   assert.match(snapshot.failure?.message ?? "", /needs allowCamera: or allowFile: to be true/u);
   // A filter too long for an interaction fails at the interaction text limit, however long it is.
-  const long = started('let kinds = load "kinds"\nlet pick = askImage(types: kinds)\nexit', {
-    scriptStorage: [{ key: "kinds", value: { kind: "list", items: Array(150_000).fill(".png") } }],
-  }).snapshot;
+  const long = started(
+    'let kinds = load "" + "kinds", default: null\nlet pick = askImage(types: kinds)\nexit',
+    {
+      scriptStorage: [
+        { key: "kinds", value: { kind: "list", items: Array(150_000).fill(".png") } },
+      ],
+    },
+  ).snapshot;
   assert.equal(long.failure?.code, "TSR052");
   assert.match(long.failure?.message ?? "", /aggregate UTF-8 byte limit/u);
 });

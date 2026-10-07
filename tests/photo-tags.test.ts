@@ -134,7 +134,7 @@ test("tags that are not tags fail before the capture is requested", () => {
       /'level' two different numbers/u,
     ],
     [
-      'let names = load "names", default: "bedroom"\nlet photo = takePhoto(tags: names)\nexit',
+      'let names = load "na" + "mes", default: "bedroom"\nlet photo = takePhoto(tags: names)\nexit',
       /takes a list of tags/u,
     ],
   ] as const) {

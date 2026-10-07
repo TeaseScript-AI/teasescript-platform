@@ -325,7 +325,9 @@ test("compound assignment keeps the variable's type", () => {
         `${target} ${operator} ${operand}`,
       );
   assert.deepEqual(
-    mismatches('let count = 1\nlet saved = load "count"\ncount += saved\ncount -= saved\nexit'),
+    mismatches(
+      'let count = 1\nlet saved = load "co" + "unt", default: null\ncount += saved\ncount -= saved\nexit',
+    ),
     [],
   );
   assert.deepEqual(
@@ -628,8 +630,8 @@ test("values the compiler cannot know are not rejected at compile time", () => {
         "}",
         "let count = 0",
         'count = pick("x")',
-        'count = load "count"',
-        'let stored: integer = load "stored"',
+        'count = load "co" + "unt", default: 0',
+        'let stored: integer = load "st" + "ored", default: 0',
         "exit",
       ].join("\n"),
     ),
@@ -662,9 +664,10 @@ test("a variable that starts as null takes the type of its first non-null value 
     ],
   ]);
   // A value the compiler cannot know decides nothing; the first known value does.
-  assert.deepEqual(codes('let best = null\nbest = load "best"\nbest = 2\nbest = "x"\nexit'), [
-    ["TSV041", '"x"'],
-  ]);
+  assert.deepEqual(
+    codes('let best = null\nbest = load "be" + "st", default: null\nbest = 2\nbest = "x"\nexit'),
+    [["TSV041", '"x"']],
+  );
   // The first value in checking order decides, also when it is assigned inside a function.
   assert.deepEqual(codes('let best = null\nfunction keep {\n    best = 5\n}\nbest = "x"\nexit'), [
     ["TSV041", "5"],

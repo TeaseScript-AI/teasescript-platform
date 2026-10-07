@@ -192,7 +192,10 @@ test("a start value uses only literals, earlier globals, operators, and load", (
   );
   const unknown = runToEnd(
     compiledPlan([
-      { path: "main.tease", source: 'global pick = (load "picks", default: [1, 2]).random\nexit' },
+      {
+        path: "main.tease",
+        source: 'global pick = (load "pi" + "cks", default: [1, 2]).random\nexit',
+      },
     ]),
   );
   assert.equal(unknown.snapshot.failure?.code, "TSR067");
@@ -335,7 +338,7 @@ test("globals follow the let type rules with one type environment for all files"
 
   // A declared type is checked at runtime for a value the compiler cannot know.
   const typed = compiledPlan([
-    { path: "main.tease", source: 'global level: integer = load "level", default: 1\nexit' },
+    { path: "main.tease", source: 'global level: integer = load "le" + "vel", default: 1\nexit' },
   ]);
   assert.equal(runToEnd(typed).snapshot.status, "halted");
   assert.equal(
@@ -894,6 +897,7 @@ test("a plan sets up its globals once, with start values of the accepted kinds",
           kind: "storageLoad",
           key: { kind: "literal", value: "level", span },
           default: bump,
+          type: null,
           span,
         };
       }),

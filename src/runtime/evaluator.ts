@@ -22,6 +22,7 @@ import type {
   TagQueryExpressionPlan,
   TagQueryStepPlan,
   TypeCheckPlan,
+  TypePlan,
 } from "../plan/model.js";
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
@@ -113,7 +114,12 @@ import {
   stringLength,
 } from "./string-operations.js";
 import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
-import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
+import {
+  LOAD_KEY_MESSAGE,
+  findScriptStorageEntry,
+  storageKey,
+  storageKeyPlace,
+} from "./script-storage.js";
 import {
   addSerializableSetValue,
   clearSerializableSet,
@@ -175,6 +181,7 @@ import {
   assertValueType,
   describeValue as describeTypedValue,
   matchesValueType,
+  storedValueMismatch,
 } from "./value-types.js";
 import {
   mediaEndMs,
@@ -1047,7 +1054,10 @@ export class Evaluator {
           if (frame.stage === 1) {
             const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
-            if (entry !== undefined) {
+            if (
+              entry !== undefined &&
+              this.#storedValueFits(key, entry.value, expression.type, expression.span)
+            ) {
               value = entry.value;
               if (trace !== null) {
                 trace.readStorage(key);
@@ -1060,13 +1070,23 @@ export class Evaluator {
               trace?.load(key, false, false, value, expression.span);
               break;
             }
-            // The default is evaluated only for an absent key.
-            if (trace !== null) frame.key = key;
+            // The default is evaluated only for an absent key, or a stored value that does not fit the load's type.
+            frame.key = key;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.default));
             continue;
           }
           value = result.value;
+          // The default takes the place of the stored value, so it fits the load's type, or is null.
+          if (expression.type !== null)
+            assertValueType(
+              value,
+              {
+                type: { kind: "union", members: [expression.type, { kind: "null" }] },
+                place: storageKeyPlace(frame.key!),
+              },
+              expression.default!.span,
+            );
           trace?.load(frame.key!, false, true, value, expression.span);
           break;
       }
@@ -2459,6 +2479,22 @@ export class Evaluator {
 
   #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {
     if (warning !== null) this.#warn(warning.code, warning.message, span);
+  }
+
+  /**
+   * Whether a stored value fits the load's type, if it has one (V30 §25). A value that does not is ignored by this load,
+   * with a warning, and stays stored.
+   */
+  #storedValueFits(
+    key: string,
+    value: SerializableRuntimeValue,
+    type: TypePlan | null,
+    span: SourceSpan,
+  ): boolean {
+    const warning = type === null ? null : storedValueMismatch(key, value, type);
+    if (warning === null) return true;
+    this.#warn("TSW016", warning, span);
+    return false;
   }
 
   #warn(code: string, message: string, span: SourceSpan): void {
