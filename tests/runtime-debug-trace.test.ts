@@ -317,6 +317,7 @@ test("a message explains its interpolated value through a call, its parameters, 
     draws: 1,
     stateBefore: SEED,
     stateAfter: played.snapshot.rng.state,
+    forced: false,
   });
   assert.equal(drawCauses[1]!.preview, drawn!.preview);
 });

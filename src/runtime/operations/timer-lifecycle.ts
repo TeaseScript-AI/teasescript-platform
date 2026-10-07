@@ -10,6 +10,7 @@ import { isValidSessionTime } from "../actions/delay.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { drawFromSessionGenerator, sampleRangeInteger } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
+import type { RandomControl } from "../random-control.js";
 import type { RuntimeSnapshot } from "../state.js";
 import {
   expireTimerRound,
@@ -126,9 +127,12 @@ export function expireTimerAction(
   span: SourceSpan | PlanSourceLocation,
   events: InterpreterEvent[],
   trace: TraceStore | null = null,
+  control: RandomControl | null = null,
 ): void {
   const timer = action.timer;
-  expireTimerRound(timer, endedAtMs, (range) => drawWholeSeconds(snapshot, range, trace));
+  expireTimerRound(timer, endedAtMs, (range) =>
+    drawWholeSeconds(snapshot, action.owningInstruction, range, trace, control),
+  );
   // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
   // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
   // shorter than the deadline's resolution may end at the same time without looping.
@@ -216,14 +220,20 @@ function queueTimerHandler(
   });
 }
 
-/** Draws a repeat round from the persisted session RNG. */
+/**
+ * Draws a repeat round from the persisted session RNG. Its site is the duration of the timer's start, where its first
+ * round was drawn.
+ */
 function drawWholeSeconds(
   snapshot: RuntimeSnapshot,
+  owningInstruction: number,
   range: RuntimeTimerRangeSnapshot,
   trace: TraceStore | null,
+  control: RandomControl | null,
 ): number {
   const length = range.end - range.start + (range.inclusive ? 1 : 0);
-  const seconds = drawFromSessionGenerator(
+  const drawId = snapshot.rng.state;
+  let seconds = drawFromSessionGenerator(
     snapshot.rng,
     trace,
     "timerRepeat",
@@ -232,6 +242,20 @@ function drawWholeSeconds(
     { kind: "range", ...range },
     (draw) => sampleRangeInteger(draw, range, length),
   );
+  if (control !== null) {
+    const start = control.plan.instructions[owningInstruction]!;
+    const resolved = control.resolve(
+      owningInstruction,
+      start.kind === "startTimer" ? start.duration.span : start.span,
+      "timerRepeat",
+      drawId,
+      { kind: "number", value: seconds },
+      () => ({ kind: "integer", min: range.start, max: range.start + length - 1 }),
+    );
+    if (resolved.kind !== "number")
+      throw new Error("A timer round resolved to another kind of outcome.");
+    seconds = resolved.value;
+  }
   trace?.randomResult(seconds);
   return seconds;
 }
