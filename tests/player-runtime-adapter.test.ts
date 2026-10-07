@@ -1025,6 +1025,34 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
+test("a submitted cycle shows the option it showed among options with the same value, also after a restore", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      "let answers = askForm fields: {",
+      '  pace: { text: "Pace", options: [{ value: 1, text: "Slow" }, { value: 1, text: "Fast" }] }',
+      "}",
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  );
+  const stepped = stepPlayerRuntimeFormField(session, "pace")!;
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(stepped.session));
+  const done = submitPlayerRuntimeForm(restored)!;
+  assert.equal(done.outcome.kind, "completed");
+  for (const shown of [
+    done.session,
+    restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(done.session)),
+  ]) {
+    const answer = shown.transcriptEntries.find(
+      (entry) => entry.kind === "message" && entry.formSummary !== undefined,
+    );
+    assert.deepEqual(answer?.kind === "message" ? [answer.text, answer.formSummary] : undefined, [
+      "Pace: Fast",
+      [{ kind: "value", label: "Pace", value: "Fast" }],
+    ]);
+  }
+});
+
 test("a typed form field opens in the composer, keeps its draft through a restore, and takes the composer's text", () => {
   const session = createPlayerRuntimeSession(
     [

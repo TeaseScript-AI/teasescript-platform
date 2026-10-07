@@ -826,15 +826,12 @@ export function submitForm(
   );
   if (missing !== undefined) return refused(`That is wrong. ${missing.text} needs a value.`);
   const answers = ui.fields.map((field, index) => formAnswer(field, values[index]!));
-  const result = formResult(ui, answers);
-  // The transcript text comes from the result, as the Player's summary of the settlement does.
-  const summary = formSummaryOf(ui, result, presentation);
-  if (summary === null) throw new Error("A form's own result holds its answers.");
-  const transcriptText = formSummaryText(summary);
+  // The form's state, not its result, knows which of several cycle options with the same value is shown.
+  const transcriptText = formSummaryText(formSummaryLines(ui, values, presentation));
   // Every answer is shown in full; answers too long for one transcript line are refused rather than cut.
   if (!interactionStringFits(transcriptText))
     return refused("That is wrong. These answers are too long to send at once.");
-  return { ok: true, result, transcriptText };
+  return { ok: true, result: formResult(ui, answers), transcriptText };
 }
 
 /**
@@ -886,17 +883,63 @@ export type FormSummaryLine =
   | { readonly kind: "value"; readonly label: string; readonly value: string };
 
 /**
- * The summary of a form's settled `result` (V30 askForm; owner decision 2026-10-07): every field in field order, a
- * toggle with its state and any other field with its value as its button shows it, `Not set` for an optional field
- * without one; `null` when the result is not one this form returns.
+ * The summary of a form's settlement (V30 askForm; owner decision 2026-10-07): every field in field order, a toggle
+ * with its state and any other field with its value as its button showed it, `Not set` for an optional field without
+ * one; `null` when `result` is not one this form returns. A value is taken as its `transcriptText` shows it, since the
+ * result cannot tell cycle options with the same value apart and a date or time was shown in the presentation of its
+ * moment; when the text is not this result's summary, the values are shown in `presentation`.
  */
 export function formSummaryOf(
   ui: FormUi,
   result: unknown,
+  transcriptText: unknown,
   presentation: TemporalContext["presentation"],
 ): readonly FormSummaryLine[] | null {
   const values = formValuesOf(ui, result);
-  return values === null ? null : formSummaryLines(ui, values, presentation);
+  if (values === null) return null;
+  const lines = formSummaryLines(ui, values, presentation);
+  const shown = typeof transcriptText === "string" ? shownSummary(lines, transcriptText) : null;
+  return shown ?? lines;
+}
+
+/**
+ * `lines` with each value as `text` shows it, or `null` when `text` is not their summary: their toggles and labels
+ * in order, with any values between them.
+ */
+function shownSummary(
+  lines: readonly FormSummaryLine[],
+  text: string,
+): readonly FormSummaryLine[] | null {
+  const shown: FormSummaryLine[] = [];
+  let position = 0;
+  for (const [index, line] of lines.entries()) {
+    const start = `${index === 0 ? "" : ", "}${line.kind === "toggle" ? formSummaryText([line]) : `${line.label}: `}`;
+    if (!text.startsWith(start, position)) return null;
+    position += start.length;
+    if (line.kind === "toggle") {
+      shown.push(line);
+      continue;
+    }
+    const following = lines[index + 1];
+    const next =
+      following === undefined
+        ? null
+        : `, ${following.kind === "toggle" ? formSummaryText([following]) : `${following.label}: `}`;
+    // The value as computed when the text holds it; otherwise up to the next field, such as another option's text.
+    const end =
+      text.startsWith(line.value, position) &&
+      (next === null
+        ? position + line.value.length === text.length
+        : text.startsWith(next, position + line.value.length))
+        ? position + line.value.length
+        : next === null
+          ? text.length
+          : text.indexOf(next, position);
+    if (end < 0) return null;
+    shown.push({ ...line, value: text.slice(position, end) });
+    position = end;
+  }
+  return position === text.length ? shown : null;
 }
 
 function formSummaryLines(

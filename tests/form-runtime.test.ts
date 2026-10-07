@@ -342,10 +342,10 @@ test("submitting requires every required field and returns the answers once, wit
       completion.settlement.actionKind === "interaction" &&
       completion.settlement.ui.kind === "form",
   );
-  const { ui, result } = completion.settlement;
+  const { ui, result, transcriptText } = completion.settlement;
   const presentation = DEFAULT_TEMPORAL_CONTEXT.presentation;
   assert.deepEqual(
-    formSummaryOf(ui, result, presentation)?.map((line) =>
+    formSummaryOf(ui, result, transcriptText, presentation)?.map((line) =>
       line.kind === "toggle" ? `${line.label} ${line.on}` : `${line.label}: ${line.value}`,
     ),
     [
@@ -361,7 +361,7 @@ test("submitting requires every required field and returns the answers once, wit
       "count: 3",
     ],
   );
-  assert.equal(formSummaryOf(ui, { kind: "list", items: [] }, presentation), null);
+  assert.equal(formSummaryOf(ui, { kind: "list", items: [] }, transcriptText, presentation), null);
   const actionId = pendingForm(snapshot).actionId;
   const repeated = completeAction(plan, submitted.snapshot, {
     actionId,
