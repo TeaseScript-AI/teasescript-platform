@@ -1187,8 +1187,8 @@ export interface ClockDifference extends Constants {
 
 /**
  * The differences of clock reads the code times something with (`start = getTimestamp().toSeconds()`, a button, then
- * `took = getTimestamp().toSeconds() - start`), with the constants a condition shortly after compares the difference
- * with (`took < 5`); also a difference a condition takes itself.
+ * `took = getTimestamp().toSeconds() - start`), with the conditions shortly after that compare the difference and the
+ * constants they compare it with (`took < 5`); also a difference a condition takes itself.
  */
 export function clockDifferences(flow: DataFlow, instructions: readonly Data[]): ClockDifference[] {
   /** The clock read each variable holds, by name, as of the instruction looked at: where it was read. */
@@ -1258,35 +1258,36 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
         differences.push(own);
         add(own, constant, index);
       }
-      const names = namesIn(subject);
-      for (const name of names) {
+      // A condition further on still compares the difference, but its constant is not taken for the button.
+      for (const name of namesIn(subject)) {
         const difference = held.get(name);
-        if (
-          difference !== undefined &&
-          index > difference.at &&
-          index - difference.at <= TIMING_WINDOW
-        )
-          add(difference, constant, index);
+        if (difference !== undefined && index > difference.at)
+          add(difference, index - difference.at <= TIMING_WINDOW ? constant : undefined, index);
       }
     };
     for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);
+    // A comparison with a duration gives its constant; one with another value (`took <= limit`) only the condition.
     const walk = (expression: unknown): void => {
       const value = record(expression);
       if (value.kind === "group") walk(value.expression);
+      if (value.kind === "unary") walk(value.operand);
       if (value.kind !== "binary") return;
-      const comparison = String(value.operator) in FLIP;
-      if (comparison && record(value.right).kind === "duration") compared(value.left, value.right);
-      else if (comparison && record(value.left).kind === "duration")
-        compared(value.right, value.left);
-      else {
+      const left = record(value.left);
+      const right = record(value.right);
+      if (!(String(value.operator) in FLIP)) {
         walk(value.left);
         walk(value.right);
+      } else if (right.kind === "duration") compared(value.left, value.right);
+      else if (left.kind === "duration") compared(value.right, value.left);
+      else if (left.kind !== "literal" && right.kind !== "literal") {
+        compared(value.left, undefined);
+        compared(value.right, undefined);
       }
     };
     walk(condition);
   });
   return differences
-    .filter((difference) => difference.numbers.length + difference.durations.length > 0)
+    .filter((difference) => difference.conditions.length > 0)
     .map(({ from, at, numbers, durations, conditions }) => ({
       from,
       at,

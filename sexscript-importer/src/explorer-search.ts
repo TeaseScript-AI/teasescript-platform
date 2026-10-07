@@ -957,9 +957,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       session.comparedWith.set(ask, expressions);
   for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
     session.timedWith.set(button, expressions);
-  session.clockDifferences.push(...clockDifferences(flow, instructions));
+  const differences = clockDifferences(flow, instructions);
+  session.clockDifferences.push(
+    ...differences.filter(
+      (difference) => difference.numbers.length + difference.durations.length > 0,
+    ),
+  );
   /** The conditions that compare a difference of clock reads around a button. */
-  const measured = new Set(session.clockDifferences.flatMap((difference) => difference.conditions));
+  const measured = new Set(differences.flatMap((difference) => difference.conditions));
   const constants = constantConditions(instructions, files, options.diagnostics);
   // Conditions that read only stored keys whose values this package fixes have one value too.
   const fixed = new Map<number, { value: boolean; reason: string }>();
