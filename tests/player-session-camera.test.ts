@@ -13,6 +13,7 @@ import {
   createPlayerRuntimeSession,
   type PlayerCaptureAnswer,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../player/session-camera.js";
 
@@ -211,8 +212,8 @@ test("a capture is answered once and its photo continues the script", async () =
   harness.service.request();
   await settle();
   assert.equal(answers, 1);
-  assert.equal(harness.state.session?.snapshot.status, "halted");
-  assert.equal(harness.state.session?.snapshot.stageImage, "photo-1");
+  assert.equal(harness.state.session?.state.status, "halted");
+  assert.equal(playerRuntimeSnapshot(harness.state.session!).stageImage, "photo-1");
 });
 
 test("a session replaced while its photo is captured gets its own capture serviced", async () => {
@@ -228,12 +229,12 @@ test("a session replaced while its photo is captured gets its own capture servic
   await settle();
   await settle();
   assert.equal(answers.length, 2);
-  assert.equal(harness.state.session?.snapshot.foregroundAction?.kind, "capture");
+  assert.equal(harness.state.session?.state.foregroundAction?.kind, "capture");
   harness.held.add("new photo");
   answers[1]?.({ kind: "captured", reference: "new photo" });
   await settle();
   await settle();
-  assert.equal(harness.state.session?.snapshot.stageImage, "new photo");
+  assert.equal(playerRuntimeSnapshot(harness.state.session!).stageImage, "new photo");
 });
 
 test("a captured reference the store does not hold never leaves the script waiting", async () => {
@@ -241,7 +242,7 @@ test("a captured reference the store does not hold never leaves the script waiti
   harness.start("let photo = takePhoto()\nlet missing = photo == null\nexit");
   harness.service.request();
   await settle();
-  assert.equal(harness.state.session?.snapshot.status, "halted");
+  assert.equal(harness.state.session?.state.status, "halted");
   assert.equal(harness.diagnostics[0]?.code, "capture-rejected");
 });
 
@@ -275,5 +276,5 @@ test("a stopped service never resumes the script with an answer still in flight"
   harness.service.stop();
   deliver({ kind: "unavailable", reason: "denied" });
   await settle();
-  assert.equal(harness.state.session?.snapshot.foregroundAction?.kind, "capture");
+  assert.equal(harness.state.session?.state.foregroundAction?.kind, "capture");
 });

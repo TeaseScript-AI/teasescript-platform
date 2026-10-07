@@ -75,7 +75,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
-  props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
+  props.session ? activePlayerRuntimeInteraction(props.session.state)?.actionId : undefined,
 );
 // An interaction's presentation is fixed for its lifetime. Keep one object per action so frequent time and media
 // observations do not re-render, and re-measure, the controls on every update.
@@ -154,7 +154,7 @@ watch(
   () => {
     const texts = typedTexts();
     if (!texts || !props.session) return;
-    const pending = new Set(playerRuntimeFormActionIds(props.session.snapshot));
+    const pending = new Set(playerRuntimeFormActionIds(props.session.state));
     for (const key of texts.keys())
       if (!pending.has(parseTypedKey(key).actionId)) texts.delete(key);
   },
@@ -202,7 +202,7 @@ function presents(request: ImageRequestIdentity): boolean {
     imageRequest.value !== null &&
     props.session?.plan === request.plan &&
     props.reset === request.reset &&
-    activePlayerRuntimeInteraction(props.session.snapshot)?.actionId === request.actionId
+    activePlayerRuntimeInteraction(props.session.state)?.actionId === request.actionId
   );
 }
 const readingImage = ref(false);
@@ -372,7 +372,7 @@ async function complete(
     const targetId = (current: PlayerRuntimeSession) =>
       target === "pacing"
         ? playerRuntimePacingGate(current)?.actionId
-        : activePlayerRuntimeInteraction(current.snapshot)?.actionId;
+        : activePlayerRuntimeInteraction(current.state)?.actionId;
     const presented = expectedActionId ?? targetId(props.session);
     // Ordinary input is evaluated at once; a session that must be readied first is evaluated once it is.
     const ready = props.prepareInput?.() ?? true;

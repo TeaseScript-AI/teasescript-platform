@@ -282,7 +282,7 @@ test("a bundle imports each script into its own scope while a different script r
   await host.importSavedData(review, new Set([OTHER, NEW]));
 
   // The shown script and its session are untouched.
-  assert.equal(host.session.value?.snapshot.status, "waiting");
+  assert.equal(host.session.value?.state.status, "waiting");
   assert.deepEqual([...provider.entries], [["kept", 1]]);
   // Each script holds the imported values, its photo stored in its own scope under a new reference.
   for (const scope of [OTHER, NEW]) {
@@ -369,7 +369,7 @@ test("a bundle that includes the shown script ends its session, and the next Sta
     ),
   );
   await host.activate();
-  await until(() => host.session.value?.snapshot.status === "halted", "the session did not end");
+  await until(() => host.session.value?.state.status === "halted", "the session did not end");
   assert.equal(provider.entries.get("copy"), photo);
   assert.equal(provider.entries.get("score"), 4);
 });
@@ -384,7 +384,7 @@ test("unticked scripts keep their saved data, the shown one and its session incl
     bundle([script(SHOWN), script(OTHER), script(NEW)]),
   );
   await host.importSavedData(review, new Set([NEW]));
-  assert.equal(host.session.value?.snapshot.status, "waiting");
+  assert.equal(host.session.value?.state.status, "waiting");
   assert.deepEqual([...provider.entries], [["kept", 1]]);
   assert.deepEqual([...(await values(other(OTHER)))], [["kept", "other"]]);
   assert.equal((await values(other(NEW))).get("score"), 3);
@@ -450,7 +450,7 @@ test("a save the ended session had issued finishes before the import replaces th
   await until(
     () =>
       host.session.value !== null &&
-      pendingPlayerRuntimeStorageWrite(host.session.value.snapshot) !== null,
+      pendingPlayerRuntimeStorageWrite(host.session.value.state) !== null,
     "the save was not requested",
   );
   const importing = host.importSavedData(review, new Set([SHOWN]));

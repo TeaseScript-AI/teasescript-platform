@@ -7,7 +7,7 @@ import {
   storageOutline,
   storagePreview,
 } from "../player/storage-preview.js";
-import { createPlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession, playerRuntimeSnapshot } from "../player/runtime-adapter.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 
 // Debug's Storage tab previews each saved value by its type. The values come from real saves, as the Player stores
@@ -15,7 +15,9 @@ import type { SerializableRuntimeValue } from "../src/index.js";
 
 function savedValues(source: string) {
   const session = createPlayerRuntimeSession(`${source}\nexit`);
-  return new Map(session.snapshot.scriptStorage.map((entry) => [entry.key, entry.value]));
+  return new Map(
+    playerRuntimeSnapshot(session).scriptStorage.map((entry) => [entry.key, entry.value]),
+  );
 }
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";

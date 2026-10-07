@@ -174,7 +174,7 @@ export class CaptureService {
 
   async #service(): Promise<void> {
     const current = this.#host.session();
-    const action = current && activePlayerRuntimeCapture(current.snapshot);
+    const action = current && activePlayerRuntimeCapture(current.state);
     if (!action || this.#servicing || this.#stopped) return;
     this.#servicing = true;
     const generation = this.#host.generation();
@@ -188,10 +188,7 @@ export class CaptureService {
       if (this.#stopped || this.#host.generation() !== generation) return;
       // Input happens at the observed time.
       const observed = this.#host.observe() ?? this.#host.session();
-      if (
-        !observed ||
-        activePlayerRuntimeCapture(observed.snapshot)?.actionId !== action.actionId
-      ) {
+      if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== action.actionId) {
         this.#settled(key);
         return;
       }

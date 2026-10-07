@@ -47,6 +47,7 @@ import {
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
@@ -216,11 +217,11 @@ exit
     ["bold"],
   );
 
-  const buttonSnapshot = structuredClone(session.snapshot);
+  const buttonSnapshot = structuredClone(playerRuntimeSnapshot(session));
   assert.equal(submitPlayerRuntimeComposer(session, "continue"), null);
   assert.equal(submitPlayerRuntimeComposer(session, "Continue "), null);
   assert.equal(submitPlayerRuntimeComposer(session, ""), null);
-  assert.deepEqual(session.snapshot, buttonSnapshot);
+  assert.deepEqual(playerRuntimeSnapshot(session), buttonSnapshot);
   const buttonRestorePoint = createPlayerRuntimeRestorePoint(session);
   const button = submitPlayerRuntimeComposer(session, "Continue");
   assert.equal(button?.outcome.kind, "completed");
@@ -228,16 +229,16 @@ exit
     restorePlayerRuntimeSession(buttonRestorePoint),
   );
   assert.deepEqual(button?.outcome, clickedButton?.outcome);
-  assert.deepEqual(button?.session.snapshot, clickedButton?.session.snapshot);
+  assert.deepEqual(
+    playerRuntimeSnapshot(button!.session),
+    playerRuntimeSnapshot(clickedButton!.session),
+  );
   assert.deepEqual(button?.session.transcriptEntries, clickedButton?.session.transcriptEntries);
   session = button!.session;
 
   const invalidText = submitPlayerRuntimeComposer(session, " \t ");
   assert.equal(invalidText?.outcome.kind, "invalidPayload");
-  assert.deepEqual(
-    invalidText?.session.snapshot.foregroundAction,
-    session.snapshot.foregroundAction,
-  );
+  assert.deepEqual(invalidText?.session.state.foregroundAction, session.state.foregroundAction);
   const text = submitPlayerRuntimeComposer(session, "  A\r\nB\r  ");
   assert.equal(text?.outcome.kind, "completed");
   session = text!.session;
@@ -257,12 +258,12 @@ exit
   );
   const ambiguous = submitPlayerRuntimeComposer(session, "Same");
   assert.equal(ambiguous?.outcome.kind, "invalidPayload");
-  assert.deepEqual(ambiguous?.session.snapshot.foregroundAction, session.snapshot.foregroundAction);
+  assert.deepEqual(ambiguous?.session.state.foregroundAction, session.state.foregroundAction);
 
   const selected = selectPlayerRuntimeChoice(session, foreground.options[1]!.id);
   assert.equal(selected?.outcome.kind, "completed");
   session = selected!.session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
     ["Ready?", "Continue", "  A\nB\n  ", "-0e2", "Same", "  A\nB\n   / 0 / second"],
@@ -330,16 +331,18 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
   );
   const firstGate = playerRuntimePacingGate(session);
   assert.equal(firstGate?.skippable, false);
-  const beforeRejectedSkip = structuredClone(session.snapshot);
+  const beforeRejectedSkip = structuredClone(playerRuntimeSnapshot(session));
   const rejected = skipPlayerRuntimePacing(session);
   assert.equal(rejected?.outcome.kind, "invalidPayload");
-  assert.deepEqual(rejected?.session.snapshot, beforeRejectedSkip);
+  assert.deepEqual(playerRuntimeSnapshot(rejected?.session), beforeRejectedSkip);
 
-  const beforeObservation = structuredClone(session.snapshot);
+  const beforeObservation = structuredClone(session.state);
   const observed = observePlayerRuntimeTime(session, firstGate!.deadlineMs);
   assert.equal(observed.outcome.kind, "observed");
-  // The observation continues execution on a new snapshot; the published one stays as it was.
-  assert.deepEqual(session.snapshot, beforeObservation);
+  // The observation continues execution in a new publication; the earlier one shows what it showed, and only the new
+  // one continues, as the refused skip left the state unchanged.
+  assert.deepEqual(session.state, beforeObservation);
+  assert.throws(() => playerRuntimeSnapshot(session), /replaced by a newer one/u);
   session = observed.session;
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
@@ -350,7 +353,7 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
   const skipped = skipPlayerRuntimePacing(session);
   assert.equal(skipped?.outcome.kind, "completed");
   assert.equal(playerRuntimePacingGate(skipped!.session), null);
-  assert.equal(skipped?.session.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(skipped?.session.state.foregroundAction?.kind, "delay");
 });
 
 test("runtime checkpoint restore reconstructs presentation without replay or completion", () => {
@@ -360,11 +363,11 @@ test("runtime checkpoint restore reconstructs presentation without replay or com
   const before = playerRuntimeForeground(session);
   const restorePoint = createPlayerRuntimeRestorePoint(session);
   const roundTrippedCheckpoint = deserializeCheckpoint(restorePoint.checkpointJson);
-  assert.deepEqual(roundTrippedCheckpoint.snapshot, session.snapshot);
+  assert.deepEqual(roundTrippedCheckpoint.snapshot, playerRuntimeSnapshot(session));
 
   if (before?.kind !== "choose") throw new Error("Expected choice presentation.");
   session = selectPlayerRuntimeChoice(session, before.options[0]!.id)!.session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
 
   const restored = restorePlayerRuntimeSession(restorePoint);
   assert.deepEqual(playerRuntimeForeground(restored), before);
@@ -372,7 +375,7 @@ test("runtime checkpoint restore reconstructs presentation without replay or com
     restored.transcriptEntries.map((entry) => entry.text),
     ["Question"],
   );
-  assert.equal(restored.snapshot.status, "waiting");
+  assert.equal(restored.state.status, "waiting");
   assert.equal(restored.events.length, restorePoint.events.length);
 });
 
@@ -384,7 +387,7 @@ test("runtime checkpoint restore preserves a paced history and its continuation"
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
   const resumed = skipPlayerRuntimePacing(restored)!.session;
   const direct = skipPlayerRuntimePacing(session)!.session;
-  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(resumed), playerRuntimeSnapshot(direct));
   assert.deepEqual(resumed.transcriptEntries, direct.transcriptEntries);
 });
 
@@ -404,8 +407,8 @@ test("Continue runs a restored ready session at once, after recording its captur
     temporalContext: DEFAULT_TEMPORAL_CONTEXT,
   };
   const restored = restorePlayerRuntimeSession({ checkpointJson, events: [] });
-  assert.equal(restored.snapshot.status, "ready");
-  assert.deepEqual(playerRuntimeDeadlines(restored.snapshot), []);
+  assert.equal(restored.state.status, "ready");
+  assert.deepEqual(playerRuntimeDeadlines(restored.state), []);
 
   // No time observation follows: Continue itself resumes, with its own wall clock already in force.
   const continued = continuePlayerRuntimeSession(restored, capture);
@@ -416,14 +419,14 @@ test("Continue runs a restored ready session at once, after recording its captur
     resumedTranscript,
   );
   // Continue consumes no scene time: the wait keeps its full duration.
-  assert.deepEqual(playerRuntimeDeadlines(continued.session.snapshot), [1_000]);
+  assert.deepEqual(playerRuntimeDeadlines(continued.session.state), [1_000]);
 
   // The same as recording the capture through the runtime and then running.
   const checkpoint = deserializeCheckpoint(checkpointJson);
   const recorded = recordContinueCapture(checkpoint.plan, checkpoint.snapshot, capture);
   const ran = run(checkpoint.plan, recorded.snapshot);
   assert.deepEqual(continued.session.events, [...recorded.events, ...ran.events]);
-  assert.deepEqual(continued.session.snapshot, ran.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(continued.session), ran.snapshot);
 
   // Continuing the saved wait settles nothing early.
   const waiting = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(continued.session));
@@ -433,7 +436,7 @@ test("Continue runs a restored ready session at once, after recording its captur
     again.session.transcriptEntries.map((entry) => entry.text),
     resumedTranscript,
   );
-  assert.deepEqual(playerRuntimeDeadlines(again.session.snapshot), [1_000]);
+  assert.deepEqual(playerRuntimeDeadlines(again.session.state), [1_000]);
 
   // A rejected capture runs nothing.
   const rejected = continuePlayerRuntimeSession(
@@ -441,7 +444,7 @@ test("Continue runs a restored ready session at once, after recording its captur
     { ...capture, wallClockMs: 0.5 },
   );
   assert.equal(rejected.outcome.kind, "invalidCapture");
-  assert.equal(rejected.session.snapshot.status, "ready");
+  assert.equal(rejected.session.state.status, "ready");
   assert.deepEqual(rejected.session.events, []);
 });
 
@@ -461,7 +464,7 @@ test("runtime checkpoint restore handles retained event histories above the nati
   assert.equal(new Set(restored.transcriptEntries.map((entry) => entry.id)).size, count);
   assert.equal(restored.transcriptEntries[0]?.text, "x");
   assert.equal(restored.transcriptEntries.at(-1)?.text, "x");
-  assert.deepEqual(restored.snapshot, result.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(restored), result.snapshot);
 });
 
 test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {
@@ -517,11 +520,11 @@ test("blocking timer scenario presents runtime timers, hides waits, and restores
   let session = createPlayerRuntimeSession(source);
   const presented: Array<number | null> = [];
   let restoredChecked = false;
-  for (let guard = 0; session.snapshot.foregroundAction?.kind === "delay"; guard += 1) {
+  for (let guard = 0; session.state.foregroundAction?.kind === "delay"; guard += 1) {
     assert.ok(guard < 10, "scenario must reach its final button");
-    const action = session.snapshot.foregroundAction;
-    const now = session.snapshot.currentSessionTimeMs;
-    const timers = playerRuntimeTimers(session.snapshot, now);
+    const action = session.state.foregroundAction;
+    const now = session.state.currentSessionTimeMs;
+    const timers = playerRuntimeTimers(session.state, now);
     if (action.display === "hidden") {
       assert.deepEqual(timers, [], "a hidden wait has no timer presentation");
       presented.push(null);
@@ -538,32 +541,36 @@ test("blocking timer scenario presents runtime timers, hides waits, and restores
         [{ kind: "visible", name: undefined, remainingSeconds: total, totalSeconds: total }],
       );
       assert.equal(
-        playerRuntimeTimers(session.snapshot, now + 1_250)[0]?.remainingSeconds,
+        playerRuntimeTimers(session.state, now + 1_250)[0]?.remainingSeconds,
         total - 1.25,
       );
       assert.equal(
-        playerRuntimeTimers(session.snapshot, action.deadlineMs + 5_000)[0]?.remainingSeconds,
+        playerRuntimeTimers(session.state, action.deadlineMs + 5_000)[0]?.remainingSeconds,
         0,
       );
-      assert.equal(playerRuntimeTimers(session.snapshot, now - 5_000)[0]?.remainingSeconds, total);
+      assert.equal(playerRuntimeTimers(session.state, now - 5_000)[0]?.remainingSeconds, total);
       presented.push(total);
 
       if (!restoredChecked && presented.length === 2) {
         const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
-        assert.deepEqual(restored.snapshot, session.snapshot, "restore keeps the drawn duration");
         assert.deepEqual(
-          playerRuntimeTimers(restored.snapshot, now + 500),
-          playerRuntimeTimers(session.snapshot, now + 500),
+          playerRuntimeSnapshot(restored),
+          playerRuntimeSnapshot(session),
+          "restore keeps the drawn duration",
+        );
+        assert.deepEqual(
+          playerRuntimeTimers(restored.state, now + 500),
+          playerRuntimeTimers(session.state, now + 500),
         );
         session = restored;
         restoredChecked = true;
       }
     }
     const early = observePlayerRuntimeTime(session, action.deadlineMs - 1);
-    assert.equal(early.session.snapshot.foregroundAction?.actionId, action.actionId);
+    assert.equal(early.session.state.foregroundAction?.actionId, action.actionId);
     session = observePlayerRuntimeTime(early.session, action.deadlineMs).session;
     assert.notEqual(
-      session.snapshot.foregroundAction?.actionId,
+      session.state.foregroundAction?.actionId,
       action.actionId,
       "settled timer is removed",
     );
@@ -575,10 +582,7 @@ test("blocking timer scenario presents runtime timers, hides waits, and restores
   assert.equal(presented[2], null);
   assert.ok(presented.slice(3).every((total) => total! >= 3 && total! <= 5));
   assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
-  assert.deepEqual(
-    playerRuntimeTimers(session.snapshot, session.snapshot.currentSessionTimeMs),
-    [],
-  );
+  assert.deepEqual(playerRuntimeTimers(session.state, session.state.currentSessionTimeMs), []);
   assert.deepEqual(
     session.transcriptEntries.map((entry) => (entry.kind === "message" ? entry.text : "")).at(-1),
     "Every timer has settled.",
@@ -593,7 +597,7 @@ test("authored timers scenario presents concurrent timers and interrupts the una
   const texts = (session: ReturnType<typeof createPlayerRuntimeSession>) =>
     session.transcriptEntries.flatMap((entry) => (entry.kind === "message" ? [entry.text] : []));
   const presented = (session: ReturnType<typeof createPlayerRuntimeSession>, now: number) =>
-    playerRuntimeTimers(session.snapshot, now).map((timer) => [
+    playerRuntimeTimers(session.state, now).map((timer) => [
       timer.kind,
       timer.name ?? null,
       timer.remainingSeconds,
@@ -608,13 +612,13 @@ test("authored timers scenario presents concurrent timers and interrupts the una
   ]);
   assert.deepEqual(pulse.slice(0, 2), ["visible", "Pulse"], "the hidden reminder is not presented");
   assert.ok(Number(pulse[2]) >= 2 && Number(pulse[2]) <= 4);
-  assert.ok(playerRuntimeDeadlines(session.snapshot).includes(6_000));
+  assert.ok(playerRuntimeDeadlines(session.state).includes(6_000));
 
   session = observePlayerRuntimeTime(session, 6_000).session;
   assert.match(texts(session).at(-1)!, /^A hidden timer just expired\. [1-3] pulses so far\.$/u);
   assert.equal(playerRuntimeForeground(session)?.kind, "ask-text", "the question returns");
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
-  assert.deepEqual(restored.snapshot, session.snapshot);
+  assert.deepEqual(playerRuntimeSnapshot(restored), playerRuntimeSnapshot(session));
 
   const answered = submitPlayerRuntimeComposer(
     observePlayerRuntimeTime(restored, 8_000).session,
@@ -646,8 +650,8 @@ test("authored timers scenario presents concurrent timers and interrupts the una
   assert.equal(texts(unanswered).at(-1), "Time is up, so the question is cancelled.");
   assert.equal(playerRuntimeForeground(unanswered)?.kind, "show-button");
   unanswered = activatePlayerRuntimeButton(unanswered)!.session;
-  assert.equal(unanswered.snapshot.status, "halted");
-  assert.deepEqual(playerRuntimeTimers(unanswered.snapshot, 20_000), []);
+  assert.equal(unanswered.state.status, "halted");
+  assert.deepEqual(playerRuntimeTimers(unanswered.state, 20_000), []);
 });
 
 test("runtime adapter forwards media reports, projects a live seek, and restores pending samples", () => {
@@ -664,18 +668,18 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
       "exit",
     ].join("\n"),
   );
-  assert.deepEqual(playerRuntimeMedia(session.snapshot).stage, {
+  assert.deepEqual(playerRuntimeMedia(session.state).stage, {
     image: "images/room.jpg",
     videoMediaId: null,
   });
-  assert.equal(playerRuntimeMedia(session.snapshot).media[0]?.loaded, false);
+  assert.equal(playerRuntimeMedia(session.state).media[0]?.loaded, false);
   const loaded = reportPlayerRuntimeMediaLoad(session, 1, { kind: "loaded", durationMs: 10_000 });
   assert.equal(loaded.outcome.kind, "accepted");
   session = observePlayerRuntimeTime(loaded.session, 1_500, [
     { mediaId: 1, segment: 1, progressMs: 1_500 },
   ]).session;
   // The cue at 1 s seeked to 3 s: a new segment starts there.
-  let [media] = playerRuntimeMedia(session.snapshot).media;
+  let [media] = playerRuntimeMedia(session.state).media;
   assert.deepEqual(
     { segment: media?.segment, playheadMs: media?.playheadMs, reported: media?.reportedProgressMs },
     { segment: 2, playheadMs: 3_000, reported: 0 },
@@ -684,8 +688,8 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
     { mediaId: 1, segment: 2, progressMs: 500 },
   ]).session;
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
-  assert.deepEqual(playerRuntimeMedia(restored.snapshot), playerRuntimeMedia(session.snapshot));
-  [media] = playerRuntimeMedia(restored.snapshot).media;
+  assert.deepEqual(playerRuntimeMedia(restored.state), playerRuntimeMedia(session.state));
+  [media] = playerRuntimeMedia(restored.state).media;
   assert.deepEqual(
     { playheadMs: media?.playheadMs, reported: media?.reportedProgressMs },
     { playheadMs: 3_500, reported: 500 },
@@ -693,7 +697,7 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
   const finished = observePlayerRuntimeTime(restored, 10_000, [
     { mediaId: 1, segment: 2, progressMs: 8_500 },
   ]).session;
-  assert.equal(finished.snapshot.status, "halted");
+  assert.equal(finished.state.status, "halted");
   const last = finished.transcriptEntries.at(-1);
   assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 s 8 s");
 });
@@ -702,7 +706,7 @@ test("the Player answers takePhoto() with a vouched reference or an unavailable 
   const session = createPlayerRuntimeSession(
     "let photo = takePhoto()\nshowImage photo\nlet second = takePhoto()\nexit",
   );
-  const pending = activePlayerRuntimeCapture(session.snapshot);
+  const pending = activePlayerRuntimeCapture(session.state);
   assert.ok(pending !== null);
   const reference = "captured-media:session:1";
   const unvouched = answerPlayerRuntimeCapture(session, pending.actionId, {
@@ -718,15 +722,15 @@ test("the Player answers takePhoto() with a vouched reference or an unavailable 
   );
   assert.equal(answered.outcome.kind, "completed");
   // The session continued to the next capture and shows the photo.
-  assert.equal(playerRuntimeMedia(answered.session.snapshot).stage.image, reference);
-  const next = activePlayerRuntimeCapture(answered.session.snapshot);
+  assert.equal(playerRuntimeMedia(answered.session.state).stage.image, reference);
+  const next = activePlayerRuntimeCapture(answered.session.state);
   assert.ok(next !== null && next.actionId !== pending.actionId);
   const unavailable = answerPlayerRuntimeCapture(answered.session, next.actionId, {
     kind: "unavailable",
     reason: "denied",
   });
   assert.equal(unavailable.outcome.kind, "completed");
-  assert.equal(unavailable.session.snapshot.status, "halted");
+  assert.equal(unavailable.session.state.status, "halted");
   assert.ok(
     unavailable.session.events.some(
       (event) => event.kind === "developerWarning" && event.code === "TSW015",
@@ -763,8 +767,8 @@ test("an image request is presented, survives a restore while it waits, and show
   );
   const answered = answerPlayerRuntimeImage(restored, reference, store);
   assert.equal(answered?.outcome.kind, "completed");
-  assert.equal(answered.session.snapshot.status, "halted");
-  assert.equal(playerRuntimeMedia(answered.session.snapshot).stage.image, reference);
+  assert.equal(answered.session.state.status, "halted");
+  assert.equal(playerRuntimeMedia(answered.session.state).stage.image, reference);
   assert.deepEqual(
     answered.session.transcriptEntries.map((entry) => entry.text),
     ["Show me.", "Image"],
@@ -786,19 +790,19 @@ exit
 `,
     { scriptStorage: initial, persistentScriptStorage: true },
   );
-  const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  const write = pendingPlayerRuntimeStorageWrite(session.state);
   assert.ok(write);
   assert.deepEqual({ key: write.key, value: write.value }, { key: "answer.2", value: "new value" });
-  assert.equal(session.snapshot.status, "waiting");
-  assert.equal(session.snapshot.scriptStoragePersistent, true);
-  assert.deepEqual(session.snapshot.scriptStorage, initial);
+  assert.equal(session.state.status, "waiting");
+  assert.equal(playerRuntimeSnapshot(session).scriptStoragePersistent, true);
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, initial);
   assert.deepEqual(session.transcriptEntries, []);
 
   const completed = completePlayerRuntimeStorageWrite(session, write.actionId, true);
   assert.equal(completed.outcome.kind, "completed");
-  assert.equal(completed.session.snapshot.status, "halted");
-  assert.equal(pendingPlayerRuntimeStorageWrite(completed.session.snapshot), null);
-  assert.deepEqual(completed.session.snapshot.scriptStorage, [
+  assert.equal(completed.session.state.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(completed.session.state), null);
+  assert.deepEqual(playerRuntimeSnapshot(completed.session).scriptStorage, [
     { key: "answer.2", value: "new value" },
   ]);
   assert.deepEqual(
@@ -812,13 +816,13 @@ test("runtime adapter retains the previous value and emits TSW014 after a failed
     'save "replacement" as "answer"\nlet answer = load "answer"\nsay answer, instant\nexit',
     { scriptStorage: [{ key: "answer", value: "previous" }], persistentScriptStorage: true },
   );
-  const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  const write = pendingPlayerRuntimeStorageWrite(session.state);
   assert.ok(write);
   const completed = completePlayerRuntimeStorageWrite(session, write.actionId, false);
   assert.equal(completed.outcome.kind, "completed");
-  assert.equal(completed.session.snapshot.status, "halted");
-  assert.equal(pendingPlayerRuntimeStorageWrite(completed.session.snapshot), null);
-  assert.deepEqual(completed.session.snapshot.scriptStorage, [
+  assert.equal(completed.session.state.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(completed.session.state), null);
+  assert.deepEqual(playerRuntimeSnapshot(completed.session).scriptStorage, [
     { key: "answer", value: "previous" },
   ]);
   assert.deepEqual(
@@ -838,11 +842,13 @@ test("runtime adapter keeps storage session-local by default without pending wri
     'save "local" as "answer"\nlet answer = load "answer"\nsay answer, instant\ndelete "old"\nexit',
     { scriptStorage: [{ key: "old", value: "initial" }] },
   );
-  assert.equal(session.snapshot.scriptStoragePersistent, false);
-  assert.equal(session.snapshot.status, "halted");
-  assert.equal(session.snapshot.foregroundAction, null);
-  assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
-  assert.deepEqual(session.snapshot.scriptStorage, [{ key: "answer", value: "local" }]);
+  assert.equal(playerRuntimeSnapshot(session).scriptStoragePersistent, false);
+  assert.equal(session.state.status, "halted");
+  assert.equal(session.state.foregroundAction, null);
+  assert.equal(pendingPlayerRuntimeStorageWrite(session.state), null);
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, [
+    { key: "answer", value: "local" },
+  ]);
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
     ["local"],
@@ -862,20 +868,23 @@ test("runtime adapter ignores unknown and stale storage action IDs", () => {
   const original = createPlayerRuntimeSession('save 1 as "answer"\nsave 2 as "answer"\nexit', {
     persistentScriptStorage: true,
   });
-  const first = pendingPlayerRuntimeStorageWrite(original.snapshot);
+  const first = pendingPlayerRuntimeStorageWrite(original.state);
   assert.ok(first);
   const unknown = completePlayerRuntimeStorageWrite(original, first.actionId + 100, true);
   assert.notEqual(unknown.outcome.kind, "completed");
-  assert.deepEqual(unknown.session, original);
+  // A refusal publishes again, unchanged but for the revision.
+  assert.deepEqual({ ...unknown.session, revision: original.revision }, original);
 
   const completed = completePlayerRuntimeStorageWrite(original, first.actionId, true);
-  const second = pendingPlayerRuntimeStorageWrite(completed.session.snapshot);
+  const second = pendingPlayerRuntimeStorageWrite(completed.session.state);
   assert.ok(second);
   assert.notEqual(second.actionId, first.actionId);
   const stale = completePlayerRuntimeStorageWrite(completed.session, first.actionId, false);
   assert.notEqual(stale.outcome.kind, "completed");
-  assert.deepEqual(stale.session, completed.session);
-  assert.deepEqual(stale.session.snapshot.scriptStorage, [{ key: "answer", value: 1 }]);
+  assert.deepEqual({ ...stale.session, revision: completed.session.revision }, completed.session);
+  assert.deepEqual(playerRuntimeSnapshot(stale.session).scriptStorage, [
+    { key: "answer", value: 1 },
+  ]);
 });
 
 test("runtime adapter leaves writes reached after interaction and time observation pending", () => {
@@ -883,43 +892,43 @@ test("runtime adapter leaves writes reached after interaction and time observati
     'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered", default: "deleted"\nsay answer, instant\nexit',
     { persistentScriptStorage: true },
   );
-  assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
+  assert.equal(pendingPlayerRuntimeStorageWrite(session.state), null);
   const answered = activatePlayerRuntimeButton(session);
   assert.ok(answered);
   assert.equal(answered.outcome.kind, "completed");
   session = answered.session;
-  const interactionWrite = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  const interactionWrite = pendingPlayerRuntimeStorageWrite(session.state);
   assert.ok(interactionWrite);
   assert.deepEqual(
     { key: interactionWrite.key, value: interactionWrite.value },
     { key: "answered", value: 2 },
   );
-  assert.equal(session.snapshot.status, "waiting");
-  assert.deepEqual(session.snapshot.scriptStorage, []);
+  assert.equal(session.state.status, "waiting");
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, []);
   session = completePlayerRuntimeStorageWrite(session, interactionWrite.actionId, true).session;
-  assert.equal(session.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(session.state.foregroundAction?.kind, "delay");
 
   const observed = observePlayerRuntimeTime(session, 1_000);
   assert.equal(observed.outcome.kind, "observed");
   session = observed.session;
-  const timeWrite = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  const timeWrite = pendingPlayerRuntimeStorageWrite(session.state);
   assert.ok(timeWrite);
   assert.deepEqual({ key: timeWrite.key, value: timeWrite.value }, { key: "observed", value: 3 });
-  assert.equal(session.snapshot.status, "waiting");
-  assert.deepEqual(session.snapshot.scriptStorage, [{ key: "answered", value: 2 }]);
+  assert.equal(session.state.status, "waiting");
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, [{ key: "answered", value: 2 }]);
   session = completePlayerRuntimeStorageWrite(session, timeWrite.actionId, true).session;
 
-  const deletion = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  const deletion = pendingPlayerRuntimeStorageWrite(session.state);
   assert.ok(deletion);
   assert.deepEqual({ key: deletion.key, value: deletion.value }, { key: "answered", value: null });
-  assert.deepEqual(session.snapshot.scriptStorage, [
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, [
     { key: "answered", value: 2 },
     { key: "observed", value: 3 },
   ]);
   session = completePlayerRuntimeStorageWrite(session, deletion.actionId, true).session;
-  assert.equal(session.snapshot.status, "halted");
-  assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
-  assert.deepEqual(session.snapshot.scriptStorage, [{ key: "observed", value: 3 }]);
+  assert.equal(session.state.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(session.state), null);
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, [{ key: "observed", value: 3 }]);
   assert.equal(session.transcriptEntries.at(-1)?.text, "deleted");
 });
 
@@ -934,7 +943,7 @@ test("a session records the account's zone and presentation, falling back to the
   const session = createPlayerRuntimeSession('say toDateTime("2026-10-04T18:30")\nexit', {
     temporalContext: account,
   });
-  assert.deepEqual(session.snapshot.temporalCaptures[0]?.context, account);
+  assert.deepEqual(playerRuntimeSnapshot(session).temporalCaptures[0]?.context, account);
   assert.equal(
     session.events.find((event) => event.kind === "say")?.text,
     new Intl.DateTimeFormat("en-US", {

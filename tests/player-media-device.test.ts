@@ -13,7 +13,9 @@ import {
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
+  restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { observeTime } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
@@ -150,7 +152,7 @@ test("restore reconnects a fresh element at the saved playhead without reloading
   assert.equal(element!.paused, false);
   // Progress continues from the saved value, so the runtime's playhead advances by what was played since.
   player.tick(1000);
-  assert.equal(playerRuntimeMedia(player.session.snapshot).media[0]?.playheadMs, 2500);
+  assert.equal(playerRuntimeMedia(player.session.state).media[0]?.playheadMs, 2500);
   player.tick(10_000, 1.5);
   assert.deepEqual(player.texts(), ["cue", "done"], "the cue ran once across restore");
 });
@@ -287,7 +289,7 @@ test("a retry never plays audio the script has paused", async () => {
   await settle();
   assert.equal(player.blocked, true);
   player.tick(200, 0);
-  assert.equal(playerRuntimeMedia(player.session.snapshot).media[0]?.state, "paused");
+  assert.equal(playerRuntimeMedia(player.session.state).media[0]?.state, "paused");
   assert.equal(player.blocked, false, "paused media is not refused playback");
   element!.refuse = false;
   const plays = element!.plays;
@@ -319,7 +321,7 @@ test("the load queue keeps a report the runtime cannot take yet and offers it ag
 // The Player host loop around MediaLoadQueue: observe current time, then deliver; keep pending reports queued.
 function queued(initial: PlayerRuntimeSession) {
   let session = initial;
-  let now = session.snapshot.observedSessionTimeMs;
+  let now = session.state.observedSessionTimeMs;
   const queue = new MediaLoadQueue(
     () => {
       const result = observePlayerRuntimeTime(session, now);
@@ -354,7 +356,7 @@ test("a load report applies at the current scene time, not the last observation"
   await settle();
   assert.equal(host.queue.size, 0);
   assert.ok(
-    playerRuntimeDeadlines(host.session.snapshot).includes(125),
+    playerRuntimeDeadlines(host.session.state).includes(125),
     "the wait starts when loading was reported",
   );
 });
@@ -364,9 +366,12 @@ test("an execution-pending load report is delivered after the engine ran queued 
     'timer async 1 s {\n  say "timer", instant\n}\nplayVideo "intro.mp4"\nsay "after", instant\nexit';
   const started = createPlayerRuntimeSession(source);
   // A canonical checkpoint whose timer expiry is queued but has not run yet.
-  const observed = observeTime(started.plan, started.snapshot, 2000);
-  const checkpointed = { ...started, snapshot: observed.snapshot };
-  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(checkpointed));
+  const observed = observeTime(started.plan, playerRuntimeSnapshot(started), 2000);
+  const restored = restorePlayerRuntimeSessionAt(
+    started.plan,
+    JSON.stringify(observed.snapshot),
+    started.events,
+  );
   assert.equal(
     reportPlayerRuntimeMediaLoad(restored, 1, {
       kind: "failed",

@@ -9,6 +9,7 @@ import {
   playerRuntimeDebugNow,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 
 // Player Debug's Now view (DEBUGGER.md "Player Debug") locates the session from canonical state: package paths with
@@ -93,7 +94,7 @@ test("Now names the next statement, the wait's statement, and the calls across n
   );
 
   session = press(observe(session, 5_000));
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   now = playerRuntimeDebugNow(session, 6_000);
   assert.deepEqual(now, { next: null, waitingAt: null, calls: [], timers: [], media: [] });
 });
@@ -180,10 +181,11 @@ test("Now lists each active sound with the statement that started it", () => {
   assert.deepEqual(sounds(), [
     { source: "sounds/a.wav", loaded: false, startedAt: location("rooms/hall.tease", 1) },
   ]);
-  const loaded = reportPlayerRuntimeMediaLoad(session, session.snapshot.nextMediaId - 1, {
-    kind: "loaded",
-    durationMs: 10_000,
-  });
+  const loaded = reportPlayerRuntimeMediaLoad(
+    session,
+    playerRuntimeSnapshot(session).nextMediaId - 1,
+    { kind: "loaded", durationMs: 10_000 },
+  );
   assert.equal(loaded.outcome.kind, "accepted");
   session = loaded.session;
   assert.deepEqual(sounds(), [

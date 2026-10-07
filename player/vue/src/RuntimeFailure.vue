@@ -3,19 +3,19 @@ import { computed } from "vue";
 import { Download } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import type { RuntimeSnapshot } from "../../../src/index.js";
+import type { RuntimeSessionView } from "../../../src/index.js";
 
 // How a session ended, above the composer (PLAYER-UI "Session end and failure"): after an error it says so, names the
 // error and where it happened, and offers a debug export; an ordinary end is only noted. The transcript and Stage stay.
 const props = defineProps<{
-  snapshot: RuntimeSnapshot | null;
+  state: Pick<RuntimeSessionView, "failure" | "status"> | null;
   /** The error name of an exception of the Player itself. */
   hostError: string | null;
 }>();
 const emit = defineEmits<{ export: [] }>();
 
-const failure = computed(() => props.snapshot?.failure ?? null);
-const ended = computed(() => props.snapshot?.status === "halted" && props.hostError === null);
+const failure = computed(() => props.state?.failure ?? null);
+const ended = computed(() => props.state?.status === "halted" && props.hostError === null);
 </script>
 
 <template>

@@ -125,7 +125,7 @@ test("saved data cannot be cleared while a restored session waits for the camera
     scriptStorage: [{ key: "first", value: 0 }],
     persistentScriptStorage: true,
   });
-  assert.ok(pendingPlayerRuntimeStorageWrite(pending.snapshot));
+  assert.ok(pendingPlayerRuntimeStorageWrite(pending.state));
   const host = mount(context, {
     scriptStorage: provider,
     capabilities: { camera: true },
@@ -142,7 +142,7 @@ test("saved data cannot be cleared while a restored session waits for the camera
 
   grant();
   await activation;
-  const status = () => host.session.value?.snapshot.status;
+  const status = () => host.session.value?.state.status;
   assert.ok(status());
   const deadline = Date.now() + 2_000;
   while (status() !== "halted") {

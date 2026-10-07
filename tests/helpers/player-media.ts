@@ -122,7 +122,7 @@ export function harness(
   });
   function publish(next: PlayerRuntimeSession) {
     session = next;
-    device.reconcile(playerRuntimeMedia(session.snapshot).media);
+    device.reconcile(playerRuntimeMedia(session.state).media);
   }
   return {
     elements,
@@ -135,7 +135,7 @@ export function harness(
       return blocked;
     },
     start() {
-      device.reconcile(playerRuntimeMedia(session.snapshot).media);
+      device.reconcile(playerRuntimeMedia(session.state).media);
     },
     /** Publishes the session returned by a completed Player action. */
     update(next: PlayerRuntimeSession) {
@@ -144,7 +144,7 @@ export function harness(
     replace(next: PlayerRuntimeSession) {
       device.reset();
       // Like the Player's scene clock, continue from the restored observation.
-      now = next.snapshot.observedSessionTimeMs;
+      now = next.state.observedSessionTimeMs;
       publish(next);
     },
     /** Lets `ms` of wall time pass, during which playing elements advance by `played` seconds. */
@@ -158,8 +158,8 @@ export function harness(
     /** A development time jump to `targetMs`, published as the Player host publishes one. */
     jump(targetMs: number) {
       session = advancePlayerRuntimeTime(session, targetMs);
-      now = session.snapshot.observedSessionTimeMs;
-      device.jumped(playerRuntimeMedia(session.snapshot).media);
+      now = session.state.observedSessionTimeMs;
+      device.jumped(playerRuntimeMedia(session.state).media);
     },
     texts() {
       return session.transcriptEntries.flatMap((entry) =>

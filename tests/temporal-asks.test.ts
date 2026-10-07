@@ -8,6 +8,7 @@ import {
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
@@ -61,7 +62,7 @@ test("askDate, askTime, and askDateTime return the ISO answer as a value", () =>
     });
     const answered = answer(session, text);
     assert.equal(answered.outcome.kind, "completed", text);
-    assert.equal(answered.session.snapshot.status, "halted");
+    assert.equal(answered.session.state.status, "halted");
     // The transcript shows the answer as `say` shows the value, in the player's presentation.
     const [shownAnswer, said, toIso] = transcript(answered.session).slice(-3);
     assert.equal(shownAnswer, said, text);
@@ -92,7 +93,7 @@ test("a date or time field asks again for anything but strict ISO text", () => {
       const rejected = answer(session, text);
       assert.equal(rejected.outcome.kind, "invalidPayload", `${command} ${JSON.stringify(text)}`);
       assert.equal(rejected.outcome.kind === "invalidPayload" && rejected.outcome.message, message);
-      assert.deepEqual(rejected.session.snapshot, session.snapshot);
+      assert.deepEqual(playerRuntimeSnapshot(rejected.session), playerRuntimeSnapshot(session));
     }
   }
 });
@@ -159,12 +160,12 @@ test("a checkpoint while the field is open restores the control and its default"
     'let day = toDate("2026-10-04")\nlet value = askDate "Which day?", default: day\nexit',
   );
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
-  assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
+  assert.equal(validateRuntimeSnapshot(playerRuntimeSnapshot(restored), restored.plan).valid, true);
   assert.deepEqual(playerRuntimeForeground(restored), playerRuntimeForeground(session));
   assert.equal(answer(restored, "4-10-2026").outcome.kind, "invalidPayload");
   assert.deepEqual(
-    answer(restored, "2026-10-05").session.snapshot,
-    answer(session, "2026-10-05").session.snapshot,
+    playerRuntimeSnapshot(answer(restored, "2026-10-05").session),
+    playerRuntimeSnapshot(answer(session, "2026-10-05").session),
   );
 });
 
@@ -177,7 +178,8 @@ function rejects(plan: InstructionPlan, snapshot: unknown): boolean {
 
 test("plan and snapshot validation keep the date and time rules", () => {
   const session = start('let value = askTime default: toTime("14:30")\nexit');
-  const { plan, snapshot } = session;
+  const { plan } = session;
+  const snapshot = playerRuntimeSnapshot(session);
   const action = snapshot.foregroundAction;
   assert.ok(action?.kind === "interaction" && action.ui.kind === "temporal");
   for (const [name, ui] of [
@@ -187,7 +189,7 @@ test("plan and snapshot validation keep the date and time rules", () => {
   ] as const)
     assert.ok(rejects(plan, { ...snapshot, foregroundAction: { ...action, ui } }), name);
 
-  const answered = answer(session, "09:15").session.snapshot;
+  const answered = playerRuntimeSnapshot(answer(session, "09:15").session);
   const settlement = answered.lastSettlement!;
   for (const [name, change] of [
     ["a result of another kind", { result: { kind: "date", year: 2026, month: 10, day: 4 } }],

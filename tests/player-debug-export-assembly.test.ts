@@ -24,6 +24,7 @@ import {
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
@@ -53,7 +54,7 @@ function failedSession(answer = SECRET): {
   session = answerPlayerRuntimeImage(session, reference, {
     holds: (asked) => asked === reference,
   })!.session;
-  assert.equal(session.snapshot.status, "failed");
+  assert.equal(session.state.status, "failed");
   return { session, recorder };
 }
 
@@ -63,13 +64,13 @@ function candidate(
   read: () => Promise<Uint8Array<ArrayBuffer> | null> = async () => photoBytes,
 ): DebugExportCandidate {
   const recording = recorder.recording();
-  const uses = debugPhotoUses(recording, session.snapshot.scriptStorage);
+  const uses = debugPhotoUses(recording, playerRuntimeSnapshot(session).scriptStorage);
   return {
     build: { commit: "abc", dirty: false, mode: "production", appVersion: "0.0.0" },
     package: { id: "development-package:test", version: null },
     session: {
       plan: session.plan,
-      snapshot: session.snapshot,
+      snapshot: playerRuntimeSnapshot(session),
       events: session.events,
       transcriptEntries: session.transcriptEntries,
     },
@@ -153,7 +154,7 @@ test("by default an export holds the technical report and no personal content", 
     Array.isArray(tail) && tail.every((event) => Object.keys(event).join() === "sequence,kind"),
   );
   assert.equal(exported.incident.kind, "runtimeFailure");
-  assert.equal(exported.incident.code, session.snapshot.failure?.code);
+  assert.equal(exported.incident.code, session.state.failure?.code);
   assert.equal(exported.incident.line, 7);
   assert.deepEqual(
     parts.map((part) => part.name),
@@ -202,9 +203,7 @@ test("with everything chosen, the export replays the failure and carries the pho
   const { exported, parts } = await assembleDebugExport(frozen, all(frozen));
   const read = parseDebugExport(await fileText(exported));
   const result = replayDebugExport(read);
-  assert.ok(
-    result.kind === "reproduced" && result.failure?.code === session.snapshot.failure?.code,
-  );
+  assert.ok(result.kind === "reproduced" && result.failure?.code === session.state.failure?.code);
   assert.equal(read.photos.length, 1);
   assert.deepEqual(read.photos[0]?.data, photoBytes);
   assert.deepEqual(
@@ -291,10 +290,10 @@ test("session text shows what the player saw; values that were never said need t
   session = submitPlayerRuntimeComposer(session, "Typed by the player")!.session;
   session = completePlayerRuntimeStorageWrite(
     session,
-    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    pendingPlayerRuntimeStorageWrite(session.state)!.actionId,
     true,
   ).session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const frozen = candidate(session, recorder);
   const exported = async (categories: readonly DebugCategory[]) => {
     let chosen = NO_PERSONAL_CONTENT;
@@ -394,11 +393,11 @@ test("a recording that stopped early still reports the actual failure, and its i
   // A value the engine refuses, which leaves the recording incomplete.
   session = applyPlayerRuntimeStorageEdit(session, { key: "k", value: Number.NaN }).session;
   session = submitPlayerRuntimeComposer(session, "Ada")!.session;
-  assert.equal(session.snapshot.status, "failed");
+  assert.equal(session.state.status, "failed");
   const frozen = candidate(session, recorder);
   const byDefault = await assembleDebugExport(frozen, NO_PERSONAL_CONTENT);
   assert.equal(byDefault.exported.incident.kind, "runtimeFailure");
-  assert.equal(byDefault.exported.incident.code, session.snapshot.failure?.code);
+  assert.equal(byDefault.exported.incident.code, session.state.failure?.code);
   const { exported } = await assembleDebugExport(frozen, all(frozen));
   assert.equal(exported.checkpoint?.snapshot.status, "failed");
   assert.equal(exported.replay?.complete, false);
@@ -417,10 +416,10 @@ test("a wide list a script saved is checked and replays", async () => {
   );
   session = completePlayerRuntimeStorageWrite(
     session,
-    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    pendingPlayerRuntimeStorageWrite(session.state)!.actionId,
     true,
   ).session;
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const frozen = candidate(session, recorder);
   const { exported } = await assembleDebugExport(frozen, all(frozen));
   assert.notEqual(exported.checkpoint, null);
@@ -474,7 +473,7 @@ test("a changed message's text is session text, the chat tail shows its current 
     { recorder },
   );
   session = advancePlayerRuntimeTime(session, 60_000);
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const frozen = candidate(session, recorder);
   const withoutText = (await assembleDebugExport(frozen, NO_PERSONAL_CONTENT)).exported;
   assert.ok(!(await fileText(withoutText)).includes(SECRET));

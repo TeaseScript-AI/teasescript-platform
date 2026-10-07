@@ -23,7 +23,7 @@ export function debugStageImage(
   const image = player.stageImage.value;
   const observed = player.stageImageObservation.value;
   const session = player.session.value;
-  const video = session === null ? null : playerRuntimeMedia(session.snapshot).stage.videoMediaId;
+  const video = session === null ? null : playerRuntimeMedia(session.state).stage.videoMediaId;
   const captured = image !== null && isCapturedMediaReference(image);
   return {
     status: debugStageImageStatus({

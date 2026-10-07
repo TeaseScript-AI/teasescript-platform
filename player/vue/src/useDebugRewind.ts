@@ -7,6 +7,7 @@ import {
   type DebugHistoryRestore,
 } from "../../debug-history.js";
 import {
+  beginPlayerRuntimeRecording,
   restorePlayerRuntimeSessionAt,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
@@ -127,7 +128,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
     try {
       rewind.publish(
         ({ recorder }) => {
-          recorder.begin(parked.session.plan, parked.session.snapshot);
+          beginPlayerRuntimeRecording(parked.session, recorder);
           const trace = player.debugTrace.value;
           trace?.reset("restore");
           return withPlayerRuntimeDebugTrace(parked.session, trace);

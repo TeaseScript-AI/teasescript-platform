@@ -8,6 +8,7 @@ import {
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
@@ -24,7 +25,9 @@ import {
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 function binding(session: PlayerRuntimeSession, name: string) {
-  return session.snapshot.frames[0]?.bindings.find((candidate) => candidate.name === name)?.value;
+  return playerRuntimeSnapshot(session).frames[0]?.bindings.find(
+    (candidate) => candidate.name === name,
+  )?.value;
 }
 
 function answer(session: PlayerRuntimeSession, text: string) {
@@ -53,7 +56,7 @@ test("askInteger returns a whole number as an integer and shows it as the player
     const answered = answer(session, text);
     assert.equal(answered.outcome.kind, "completed", text);
     session = answered.session;
-    assert.equal(session.snapshot.status, "halted");
+    assert.equal(session.state.status, "halted");
     assert.equal(binding(session, "count"), value, text);
     assert.equal(session.transcriptEntries.at(-1)?.text, text.trim());
   }
@@ -83,7 +86,11 @@ test("askInteger asks again for anything but a whole number", () => {
       rejected.outcome.kind === "invalidPayload" && rejected.outcome.message,
       "That is wrong. I asked for a whole number.",
     );
-    assert.deepEqual(rejected.session.snapshot, session.snapshot, JSON.stringify(text));
+    assert.deepEqual(
+      playerRuntimeSnapshot(rejected.session),
+      playerRuntimeSnapshot(session),
+      JSON.stringify(text),
+    );
   }
 });
 
@@ -128,10 +135,13 @@ test("a checkpoint while the field is open restores the whole-number field and i
     'let base = 3\nlet count = askInteger "How many?", default: base + 1\nexit',
   );
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
-  assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
+  assert.equal(validateRuntimeSnapshot(playerRuntimeSnapshot(restored), restored.plan).valid, true);
   assert.deepEqual(playerRuntimeForeground(restored), playerRuntimeForeground(session));
   assert.equal(answer(restored, "2.5").outcome.kind, "invalidPayload");
-  assert.deepEqual(answer(restored, "4").session.snapshot, answer(session, "4").session.snapshot);
+  assert.deepEqual(
+    playerRuntimeSnapshot(answer(restored, "4").session),
+    playerRuntimeSnapshot(answer(session, "4").session),
+  );
 });
 
 /** A malformed snapshot fails validation and cannot be restored from a checkpoint. */
@@ -185,7 +195,8 @@ test("a handed-off askInteger result must be a safe whole number", () => {
 
 test("plan and snapshot validation keep the whole-number rule", () => {
   const session = createPlayerRuntimeSession("let count = askInteger default: 10\nexit");
-  const { plan, snapshot } = session;
+  const { plan } = session;
+  const snapshot = playerRuntimeSnapshot(session);
   const action = snapshot.foregroundAction;
   assert.ok(action?.kind === "interaction" && action.ui.kind === "number");
   for (const [name, ui] of [
@@ -195,7 +206,7 @@ test("plan and snapshot validation keep the whole-number rule", () => {
   ] as const)
     assert.ok(rejects(plan, { ...snapshot, foregroundAction: { ...action, ui } }), name);
 
-  const answered = answer(session, "7").session.snapshot;
+  const answered = playerRuntimeSnapshot(answer(session, "7").session);
   const settlement = answered.lastSettlement!;
   assert.ok(
     rejects(plan, { ...answered, lastSettlement: { ...settlement, transcriptText: "7.0" } }),

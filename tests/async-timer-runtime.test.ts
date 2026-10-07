@@ -19,14 +19,15 @@ import { nextXorShift32 } from "../src/runtime/random.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { playerStateOf } from "./helpers/player-state.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 import {
   activePlayerRuntimePacingGate,
   playerRuntimeDeadlines,
 } from "../player/runtime-adapter.js";
 
-function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
-  return playerRuntimeDeadlines(snapshot).some(
+function playerRuntimeDeadlinesDue(plan: InstructionPlan, snapshot: RuntimeSnapshot): boolean {
+  return playerRuntimeDeadlines(playerStateOf(plan, snapshot)).some(
     (deadline) => deadline <= snapshot.observedSessionTimeMs,
   );
 }
@@ -1170,7 +1171,7 @@ test("work due exactly at the observed time settles once execution waits or ends
     assert.deepEqual(late.events, exact.events, source);
     assert.deepEqual(late.snapshot, exact.snapshot, source);
     assert.equal(
-      playerRuntimeDeadlinesDue(exact.snapshot),
+      playerRuntimeDeadlinesDue(exact.plan, exact.snapshot),
       false,
       `nothing due at the horizon remains: ${source}`,
     );
@@ -1192,7 +1193,7 @@ test("a failed session accepts no host input and schedules no further observatio
   });
   assert.equal(skipped.outcome.kind, "invalidPayload");
   assert.deepEqual(skipped.snapshot, observed);
-  assert.deepEqual(playerRuntimeDeadlines(observed), []);
+  assert.deepEqual(playerRuntimeDeadlines(playerStateOf(failed.plan, observed)), []);
   assert.equal(activePlayerRuntimePacingGate(observed), null);
 });
 

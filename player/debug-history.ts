@@ -265,7 +265,7 @@ export class DebugHistory {
   follow(session: PlayerRuntimeSession, marks: DebugHistoryMarks) {
     if (this.#inspection !== null) return;
     this.#linkResponses(session.events);
-    const interaction = activePlayerRuntimeInteraction(session.snapshot);
+    const interaction = activePlayerRuntimeInteraction(session.state);
     if (interaction === null || interaction.actionId <= this.#lastActionId || !this.#complete)
       return;
     const foreground = playerRuntimeForeground(session);
@@ -395,7 +395,7 @@ export class DebugHistory {
       id,
       events: session.events,
       eventCount: session.events.length,
-      sceneTimeMs: session.snapshot.observedSessionTimeMs,
+      sceneTimeMs: session.state.observedSessionTimeMs,
       marks,
     };
   }
