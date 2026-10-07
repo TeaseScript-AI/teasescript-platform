@@ -124,13 +124,13 @@ const glide = new ConversationGlide(
 );
 let liveUntil = 0;
 let shown = { entries: props.entries, length: props.entries.length, revision: props.revision ?? 0 };
+// While following, the first entry the latest update added: following scrolls no further than to show it at the top.
+let firstNewEntry: number | null = null;
+// Whether following stopped there, with more of the update below.
+const heldAtNewEntry = ref(false);
+// Corrections that follow a live update glide; the reader's own scrolling ends that.
 function gliding() {
-  return (
-    performance.now() < liveUntil &&
-    following.value &&
-    !touching.value &&
-    reducedMotion.value !== "reduce"
-  );
+  return performance.now() < liveUntil && !touching.value && reducedMotion.value !== "reduce";
 }
 function glideTargets() {
   return [historyElement.value, foregroundElement.value].filter((element) => element !== null);
@@ -142,6 +142,10 @@ watch(
     shown = { entries: props.entries, length: props.entries.length, revision: props.revision ?? 0 };
     if (shown.revision === previous.revision && shown.entries === previous.entries) return;
     const added = props.entries.slice(previous.length);
+    firstNewEntry =
+      following.value && props.entries === previous.entries && added.length > 0
+        ? previous.length
+        : null;
     if (
       initialPositioning ||
       reducedMotion.value === "reduce" ||
@@ -205,6 +209,18 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
         void nextTick(() => {
           const element = scrollElement.value;
           const before = element?.scrollTop ?? 0;
+          // Following never scrolls the first entry of an update out of view: there the reader starts reading.
+          const first =
+            options.adjustments === undefined && firstNewEntry !== null
+              ? instance.measurementsCache[firstNewEntry]?.start
+              : undefined;
+          if (first !== undefined && offset > first + 1) {
+            offset = first;
+            following.value = false;
+            heldAtNewEntry.value = true;
+            // The end is no longer the target to reconcile toward.
+            instance.scrollToOffset(first);
+          }
           elementScroll(offset, options, instance);
           // A correction that keeps the text in view in place moves nothing that is drawn.
           if (
@@ -308,7 +324,9 @@ const showLatest = computed(
     !touching.value &&
     !virtualizer.value.isScrolling &&
     virtualizer.value.getDistanceFromEnd() >
-      Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2),
+      (heldAtNewEntry.value
+        ? latestThreshold
+        : Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2)),
 );
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
 function continues(index: number) {
@@ -333,6 +351,7 @@ function rememberFollow() {
 // Shrinking row measurements can mimic reaching the end; do not resume follow here.
 function releaseFollow() {
   if (!initialPositioning && !touching.value && !readingLatest()) following.value = false;
+  else if (readingLatest()) heldAtNewEntry.value = false;
 }
 // Capture intent before rendering; revision also covers in-place adapter updates.
 watch([() => props.entries, () => props.revision, () => props.entries.length], rememberFollow, {
@@ -394,6 +413,7 @@ watch(
 function interruptFollow() {
   following.value = false;
   liveUntil = 0;
+  firstNewEntry = null;
   // Replace an in-flight measured end target before native user scrolling starts.
   virtualizer.value.scrollToOffset(scrollElement.value?.scrollTop ?? 0);
 }
@@ -412,6 +432,7 @@ function onScrollKeydown(event: KeyboardEvent) {
     event.preventDefault();
     following.value = false;
     liveUntil = 0;
+    firstNewEntry = null;
     virtualizer.value.scrollToOffset(0);
   } else if (event.key === "ArrowUp" || event.key === "PageUp") {
     interruptFollow();
@@ -419,12 +440,16 @@ function onScrollKeydown(event: KeyboardEvent) {
     event.preventDefault();
     following.value = true;
     liveUntil = 0;
+    firstNewEntry = null;
+    heldAtNewEntry.value = false;
     virtualizer.value.scrollToEnd();
   }
 }
 function returnToLatest() {
   following.value = true;
   liveUntil = 0;
+  firstNewEntry = null;
+  heldAtNewEntry.value = false;
   virtualizer.value.scrollToEnd();
   scrollElement.value?.focus({ preventScroll: true });
 }
