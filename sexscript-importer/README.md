@@ -121,7 +121,7 @@ Mapping decisions and their rationale are in [`docs/POC-SCOPE.md`](docs/POC-SCOP
 A page that opens every converted package of a legacy corpus in the Player, with the status from playing it there:
 
 ```sh
-node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] [--patches dir] /path/to/corpus external/converted
+node tools/convert-corpus.ts [--jobs N] [--only id,id] [--units-file file] [--report-only] [--patches dir] /path/to/corpus external/converted
 # from the repository root, after npm run build: the converted and the verified packages, then the HTTPS front
 HOST=127.0.0.1 PORT=4182 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/converted node dist/playground/server.js
 HOST=127.0.0.1 PORT=4183 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/verified node dist/playground/server.js
@@ -155,6 +155,27 @@ succeeded. When a patch does not apply, or the converter, the report, or the dri
 the driver exits with status 1, and `.failures/<unit>.json` records the step and the message until a later conversion
 succeeds. TODOs, compiler errors, and smoke-run outcomes are results, not failures. A replacement interrupted between
 its two moves leaves the previous output in the staging folder, and the next run restores it.
+
+### Core test set
+
+`core-units.txt` lists the core units: the owner's favourites, and the units that a greedy set cover added because
+each exercises something no other core unit does (a converter rule's SX_ code, a report counter, an engine name or token
+kind in the generated code, a compile or smoke-run status or failure code). A comment beside each unit says what it
+adds. The core set is for routine checks after a converter change; convert all 210 units after large changes, before
+a checkpoint push, and periodically:
+
+```sh
+# from sexscript-importer/: the core units into a scratch root, then compare their reports with the published ones
+node tools/convert-corpus.ts --jobs 2 --units-file core-units.txt external/corpus2-selected external/core-check
+# reports only, of units already converted
+node tools/convert-corpus.ts --jobs 2 --report-only --units-file core-units.txt external/corpus2-selected external/core-check
+# what each core unit alone adds, what no core unit exercises, and the next units a greedy cover would add
+node tools/core-units.ts [--units-file core-units.txt] [--suggest N] external/converted-merged
+```
+
+`--units-file` takes one unit per line, with `#` comments, and combines with `--only`; a unit the corpus does not
+have stops the run. Rerun `core-units.ts` after adding a converter rule: a new SX_ code or counter that no core unit
+exercises shows up under the features no listed unit has.
 
 ### Manual unit patches
 
