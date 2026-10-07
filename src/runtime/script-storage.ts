@@ -89,7 +89,7 @@ export function assertPersistable(
   if (containsRuntimeIdentity(value)) {
     throw fault(
       "TSR055",
-      "save cannot store a timer handle, media handle, or speaker reference; they exist only in the current session.",
+      "save cannot store a timer, media, or message handle or a speaker reference; they exist only in the current session.",
       span,
     );
   }
@@ -135,7 +135,7 @@ export function validateScriptStorageEntries(
     const valid = stored as SerializableRuntimeValue;
     if (valid === null) return `${entryPath}.value must not be null; an absent key has no entry.`;
     if (containsRuntimeIdentity(valid)) {
-      return `${entryPath}.value contains a timer handle, media handle, or speaker reference.`;
+      return `${entryPath}.value contains a timer, media, or message handle or a speaker reference.`;
     }
   }
   return null;

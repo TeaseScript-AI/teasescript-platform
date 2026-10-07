@@ -15,6 +15,7 @@ import {
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan } from "./helpers/message-says.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
 // transcript rebuilt from the events that led to it (DEBUGGER.md "Rewind").
@@ -249,4 +250,49 @@ test("the grey future is the transcript of the state Forward restores after the 
   assert.ok(future.entries.every((entry) => !shownTranscript.includes(entry.id)));
   // The answer keeps its mark as a choice.
   assert.equal(future.entries[0]?.kind === "message" && future.entries[0].responseKind, "choice");
+});
+
+test("Back and Forward show a changed message as each state had it, and the grey future does not repeat it", async () => {
+  const first = createPlayerRuntimeSession(
+    messageSayPlan(
+      [
+        MESSAGE_TEXT_FUNCTIONS,
+        'let strokes = timer(duration: 1 ms, async: true, label: "Strokes: 0")',
+        'let first = choose "One", "Two"',
+        'setText(strokes, "Strokes: 1")',
+        'let second = choose "Red", "Blue"',
+        'setText(strokes, "Strokes: 50")',
+        'say "done", instant',
+        "exit",
+      ].join("\n"),
+    ),
+  );
+  const history = new DebugHistory(first.plan, Promise.resolve(null));
+  history.follow(first, unmarked);
+  const second = choose(first, "One");
+  history.follow(second, unmarked);
+  const ended = choose(second, "Red");
+  history.follow(ended, unmarked);
+  assert.deepEqual(said(ended), ["Strokes: 50", "One", "Red", "done"]);
+
+  const back = restored(
+    history,
+    await history.back(1, () => ({ session: ended, marks: unmarked })),
+  );
+  // One row for the message, with the text it had then; the later text does not leak into it.
+  assert.deepEqual(said(back), ["Strokes: 1", "One"]);
+  assert.equal(back.transcriptEntries[0]?.id, ended.transcriptEntries[0]?.id);
+  const future = rewindFutureTranscript(history.shown!, history.future!);
+  assert.deepEqual(
+    future.entries.map((entry) => entry.text),
+    ["Red", "done"],
+  );
+  const earlier = restored(
+    history,
+    await history.back(0, () => ({ session: back, marks: unmarked })),
+  );
+  assert.deepEqual(said(earlier), ["Strokes: 0"]);
+  const forward = restored(history, await history.forward());
+  assert.deepEqual(said(forward), ["Strokes: 1", "One"]);
+  assert.deepEqual(said(restored(history, await history.forward())), said(ended));
 });

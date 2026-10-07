@@ -26,7 +26,7 @@ import type {
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
-import { escapeMarkup } from "../message-markup.js";
+import { escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
@@ -42,7 +42,12 @@ import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector } from "./instruction-trace.js";
-import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
+import type {
+  DeveloperWarningEvent,
+  InterpreterEvent,
+  MessageUpdatedEvent,
+  OutputSpeaker,
+} from "./events.js";
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
   GLOBAL_SCOPE_ID,
@@ -117,6 +122,7 @@ import {
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
+  type SerializableMessageHandle,
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
@@ -141,6 +147,7 @@ import {
   isTemporal,
   isTimerHandle,
   isMediaHandle,
+  isMessageHandle,
   isCameraView,
   isPermanentButton,
 } from "./value-predicates.js";
@@ -362,6 +369,7 @@ export class Evaluator {
     if (isTimerHandle(value)) return stateKey("timer", value.timerId);
     if (isMediaHandle(value)) return stateKey("media", value.mediaId);
     if (isPermanentButton(value)) return stateKey("button", value.buttonId);
+    if (isMessageHandle(value)) return stateKey("message", value.messageId);
     if (isCameraView(value)) return stateKey("camera");
     return null;
   }
@@ -403,7 +411,9 @@ export class Evaluator {
           ? "media"
           : isCameraView(value)
             ? "camera"
-            : "permanent button";
+            : isMessageHandle(value)
+              ? "message"
+              : "permanent button";
     this.trace!.writeState(
       part === "whole" || part === "timed" ? "mutation" : "assignment",
       key,
@@ -553,6 +563,18 @@ export class Evaluator {
                   frame.descriptor.path.push({ kind: "index", index });
                   frame.value = base.items[index]!;
                 }
+              } else if (isMessageHandle(base)) {
+                // A message's text is state of the message, outside the value that holds the handle, so the
+                // reference keeps the text read now, as it would keep a text variable's value.
+                const text = this.#getProperty(base, expression.name, expression.span);
+                frame.descriptor = {
+                  rootFrameId: null,
+                  rootName: null,
+                  path: [],
+                  capturedRoot: text,
+                  detached: true,
+                };
+                frame.value = text;
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
                 frame.value = this.#getProperty(base, expression.name, expression.span);
@@ -1115,9 +1137,13 @@ export class Evaluator {
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
+      if (isMessageHandle(object)) {
+        this.#assignMessageProperty(object, target.name, value, target.span);
+        return;
+      }
       throw fault(
         "TSR003",
-        "Only objects, speakers, timer and media handles, and camera views have assignable properties.",
+        "Only objects, speakers, timer, media, and message handles, and camera views have assignable properties.",
         target.span,
       );
     }
@@ -1186,6 +1212,7 @@ export class Evaluator {
         !isSpeakerReference(object) &&
         !isTimerHandle(object) &&
         !isMediaHandle(object) &&
+        !isMessageHandle(object) &&
         !isCameraView(object)
       ) {
         throw fault(
@@ -1756,7 +1783,7 @@ export class Evaluator {
       if (containsRuntimeIdentity(copied)) {
         throw fault(
           "TSR013",
-          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer, media, or message handle or a speaker reference, which only the runtime creates.`,
           expression.span,
         );
       }
@@ -2284,6 +2311,67 @@ export class Evaluator {
       return;
     }
     view.placement = value;
+  }
+
+  /** The index of a message handle's live record; snapshot validation keeps one for every handle the state holds. */
+  #liveMessage(handle: SerializableMessageHandle, span: SourceSpan): number {
+    const messages = this.snapshot.liveMessages;
+    let low = 0;
+    let high = messages.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      const id = messages[middle]!.messageId;
+      if (id === handle.messageId) return middle;
+      if (id < handle.messageId) low = middle + 1;
+      else high = middle - 1;
+    }
+    throw fault("TSR053", "Message handle refers to no message.", span);
+  }
+
+  /**
+   * `message.text = …` gives the shown message new text in place, which an event tells; the same text again changes
+   * nothing. Its speaker, presentation, and place in the conversation stay, and no pacing starts.
+   */
+  #assignMessageProperty(
+    handle: SerializableMessageHandle,
+    name: string,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): void {
+    if (name !== "text")
+      throw fault(
+        "TSR003",
+        `Message handle property '${name}' cannot be assigned; assign text.`,
+        span,
+      );
+    if (typeof value !== "string")
+      throw fault(
+        "TSR050",
+        `Message text must be text (string), not ${describeRuntimeValue(value)}.`,
+        span,
+      );
+    const index = this.#liveMessage(handle, span);
+    if (this.snapshot.liveMessages[index]!.sourceText === value) return;
+    const content = parseMessageMarkup(value);
+    const sequence = takeSequence(this.snapshot);
+    this.events.push(
+      Object.freeze({
+        kind: "messageUpdated",
+        sequence,
+        messageId: handle.messageId,
+        content,
+        text: content.visibleText,
+        span: copySpan(span),
+      } satisfies MessageUpdatedEvent),
+    );
+    this.snapshot.liveMessages[index] = { messageId: handle.messageId, sourceText: value };
+    this.trace?.messageText(
+      stateKey("message", handle.messageId),
+      handle.messageId,
+      value,
+      span,
+      sequence,
+    );
   }
 
   #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {
@@ -2869,6 +2957,11 @@ export class Evaluator {
       if (property === undefined)
         throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
       return property;
+    }
+    if (isMessageHandle(value)) {
+      if (name !== "text")
+        throw fault("TSR017", `Message handles have no property '${name}'; use text.`, span);
+      return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }

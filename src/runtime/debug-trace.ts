@@ -122,7 +122,11 @@ export type RuntimeDebugRecordDetail =
       /** Set by a debugging tool's edit (`applyExternalStorageEdit`) rather than by the script. */
       readonly edited: boolean;
     }
-  | { readonly kind: "output"; readonly eventSequence: number }
+  /**
+   * The event that showed the text: a `say`, or, for an assignment, a message update, which names its message by the
+   * sequence of its `say`.
+   */
+  | { readonly kind: "output"; readonly eventSequence: number; readonly messageId?: number }
   | {
       readonly kind: "call";
       readonly functionName: string;
@@ -258,6 +262,14 @@ export class RuntimeDebugContext {
   /** The newest retained output records, newest first. */
   public outputs(limit = 20): readonly number[] {
     return this.#store.newest("output", limit);
+  }
+
+  /**
+   * The `limit` messages whose `say` or text changes the trace retains most recently, newest message first, each as the
+   * record of the latest of them: what each message shows now, as far as the trace knows.
+   */
+  public recentMessages(limit = 20): readonly number[] {
+    return this.#store.recentMessages(limit);
   }
 
   /** The record of a variable's current version: a scope ID from the snapshot, or `"global"`. */
@@ -1066,6 +1078,31 @@ export class TraceStore {
     this.#stage?.outputs.push(eventSequence);
   }
 
+  /**
+   * A `.text` write that gave the message whose state is `base` new text, emitted as event `eventSequence`: the new
+   * version of its text, with the causes collected so far. The output record of that event, which explains the message
+   * as it shows from then on; it is no message of its own.
+   */
+  messageText(
+    base: string,
+    messageId: number,
+    value: string,
+    span: TraceSpan,
+    eventSequence: number,
+  ): void {
+    const id = this.write(
+      "assignment",
+      partKey(base, { property: "text" }),
+      "message.text",
+      value,
+      span,
+      Object.freeze({ kind: "output", eventSequence, messageId }),
+    );
+    if (id === null || this.#find(id) === undefined) return;
+    this.#outputs.set(eventSequence, id);
+    this.#stage?.outputs.push(eventSequence);
+  }
+
   /** A `say` whose text waits behind pacing; it is emitted by a later operation. */
   holdOutput(instruction: number, deps: DebugDependencies): void {
     if (this.#failure !== null) return;
@@ -1291,6 +1328,24 @@ export class TraceStore {
     return this.#stageImageId;
   }
 
+  recentMessages(limit: number): readonly number[] {
+    // The first record of a message from the newest one back is its latest; one per message, up to `limit` messages.
+    const latest = new Map<number, number>();
+    for (
+      let index = this.#records.length - 1;
+      index >= this.#head && latest.size < limit;
+      index -= 1
+    ) {
+      const record = this.#records[index]!;
+      if (record.detail?.kind !== "output") continue;
+      const messageId = record.detail.messageId ?? record.detail.eventSequence;
+      if (!latest.has(messageId)) latest.set(messageId, record.id);
+    }
+    return Object.freeze(
+      [...latest].sort(([left], [right]) => right - left).map(([, record]) => record),
+    );
+  }
+
   newest(kind: RuntimeDebugRecordKind, limit: number): readonly number[] {
     const ids: number[] = [];
     for (
@@ -1384,7 +1439,7 @@ function argumentKey(callFrameId: number, parameter: string): string {
  * button, the camera view, and the catalog of tagged photos.
  */
 export function stateKey(
-  kind: "speaker" | "timer" | "media" | "button" | "camera" | "photos",
+  kind: "speaker" | "timer" | "media" | "button" | "message" | "camera" | "photos",
   id = 0,
 ): string {
   return `x${kind}:${id}`;

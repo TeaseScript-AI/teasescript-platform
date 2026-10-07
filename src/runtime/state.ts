@@ -112,7 +112,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 55;
+export const RUNTIME_SNAPSHOT_VERSION = 56;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -162,12 +162,22 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextMediaId",
   "cameraView",
   "nextPermanentButtonId",
+  "liveMessages",
   "maxCallDepth",
   "status",
   "failure",
 ] as const;
 
 export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
+
+/**
+ * A shown message a message handle can still change: the ID of its `say` event, and the markup source of its current
+ * text, as that `say` or the latest `.text` write gave it. Its events carry the parsed text.
+ */
+export interface RuntimeLiveMessageSnapshot {
+  readonly messageId: number;
+  readonly sourceText: string;
+}
 
 /**
  * The default camera's view: where it is shown, and whether it is shown now. It exists from the first `showCamera` on,
@@ -437,6 +447,11 @@ export interface RuntimeSnapshot {
   cameraView: RuntimeCameraViewSnapshot | null;
   /** Shown permanent buttons are background actions; this issues their identifiers. */
   nextPermanentButtonId: number;
+  /**
+   * The current text of each shown message that a message handle in this state reaches, by message ID in ascending
+   * order. A public operation drops the messages no handle reaches anymore before it returns.
+   */
+  readonly liveMessages: RuntimeLiveMessageSnapshot[];
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -561,7 +576,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     const valid = value as SerializableRuntimeValue;
     if (containsRuntimeIdentity(valid)) {
       throw new TypeError(
-        `globals.${name} contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+        `globals.${name} contains a timer, media, or message handle or a speaker reference, which only the runtime creates.`,
       );
     }
     hostGlobals.push({ name, value: valid });
@@ -621,6 +636,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextMediaId: 1,
     cameraView: null,
     nextPermanentButtonId: 1,
+    liveMessages: [],
     maxCallDepth,
     status: "ready",
     failure: null,
@@ -720,6 +736,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextMediaId: snapshot.nextMediaId,
     cameraView: snapshot.cameraView === null ? null : { ...snapshot.cameraView },
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
+    liveMessages: snapshot.liveMessages.map((message) => ({ ...message })),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -823,6 +840,7 @@ function clonePreparedSayOutput(
     content: cloneMessageMarkup(output.content),
     presentation: { ...output.presentation },
     text: output.text,
+    ...(output.sourceText === undefined ? {} : { sourceText: output.sourceText }),
     durationMs: output.durationMs,
     skippable: output.skippable,
   };
@@ -1259,6 +1277,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateMediaState(value, plan, handleIds.media, errors);
   validateCameraView(value, handleIds.camera, errors);
   validatePermanentButtonState(value, plan, handleIds.permanentButton, errors);
+  validateLiveMessages(value.liveMessages, value.nextEventSequence, handleIds.message, errors);
   validateCaptureState(value, analysis, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
@@ -3081,6 +3100,13 @@ function validateCurrentTemporaryRequirements(
   if (instruction.kind === "capture" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime capture result destination is already occupied.");
   }
+  if (
+    instruction.kind === "say" &&
+    instruction.destinationTemporary !== undefined &&
+    present.has(instruction.destinationTemporary)
+  ) {
+    errors.push("Runtime say result destination is already occupied.");
+  }
 }
 
 /**
@@ -3223,6 +3249,7 @@ function validateStartupPhase(
       snapshot.stageImage !== null ||
       snapshot.cameraView !== null ||
       !empty(snapshot.capturedImages) ||
+      !empty(snapshot.liveMessages) ||
       [
         snapshot.nextScopeId,
         snapshot.nextCallFrameId,
@@ -3477,12 +3504,51 @@ function validateSpeakerReferences(
   callFrames: unknown,
   speakerIds: ReadonlySet<number>,
   errors: string[],
-): {
+): RuntimeIdentityIds {
+  const referencedIds = new Set<number>();
+  const handleIds = emptyIdentityIds();
+  for (const value of identityRootValues(frames, speakers, loopFrames, temporaries, callFrames))
+    collectSpeakerReferenceIds(value, referencedIds, handleIds);
+  for (const id of referencedIds) {
+    if (!speakerIds.has(id)) {
+      errors.push("Runtime value refers to an unknown speaker ID.");
+      break;
+    }
+  }
+  return handleIds;
+}
+
+/** The engine-owned resources that values of a state refer to, by kind. */
+interface RuntimeIdentityIds {
   readonly timer: Set<number>;
   readonly media: Set<number>;
   readonly permanentButton: Set<number>;
-  readonly camera: boolean;
-} {
+  readonly message: Set<number>;
+  camera: boolean;
+}
+
+function emptyIdentityIds(): RuntimeIdentityIds {
+  return {
+    timer: new Set(),
+    media: new Set(),
+    permanentButton: new Set(),
+    message: new Set(),
+    camera: false,
+  };
+}
+
+/**
+ * Every value a state holds where a script can reach it: the bindings of each scope and of the globals, speaker
+ * properties, for-loop sources, temporaries, and each call frame's saved temporaries and supplied arguments. Validation
+ * finds the runtime identities a state refers to through them, and message collection the messages it still reaches.
+ */
+function identityRootValues(
+  frames: unknown,
+  speakers: unknown,
+  loopFrames: unknown,
+  temporaries: unknown,
+  callFrames: unknown,
+): unknown[] {
   const values: unknown[] = [];
   if (Array.isArray(frames)) {
     for (const frame of frames) {
@@ -3527,36 +3593,84 @@ function validateSpeakerReferences(
       }
     }
   }
-  const referencedIds = new Set<number>();
-  const handleIds = {
-    timer: new Set<number>(),
-    media: new Set<number>(),
-    permanentButton: new Set<number>(),
-    camera: false,
-  };
-  for (const value of values) collectSpeakerReferenceIds(value, referencedIds, handleIds);
-  for (const id of referencedIds) {
-    if (!speakerIds.has(id)) {
-      errors.push("Runtime value refers to an unknown speaker ID.");
-      break;
-    }
-  }
-  return handleIds;
+  return values;
 }
 
 /**
- * Collects speaker references and, in the same traversal, timer, media, and permanent button IDs and camera view
- * handles.
+ * Drops the live records of messages that no message handle in `snapshot` reaches anymore. A public operation does it
+ * before it returns, when every value of the state is in one of its roots; no handle to such a message can appear again.
+ */
+export function dropUnreachableMessages(snapshot: RuntimeSnapshot): void {
+  if (snapshot.liveMessages.length === 0) return;
+  const handleIds = emptyIdentityIds();
+  for (const value of identityRootValues(
+    [...snapshot.frames, ...snapshot.retainedScopes, { bindings: snapshot.globals }],
+    snapshot.speakers,
+    snapshot.loopFrames,
+    snapshot.temporaries,
+    snapshot.callFrames,
+  ))
+    collectSpeakerReferenceIds(value, new Set(), handleIds);
+  const reached = handleIds.message;
+  if (reached.size === snapshot.liveMessages.length) return;
+  let kept = 0;
+  for (const message of snapshot.liveMessages) {
+    if (reached.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+  }
+  snapshot.liveMessages.length = kept;
+}
+
+/**
+ * The live message records: unique positive IDs of `say` events already emitted, in ascending order, each with its
+ * markup source. Every message handle the state holds has one; a record no handle reaches is harmless and is dropped by
+ * the next public operation.
+ */
+function validateLiveMessages(
+  value: unknown,
+  nextEventSequence: unknown,
+  referenced: ReadonlySet<number>,
+  errors: string[],
+): void {
+  if (!isCanonicalJsonArray(value)) {
+    errors.push("Runtime liveMessages must be an array.");
+    return;
+  }
+  const ids = new Set<number>();
+  let previous = 0;
+  for (const message of value) {
+    if (
+      !isPlainRecord(message) ||
+      !hasExactKeys(message, ["messageId", "sourceText"]) ||
+      !positiveSafeInteger(message.messageId) ||
+      message.messageId <= previous ||
+      typeof nextEventSequence !== "number" ||
+      message.messageId >= nextEventSequence ||
+      typeof message.sourceText !== "string"
+    ) {
+      errors.push(
+        "Runtime liveMessages must list emitted message IDs once each in ascending order, each with its text.",
+      );
+      return;
+    }
+    previous = message.messageId;
+    ids.add(message.messageId);
+  }
+  for (const id of referenced) {
+    if (!ids.has(id)) {
+      errors.push("Runtime value refers to a message that has no live record.");
+      return;
+    }
+  }
+}
+
+/**
+ * Collects speaker references and, in the same traversal, timer, media, message, and permanent button IDs and camera
+ * view handles.
  */
 function collectSpeakerReferenceIds(
   value: unknown,
   output: Set<number>,
-  handleIds: {
-    readonly timer: Set<number>;
-    readonly media: Set<number>;
-    readonly permanentButton: Set<number>;
-    camera: boolean;
-  },
+  handleIds: RuntimeIdentityIds,
 ): void {
   const work: unknown[] = [value];
   while (work.length > 0) {
@@ -3576,6 +3690,10 @@ function collectSpeakerReferenceIds(
     }
     if (current.kind === "permanentButtonHandle" && nonNegativeSafeInteger(current.buttonId)) {
       handleIds.permanentButton.add(current.buttonId);
+      continue;
+    }
+    if (current.kind === "messageHandle" && nonNegativeSafeInteger(current.messageId)) {
+      handleIds.message.add(current.messageId);
       continue;
     }
     if (current.kind === "cameraView") {

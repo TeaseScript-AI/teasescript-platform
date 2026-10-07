@@ -1650,8 +1650,9 @@ export function playerRuntimeTranscriptMessage(
 }
 
 // Folds `events` into the transcript, in order: each message or answer appends its entry, keyed by the event that
-// created it, and the speakers they name. `rows` indexes the script messages. A choice, button, or form answer is
-// marked by its settlement, which the same operation emits.
+// created it, and the speakers they name; a message update replaces its message's entry with one showing the new text.
+// `rows` indexes the script messages. A choice, button, or form answer is marked by its settlement, which the same
+// operation emits.
 function appendTranscript(
   transcriptEntries: PlayerTranscriptEntryPresentation[],
   rows: Map<number, number>,
@@ -1693,6 +1694,17 @@ function appendTranscript(
           presentation: event.presentation,
         }),
       );
+    } else if (event.kind === "messageUpdated") {
+      // The message keeps its place, speaker, and presentation; a message these events did not show stays absent.
+      const index = rows.get(event.messageId);
+      const entry = index === undefined ? undefined : transcriptEntries[index];
+      if (entry?.kind === "message")
+        transcriptEntries[index!] = Object.freeze({
+          ...entry,
+          text: event.text,
+          content: event.content,
+          contentSequence: event.sequence,
+        });
     } else if (event.kind === "playerTranscript") {
       transcriptEntries.push(
         Object.freeze({

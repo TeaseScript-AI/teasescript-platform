@@ -642,6 +642,19 @@ spans, values, and validated HTTP(S) links; it does not interpret authored HTML 
 open a new browsing context with opener isolation. Spoiler markup and reveal controls are removed.
 Player-authored transcript messages remain plain text and do not enter the markup parser.
 
+A script message can change in place through its handle ([`RUNTIME.md`](../RUNTIME.md#message-handles)). Its entry keeps
+its identity, place, grouping, speaker, and presentation and shows the new text; history shows the current text, with no
+edit marker, new entry, or unread indication. A change does not scroll to the message or resume smart follow: while
+following, the newest content stays readable when an earlier entry changes height, and while reading history the text
+in view stays in place, also when an entry that changed out of view is measured again as it scrolls back. When a change
+removes the element inside the message that had focus, such as a link, focus moves to the message itself without
+scrolling, which is a tab stop only until focus leaves it. Because a changed message may be out of view or already read,
+the Player speaks changes that live play produces from a polite status region outside the transcript list, as
+`speaker: text`, or `message cleared` for empty text: coalesced per message to its latest text, one at a time, at most
+one each second and the same message at most once every five seconds, and not when the visible text is what was last
+shown or spoken. Start, Continue, and states that Debug's rewind shows speak nothing of their history. The intervals are
+accessibility tuning of the Player, not limits a script can observe.
+
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
 activations become player-authored transcript messages according to its normalization and visible-text rules. Every
 accepted user activation/change on the long-lived control family also carries machine-readable canonical provenance. A

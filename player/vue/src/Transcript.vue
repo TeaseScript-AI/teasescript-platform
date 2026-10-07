@@ -2,7 +2,13 @@
 import { ScrollAreaRoot, ScrollAreaViewport } from "reka-ui";
 import ScrollBar from "@/components/ui/scroll-area/ScrollBar.vue";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
+import {
+  elementScroll,
+  measureElement,
+  observeElementRect,
+  useVirtualizer,
+} from "@tanstack/vue-virtual";
+import { ChangedContentMeasurement } from "../../transcript-measurement.js";
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -85,6 +91,19 @@ function itemKeyFor(entries: readonly PlayerTranscriptEntryPresentation[]) {
   }
   return entryKey;
 }
+const measurement = new ChangedContentMeasurement();
+watch(
+  () => props.entries,
+  () => measurement.clear(),
+);
+// Each measurement reports the row and content its element shows; an entry updated in place is ahead of the element
+// until Vue renders it.
+const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
+  const key = element.dataset.messageId;
+  if (key !== undefined)
+    measurement.measured(key, element.dataset.contentSequence, entry !== undefined);
+  return measureElement(element, entry, instance);
+};
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   computed(() => {
     // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
@@ -95,6 +114,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
       getScrollElement: () => scrollElement.value,
       getItemKey: itemKeyFor(entries),
       estimateSize: () => 140,
+      measureElement: measureEntry,
       overscan: 5,
       // A viewport of leading space keeps even a single message scrollable.
       paddingStart: viewportHeight.value,
@@ -129,6 +149,25 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
         }),
     };
   }),
+);
+// A message whose text changed out of view keeps the text being read in place as it is measured again on the way up.
+virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+  measurement.compensates(item, instance);
+// Once Vue has rendered every row, a message whose new text kept its size counts as measured with that text.
+watch(
+  [() => props.entries, () => props.revision],
+  () => {
+    const sizes = virtualizer.value.itemSizeCache;
+    for (const element of scrollElement.value?.querySelectorAll<HTMLElement>(".transcript-entry") ??
+      []) {
+      const key = element.dataset.messageId;
+      if (key === undefined) continue;
+      measurement.rendered(key, element.dataset.contentSequence, sizes.get(key), () =>
+        Math.round(element.getBoundingClientRect().height),
+      );
+    }
+  },
+  { flush: "post" },
 );
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
@@ -226,6 +265,41 @@ watch(
     );
   },
 );
+// A message changed in place can replace the element inside it that had focus, such as a link. Focus then moves to the
+// message itself, without scrolling, and the message is a tab stop only until focus leaves it.
+let focusedEntry: string | null = null;
+watch(
+  () => props.revision,
+  () => {
+    const active = document.activeElement;
+    const entry =
+      active instanceof HTMLElement && scrollElement.value?.contains(active)
+        ? active.closest<HTMLElement>(".transcript-entry")
+        : null;
+    focusedEntry = entry?.dataset.messageId ?? null;
+  },
+  { flush: "pre" },
+);
+watch(
+  () => props.revision,
+  () => {
+    const id = focusedEntry;
+    focusedEntry = null;
+    if (
+      id === null ||
+      (document.activeElement !== null && document.activeElement !== document.body)
+    )
+      return;
+    const entry = scrollElement.value?.querySelector<HTMLElement>(
+      `.transcript-entry[data-message-id="${CSS.escape(id)}"]`,
+    );
+    if (entry === null || entry === undefined) return;
+    entry.tabIndex = -1;
+    entry.addEventListener("blur", () => entry.removeAttribute("tabindex"), { once: true });
+    entry.focus({ preventScroll: true });
+  },
+  { flush: "post" },
+);
 function interruptFollow() {
   following.value = false;
   // Replace an in-flight measured end target before native user scrolling starts.
@@ -313,6 +387,9 @@ onMounted(() => {
                 :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
                 :data-index="item.index"
                 :data-message-id="entry.id"
+                :data-content-sequence="
+                  entry.kind === 'message' ? entry.contentSequence : undefined
+                "
                 :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
                 role="listitem"
                 :aria-posinset="item.index + 1"

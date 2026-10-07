@@ -22,6 +22,7 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan } from "./helpers/message-says.js";
 
 /*
  * Player Debug's Variables view (DEBUGGER.md "Player Debug") as the Player derives it from a session and its value trace:
@@ -340,4 +341,79 @@ test("a message shown inside a branch shows the decision that took it", () => {
   const opened = playerDebugTraceRows(trace, [output!], defaults(new Set([condition.key])));
   assert.equal(summary(opened).at(-1), '    ↑ let mood "calm"');
   assert.equal(session.snapshot.status, "halted");
+});
+
+test("a changed message is explained by its latest change, also in Recent chat, and its handle shows its text", () => {
+  const trace = new RuntimeDebugContext();
+  const session = advancePlayerRuntimeTime(
+    createPlayerRuntimeSession(
+      messageSayPlan(
+        [
+          MESSAGE_TEXT_FUNCTIONS,
+          "let count = 0",
+          'let strokes = timer(duration: 1 ms, async: true, label: "Strokes: 0")',
+          "repeat 2 {",
+          "    count += 1",
+          '    setText(strokes, "Strokes: ${count}")',
+          "}",
+          'say "Later", instant',
+          "wait 1 s",
+          "exit",
+        ].join("\n"),
+      ),
+      { debugTrace: trace },
+    ),
+    500,
+  );
+  const first = session.transcriptEntries[0]!;
+  const message = playerRuntimeTranscriptMessage(session, first.id);
+  assert.equal(message?.text, "Strokes: 2");
+  const origin = playerDebugMessageOrigin(trace, message!.contentSequence!);
+  assert.ok(origin.kind === "record");
+  const explained = summary(playerDebugTraceRows(trace, [origin.id], defaults()));
+  assert.deepEqual(explained.slice(0, 1), ['message.text = "Strokes: 2"']);
+  assert.ok(
+    explained.some((line) => line.trim().startsWith("count = 2")),
+    explained.join("\n"),
+  );
+
+  // Recent chat lists each message once, newest first, by the record of the text it shows now.
+  const [later, strokes] = trace.recentMessages(PLAYER_DEBUG_TRACE_PAGE);
+  assert.equal(strokes, origin.id);
+  assert.equal(trace.record(later!)?.kind, "output");
+
+  // A handle shows its message's text now, beside its identity, also on its recorded origin.
+  const handle = playerDebugVariables(session.plan, session.snapshot, trace)
+    .flatMap((group) => group.variables)
+    .find((variable) => variable.name === "strokes");
+  const shown = `<message ${first.id.replace("runtime-event-", "")} "Strokes: 2">`;
+  assert.equal(handle?.value, shown);
+  const [row] = playerDebugTraceRows(
+    trace,
+    [handle!.record!],
+    defaults(),
+    playerDebugLiveValue(session.snapshot),
+  );
+  assert.equal(row?.kind === "record" && row.text.now, shown);
+});
+
+test("Recent chat shows a message changed while Debug runs, also one said before", () => {
+  const plan = messageSayPlan(
+    [
+      MESSAGE_TEXT_FUNCTIONS,
+      'let line = timer(duration: 1 ms, async: true, label: "Waiting")',
+      "wait 1 s",
+      'setText(line, "Ready")',
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+  );
+  const trace = new RuntimeDebugContext();
+  const session = advancePlayerRuntimeTime(
+    withPlayerRuntimeDebugTrace(createPlayerRuntimeSession(plan), trace),
+    1_000,
+  );
+  assert.equal(session.transcriptEntries[0]?.text, "Ready");
+  const [ready] = trace.recentMessages(PLAYER_DEBUG_TRACE_PAGE);
+  assert.equal(trace.record(ready!)?.preview, '"Ready"');
 });

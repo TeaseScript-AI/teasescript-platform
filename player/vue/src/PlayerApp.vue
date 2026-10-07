@@ -40,6 +40,7 @@ import { useDebugExport } from "./useDebugExport";
 import { playerNoticeKeys, playerNotices } from "../../notices.js";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerNotifications } from "./usePlayerNotifications";
+import { useMessageUpdateAnnouncements } from "./useMessageUpdateAnnouncements";
 import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
@@ -81,6 +82,7 @@ const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
 
 usePlayerKeyboardFocus();
 const notifications = usePlayerNotifications(props.player.notices);
+const messageUpdateAnnouncement = useMessageUpdateAnnouncements(props.player);
 provide(
   enhancedTranscriptContrast,
   computed(() => themeIntent.value.contrast === "high"),
@@ -418,6 +420,10 @@ async function toggleFullscreen() {
             :theme-mode="themeIntent.mode"
           />
           <DebugStatus v-if="debug.log.value" :time="debug.time.value" :log="debug.log.value" />
+          <!-- A message changed in place may be offscreen or already read, so its new text is spoken. -->
+          <span role="status" class="sr-only" data-message-update-announcement>{{
+            messageUpdateAnnouncement
+          }}</span>
           <slot name="overlay" />
         </template>
         <template #right-rail>

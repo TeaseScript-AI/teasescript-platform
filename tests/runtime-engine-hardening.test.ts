@@ -61,6 +61,7 @@ test("host values cannot carry handles or speaker references, which only the run
   const identities: readonly SerializableRuntimeValue[] = [
     { kind: "timerHandle", timerId: 1 },
     { kind: "mediaHandle", mediaId: 1 },
+    { kind: "messageHandle", messageId: 1 },
     {
       kind: "list",
       items: [
