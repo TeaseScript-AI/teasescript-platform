@@ -363,7 +363,7 @@ function tokens(value: IrExpression): Token[] | null {
 }
 
 /** Every name the statements use or declare, so that a handle's name is new. */
-function usedNames(statements: readonly IrStatement[]): Set<string> {
+export function usedNames(statements: readonly IrStatement[]): Set<string> {
   const names = new Set<string>();
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {

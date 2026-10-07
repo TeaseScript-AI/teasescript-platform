@@ -26,3 +26,10 @@ def halves = {
     show("" + s2 + " and " + s3)
 }
 halves()
+// A read whose key a call computes, with a fallback that may fail, computes the key once, in a variable of a name the
+// script does not use.
+def sexscriptLegacyKey1 = "taken"
+def keyOf = { return "game.points" }
+def counted = loadInteger(keyOf())
+if (counted == null) counted = 1 + 1
+show("" + counted + " " + sexscriptLegacyKey1)

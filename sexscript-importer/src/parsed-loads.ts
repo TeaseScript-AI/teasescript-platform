@@ -1,5 +1,6 @@
 import { helperCall, type HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
+import { usedNames } from "./message-handles.ts";
 import { computes, hasEffect, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
@@ -54,7 +55,18 @@ export function withParsedLoads(
     const { integer: _integer, number: _number, ...raw } = next;
     return helperCall(helper, [key, raw]);
   };
+  // A key's variable takes a name that nothing in the file uses.
+  let taken: Set<string> | null = null;
   let keys = 0;
+  const fresh = (): string => {
+    taken ??= usedNames(statements);
+    let name: string;
+    do {
+      keys += 1;
+      name = `sexscriptLegacyKey${keys}`;
+    } while (taken.has(name));
+    return name;
+  };
   const keyed = (item: IrStatement): IrStatement[] => {
     if ((item.kind !== "let" || item.global === true) && item.kind !== "assign") return [item];
     const read = storedRead(item.value);
@@ -66,8 +78,7 @@ export function withParsedLoads(
       repeatable(read.key)
     )
       return [item];
-    keys += 1;
-    const name = `sexscriptLegacyKey${keys}`;
+    const name = fresh();
     const key: IrStatement = { kind: "let", name, value: read.key, span: item.span };
     return [key, { ...item, value: withKey(item.value, { kind: "variable", name }) }];
   };
