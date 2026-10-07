@@ -595,6 +595,12 @@ Smart follow is active while the user is following the newest content. New trans
 the newest content readable in that state. When the user intentionally scrolls upward, smart follow suspends and new
 content/composer growth must not drag the reading position back to the bottom.
 
+An update that adds more than the transcript can show at once, such as several messages that arrive together, does not
+follow to its end: the transcript stops with the update's first new entry at its top, where the user starts reading,
+and smart follow suspends as after an upward scroll. This includes what development time jumps add. Start, Continue,
+and the states Debug's rewind shows open at the end of their history, as does a session's first content when the script
+shows it only once the host answered, such as after a media request.
+
 Smart follow reactivates when either:
 
 - the user manually scrolls back to the latest/bottom region; or
@@ -605,7 +611,24 @@ middle of an active touch/scroll gesture. On touch, wait until the finger is rel
 than placing a button under the user's moving finger. Hide the control once latest content is reached/follow resumes.
 It is a compact, translucent down-arrow control at the lower right of the transcript, using the conversation's unused
 side margin instead of claiming a new vertical row. It may overlap an avatar margin before it obscures message text and
-uses restrained backdrop blur where supported. Its exact threshold remains a tuning detail.
+uses restrained backdrop blur where supported. Its exact threshold remains a tuning detail; while smart follow stopped at
+an update's first new entry, it appears as soon as anything of that update is below the view.
+
+### Entering content
+
+During live play, what newly appears in the transcript enters from below: a script message, a player-authored message,
+and the choice, button, or form controls of a new interaction fade in while rising slightly. While smart follow is
+active, the transcript glides up to make room for them instead of jumping. Only the drawing moves: the scroll position
+reaches its new place at once, so smart follow, the anchoring of the reading position, and its measurements behave as
+they would without the motion. Updates in quick succession continue one movement instead of queueing animations. A
+message changed in place does not enter again; while smart follow is active, the transcript glides when its height
+changes.
+
+Content shows directly, without entering: the transcript at Start and Continue and the states Debug's rewind shows,
+also when input adopts one; a session's first content, also when it follows Start in a later update; what development
+time jumps add; and an update with many entries or, under smart follow, with more than the transcript shows at once. End and error notices and Debug's own status lines do not enter. With a
+reduced-motion preference nothing enters or glides. The duration, the rise, and what counts as many are tuning of the
+Player, not behavior a script can observe.
 
 ### Message presentation and provenance
 
@@ -1015,7 +1038,7 @@ browser scroll behavior with matching scrollbar colors.
 - keyboard focus remains visible through `:focus-visible`-equivalent behavior;
 - actual interactive controls take precedence over viewport-wide pacing-skip gestures;
 - functional motion is allowed for carousel/snap movement, drawer/rail transitions, mystery-timer indeterminate motion,
-  edge fades, fullscreen auto-hide chrome, and similarly meaningful state transitions;
+  edge fades, fullscreen auto-hide chrome, content entering the transcript, and similarly meaningful state transitions;
 - `prefers-reduced-motion` reduces/removes non-essential animation while preserving understandable state changes.
 
 ## Z-order, overlays, and click-through

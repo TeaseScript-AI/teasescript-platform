@@ -147,6 +147,7 @@ async function main() {
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await messageUpdatesScenario(cdp, origin);
+      await entrancesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
@@ -154,7 +155,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1542,6 +1543,95 @@ async function lateImageScenario(cdp, origin) {
     0,
     "A late failure of a removed image was reported",
   );
+}
+
+/**
+ * Entrances (`entrances` package): what Start shows appears directly, a message live play adds enters while the
+ * conversation glides up, the controls of a new interaction enter, and an update taller than the view stops with its
+ * first entry at the top, with Return to latest offered, while later messages do not move it. Under reduced motion
+ * nothing enters.
+ */
+async function entrancesScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  // Records, every frame, which parts of the conversation an animation moves.
+  const start = async () => {
+    await navigate(cdp, `${origin}/player/?package=entrances`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await evaluate(
+      cdp,
+      `window.smokeEntrances = new Set();
+      const record = () => {
+        for (const animation of document.getAnimations()) {
+          const target = animation.effect?.target;
+          if (target?.matches?.('.transcript-entry')) window.smokeEntrances.add('row ' + target.dataset.index);
+          else if (target?.matches?.('.transcript-history')) window.smokeEntrances.add('glide');
+          else if (target?.matches?.('[data-foreground-controls]')) window.smokeEntrances.add('controls');
+        }
+        requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);`,
+    );
+    await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const entered = () => evaluate(cdp, `return [...window.smokeEntrances].sort()`);
+  await start();
+  await waitFor(
+    cdp,
+    `${entries} === 2`,
+    8_000,
+    "The entrances package did not add its second message",
+  );
+  await delay(400);
+  // Start shows its first message directly; the next one enters alone, and the conversation glides up for it.
+  assertEqual(
+    JSON.stringify(await entered()),
+    JSON.stringify(["glide", "row 1"]),
+    "A live message did not enter alone, gliding the conversation up",
+  );
+  // An update taller than the view: its first entry stays at the top and Return to latest offers the rest.
+  await waitFor(cdp, `${entries} === 17`, 8_000, "The tall update did not arrive");
+  const heldTop = `(() => {
+    const view = document.querySelector('.transcript-scroll').getBoundingClientRect();
+    const first = [...document.querySelectorAll('.transcript-entry')].find((row) => row.dataset.index === '2');
+    return first ? Math.round(first.getBoundingClientRect().top - view.top) : null;
+  })()`;
+  await waitFor(
+    cdp,
+    `Math.abs(${heldTop} ?? 99) <= 2 && !!document.querySelector('.return-to-latest')`,
+    4_000,
+    "An update taller than the view did not stop at its first entry with Return to latest",
+  );
+  // The next message and the choice arrive below without moving the reader; the new controls still enter.
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls]')`, 8_000);
+  await delay(400);
+  assertEqual(
+    Math.abs((await value(cdp, heldTop)) ?? 99) <= 2,
+    true,
+    "A message after the tall update moved the reader",
+  );
+  const later = await entered();
+  assertEqual(
+    later.includes("controls") && !later.some((part) => /^row (0|[2-9]|1[0-6])$/u.test(part)),
+    true,
+    `The tall update entered, or the new controls did not: ${JSON.stringify(later)}`,
+  );
+  // Reduced motion: the same live message shows without entering.
+  await cdp.call("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+  try {
+    await start();
+    await waitFor(cdp, `${entries} === 2`, 8_000, "The entrances package did not restart");
+    await delay(400);
+    assertEqual(
+      JSON.stringify(await entered()),
+      "[]",
+      "Something entered the conversation under reduced motion",
+    );
+  } finally {
+    await cdp.call("Emulation.setEmulatedMedia", { features: [] });
+  }
 }
 
 /**

@@ -1,0 +1,13 @@
+say "Start.", 2
+say "Entering.", 2
+wait 2 s
+say "A tall update follows.", instant
+let line = 0
+repeat 14 {
+    line += 1
+    say "Line ${line} of an update taller than the view.", instant
+}
+wait 1 s
+say "Below the view.", instant
+let done = choose "Done"
+exit
