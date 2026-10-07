@@ -445,8 +445,7 @@ test(
         ? plan.instructions.filter(isRecord)
         : [];
       const flow = new DataFlow(plan, instructions);
-      for (const [at, constants] of clockDifferences(flow, instructions))
-        session.clockDifferences.set(at, constants);
+      session.clockDifferences.push(...clockDifferences(flow, instructions));
       for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
         session.timedWith.set(button, expressions);
       const step = session.start();

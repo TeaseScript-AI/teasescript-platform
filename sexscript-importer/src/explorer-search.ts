@@ -920,8 +920,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       session.comparedWith.set(ask, expressions);
   for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
     session.timedWith.set(button, expressions);
-  for (const [at, constants] of clockDifferences(flow, instructions))
-    session.clockDifferences.set(at, constants);
+  session.clockDifferences.push(...clockDifferences(flow, instructions));
   const constants = constantConditions(instructions, files, options.diagnostics);
   // Conditions that read only stored keys whose values this package fixes have one value too.
   const fixed = new Map<number, { value: boolean; reason: string }>();

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
-import type { Constants } from "./explorer-analysis.ts";
+import type { ClockDifference, Constants } from "./explorer-analysis.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
@@ -351,11 +351,10 @@ export class Session {
   /**
    * The player may think before pressing a button that the code times (see {@link thinkTimes}): the expressions a
    * timed button's result is compared with, by its instruction (`(showButton "Done") / 1 s > count`); and the
-   * constants a difference of clock reads is compared with, by the instruction that takes the difference
-   * (`clockDifferences`), for the buttons before it.
+   * differences of clock reads compared with constants (`clockDifferences`), for the buttons between the two reads.
    */
   readonly timedWith = new Map<number, readonly unknown[]>();
-  readonly clockDifferences = new Map<number, Constants>();
+  readonly clockDifferences: ClockDifference[] = [];
   /**
    * Runtime operations called so far, a deterministic measure of the work the session's steps took: fresh sessions,
    * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
@@ -740,24 +739,22 @@ export class Session {
   }
 
   /**
-   * The constants a button is timed against beyond its compared literals: those of the clock differences taken in the
-   * instructions after it, or after where a call that leads to it returns; and the values, in the state (when `state`
+   * The constants a button is timed against beyond its compared literals: those of the clock differences whose two
+   * reads enclose it, or enclose where a call that leads to it returns; and the values, in the state (when `state`
    * gives it), of what a timed button's result is compared with.
    */
   #timedConstants(runtime: Runtime, action: Data, state?: () => Data): Constants | null {
-    if (this.clockDifferences.size === 0 && this.timedWith.size === 0) return null;
+    if (this.clockDifferences.length === 0 && this.timedWith.size === 0) return null;
     const found: Constants = { numbers: [], durations: [] };
     const positions = [
       action.owningInstruction,
-      ...(this.clockDifferences.size === 0 ? [] : runtime.callReturnInstructions()),
+      ...(this.clockDifferences.length === 0 ? [] : runtime.callReturnInstructions()),
     ].filter((position): position is number => typeof position === "number");
-    for (const position of positions) {
-      for (let at = position + 1; at <= position + LITERAL_WINDOW; at += 1) {
-        const constants = this.clockDifferences.get(at);
-        if (constants === undefined) continue;
-        found.numbers.push(...constants.numbers);
-        found.durations.push(...constants.durations);
-      }
+    for (const difference of this.clockDifferences) {
+      if (!positions.some((position) => difference.from < position && position <= difference.at))
+        continue;
+      found.numbers.push(...difference.numbers);
+      found.durations.push(...difference.durations);
     }
     const expressions =
       typeof action.owningInstruction === "number"
