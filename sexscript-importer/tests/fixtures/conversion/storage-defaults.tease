@@ -4,6 +4,22 @@ function sexscriptLegacyBooleanText(value) {
 function sexscriptLegacyValue(value) {
   return value
 }
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -115,7 +131,7 @@ if outfit == null or outfit == "" {
 let names = ["a", "b"]
 let n = 0
 while n < 2 {
-  names[n] = load "game.name${n}", default: sexscriptLegacyValue("")
+  names[n] = load "game.name${n}", default: ""
   n += 1
 }
 say names.join(", ")
@@ -142,11 +158,39 @@ function decide {
 say "${readName()} ${decide()}"
 // A read of a computed key has no type, also where it keeps its null.
 let slot = 2
-let saved = load "game.slot${slot}", default: sexscriptLegacyValue(null)
+let saved = load "game.slot${slot}", default: null
 if saved == null {
   say "Empty slot."
 }
 let counted: integer | string | null = 0
 // NOTE SX_LOAD_KEEPS_VALUE line 73: Groovy stored null in 'counted' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
 counted = load "game.count${slot}", default: counted
+// A read of a computed key into a variable or a list of a known type reads that type's empty value where the script
+// uses it up, and makes the variable or the list's items optional where it keeps its null.
+let stage: integer = sexscriptLegacyLoadInteger("game.stage${slot}", 0)
+say "Stage ${stage + 1}"
+let owned = load "toys.item${slot}", default: false
+if owned == true {
+  say "Owned."
+}
+let bonus = 0
+// NOTE SX_LOAD_KEEPS_VALUE line 81: Groovy stored null in 'bonus' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+bonus = load "game.bonus${slot}", default: bonus
+// NOTE SX_PLUS_OPERAND_TYPE line 82: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Bonus ${bonus + 1}"
+let best: integer? = 0
+best = load "game.best${slot}", default: null
+if best == null {
+  say "No best."
+}
+let picks: string?[] = ["a", "b"]
+picks[0] = load "game.pick${slot}", default: null
+// NOTE SX_INDEX_PAST_END line 88: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(picks, 0) == null {
+  say "No pick."
+}
+let counts = [1, 2]
+counts[1] = load "game.count${slot}", default: 0
+// NOTE SX_PLUS_OPERAND_TYPE line 91: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Count ${counts[1] + 1}"
 exit

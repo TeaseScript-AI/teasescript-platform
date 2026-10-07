@@ -201,36 +201,152 @@ function telling(value: IrExpression): boolean {
 }
 
 /**
- * A read of a computed key has no type (#690): one that keeps its null gets null of an open type,
- * `default: sexscriptLegacyValue(null)`, as `default: null` would type its value as null, so that it stays as open as
- * legacy's read (`SX_LOAD_COMPUTED_OPEN`, counted).
+ * A read of a computed key has no type (#690), but its default must fit the place it goes to: into a variable of a known
+ * type, a read whose null is used up gets that type's empty value (`load "toys.${id}", default: false`), and one that
+ * keeps its null makes the variable optional (`let level: integer? = ...`); into an item of a list of a known type, a
+ * read gets the item type's empty value, or makes the items optional (`string?[]`) where the script tests the list's
+ * items for null; a read anywhere else keeps `default: null`. The marks of used-up reads (`fill`) end here.
  */
-function withOpenComputedReads(programs: readonly MigrationProgram[]): MigrationProgram[] {
+function withTypedComputedReads(programs: readonly MigrationProgram[]): MigrationProgram[] {
   return programs.map((program) => {
-    const diagnostics = [...program.diagnostics];
-    let span: IrStatement["span"] = null;
-    const opened = (value: IrExpression): IrExpression => {
-      const next = mapChildren(value, opened);
-      if (next.kind !== "load" || next.defaultValue !== undefined || literalKey(next.key) !== null)
-        return next;
-      diagnostics.push({
-        code: "SX_LOAD_COMPUTED_OPEN",
-        severity: "info",
-        message: "A read of a computed key has no type; it keeps legacy's null of an open type.",
-        span,
-      });
-      return { ...next, defaultValue: OPEN_NULL };
+    const locals = functionLocals(program.statements);
+    const resolve = (fn: string | null, name: string): string =>
+      fn !== null && locals.get(fn)?.has(name) === true ? `${fn}:${name}` : `:${name}`;
+    // Each binding's declared type: its annotation, or the type of the value it starts with.
+    const declared = new Map<string, string>();
+    const collect = (items: readonly IrStatement[], fn: string | null): void => {
+      for (const item of items) {
+        if (item.kind === "function") {
+          collect(item.body, item.name);
+          continue;
+        }
+        if (item.kind === "let") {
+          const type = item.type ?? (item.value.kind === "load" ? null : valueType(item.value));
+          if (type !== null) declared.set(resolve(fn, item.name), type);
+        }
+        withNestedBlocks(item, (body) => {
+          collect(body, fn);
+          return body;
+        });
+      }
     };
-    // The generated helpers read their keys as they are written (helpers.ts).
-    const block = (items: IrStatement[]): IrStatement[] =>
+    collect(program.statements, null);
+    // Lists whose items the script compares with null, also through the helper that reads past the end.
+    const itemTested = new Set<string>();
+    const itemAt = helperName("itemAt");
+    const tests = (items: readonly IrStatement[], fn: string | null): void => {
+      for (const item of items) {
+        if (item.kind === "function") {
+          tests(item.body, item.name);
+          continue;
+        }
+        const visit = (value: IrExpression): IrExpression => {
+          if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
+            for (const [side, other] of [
+              [value.left, value.right],
+              [value.right, value.left],
+            ] as const) {
+              const list =
+                side.kind === "index"
+                  ? side.target
+                  : side.kind === "call" && side.name === itemAt
+                    ? side.positional[0]
+                    : undefined;
+              if (isNullLiteral(other) && list?.kind === "variable")
+                itemTested.add(resolve(fn, list.name));
+            }
+          }
+          return mapChildren(value, visit);
+        };
+        mapOwnExpressions(item, visit);
+        withNestedBlocks(item, (body) => {
+          tests(body, fn);
+          return body;
+        });
+      }
+    };
+    tests(program.statements, null);
+    const nullable = (type: string): boolean => /\?$|\bnull\b/u.test(type);
+    // Variables a read that keeps its null makes optional, and lists whose items it makes optional.
+    const optionals = new Set<string>();
+    const optionalItems = new Set<string>();
+    const typed = (
+      target: IrExpression,
+      fn: string | null,
+    ): { type: string; binding?: string; list?: string } | null => {
+      if (target.kind === "variable") {
+        const binding = resolve(fn, target.name);
+        const type = declared.get(binding);
+        return type === undefined ? null : { type, binding };
+      }
+      if (target.kind === "index" && target.target.kind === "variable") {
+        const list = resolve(fn, target.target.name);
+        const type = declared.get(list);
+        return type?.endsWith("[]") === true ? { type: type.slice(0, -2), list } : null;
+      }
+      return null;
+    };
+    const strip = (value: IrExpression): IrExpression => {
+      const next = mapChildren(value, strip);
+      if (next.kind !== "load" || next.fill !== true) return next;
+      const { fill: _fill, ...load } = next;
+      return load;
+    };
+    const block = (items: IrStatement[], fn: string | null): IrStatement[] =>
       items.map((item) => {
-        if (helperDefinitionOrder(item) >= 0) return item;
-        const next = withNestedBlocks(item, block);
-        span = next.span;
-        return mapOwnExpressions(next, opened);
+        if (item.kind === "function") return { ...item, body: block(item.body, item.name) };
+        let next = withNestedBlocks(item, (body) => block(body, fn));
+        const read =
+          (next.kind === "let" || (next.kind === "assign" && next.operator === "=")) &&
+          next.value.kind === "load" &&
+          next.value.defaultValue === undefined &&
+          literalKey(next.value.key) === null
+            ? next.value
+            : null;
+        if (read !== null && (next.kind === "let" || next.kind === "assign")) {
+          const target =
+            next.kind === "let"
+              ? next.type === undefined
+                ? null
+                : { type: next.type }
+              : typed(next.target, fn);
+          if (target !== null && !nullable(target.type)) {
+            const { fill, ...load } = read;
+            const empty = emptyValue(target.type);
+            if (target.list !== undefined) {
+              if (itemTested.has(target.list) && !target.type.includes(" | "))
+                optionalItems.add(target.list);
+              else if (empty !== null) next = { ...next, value: { ...load, defaultValue: empty } };
+            } else if (fill === true && empty !== null)
+              next = { ...next, value: { ...load, defaultValue: empty } };
+            else if (next.kind === "let")
+              next = { ...next, type: optional(target.type), value: load };
+            else if (target.binding !== undefined) optionals.add(target.binding);
+          }
+        }
+        return mapOwnExpressions(next, strip);
       });
-    return { ...program, statements: block(program.statements), diagnostics };
+    const statements = block(program.statements, null);
+    if (optionals.size === 0 && optionalItems.size === 0) return { ...program, statements };
+    const optionalize = (items: IrStatement[], fn: string | null): IrStatement[] =>
+      items.map((item) => {
+        if (item.kind === "function") return { ...item, body: optionalize(item.body, item.name) };
+        const next = withNestedBlocks(item, (body) => optionalize(body, fn));
+        if (next.kind !== "let") return next;
+        const binding = resolve(fn, next.name);
+        const type = next.type ?? valueType(next.value);
+        if (type === null) return next;
+        if (optionalItems.has(binding) && type.endsWith("[]") && !nullable(type.slice(0, -2)))
+          return { ...next, type: `${type.slice(0, -2)}?[]` };
+        return !optionals.has(binding) || nullable(type) ? next : { ...next, type: optional(type) };
+      });
+    return { ...program, statements: optionalize(statements, null) };
   });
+}
+
+/** The type that also holds null: `integer?`, or `integer | string | null` for a union. */
+function optional(type: string): string {
+  return type.includes(" | ") ? `${type} | null` : `${type}?`;
 }
 
 /** The variables that a legacy text read (`loadString`) starts or is set to, by name. */
@@ -328,7 +444,8 @@ export function withStorageDefaults(
     const key = literalKey(load.key);
     const type = load.read ?? (key === null ? null : keyType(key));
     const empty = type === null ? null : emptyValue(type);
-    if (empty === null) return load;
+    // A computed key's read takes its receiver's type instead (withTypedComputedReads).
+    if (empty === null) return key === null ? next : load;
     if (key !== null) note(defaulted, key, type);
     return { ...load, defaultValue: empty };
   };
@@ -347,7 +464,7 @@ export function withStorageDefaults(
     ),
   );
   return withUsedHelpers(
-    withOpenComputedReads(
+    withTypedComputedReads(
       withDeclaredKeys(withEmptyText(filled, textKeys), declaredType, layout.published),
     ),
     shared,
@@ -438,11 +555,10 @@ const BOOLEAN_TEXT =
 
 /**
  * A missing text reads as the empty text (owner decision 2026-10-07): every read of a key that only text is read from
- * and saved under, and a legacy text read of a computed key, gets `default: ""` (of an open type for a computed key,
- * which stays untyped), also where the script tests it for null, and those tests test for the empty text instead,
- * `x == null` as `x == ""`, of the read itself or of the variable it is read into, also through copies, parameters,
- * and results it reaches; where the variable may hold null from another value too, the test takes both,
- * `x == null or x == ""`. A null that the script saves under the key or sets the variable to is the empty text too. A
+ * and saved under, and a legacy text read of a computed key, gets `default: ""`, also where the script tests it for
+ * null, and those tests test for the empty text instead, `x == null` as `x == ""`, of the read itself or of the
+ * variable it is read into, also through copies, parameters, and results it reaches; where the variable may hold null
+ * from another value too, the test takes both, `x == null or x == ""`. A null that the script saves under the key or sets the variable to is the empty text too. A
  * variable is the binding its name resolves to: a function's own variable or parameter, or else the file's, or a
  * global's in every file. A stored empty text so counts as missing.
  */
@@ -451,15 +567,34 @@ function withEmptyText(
   textKeys: ReadonlySet<string>,
 ): MigrationProgram[] {
   const EMPTY: IrExpression = { kind: "literal", value: "" };
-  const computedText = (value: IrExpression): boolean =>
-    value.kind === "load" && literalKey(value.key) === null && value.read === "string";
   const textRead = (value: IrExpression): boolean => {
     if (value.kind !== "load") return false;
     const key = literalKey(value.key);
     return key === null ? value.read === "string" : textKeys.has(key);
   };
+  // Lists that text reads are written into, by name, whose elements are text.
+  const textLists = new Set<string>();
+  const findLists = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      if (
+        item.kind === "assign" &&
+        item.target.kind === "index" &&
+        item.target.target.kind === "variable" &&
+        textRead(item.value)
+      )
+        textLists.add(item.target.target.name);
+      withNestedBlocks(item, (body) => {
+        findLists(body);
+        return body;
+      });
+    }
+  };
+  for (const program of programs) findLists(program.statements);
   const text = (value: IrExpression): boolean =>
     textRead(value) ||
+    (value.kind === "index" &&
+      value.target.kind === "variable" &&
+      textLists.has(value.target.name)) ||
     (value.kind === "template" &&
       value.parts.length === 1 &&
       "value" in value.parts[0]! &&
@@ -616,11 +751,7 @@ function withEmptyText(
               "Legacy read null for a missing text, which reads as the empty text now.",
               span,
             );
-            // A computed key has no type, so its default keeps an open one.
-            return {
-              ...load,
-              defaultValue: computedText(load) ? helperCall("value", [EMPTY]) : EMPTY,
-            };
+            return { ...load, defaultValue: EMPTY };
           }
           if (next.kind !== "binary" || (next.operator !== "==" && next.operator !== "!="))
             return next;
@@ -709,7 +840,13 @@ function withEmptyText(
         const reads = widened.has(binding) || text(next.value);
         if (next.type === "string?" && reads && !holdsNull(binding))
           return { ...next, type: "string" };
-        if (next.type !== undefined || !widened.has(binding)) return next;
+        if (next.type !== undefined) {
+          // A declared type that text is read into later takes text too.
+          if (!widened.has(binding) || /\bstring\b/u.test(next.type)) return next;
+          const declared = next.type.replace(/\?$/u, "").replace(/ \| null$/u, "");
+          return { ...next, type: `${unionType([declared, "string"])!} | null` };
+        }
+        if (!widened.has(binding)) return next;
         const start = valueType(next.value);
         if (start === null || start === "string") return next;
         return { ...next, type: `${unionType([start, "string"])!} | null` };
@@ -799,7 +936,6 @@ function withDeclaredKeys(
     if (type === null || filledIn.has(key)) open.add(key);
     else types.set(key, type);
   }
-  const optional = (type: string): string => (type.includes(" | ") ? `${type} | null` : `${type}?`);
   // Names generated here stay clear of every name of the package, which globals share.
   const packageNames = new Set(programs.flatMap((program) => [...usedNames(program.statements)]));
   const done = new Set<string>();
@@ -1073,8 +1209,7 @@ function fillable(value: IrExpression): value is Extract<IrExpression, { kind: "
     value.kind === "load" &&
     value.defaultValue === undefined &&
     value.integer !== true &&
-    value.number !== true &&
-    literalKey(value.key) !== null
+    value.number !== true
   );
 }
 

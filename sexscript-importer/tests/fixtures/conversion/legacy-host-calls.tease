@@ -51,7 +51,7 @@ let code = sexscriptLegacySendImage(photo)
 save code as "game.photo"
 // NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 // NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let back = load "sexscript.image.${load("game.photo", default: "")}", default: sexscriptLegacyValue(null)
+let back = load "sexscript.image.${load("game.photo", default: "")}", default: null
 if back != null {
   showImage back
 }

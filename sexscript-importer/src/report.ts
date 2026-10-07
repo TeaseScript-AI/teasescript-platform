@@ -226,8 +226,8 @@ export interface FeasibilityReport {
    * `default: null` and a declared key type (`nullKept`), and the statements whose reads keep a null of an open type
    * (`open`, `SX_LOAD_OPEN_NULL`); text reads whose null the script told apart, now the empty text (`textEmpty`,
    * `SX_LOAD_TEXT_EMPTY`), and their null tests and nulls set, now the empty text (`textTests`,
-   * `SX_LOAD_TEXT_NULL_TEST`, `SX_LOAD_TEXT_NULL_SET`); reads of computed keys that keep an open null
-   * (`computedOpen`, `SX_LOAD_COMPUTED_OPEN`).
+   * `SX_LOAD_TEXT_NULL_TEST`, `SX_LOAD_TEXT_NULL_SET`); and reads of a computed key with a default of the type of the
+   * place they go to (`computedDefaulted`) or with `default: null` (`computedNullKept`).
    */
   storageReads: {
     defaulted: number;
@@ -235,7 +235,8 @@ export interface FeasibilityReport {
     open: number;
     textEmpty: number;
     textTests: number;
-    computedOpen: number;
+    computedDefaulted: number;
+    computedNullKept: number;
   };
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
@@ -397,7 +398,8 @@ export function analyzeFeasibility(
       open: 0,
       textEmpty: 0,
       textTests: 0,
-      computedOpen: 0,
+      computedDefaulted: 0,
+      computedNullKept: 0,
     },
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
@@ -497,16 +499,17 @@ export function analyzeFeasibility(
     const backwardLineJumps = isScriptBody ? lineOrderJumps(emitTease(packageProgram)) : 0;
     report.backwardLineJumps += backwardLineJumps;
     if (isScriptBody || packageProgram.module !== undefined) {
-      const reads = literalStorageReads(packageProgram.statements);
+      const reads = storageReads(packageProgram.statements);
       report.storageReads.defaulted += reads.defaulted;
       report.storageReads.nullKept += reads.nullKept;
+      report.storageReads.computedDefaulted += reads.computedDefaulted;
+      report.storageReads.computedNullKept += reads.computedNullKept;
       const count = (code: string): number =>
         packageProgram.diagnostics.filter((diagnostic) => diagnostic.code === code).length;
       report.storageReads.open += count("SX_LOAD_OPEN_NULL");
       report.storageReads.textEmpty += count("SX_LOAD_TEXT_EMPTY");
       report.storageReads.textTests +=
         count("SX_LOAD_TEXT_NULL_TEST") + count("SX_LOAD_TEXT_NULL_SET");
-      report.storageReads.computedOpen += count("SX_LOAD_COMPUTED_OPEN");
     }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
@@ -902,20 +905,23 @@ export function lineOrderJumps(source: string): number {
   return jumps;
 }
 
-/** The reads of literal storage keys in the statements, by whether they have a default other than null. */
-function literalStorageReads(statements: readonly IrStatement[]): {
+/**
+ * The storage reads in the statements, by whether their key is one literal and whether they have a default other than
+ * null.
+ */
+function storageReads(statements: readonly IrStatement[]): {
   defaulted: number;
   nullKept: number;
+  computedDefaulted: number;
+  computedNullKept: number;
 } {
-  const counts = { defaulted: 0, nullKept: 0 };
+  const counts = { defaulted: 0, nullKept: 0, computedDefaulted: 0, computedNullKept: 0 };
   const visit = (value: IrExpression): IrExpression => {
-    if (
-      value.kind === "load" &&
-      value.key.kind === "literal" &&
-      typeof value.key.value === "string"
-    ) {
-      if (value.defaultValue === undefined) counts.nullKept += 1;
-      else if (value.defaultValue.kind !== "call") counts.defaulted += 1;
+    if (value.kind === "load") {
+      const literal = value.key.kind === "literal" && typeof value.key.value === "string";
+      if (value.defaultValue === undefined) counts[literal ? "nullKept" : "computedNullKept"] += 1;
+      else if (value.defaultValue.kind !== "call")
+        counts[literal ? "defaulted" : "computedDefaulted"] += 1;
     }
     return mapChildren(value, visit);
   };
