@@ -79,8 +79,8 @@ const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2
  * its evidence.
  *
  * A call that pauses at a random draw stays one record: each resolution that continues it adds its events to it, and a
- * chosen one also its outcome, rather than a record of its own, so many natural resolutions add no record, and the log
- * never starts again between a call and its resolutions.
+ * chosen one also its outcome, rather than a record of its own, so many natural resolutions add no record. When the log
+ * starts again at a paused state, the next resolution is a call of its own from there.
  *
  * The session's state stays in its engine-owned runner: the recorder exports it only where it needs a snapshot (a new
  * anchor, the end of a frozen recording, or `recording()`). Its calls also rebuild the state of the session's latest
@@ -215,12 +215,21 @@ export class DebugRecorder {
     invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
     continuation = false,
   ): R {
-    // While the session stands paused at a random draw, a resolution continues the record of the call that paused, if
-    // the log has it, and the engine refuses every other call, which then changes nothing and needs no record.
     const owned = owner === this.#owner;
     const paused = owned ? this.#paused.draw : null;
+    // While the session stands paused at a random draw, the engine refuses every call but its resolution: such a call
+    // changes nothing and needs no record, so the log, which it never copies, stays as it was.
+    if (paused !== null && kind !== "resumeRandomDraw") {
+      const result = invoke((store) => store);
+      if (!unchangedWhilePaused(result, paused)) {
+        this.#skip("A call changed a session paused at a random draw.", null);
+        this.#paused = { draw: result.pausedAt, record: false };
+      }
+      return result;
+    }
+    const prepared = owned ? this.#prepare(input, args, continuation) : null;
+    // A resolution continues the record of the call that paused, unless the log started again before it.
     const continues = owned && kind === "resumeRandomDraw" && this.#paused.record && !this.#broken;
-    const prepared = owned ? this.#prepare(input, args, continuation || paused !== null) : null;
     const queries: DebugAdmissionQuery[] = [];
     const admission = (store: CapturedMediaAdmission): CapturedMediaAdmission => ({
       holds: (reference, mediaKind) => {
@@ -395,19 +404,10 @@ export class DebugRecorder {
   }
 }
 
-/** Refusals that change nothing while a draw is paused: every call but its resolution, and a resolution that misses. */
-const PAUSED_REFUSALS: ReadonlySet<string> = new Set([
-  "randomDrawPending",
-  "noPendingDraw",
-  "staleDraw",
-  "invalidOutcome",
-]);
-
-/** Whether a call made while draw `paused` waits changed nothing, as the engine refused it. */
+/**
+ * Whether a call made while draw `paused` waits changed nothing: the engine refuses every call but the draw's
+ * resolution, and a resolution that misses changes nothing either.
+ */
 function unchangedWhilePaused(result: CallResult, paused: number): boolean {
-  return (
-    result.events.length === 0 &&
-    result.pausedAt === paused &&
-    (result.outcome === undefined || PAUSED_REFUSALS.has(result.outcome.kind))
-  );
+  return result.events.length === 0 && result.pausedAt === paused;
 }

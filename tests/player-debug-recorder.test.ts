@@ -776,3 +776,71 @@ test("a resolution whose continuation throws leaves the session at the paused st
   });
   assert.equal(JSON.stringify(playerRuntimeSnapshot(session)), shown);
 });
+
+test("a call the recorder cannot keep while a draw is paused leaves recovery of the paused state intact", () => {
+  const recorder = new DebugRecorder({ argumentBytes: 128 });
+  let session = createPlayerRuntimeSession(
+    'let t = timer(duration: 1..=2, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10\nexit',
+    { recorder },
+  );
+  setPlayerRuntimeRandomControl(session, { filter: { kinds: ["timerRepeat"] } });
+  session = observePlayerRuntimeTime(session, 3000).session;
+  const shown = JSON.stringify(playerRuntimeSnapshot(session));
+  // Larger than the recording keeps; refused while the draw is paused.
+  const refused = applyPlayerRuntimeStorageEdit(session, { key: "k", value: "x".repeat(200) });
+  assert.equal(refused.outcome.kind, "randomDrawPending");
+  session = refused.session;
+  setPlayerRuntimeRandomControl(session, {
+    filter: { kinds: ["random"] },
+    decide: () => {
+      throw new Error("host decision failed");
+    },
+  });
+  assert.throws(
+    () =>
+      resumePlayerRuntimeRandomDraw(session, {
+        drawId: session.state.randomDraw!.drawId,
+        outcome: "natural",
+      }),
+    { name: "RandomDecisionError" },
+  );
+  assert.equal(JSON.stringify(playerRuntimeSnapshot(session)), shown);
+  assert.equal(recorder.recording()!.complete, true, "the refused call needed no record");
+});
+
+test("a log that starts again at a paused state keeps the resolution exact", async () => {
+  // Two calls fit: the log starts again before the third, while the draw is paused.
+  const recorder = new DebugRecorder({ operations: 3 });
+  let session = createPlayerRuntimeSession(
+    'wait 1\nlet x = randomInteger(1..=6) + randomInteger(1..=6)\nsay "${x}", instant\nexit',
+    { recorder },
+  );
+  setPlayerRuntimeRandomControl(session, {});
+  session = observePlayerRuntimeTime(session, 1000).session;
+  for (const outcome of [{ kind: "number", value: 6 } as const, "natural" as const]) {
+    session = resumePlayerRuntimeRandomDraw(session, {
+      drawId: session.state.randomDraw!.drawId,
+      outcome,
+    }).session;
+  }
+  assert.equal(session.state.randomDraw, null);
+  const recording = recorder.recording()!;
+  assert.equal(recording.complete, true);
+  assert.notEqual(
+    recording.anchorSnapshot.randomControl?.pending ?? null,
+    null,
+    "the log began paused",
+  );
+  assert.equal(recording.operations[0]!.kind, "resumeRandomDraw");
+  assert.equal(
+    JSON.stringify(
+      rebuildRecordedSession(
+        recording.plan,
+        recording.anchorSnapshot,
+        recording.operations,
+      ).exportSnapshot(),
+    ),
+    JSON.stringify(playerRuntimeSnapshot(session)),
+  );
+  assert.equal((await replay(recorder)).kind, "reproduced");
+});
