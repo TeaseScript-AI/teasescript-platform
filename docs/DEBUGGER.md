@@ -165,7 +165,11 @@ When the record would outgrow its retention (4,096 calls or 2 Mi characters of a
 than a script limit), it starts again from the state before the Player's next call, never dropping a call in between. A
 call that fails the session or throws freezes the record, which keeps the state that call reached as the export's
 checkpoint, so that later observations, such as on hiding the page, cannot evict or outdate it; a call the recorder
-cannot copy, or a media store that throws during a call, marks it incomplete.
+cannot copy, or a media store that throws during a call, marks it incomplete. The recorder also lets the Player
+continue after a call throws, which ends the session's [runtime session](RUNTIME.md#runtime-sessions): the Player
+rebuilds the state it showed last from the recorded calls. For that, the recorder keeps logging calls after the record
+froze without changing the record, and after a call it cannot copy, it starts that log again from the next call's
+state.
 
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The

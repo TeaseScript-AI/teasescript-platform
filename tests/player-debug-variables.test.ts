@@ -21,6 +21,7 @@ import {
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
+  playerRuntimeDebugVariables,
 } from "../player/runtime-adapter.js";
 
 /*
@@ -63,7 +64,7 @@ test("a message opens to its values and their immediate causes, and further leve
     ].join("\n"),
   );
   const [output] = trace.outputs();
-  const live = playerDebugLiveValue(session.snapshot);
+  const live = playerDebugLiveValue(playerRuntimeDebugVariables(session).variables);
   const rows = playerDebugTraceRows(trace, [output!], defaults(), live);
   const said = session.events.find((event) => event.kind === "say")!;
   const spanks = /You get (\d+)/u.exec(said.kind === "say" ? said.text : "")![1]!;
@@ -108,7 +109,7 @@ test("an earlier version shows the variable's value now, and unknown origins say
   const { session, trace } = traced(source);
   // The ask's question is a message too; this is the first message.
   const output = trace.outputs().find((id) => trace.record(id)?.preview === '"1"');
-  const live = playerDebugLiveValue(session.snapshot);
+  const live = playerDebugLiveValue(playerRuntimeDebugVariables(session).variables);
   const rows = playerDebugTraceRows(trace, [output!], defaults(), live);
   const version = rows.find((row) => row.kind === "record" && row.text.title === "let count")!;
   assert.equal(version.kind === "record" && version.text.now, "5");
@@ -127,7 +128,7 @@ test("an earlier version shows the variable's value now, and unknown origins say
     late,
     [message!],
     defaults(),
-    playerDebugLiveValue(answered.snapshot),
+    playerDebugLiveValue(playerRuntimeDebugVariables(answered).variables),
   ).find((row) => row.kind === "record" && row.text.unknown);
   assert.deepEqual(
     unknown?.kind === "record" && [unknown.text.title, unknown.text.value, unknown.text.note],
@@ -192,7 +193,7 @@ test("live variables group by globals, files, calls, and blocks, and filter by n
       "exit",
     ].join("\n"),
   );
-  const groups = playerDebugVariables(session.plan, session.snapshot, trace);
+  const groups = playerDebugVariables(session.plan, playerRuntimeDebugVariables(session), trace);
   assert.deepEqual(
     groups.map((group) => [group.label, group.variables.map((variable) => variable.name)]),
     [
@@ -204,13 +205,13 @@ test("live variables group by globals, files, calls, and blocks, and filter by n
   for (const group of groups)
     for (const variable of group.variables) assert.notEqual(variable.record, null);
   assert.deepEqual(
-    playerDebugVariables(session.plan, session.snapshot, trace, "LEF").map((group) =>
-      group.variables.map((variable) => variable.name),
+    playerDebugVariables(session.plan, playerRuntimeDebugVariables(session), trace, "LEF").map(
+      (group) => group.variables.map((variable) => variable.name),
     ),
     [["left"]],
   );
   // Without a trace the values still show, with no record.
-  const untraced = playerDebugVariables(session.plan, session.snapshot, null);
+  const untraced = playerDebugVariables(session.plan, playerRuntimeDebugVariables(session), null);
   assert.equal(untraced[0]!.variables[0]!.value, '"Coach"');
   assert.equal(untraced[0]!.variables[0]!.record, null);
 });
@@ -339,7 +340,7 @@ test("a message shown inside a branch shows the decision that took it", () => {
   // The decision opens to its condition's causes, the one shown above.
   const opened = playerDebugTraceRows(trace, [output!], defaults(new Set([condition.key])));
   assert.equal(summary(opened).at(-1), '    ↑ let mood "calm"');
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
 });
 
 test("a changed message is explained by its latest change, also in Recent chat, and its handle shows its text", () => {
@@ -379,7 +380,7 @@ test("a changed message is explained by its latest change, also in Recent chat, 
   assert.equal(trace.record(later!)?.kind, "output");
 
   // A handle shows its message's text now, beside its identity, also on its recorded origin.
-  const handle = playerDebugVariables(session.plan, session.snapshot, trace)
+  const handle = playerDebugVariables(session.plan, playerRuntimeDebugVariables(session), trace)
     .flatMap((group) => group.variables)
     .find((variable) => variable.name === "strokes");
   const shown = `<message ${first.id.replace("runtime-event-", "")} "Strokes: 2">`;
@@ -388,7 +389,7 @@ test("a changed message is explained by its latest change, also in Recent chat, 
     trace,
     [handle!.record!],
     defaults(),
-    playerDebugLiveValue(session.snapshot),
+    playerDebugLiveValue(playerRuntimeDebugVariables(session).variables),
   );
   assert.equal(row?.kind === "record" && row.text.now, shown);
 });

@@ -7,6 +7,7 @@ import {
   playerRuntimeForeground,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
@@ -262,7 +263,7 @@ test("a default that is null or blank when the field opens starts the field empt
           ...(stored === undefined ? {} : { scriptStorage: [{ key: "saved", value: stored }] }),
         },
       );
-      assert.equal(session.snapshot.failure, null, label);
+      assert.equal(session.state.failure, null, label);
       const foreground = playerRuntimeForeground(session);
       assert.equal(foreground?.kind, kind, label);
       assert.equal("prefill" in foreground, false, label);
@@ -325,7 +326,7 @@ test("an open field without a prefill restores without one", () => {
     { temporalContext: AMSTERDAM },
   );
   const reopened = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
-  assert.equal(validateRuntimeSnapshot(reopened.snapshot, reopened.plan).valid, true);
+  assert.equal(validateRuntimeSnapshot(playerRuntimeSnapshot(reopened), reopened.plan).valid, true);
   assert.deepEqual(playerRuntimeForeground(reopened), playerRuntimeForeground(session));
   assert.equal("prefill" in playerRuntimeForeground(reopened)!, false);
 });

@@ -11,7 +11,10 @@ import {
   playerDebugMessageOrigin,
   playerDebugVariables,
 } from "../../debug-variables.js";
-import { playerRuntimeTranscriptMessage } from "../../runtime-adapter.js";
+import {
+  playerRuntimeDebugVariables,
+  playerRuntimeTranscriptMessage,
+} from "../../runtime-adapter.js";
 import DebugTraceRows from "./DebugTraceRows.vue";
 import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "./usePlayerSession";
@@ -35,8 +38,15 @@ watch(
   () => (props.active ? props.player.session.value : session.value),
   (shown) => (session.value = shown),
 );
+// Its variables with bounded previews, read once for each session the view shows.
+const variables = shallowRef(
+  session.value === null ? null : playerRuntimeDebugVariables(session.value),
+);
+watch(session, (shown) => {
+  variables.value = shown === null ? null : playerRuntimeDebugVariables(shown);
+});
 const live = computed(() =>
-  session.value === null ? null : playerDebugLiveValue(session.value.snapshot),
+  variables.value === null ? null : playerDebugLiveValue(variables.value.variables),
 );
 
 const outputPages = ref(1);
@@ -95,13 +105,8 @@ const background = ref(false);
 const filter = ref("");
 const groupPages = reactive(new Map<string, number>());
 const groups = computed(() => {
-  if (!background.value || session.value === null) return [];
-  return playerDebugVariables(
-    session.value.plan,
-    session.value.snapshot,
-    trace.value,
-    filter.value,
-  );
+  if (!background.value || session.value === null || variables.value === null) return [];
+  return playerDebugVariables(session.value.plan, variables.value, trace.value, filter.value);
 });
 const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ?? 1);
 </script>

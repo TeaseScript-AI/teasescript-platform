@@ -3,7 +3,7 @@ import test from "node:test";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
-import { createPlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { createPlayerRuntimeSession, playerRuntimeSnapshot } from "../player/runtime-adapter.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import {
   checkStorageTransferImages,
@@ -428,9 +428,16 @@ test("a deeply nested value a script saved moves as a file and as text", async (
   const session = createPlayerRuntimeSession(
     `let nested = ${"[".repeat(depth)}1${"]".repeat(depth)}\nsave nested as "deep"\nexit`,
   );
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const deep: StorageBundle = {
-    scripts: [{ scope: "script", name: null, photos: [], entries: session.snapshot.scriptStorage }],
+    scripts: [
+      {
+        scope: "script",
+        name: null,
+        photos: [],
+        entries: playerRuntimeSnapshot(session).scriptStorage,
+      },
+    ],
     images: [],
   };
   // Compared as JSON text written without recursion, since a recursive comparison cannot reach the bottom.

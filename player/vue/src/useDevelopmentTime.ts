@@ -8,8 +8,8 @@ import {
   playerRuntimeMedia,
   stepPlayerRuntimeTime,
   type PlayerRuntimeSession,
+  type PlayerRuntimeState,
 } from "../../runtime-adapter.js";
-import type { RuntimeSnapshot } from "../../../src/index.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // How long one task may observe events of a jump before it yields to input and rendering.
@@ -31,17 +31,15 @@ export function useDevelopmentTime(
   const autoSkip = ref(initial.autoSkip);
   const jumping = ref(false);
 
-  const snapshot = computed(() => player.session.value?.snapshot ?? null);
-  const canSkip = computed(
-    () => !jumping.value && snapshot.value !== null && skippable(snapshot.value),
-  );
+  const state = computed(() => player.session.value?.state ?? null);
+  const canSkip = computed(() => !jumping.value && state.value !== null && skippable(state.value));
   // A session that ended has no scene time left to advance.
   const canAdvance = computed(
     () =>
       !jumping.value &&
-      snapshot.value !== null &&
-      snapshot.value.status !== "halted" &&
-      snapshot.value.status !== "failed",
+      state.value !== null &&
+      state.value.status !== "halted" &&
+      state.value.status !== "failed",
   );
   // A state Debug's rewind restored is inspected until input adopts it; auto-skip waits for that.
   const autoSkipDue = computed(
@@ -49,11 +47,11 @@ export function useDevelopmentTime(
       canSkip.value &&
       autoSkip.value &&
       !player.rewind.inspecting.value &&
-      autoSkippable(snapshot.value!),
+      autoSkippable(state.value!),
   );
 
   function record(from: PlayerRuntimeSession, to: PlayerRuntimeSession) {
-    const skippedMs = to.snapshot.observedSessionTimeMs - from.snapshot.observedSessionTimeMs;
+    const skippedMs = to.state.observedSessionTimeMs - from.state.observedSessionTimeMs;
     if (skippedMs > 0) log(`⏩ ${durationText(skippedMs)} skipped`);
   }
 
@@ -87,9 +85,9 @@ export function useDevelopmentTime(
           next = stepPlayerRuntimeTime(current, targetMs);
         }
         if (current !== published) player.publishJump(current);
-        if (current.snapshot.observedSessionTimeMs >= targetMs) break;
+        if (current.state.observedSessionTimeMs >= targetMs) break;
         // A save, delete, or photo waits for the host; the jump continues once its answer is published.
-        if (playerRuntimeAwaitsHost(current.snapshot))
+        if (playerRuntimeAwaitsHost(current.state))
           await new Promise<void>((resolve) => (wake = resolve));
         else if (current !== published) await new Promise((resolve) => setTimeout(resolve, 0));
         else break;
@@ -105,26 +103,24 @@ export function useDevelopmentTime(
   async function skip() {
     if (canSkip.value)
       await jump((session) =>
-        playerRuntimeAwaitsHost(session.snapshot)
-          ? null
-          : nextPlayerRuntimeEventMs(session.snapshot),
+        playerRuntimeAwaitsHost(session.state) ? null : nextPlayerRuntimeEventMs(session.state),
       );
   }
   // A jump that starts while the host answers a save, delete, or photo waits for that answer first.
   async function advanceBy(milliseconds: number) {
     if (canAdvance.value)
-      await jump((session) => session.snapshot.observedSessionTimeMs + milliseconds);
+      await jump((session) => session.state.observedSessionTimeMs + milliseconds);
   }
 
   /** Skips events for one task, then publishes them as one jump. */
   function autoSkipTask() {
     const start = player.observe();
-    if (start === null || !autoSkippable(start.snapshot)) return;
+    if (start === null || !autoSkippable(start.state)) return;
     let current = start;
     const until = performance.now() + JUMP_TASK_MS;
     do {
-      current = advancePlayerRuntimeTime(current, nextPlayerRuntimeEventMs(current.snapshot)!);
-    } while (performance.now() < until && autoSkippable(current.snapshot));
+      current = advancePlayerRuntimeTime(current, nextPlayerRuntimeEventMs(current.state)!);
+    } while (performance.now() < until && autoSkippable(current.state));
     player.publishJump(current);
     record(start, current);
   }
@@ -151,16 +147,16 @@ export function useDevelopmentTime(
 
 export type DevelopmentTime = ReturnType<typeof useDevelopmentTime>;
 
-function skippable(snapshot: RuntimeSnapshot): boolean {
-  return !playerRuntimeAwaitsHost(snapshot) && nextPlayerRuntimeEventMs(snapshot) !== null;
+function skippable(state: PlayerRuntimeState): boolean {
+  return !playerRuntimeAwaitsHost(state) && nextPlayerRuntimeEventMs(state) !== null;
 }
 
 /** Auto-skip leaves input to the player and does not run ahead of a load result, which decides what happens next. */
-function autoSkippable(snapshot: RuntimeSnapshot): boolean {
+function autoSkippable(state: PlayerRuntimeState): boolean {
   return (
-    skippable(snapshot) &&
-    activePlayerRuntimeInteraction(snapshot) === null &&
-    playerRuntimeMedia(snapshot).media.every((media) => media.loaded)
+    skippable(state) &&
+    activePlayerRuntimeInteraction(state) === null &&
+    playerRuntimeMedia(state).media.every((media) => media.loaded)
   );
 }
 

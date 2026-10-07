@@ -28,7 +28,7 @@ accept syntax, architecture, or implementation details.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
   [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
-  boundaries.
+  boundaries, on which the Player runs its sessions.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
   host-acknowledged atomic writes under [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
   with a Clear saved script data control.

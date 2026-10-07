@@ -11,6 +11,14 @@ projected audio through `player/media-device.ts` and shows the Stage image; brow
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
 
+The Player runs each session on one [runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication
+of it: `state` holds the view, projections, active calls, and date and time presentation it shows, and
+`playerRuntimeSnapshot` exports the complete state only where one is kept, such as a restore point, a debug export, a
+rewind point, or a saved-data adoption. An operation goes through a publication that shows the current state; once an
+operation changed the state, one made from an earlier publication throws. When an operation throws, the error reaches
+the Player, and the next use rebuilds the state of the latest publication from the calls the session's [debug
+recorder](DEBUGGER.md#debug-export) logged, so play continues from the state the Player showed.
+
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
 ## Accepted model

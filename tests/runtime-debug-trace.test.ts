@@ -41,9 +41,11 @@ import {
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { TraceStore } from "../src/runtime/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { playerStateOf } from "./helpers/player-state.js";
 
 /*
  * The opt-in debug trace (docs/RUNTIME.md#debug-trace) explains values with what execution actually computed. Every
@@ -149,7 +151,7 @@ function play(plan: InstructionPlan, options: PlayOptions = {}): Played {
         ),
       );
     } else {
-      const next = nextPlayerRuntimeEventMs(snapshot);
+      const next = nextPlayerRuntimeEventMs(playerStateOf(plan, snapshot));
       assert.notEqual(next, null, "a waiting scenario without input must have a next event");
       apply(observeTime(plan, snapshot, next, [], debug));
     }
@@ -566,13 +568,13 @@ test("a media block's own handle is its first variable", () => {
     ].join("\n"),
     debug,
   );
-  const media = playerRuntimeMedia(session.snapshot).media[0]!;
+  const media = playerRuntimeMedia(session.state).media[0]!;
   session = reportPlayerRuntimeMediaLoad(session, media.mediaId, {
     kind: "loaded",
     durationMs: 10_000,
   }).session;
   session = advancePlayerRuntimeTime(session, 60_000);
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const said = session.events.find((event) => event.kind === "say")!;
   const steps = lineage(trace, trace.outputRecord(said.sequence));
   assert.deepEqual(
@@ -1000,7 +1002,7 @@ test("a message held behind pacing keeps its causes until it is shown", () => {
     debug,
   );
   session = advancePlayerRuntimeTime(session, 60_000);
-  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.state.status, "halted");
   const outputs = trace.outputs().map((id) => record(trace, id));
   assert.deepEqual(
     outputs.map((output) => lineage(trace, output.id).map((step) => step.target ?? step.kind)),
@@ -1054,9 +1056,9 @@ test("restore and attaching mid-run start a new epoch that names unrecorded hist
     ),
   );
 
-  // An operation on a snapshot that is not the last traced result cannot continue earlier links.
+  // An operation on a session that is not the last traced one cannot continue earlier links.
   const epoch = attached.status().epoch;
-  observePlayerRuntimeTime(withPlayerRuntimeDebugTrace(restored, attached), 0);
+  observePlayerRuntimeTime(withPlayerRuntimeDebugTrace(answered.session, attached), 0);
   assert.equal(attached.status().epoch, epoch + 1);
 });
 
@@ -1086,11 +1088,11 @@ function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSessi
   let edited = false;
   let pressed = false;
   let restored = false;
-  for (let guard = 0; session.snapshot.status === "waiting"; guard += 1) {
+  for (let guard = 0; session.state.status === "waiting"; guard += 1) {
     assert.ok(guard < 100, "the Player scenario must end");
     const foreground = playerRuntimeForeground(session);
-    const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
-    const unloaded = playerRuntimeMedia(session.snapshot).media.find((media) => !media.loaded);
+    const write = pendingPlayerRuntimeStorageWrite(session.state);
+    const unloaded = playerRuntimeMedia(session.state).media.find((media) => !media.loaded);
     if (foreground?.kind === "choose") {
       session = selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!.session;
     } else if (foreground?.kind === "ask-text") {
@@ -1105,9 +1107,9 @@ function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSessi
         kind: "loaded",
         durationMs: 10_000,
       }).session;
-    } else if (!pressed && playerRuntimePermanentButtons(session.snapshot).length > 0) {
+    } else if (!pressed && playerRuntimePermanentButtons(session.state).length > 0) {
       pressed = true;
-      const [button] = playerRuntimePermanentButtons(session.snapshot);
+      const [button] = playerRuntimePermanentButtons(session.state);
       session = pressPlayerRuntimePermanentButton(session, button!.buttonId).session;
     } else if (!restored) {
       restored = true;
@@ -1118,10 +1120,10 @@ function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSessi
       );
       session = continuePlayerRuntimeSession(session, {
         wallClockMs: 1_790_942_460_000,
-        temporalContext: session.snapshot.temporalCaptures[0]!.context,
+        temporalContext: playerRuntimeSnapshot(session).temporalCaptures[0]!.context,
       }).session;
     } else {
-      const next = nextPlayerRuntimeEventMs(session.snapshot);
+      const next = nextPlayerRuntimeEventMs(session.state);
       assert.notEqual(next, null);
       session = observePlayerRuntimeTime(session, next!).session;
     }
@@ -1157,8 +1159,8 @@ test("Debug off leaves every Player adapter path unchanged and does no trace wor
   }
   const trace = new RuntimeDebugContext();
   const on = drivePlayer(trace);
-  assert.equal(off.snapshot.status, "halted");
-  assert.deepEqual(on.snapshot, off.snapshot);
+  assert.equal(off.state.status, "halted");
+  assert.deepEqual(playerRuntimeSnapshot(on), playerRuntimeSnapshot(off));
   assert.deepEqual(on.events, off.events);
   assert.deepEqual(on.transcriptEntries, off.transcriptEntries);
   assert.equal(

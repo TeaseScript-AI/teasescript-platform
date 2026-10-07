@@ -30,16 +30,16 @@ export function useRuntimeSceneClock(
   const displayTimeMs = ref(0);
 
   function sceneTimeMs(current: PlayerRuntimeSession): number {
-    if (paused.value) return current.snapshot.observedSessionTimeMs;
-    return Math.max(current.snapshot.observedSessionTimeMs, performance.now() - origin);
+    if (paused.value) return current.state.observedSessionTimeMs;
+    return Math.max(current.state.observedSessionTimeMs, performance.now() - origin);
   }
 
   /** Continues from the session's persisted time; call after starting or restoring a session. */
   function rebase() {
     const current = session.value;
     if (!current) return;
-    origin = performance.now() - current.snapshot.observedSessionTimeMs;
-    displayTimeMs.value = current.snapshot.observedSessionTimeMs;
+    origin = performance.now() - current.state.observedSessionTimeMs;
+    displayTimeMs.value = current.state.observedSessionTimeMs;
   }
 
   /** Submits an ordinary time observation and publishes the resulting session. */
@@ -61,12 +61,8 @@ export function useRuntimeSceneClock(
     // A queued timer or media block waits for a pending storage write, and catch-up holds at its due time: an overdue
     // deadline cannot progress until the acknowledgement, whose published session schedules again. Without a queued
     // block, deadlines are observed as usual.
-    if (
-      pendingPlayerRuntimeStorageWrite(current.snapshot) &&
-      current.snapshot.pendingTimerHandlers.length > 0
-    )
-      return;
-    const deadlines = playerRuntimeDeadlines(current.snapshot);
+    if (pendingPlayerRuntimeStorageWrite(current.state) && current.state.queuedBlocks > 0) return;
+    const deadlines = playerRuntimeDeadlines(current.state);
     if (deadlines.length === 0) return;
     const delay = Math.min(...deadlines) - sceneTimeMs(current);
     wakeUp = setTimeout(observe, Math.min(MAX_TIMEOUT_MS, Math.max(0, delay)));
@@ -75,7 +71,7 @@ export function useRuntimeSceneClock(
   tryOnScopeDispose(() => scheduleWakeUp(null));
 
   const timers = computed(() =>
-    session.value ? playerRuntimeTimers(session.value.snapshot, displayTimeMs.value) : [],
+    session.value ? playerRuntimeTimers(session.value.state, displayTimeMs.value) : [],
   );
   // Presentation estimates only; canonical scene time advances through observations. Presented timers keep the estimate
   // current, and so does any other presentation that asks while it is shown, such as a Debug countdown.
