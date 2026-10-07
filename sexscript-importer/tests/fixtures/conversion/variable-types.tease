@@ -4,6 +4,20 @@ function sexscriptLegacyCall(action, args): boolean | number | null {
     return chanceOrFlag(args[0])
   }
 }
+function sexscriptLegacyLoadInteger(key) {
+  let value = load key
+  if value != null {
+    save toInteger(value) as key
+  }
+  return load key
+}
+function sexscriptLegacyLoadFloat(key) {
+  let value = load key
+  if value != null {
+    save toNumber(value) as key
+  }
+  return load key
+}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -46,10 +60,10 @@ function fraction {
 let whole = toInteger(fraction())
 whole = toInteger(fraction() + 1)
 save 4 as "x.count"
-let stored: integer = load "x.count"
+let stored: integer = sexscriptLegacyLoadInteger("x.count")
 // Another storage read may hold a fraction, which Groovy truncated.
 save 2.5 as "x.ratio"
-let ratio = toInteger(load("x.ratio"))
+let ratio = toInteger(sexscriptLegacyLoadFloat("x.ratio"))
 say "Ratio ${ratio}"
 // A number that starts as null, and that nothing compares with null, starts at 0.
 let later: number = 0
@@ -84,7 +98,7 @@ if (choose yes: "Yes", no: "No") == "yes" {
 }
 say "${words.length}"
 // A variable declared String converted every value stored in it to text, and kept null.
-let startDelay = load "training.startDelay"
+let startDelay = sexscriptLegacyLoadInteger("training.startDelay")
 let delayText: string? = null
 if startDelay == null {
   delayText = "(not set)"

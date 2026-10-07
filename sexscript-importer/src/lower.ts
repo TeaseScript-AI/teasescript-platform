@@ -44,6 +44,7 @@ import { withParagraphs } from "./paragraphs.ts";
 import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
 import { withMessageHandles } from "./message-handles.ts";
+import { withParsedLoads } from "./parsed-loads.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1424,14 +1425,16 @@ export function lowerParsedFile(
     if (!callsFunction([typedStatements, others], "sexscriptLegacyTruth"))
       context.syntheticHelpers.delete("truth");
   }
-  // The passes over the typed statements, in this order: a button's seconds kept as a duration, empty texts dropped,
+  // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
+  // kept as a duration, empty texts dropped,
   // animations and counters made messages that change in place, legacy waits replaced by reading time, repeated texts
   // shortened, texts folded into asks, paragraphs split, and `instant` taken away where it would cut a reading time
   // short.
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withElapsedDurations(typedStatements, diagnostics, shared);
+  let texts = withParsedLoads(typedStatements, context.syntheticHelpers);
+  texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withReadingTimes(texts, diagnostics);
@@ -1626,7 +1629,10 @@ function lowerHelperCompilationUnit(
     withReadingTimes(
       withMessageHandles(
         withElapsedDurations(
-          withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+          withParsedLoads(
+            withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+            baseContext.syntheticHelpers,
+          ),
           diagnostics,
           true,
         ),
@@ -14349,6 +14355,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     if (key === null) return null;
     if (call.name === "loadInteger" || call.name === "receiveInteger")
       return { kind: "load", key, integer: true };
+    if (call.name === "loadFloat") return { kind: "load", key, number: true };
     const shape = storageKeyShape(call.arguments[0]!);
     if (call.name === "loadString" && shape !== null && context.nonTextKeys.has(shape)) {
       addDiagnostic(

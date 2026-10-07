@@ -87,7 +87,7 @@ implemented):
 | a variable that receives a function result that may be absent, or a storage read that the script then tests for null; `def b = a` where `a` may be null | `let x: integer? = 7`, since a possibly null value fits only an optional place (ADR 0021 rule 1.9); `let b: string? = a`, since the compiler narrows `a` at the declaration. Other storage reads are checked at runtime when stored |
 | `text += value` | `text = "${text}${value}"` |
 | a list literal mixing types, such as Groovy pairs `[["late", 2], ["rude", 4]]` | `let pairs: (string \| integer)[][] = [["late", 2], ["rude", 4]]` (ADR 0021 rule 1.3), with a note when later elements add a type |
-| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k`, and another storage read `toInteger(load(k))` |
+| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = sexscriptLegacyLoadInteger(k)` (below) |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
 | `setInfos(version, title, summary, author, status, color, language, tags)` | the `---` file header (V30 §41, #575): `title`, `author`, `description`, and the legacy tags, which named a script in the legacy catalog, as `keywords` rather than the selection `tags`; the version, status, color, and language have no header field and stay a comment after it, as does a value the script computed (`SX_METADATA_DYNAMIC`, 0 corpus sites); text joined from literals with `+` counts as written. All 23 corpus calls convert |
@@ -103,6 +103,7 @@ implemented):
 | `showButton(text, s)` used as a value (seconds until the click) | the duration where the seconds are only compared with numbers, waited for, or a timeout: `(showButton text, timeout: 30) >= 30 s`, `let t = showButton text` with `while t < 15 s`; elsewhere `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
 | `x = loadInteger(k)` followed by `if (x == null) x = d`, also further down a settings block where the code between neither uses `x`, nor calls script code, nor leaves the block | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`, and the online `receive*` reads) |
+| `loadInteger(k)`, `loadFloat(k)` (legacy parsed the stored text as a number, `loadInteger` dropping the fraction toward zero, so `"5.1"` read 5.1 and 100.5 read 100; a missing key read null) | with a default, `toInteger(load(k, default: d))` and `toNumber(…)`; without one, a generated helper, `sexscriptLegacyLoadInteger(k)` or `sexscriptLegacyLoadFloat(k)`, that stores the parsed value and returns the storage read, so its type stays that of `load`; a null test stays `load(k) == null`. A whole-number variable that receives a `loadFloat()` read with a default is declared a number |
 | `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
 | `loadBoolean(k)` of a key under which the package saves a number or a text (legacy read it as text, true only for "true") | a helper that reads the stored value the same way, a missing one as false, with a note (`SX_LOAD_BOOLEAN_TEXT`); keys match by shape, so `"p" + i + ".chosen"` matches a save under `"p" + 1 + ".chosen"` |
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
@@ -311,8 +312,8 @@ unannotated integer widens to `number` by itself (option B). Measured on the fou
   guards (`if (loadInteger(k) != null) p = loadInteger(k)`) rely on.
 - **Groovy integer declarations coerce:** an `int` stores whole numbers, so every value not known to be an integer
   truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`). The 53 `int`
-  declarations initialized with `loadInteger()` become `let x: integer = load k`, which `main` now checks when the
-  value is stored (#520); in isolated smoke runs with empty storage four Domme3 scripts fail there (`TSR058`), where
+  declarations initialized with `loadInteger()` become `let x: integer = sexscriptLegacyLoadInteger(k)`, which `main`
+  checks when the value is stored (#520); in isolated smoke runs with empty storage four Domme3 scripts fail there (`TSR058`), where
   Groovy's `int` rejected null too. Groovy stored a one-character text in an `int` as its character code (`"3"` became
   51), so a value proven to be text is reported and a truncated value that may be text gets a note
   (`SX_INTEGER_FROM_TEXT`; 0 corpus sites).

@@ -1,3 +1,10 @@
+function sexscriptLegacyLoadInteger(key) {
+  let value = load key
+  if value != null {
+    save toInteger(value) as key
+  }
+  return load key
+}
 // The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
 // the Player's reading time.
 let name = "Ann"
@@ -58,7 +65,7 @@ let note = """
 say note
 // A form's question keeps its first paragraph, the intro, and says the others after the form's fields as its outro.
 let pics = load("game.pics") == true
-let rounds = load "game.rounds"
+let rounds = sexscriptLegacyLoadInteger("game.rounds")
 if rounds == null or rounds == 0 {
   rounds = 3
 }

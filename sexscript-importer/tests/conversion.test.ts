@@ -906,7 +906,9 @@ test(
         // An assembled unit's internal script, such as an add-on, is no entry: the package starts at the story.
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
-        assert.equal(emitTease(unit.main.menu), 'goto "Story/start.tease"\n');
+        // The entry holds the package's global helpers and goes straight to the story, with no menu.
+        const menu = emitTease(unit.main.menu);
+        assert.ok(menu.endsWith('\ngoto "Story/start.tease"\n') && !menu.includes("choose"), menu);
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.

@@ -1,3 +1,10 @@
+function sexscriptLegacyLoadInteger(key) {
+  let value = load key
+  if value != null {
+    save toInteger(value) as key
+  }
+  return load key
+}
 let sexscriptLegacyDeviceButtons = dict{}
 function sexscriptLegacyShowDevice(device, state) {
   if sexscriptLegacyDeviceButtons.contains(device) {
@@ -58,7 +65,7 @@ sexscriptLegacyOpenTray()
 say "Put the key in the tray"
 let switchbox_on = 0
 let switchbox_off = 0
-switchbox_onText = "usbcontrol.exe ${load("training.switchbox")} on"
+switchbox_onText = "usbcontrol.exe ${sexscriptLegacyLoadInteger("training.switchbox")} on"
 // NOTE SX_SWITCH_BUTTON line 18: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
 sexscriptLegacyShowSwitch(switchbox_onText)
 switchbox_off = 1

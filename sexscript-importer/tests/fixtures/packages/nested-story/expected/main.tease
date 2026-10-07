@@ -1,4 +1,11 @@
 // NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.
+global function sexscriptLegacyLoadInteger(key) {
+  let value = load key
+  if value != null {
+    save toInteger(value) as key
+  }
+  return load key
+}
 say "Which script do you want to start?"
 let picked = choose addon: "addon", start: "start"
 switch picked {

@@ -806,8 +806,19 @@ function analyse(
         statement.target.kind === "variable" &&
         type !== undefined &&
         type.kind !== "optional"
-      )
+      ) {
         analysis.loadDefaults.add(statement);
+        // A legacy loadFloat() read parses a number, which a whole-number variable widens to hold.
+        if (
+          statement.value.number === true &&
+          type.kind === "scalar" &&
+          type.name === "integer" &&
+          target.declaration !== null &&
+          !target.integer &&
+          !target.widened
+        )
+          return change(() => (target.widened = true));
+      }
       return;
     }
     const type = bindingType(target);
@@ -1988,10 +1999,10 @@ export function expressionType(
       return UNKNOWN;
     }
     case "load":
-      // A read with a default has the default's type (#541); without one, a missing key reads null.
-      return value.defaultValue === undefined
-        ? { kind: "optional", value: UNKNOWN }
-        : type(value.defaultValue);
+      // A read with a default has the default's type (#541); without one, a missing key reads null. A legacy
+      // loadFloat() read with a default parses a number (withParsedLoads).
+      if (value.defaultValue === undefined) return { kind: "optional", value: UNKNOWN };
+      return value.number === true ? scalar("number") : type(value.defaultValue);
     case "choice":
       // Numeric choice values are integers (#515).
       return scalar(value.labels === undefined ? "integer" : "string");

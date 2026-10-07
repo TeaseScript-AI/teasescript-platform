@@ -1,6 +1,13 @@
 speaker system {
   title: "System"
 }
+function sexscriptLegacyLoadInteger(key) {
+  let value = load key
+  if value != null {
+    save toInteger(value) as key
+  }
+  return load key
+}
 function sexscriptLegacySendImage(reference) {
   let codeValue = "image-${randomInteger(0..1000000000)}"
   save reference as "sexscript.image.${codeValue}"
@@ -31,7 +38,7 @@ if true {
   save 12 as "game.highscore"
 }
 // NOTE SX_ONLINE_STORAGE line 3: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let best = load "game.highscore"
+let best = sexscriptLegacyLoadInteger("game.highscore")
 // A sent image keeps its photo reference under the code sendImage() gives.
 // NOTE SX_FILE_PHOTO line 5: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 let photo = askImage("Take a picture of yourself and choose it")

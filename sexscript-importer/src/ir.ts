@@ -260,9 +260,11 @@ export type IrExpression =
     }
   /**
    * `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage, written
-   * `load key, default: value` (#541). `integer` marks a legacy `loadInteger()`, which read a whole number.
+   * `load key, default: value` (#541). `integer` marks a legacy `loadInteger()`, which parsed the stored text as a
+   * number and dropped its fraction toward zero, and `number` a legacy `loadFloat()`, which parsed it as a number
+   * (withParsedLoads).
    */
-  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression; integer?: true }
+  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression; integer?: true; number?: true }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
    * option gets the identifier label that `choose` returns.

@@ -514,6 +514,8 @@ const PURE_CALLS: ReadonlySet<string> = new Set([
   "randomInteger",
   "abs",
   "getTimestamp",
+  "sexscriptLegacyLoadFloat",
+  "sexscriptLegacyLoadInteger",
   "sexscriptLegacyCompare",
   "sexscriptLegacyIndexOf",
   "sexscriptLegacyItemAt",

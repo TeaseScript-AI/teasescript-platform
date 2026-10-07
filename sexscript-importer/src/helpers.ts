@@ -186,6 +186,8 @@ export type HelperName =
   | "listPart"
   | "listMinus"
   | "booleanText"
+  | "loadInteger"
+  | "loadFloat"
   | "textMinus"
   | "repeatList"
   | "compare"
@@ -259,6 +261,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "stopBackgroundSounds",
   "random",
   "loadFirstTrue",
+  "loadInteger",
+  "loadFloat",
   "indexOf",
   "count",
   "concat",
@@ -350,6 +354,27 @@ const forS = (variable: string, collection: IrExpression, body: IrStatement[]): 
   body,
   span: null,
 });
+/** A storage read whose stored value the conversion parses first, keeping null for a missing key. */
+function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrStatement {
+  const stored: IrExpression = { kind: "load", key: v("key") };
+  return fn(
+    name,
+    ["key"],
+    [
+      letS("value", stored),
+      ifS(bin("!=", v("value"), lit(null)), [
+        {
+          kind: "save",
+          key: v("key"),
+          value: { kind: "call", name: conversion, positional: [v("value")], named: {} },
+          span: null,
+        },
+      ]),
+      ret(stored),
+    ],
+  );
+}
+
 const fn = (name: string, parameters: string[], body: IrStatement[]): IrStatement => ({
   kind: "function",
   name,
@@ -1053,6 +1078,17 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     },
   },
   // Legacy loadBoolean(): a stored value read as text is true only as "true" in any case; a missing one is false here.
+  // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
+  // zero, and read null for a missing key. The stored value takes the parsed form, so the result is the storage read
+  // itself, whose type the compiler checks when it is stored, as for any `load`.
+  loadInteger: {
+    name: "sexscriptLegacyLoadInteger",
+    build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),
+  },
+  loadFloat: {
+    name: "sexscriptLegacyLoadFloat",
+    build: () => parsedLoad("sexscriptLegacyLoadFloat", "toNumber"),
+  },
   booleanText: {
     name: "sexscriptLegacyBooleanText",
     build: () =>

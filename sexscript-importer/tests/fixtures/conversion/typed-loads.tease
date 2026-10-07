@@ -1,0 +1,52 @@
+function sexscriptLegacyLoadInteger(key) {
+  let value = load key
+  if value != null {
+    save toInteger(value) as key
+  }
+  return load key
+}
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
+// Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping the fraction toward
+// zero; a missing key read null.
+save "5.1" as "game.version"
+let lastVersion = toNumber(load("game.version", default: 0))
+if sexscriptLegacyCompare(lastVersion, 4) > 0 {
+  say "Welcome back."
+}
+save 100.5 as "game.points"
+let points = 80
+if load("game.points") != null {
+  // NOTE SX_LOAD_KEEPS_VALUE line 9: Groovy stored null in 'points' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  points = toInteger(load("game.points", default: points))
+}
+say "You have ${points} points."
+let missing = sexscriptLegacyLoadInteger("game.missing")
+if missing == null {
+  say "Nothing stored."
+}
+// A whole-number variable that reads a number widens to hold it.
+let version: number = 0
+function readVersion {
+  // NOTE SX_LOAD_KEEPS_VALUE line 15: Groovy stored null in 'version' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  version = toNumber(load("game.version", default: version))
+}
+readVersion()
+say "Version ${version}"
+exit
