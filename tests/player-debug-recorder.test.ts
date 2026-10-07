@@ -5,6 +5,7 @@ import {
   debugBuildRevisions,
   debugExportFile,
   parseDebugExport,
+  rebuildRecordedSession,
   replayDebugExport,
   type DebugExport,
   type DebugReplayResult,
@@ -28,7 +29,9 @@ import {
   playerRuntimeForeground,
   restorePlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
+  resumePlayerRuntimeRandomDraw,
   selectPlayerRuntimeChoice,
+  setPlayerRuntimeRandomControl,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   stepPlayerRuntimeFormField,
@@ -51,7 +54,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   assert.ok(recording);
   const exported: DebugExport = {
     format: "teasescript-debug-export",
-    version: 3,
+    version: 4,
     build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
     package: { id: null, version: null, contentHash: null },
     incident: {
@@ -247,6 +250,8 @@ test("each call keeps its own copy of the arguments and the store's answers, als
     events: { first: null, count: 0 },
     status: "waiting",
     thrown: null,
+    randomChoices: [],
+    pausedAt: null,
   });
 
   const image = new DebugRecorder();
@@ -570,4 +575,146 @@ test("a value the engine produced, such as a saved list, is recorded as an argum
   assert.equal(recorder.recording()!.complete, true);
   const result = await replay(recorder);
   assert.ok(result.kind === "reproduced" && result.failure?.code === session.state.failure?.code);
+});
+
+/** Exports the recorder's recording, as `replay` does, and returns the parsed export. */
+async function exportedRecording(recorder: DebugRecorder): Promise<DebugExport> {
+  const recording = recorder.recording()!;
+  const file = await debugExportFile(
+    {
+      format: "teasescript-debug-export",
+      version: 4,
+      build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
+      package: { id: null, version: null, contentHash: null },
+      incident: {
+        kind: "requested",
+        code: null,
+        path: null,
+        line: null,
+        column: null,
+        hostError: null,
+      },
+      editedWhileDebugging: null,
+      rewoundWhileDebugging: null,
+      selection: {
+        savedValues: true,
+        answers: true,
+        replay: true,
+        sessionText: true,
+        photos: false,
+        player: false,
+      },
+      omissions: [],
+      checkpoint: createCheckpoint(recording.plan, recording.endSnapshot),
+      checkpointRole: "current",
+      replay: {
+        anchorSnapshot: recording.anchorSnapshot,
+        operations: recording.operations,
+        complete: recording.complete,
+        reason: recording.reason,
+      },
+      photos: [],
+      sections: {},
+    },
+    false,
+  );
+  return parseDebugExport(await file.text());
+}
+
+/**
+ * Plays `draws` random draws of a script, pausing at each and resolving it: the third with a chosen 6, the others
+ * naturally, and the last one only when `resolveLast`.
+ */
+function pausedDraws(
+  draws: number,
+  recorder: DebugRecorder,
+  resolveLast = true,
+): PlayerRuntimeSession {
+  let session = createPlayerRuntimeSession(
+    `wait 1\nlet total = 0\nrepeat ${draws} {\n  total += randomInteger(1..=6)\n}\nsay "\${total}"\nexit`,
+    { recorder },
+  );
+  setPlayerRuntimeRandomControl(session, {});
+  session = observePlayerRuntimeTime(session, 1000).session;
+  for (let resolved = 0; session.state.randomDraw !== null; resolved += 1) {
+    if (!resolveLast && resolved === draws - 1) break;
+    const outcome = resolved === 2 ? ({ kind: "number", value: 6 } as const) : "natural";
+    const resumed = resumePlayerRuntimeRandomDraw(session, {
+      drawId: session.state.randomDraw.drawId,
+      outcome,
+    });
+    assert.equal(resumed.outcome.kind, "resolved");
+    session = resumed.session;
+  }
+  return session;
+}
+
+test("a call paused at random draws stays one record, with only its chosen outcomes", async () => {
+  const recorder = new DebugRecorder();
+  const session = pausedDraws(5, recorder);
+  assert.equal(session.state.randomDraw, null);
+  const operations = recorder.recording()!.operations;
+  assert.ok(operations.every((operation) => operation.kind !== "resumeRandomDraw"));
+  const chosen = operations.flatMap((operation) => operation.randomChoices);
+  assert.equal(chosen.length, 1, "natural resolutions add nothing");
+  assert.deepEqual(chosen[0]!.outcome, { kind: "number", value: 6 });
+  // Many more natural resolutions add no record either.
+  const longer = new DebugRecorder();
+  pausedDraws(40, longer);
+  assert.equal(longer.recording()!.operations.length, operations.length);
+  assert.deepEqual(await replay(recorder), {
+    kind: "reproduced",
+    failure: null,
+    operations: operations.length,
+  });
+  const recording = recorder.recording()!;
+  assert.equal(
+    JSON.stringify(
+      rebuildRecordedSession(recording.plan, recording.anchorSnapshot, operations).exportSnapshot(),
+    ),
+    JSON.stringify(playerRuntimeSnapshot(session)),
+  );
+});
+
+test("a recording that ends paused at a draw replays to the same paused draw", async () => {
+  const recorder = new DebugRecorder();
+  const session = pausedDraws(5, recorder, false);
+  const paused = session.state.randomDraw!;
+  assert.equal(recorder.recording()!.operations.at(-1)!.pausedAt, paused.drawId);
+  assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("a recording that begins at a paused draw keeps its resolution as a call of its own", async () => {
+  const first = pausedDraws(5, new DebugRecorder(), false);
+  const recorder = new DebugRecorder();
+  let session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(first), recorder);
+  setPlayerRuntimeRandomControl(session, {});
+  const paused = session.state.randomDraw!;
+  session = resumePlayerRuntimeRandomDraw(session, {
+    drawId: paused.drawId,
+    outcome: { kind: "number", value: 1 },
+  }).session;
+  const operations = recorder.recording()!.operations;
+  assert.equal(operations[0]!.kind, "resumeRandomDraw");
+  assert.equal(operations[0]!.randomChoices.length, 1);
+  assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("a replay whose chosen outcome differs from the recorded one diverges", async () => {
+  const recorder = new DebugRecorder();
+  pausedDraws(5, recorder);
+  const exported = await exportedRecording(recorder);
+  const operations = exported.replay!.operations.map((operation) =>
+    operation.randomChoices.length === 0
+      ? operation
+      : {
+          ...operation,
+          randomChoices: operation.randomChoices.map((receipt) => ({
+            ...receipt,
+            outcome: { kind: "number" as const, value: 5 },
+          })),
+        },
+  );
+  const result = replayDebugExport({ ...exported, replay: { ...exported.replay!, operations } });
+  assert.equal(result.kind, "diverged");
 });

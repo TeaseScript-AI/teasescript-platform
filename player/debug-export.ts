@@ -13,11 +13,18 @@ import {
   reportMediaLoad,
   updateInteraction,
   restoreCheckpoint,
+  resumeRandomDraw,
   run,
+  pendingRandomDraw,
+  RANDOM_DRAW_KINDS,
+  replayRandomChoices,
   RUNTIME_SNAPSHOT_VERSION,
   serializeCheckpoint,
   type InstructionPlan,
   type InterpreterEvent,
+  type RandomChoiceReceipt,
+  type RandomControlOptions,
+  type RandomOutcome,
   type RuntimeCheckpoint,
   type RuntimeSession,
   type RuntimeSessionResult,
@@ -138,7 +145,11 @@ export type DebugOperationKind = (typeof OPERATION_KINDS)[number];
  * One engine call the Player made, with the plain arguments it passed after the plan and snapshot: `run` takes its run
  * options; `observeTime` the time and media reports; `completeAction` the request; `reportMediaLoad` the media and
  * report; `pressPermanentButton` the button; `recordContinueCapture` the capture; `applyExternalStorageEdit` the edit;
- * `updateInteraction` the form edit.
+ * `updateInteraction` the form edit; `resumeRandomDraw` the resolution of a draw that paused before the anchor.
+ *
+ * A call that paused at a random draw (`docs/RUNTIME.md#controlled-randomness`) stays one record while the Player
+ * resolves its draws: each resolution adds its events and chosen outcomes to the call it continues, and a natural one
+ * adds nothing else, so the record holds the call as one decided run would make it.
  */
 export interface DebugOperation {
   readonly seq: number;
@@ -154,6 +165,10 @@ export interface DebugOperation {
   readonly status: RuntimeSnapshot["status"];
   /** The error name when the call threw. */
   readonly thrown: string | null;
+  /** The random outcomes the Player chose during the call and the resolutions that continued it, in draw order. */
+  readonly randomChoices: readonly RandomChoiceReceipt[];
+  /** The ID of the random draw the call stands paused at, or `null`. */
+  readonly pausedAt: number | null;
 }
 
 export interface DebugAdmissionQuery {
@@ -192,8 +207,9 @@ export class DebugExportError extends Error {
 }
 
 export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
-// 2: adds the `applyExternalStorageEdit` call. 3: adds the `updateInteraction` call.
-export const DEBUG_EXPORT_VERSION = 3;
+// 2: adds the `applyExternalStorageEdit` call. 3: adds the `updateInteraction` call. 4: adds a call's chosen random
+// outcomes and paused draw, and the `resumeRandomDraw` call.
+export const DEBUG_EXPORT_VERSION = 4;
 /** The most JSON a reader decompresses or parses; a diagnostic-tool limit, not a TeaseScript one. */
 export const DEBUG_EXPORT_MAX_JSON_BYTES = 64 * 1024 * 1024;
 
@@ -206,6 +222,7 @@ const OPERATION_KINDS = [
   "recordContinueCapture",
   "applyExternalStorageEdit",
   "updateInteraction",
+  "resumeRandomDraw",
 ] as const;
 const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   run: 1,
@@ -216,6 +233,7 @@ const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   recordContinueCapture: 1,
   applyExternalStorageEdit: 1,
   updateInteraction: 1,
+  resumeRandomDraw: 1,
 };
 const STATUSES = ["ready", "running", "waiting", "halted", "failed"] as const;
 const SELECTION_FIELDS = [
@@ -552,6 +570,8 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
     "events",
     "status",
     "thrown",
+    "randomChoices",
+    "pausedAt",
   ]);
   const seq = count(operation["seq"], `${path}.seq`);
   if (seq !== index + 1) fail(`${path}.seq`, `must be ${index + 1}`);
@@ -585,6 +605,13 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
     fail(path, "must have either an outcome or a thrown error");
   if (thrown !== null && eventCount > 0)
     fail(`${path}.events`, "must be empty for a call that threw");
+  const randomChoices = array(operation["randomChoices"], `${path}.randomChoices`).map(
+    (entry, choiceIndex) => parseReceipt(entry, `${path}.randomChoices[${choiceIndex}]`),
+  );
+  const pausedAt =
+    operation["pausedAt"] === null ? null : count(operation["pausedAt"], `${path}.pausedAt`);
+  if (thrown !== null && (randomChoices.length > 0 || pausedAt !== null))
+    fail(path, "must not choose or pause at random draws when it threw");
   return {
     seq,
     kind,
@@ -594,7 +621,71 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
     events: { first, count: eventCount },
     status: oneOf(operation["status"], `${path}.status`, STATUSES),
     thrown,
+    randomChoices,
+    pausedAt,
   };
+}
+
+/** A chosen random outcome: the draw's ID, site, and kind, and the outcome, which the engine checks when it replays. */
+function parseReceipt(value: unknown, path: string): RandomChoiceReceipt {
+  const receipt = record(value, path);
+  exactly(receipt, path, ["drawId", "site", "kind", "outcome"]);
+  const outcome = record(receipt["outcome"], `${path}.outcome`);
+  const kind = oneOf(outcome["kind"], `${path}.outcome.kind`, [
+    "number",
+    "boolean",
+    "index",
+    "order",
+  ] as const);
+  const field = kind === "index" ? "index" : kind === "order" ? "order" : "value";
+  exactly(outcome, `${path}.outcome`, ["kind", field]);
+  const chosen: RandomOutcome =
+    kind === "number"
+      ? { kind, value: finiteNumber(outcome["value"], `${path}.outcome.value`) }
+      : kind === "boolean"
+        ? { kind, value: boolean(outcome["value"], `${path}.outcome.value`) }
+        : kind === "index"
+          ? { kind, index: count(outcome["index"], `${path}.outcome.index`, true) }
+          : {
+              kind,
+              order: array(outcome["order"], `${path}.outcome.order`).map((index, position) =>
+                count(index, `${path}.outcome.order[${position}]`, true),
+              ),
+            };
+  return {
+    drawId: count(receipt["drawId"], `${path}.drawId`),
+    site: string(receipt["site"], `${path}.site`),
+    kind: oneOf(receipt["kind"], `${path}.kind`, RANDOM_DRAW_KINDS),
+    outcome: chosen,
+  };
+}
+
+function finiteNumber(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) fail(path, "must be a finite number");
+  return value;
+}
+
+/**
+ * The decisions of a recorded call: each chosen outcome at its draw, a pause at the draw it stands paused at, and the
+ * natural outcome everywhere else; `undefined` when it decided nothing, so it runs without control.
+ */
+function recordedRandomControl(operation: DebugOperation): RandomControlOptions | undefined {
+  return operation.randomChoices.length === 0 && operation.pausedAt === null
+    ? undefined
+    : replayRandomChoices(operation.randomChoices, operation.pausedAt);
+}
+
+/** How a replayed call's random decisions differ from its record, or `null` when they match. */
+function randomDifference(
+  operation: DebugOperation,
+  choices: readonly RandomChoiceReceipt[],
+  pausedAt: number | null,
+): string | null {
+  if (JSON.stringify(choices) !== JSON.stringify(operation.randomChoices))
+    return `chose ${choices.length} random outcome(s), recorded ${operation.randomChoices.length}`;
+  if (pausedAt !== operation.pausedAt)
+    return `stands paused at draw ${pausedAt ?? "none"}, recorded ${operation.pausedAt ?? "none"}`;
+  return null;
 }
 
 /** Run options as the engine takes them; the Player passes at most an instruction budget. */
@@ -753,6 +844,7 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
       readonly events: readonly InterpreterEvent[];
       readonly outcome: string | null;
       readonly thrown: string | null;
+      readonly randomChoices: readonly RandomChoiceReceipt[];
     };
     try {
       actual = { ...dispatch(plan, snapshot, operation, capturedMedia), thrown: null };
@@ -762,8 +854,11 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
         events: [],
         outcome: null,
         thrown: error instanceof Error ? error.name : "Error",
+        randomChoices: [],
       };
     }
+    const pausedAt =
+      actual.thrown === null ? (pendingRandomDraw(actual.snapshot)?.drawId ?? null) : null;
     const first = actual.events[0]?.sequence ?? null;
     // An unrecorded store question explains everything after it, so it is reported first.
     const difference =
@@ -777,7 +872,7 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
               ? `emitted ${actual.events.length} event(s) from ${first}, recorded ${operation.events.count} from ${operation.events.first}`
               : actual.snapshot.status !== operation.status
                 ? `left the session ${actual.snapshot.status}, recorded ${operation.status}`
-                : null;
+                : randomDifference(operation, actual.randomChoices, pausedAt);
     if (difference !== null) return diverged(plan, actual.snapshot, operation, difference);
     snapshot = actual.snapshot;
   }
@@ -818,19 +913,33 @@ function dispatch(
   snapshot: RuntimeSnapshot,
   operation: DebugOperation,
   capturedMedia: { holds(reference: string, kind: "image"): boolean },
-): { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[]; outcome: string } {
+): {
+  snapshot: RuntimeSnapshot;
+  events: readonly InterpreterEvent[];
+  outcome: string;
+  randomChoices: readonly RandomChoiceReceipt[];
+} {
   const [first, second] = operation.args;
+  const randomControl = recordedRandomControl(operation);
+  const control = randomControl === undefined ? {} : { randomControl };
   switch (operation.kind) {
     case "run": {
-      const ran = run(plan, snapshot, {}, parseRunOptions(first, "run options"));
-      return { snapshot: ran.snapshot, events: ran.events, outcome: "ran" };
+      const ran = run(plan, snapshot, {}, { ...parseRunOptions(first, "run options"), ...control });
+      return {
+        snapshot: ran.snapshot,
+        events: ran.events,
+        outcome: "ran",
+        randomChoices: ran.randomChoices ?? [],
+      };
     }
+    case "resumeRandomDraw":
+      return withOutcome(resumeRandomDraw(plan, snapshot, first, {}, control));
     case "observeTime":
-      return withOutcome(observeTime(plan, snapshot, first, second));
+      return withOutcome(observeTime(plan, snapshot, first, second, control));
     case "completeAction":
       return withOutcome(completeAction(plan, snapshot, first, { capturedMedia }));
     case "reportMediaLoad":
-      return withOutcome(reportMediaLoad(plan, snapshot, first, second));
+      return withOutcome(reportMediaLoad(plan, snapshot, first, second, control));
     case "pressPermanentButton":
       return withOutcome(pressPermanentButton(plan, snapshot, first));
     case "recordContinueCapture":
@@ -868,13 +977,16 @@ export function rebuildRecordedSession(
         return query.result;
       },
     };
+    session.setRandomControl(recordedRandomControl(operation) ?? null);
     const result = dispatchToSession(session, operation, capturedMedia);
     const first = result.events[0]?.sequence ?? null;
+    const view = session.view();
     if (
       result.outcome !== operation.outcome ||
       result.events.length !== operation.events.count ||
       first !== operation.events.first ||
-      session.view().status !== operation.status
+      view.status !== operation.status ||
+      randomDifference(operation, result.randomChoices, view.randomDraw?.drawId ?? null) !== null
     )
       throw new Error(`call ${operation.seq} (${operation.kind}) did not repeat its record`);
   }
@@ -885,15 +997,28 @@ function dispatchToSession(
   session: RuntimeSession,
   operation: DebugOperation,
   capturedMedia: { holds(reference: string, kind: "image"): boolean },
-): { readonly events: RuntimeSessionResult["events"]; readonly outcome: string } {
+): {
+  readonly events: RuntimeSessionResult["events"];
+  readonly outcome: string;
+  readonly randomChoices: readonly RandomChoiceReceipt[];
+} {
   const [first, second] = operation.args;
   const settled = (result: {
     events: RuntimeSessionResult["events"];
     outcome: { kind: string };
-  }) => ({ events: result.events, outcome: result.outcome.kind });
+    randomChoices?: readonly RandomChoiceReceipt[];
+  }) => ({
+    events: result.events,
+    outcome: result.outcome.kind,
+    randomChoices: result.randomChoices ?? [],
+  });
   switch (operation.kind) {
-    case "run":
-      return { events: session.run(parseRunOptions(first, "run options")).events, outcome: "ran" };
+    case "run": {
+      const ran = session.run(parseRunOptions(first, "run options"));
+      return { events: ran.events, outcome: "ran", randomChoices: ran.randomChoices ?? [] };
+    }
+    case "resumeRandomDraw":
+      return settled(session.resumeRandomDraw(first));
     case "observeTime":
       return settled(session.observeTime(first, second));
     case "completeAction":
@@ -915,8 +1040,14 @@ function withOutcome(result: {
   snapshot: RuntimeSnapshot;
   events: readonly InterpreterEvent[];
   outcome: { kind: string };
+  randomChoices?: readonly RandomChoiceReceipt[];
 }) {
-  return { snapshot: result.snapshot, events: result.events, outcome: result.outcome.kind };
+  return {
+    snapshot: result.snapshot,
+    events: result.events,
+    outcome: result.outcome.kind,
+    randomChoices: result.randomChoices ?? [],
+  };
 }
 
 function diverged(

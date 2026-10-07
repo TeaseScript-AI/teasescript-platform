@@ -126,6 +126,8 @@ class Recording {
       events: { first: events[0]?.sequence ?? null, count: events.length },
       status: snapshot.status,
       thrown: null,
+      randomChoices: [],
+      pausedAt: null,
     });
   }
   export(overrides: Partial<DebugExport> = {}): DebugExport {
@@ -667,6 +669,8 @@ test("a recorded call that threw is compared like any other, and a failed anchor
     events: { first: null, count: 0 },
     status: "ready",
     thrown: "RuntimeDataError",
+    randomChoices: [],
+    pausedAt: null,
   };
   const exported = (operation: DebugOperation): DebugExport => ({
     ...failedRecording().export(),
@@ -725,6 +729,8 @@ test("a recorded call that threw is compared like any other, and a failed anchor
           events: { first: observed.events[0]?.sequence ?? null, count: observed.events.length },
           status: observed.snapshot.status,
           thrown: null,
+          randomChoices: [],
+          pausedAt: null,
         },
       ],
       complete: true,

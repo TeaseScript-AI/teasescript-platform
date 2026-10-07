@@ -45,6 +45,9 @@ import {
   type TemporalContext,
   type TimeObservationOutcome,
   type InteractionUpdateOutcome,
+  type RandomControlOptions,
+  type RandomDrawRequest,
+  type RandomDrawResolutionOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { formValueText } from "../src/interaction-answers.js";
@@ -139,6 +142,8 @@ export class PlayerRuntimeEngine {
   /** The first publication that shows the current state; it and every later one share it. */
   #current: number;
   #thrown: { readonly error: unknown } | null = null;
+  /** Which random draws the host decides or pauses at, which a rebuilt runner takes over. */
+  #randomControl: RandomControlOptions | null = null;
 
   public constructor(runtime: RuntimeSession, revision: number) {
     this.#runtime = runtime;
@@ -153,6 +158,7 @@ export class PlayerRuntimeEngine {
     if (this.#thrown === null) return this.#runtime;
     const rebuilt = at.recorder?.recover(this, this.#revision) ?? null;
     if (rebuilt === null) throw this.#thrown.error;
+    rebuilt.setRandomControl(this.#randomControl);
     this.#runtime = rebuilt;
     this.#thrown = null;
     return rebuilt;
@@ -184,7 +190,8 @@ export class PlayerRuntimeEngine {
         args,
         (admission) => {
           const result = invoke(runtime, admission);
-          return { ...result, status: runtime.view().status };
+          const view = runtime.view();
+          return { ...result, status: view.status, pausedAt: view.randomDraw?.drawId ?? null };
         },
         continuation,
       );
@@ -232,6 +239,12 @@ export class PlayerRuntimeEngine {
   /** Publication `at`'s variables with bounded previews, for Debug. */
   variablePreviews(at: PlayerRuntimePublication): RuntimeSessionVariablePreviews {
     return this.runtimeAt(at).variablePreviews();
+  }
+
+  /** Changes which random draws the host decides or pauses at, for publication `at`'s runner and any rebuilt later. */
+  setRandomControl(at: PlayerRuntimePublication, randomControl: RandomControlOptions | null): void {
+    this.runtimeAt(at).setRandomControl(randomControl);
+    this.#randomControl = randomControl;
   }
 
   /** Starts `recorder`'s recording at publication `at`, whose state is the latest publication's. */
@@ -1592,6 +1605,35 @@ export function pressPlayerRuntimePermanentButton(
   });
 }
 
+/**
+ * Changes which random draws the host decides or pauses at (`docs/RUNTIME.md#controlled-randomness`); `null` leaves
+ * every draw natural. It changes no state; a draw already paused stays paused.
+ */
+export function setPlayerRuntimeRandomControl(
+  session: PlayerRuntimeSession,
+  randomControl: RandomControlOptions | null,
+): void {
+  session.engine.setRandomControl(session, randomControl);
+}
+
+/**
+ * Resolves the random draw the session is paused at, naturally or with a chosen outcome, and finishes the engine call
+ * it interrupted.
+ */
+export function resumePlayerRuntimeRandomDraw(
+  session: PlayerRuntimeSession,
+  request: RandomDrawRequest,
+): PlayerRuntimeControlResult<RandomDrawResolutionOutcome> {
+  const operation = session.engine.call(session, "resumeRandomDraw", [request], (runtime) =>
+    runtime.resumeRandomDraw(request, traceOptions(session.debugTrace)),
+  );
+  // A resolved draw may leave the script runnable, as when it paused a time observation.
+  return Object.freeze({
+    session: applyOperation(session, operation, "resolved"),
+    outcome: operation.outcome,
+  });
+}
+
 /** Where the script shows the camera view now: in the floating window, over the Stage, or not at all (`null`). */
 export function playerRuntimeCameraView(state: PlayerRuntimeState): "window" | "stage" | null {
   return state.cameraView?.shown === true ? state.cameraView.placement : null;
@@ -1721,6 +1763,7 @@ const REFUSALS: ReadonlySet<string> = new Set<
   | MediaReportOutcome["kind"]
   | ExternalStorageEditOutcome["kind"]
   | PermanentButtonPressOutcome["kind"]
+  | RandomDrawResolutionOutcome["kind"]
 >([
   "alreadySettled",
   "staleAction",
@@ -1741,6 +1784,10 @@ const REFUSALS: ReadonlySet<string> = new Set<
   "busy",
   "removedButton",
   "unknownButton",
+  "randomDrawPending",
+  "noPendingDraw",
+  "staleDraw",
+  "invalidOutcome",
 ]);
 
 /** The next publication of the session: a new revision with what it shows now. */
