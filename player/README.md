@@ -126,8 +126,9 @@ Player Settings' **Debug menu** adds the **Debug** panel for testing long script
 ([`docs/DEBUGGER.md`](../docs/DEBUGGER.md#player-debug)); it starts off on every load, and on with the explicit `?dev`
 opt-in. The panel's **Debug** switch starts on and pauses its time controls (#615) and countdowns. **Skip event** advances scene time to the next wait, timer
 expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer without an expiry block
-and passes of looping audio without cues are no stops), and **+10 s** and **+1 min** apply only while the script waits
-for player input. The **Auto-skip** switch skips event after event while no input is pending and no media is loading, so
+and passes of looping audio without cues are no stops), and **+10 s** and **+1 min** advance it by that amount at any
+point of a running session, also during waits and chat pacing, after a pending save, delete, or photo is answered.
+The **Auto-skip** switch skips event after event while no input is pending and no media is loading, so
 a player's think time and the background timers running meanwhile stay real time; a badge over the Stage shows it while
 it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off; Debug turned on again later starts with
 it off. Jumps are ordinary observations (see
