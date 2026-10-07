@@ -106,6 +106,9 @@ const LATER_GAPS = [1, 6, 11.5, 18, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400].map(
 /** With forward time: the gap before a next session, and before the next day's session of a plan that reads the clock. */
 const NEXT_SESSION_GAP = 60_000;
 const NEXT_DAY_GAP = 24 * 3_600_000;
+/** With realignment: inputs a replay may skip, and buttons it may press that its path does not have, per replay. */
+const MAX_SKIPS = 8;
+const MAX_FORCED = 8;
 /** With forward time: steps before the step that evaluated a clock condition at which the player may also continue. */
 const LATER_BACK = 1;
 
@@ -185,6 +188,13 @@ export interface ExploreOptions {
    * search also aims answers at asks whose prompt the code computes. Off by default.
    */
   readonly comparedAnswers?: boolean;
+  /**
+   * Replay realignment: a directed attempt or corpus entry that meets an input which no longer fits goes on with the
+   * input that fits there (the same option or button by label, the wait there is, a later input of the path), or the
+   * only button there is, instead of stopping; and the goals of a condition after `else` include the earlier conditions
+   * of its chain taking their other way. Off by default.
+   */
+  readonly realign?: boolean;
 }
 
 /**
@@ -215,8 +225,13 @@ export interface CorpusResult {
   /** Entries given; replayed (entries of another seed, or past the budget, are kept unreplayed); stale; kept. */
   loaded: number;
   replayed: number;
-  /** Replayed entries with an input that no longer fits the pending action, or that the runtime rejects. */
+  /**
+   * Replayed entries with an input that no longer fits the pending action, or that the runtime rejects; with
+   * realignment, one that no input of the entry, nor a lone button, fits.
+   */
   stale: number;
+  /** With realignment: replayed entries that went on past an input that no longer fit. */
+  realigned?: number;
   written: number;
   /** Inputs the replay applied, and the time it took from the budget. */
   replaySteps: number;
@@ -814,6 +829,8 @@ interface Target {
   /** 0 continues with the next instruction (condition true, loop entered), 1 goes to the target. */
   readonly way: 0 | 1;
   readonly goals: readonly Goal[];
+  /** With realignment: the goals of the earlier conditions of its `else if` chain taking their other way. */
+  readonly guards: readonly Goal[];
   attempts: number;
   reach: { label: "play" | "clock"; via: "directed" | "search"; repro: Repro } | null;
   /** Session chains toward the stored values its condition needs, by key. */
@@ -909,6 +926,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const allConstants = new Map(constants);
   for (const [index, found] of fixed) allConstants.set(index, found.value);
   const cells = options.cells === true ? new Cells(comparedSlots(flow, instructions)) : null;
+  const elseIfs =
+    options.realign === true ? elseIfChains(instructions) : new Map<number, number[]>();
   const store = new SnapshotStore();
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
@@ -1273,6 +1292,32 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     });
   };
 
+  /**
+   * With realignment: how a replayed path goes on in the state of `runtime` before its input `index`. The input that
+   * fits there ({@link aligned}): the path's own, or one a few inputs on (skipping those between); or, when none does,
+   * the only button there is, before the same input again. Null to stop: nothing fits, or the allowance is spent.
+   */
+  const realign = (
+    runtime: Runtime,
+    inputs: readonly ExplorerInput[],
+    index: number,
+    allowance: { skipped: number; forced: number },
+  ): { input: ExplorerInput; next: number } | null => {
+    const choices = session.options(runtime);
+    const last = Math.min(inputs.length, index + 1 + MAX_SKIPS - allowance.skipped);
+    for (let ahead = index; ahead < last; ahead += 1) {
+      const input = aligned(inputs[ahead]!, choices);
+      if (input === null) continue;
+      allowance.skipped += ahead - index;
+      return { input, next: ahead + 1 };
+    }
+    const buttons = choices.filter((choice) => choice.kind !== "wait" && choice.kind !== "press");
+    if (buttons.length !== 1 || buttons[0]!.kind !== "button" || allowance.forced >= MAX_FORCED)
+      return null;
+    allowance.forced += 1;
+    return { input: buttons[0]!, next: index };
+  };
+
   const runAttempt = (attempt: Attempt): void => {
     const target = targets.get(attempt.target);
     if (target === undefined) return;
@@ -1296,8 +1341,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       runtime = runtimeOf(node);
       if (runtime?.view().status !== "waiting") runtime = null;
     }
-    for (const input of attempt.inputs) {
+    const allowance = { skipped: 0, forced: 0 };
+    for (let index = 0; index < attempt.inputs.length;) {
       if (runtime === null || outOfBudget()) break;
+      let input = attempt.inputs[index]!;
+      index += 1;
+      if (options.realign === true) {
+        const found = realign(runtime, attempt.inputs, index - 1, allowance);
+        if (found === null) break;
+        ({ input, next: index } = found);
+      }
       const next = step(node, runtime, input);
       if (next === null) break;
       directedTransitions += 1;
@@ -1344,6 +1397,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     for (; chain.scanned < left.length; chain.scanned += 1) {
       const entry = left[chain.scanned]!;
       const measured = storageDistance(entry.entries, chain.matches, goal);
+      // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
+      for (const guard of target.guards)
+        if (guard !== goal && guard.source.kind === "storage" && guard.source.key !== key)
+          measured.distance += guardDistance(entry.entries, guard);
       const closest = chain.closest;
       if (
         measured.distance < Infinity &&
@@ -1425,11 +1482,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
       const condition = instruction.condition ?? instruction.expression;
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
-      const goals = conditional ? goalsFor(flow, condition, way === 0) : [];
+      const guards =
+        options.realign === true
+          ? (elseIfs.get(index) ?? []).flatMap((earlier) =>
+              goalsFor(flow, instructions[earlier]!.condition, false),
+            )
+          : [];
+      const goals = [...(conditional ? goalsFor(flow, condition, way === 0) : []), ...guards];
       const target: Target = {
         instruction: index,
         way,
         goals,
+        guards,
         attempts: 0,
         reach: null,
         chains: new Map(),
@@ -1590,6 +1654,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const kept: CorpusEntry[] = [];
     let replayed = 0;
     let stale = 0;
+    /** With realignment: the entries whose replay realigned an input, and the entry being replayed. */
+    const realigned = new Set<CorpusEntry>();
+    let currentEntry: CorpusEntry | null = null;
     /** The state an input led to from a state, and the start of a session from a state's storage at a wall clock. */
     const applied = new Map<string, number>();
     const startFrom = new Map<string, number>([[`-@${EPOCH_MS}`, 0]]);
@@ -1631,24 +1698,38 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const walk = (start: number, inputs: readonly ExplorerInput[]): Node | null | "full" => {
       let node = nodes[firstOf.get(start)!]!;
       let runtime: Runtime | null = null;
-      for (const input of inputs) {
+      const allowance = { skipped: 0, forced: 0 };
+      for (let index = 0; index < inputs.length;) {
         if (full()) return "full";
+        const input = inputs[index]!;
         const key = `${node.id} ${JSON.stringify(input)}`;
         const known = applied.get(key);
         if (known !== undefined) {
           node = nodes[known]!;
           runtime = null;
+          index += 1;
           continue;
         }
         runtime ??= node.status === "open" ? runtimeOf(node) : null;
-        if (runtime === null || !fitsPending(input, session.options(runtime))) return null;
-        const next = step(node, runtime, input);
-        if (next === null) return null;
-        const reached = transition(node, input, next, node.start, null);
-        reach(reached, next.snapshot);
-        applied.set(key, reached.id);
+        if (runtime === null) return null;
+        // With realignment, an input that no longer fits is replaced, skipped, or preceded by the only button there is.
+        let applying = input;
+        let next = index + 1;
+        if (options.realign === true) {
+          const found = realign(runtime, inputs, index, allowance);
+          if (found === null) return null;
+          ({ input: applying, next } = found);
+          if ((applying !== input || next !== index + 1) && currentEntry !== null)
+            realigned.add(currentEntry);
+        } else if (!fitsPending(input, session.options(runtime))) return null;
+        const stepped = step(node, runtime, applying);
+        if (stepped === null) return null;
+        const reached = transition(node, applying, stepped, node.start, null);
+        reach(reached, stepped.snapshot);
+        if (applying === input && next === index + 1) applied.set(key, reached.id);
         node = reached;
-        runtime = next.snapshot.status === "waiting" ? next.runtime : null;
+        runtime = stepped.snapshot.status === "waiting" ? stepped.runtime : null;
+        index = next;
       }
       return node;
     };
@@ -1665,6 +1746,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return "done";
     };
     for (const entry of entries) {
+      currentEntry = entry;
       const outcome = entry.seed !== options.seed || full() ? "full" : replayEntry(entry);
       if (outcome === "full") kept.push(entry);
       else replayed += 1;
@@ -1673,6 +1755,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return {
       replayed,
       stale,
+      realigned: realigned.size,
       kept,
       replaySteps: transitions - steps,
       replayMs: performance.now() - began,
@@ -1886,6 +1969,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       loaded: options.corpus?.length ?? 0,
       replayed: replayed.replayed,
       stale: replayed.stale,
+      ...(options.realign === true ? { realigned: replayed.realigned } : {}),
       written: entries.length,
       replaySteps: replayed.replaySteps,
       replayMs: Math.round(replayed.replayMs),
@@ -2038,6 +2122,75 @@ function cover(
     else kept.push(index);
   }
   return kept.reverse();
+}
+
+/**
+ * With realignment: the input of a replayed path as it fits the pending action, whose options are given, or null. The
+ * option with the same label (at the same index if there is one), the button with the same label, the permanent button
+ * with the same label (by its ID now), the wait for the deadline now, and a typed answer, image, or form where one is
+ * asked; another wall clock or a later continue fits any waiting state.
+ */
+function aligned(input: ExplorerInput, options: readonly ExplorerInput[]): ExplorerInput | null {
+  switch (input.kind) {
+    case "clock":
+    case "later":
+      return input;
+    case "option":
+      return (
+        options.find(
+          (option) =>
+            option.kind === "option" &&
+            option.label === input.label &&
+            option.index === input.index,
+        ) ??
+        options.find((option) => option.kind === "option" && option.label === input.label) ??
+        null
+      );
+    case "press":
+      return (
+        options.find((option) => option.kind === "press" && option.label === input.label) ?? null
+      );
+    case "wait":
+      return options.find((option) => option.kind === "wait") ?? null;
+    default:
+      return fitsPending(input, options) ? input : null;
+  }
+}
+
+/**
+ * The `else if` chains of a plan: for each condition after an `else`, the earlier conditions of its chain, nearest
+ * first. A condition's `else` starts where its jump goes when it is false, after the jump that ends its true block;
+ * only temporaries and calls may come before the next condition there.
+ */
+function elseIfChains(instructions: readonly Data[]): Map<number, number[]> {
+  const chains = new Map<number, number[]>();
+  const between = new Set(["storeTemporary", "clearTemporary", "clearTemporaries", "callFunction"]);
+  instructions.forEach((instruction, index) => {
+    const target = Number(instruction.target);
+    if (instruction.kind !== "jumpIfFalse" || instructions[target - 1]?.kind !== "jump") return;
+    for (let next = target; next < Math.min(instructions.length, target + 8); next += 1) {
+      const kind = instructions[next]!.kind;
+      if (kind === "jumpIfFalse") {
+        chains.set(next, [index, ...(chains.get(index) ?? [])]);
+        return;
+      }
+      if (!between.has(String(kind))) return;
+    }
+  });
+  return chains;
+}
+
+/**
+ * How far a storage is from what an earlier condition of an `else if` chain needs to take its other way (see
+ * {@link storageDistance}); 0 when nothing is stored under the key, which leaves that condition false as far as the
+ * search can tell.
+ */
+function guardDistance(entries: readonly StorageEntry[], guard: Goal): number {
+  if (guard.source.kind !== "storage") return 0;
+  const matches = keyMatcher(guard.source.key);
+  if (!entries.some((entry) => matches(entry.key))) return 0;
+  const measured = storageDistance(entries, matches, guard).distance;
+  return Number.isFinite(measured) ? measured : 1;
 }
 
 /**

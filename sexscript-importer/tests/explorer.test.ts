@@ -193,6 +193,37 @@ test(
 );
 
 test(
+  "with realignment, corpus entries go on past a reconversion that moved an option or added a button",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const { source, plan, diagnostics } = await fixture(engine);
+    const options = { seed: 1, budgetMs: 60_000, diagnostics, sources: new Map() };
+    const corpus = explore(engine, plan, { ...options, maxStates: 12, corpus: [] }).corpus!.entries;
+    // The reconversion asks for a button first, and lists "Right" before "Left".
+    const moved = source
+      .replace('say "Welcome."', 'say "Welcome."\nshowButton "Ready"')
+      .replace('left: "Left", right: "Right"', 'right: "Right", left: "Left"');
+    const { plan: movedPlan } = engine.compileProject([{ path: "main.tease", source: moved }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(movedPlan));
+    const replay = (realign: boolean) =>
+      explore(engine, movedPlan, { ...options, maxStates: 12, corpus, realign }).corpus!;
+    const strict = replay(false);
+    const realigned = replay(true);
+    const withInputs = corpus.filter(
+      (entry) => entry.inputs.length > 0 || entry.earlier !== undefined,
+    );
+    assert.equal(strict.stale, withInputs.length);
+    assert.equal(realigned.stale, 0);
+    assert.equal(realigned.realigned, withInputs.length);
+    assert.ok(realigned.coverageAtStart.visitedLines > strict.coverageAtStart.visitedLines);
+  },
+);
+
+test(
   "a work budget ends the search after that many runtime operations, the same way each time, and shows where expansions waited",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {
