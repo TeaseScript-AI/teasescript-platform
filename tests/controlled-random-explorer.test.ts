@@ -222,3 +222,19 @@ function assertAdmitted(source: string, kind: RandomDrawKind, outcome: RandomOut
     `${source}: ${JSON.stringify(outcome)}`,
   );
 }
+
+test("alternatives respect a limit of 0 and list a narrow interval completely", () => {
+  const chance = randomDrawAlternatives(pausedDraw("let x = chance(40)\nexit", "chance"), 0);
+  assert.deepEqual(chance, { alternatives: [], complete: false });
+  // 1 and the next representable number are the whole support of this PERT.
+  const narrow = pausedDraw("let x = randomPert(1, 1, 1.0000000000000002)\nexit", "randomPert");
+  const found = randomDrawAlternatives(narrow);
+  assert.equal(found.complete, true);
+  assert.equal(found.alternatives.length, 1);
+  for (const outcome of found.alternatives)
+    assertAdmitted("let x = randomPert(1, 1, 1.0000000000000002)\nexit", "randomPert", outcome);
+  const subnormal = randomDrawAlternatives(
+    pausedDraw("let x = randomPert(0, 0, 5e-324)\nexit", "randomPert"),
+  );
+  assert.equal(subnormal.complete, true);
+});

@@ -40,10 +40,11 @@ export function randomDrawAlternatives(draw: RandomDrawView, limit = 16): Random
       if (support.percent <= 0 || support.percent >= 100)
         return { alternatives: [], complete: true };
       return {
-        alternatives: [
-          { kind: "boolean", value: !(draw.natural.kind === "boolean" && draw.natural.value) },
-        ],
-        complete: true,
+        alternatives: found,
+        complete: add({
+          kind: "boolean",
+          value: !(draw.natural.kind === "boolean" && draw.natural.value),
+        }),
       };
     case "integer": {
       const count = support.max - support.min + 1;
@@ -60,14 +61,12 @@ export function randomDrawAlternatives(draw: RandomDrawView, limit = 16): Random
       return { alternatives: found, complete: false };
     }
     case "candidates":
-    case "weighted": {
-      let complete = true;
+    case "weighted":
       for (let position = 0; position < support.candidates.length; position += 1) {
         if (support.kind === "weighted" && !(support.weights[position]! > 0)) continue;
-        if (!index(position)) complete = false;
+        if (!index(position)) return { alternatives: found, complete: false };
       }
-      return { alternatives: found, complete };
-    }
+      return { alternatives: found, complete: true };
     case "normal":
       if (support.spread === 0) return { alternatives: [], complete: true };
       for (const offset of [0, -1, 1, -3, 3]) {
@@ -83,10 +82,18 @@ export function randomDrawAlternatives(draw: RandomDrawView, limit = 16): Random
       for (const value of values) number(value);
       return { alternatives: found, complete: false };
     }
-    case "pert":
+    case "pert": {
       if (support.min === support.max) return { alternatives: [], complete: true };
+      // An interval of a few representable numbers is enumerated as a whole.
+      const low = orderedDouble(support.min);
+      const count = orderedDouble(support.max) - low + 1n;
+      if (count <= BigInt(limit) + 1n) {
+        for (let step = 0n; step < count; step += 1n) number(fromOrderedDouble(low + step));
+        return { alternatives: found, complete: true };
+      }
       for (const value of [support.min, support.mostLikely, support.max]) number(value);
       return { alternatives: found, complete: false };
+    }
     case "order": {
       const length = support.items.length;
       const identity = Array.from({ length }, (_, position) => position);
@@ -101,6 +108,22 @@ export function randomDrawAlternatives(draw: RandomDrawView, limit = 16): Random
       }
     }
   }
+}
+
+/** A finite number's position among all finite numbers in order, with `-0` and `0` at one position. */
+function orderedDouble(value: number): bigint {
+  const bits = new DataView(new ArrayBuffer(8));
+  bits.setFloat64(0, Math.abs(value));
+  const magnitude = bits.getBigUint64(0);
+  return value < 0 ? -magnitude : magnitude;
+}
+
+/** The finite number at a position that `orderedDouble` gives. */
+function fromOrderedDouble(position: bigint): number {
+  const bits = new DataView(new ArrayBuffer(8));
+  bits.setBigUint64(0, position < 0n ? -position : position);
+  const magnitude = bits.getFloat64(0);
+  return position < 0n ? -magnitude : magnitude;
 }
 
 /** Advances `order` to the next permutation in lexicographic order; false after the last one. */
