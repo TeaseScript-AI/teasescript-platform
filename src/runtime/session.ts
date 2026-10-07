@@ -33,6 +33,31 @@ import type {
   TimeObservationOutcome,
 } from "./operations/model.js";
 import { executionRunnable, observeValidatedTime } from "./operations/observe-time.js";
+import {
+  applyValidatedStorageEdit,
+  type ExternalStorageEditOutcome,
+} from "./operations/external-storage-edit.js";
+import {
+  recordValidatedContinueCapture,
+  type ContinueCaptureOutcome,
+} from "./operations/continue-capture.js";
+import { reportValidatedMediaLoad, type MediaReportOutcome } from "./operations/media-reports.js";
+import {
+  pressValidatedPermanentButton,
+  type PermanentButtonPressOutcome,
+} from "./operations/press-permanent-button.js";
+import {
+  updateValidatedInteraction,
+  type InteractionUpdateOutcome,
+} from "./operations/update-interaction.js";
+import { inspectRuntimeState, type RuntimeInspectionResult } from "./inspection.js";
+import {
+  mediaPlaybackProjection,
+  stageProjection,
+  type MediaPlaybackProjection,
+  type StageProjection,
+} from "./media-projection.js";
+import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
 import { captureExecutableData } from "./operations/support.js";
 import { isFrozenTemporalContext } from "../temporal.js";
 import {
@@ -171,6 +196,62 @@ export class RuntimeSession {
     );
   }
 
+  public reportMediaLoad(
+    mediaId: unknown,
+    report: unknown,
+    options: TraceOptions = {},
+  ): RuntimeSessionOutcomeResult<MediaReportOutcome> {
+    return this.#operate(
+      () => traceOptions(options),
+      (state, checked) => reportValidatedMediaLoad(this.#plan, state, mediaId, report, checked),
+      settled,
+    );
+  }
+
+  public updateInteraction(
+    request: unknown,
+    options: TraceOptions = {},
+  ): RuntimeSessionOutcomeResult<InteractionUpdateOutcome> {
+    return this.#operate(
+      () => traceOptions(options),
+      (state, checked) => updateValidatedInteraction(this.#plan, state, request, checked),
+      settled,
+    );
+  }
+
+  public pressPermanentButton(
+    buttonId: unknown,
+    options: TraceOptions = {},
+  ): RuntimeSessionOutcomeResult<PermanentButtonPressOutcome> {
+    return this.#operate(
+      () => traceOptions(options),
+      (state, checked) => pressValidatedPermanentButton(this.#plan, state, buttonId, checked),
+      settled,
+    );
+  }
+
+  public recordContinueCapture(
+    capture: unknown,
+    options: TraceOptions = {},
+  ): RuntimeSessionOutcomeResult<ContinueCaptureOutcome> {
+    return this.#operate(
+      () => traceOptions(options),
+      (state, checked) => recordValidatedContinueCapture(this.#plan, state, capture, checked),
+      settled,
+    );
+  }
+
+  public applyExternalStorageEdit(
+    edit: unknown,
+    options: TraceOptions = {},
+  ): RuntimeSessionOutcomeResult<ExternalStorageEditOutcome> {
+    return this.#operate(
+      () => traceOptions(options),
+      (state, checked) => applyValidatedStorageEdit(this.#plan, state, edit, checked),
+      settled,
+    );
+  }
+
   public view(): RuntimeSessionView {
     return this.#read((state) =>
       published({
@@ -185,6 +266,26 @@ export class RuntimeSession {
         suspendedAction: interruptFrame(state)?.timerInterruption?.suspendedAction ?? null,
       }),
     );
+  }
+
+  /** What the Stage shows, as `stageProjection` gives it for a snapshot. */
+  public stageProjection(): StageProjection {
+    return this.#read((state) => published(stageProjection(state)));
+  }
+
+  /** The media a Player plays, as `mediaPlaybackProjection` gives them for a snapshot. */
+  public mediaPlaybackProjection(): readonly MediaPlaybackProjection[] {
+    return this.#read((state) => published(mediaPlaybackProjection(state)));
+  }
+
+  /** The shown permanent buttons, as `permanentButtonProjection` gives them for a snapshot. */
+  public permanentButtonProjection(): readonly PermanentButtonProjection[] {
+    return this.#read((state) => published(permanentButtonProjection(state)));
+  }
+
+  /** `inspectRuntimeState`'s debugger inspection, which captures and validates the whole state first. */
+  public inspect(): RuntimeInspectionResult {
+    return this.#read((state) => inspectRuntimeState(this.#plan, state));
   }
 
   /** A complete snapshot, freshly captured and validated: plain data that later operations do not change. */

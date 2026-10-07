@@ -48,16 +48,35 @@ export function updateInteraction(
   const captured = captureExecutableData(plan, snapshot);
   // An edit changes no script value; the trace only follows the session through it.
   const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const external = captureExternalData(request);
-  const updated =
-    !external.ok || !isPlainRecord(external.value)
-      ? pendingResult(captured.snapshot, [], {
-          kind: "invalidPayload" as const,
-          message: "An interaction update must be bounded JSON-safe object data.",
-        })
-      : updateCapturedInteraction(captured.snapshot, external.value);
+  const updated = updateInteractionRequest(captured.snapshot, request);
   closeDebugTrace(trace, updated);
   return updated;
+}
+
+/** Updates an interaction of engine-owned plan/state that already passed complete validation. */
+export function updateValidatedInteraction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  request: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+): PendingActionOperationResult<InteractionUpdateOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const updated = updateInteractionRequest(snapshot, request);
+  closeDebugTrace(trace, updated);
+  return updated;
+}
+
+function updateInteractionRequest(
+  current: RuntimeSnapshot,
+  request: unknown,
+): PendingActionOperationResult<InteractionUpdateOutcome> {
+  const external = captureExternalData(request);
+  return !external.ok || !isPlainRecord(external.value)
+    ? pendingResult(current, [], {
+        kind: "invalidPayload" as const,
+        message: "An interaction update must be bounded JSON-safe object data.",
+      })
+    : updateCapturedInteraction(current, external.value);
 }
 
 function updateCapturedInteraction(

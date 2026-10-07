@@ -55,6 +55,20 @@ export function reportMediaLoad(
   return reported;
 }
 
+/** Reports a media load for engine-owned plan/state that already passed complete validation. */
+export function reportValidatedMediaLoad(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  mediaId: unknown,
+  report: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+): PendingActionOperationResult<MediaReportOutcome> {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const reported = reportCapturedMediaLoad({ plan, snapshot }, mediaId, report, trace);
+  closeDebugTrace(trace, reported);
+  return reported;
+}
+
 function reportCapturedMediaLoad(
   captured: CapturedExecutableData,
   mediaId: unknown,
