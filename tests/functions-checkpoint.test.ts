@@ -344,11 +344,11 @@ test("preserves prepared earlier arguments through a later suspension and a susp
 test("validates and resumes deep suspended recursive continuations", () => {
   const compiled = plan(
     [
-      "function sum(value) {",
+      "function addUp(value) {",
       "  if value == 0 { return 0 }",
-      "  return value + sum(value - 1)",
+      "  return value + addUp(value - 1)",
       "}",
-      "say sum(32)",
+      "say addUp(32)",
       "exit",
     ].join("\n"),
   );

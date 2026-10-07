@@ -10,19 +10,32 @@ export interface NumericArgument {
 
 /** A built-in function of numbers (V30 §13): every argument is a number, and the result is one too. */
 export interface NumericFunction {
-  /** The parameter names, which also give the number of arguments. */
+  /** The positional parameter names, which also give the number of positional arguments. */
   readonly parameters: readonly string[];
+  /** The named parameters the function may also take, each a number. */
+  readonly named?: readonly string[];
   /** A call that shows how to use the function. */
   readonly example: string;
   /** The result type, from what the compiler knows about the arguments. */
-  readonly result: (inputs: readonly NumericArgument[]) => "integer" | "number" | "unknown";
+  readonly result: (
+    inputs: readonly NumericArgument[],
+    named: Readonly<Record<string, NumericArgument>>,
+  ) => "integer" | "number" | "unknown";
   /** The finite result, or why the call has none. */
-  readonly apply: (values: readonly number[]) => number | NoResult;
+  readonly apply: (
+    values: readonly number[],
+    named: Readonly<Record<string, number>>,
+  ) => number | NumericFailure;
 }
 
-/** Why a call of a numeric function has no finite result: a compile error, or runtime error `TSR036`. */
-export interface NoResult {
-  readonly noResult: string;
+/**
+ * Why a call of a numeric function has no result: a compile error when the compiler can see the arguments, and
+ * otherwise runtime error `code`, `TSR036` for a result that is not a finite number and `TSR039` for an argument
+ * outside the function's range.
+ */
+export interface NumericFailure {
+  readonly failure: string;
+  readonly code: "TSR036" | "TSR039";
 }
 
 function rounding(name: string): NumericFunction {
@@ -34,9 +47,25 @@ function rounding(name: string): NumericFunction {
   };
 }
 
+/** `integer` when every input is one, `number` when every input is a number, and `unknown` otherwise. */
+function together(inputs: readonly NumericArgument[]): "integer" | "number" | "unknown" {
+  if (inputs.some((input) => input.type === "unknown")) return "unknown";
+  return inputs.every((input) => input.type === "integer") ? "integer" : "number";
+}
+
 /** The numeric built-ins by name. */
 export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
-  ["round", rounding("round")],
+  [
+    "round",
+    {
+      parameters: ["value"],
+      named: ["decimals"],
+      example: "round(2.5)",
+      result: (_, { decimals }) => (decimals === undefined ? "integer" : "number"),
+      apply: ([value], { decimals }) =>
+        decimals === undefined ? rounded("round", value!) : roundedToDecimals(value!, decimals),
+    },
+  ],
   ["floor", rounding("floor")],
   ["ceil", rounding("ceil")],
   [
@@ -49,6 +78,15 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     },
   ],
   [
+    "sign",
+    {
+      parameters: ["value"],
+      example: "sign(-2)",
+      result: () => "integer",
+      apply: ([value]) => withoutNegativeZero(Math.sign(value!)),
+    },
+  ],
+  [
     "sqrt",
     {
       parameters: ["value"],
@@ -57,7 +95,7 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
       // IEEE 754 rounds a square root correctly, so every JavaScript engine gives the same result.
       apply: ([value]) =>
         value! < 0
-          ? { noResult: `sqrt(${value}) has no result: a negative number has no square root.` }
+          ? noResult(`sqrt(${value}) has no result: a negative number has no square root.`)
           : Math.sqrt(value!),
     },
   ],
@@ -74,21 +112,85 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
       apply: ([base, exponent]) => power(base!, exponent!),
     },
   ],
+  [
+    "mod",
+    {
+      parameters: ["value", "divisor"],
+      example: "mod(-1, 3)",
+      result: together,
+      apply: ([value, divisor]) => modulo(value!, divisor!),
+    },
+  ],
+  [
+    "clamp",
+    {
+      parameters: ["value", "min", "max"],
+      example: "clamp(level, 1, 10)",
+      result: together,
+      apply: ([value, min, max]) =>
+        min! > max!
+          ? {
+              failure: `clamp(${value}, ${min}, ${max}) needs a min that is at most its max.`,
+              code: "TSR039",
+            }
+          : Math.min(Math.max(value!, min!), max!),
+    },
+  ],
 ]);
 
+function noResult(failure: string): NumericFailure {
+  return { failure, code: "TSR036" };
+}
+
+/**
+ * `value` rounded to `decimals` decimal places, a half away from zero, as the number is written: `round(2.675,
+ * decimals: 2)` is 2.68, although the double nearest 2.675 is slightly below it.
+ */
+function roundedToDecimals(value: number, decimals: number): number | NumericFailure {
+  if (!Number.isInteger(decimals) || decimals < 0)
+    return {
+      failure: `round(...) needs decimals: to be a whole number of at least 0, not ${decimals}.`,
+      code: "TSR039",
+    };
+  // String() writes the shortest decimal that reads back as the same double, alike on every engine (ECMAScript
+  // Number::toString): its digits are the number as the author sees it, value = digits × 10^-scale.
+  const [, whole, fraction = "", exponent = "0"] = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/u.exec(
+    String(Math.abs(value)),
+  )!;
+  const digits = `${whole}${fraction}`;
+  const dropped = fraction.length - Number(exponent) - decimals;
+  if (dropped <= 0) return value;
+  const kept = digits.length - dropped;
+  let result = kept > 0 ? BigInt(digits.slice(0, kept)) : 0n;
+  if (kept >= 0 && digits[kept]! >= "5") result += 1n;
+  // A decimal of at most 17 significant digits reads back as its nearest double on every engine.
+  const magnitude = Number(`${result}e-${decimals}`);
+  return withoutNegativeZero(value < 0 ? -magnitude : magnitude);
+}
+
+/** The remainder of `value` divided by `divisor` with the sign of the divisor: `mod(-1, 3)` is 2. */
+function modulo(value: number, divisor: number): number | NumericFailure {
+  if (divisor === 0) return noResult(`mod(${value}, 0) has no result: it divides by zero.`);
+  // `%` is exact and keeps the sign of `value`.
+  const remainder = value % divisor;
+  if (remainder === 0 || remainder < 0 === divisor < 0) return withoutNegativeZero(remainder);
+  // A remainder too small to add to the divisor exactly would round to the divisor itself.
+  const shifted = remainder + divisor;
+  return shifted === divisor ? 0 : shifted;
+}
+
 /** `base` to the power `exponent`, or why there is no finite result. */
-function power(base: number, exponent: number): number | NoResult {
+function power(base: number, exponent: number): number | NumericFailure {
   const call = `pow(${base}, ${exponent})`;
   if (exponent === 0) return 1;
-  if (base === 0)
-    return exponent > 0 ? 0 : { noResult: `${call} has no result: it divides by zero.` };
+  if (base === 0) return exponent > 0 ? 0 : noResult(`${call} has no result: it divides by zero.`);
   if (base < 0 && !Number.isInteger(exponent))
-    return { noResult: `${call} has no result: a negative base needs a whole exponent.` };
+    return noResult(`${call} has no result: a negative base needs a whole exponent.`);
   // `%` is exact, and every double of at least 2^53 is even.
   const sign = base < 0 && exponent % 2 !== 0 ? -1 : 1;
   const magnitude = Math.abs(base) === 1 ? 1 : positivePower(Math.abs(base), exponent);
   if (magnitude === undefined)
-    return { noResult: `${call} gives a number too large to represent. Use smaller values.` };
+    return noResult(`${call} gives a number too large to represent. Use smaller values.`);
   return withoutNegativeZero(sign * magnitude);
 }
 

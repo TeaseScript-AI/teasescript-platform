@@ -587,7 +587,7 @@ test("a bounded load ends at its ')', also with a space before '(' and options o
       'save [10, 20] as "list"',
       'save { name: "Ada" } as "record"',
       'function key(prefix) { return "${prefix}st" }',
-      'let sum = load ("n", default: 0) + 1',
+      'let total = load ("n", default: 0) + 1',
       'let fallbackSum = load("missing", default: 3) * 2',
       'let second = load(key("li"))[1]',
       'let name = load("record").name',
@@ -602,7 +602,7 @@ test("a bounded load ends at its ')', also with a space before '(' and options o
     ].join("\n"),
   );
   const bound = (name: string) => binding(result.finalSnapshot, name);
-  assert.equal(bound("sum"), 3);
+  assert.equal(bound("total"), 3);
   assert.equal(bound("fallbackSum"), 6);
   assert.equal(bound("second"), 20);
   assert.equal(bound("name"), "Ada");

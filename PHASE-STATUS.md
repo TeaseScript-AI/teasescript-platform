@@ -18,12 +18,13 @@ accept syntax, architecture, or implementation details.
 - **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values, variables,
   assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated single-line and block
   strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion, control flow,
-  deterministic random, rounding, `min`/`max`, and `abs`/`sqrt`/`pow` built-ins, text operations and list `join`, `+` on
-  two texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle`
-  and set operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
-  (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
-  shared by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets
-  from `script(...)` references.
+  deterministic random and weighted choice, rounding, numeric, `min`/`max`, statistics, and trend built-ins, text
+  operations and list `join`, `take`, and `takeLast`, `+` on two texts or two lists, the
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and set operations,
+  top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects
+  of several `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files,
+  `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)`
+  references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and

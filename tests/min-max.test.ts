@@ -60,7 +60,12 @@ test("min and max of integers are integers, otherwise numbers, and of durations 
 
 test("misuse the compiler can see is a compile error", () => {
   const cases: [string, string, string, string][] = [
-    ["say min(1)\nexit", "TSV020", "min(...) takes 2 or more arguments, received 1.", "min(1)"],
+    [
+      "say min(1)\nexit",
+      "TSV020",
+      "min(...) takes 2 or more arguments, or one list, received 1.",
+      "min(1)",
+    ],
     [
       "say max(1, 2 s)\nexit",
       "TSV043",

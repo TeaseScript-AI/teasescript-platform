@@ -29,6 +29,15 @@ import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import {
+  LIST_STATISTICS,
+  linearRegression,
+  listStatistic,
+  listValues,
+  predict,
+  weightedChoices,
+  weightedIndex,
+} from "./list-statistics.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
@@ -1251,6 +1260,8 @@ export class Evaluator {
             "contains",
             "toSet",
             "join",
+            "take",
+            "takeLast",
           ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
@@ -1666,6 +1677,11 @@ export class Evaluator {
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
+      if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
+      if (name === "linearRegression") return linearRegression(positional, named, expression.span);
+      if (name === "predict") return predict(positional, named, expression.span);
+      if (name === "randomWeighted")
+        return this.#randomWeighted(positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
       if (name === "removePermanentButton") {
         const removed = this.#removePermanentButton(positional, named, expression.span);
@@ -1947,6 +1963,23 @@ export class Evaluator {
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "take":
+        case "takeLast": {
+          expect(1);
+          const count = positional[0]!;
+          if (typeof count !== "number" || !Number.isInteger(count) || count < 0)
+            throw fault(
+              "TSR057",
+              `${name}() needs a whole number of at least 0, not ${typeof count === "number" ? count : describeRuntimeValue(count)}.`,
+              span,
+            );
+          // A count beyond the length takes the whole list.
+          return createCapturedSerializableList(
+            name === "take"
+              ? receiver.items.slice(0, count)
+              : receiver.items.slice(Math.max(0, receiver.items.length - count)),
+          );
+        }
         case "sort":
         case "shuffle":
           expect(0);
@@ -2560,12 +2593,24 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    if (positional.length < 2 || Object.keys(named).length !== 0)
+    // One list, optionally with by:, chooses among its values (V30 §16).
+    const list = positional.length === 1 && Object.keys(named).every((key) => key === "by");
+    if ((positional.length < 2 || Object.keys(named).length !== 0) && !list)
       throw fault(
         "TSR028",
-        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total).`,
+        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total), or one list, such as ${name}(scores).`,
         span,
       );
+    if (list) {
+      const values = listValues(name, positional[0]!, named.by, span);
+      if (values.length === 0)
+        throw fault(
+          "TSR018",
+          `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`,
+          span,
+        );
+      positional = values;
+    }
     const numbers = positional.every((value) => typeof value === "number");
     const first = positional[0]!;
     const temporals = positional.filter(
@@ -2621,32 +2666,50 @@ export class Evaluator {
     return cloneSerializableValue(best);
   }
 
-  /** A numeric function of numbers (V30 §13); a call without a finite result fails. */
+  /** One key of a dict, or element of a list, chosen with one draw, with the chance of its share of the weight. */
+  #randomWeighted(
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const { choices, weights } = weightedChoices(positional, named, span);
+    const draw = this.#findRandom(span, "randomWeighted", choices.length);
+    const chosen = cloneSerializableValue(choices[weightedIndex(weights, draw)]!);
+    this.trace?.randomResult(chosen);
+    return chosen;
+  }
+
+  /** A numeric function of numbers (V30 §13); a call without a result fails. */
   #numericFunction(
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): number {
-    const { parameters, example, apply } = NUMERIC_FUNCTIONS.get(name)!;
-    if (positional.length !== parameters.length || Object.keys(named).length !== 0)
+    const { parameters, named: names = [], example, apply } = NUMERIC_FUNCTIONS.get(name)!;
+    if (
+      positional.length !== parameters.length ||
+      Object.keys(named).some((key) => !names.includes(key))
+    )
       throw fault(
         "TSR028",
         `${name}(...) takes ${parameters.length === 1 ? "one number" : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
         span,
       );
-    const numbers: number[] = [];
-    for (const value of positional) {
-      if (typeof value !== "number")
-        throw fault(
-          "TSR059",
-          `${name}(...) needs a number, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
-          span,
-        );
-      numbers.push(value);
-    }
-    const result = apply(numbers);
-    if (typeof result !== "number") throw fault("TSR036", result.noResult, span);
+    const number = (value: SerializableRuntimeValue, place: string): number => {
+      if (typeof value === "number") return value;
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        span,
+      );
+    };
+    const numbers = positional.map((value) => number(value, ""));
+    const options = Object.fromEntries(
+      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
+    );
+    const result = apply(numbers, options);
+    if (typeof result !== "number") throw fault(result.code, result.failure, span);
     return result;
   }
 

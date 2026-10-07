@@ -327,37 +327,48 @@ export function builtinCallProblems(
   return problems;
 }
 
-/** Problems with a numeric function: its named arguments, its number of arguments, and arguments that are not numbers. */
+/**
+ * Problems with a numeric function: names it does not take, its number of positional arguments, and arguments that are
+ * not numbers.
+ */
 function numericFunctionProblems(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const { parameters } = NUMERIC_FUNCTIONS.get(name)!;
+  const { parameters, named = [] } = NUMERIC_FUNCTIONS.get(name)!;
   const problems: OperationProblem[] = [];
-  const positional: Expression[] = [];
+  const values: [Expression, string][] = [];
+  let positional = 0;
   for (const argument of call.arguments) {
-    if (argument.kind === "positionalArgument") positional.push(argument.value);
+    if (argument.kind === "positionalArgument") {
+      positional += 1;
+      values.push([argument.value, ""]);
+    } else if (named.includes(argument.name.name))
+      values.push([argument.value, ` as its ${argument.name.name}:`]);
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`,
+        message:
+          named.length === 0
+            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
+            : `${name}(...) has no parameter '${argument.name.name}'; its only named argument is ${named[0]}:.`,
         span: argument.name.span,
       });
   }
-  if (positional.length !== parameters.length)
+  if (positional !== parameters.length)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${positional.length}.`,
+      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${positional}.`,
       span: call.span,
     });
   if (problems.length > 0) return problems;
-  for (const value of positional) {
+  for (const [value, place] of values) {
     const type = typeOf(value);
     if (!isAssignable(NUMBER_TYPE, type))
       problems.push({
         kind: "invalidOperand",
-        message: `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`,
+        message: `${name}(...) needs a number${place}, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`,
         span: value.span,
       });
   }
@@ -386,7 +397,7 @@ function minMaxProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}(...) takes 2 or more arguments, received ${call.arguments.length}.`,
+        message: `${name}(...) takes 2 or more arguments, or one list, received ${call.arguments.length}.`,
         span: call.span,
       },
     ];
@@ -595,6 +606,8 @@ export function rootName(expression: Expression): string | null {
 export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "sort",
   "shuffle",
+  "take",
+  "takeLast",
   "intersection",
   "union",
   "difference",
@@ -612,6 +625,8 @@ export function collectionMethodProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
+  if (name === "take" || name === "takeLast")
+    return takeProblems(name, receiverType, property, call, typeOf);
   const reorders = name === "sort" || name === "shuffle";
   if (reorders && receiverType.kind === "set")
     return [
@@ -660,6 +675,50 @@ export function collectionMethodProblems(
       },
     ];
   return [];
+}
+
+/** Problems with `take` or `takeLast`: a list method of one count, a whole number of at least 0 (V30 §16). */
+function takeProblems(
+  name: string,
+  receiverType: StaticType & { readonly kind: "list" | "set" },
+  property: Identifier,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  if (receiverType.kind === "set")
+    return [
+      {
+        kind: "invalidOperand",
+        message: `A set has no ${name}(). Copy it into a list with toList() first.`,
+        span: property.span,
+      },
+    ];
+  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
+  if (named !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `${name}() takes its count without a name; remove '${named.name.name}:'.`,
+        span: named.name.span,
+      },
+    ];
+  if (call.arguments.length !== 1)
+    return [
+      {
+        kind: "argumentCount",
+        message: `${name}() takes 1 argument (count), received ${call.arguments.length}.`,
+        span: call.span,
+      },
+    ];
+  const count = call.arguments[0]!.value;
+  const type = typeOf(count);
+  const known = staticNumber(count);
+  const message = !isAssignable(INTEGER_TYPE, type)
+    ? `${name}() needs a whole number (integer), not ${describeValue(forUse(type))}.`
+    : known !== undefined && known < 0
+      ? `${name}() needs a whole number of at least 0, not ${known}.`
+      : undefined;
+  return message === undefined ? [] : [{ kind: "invalidOperand", message, span: count.span }];
 }
 
 /** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */

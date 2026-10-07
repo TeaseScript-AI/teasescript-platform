@@ -116,6 +116,11 @@ export function daysBetween(left: DateFields, right: DateFields): number {
   return daysFromEpoch(left) - daysFromEpoch(right);
 }
 
+/** A date and time read as if it were UTC, in milliseconds since the epoch, to measure the time between two. */
+export function dateTimeMilliseconds(fields: DateTimeFields): number {
+  return fieldsAsUtc(fields);
+}
+
 export function compareDates(left: DateFields, right: DateFields): number {
   return Math.sign(daysFromEpoch(left) - daysFromEpoch(right));
 }

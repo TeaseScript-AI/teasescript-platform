@@ -44,6 +44,93 @@ test("abs, sqrt, and pow compute their results", () => {
   );
 });
 
+test("round to decimals rounds the number as written, half away from zero, and gives a number", () => {
+  assert.deepEqual(
+    said(
+      [
+        // The doubles nearest 2.675 and 1.005 are slightly below them, but they are written and so rounded as shown.
+        'say "${round(2.675, decimals: 2)} ${round(1.005, decimals: 2)} ${round(-2.5, decimals: 0)} ${round(1234.5678, decimals: 1)}"',
+        'say "${round(0.005, decimals: 2)} ${round(0.004, decimals: 2)} ${round(1e-7, decimals: 3)} ${round(2.5, decimals: 20)} ${round(pi, decimals: 4)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["2.68 1.01 -3 1234.6", "0.01 0 0 2.5 3.1416"],
+  );
+  assert.deepEqual(diagnostics("let whole: integer = round(2.5, decimals: 0)\nexit"), [
+    [
+      "TSV041",
+      "'whole' is declared as integer, so it cannot start as a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let whole: number = ...'.",
+      "round(2.5, decimals: 0)",
+    ],
+  ]);
+  assert.deepEqual(diagnostics("say round(2.5, decimals: 1.5)\nexit"), [
+    [
+      "TSV043",
+      "round(...) needs decimals: to be a whole number of at least 0, not 1.5.",
+      "round(2.5, decimals: 1.5)",
+    ],
+  ]);
+  assert.deepEqual(diagnostics("say floor(2.5, decimals: 1)\nexit"), [
+    ["TSV022", "floor(...) takes no named arguments; remove 'decimals:'.", "decimals"],
+  ]);
+  assert.deepEqual(failure(`${DYNAMIC}say round(2.5, decimals: dynamic(-1))\nexit`), [
+    "TSR039",
+    "round(...) needs decimals: to be a whole number of at least 0, not -1.",
+  ]);
+});
+
+test("mod takes the divisor's sign where % keeps the dividend's, sign gives -1, 0, or 1, and clamp bounds a number", () => {
+  assert.deepEqual(
+    said(
+      [
+        'say "${mod(-1, 3)} ${mod(7, -3)} ${mod(-7, -3)} ${mod(5.5, 2)} ${mod(6, 3)} ${-1 % 3} ${7 % -3}"',
+        'say "${sign(-4)} ${sign(0)} ${sign(2.5)} ${clamp(15, 1, 10)} ${clamp(-3, 1, 10)} ${clamp(5.5, 1, 10)} ${clamp(4, 4, 4)}"',
+        'say "${pi} ${2 * pi}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["2 -2 -1 1.5 0 -1 1", "-1 0 1 10 1 5.5 4", "3.141592653589793 6.283185307179586"],
+  );
+  assert.deepEqual(
+    diagnostics(
+      [
+        "let wrapped: integer = mod(-7, 3)",
+        "let bounded: integer = clamp(4, 1, 10)",
+        "let direction: integer = sign(-2.5)",
+        "let part: number = mod(7.5, 2)",
+        "let circle: number = pi",
+        "exit",
+      ].join("\n"),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    diagnostics("let part: integer = mod(7.5, 2)\nlet area: integer = pi\nexit").map(
+      ([code, , text]) => [code, text],
+    ),
+    [
+      ["TSV041", "mod(7.5, 2)"],
+      ["TSV041", "pi"],
+    ],
+  );
+  for (const [call, code, message] of [
+    ["mod(5, 0)", "TSR036", "mod(5, 0) has no result: it divides by zero."],
+    ["clamp(5, 10, 1)", "TSR039", "clamp(5, 10, 1) needs a min that is at most its max."],
+  ] as const) {
+    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, call]], call);
+    const hidden = call.replace(/-?[\d.]+/gu, (number) => `dynamic(${number})`);
+    assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), [code, message], hidden);
+  }
+  // `pi` is a protected name, so neither a script nor a host can declare it.
+  assert.deepEqual(diagnostics("let pi = 3\nexit")[0]?.[0], "TSV001");
+  assert.deepEqual(
+    compileSource("say pi\nexit", { globals: ["pi"] }).diagnostics.map(
+      (diagnostic) => diagnostic.message,
+    ),
+    ["Configured name 'pi' conflicts with a protected TeaseScript name."],
+  );
+});
+
 test("abs keeps an integer whole, pow of a whole number to a known whole power is whole, and sqrt is a number", () => {
   assert.deepEqual(
     diagnostics(
@@ -151,11 +238,14 @@ test("numeric functions check their arguments", () => {
   ]);
 });
 
-test("abs, sqrt, and pow are protected names", () => {
+test("the numeric functions are protected names", () => {
   for (const [source, name] of [
     ["function sqrt(value) {\n    return value\n}\nexit", "sqrt"],
     ["let pow = 2\nexit", "pow"],
     ["function size(abs) {\n    return 1\n}\nexit", "abs"],
+    ["let sign = 1\nexit", "sign"],
+    ["let mod = 1\nexit", "mod"],
+    ["let clamp = 1\nexit", "clamp"],
   ] as const) {
     assert.deepEqual(
       diagnostics(source),
@@ -173,7 +263,7 @@ test("abs, sqrt, and pow are protected names", () => {
 
 test("pow gives the correctly rounded result with the same operations on every JavaScript engine", () => {
   const pow = (base: number, exponent: number) =>
-    NUMERIC_FUNCTIONS.get("pow")!.apply([base, exponent]);
+    NUMERIC_FUNCTIONS.get("pow")!.apply([base, exponent], {});
   // Whole powers of whole numbers, rounded once from the exact BigInt power.
   for (const [base, exponent] of [
     [477, 6],
@@ -208,7 +298,8 @@ test("pow gives the correctly rounded result with the same operations on every J
   assert.equal(pow(2, -1075), 0);
   // Extreme exponents end quickly: beyond any finite double, or within rounding of 1.
   assert.deepEqual(pow(1.0000001, 1e300), {
-    noResult: "pow(1.0000001, 1e+300) gives a number too large to represent. Use smaller values.",
+    failure: "pow(1.0000001, 1e+300) gives a number too large to represent. Use smaller values.",
+    code: "TSR036",
   });
   assert.equal(pow(0.9999999, 1e300), 0);
   assert.equal(pow(3, 5e-324), 1);

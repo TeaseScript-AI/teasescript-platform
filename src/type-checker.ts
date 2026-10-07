@@ -85,6 +85,7 @@ import {
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
+import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import {
   compareDurationParts,
   divideDurationParts,
@@ -4492,6 +4493,8 @@ class TypeChecker {
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    if (method === "take" || method === "takeLast")
+      return { kind: "list", element: copyType(value.element) };
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
     if (operand !== undefined && problems.length === 0) {
@@ -4595,9 +4598,8 @@ class TypeChecker {
     this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
     for (const { item, type } of several)
       this.#reportUnless(type, isNumeric, item.value, `${name}(...) takes a number`);
-    const inputs = numeric.parameters.map((_, index): NumericArgument => {
-      const item = fitting ? expression.arguments[index] : undefined;
-      if (item === undefined) return { type: "unknown", known: undefined };
+    const input = (item: CallArgument | undefined, index: number): NumericArgument => {
+      if (item === undefined || !fitting) return { type: "unknown", known: undefined };
       const parts = members(nonNullTypeForUse(values[index]!));
       const known = this.#known(item.value);
       return {
@@ -4609,13 +4611,25 @@ class TypeChecker {
               : "number",
         known: typeof known === "number" ? known : undefined,
       };
+    };
+    const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
+    const inputs = numeric.parameters.map((_, index) =>
+      input(positional[index], expression.arguments.indexOf(positional[index]!)),
+    );
+    const named: Record<string, NumericArgument> = {};
+    expression.arguments.forEach((item, index) => {
+      if (item.kind === "namedArgument") named[item.name.name] = input(item, index);
     });
-    if (problems.length === 0 && inputs.every((input) => input.known !== undefined)) {
-      const result = numeric.apply(inputs.map((input) => input.known!));
+    const all = [...inputs, ...Object.values(named)];
+    if (problems.length === 0 && all.every((one) => one.known !== undefined)) {
+      const result = numeric.apply(
+        inputs.map((one) => one.known!),
+        Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
+      );
       if (typeof result !== "number")
-        this.#report(typeCode.invalidOperand, result.noResult, expression.span);
+        this.#report(typeCode.invalidOperand, result.failure, expression.span);
     }
-    const result = numeric.result(inputs);
+    const result = numeric.result(inputs, named);
     return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
   }
 
@@ -4626,6 +4640,26 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
+    // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
+    const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
+    const list =
+      positional.length === 1 &&
+      members(nonNullTypeForUse(this.#typeOf(positional[0]!.value))).some(
+        (member) => !isKnown(member) || resolved(member).kind === "list",
+      );
+    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list)) {
+      const check = listFunctionCheck(
+        name,
+        expression,
+        (item) => this.#typeOf(item),
+        (item) => {
+          const known = this.#known(item);
+          return typeof known === "number" ? known : undefined;
+        },
+      );
+      this.#reportProblems(check.problems);
+      return check.type;
+    }
     const argument = expression.arguments[0];
     const value = values[0];
     // A built-in that takes fixed positional arguments checks their values only when their number is right.
@@ -6755,6 +6789,10 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "sort":
     case "shuffle":
       return value.kind === "list" ? NULL_TYPE : undefined;
+    // A part of a list is a new list.
+    case "take":
+    case "takeLast":
+      return value.kind === "list" ? { kind: "list", element: copyType(value.element) } : undefined;
     // A set operation builds a new collection of the receiver's kind.
     case "intersection":
     case "union":
@@ -7179,6 +7217,8 @@ const SCRIPT_CHOICE_MESSAGE =
 function isChoiceValue(member: StaticType): boolean {
   return isShowable(member) && !isScalar(member, "script");
 }
+
+const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
 
 /** The result types of the built-ins that take fixed positional arguments. */
 const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([

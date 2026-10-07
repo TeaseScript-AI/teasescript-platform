@@ -317,6 +317,7 @@ const RANDOM_TITLES = {
   chance: () => "chance()",
   randomInteger: (range: string) => `randomInteger(${range})`,
   collectionRandom: (_range: string, choices: string) => `random pick of ${choices}`,
+  randomWeighted: (_range: string, choices: string) => `weighted pick of ${choices}`,
   interpolation: (_range: string, choices: string) => `random pick of ${choices} for \${...}`,
   shuffle: (_range: string, choices: string) => `shuffle of ${choices}`,
   tagQuery: (_range: string, choices: string) => `tagged pick of ${choices}`,
