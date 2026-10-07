@@ -22,6 +22,7 @@ import {
   type Engine,
   type ExplorerInput,
   type Prompt,
+  type Runtime,
   type SessionPath,
   type Setup,
   type Step,
@@ -124,11 +125,20 @@ interface Node {
   readonly edges: number[];
   readonly texts: readonly string[];
   readonly prompt: Prompt;
+  /** Where it waits: the instruction of its foreground action, or null without one. */
+  readonly waitsAt: number | null;
 }
 
 export interface ExploreOptions {
   readonly seed: number;
+  /** The time budget; `Infinity` for none. */
   readonly budgetMs: number;
+  /**
+   * The work budget: the runtime operations the run may call (`Session.operations`), the corpus replay's included; none
+   * when absent. It is checked before each step, and a step that started finishes, so a run can go over it by the
+   * operations of its last step. A run that only this budget and `maxStates` limit is deterministic.
+   */
+  readonly budgetOps?: number;
   readonly maxStates: number;
   /** Project sources by path, for the source text of conditions. */
   readonly sources: ReadonlyMap<string, string>;
@@ -269,6 +279,14 @@ export interface TrapReport extends Repro {
   clock: boolean;
 }
 
+/** The expansions of states that wait at one place: its `path:line`, and the prompt of the first one expanded there. */
+export interface PromptShare {
+  location: string;
+  prompt: string;
+  expansions: number;
+  percent: number;
+}
+
 export interface ExploreResult {
   search: {
     states: number;
@@ -279,16 +297,23 @@ export interface ExploreResult {
     /** Inputs the runtime did not accept, such as an answer to an interaction inside a running timer block. */
     rejectedInputs: number;
     /**
-     * Inputs whose operation threw, such as a runtime that rejects a snapshot it produced itself (`TSR101`): a problem
-     * of the explorer or the runtime, not of the package. `first` has the path from the start that throws.
+     * Inputs whose operation threw, such as a runtime that rejects a state it produced itself when exporting it
+     * (`TSR101`): a problem of the explorer or the runtime, not of the package. `first` has the path from the start
+     * that throws.
      */
     engineErrors: { count: number; first: ({ message: string } & Repro) | null };
-    /** How executions were recorded: `trace` by the runtime's instruction trace, `steps` on a build without it. */
-    recording: "trace" | "steps" | null;
-    /** With `steps`: runs whose rest went unrecorded after a long stretch of known instructions. */
-    untracedRuns: number;
-    stoppedBy: "exhausted" | "budget" | "maxStates";
+    /** Why the search stopped: `budget` is the time budget, `operations` the work budget. */
+    stoppedBy: "exhausted" | "budget" | "operations" | "maxStates";
+    /** Runtime operations the run called: the work that `budgetOps` limits. */
+    operations: number;
     elapsedMs: number;
+    /** CPU time of the process during the run. */
+    cpuMs: number;
+    /**
+     * Where expanded states waited, by the instruction of their foreground action: the five places with the most
+     * expansions, and their share of all expansions. Most of them at one place is usually a loop the search goes round.
+     */
+    expansionsByPrompt: PromptShare[];
     /** The compressed snapshot store: its largest size, the snapshots it dropped, and the replays that made up for them. */
     store: { peakBytes: number; evicted: number; replays: number };
   };
@@ -523,6 +548,7 @@ interface Left {
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
+  const cpuAtStart = process.cpuUsage();
   const instructions = list(plan.instructions);
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
@@ -679,6 +705,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return node;
     }
     const status = step.snapshot.status;
+    const waitsAt = record(step.snapshot.foregroundAction).owningInstruction;
     const repeats = loopSeen.get(keys.loop) ?? 0;
     const id = nodes.length;
     const node: Node = {
@@ -697,6 +724,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       edges: [],
       texts: step.texts,
       prompt: session.prompt(step.snapshot),
+      waitsAt: typeof waitsAt === "number" ? waitsAt : null,
     };
     nodes.push(node);
     byState.set(keys.state, node.id);
@@ -737,10 +765,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (node.status === "completed") completedLeft.push(left.length - 1);
   };
 
-  /** A state's snapshot: stored, or replayed from its nearest ancestor that has one. */
-  const snapshotOf = (node: Node): Data | null => {
-    const stored = store.get(node.id);
-    if (stored !== null) return stored;
+  /**
+   * A runtime session in the state of a node whose snapshot was not stored: from its nearest ancestor that has one,
+   * with the inputs after that ancestor replayed in it.
+   */
+  const replayTo = (node: Node): Runtime | null => {
     const chain: Node[] = [];
     let current: Node | undefined = node;
     let snapshot: Data | null = null;
@@ -753,23 +782,37 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     if (snapshot === null) return null;
     replays += 1;
+    const runtime = session.restore(snapshot);
     for (const step of chain.reverse()) {
-      if (step.input === null) return null;
-      const next = session.apply(snapshot, step.input, step.clock);
-      if (next === null) return null;
-      snapshot = next.snapshot;
+      if (step.input === null || !session.advance(runtime, step.input, step.clock)) return null;
     }
-    return snapshot;
+    return runtime;
   };
 
-  /** Applies one input to a state; null when the runtime rejects it or throws. */
-  const step = (node: Node, snapshot: Data, input: ExplorerInput): Step | null => {
+  /** A runtime session in a node's state: from its stored snapshot, or replayed. */
+  const runtimeOf = (node: Node): Runtime | null => {
+    const stored = store.get(node.id);
+    return stored === null ? replayTo(node) : session.restore(stored);
+  };
+
+  /** A node's snapshot: stored, or exported after a replay. */
+  const snapshotOf = (node: Node): Data | null =>
+    store.get(node.id) ?? replayTo(node)?.exportSnapshot() ?? null;
+
+  /**
+   * Applies one input in `runtime`, which goes on in place; null when the runtime rejects the input or throws. Either
+   * way the caller does not use `runtime` again: a throw ended it, and a rejected input may have left it part of the
+   * way.
+   */
+  const step = (node: Node, runtime: Runtime, input: ExplorerInput): Step | null => {
     try {
-      const next = session.apply(snapshot, input, node.clock);
+      const next = session.apply(runtime, input, node.clock);
       if (next === null) rejectedInputs += 1;
       else transitions += 1;
       return next;
     } catch (error) {
+      // A session the explorer used after it ended is the explorer's own mistake: no result can be trusted then.
+      if (error instanceof Error && error.name === "RuntimeSessionError") throw error;
       // The runtime refused data it was given (RuntimeDataError): a harness problem, not a script failure.
       engineErrors.count += 1;
       engineErrors.first ??= { message: String(error), ...reproOf(node, input, node.start) };
@@ -777,12 +820,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
   };
 
-  /** Starts a session from `start`; its first state, or null when the session ended before asking anything. */
-  const startSession = (start: Start, lead: Lead | null): { node: Node; snapshot: Data | null } => {
+  /** Starts a session from `start`; its first state, and its runtime session when it waits for the player. */
+  const startSession = (
+    start: Start,
+    lead: Lead | null,
+  ): { node: Node; runtime: Runtime | null } => {
     starts.push(start);
     const first = session.start(start);
     const node = transition(null, null, first, starts.length - 1, lead);
-    return { node, snapshot: first.snapshot.status === "waiting" ? first.snapshot : null };
+    return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null };
   };
 
   /** Variables' values in a state, by name: the innermost binding, numbers and booleans as numbers. */
@@ -832,21 +878,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         ? { remaining: ATTEMPT_EXPANSIONS, target: attempt.target }
         : null;
     let node: Node;
-    let snapshot: Data | null;
+    let runtime: Runtime | null;
     if (attempt.start !== null) {
-      ({ node, snapshot } = startSession(attempt.start, lead));
+      ({ node, runtime } = startSession(attempt.start, lead));
       directedTransitions += 1;
     } else {
       node = nodes[attempt.from ?? 0]!;
-      snapshot = snapshotOf(node);
+      runtime = runtimeOf(node);
+      if (runtime?.view().status !== "waiting") runtime = null;
     }
     for (const input of attempt.inputs) {
-      if (snapshot === null || snapshot.status !== "waiting" || outOfBudget()) break;
-      const next = step(node, snapshot, input);
+      if (runtime === null || outOfBudget()) break;
+      const next = step(node, runtime, input);
       if (next === null) break;
       directedTransitions += 1;
       node = transition(node, input, next, node.start, lead);
-      snapshot = next.snapshot.status === "waiting" ? next.snapshot : null;
+      runtime = next.snapshot.status === "waiting" ? next.runtime : null;
     }
     directedWork += session.operations - work;
   };
@@ -1074,7 +1121,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return plan.length > 0 || chained;
   };
 
-  const outOfBudget = () => performance.now() - started >= options.budgetMs;
+  const budgetOps = options.budgetOps ?? Infinity;
+  /** The budget that is spent: `operations` for work, `budget` for time; null while neither is. */
+  const spent = (): "operations" | "budget" | null =>
+    session.operations >= budgetOps
+      ? "operations"
+      : performance.now() - started >= options.budgetMs
+        ? "budget"
+        : null;
+  const outOfBudget = () => spent() !== null;
   const full = () => outOfBudget() || nodes.length >= options.maxStates;
 
   /**
@@ -1117,34 +1172,39 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       firstOf.set(starts.length - 1, node.id);
       return starts.length - 1;
     };
-    /** Applies one session's inputs; the state reached, null when an input does not fit, "full" at a limit. */
+    /**
+     * Applies one session's inputs; the state reached, null when an input does not fit, "full" at a limit. The inputs
+     * go on in one runtime session; after an input applied before, from the state it reached.
+     */
     const walk = (start: number, inputs: readonly ExplorerInput[]): Node | null | "full" => {
       let node = nodes[firstOf.get(start)!]!;
-      let snapshot: Data | null = null;
+      let runtime: Runtime | null = null;
       for (const input of inputs) {
         if (full()) return "full";
         const key = `${node.id} ${JSON.stringify(input)}`;
         const known = applied.get(key);
         if (known !== undefined) {
           node = nodes[known]!;
-          snapshot = null;
+          runtime = null;
           continue;
         }
-        snapshot ??= node.status === "open" ? snapshotOf(node) : null;
-        if (snapshot === null || !fitsPending(input, session.options(snapshot))) return null;
-        const next = step(node, snapshot, input);
+        runtime ??= node.status === "open" ? runtimeOf(node) : null;
+        if (runtime === null || !fitsPending(input, session.options(runtime))) return null;
+        const next = step(node, runtime, input);
         if (next === null) return null;
         const reached = transition(node, input, next, node.start, null);
         reach(reached, next.snapshot);
         applied.set(key, reached.id);
         node = reached;
-        snapshot = next.snapshot.status === "waiting" ? next.snapshot : null;
+        runtime = next.snapshot.status === "waiting" ? next.runtime : null;
       }
       return node;
     };
     const replayEntry = (entry: CorpusEntry): "done" | "stale" | "full" => {
       let origin: Node | null = null;
       for (const part of [...(entry.earlier ?? []), entry]) {
+        // A spent budget also ends the replay between sessions, which may have no inputs.
+        if (full()) return "full";
         const start = sessionStart(origin, part.wallClockMs ?? EPOCH_MS);
         const reached = start === null ? null : walk(start, part.inputs);
         if (reached === null || reached === "full") return reached ?? "stale";
@@ -1194,18 +1254,28 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
   let sinceAnalysis = 0;
   let analyzedAt = started;
+  let analyzedOps = 0;
+  /** Expansions by where the expanded state waited, with the prompt of the first one. */
+  const expansionsAt = new Map<number | null, { expansions: number; prompt: string }>();
   search: for (;;) {
-    if (outOfBudget()) {
-      stoppedBy = "budget";
+    const stop = spent();
+    if (stop !== null) {
+      stoppedBy = stop;
       break;
     }
     if (nodes.length >= options.maxStates) {
       stoppedBy = "maxStates";
       break;
     }
-    if (sinceAnalysis >= ANALYZE_EVERY || performance.now() - analyzedAt >= options.budgetMs / 10) {
+    // A tenth of the budget: of the work budget when there is one, so that a run it limits stays deterministic.
+    const due =
+      options.budgetOps === undefined
+        ? performance.now() - analyzedAt >= options.budgetMs / 10
+        : session.operations - analyzedOps >= options.budgetOps / 10;
+    if (sinceAnalysis >= ANALYZE_EVERY || due) {
       sinceAnalysis = 0;
       analyzedAt = performance.now();
+      analyzedOps = session.operations;
       analyze();
     }
     // Directed attempts and the rest of the search take turns, by steps.
@@ -1237,12 +1307,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     const leading = leads(node);
     if (leading && node.lead !== null) node.lead.remaining -= 1;
-    const snapshot = snapshotOf(node);
-    if (snapshot === null) {
+    // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
+    const stored = store.get(node.id);
+    const base = stored === null ? replayTo(node) : session.restore(stored);
+    if (base === null) {
       node.status = "expanded";
       continue;
     }
-    const inputs = session.options(snapshot);
+    const inputs = session.options(base);
     if (inputs.length === 0) {
       node.status = "stuck";
       store.drop(node.id);
@@ -1250,15 +1322,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     expanded += 1;
     sinceAnalysis += 1;
+    const at = expansionsAt.get(node.waitsAt);
+    if (at === undefined)
+      expansionsAt.set(node.waitsAt, { expansions: 1, prompt: node.prompt.text });
+    else at.expansions += 1;
     node.status = "partial";
-    const closeness = distanceTargets.length === 0 ? [] : distances(snapshot);
-    for (const input of inputs) {
-      if (outOfBudget()) {
-        stoppedBy = "budget";
+    const closeness =
+      distanceTargets.length === 0 ? [] : distances(stored ?? base.exportSnapshot());
+    for (const [index, input] of inputs.entries()) {
+      const stop = spent();
+      if (stop !== null) {
+        stoppedBy = stop;
         break search;
       }
       const work = session.operations;
-      const next = step(node, snapshot, input);
+      const next = step(node, index === inputs.length - 1 ? base : base.fork(), input);
       if (leading) directedWork += session.operations - work;
       if (next === null) continue;
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
@@ -1361,6 +1439,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       entries,
     };
   };
+  const directed = directedSummary(
+    instructions,
+    files,
+    options.sources,
+    targets,
+    attemptCount,
+    directedTransitions,
+  );
+  const corpus = corpusResult();
+  // The run's time and CPU time end here, with everything but the search figures computed.
+  const cpu = process.cpuUsage(cpuAtStart);
   return {
     search: {
       states: nodes.length,
@@ -1369,10 +1458,25 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       sessions: starts.length,
       rejectedInputs,
       engineErrors,
-      recording: session.recording,
-      untracedRuns: session.untracedRuns,
       stoppedBy,
+      operations: session.operations,
       elapsedMs: Math.round(performance.now() - started),
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+      expansionsByPrompt: [...expansionsAt]
+        .sort((left, right) => right[1].expansions - left[1].expansions)
+        .slice(0, 5)
+        .map(([at, { expansions, prompt }]) => {
+          const span = at === null ? null : compactSpan(instructions[at]?.span);
+          return {
+            location:
+              at === null
+                ? "(nothing in the foreground)"
+                : `${files[at]}${span === null ? "" : `:${span.line}`}`,
+            prompt,
+            expansions,
+            percent: Math.round((expansions / expanded) * 1000) / 10,
+          };
+        }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
     },
     endStates: {
@@ -1382,17 +1486,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       open: count("open") + count("partial"),
     },
     coverage,
-    directed: directedSummary(
-      instructions,
-      files,
-      options.sources,
-      targets,
-      attemptCount,
-      directedTransitions,
-    ),
+    directed,
     crashes: [...crashes.values()],
     traps: traps.map((trap) => trap.report),
-    corpus: corpusResult(),
+    corpus,
   };
 }
 

@@ -17,8 +17,9 @@ const JUMP_TASK_MS = 10;
 
 /**
  * Development time controls of the Player with `?dev` (#615), always active there. Skip advances scene time to the next
- * timed event, and +10 s or +1 min advance it while the script waits for player input. Auto-skip skips event after
- * event while no input is pending, yielding between tasks; the player's think time before an answer stays real time.
+ * timed event, and +10 s or +1 min advance it by that amount while the session runs, also during waits and pacing.
+ * Auto-skip skips event after event while no input is pending, yielding between tasks; the player's think time before
+ * an answer stays real time.
  * Every jump is made of ordinary observations of the session, see `advancePlayerRuntimeTime`, and `log` receives a
  * line for it ("⏩ 30 s skipped").
  */
@@ -34,11 +35,13 @@ export function useDevelopmentTime(
   const canSkip = computed(
     () => !jumping.value && snapshot.value !== null && skippable(snapshot.value),
   );
+  // A session that ended has no scene time left to advance.
   const canAdvance = computed(
     () =>
       !jumping.value &&
       snapshot.value !== null &&
-      activePlayerRuntimeInteraction(snapshot.value) !== null,
+      snapshot.value.status !== "halted" &&
+      snapshot.value.status !== "failed",
   );
   // A state Debug's rewind restored is inspected until input adopts it; auto-skip waits for that.
   const autoSkipDue = computed(
@@ -72,7 +75,7 @@ export function useDevelopmentTime(
       // Time that really elapsed is observed first, with the media progress actually played.
       const start = player.observe();
       const targetMs = start === null ? null : target(start);
-      if (start === null || targetMs === null || playerRuntimeAwaitsHost(start.snapshot)) return;
+      if (start === null || targetMs === null) return;
       let current = start;
       for (;;) {
         // Each task observes events for a bounded time, so a long jump keeps input and rendering responsive.
@@ -100,15 +103,17 @@ export function useDevelopmentTime(
   }
 
   async function skip() {
-    if (canSkip.value) await jump((session) => nextPlayerRuntimeEventMs(session.snapshot));
+    if (canSkip.value)
+      await jump((session) =>
+        playerRuntimeAwaitsHost(session.snapshot)
+          ? null
+          : nextPlayerRuntimeEventMs(session.snapshot),
+      );
   }
+  // A jump that starts while the host answers a save, delete, or photo waits for that answer first.
   async function advanceBy(milliseconds: number) {
-    if (!canAdvance.value) return;
-    await jump((session) =>
-      activePlayerRuntimeInteraction(session.snapshot) === null
-        ? null
-        : session.snapshot.observedSessionTimeMs + milliseconds,
-    );
+    if (canAdvance.value)
+      await jump((session) => session.snapshot.observedSessionTimeMs + milliseconds);
   }
 
   /** Skips events for one task, then publishes them as one jump. */

@@ -249,7 +249,7 @@ them at the top.
 
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
-node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] \
+node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
   [--corpus <corpus-dir> [--rounds N]] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
@@ -278,7 +278,12 @@ session, then, earlier sessions first, states that look new apart from clock, ra
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
 first. Waiting states keep their snapshots
 as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
-when every state is expanded and directed search has nothing left to try, or at the time or state budget.
+when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
+`--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic
+answers, the corpus replay's included), checked before each step: a step that started finishes, so a run can go over N
+by the operations of its last step. With it the time budget applies only when `--budget-seconds` is given, and directed
+search looks again every tenth of the work budget instead of every tenth of the time; without an explicit time budget,
+a run's length and result then do not depend on the machine's load.
 
 Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
@@ -294,14 +299,16 @@ other wall clock times (times of day, weekdays, later dates) before that step, a
 after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
 condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
 share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
-work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations,
-which measure what steps cost.
+work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations
+(fresh sessions, runs, inputs, and automatic answers), a deterministic measure of what steps cost.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
-`instructionTrace: true`, and the condition ways come from the trace's branch edges. A build without the trace falls
-back to executing instruction by instruction, which records nothing after 200 known instructions in a row.
-`TEASESCRIPT_DIST` names another repository build to load the compiler and runtime from, for comparisons. Each line has
+`instructionTrace: true`, and the condition ways come from the trace's branch edges. A path runs in one runtime
+session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between operations: the explorer exports the state
+once per step, for its hash and the snapshot store, restores a stored state once to expand it, and tries each input on
+its own copy: a fork of it for all inputs but the last, which goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
+from, for comparisons. Each line has
 a label: `play` when a play step executed it, in any session; `clock` when only steps after the wall clock was set did;
 `unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control
 flow in which a constant condition takes only its one way; and `unknown` otherwise. A condition is constant when it is a
@@ -325,14 +332,20 @@ The report `<out>/<unit>.json` has these parts:
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
   there is), and whether that path set the clock;
 - the traps;
-- the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out.
+- the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out;
+- in `search`, what stopped it (`exhausted`, `budget` for time, `operations` for work, or `maxStates`), the runtime
+  operations, the elapsed and CPU time, and `expansionsByPrompt`: the five places where the most expanded states
+  waited (the `path:line` of their pending action, with its prompt) and their share of all expansions. It shows where
+  the search spends its work; most expansions at one place is often a loop the search keeps going round, worth checking
+  before raising the budget, though paths that converge on one prompt can concentrate there too.
 
 A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
-runtime operation that throws, such as a runtime that rejects a snapshot it produced (`TSR101`), is no crash of the
-package: the report counts these under `search.engineErrors` with the path of the first, which `--error` replays.
+runtime operation that throws, such as a runtime that rejects a state it produced when exporting it (`TSR101`), is no
+crash of the package: it ends that runtime session, the search goes on from the state before the input, and the report
+counts these under `search.engineErrors` with the path of the first, which `--error` replays.
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
@@ -354,8 +367,8 @@ entries of another seed, and those the budget left unreplayed, stay as they are.
 entries loaded, replayed, stale, and written, the replay's steps and time, the play coverage at the start (from the
 corpus) and at the end, and the file's size. The file also records the `contentHash` and seed of the run that wrote it
 and whether that run was exhausted; a unit exhausted with the same content and seed is skipped. `--rounds N` explores
-the units in N rounds: the first with the budget, each later one with twice the budget before and only the units not
-exhausted yet. Directed attempts and session chains start over in each run; what they reached comes back with the
+the units in N rounds: the first with the budgets, each later one with twice the budgets before and only the units
+not exhausted yet. Directed attempts and session chains start over in each run; what they reached comes back with the
 corpus.
 
 The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.

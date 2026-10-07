@@ -16,16 +16,18 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  *
  * Execution is deterministic: a state is reproduced by the seed, its earlier sessions, its start clock, and its input
  * list ({@link replay}).
+ *
+ * Each path runs in an engine-owned runtime session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between
+ * operations. The explorer handles the whole state only where it needs it: one checked export per step for the
+ * search's state hash and store, a checked import to go on from a stored state, and a trusted copy (a fork) for each
+ * input tried from one state but the last.
  */
 
-/** A runtime operation result read field by field; plans and snapshots inside it are passed back unchanged. */
+/** A runtime result read field by field. */
 export type Data = Readonly<Record<string, unknown>>;
 
-const ENGINE_OPERATIONS = [
-  "compileProject",
-  "createFreshRuntimeSnapshot",
+const RUNTIME_OPERATIONS = [
   "run",
-  "executeInstruction",
   "completeAction",
   "updateInteraction",
   "observeTime",
@@ -33,42 +35,97 @@ const ENGINE_OPERATIONS = [
   "pressPermanentButton",
   "recordContinueCapture",
 ] as const;
-const ENGINE_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
+const RUNTIME_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
+const RUNTIME_READS = ["view", "callReturnInstructions", "exportSnapshot", "fork"] as const;
 
-/** The runtime operations the explorer drives, as `runtime-check.ts` reads them: each result must be an object. */
+/**
+ * One runtime session, as the explorer drives it. Its results, view, and projections are detached frozen data. An
+ * operation that throws ends the session: every later call throws too, so the explorer goes on from another one.
+ */
+export interface Runtime {
+  /** Runs one operation on the session's state; its result read field by field. */
+  call: (name: (typeof RUNTIME_OPERATIONS)[number], ...args: unknown[]) => Data;
+  /** The records of a projection of the current state, such as the playback of its media. */
+  project: (name: (typeof RUNTIME_PROJECTIONS)[number]) => Data[];
+  /** What a host acts on between operations: status, failure, times, `runnable`, and the pending actions. */
+  view: () => Data;
+  /** Where each active call continues when it returns, outermost first. */
+  callReturnInstructions: () => number[];
+  /** The complete state as plain data, checked by the runtime, which later operations do not change. */
+  exportSnapshot: () => Data;
+  /** An independent session with a copy of the state. */
+  fork: () => Runtime;
+}
+
+/** The compiler and the runtime session factories the explorer uses. */
 export interface Engine {
-  call: (name: (typeof ENGINE_OPERATIONS)[number], ...args: unknown[]) => Data;
-  /** The records of a projection of a snapshot, such as the playback of its media. */
-  project: (name: (typeof ENGINE_PROJECTIONS)[number], snapshot: Data) => Data[];
+  compileProject: (sources: unknown, options: unknown) => Data;
+  /** A session at the start of a plan. */
+  createFreshRuntimeSession: (plan: Data, fresh: Data) => Runtime;
+  /** A session that goes on from a snapshot, which the runtime checks completely. */
+  createRuntimeSession: (plan: Data, snapshot: Data) => Runtime;
 }
 
 const repositoryIndexUrl = repositoryBuildUrl("src/index.js");
 
-/** Loads the runtime operations from the repository build (`npm run build:typescript`, or `TEASESCRIPT_DIST`). */
+/**
+ * Loads the compiler and the runtime sessions from the repository build (`npm run build:typescript`, or
+ * `TEASESCRIPT_DIST`).
+ */
 export async function loadEngine(): Promise<Engine> {
   const module: unknown = await import(repositoryIndexUrl.href);
   const exported = (name: string) => {
     const value = isRecord(module) ? module[name] : undefined;
-    if (typeof value !== "function") throw new Error(`Repository build does not export ${name}().`);
+    if (typeof value !== "function")
+      throw new Error(
+        `Repository build does not export ${name}(); the explorer needs runtime sessions.`,
+      );
     return value;
   };
-  const functions = new Map(
-    [...ENGINE_OPERATIONS, ...ENGINE_PROJECTIONS].map((name) => [name, exported(name)]),
-  );
+  const compileProject = exported("compileProject");
+  const fresh = exported("createFreshRuntimeSession");
+  const restore = exported("createRuntimeSession");
   return {
-    call: (name, ...args) => {
-      const operation = functions.get(name);
-      if (operation === undefined) throw new Error(`Unknown runtime operation ${name}.`);
-      const value: unknown = operation(...args);
-      if (!isRecord(value)) throw new Error(`${name}() returned an unexpected result shape.`);
+    compileProject: (sources, options) => {
+      const value: unknown = compileProject(sources, options);
+      if (!isRecord(value))
+        throw new Error("compileProject() returned an unexpected result shape.");
       return value;
     },
-    project: (name, snapshot) => {
-      const projection = functions.get(name);
-      if (projection === undefined) throw new Error(`Unknown runtime projection ${name}.`);
-      const value: unknown = projection(snapshot);
-      return Array.isArray(value) ? value.filter(isRecord) : [];
+    createFreshRuntimeSession: (plan, options) => runtimeOf(fresh(plan, options)),
+    createRuntimeSession: (plan, snapshot) => runtimeOf(restore(plan, snapshot)),
+  };
+}
+
+/** The explorer's view of a runtime session of the repository build. */
+function runtimeOf(session: unknown): Runtime {
+  const methods = new Map(
+    [...RUNTIME_OPERATIONS, ...RUNTIME_PROJECTIONS, ...RUNTIME_READS].map((name) => {
+      const value = isRecord(session) ? session[name] : undefined;
+      if (typeof value !== "function") throw new Error(`The runtime session has no ${name}().`);
+      return [name, value] as const;
+    }),
+  );
+  const result = (
+    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportSnapshot",
+    ...args: unknown[]
+  ): Data => {
+    const value: unknown = methods.get(name)!.apply(session, args);
+    if (!isRecord(value)) throw new Error(`${name}() returned an unexpected result shape.`);
+    return value;
+  };
+  return {
+    call: result,
+    project: (name) => list(methods.get(name)!.apply(session, [])),
+    view: () => result("view"),
+    callReturnInstructions: () => {
+      const value: unknown = methods.get("callReturnInstructions")!.apply(session, []);
+      return Array.isArray(value)
+        ? value.filter((position): position is number => typeof position === "number")
+        : [];
     },
+    exportSnapshot: () => result("exportSnapshot"),
+    fork: () => runtimeOf(methods.get("fork")!.apply(session, [])),
   };
 }
 
@@ -155,11 +212,6 @@ const MEDIA_PASS_MS = 1000;
 const EXPLORER_IMAGE = "explorer-image";
 /** The product's instruction budget per `run` (the runtime's default). */
 const INSTRUCTION_BUDGET = 1_000_000;
-/**
- * Without the runtime's instruction trace: instructions an execution records one by one without reaching one for the
- * first time, before it finishes with `run`, so that a long loop over known code is not stepped again.
- */
-const TRACE_PATIENCE = 200;
 /** How long the player thinks before pressing a timed button without a compared constant nearby. */
 const THINK_MS = 60_000;
 /** Times in a row the explorer lets time pass when nothing else can happen, before it records a state. */
@@ -181,7 +233,10 @@ export interface Prompt {
 
 /** The result of one input and everything that follows from it until the player is asked again. */
 export interface Step {
+  /** The state the step reached, exported once: later operations of {@link runtime} do not change it. */
   readonly snapshot: Data;
+  /** The runtime session in that state, to go on from. */
+  readonly runtime: Runtime;
   /** Instructions this step executed for the first time, for its kind of coverage (see {@link Session}). */
   readonly newInstructions: number;
   /** Every instruction the step executed, once each. */
@@ -208,132 +263,49 @@ export function short(text: string): string {
   return line.length > TEXT_LENGTH ? `${line.slice(0, TEXT_LENGTH - 1)}…` : line;
 }
 
-/** What one execution ran, until nothing was runnable, as one `run` would have. */
+/** What one execution ran, until nothing was runnable. */
 interface Execution {
-  readonly snapshot: Data;
   readonly events: readonly Data[];
-  /** The instructions it recorded as executed, each once. */
+  /** The instructions it executed, each once. */
   readonly instructions: readonly number[];
-  /** The instruction transitions it recorded: from an instruction to the next one executed. */
+  /** The successors that conditions, loops, transfers, and `end` took: from an instruction to the next one executed. */
   readonly edges: readonly (readonly [number, number])[];
 }
 
 /**
- * Records what an execution ran. With the runtime's instruction trace (`docs/RUNTIME.md#instruction-trace`) an
- * execution is one `run` with `instructionTrace: true`, whose trace lists every instruction it executed, a failing one
- * included, and the successor each condition, loop, transfer, and `end` took. A build without the trace ignores the
- * option and returns no trace; then the recorder runs the execution again instruction by instruction with
- * `executeInstruction` and keeps doing so. In that fallback, once {@link TRACE_PATIENCE} instructions in a row were
- * known (reached before, or earlier in this execution), it finishes with `run` and records nothing more. Both keep the
- * product's instruction budget per run, and so `TSR037` where the Player has it.
+ * Runs a session until nothing is runnable: one `run` with the product's instruction budget, and so `TSR037` where the
+ * Player has it, and `instructionTrace: true`. The trace (`docs/RUNTIME.md#instruction-trace`) lists every instruction
+ * the run executed, a failing one included, and the successor each condition, loop, transfer, and `end` took.
  */
-class Recorder {
-  /** Fallback runs finished with `run`, without recording their instructions, after {@link TRACE_PATIENCE} known ones. */
-  untracedRuns = 0;
-  /** Whether the runtime returns an instruction trace; unknown until the first run. */
-  #traced: boolean | null = null;
-  readonly #engine: Engine;
-  readonly #plan: Data;
-
-  constructor(engine: Engine, plan: Data) {
-    this.#engine = engine;
-    this.#plan = plan;
-  }
-
-  /** How executions are recorded: by the runtime's trace, or step by step without one. */
-  get recording(): "trace" | "steps" | null {
-    return this.#traced === null ? null : this.#traced ? "trace" : "steps";
-  }
-
-  execute(start: Data, known: (index: number) => boolean): Execution {
-    if (!runnable(start)) return { snapshot: start, events: [], instructions: [], edges: [] };
-    if (this.#traced !== false) {
-      const result = this.#engine.call(
-        "run",
-        this.#plan,
-        start,
-        {},
-        { instructionBudget: INSTRUCTION_BUDGET, instructionTrace: true },
-      );
-      const trace = result.instructionTrace;
-      if (isRecord(trace)) {
-        this.#traced = true;
-        return {
-          snapshot: record(result.snapshot),
-          events: list(result.events),
-          instructions: Array.isArray(trace.instructions)
-            ? trace.instructions.filter((index): index is number => typeof index === "number")
-            : [],
-          edges: (Array.isArray(trace.branches) ? trace.branches : [])
-            .filter(
-              (edge): edge is [number, number] =>
-                Array.isArray(edge) && typeof edge[0] === "number" && typeof edge[1] === "number",
-            )
-            .map(([from, to]) => [from, to] as const),
-        };
-      }
-      this.#traced = false;
-    }
-    return this.#step(start, known);
-  }
-
-  /** An instruction boundary that only starts a queued timer, cue, or button block executes no instruction of its own. */
-  #step(start: Data, known: (index: number) => boolean): Execution {
-    const events: Data[] = [];
-    const executed = new Set<number>();
-    const edges: (readonly [number, number])[] = [];
-    let snapshot = start;
-    let quiet = 0;
-    for (let steps = 0; runnable(snapshot);) {
-      if (quiet >= TRACE_PATIENCE) {
-        this.untracedRuns += 1;
-        const result = this.#engine.call(
-          "run",
-          this.#plan,
-          snapshot,
-          {},
-          { instructionBudget: INSTRUCTION_BUDGET - steps },
-        );
-        events.push(...list(result.events));
-        snapshot = record(result.snapshot);
-        break;
-      }
-      const before = typeof snapshot.nextInstruction === "number" ? snapshot.nextInstruction : -1;
-      const interrupts = interruptFrames(snapshot);
-      const result = this.#engine.call("executeInstruction", this.#plan, snapshot, {});
-      const count =
-        typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
-      // Nothing was runnable; `run` would not have executed this boundary, nor settled due work after it.
-      if (count === 0 || !isRecord(result.snapshot)) break;
-      const after = result.snapshot;
-      events.push(...list(result.events));
-      if (before >= 0 && interruptFrames(after) <= interrupts) {
-        if (known(before) || executed.has(before)) quiet += 1;
-        else quiet = 0;
-        executed.add(before);
-        if (after.status !== "failed" && typeof after.nextInstruction === "number")
-          edges.push([before, after.nextInstruction]);
-      }
-      snapshot = after;
-      steps += count;
-    }
-    return { snapshot, events, instructions: [...executed], edges };
-  }
+function execute(runtime: Runtime): Execution {
+  const result = runtime.call("run", {
+    instructionBudget: INSTRUCTION_BUDGET,
+    instructionTrace: true,
+  });
+  const trace = result.instructionTrace;
+  if (!isRecord(trace)) throw new Error("run() returned no instruction trace.");
+  return {
+    events: list(result.events),
+    instructions: Array.isArray(trace.instructions)
+      ? trace.instructions.filter((index): index is number => typeof index === "number")
+      : [],
+    edges: (Array.isArray(trace.branches) ? trace.branches : [])
+      .filter(
+        (edge): edge is [number, number] =>
+          Array.isArray(edge) && typeof edge[0] === "number" && typeof edge[1] === "number",
+      )
+      .map(([from, to]) => [from, to] as const),
+  };
 }
 
-/** What `run` would find runnable: a waiting session runs only to start a queued block. */
-function runnable(snapshot: Data): boolean {
-  return (
-    snapshot.status === "ready" ||
-    snapshot.status === "running" ||
-    (snapshot.status === "waiting" && list(snapshot.pendingTimerHandlers).length > 0)
-  );
-}
+/** A step before the state it reached is exported. */
+type Settled = Omit<Step, "snapshot" | "runtime">;
 
 /**
  * The project's plan with the engine, which runs inputs and records the instructions and condition ways they execute.
  * Coverage accumulates over every step of the session object, apart for play and for clock steps: a clock step
- * starts at another wall clock or follows a {@link isClockInput} input.
+ * starts at another wall clock or follows a {@link isClockInput} input. A step goes on in the runtime session it is
+ * given; its state is exported once, when the step has settled.
  */
 export class Session {
   /** Instructions play executed. */
@@ -345,75 +317,77 @@ export class Session {
   readonly clockBranches: Uint8Array;
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
-  /** Runtime operations called so far: the work the session's steps took. */
+  /**
+   * Runtime operations called so far, a deterministic measure of the work the session's steps took: fresh sessions,
+   * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
+   */
   operations = 0;
   readonly #engine: Engine;
   readonly #plan: Data;
   readonly #instructions: Data[];
   readonly #seed: number;
-  readonly #recorder: Recorder;
   /** Per instruction, the constants it compares with; computed at the first ask. */
   #literals: Literals[] | undefined;
 
   constructor(engine: Engine, plan: Data, seed: number) {
-    // Every runtime operation copies and checks the snapshot, so their count measures the work steps take.
-    this.#engine = {
-      call: (name, ...args) => {
-        this.operations += 1;
-        return engine.call(name, ...args);
-      },
-      project: engine.project,
-    };
+    this.#engine = engine;
     this.#plan = plan;
     this.#instructions = list(plan.instructions);
     this.#seed = seed;
-    this.#recorder = new Recorder(this.#engine, plan);
     this.visited = new Uint8Array(this.#instructions.length);
     this.clockVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
     this.clockBranches = new Uint8Array(this.#instructions.length);
   }
 
-  get untracedRuns(): number {
-    return this.#recorder.untracedRuns;
-  }
-
-  /** How executions are recorded: by the runtime's instruction trace, or step by step on a build without it. */
-  get recording(): "trace" | "steps" | null {
-    return this.#recorder.recording;
-  }
-
   /** A fresh session, run until the player is first asked; a clock session at another wall clock than the play one. */
   start(setup: Setup = PLAY_SETUP): Step {
-    const fresh = this.#engine.call("createFreshRuntimeSnapshot", this.#plan, {
-      seed: this.#seed,
-      baseDelayMs: 0,
-      delayPerWordMs: 0,
-      delayPerCharacterMs: 0,
-      // The runtime keeps storage sorted by key.
-      scriptStorage: [...setup.storage].sort((left, right) =>
-        left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
-      ),
-      wallClockMs: setup.wallClockMs,
-    });
-    return this.#settle(fresh, setup.wallClockMs !== EPOCH_MS);
+    this.operations += 1;
+    const runtime = this.#counted(
+      this.#engine.createFreshRuntimeSession(this.#plan, {
+        seed: this.#seed,
+        baseDelayMs: 0,
+        delayPerWordMs: 0,
+        delayPerCharacterMs: 0,
+        // The runtime keeps storage sorted by key.
+        scriptStorage: [...setup.storage].sort((left, right) =>
+          left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+        ),
+        wallClockMs: setup.wallClockMs,
+      }),
+    );
+    return this.#reached(runtime, this.#settle(runtime, setup.wallClockMs !== EPOCH_MS));
   }
 
-  /** Applies one input to a waiting state; null when the runtime rejects it. */
-  apply(snapshot: Data, input: ExplorerInput, clock: boolean): Step | null {
-    const next = this.#input(snapshot, input);
-    return next === null ? null : this.#settle(next, clock || isClockInput(input));
+  /** A session that goes on from a stored state. */
+  restore(snapshot: Data): Runtime {
+    return this.#counted(this.#engine.createRuntimeSession(this.#plan, snapshot));
   }
 
-  /** The inputs the player has in a waiting state; none in an ended state. */
-  options(snapshot: Data): ExplorerInput[] {
-    if (snapshot.status !== "waiting") return [];
+  /**
+   * Applies one input to the waiting state of `runtime` and runs until the player is asked again; null when the
+   * runtime rejects the input. Either way `runtime` goes on in place: to try other inputs from the same state, give
+   * each a fork.
+   */
+  apply(runtime: Runtime, input: ExplorerInput, clock: boolean): Step | null {
+    const settled = this.#apply(runtime, input, clock);
+    return settled === null ? null : this.#reached(runtime, settled);
+  }
+
+  /** {@link apply} without exporting the state reached, to replay a path: whether the runtime accepted the input. */
+  advance(runtime: Runtime, input: ExplorerInput, clock: boolean): boolean {
+    return this.#apply(runtime, input, clock) !== null;
+  }
+
+  /** The inputs the player has in the state of `runtime` (whose `view` it is); none in an ended state. */
+  options(runtime: Runtime, view: Data = runtime.view()): ExplorerInput[] {
+    if (view.status !== "waiting") return [];
     const options: ExplorerInput[] = [];
-    const action = record(snapshot.foregroundAction);
-    const until = this.#nextDeadline(snapshot);
+    const action = record(view.foregroundAction);
+    const until = this.#nextDeadline(runtime, view);
     if (action.kind === "interaction") {
       const ui = record(action.ui);
-      const literals = this.#nearbyLiterals(snapshot, action);
+      const literals = this.#nearbyLiterals(runtime, action);
       const directed =
         typeof action.owningInstruction === "number"
           ? (this.directedAnswers.get(action.owningInstruction) ?? [])
@@ -426,14 +400,14 @@ export class Session {
         action.expectedResult === "duration" &&
         action.destinationTemporary !== null
       ) {
-        const now = Number(snapshot.observedSessionTimeMs);
+        const now = Number(view.observedSessionTimeMs);
         for (const afterMs of thinkTimes(literals)) {
           if (until === null || now + afterMs < until)
             options.push({ kind: "button", label: String(ui.buttonLabel), afterMs });
         }
       }
     }
-    for (const button of this.#engine.project("permanentButtonProjection", snapshot)) {
+    for (const button of runtime.project("permanentButtonProjection")) {
       if (button.busy !== true && typeof button.buttonId === "number")
         options.push({ kind: "press", buttonId: button.buttonId, label: String(button.text) });
     }
@@ -441,7 +415,7 @@ export class Session {
     return options;
   }
 
-  /** The foreground interaction in short: its kind and labels. */
+  /** The foreground interaction of a state in short: its kind and labels. */
   prompt(snapshot: Data): Prompt {
     const action = record(snapshot.foregroundAction);
     if (action.kind !== "interaction") {
@@ -465,14 +439,34 @@ export class Session {
     };
   }
 
-  #input(snapshot: Data, input: ExplorerInput): Data | null {
-    const plan = this.#plan;
-    const action = record(snapshot.foregroundAction);
-    const completion = (payload: InteractionPayload, from = snapshot) =>
-      this.#engine.call(
+  /** Counts the operations of a session and of its forks. */
+  #counted(runtime: Runtime): Runtime {
+    return {
+      ...runtime,
+      call: (name, ...args) => {
+        this.operations += 1;
+        return runtime.call(name, ...args);
+      },
+      fork: () => this.#counted(runtime.fork()),
+    };
+  }
+
+  #apply(runtime: Runtime, input: ExplorerInput, clock: boolean): Settled | null {
+    return this.#input(runtime, runtime.view(), input)
+      ? this.#settle(runtime, clock || isClockInput(input))
+      : null;
+  }
+
+  #reached(runtime: Runtime, settled: Settled): Step {
+    return { ...settled, snapshot: runtime.exportSnapshot(), runtime };
+  }
+
+  /** Gives the session in the state `view` shows one input; whether the runtime accepted it. */
+  #input(runtime: Runtime, view: Data, input: ExplorerInput): boolean {
+    const action = record(view.foregroundAction);
+    const completion = (payload: InteractionPayload) =>
+      runtime.call(
         "completeAction",
-        plan,
-        from,
         {
           actionId: action.actionId,
           actionKind: "interaction",
@@ -489,21 +483,17 @@ export class Session {
         accepted = "completed";
         break;
       case "button": {
-        let from = snapshot;
         if (input.afterMs !== undefined) {
-          const until = Number(snapshot.observedSessionTimeMs) + input.afterMs;
-          const observed = this.#engine.call(
+          const until = Number(view.observedSessionTimeMs) + input.afterMs;
+          const observed = runtime.call(
             "observeTime",
-            plan,
-            snapshot,
             until,
-            this.#mediaReports(snapshot, until),
+            this.#mediaReports(runtime, view, until),
           );
-          if (record(observed.outcome).kind !== "observed" || !isRecord(observed.snapshot))
-            return null;
-          from = observed.snapshot;
+          if (record(observed.outcome).kind !== "observed") return false;
         }
-        result = completion({ kind: "activate" }, from);
+        // The press answers the button shown before the player thought.
+        result = completion({ kind: "activate" });
         accepted = "completed";
         break;
       }
@@ -515,59 +505,47 @@ export class Session {
         result = completion({ kind: "image", reference: EXPLORER_IMAGE });
         accepted = "completed";
         break;
-      case "form": {
-        const filled =
-          input.action === "submit" ? this.#fill(snapshot, action, input.fields ?? {}) : snapshot;
-        if (filled === null) return null;
-        result = completion({ kind: input.action }, filled);
+      case "form":
+        if (input.action === "submit" && !this.#fill(runtime, action, input.fields ?? {}))
+          return false;
+        result = completion({ kind: input.action });
         accepted = "completed";
         break;
-      }
       case "press":
-        result = this.#engine.call("pressPermanentButton", plan, snapshot, input.buttonId);
+        result = runtime.call("pressPermanentButton", input.buttonId);
         accepted = "pressed";
         break;
       case "wait":
-        result = this.#engine.call(
+        result = runtime.call(
           "observeTime",
-          plan,
-          snapshot,
           input.untilMs,
-          this.#mediaReports(snapshot, input.untilMs),
+          this.#mediaReports(runtime, view, input.untilMs),
         );
         accepted = "observed";
         break;
       case "clock":
-        result = this.#engine.call("recordContinueCapture", plan, snapshot, {
-          wallClockMs: input.wallClockMs,
-        });
+        result = runtime.call("recordContinueCapture", { wallClockMs: input.wallClockMs });
         accepted = "recorded";
         break;
     }
-    return record(result.outcome).kind === accepted && isRecord(result.snapshot)
-      ? result.snapshot
-      : null;
+    return record(result.outcome).kind === accepted;
   }
 
   /** Sets the named fields of the pending form: a toggle or cycle by option index, a typed field by its text. */
   #fill(
-    snapshot: Data,
+    runtime: Runtime,
     action: Data,
     fields: Readonly<Record<string, number | string>>,
-  ): Data | null {
-    let current = snapshot;
+  ): boolean {
     const update = (edit: Data): boolean => {
-      const result = this.#engine.call("updateInteraction", this.#plan, current, {
+      const result = runtime.call("updateInteraction", {
         actionId: action.actionId,
         actionKind: "interaction",
         interactionKind: "form",
         update: edit,
       });
       const outcome = record(result.outcome).kind;
-      if ((outcome !== "updated" && outcome !== "unchanged") || !isRecord(result.snapshot))
-        return false;
-      current = result.snapshot;
-      return true;
+      return outcome === "updated" || outcome === "unchanged";
     };
     for (const [fieldId, value] of Object.entries(fields)) {
       const done =
@@ -576,66 +554,60 @@ export class Session {
           : update({ kind: "edit", fieldId }) &&
             update({ kind: "draft", fieldId, text: value }) &&
             update({ kind: "commit", fieldId });
-      if (!done) return null;
+      if (!done) return false;
     }
-    return current;
+    return true;
   }
 
   /**
    * Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can
    * happen. Records what ran as play or as clock coverage.
    */
-  #settle(start: Data, clock: boolean): Step {
+  #settle(runtime: Runtime, clock: boolean): Settled {
     const texts: string[] = [];
     const executed = new Set<number>();
     const ways = new Set<number>();
     let newInstructions = 0;
-    let snapshot = start;
+    let view = runtime.view();
     let waits = 0;
     for (let operations = 0; ; operations += 1) {
-      const execution = this.#recorder.execute(
-        snapshot,
-        (index) => this.visited[index] === 1 || this.clockVisited[index] === 1,
-      );
-      snapshot = execution.snapshot;
-      collectTexts(execution.events, texts);
-      newInstructions += this.#record(execution, clock, executed, ways);
-      if (snapshot.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
-      const action = record(snapshot.foregroundAction);
+      if (view.runnable === true) {
+        const execution = execute(runtime);
+        collectTexts(execution.events, texts);
+        newInstructions += this.#record(execution, clock, executed, ways);
+        view = runtime.view();
+      }
+      if (view.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
+      const action = record(view.foregroundAction);
       if (action.kind === "capture") {
-        const result = this.#engine.call("completeAction", this.#plan, snapshot, {
+        const result = runtime.call("completeAction", {
           actionId: action.actionId,
           actionKind: "capture",
           payload: { kind: "unavailable", reason: "unconfigured" },
         });
-        if (record(result.outcome).kind !== "completed" || !isRecord(result.snapshot)) break;
-        snapshot = result.snapshot;
+        if (record(result.outcome).kind !== "completed") break;
+        view = runtime.view();
         continue;
       }
-      const unloaded = this.#engine
-        .project("mediaPlaybackProjection", snapshot)
+      const unloaded = runtime
+        .project("mediaPlaybackProjection")
         .find((media) => media.loaded !== true);
       if (unloaded !== undefined) {
-        const result = this.#engine.call(
-          "reportMediaLoad",
-          this.#plan,
-          snapshot,
-          unloaded.mediaId,
-          { kind: "loaded", durationMs: MEDIA_PASS_MS },
-        );
-        if (record(result.outcome).kind !== "accepted" || !isRecord(result.snapshot)) break;
-        snapshot = result.snapshot;
+        const result = runtime.call("reportMediaLoad", unloaded.mediaId, {
+          kind: "loaded",
+          durationMs: MEDIA_PASS_MS,
+        });
+        if (record(result.outcome).kind !== "accepted") break;
+        view = runtime.view();
         continue;
       }
-      const options = this.options(snapshot);
+      const options = this.options(runtime, view);
       if (waits >= MAX_AUTO_WAITS || options.length !== 1 || options[0]!.kind !== "wait") break;
-      const next = this.#input(snapshot, options[0]!);
-      if (next === null) break;
-      snapshot = next;
+      if (!this.#input(runtime, view, options[0]!)) break;
+      view = runtime.view();
       waits += 1;
     }
     return {
-      snapshot,
       newInstructions,
       instructions: [...executed],
       texts: texts.slice(-KEPT_TEXTS),
@@ -672,13 +644,11 @@ export class Session {
    * The constants the code compares with near an ask: around the asking instruction and around the return point of
    * every call that leads to it, nearest first, so that an ask in a helper function also gets its caller's constants.
    */
-  #nearbyLiterals(snapshot: Data, action: Data): Literals {
+  #nearbyLiterals(runtime: Runtime, action: Data): Literals {
     this.#literals ??= this.#instructions.map(comparedLiterals);
     const positions = [
       action.owningInstruction,
-      ...list(snapshot.callFrames)
-        .reverse()
-        .map((frame) => frame.returnInstruction),
+      ...runtime.callReturnInstructions().toReversed(),
     ].filter((position): position is number => typeof position === "number");
     const found: Literals = { numbers: [], strings: [] };
     for (let distance = 0; distance <= LITERAL_WINDOW; distance += 1) {
@@ -702,29 +672,27 @@ export class Session {
   }
 
   /** The earliest time at which something happens without the player, or null when nothing will. */
-  #nextDeadline(snapshot: Data): number | null {
-    const now =
-      typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
+  #nextDeadline(runtime: Runtime, view: Data): number | null {
+    const now = typeof view.observedSessionTimeMs === "number" ? view.observedSessionTimeMs : 0;
     const deadlines: number[] = [];
     const add = (value: unknown) => {
       if (typeof value === "number") deadlines.push(value);
     };
-    const action = record(snapshot.foregroundAction);
+    const action = record(view.foregroundAction);
     if (action.kind === "delay" || action.kind === "chatPacingGate") add(action.deadlineMs);
     if (action.kind === "interaction" && typeof action.timeoutMs === "number")
       add(Number(action.createdAtMs) + action.timeoutMs);
-    for (const background of list(snapshot.backgroundActions)) {
+    for (const background of list(view.backgroundActions)) {
       if (background.kind === "chatPacingGate") add(background.deadlineMs);
       if (background.kind === "timer") add(record(background.timer).deadlineMs);
     }
-    for (const frame of list(snapshot.callFrames)) {
-      const suspended = record(record(frame.timerInterruption).suspendedAction);
-      if (suspended.kind === "delay") add(suspended.deadlineMs);
-    }
+    // The wait that a running timer, media, or button block interrupted.
+    const suspended = record(view.suspendedAction);
+    if (suspended.kind === "delay") add(suspended.deadlineMs);
     // Media plays on through every observation, and the runtime catches up on its cues and passes; a stop at the end
     // of a pass is needed only where the story waits for that media, or where nothing else will happen.
-    const running = this.#engine
-      .project("mediaPlaybackProjection", snapshot)
+    const running = runtime
+      .project("mediaPlaybackProjection")
       .filter((media) => media.state === "running" && media.loaded === true);
     const awaited = running.filter(
       (media) => action.kind === "mediaPlayback" && media.mediaId === action.mediaId,
@@ -738,13 +706,13 @@ export class Session {
 
   /** Progress of every running media until `until`, which plays on in real time. */
   #mediaReports(
-    snapshot: Data,
+    runtime: Runtime,
+    view: Data,
     until: number,
   ): { mediaId: unknown; segment: unknown; progressMs: number }[] {
-    const now =
-      typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
-    return this.#engine
-      .project("mediaPlaybackProjection", snapshot)
+    const now = typeof view.observedSessionTimeMs === "number" ? view.observedSessionTimeMs : 0;
+    return runtime
+      .project("mediaPlaybackProjection")
       .filter((media) => media.state === "running" && media.loaded === true)
       .map((media) => ({
         mediaId: media.mediaId,
@@ -755,10 +723,6 @@ export class Session {
           now,
       }));
   }
-}
-
-function interruptFrames(snapshot: Data): number {
-  return list(snapshot.callFrames).filter((frame) => isRecord(frame.timerInterruption)).length;
 }
 
 function collectTexts(events: readonly Data[], texts: string[]): void {
@@ -1058,7 +1022,7 @@ export interface ReplayStep {
 /**
  * Replays a path: each earlier session from the storage the one before it left (the first from none), then the input
  * list of the last one; the steps are those of the last session. An operation that throws ends the replay with its
- * `error`.
+ * `error`, at the state the last step before it reached.
  */
 export function replay(
   engine: Engine,
@@ -1088,8 +1052,9 @@ export function replay(
     for (const input of list) {
       let next: Step | null;
       try {
-        next = session.apply(step.snapshot, input, clock);
+        next = session.apply(step.runtime, input, clock);
       } catch (thrown) {
+        // The throw ended the runtime session; `step` keeps the state it exported before.
         error = String(thrown);
         break;
       }

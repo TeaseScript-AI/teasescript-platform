@@ -622,7 +622,8 @@ importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that p
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
 `debug-countdowns` package's countdown line with the Debug panel closed: for its wait, none for its blocking timer, then
-its pacing and its timed button after Skip event; the panel's Debug switch and the Debug menu hide and show it, an untimed
+its pacing, 10 s shorter after +10 s, and its timed button after Skip event; the panel's Debug switch and the Debug menu
+hide and show it, an untimed
 button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. Its Now tab on the
 `debug-now` package, shaped like the Domme3 case, names a nested call chain and two overlapping sounds and the hidden
 timer, and the Stage image as unresolved, failed, hidden, and displayed in turn, and fits the narrow drawer. Its Storage
