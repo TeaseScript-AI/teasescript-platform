@@ -26,8 +26,9 @@ const BLANK_LINES = /\n(?:[^\S\n]*\n)+/u;
  *   that was `instant` because a legacy `wait` follows loses it, since `instant` would also skip the reading time of
  *   the paragraph before it. A kept wait after it (withReadingTimes) keeps only what the reading time of the
  *   paragraphs before the last leaves (shortenedWait); any other `wait` stays as it is.
- * - An ask's question (said before the field opens, also after withAskQuestions made a `say` its question) says its
- *   earlier paragraphs before the asking statement and keeps the last as the question.
+ * - An ask's question (said before the field opens, also after withAskQuestions made a `say` its question) says the
+ *   paragraphs before the one that asks (questionAt), or before the last where none does, before the asking statement,
+ *   and keeps the rest as the question.
  * - A form's question keeps its first paragraph, the intro, and the form says the others after it, in its `outro:`
  *   prose block (V30 §20 Forms), unsplit.
  * Text laid out with blank lines (aligned columns, ruled lines, tables, stat blocks; isLayout) and the units that keep
@@ -122,22 +123,38 @@ export function withParagraphs(
         );
         return [withAsk(statement, { ...ask, question: first!, outro: joined(rest) })];
       }
-      report(
-        "SX_PARAGRAPH_QUESTION",
-        "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question.",
-        statement,
-      );
+      const at = questionAt(split.paragraphs);
+      const last = split.paragraphs.length - 1;
+      if (at === null)
+        report(
+          "SX_PARAGRAPH_QUESTION_FALLBACK",
+          "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question, since no paragraph ends with a question mark or starts with an instruction.",
+          statement,
+        );
+      else if (at < last)
+        report(
+          "SX_PARAGRAPH_QUESTION_REMARKS",
+          "The legacy display showed one text, whose paragraphs a blank line separated; the paragraphs before the question are messages of their own, and the question keeps the remarks after it.",
+          statement,
+        );
+      else
+        report(
+          "SX_PARAGRAPH_QUESTION",
+          "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own, and the last one is the question.",
+          statement,
+        );
+      const start = at ?? last;
       const speaker = ask.kind === "input" ? ask.speaker : undefined;
       return [
         ...split.paragraphs
-          .slice(0, -1)
+          .slice(0, start)
           .map((value): IrStatement => ({
             kind: "say",
             value,
             ...(speaker === undefined ? {} : { speaker }),
             span: statement.span,
           })),
-        withAsk(statement, asked(ask, split.paragraphs.at(-1)!)),
+        withAsk(statement, asked(ask, joined(split.paragraphs.slice(start)))),
       ];
     });
   };
@@ -226,6 +243,30 @@ function withAsk(statement: IrStatement, ask: Ask): IrStatement {
       ? ask
       : mapChildren(value, replace);
   return mapOwnExpressions(statement, replace);
+}
+
+// A question mark at the end, before closing brackets, quotes, closing markup, and whitespace.
+const QUESTION_END = /\?(?:[\s)\]}"'`’”»*_~]|\[\/[^\]]*\]|<\/[^>]*>)*$/u;
+// Opening markup and quotes before a paragraph's first word.
+const OPENING = /^(?:[\s*_~#>"'`‘“«]|\[[^\]/][^\]]*\]|<[^>/][^>]*>)*/u;
+const INSTRUCTION =
+  /^(?:Enter|Type|Choose|Select|Pick|Write|Tell|Give|Name|How|What|Which|Please|Input|Insert|Answer|Click|Press|Set)\b/iu;
+
+/**
+ * The paragraph that asks (owner decision 2026-10-07, option E): the last one that ends with a question mark, or else
+ * the last one that starts with an instruction or question word, such as `Enter` or `How`; null for none. The
+ * paragraphs after it are remarks on it, such as `(default is 2, current is 3)`, which the question keeps.
+ */
+function questionAt(paragraphs: readonly IrExpression[]): number | null {
+  const texts = paragraphs.map((paragraph) =>
+    partsOf(paragraph)!
+      .map((part) => ("text" in part ? part.text : String.fromCodePoint(FIRST_VALUE)))
+      .join(""),
+  );
+  const asked = texts.findLastIndex((text) => QUESTION_END.test(text));
+  if (asked >= 0) return asked;
+  const instructed = texts.findLastIndex((text) => INSTRUCTION.test(text.replace(OPENING, "")));
+  return instructed >= 0 ? instructed : null;
 }
 
 /** Paragraphs joined by a blank line, as one text. */

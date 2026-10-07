@@ -138,9 +138,15 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it. The wait
   started when the whole text appeared, so a kept wait after the last piece keeps only what the reading time of the
   earlier pieces leaves, in whole seconds, and goes when nothing is left (owner decision 2026-10-07;
-  `readingWaits.shortened` and `dropped`). An ask's question says its earlier paragraphs before the ask and keeps the last as
-  the question (also `askImage`'s message); a form's question keeps its first paragraph and says the others after the
-  fields as its `outro:`, where neither they nor the fields have effects (the outro is computed after the fields).
+  `readingWaits.shortened` and `dropped`). An ask's question (also `askImage`'s message) is the last paragraph that ends with a
+  question mark, ignoring closing brackets, quotes, and markup, or else the last that starts with an instruction or
+  question word (Enter, Type, Choose, Select, Pick, Write, Tell, Give, Name, How, What, Which, Please, Input, Insert,
+  Answer, Click, Press, Set); the paragraphs before it are said before the ask, and the remarks after it, such as
+  `(default is 2, current is 3)` or a legend, stay in the question. Where no paragraph qualifies, as in non-English
+  scripts without a question mark, the last paragraph is the question (owner decision 2026-10-07, option E;
+  `SX_PARAGRAPH_QUESTION`, `_REMARKS`, `_FALLBACK`, counted as `questions`, `questionRemarks`, `questionFallbacks`).
+  A form's question keeps its first paragraph and says the others after the fields as its `outro:`, where neither they
+  nor the fields have effects (the outro is computed after the fields).
   `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
   whose blank lines lay them out stay whole: two aligned lines, a ruled line, an empty box (`[  ]`), a table row, or a
   block of value rows (`Score: 12`, `Time unit = ${unit}`; three, or two that make up half the text). A unit whose

@@ -181,13 +181,16 @@ export interface FeasibilityReport {
    */
   forms: { sequences: number; menus: number };
   /**
-   * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph, form
-   * questions whose later paragraphs became the outro, single paragraphs without the blank lines around them, and texts
-   * left whole as layout or by the unit's keepParagraphs.
+   * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph (the
+   * question the last paragraph, `questions`; the question with the remarks after it, `questionRemarks`; or the last
+   * paragraph where none asks, `questionFallbacks`), form questions whose later paragraphs became the outro, single
+   * paragraphs without the blank lines around them, and texts left whole as layout or by the unit's keepParagraphs.
    */
   paragraphs: {
     says: number;
     questions: number;
+    questionRemarks: number;
+    questionFallbacks: number;
     outros: number;
     trimmed: number;
     layout: number;
@@ -342,7 +345,16 @@ export function analyzeFeasibility(
     askQuestions: 0,
     blankTexts: 0,
     forms: { sequences: 0, menus: 0 },
-    paragraphs: { says: 0, questions: 0, outros: 0, trimmed: 0, layout: 0, kept: 0 },
+    paragraphs: {
+      says: 0,
+      questions: 0,
+      questionRemarks: 0,
+      questionFallbacks: 0,
+      outros: 0,
+      trimmed: 0,
+      layout: 0,
+      kept: 0,
+    },
     readingWaits: { replaced: 0, kept: 0, keptPaced: 0, shortened: 0, dropped: 0 },
     buttonDurations: { compared: 0, variables: 0 },
     backwardLineJumps: 0,
@@ -454,6 +466,8 @@ export function analyzeFeasibility(
       else if (code === "SX_MENU_FORM") report.forms.menus += 1;
       else if (code === "SX_PARAGRAPHS") report.paragraphs.says += 1;
       else if (code === "SX_PARAGRAPH_QUESTION") report.paragraphs.questions += 1;
+      else if (code === "SX_PARAGRAPH_QUESTION_REMARKS") report.paragraphs.questionRemarks += 1;
+      else if (code === "SX_PARAGRAPH_QUESTION_FALLBACK") report.paragraphs.questionFallbacks += 1;
       else if (code === "SX_FORM_OUTRO") report.paragraphs.outros += 1;
       else if (code === "SX_PARAGRAPH_TRIMMED") report.paragraphs.trimmed += 1;
       else if (code === "SX_PARAGRAPHS_LAYOUT") report.paragraphs.layout += 1;
