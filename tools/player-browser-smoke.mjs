@@ -1546,21 +1546,24 @@ async function lateImageScenario(cdp, origin) {
 }
 
 /**
- * Entrances (`entrances` package): what Start shows appears directly, a message live play adds enters while the
- * conversation glides up, the controls of a new interaction enter, and an update taller than the view stops with its
- * first entry at the top, with Return to latest offered, while later messages do not move it. Under reduced motion
- * nothing enters.
+ * Entrances (`entrances` package): what Start shows appears directly; a message live play adds enters while the
+ * conversation glides up, and the controls of a new interaction glide with the message above them. An update taller
+ * than the view shows directly and stops with its first entry at the top, with Return to latest offered, while later
+ * messages do not move the reader; that also holds for an update of two entries, after the reader scrolled back to the
+ * end. Under reduced motion nothing enters.
  */
 async function entrancesScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
-  // Records, every frame, which parts of the conversation an animation moves.
+  // Records, every frame, which parts of the conversation an animation moves, and how far the controls are from the
+  // entry above them while the conversation glides.
   const start = async () => {
     await navigate(cdp, `${origin}/player/?package=entrances`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await evaluate(
       cdp,
       `window.smokeEntrances = new Set();
+      window.smokeControlGaps = new Set();
       const record = () => {
         for (const animation of document.getAnimations()) {
           const target = animation.effect?.target;
@@ -1568,6 +1571,10 @@ async function entrancesScenario(cdp, origin) {
           else if (target?.matches?.('.transcript-history')) window.smokeEntrances.add('glide');
           else if (target?.matches?.('[data-foreground-controls]')) window.smokeEntrances.add('controls');
         }
+        const controls = document.querySelector('[data-foreground-controls]');
+        const above = document.querySelector('.transcript-entry[data-index="2"]');
+        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
+          window.smokeControlGaps.add(Math.round(controls.getBoundingClientRect().top - above.getBoundingClientRect().bottom));
         requestAnimationFrame(record);
       };
       requestAnimationFrame(record);`,
@@ -1575,6 +1582,15 @@ async function entrancesScenario(cdp, origin) {
     await physicalClick(cdp, "[data-session-activation] button");
   };
   const entered = () => evaluate(cdp, `return [...window.smokeEntrances].sort()`);
+  const forget = () => evaluate(cdp, `window.smokeEntrances.clear()`);
+  // The top of an entry in the view, as long as it is drawn.
+  const top = (index) => `(() => {
+    const view = document.querySelector('.transcript-scroll').getBoundingClientRect();
+    const row = document.querySelector('.transcript-entry[data-index="${index}"]');
+    return row ? Math.round(row.getBoundingClientRect().top - view.top) : null;
+  })()`;
+  const held = (index) =>
+    `Math.abs(${top(index)} ?? 99) <= 2 && !!document.querySelector('.return-to-latest')`;
   await start();
   await waitFor(
     cdp,
@@ -1589,32 +1605,64 @@ async function entrancesScenario(cdp, origin) {
     JSON.stringify(["glide", "row 1"]),
     "A live message did not enter alone, gliding the conversation up",
   );
-  // An update taller than the view: its first entry stays at the top and Return to latest offers the rest.
-  await waitFor(cdp, `${entries} === 17`, 8_000, "The tall update did not arrive");
-  const heldTop = `(() => {
-    const view = document.querySelector('.transcript-scroll').getBoundingClientRect();
-    const first = [...document.querySelectorAll('.transcript-entry')].find((row) => row.dataset.index === '2');
-    return first ? Math.round(first.getBoundingClientRect().top - view.top) : null;
-  })()`;
+  // A message with a choice: the controls enter and glide with the message, at one distance below it.
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls]')`, 8_000);
+  await delay(400);
+  const gaps = await evaluate(cdp, `return [...window.smokeControlGaps]`);
+  assertEqual(
+    gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) <= 2,
+    true,
+    `The controls did not glide with the message above them: ${JSON.stringify(gaps)}`,
+  );
+  assertEqual(
+    (await entered()).includes("controls"),
+    true,
+    "The controls of a new interaction did not enter",
+  );
+  // An update of many entries, taller than the view, stops at its first entry, the answer.
+  await forget();
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `${entries} === 19`, 8_000, "The tall update did not arrive");
   await waitFor(
     cdp,
-    `Math.abs(${heldTop} ?? 99) <= 2 && !!document.querySelector('.return-to-latest')`,
+    held(3),
     4_000,
     "An update taller than the view did not stop at its first entry with Return to latest",
   );
-  // The next message and the choice arrive below without moving the reader; the new controls still enter.
-  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls]')`, 8_000);
+  // The next message and choice arrive below without moving the reader.
+  await waitFor(cdp, `${entries} === 20`, 8_000, "No message arrived after the tall update");
   await delay(400);
   assertEqual(
-    Math.abs((await value(cdp, heldTop)) ?? 99) <= 2,
+    Math.abs((await value(cdp, top(3))) ?? 99) <= 2,
     true,
     "A message after the tall update moved the reader",
   );
-  const later = await entered();
+  // Scrolled back to the end, the reader follows again: an update of two entries taller than the view stops at its
+  // first entry and shows directly.
+  await evaluate(
+    cdp,
+    `const view = document.querySelector('.transcript-scroll'); view.scrollTop = view.scrollHeight;`,
+  );
+  await waitFor(
+    cdp,
+    `!document.querySelector('.return-to-latest')`,
+    4_000,
+    "Scrolling to the end did not reach it",
+  );
+  await forget();
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `${entries} === 22`, 8_000, "The tall message did not arrive");
+  await waitFor(
+    cdp,
+    held(20),
+    4_000,
+    "A two-entry update taller than the view did not stop at its first entry after the reader returned to the end",
+  );
+  await delay(400);
   assertEqual(
-    later.includes("controls") && !later.some((part) => /^row (0|[2-9]|1[0-6])$/u.test(part)),
-    true,
-    `The tall update entered, or the new controls did not: ${JSON.stringify(later)}`,
+    JSON.stringify(await entered()),
+    "[]",
+    "An update taller than the view entered the conversation",
   );
   // Reduced motion: the same live message shows without entering.
   await cdp.call("Emulation.setEmulatedMedia", {

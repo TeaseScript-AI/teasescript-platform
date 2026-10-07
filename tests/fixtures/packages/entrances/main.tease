@@ -1,6 +1,8 @@
 say "Start.", 2
 say "Entering.", 2
 wait 2 s
+say "Pick one.", instant
+let go = choose "Go"
 say "A tall update follows.", instant
 let line = 0
 repeat 14 {
@@ -10,4 +12,6 @@ repeat 14 {
 wait 1 s
 say "Below the view.", instant
 let done = choose "Done"
+say "Line 1 of one message taller than the view.\nLine 2 of one message taller than the view.\nLine 3 of one message taller than the view.\nLine 4 of one message taller than the view.\nLine 5 of one message taller than the view.\nLine 6 of one message taller than the view.\nLine 7 of one message taller than the view.\nLine 8 of one message taller than the view.\nLine 9 of one message taller than the view.\nLine 10 of one message taller than the view.\nLine 11 of one message taller than the view.\nLine 12 of one message taller than the view.\nLine 13 of one message taller than the view.\nLine 14 of one message taller than the view.\nLine 15 of one message taller than the view.\nLine 16 of one message taller than the view.\nLine 17 of one message taller than the view.\nLine 18 of one message taller than the view.\nLine 19 of one message taller than the view.\nLine 20 of one message taller than the view.\nLine 21 of one message taller than the view.\nLine 22 of one message taller than the view.\nLine 23 of one message taller than the view.\nLine 24 of one message taller than the view.\nLine 25 of one message taller than the view.\nLine 26 of one message taller than the view.\nLine 27 of one message taller than the view.\nLine 28 of one message taller than the view.\nLine 29 of one message taller than the view.\nLine 30 of one message taller than the view.", instant
+let finish = choose "Finish"
 exit

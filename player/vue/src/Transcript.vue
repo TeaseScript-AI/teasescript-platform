@@ -132,15 +132,14 @@ const heldAtNewEntry = ref(false);
 function gliding() {
   return performance.now() < liveUntil && !touching.value && reducedMotion.value !== "reduce";
 }
-function glideTargets() {
-  return [historyElement.value, foregroundElement.value].filter((element) => element !== null);
-}
 watch(
   [() => props.entries, () => props.revision, () => props.entries.length],
   () => {
     const previous = shown;
     shown = { entries: props.entries, length: props.entries.length, revision: props.revision ?? 0 };
     if (shown.revision === previous.revision && shown.entries === previous.entries) return;
+    // Whether the reader follows now, also after scrolling back to the end since the last update.
+    rememberFollow();
     const added = props.entries.slice(previous.length);
     // The first entries of a transcript open it, also when the script shows them only once the host answered.
     const opening = previous.length === 0;
@@ -222,6 +221,10 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
             offset = first;
             following.value = false;
             heldAtNewEntry.value = true;
+            // More than the transcript shows at once shows directly.
+            liveUntil = 0;
+            entrances.clear();
+            glide.stop();
             // The end is no longer the target to reconcile toward.
             instance.scrollToOffset(first);
           }
@@ -231,7 +234,11 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
             element !== null &&
             options.adjustments === undefined &&
             gliding() &&
-            !glide.shift(glideTargets(), element.scrollTop - before)
+            // The history holds the rows and the foreground controls.
+            !glide.shift(
+              historyElement.value === null ? [] : [historyElement.value],
+              element.scrollTop - before,
+            )
           ) {
             liveUntil = 0;
             entrances.clear();

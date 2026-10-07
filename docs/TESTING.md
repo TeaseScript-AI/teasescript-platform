@@ -605,9 +605,10 @@ the request opened turns off after a photo or a file answered, and that a busy c
 paperclip stays. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
 the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
 region, and focus on a link that a change removes stays on its message. Its `entrances` package checks that what Start
-shows appears directly, a later message enters while the conversation glides up, an update taller than the view stops
-with its first entry at the top and offers Return to latest while later messages and the entering controls of a new
-choice do not move the reader, and that nothing enters under reduced motion. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
+shows appears directly, a later message enters while the conversation glides up, the controls of a new choice glide
+with the message above them, an update taller than the view shows directly and stops with its first entry at the top
+with Return to latest while later messages do not move the reader, also for a two-entry update after the reader
+scrolled back to the end, and that nothing enters under reduced motion. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
 with the saved photo's exact bytes and not the unsaved one, a refused copy selects the text, closing releases the file,
 and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file
