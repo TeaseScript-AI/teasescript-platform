@@ -9,6 +9,8 @@ return new Object() {
 	};
 	int rounds = 2
 	boolean enabled = false
+	// A field that a module reads keeps the button's seconds.
+	def reaction = 0
 	def pauseCycle = { int delay, int cycle = 60 -> wait(delay / cycle) }
 
 	def main() {
@@ -18,5 +20,9 @@ return new Object() {
 		def cycle = pauseCycle
 		cycle(120)
 		show("Rounds: " + rounds)
+		reaction = showButton("Go")
+		if (reaction < 15) show("Quick")
+		report()
+		show("Bye")
 	}
 }.main();

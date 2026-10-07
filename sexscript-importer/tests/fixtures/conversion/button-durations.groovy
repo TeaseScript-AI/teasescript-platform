@@ -20,3 +20,7 @@ def stopped = showButton("Stop", limit)
 if (stopped < limit) show("Stopped early.")
 int quick = showButton("Go")
 if (quick <= 5) show("Quick.")
+// A parameter's default stays as written, so the variable it reads keeps the seconds.
+def reaction = showButton("Ready")
+def check = { quick = reaction < 15 -> if (quick) show("Quick.") }
+check()

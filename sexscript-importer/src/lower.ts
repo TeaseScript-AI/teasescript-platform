@@ -1427,7 +1427,9 @@ export function lowerParsedFile(
   // legacy waits replaced by reading time, repeated texts shortened, texts folded into asks, paragraphs split, and
   // `instant` taken away where it would cut a reading time short.
   const { diagnostics } = context;
-  let texts = withElapsedDurations(typedStatements, diagnostics, mixin !== null);
+  // A module's script variables, and those of a script that loads modules, are shared with other files.
+  const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
+  let texts = withElapsedDurations(typedStatements, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withReadingTimes(texts, diagnostics);
   texts = withoutRepeatedText(texts, diagnostics);
@@ -1622,7 +1624,7 @@ function lowerHelperCompilationUnit(
       withElapsedDurations(
         withEnforcedTypes([...fieldStatements, ...statements], baseContext),
         diagnostics,
-        false,
+        true,
       ),
       diagnostics,
     ),

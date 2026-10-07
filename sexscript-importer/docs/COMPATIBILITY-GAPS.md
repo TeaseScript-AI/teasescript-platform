@@ -258,7 +258,8 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   "Done"` with `while t < 15 s` (`SX_BUTTON_DURATION_VARIABLE`, `buttonDurations.variables`); a Groovy `int` that
   stores the seconds does so only where its truncation changes nothing, compared by `<` or `>=` with a whole number.
   Elsewhere, where a plain number is needed (arithmetic, text, storage, a function's result, a comparison with a
-  computed number), the result is divided by `1 s`, and a Groovy `int` truncates it as Groovy did: `t =
+  computed number, a parameter's default) or other files may read the variable (a module's or a class's, or one of a
+  script that loads modules), the result is divided by `1 s`, and a Groovy `int` truncates it as Groovy did: `t =
   toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` also holds a timestamp difference
   and is shown in text. A zero timeout kept the legacy
   button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`) when the zero is

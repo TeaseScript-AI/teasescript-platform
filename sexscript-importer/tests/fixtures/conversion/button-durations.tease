@@ -1,3 +1,24 @@
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 // A button's seconds compared with a number stay its duration, compared with seconds.
 if (showButton "Done", timeout: 30) >= 30 s {
   say "Too slow."
@@ -28,4 +49,12 @@ let quick = toInteger((showButton "Go") / 1 s)
 if quick <= 5 {
   say "Quick."
 }
+// A parameter's default stays as written, so the variable it reads keeps the seconds.
+let reaction = (showButton "Ready") / 1 s
+function check(quickValue = reaction < 15) {
+  if sexscriptLegacyTruth(quickValue) {
+    say "Quick."
+  }
+}
+check()
 exit

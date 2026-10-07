@@ -38,12 +38,13 @@ interface Variable {
  * literals, waits, and button timeouts read, holds the duration, `let t = showButton "Done"` and `while t < 15 s`. A
  * variable that held whole seconds (a Groovy integer) does so only where truncation changes nothing: compared with a
  * whole number by `<` or `>=`. Where a plain number is needed, in arithmetic, text, storage, a function's result, a
- * comparison with a computed number, or a module's script variable that other files may use, the seconds stay.
+ * comparison with a computed number, a parameter's default, or a script variable that other files may use (`shared`:
+ * a module's, a class's fields, and those of a script that loads modules), the seconds stay.
  */
 export function withElapsedDurations(
   statements: IrStatement[],
   diagnostics: MigrationDiagnostic[],
-  module: boolean,
+  shared: boolean,
 ): IrStatement[] {
   const writes = new Map<IrStatement, Variable>();
   const comparisons = new Map<Binary, Variable>();
@@ -123,7 +124,7 @@ export function withElapsedDurations(
           duration:
             item.global !== true &&
             item.maybeText !== true &&
-            !(module && scope === root) &&
+            !(shared && scope === root) &&
             (item.type === undefined || item.type === "number" || item.type === "integer"),
           integer: item.integer === true,
         };
@@ -189,9 +190,20 @@ export function withElapsedDurations(
   const walk = (items: readonly IrStatement[], scope: Scope): void => {
     for (const item of items) statement(item, scope);
   };
+  // A parameter's default stays as it is, so every variable it reads keeps its numbers.
+  const keepNumbers = (value: IrExpression, scope: Scope): void => {
+    if (value.kind === "variable") {
+      const found = scope.resolve(value.name);
+      if (found !== undefined) found.duration = false;
+    }
+    mapChildren(value, (child) => {
+      keepNumbers(child, scope);
+      return child;
+    });
+  };
   const body = (item: Extract<IrStatement, { kind: "function" }>, scope: Scope): void => {
     for (const parameter of item.parameters) {
-      if (parameter.defaultValue !== null) expression(parameter.defaultValue, scope.parent!);
+      if (parameter.defaultValue !== null) keepNumbers(parameter.defaultValue, scope);
       scope.names.set(parameter.name, numberOnly());
     }
     walk(item.body, scope);
