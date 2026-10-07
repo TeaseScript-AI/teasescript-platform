@@ -9,13 +9,13 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  *
  * Each pending action is a branch point; its options are the buttons and choice options, typed answers
  * ({@link interactionOptions}), form answers, thinking before a timed button, permanent buttons, and letting time
- * pass to the next deadline. Directed search adds answers per ask and two seeded inputs: a stored value set from
- * outside, and a later wall clock. Media loads succeed with one second per pass, `takePhoto` finds no camera, and
+ * pass to the next deadline. Directed search adds answers per ask, and the player continuing at another wall clock
+ * time. A session can start from the storage an explored session left, as the player's next session would. Media loads succeed with one second per pass, `takePhoto` finds no camera, and
  * `askImage` gets one stored image. When letting time pass is the only thing the player can do, the explorer does it
  * as part of the previous step (at most {@link MAX_AUTO_WAITS} times in a row).
  *
- * Execution is deterministic: a state is reproduced by the seed, the start {@link Setup}, and its input list
- * ({@link replay}).
+ * Execution is deterministic: a state is reproduced by the seed, its earlier sessions, its start clock, and its input
+ * list ({@link replay}).
  */
 
 /** A runtime operation result read field by field; plans and snapshots inside it are passed back unchanged. */
@@ -31,7 +31,6 @@ const ENGINE_OPERATIONS = [
   "observeTime",
   "reportMediaLoad",
   "pressPermanentButton",
-  "applyExternalStorageEdit",
   "recordContinueCapture",
 ] as const;
 const ENGINE_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
@@ -73,8 +72,14 @@ export async function loadEngine(): Promise<Engine> {
   };
 }
 
-/** A value to store: a scalar, or a composite value as the runtime keeps it in script storage. */
+/** A stored value as the runtime keeps it in script storage: a scalar or a composite. */
 export type StoredValue = string | number | boolean | Data;
+
+/** One key of script storage. */
+export interface StorageEntry {
+  readonly key: string;
+  readonly value: StoredValue;
+}
 
 /** One input of a path from the start; `label` fields only explain the input to a reader. */
 export type ExplorerInput =
@@ -94,23 +99,41 @@ export type ExplorerInput =
     }
   | { readonly kind: "wait"; readonly untilMs: number }
   | { readonly kind: "press"; readonly buttonId: number; readonly label: string }
-  /** Seeded: a stored value set from outside, as an earlier session would have left it; `null` removes the key. */
-  | { readonly kind: "storage"; readonly key: string; readonly value: StoredValue | null }
-  /** Seeded: the player continues at another wall clock time (epoch milliseconds). */
+  /** The player continues at another wall clock time (epoch milliseconds): a `clock` input. */
   | { readonly kind: "clock"; readonly wallClockMs: number };
 
-/** Whether an input prepares state the player cannot make by playing: a seeded input. */
-export function isSeeding(input: ExplorerInput): boolean {
-  return input.kind === "storage" || input.kind === "clock";
+/** Whether an input sets the wall clock. */
+export function isClockInput(input: ExplorerInput): boolean {
+  return input.kind === "clock";
 }
 
 /**
- * How a session starts: the storage an earlier session left, and the wall clock. Play starts with empty storage at
- * {@link EPOCH_MS}; any other start is seeded.
+ * How a session starts: the storage an earlier explored session left (none for the first), and the wall clock. A
+ * start at another wall clock than {@link EPOCH_MS} is a `clock` start.
  */
 export interface Setup {
-  readonly storage: readonly { readonly key: string; readonly value: StoredValue }[];
+  readonly storage: readonly StorageEntry[];
   readonly wallClockMs: number;
+}
+
+/** One session of a path: its inputs, and its start wall clock when that is not {@link EPOCH_MS}. */
+export interface SessionPath {
+  readonly inputs: readonly ExplorerInput[];
+  readonly wallClockMs?: number;
+}
+
+/** A state's script storage, as the session that reached it leaves it. */
+export function storageOf(snapshot: Data): StorageEntry[] {
+  return list(snapshot.scriptStorage).flatMap((entry) => {
+    const value = entry.value;
+    return typeof entry.key === "string" &&
+      (typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        isRecord(value))
+      ? [{ key: entry.key, value }]
+      : [];
+  });
 }
 
 /** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
@@ -307,17 +330,17 @@ function runnable(snapshot: Data): boolean {
 
 /**
  * The project's plan with the engine, which runs inputs and records the instructions and condition ways they execute.
- * Coverage accumulates over every step of the session object, apart for play and for seeded steps: a seeded step
- * starts from a seeded {@link Setup} or follows a seeded input.
+ * Coverage accumulates over every step of the session object, apart for play and for clock steps: a clock step
+ * starts at another wall clock or follows a {@link isClockInput} input.
  */
 export class Session {
   /** Instructions play executed. */
   readonly visited: Uint8Array;
-  /** Instructions seeded steps executed. */
-  readonly seededVisited: Uint8Array;
+  /** Instructions clock steps executed. */
+  readonly clockVisited: Uint8Array;
   /** Per conditional instruction, the ways play took: 1 for the next instruction, 2 for its target. */
   readonly branches: Uint8Array;
-  readonly seededBranches: Uint8Array;
+  readonly clockBranches: Uint8Array;
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
   readonly #engine: Engine;
@@ -335,9 +358,9 @@ export class Session {
     this.#seed = seed;
     this.#recorder = new Recorder(engine, plan);
     this.visited = new Uint8Array(this.#instructions.length);
-    this.seededVisited = new Uint8Array(this.#instructions.length);
+    this.clockVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
-    this.seededBranches = new Uint8Array(this.#instructions.length);
+    this.clockBranches = new Uint8Array(this.#instructions.length);
   }
 
   get untracedRuns(): number {
@@ -349,7 +372,7 @@ export class Session {
     return this.#recorder.recording;
   }
 
-  /** A fresh session, run until the player is first asked; seeded unless `setup` is the play setup. */
+  /** A fresh session, run until the player is first asked; a clock session at another wall clock than the play one. */
   start(setup: Setup = PLAY_SETUP): Step {
     const fresh = this.#engine.call("createFreshRuntimeSnapshot", this.#plan, {
       seed: this.#seed,
@@ -362,13 +385,13 @@ export class Session {
       ),
       wallClockMs: setup.wallClockMs,
     });
-    return this.#settle(fresh, setup !== PLAY_SETUP);
+    return this.#settle(fresh, setup.wallClockMs !== EPOCH_MS);
   }
 
   /** Applies one input to a waiting state; null when the runtime rejects it. */
-  apply(snapshot: Data, input: ExplorerInput, seeded: boolean): Step | null {
+  apply(snapshot: Data, input: ExplorerInput, clock: boolean): Step | null {
     const next = this.#input(snapshot, input);
-    return next === null ? null : this.#settle(next, seeded || isSeeding(input));
+    return next === null ? null : this.#settle(next, clock || isClockInput(input));
   }
 
   /** The inputs the player has in a waiting state; none in an ended state. */
@@ -503,13 +526,6 @@ export class Session {
         );
         accepted = "observed";
         break;
-      case "storage":
-        result = this.#engine.call("applyExternalStorageEdit", plan, snapshot, {
-          key: input.key,
-          value: input.value,
-        });
-        accepted = "applied";
-        break;
       case "clock":
         result = this.#engine.call("recordContinueCapture", plan, snapshot, {
           wallClockMs: input.wallClockMs,
@@ -556,9 +572,9 @@ export class Session {
 
   /**
    * Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can
-   * happen. Records what ran as play or as seeded coverage.
+   * happen. Records what ran as play or as clock coverage.
    */
-  #settle(start: Data, seeded: boolean): Step {
+  #settle(start: Data, clock: boolean): Step {
     const texts: string[] = [];
     const ways = new Set<number>();
     let newInstructions = 0;
@@ -567,11 +583,11 @@ export class Session {
     for (let operations = 0; ; operations += 1) {
       const execution = this.#recorder.execute(
         snapshot,
-        (index) => this.visited[index] === 1 || this.seededVisited[index] === 1,
+        (index) => this.visited[index] === 1 || this.clockVisited[index] === 1,
       );
       snapshot = execution.snapshot;
       collectTexts(execution.events, texts);
-      newInstructions += this.#record(execution, seeded, ways);
+      newInstructions += this.#record(execution, clock, ways);
       if (snapshot.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
       const action = record(snapshot.foregroundAction);
       if (action.kind === "capture") {
@@ -610,16 +626,16 @@ export class Session {
   }
 
   /**
-   * Marks an execution's instructions and condition ways as play or seeded coverage, and counts the instructions new
-   * to it: new to play for a play step, new to both for a seeded one.
+   * Marks an execution's instructions and condition ways as play or clock coverage, and counts the instructions new
+   * to it: new to play for a play step, new to both for a clock one.
    */
-  #record(execution: Execution, seeded: boolean, ways: Set<number>): number {
-    const visited = seeded ? this.seededVisited : this.visited;
-    const branches = seeded ? this.seededBranches : this.branches;
+  #record(execution: Execution, clock: boolean, ways: Set<number>): number {
+    const visited = clock ? this.clockVisited : this.visited;
+    const branches = clock ? this.clockBranches : this.branches;
     let fresh = 0;
     for (const index of execution.instructions) {
       if (index < 0 || index >= visited.length) continue;
-      if (visited[index] === 0 && (!seeded || this.visited[index] === 0)) fresh += 1;
+      if (visited[index] === 0 && (!clock || this.visited[index] === 0)) fresh += 1;
       visited[index] = 1;
     }
     for (const [from, to] of execution.edges) {
@@ -1021,15 +1037,16 @@ export interface ReplayStep {
 }
 
 /**
- * Replays an input list from a fresh session that starts with `setup`; the last step holds the final state. An
- * operation that throws ends the replay with its `error`.
+ * Replays a path: each earlier session from the storage the one before it left (the first from none), then the input
+ * list of the last one; the steps are those of the last session. An operation that throws ends the replay with its
+ * `error`.
  */
 export function replay(
   engine: Engine,
   plan: Data,
   seed: number,
   inputs: readonly ExplorerInput[],
-  setup: Setup = PLAY_SETUP,
+  path: { readonly earlier?: readonly SessionPath[]; readonly wallClockMs?: number } = {},
 ): {
   steps: ReplayStep[];
   snapshot: Data;
@@ -1037,36 +1054,47 @@ export function replay(
   error: string | null;
 } {
   const session = new Session(engine, plan, seed);
-  let step = session.start(setup);
-  let seeded = setup !== PLAY_SETUP;
-  const describe = (input: ExplorerInput | null, current: Step): ReplayStep => ({
-    input,
-    texts: current.texts,
-    prompt: session.prompt(current.snapshot).text,
-    status: String(current.snapshot.status),
-  });
-  const steps = [describe(null, step)];
-  let error: string | null = null;
-  for (const input of inputs) {
-    let next: Step | null;
-    try {
-      next = session.apply(step.snapshot, input, seeded);
-    } catch (thrown) {
-      error = String(thrown);
-      break;
+  let storage: readonly StorageEntry[] = [];
+  const run = (wallClockMs: number, list: readonly ExplorerInput[], record: boolean) => {
+    let step = session.start({ storage, wallClockMs });
+    let clock = wallClockMs !== EPOCH_MS;
+    const describe = (input: ExplorerInput | null, current: Step): ReplayStep => ({
+      input,
+      texts: current.texts,
+      prompt: session.prompt(current.snapshot).text,
+      status: String(current.snapshot.status),
+    });
+    const steps = record ? [describe(null, step)] : [];
+    let error: string | null = null;
+    for (const input of list) {
+      let next: Step | null;
+      try {
+        next = session.apply(step.snapshot, input, clock);
+      } catch (thrown) {
+        error = String(thrown);
+        break;
+      }
+      if (next === null)
+        throw new Error(
+          `The runtime rejected input ${JSON.stringify(input)} at step ${steps.length}.`,
+        );
+      clock ||= isClockInput(input);
+      step = next;
+      if (record) steps.push(describe(input, step));
     }
-    if (next === null)
-      throw new Error(
-        `The runtime rejected input ${JSON.stringify(input)} at step ${steps.length}.`,
-      );
-    seeded ||= isSeeding(input);
-    step = next;
-    steps.push(describe(input, step));
+    return { step, steps, error };
+  };
+  for (const earlier of path.earlier ?? []) {
+    const done = run(earlier.wallClockMs ?? EPOCH_MS, earlier.inputs, false);
+    if (done.error !== null)
+      return { steps: [], snapshot: done.step.snapshot, failure: null, error: done.error };
+    storage = storageOf(done.step.snapshot);
   }
+  const last = run(path.wallClockMs ?? EPOCH_MS, inputs, true);
   return {
-    steps,
-    snapshot: step.snapshot,
-    failure: step.snapshot.status === "failed" ? failureOf(step.snapshot) : null,
-    error,
+    steps: last.steps,
+    snapshot: last.step.snapshot,
+    failure: last.step.snapshot.status === "failed" ? failureOf(last.step.snapshot) : null,
+    error: last.error,
   };
 }

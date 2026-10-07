@@ -235,6 +235,26 @@ function literalText(expression: unknown): string | null {
   return value.kind === "literal" && typeof value.value === "string" ? value.value : null;
 }
 
+/** A literal value a save writes. */
+type SavedScalar = string | number | boolean;
+/** A save whose value is computed, not a literal. */
+const COMPUTED = Symbol("computed");
+type SavedValue = SavedScalar | typeof COMPUTED;
+/** A key with no stored value. */
+const ABSENT = Symbol("absent");
+
+function scalar(value: unknown): SavedScalar | undefined {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? value
+    : undefined;
+}
+
+/** A variable whose every assignment is one `load` of a literal key, with no default or a literal one. */
+interface LoadAlias {
+  readonly key: string;
+  readonly fallback: SavedScalar | null;
+}
+
 /** Stands for a computed part of a storage key pattern. */
 export const KEY_PLACEHOLDER = "\u0000";
 
@@ -276,6 +296,10 @@ export class DataFlow {
   readonly #counters = new Set<string>();
   /** The interaction instructions by kind of answer: typed asks (`text`, `number`, ...) only. */
   readonly #typedAsks = new Set<number>();
+  /** Every save, by key or key pattern: the literal it writes, or {@link COMPUTED}. */
+  readonly #saves = new Map<string, SavedValue[]>();
+  /** Variables whose every assignment is the same `load`, by name; null for any other variable. */
+  readonly #loads = new Map<string, LoadAlias | null>();
 
   constructor(plan: Data, instructions: readonly Data[]) {
     const functions = list(plan.functions);
@@ -296,6 +320,8 @@ export class DataFlow {
         this.#typedAsks.add(index);
       this.#temporary(instruction.destinationTemporary).asks.add(index);
     });
+    this.#recordSaves(instructions);
+    this.#recordLoads(plan, instructions);
     // Propagate to a fixed point; each round only adds, so it ends.
     for (let round = 0; round < 50; round += 1) {
       let changed = false;
@@ -395,7 +421,10 @@ export class DataFlow {
       if (Array.isArray(value)) value.forEach(walk);
       else if (isRecord(value)) {
         if (value.kind === "identifier" && typeof value.name === "string") names.add(value.name);
-        for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+        // A called function's name is no variable.
+        const callee = value.kind === "call" && record(value.callee).kind === "identifier";
+        for (const [key, item] of Object.entries(value))
+          if (key !== "span" && !(callee && key === "callee")) walk(item);
       }
     };
     walk(expression);
@@ -408,6 +437,222 @@ export class DataFlow {
       if (counter || !external) sources.push({ kind: "variable", name, counter });
     }
     return sources;
+  }
+
+  /**
+   * The value a condition always has because it reads only stored keys whose values the package fixes: a key no save
+   * writes is never stored, and a key every save writes as a literal holds one of those literals or nothing. Null when
+   * the condition reads anything else, or can come out either way.
+   */
+  constantFromStorage(condition: unknown): { value: boolean; reason: string } | null {
+    const keys = new Set<string>();
+    if (!this.#readsOnlyStorage(condition, keys) || keys.size === 0) return null;
+    const possible: [string, (SavedScalar | typeof ABSENT)[]][] = [];
+    let saved = false;
+    for (const key of keys) {
+      const saves = [...this.#saves]
+        .filter(([pattern]) => keysMayMatch(pattern, key))
+        .flatMap(([, values]) => values);
+      if (saves.some((value) => value === COMPUTED)) return null;
+      saved ||= saves.length > 0;
+      const literals = saves.filter((value): value is SavedScalar => value !== COMPUTED);
+      possible.push([key, [ABSENT, ...new Set(literals)]]);
+    }
+    // Every combination of the keys' possible values; few keys and saves make few combinations.
+    let combinations: Map<string, SavedScalar | typeof ABSENT>[] = [new Map()];
+    for (const [key, values] of possible) {
+      combinations = combinations.flatMap((known) =>
+        values.map((value) => new Map([...known, [key, value]])),
+      );
+      if (combinations.length > 256) return null;
+    }
+    const results = new Set<boolean>();
+    for (const values of combinations) {
+      const value = this.#evaluate(condition, values);
+      if (typeof value !== "boolean") return null;
+      results.add(value);
+    }
+    if (results.size !== 1) return null;
+    const names = [...keys].join(", ");
+    return {
+      value: [...results][0]!,
+      reason: saved
+        ? `every save of ${names} is a literal, and none makes the condition take this way`
+        : `key never saved in this package: ${names}`,
+    };
+  }
+
+  /** Whether an expression reads nothing but literals and stored keys with a literal key; collects the keys. */
+  #readsOnlyStorage(expression: unknown, keys: Set<string>): boolean {
+    const value = record(expression);
+    switch (value.kind) {
+      case "literal":
+        return true;
+      case "group":
+        return this.#readsOnlyStorage(value.expression, keys);
+      case "unary":
+        return this.#readsOnlyStorage(value.operand, keys);
+      case "binary":
+        return (
+          this.#readsOnlyStorage(value.left, keys) && this.#readsOnlyStorage(value.right, keys)
+        );
+      case "identifier": {
+        const load = typeof value.name === "string" ? this.#loads.get(value.name) : undefined;
+        if (load == null) return false;
+        keys.add(load.key);
+        return true;
+      }
+      case "storageLoad": {
+        const key = literalText(value.key);
+        const fallback = record(value.default);
+        if (key === null || (value.default != null && fallback.kind !== "literal")) return false;
+        keys.add(key);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** An expression's value with the stored keys holding `values`; undefined where the runtime would fail or differ. */
+  #evaluate(
+    expression: unknown,
+    values: ReadonlyMap<string, SavedScalar | typeof ABSENT>,
+  ): SavedScalar | null | undefined {
+    const value = record(expression);
+    switch (value.kind) {
+      case "literal":
+        return value.value === null ? null : scalar(value.value);
+      case "group":
+        return this.#evaluate(value.expression, values);
+      case "identifier": {
+        const load = typeof value.name === "string" ? this.#loads.get(value.name) : undefined;
+        if (load == null) return undefined;
+        const stored = values.get(load.key);
+        return stored === undefined ? undefined : stored === ABSENT ? load.fallback : stored;
+      }
+      case "storageLoad": {
+        const stored = values.get(literalText(value.key) ?? "");
+        if (stored === undefined) return undefined;
+        if (stored !== ABSENT) return stored;
+        const fallback = record(value.default);
+        return value.default == null
+          ? null
+          : fallback.value === null
+            ? null
+            : scalar(fallback.value);
+      }
+      case "unary": {
+        const operand = this.#evaluate(value.operand, values);
+        if (value.operator === "not") return typeof operand === "boolean" ? !operand : undefined;
+        if (value.operator === "-") return typeof operand === "number" ? -operand : undefined;
+        return typeof operand === "number" ? operand : undefined;
+      }
+      case "binary": {
+        const left = this.#evaluate(value.left, values);
+        const right = this.#evaluate(value.right, values);
+        if (left === undefined || right === undefined) return undefined;
+        switch (value.operator) {
+          case "and":
+            return typeof left === "boolean" && typeof right === "boolean"
+              ? left && right
+              : undefined;
+          case "or":
+            return typeof left === "boolean" && typeof right === "boolean"
+              ? left || right
+              : undefined;
+          case "==":
+            return left === right;
+          case "!=":
+            return left !== right;
+          case "<":
+          case "<=":
+          case ">":
+          case ">=": {
+            const comparable =
+              (typeof left === "number" && typeof right === "number") ||
+              (typeof left === "string" && typeof right === "string");
+            if (!comparable) return undefined;
+            return value.operator === "<"
+              ? left < right
+              : value.operator === "<="
+                ? left <= right
+                : value.operator === ">"
+                  ? left > right
+                  : left >= right;
+          }
+          case "+":
+          case "-":
+          case "*":
+            if (typeof left !== "number" || typeof right !== "number") return undefined;
+            return value.operator === "+"
+              ? left + right
+              : value.operator === "-"
+                ? left - right
+                : left * right;
+          default:
+            return undefined;
+        }
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  #recordSaves(instructions: readonly Data[]): void {
+    for (const instruction of instructions) {
+      if (instruction.kind !== "storageWrite" || instruction.value === null) continue;
+      const key = keyText(instruction.key);
+      // A save to a key no one can read off the plan could be any key.
+      const pattern = key ?? KEY_PLACEHOLDER;
+      const written = record(instruction.value);
+      const literal = written.kind === "literal" ? scalar(written.value) : undefined;
+      const saves = this.#saves.get(pattern) ?? [];
+      saves.push(literal ?? COMPUTED);
+      this.#saves.set(pattern, saves);
+    }
+  }
+
+  #recordLoads(plan: Data, instructions: readonly Data[]): void {
+    const assign = (name: string, value: unknown) => {
+      const expression = record(value);
+      const key = expression.kind === "storageLoad" ? literalText(expression.key) : null;
+      const fallback = record(expression.default);
+      const literal = expression.default == null ? null : scalar(fallback.value);
+      const load =
+        key === null ||
+        (expression.default != null && fallback.kind !== "literal") ||
+        literal === undefined
+          ? null
+          : { key, fallback: literal };
+      const known = this.#loads.get(name);
+      if (known === undefined) this.#loads.set(name, load);
+      else if (
+        known !== null &&
+        (load === null || known.key !== load.key || known.fallback !== load.fallback)
+      )
+        this.#loads.set(name, null);
+    };
+    // Parameters and loop variables get their values elsewhere.
+    for (const definition of list(plan.functions))
+      for (const parameter of list(definition.parameters))
+        if (typeof parameter.name === "string") this.#loads.set(parameter.name, null);
+    for (const instruction of instructions) {
+      if (instruction.kind === "loopStart" && typeof instruction.variable === "string")
+        this.#loads.set(instruction.variable, null);
+      if (
+        (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
+        typeof instruction.name === "string"
+      )
+        assign(instruction.name, instruction.value);
+      if (instruction.kind === "assign") {
+        const target = record(instruction.target);
+        const name = targetName(instruction.target);
+        if (name === null) continue;
+        if (target.kind === "identifier") assign(name, instruction.value);
+        else this.#loads.set(name, null);
+      }
+    }
   }
 
   #addsToItself(name: string, value: unknown): boolean {
@@ -595,15 +840,22 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
                   : String(value),
               )
           : values;
-      // Closeness is measured only where the comparison reads the variable itself.
-      const comparison =
-        source.kind === "variable" &&
-        subject.kind === "identifier" &&
-        subject.name === source.name &&
+      // Closeness is measured where the comparison reads the variable itself, or a stored value.
+      const constant =
         typeof atom.constant === "number"
-          ? { operator: holds, constant: atom.constant }
+          ? atom.constant
+          : typeof atom.constant === "boolean"
+            ? Number(atom.constant)
+            : null;
+      const comparison =
+        constant !== null &&
+        ((source.kind === "variable" &&
+          subject.kind === "identifier" &&
+          subject.name === source.name) ||
+          source.kind === "storage")
+          ? { operator: holds, constant }
           : null;
-      // A stored value or the clock is worth trying even unsolved: with values play stored, or other times.
+      // A stored value or the clock is worth trying even unsolved: with storage sessions left, or other times.
       if (candidates.length === 0 && source.kind !== "storage" && source.kind !== "clock") continue;
       goals.push({ source, candidates, comparison });
     }
@@ -622,19 +874,19 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
   return goals;
 }
 
-/**
- * The concrete keys to seed for a key pattern: the stored keys play saw that match it, else the pattern with small
- * numbers for its computed parts.
- */
-export function concreteKeys(pattern: string, observed: Iterable<string>): string[] {
-  if (!pattern.includes(KEY_PLACEHOLDER)) return [pattern];
+/** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */
+export function keyMatcher(pattern: string): (key: string) => boolean {
+  if (!pattern.includes(KEY_PLACEHOLDER)) return (key) => key === pattern;
   const parts = pattern
     .split(KEY_PLACEHOLDER)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
   const matcher = new RegExp(`^${parts.join(".*")}$`, "u");
-  const matching = [...observed].filter((key) => matcher.test(key));
-  if (matching.length > 0) return matching.slice(0, 3);
-  return ["0", "1"].map((number) => pattern.split(KEY_PLACEHOLDER).join(number));
+  return (key) => matcher.test(key);
+}
+
+/** Whether a save's key (text or pattern) may be the key a load reads (text). */
+function keysMayMatch(saved: string, read: string): boolean {
+  return keyMatcher(saved)(read);
 }
 
 /** How far a variable's value is from making `value operator constant` true: 0 when it holds. */

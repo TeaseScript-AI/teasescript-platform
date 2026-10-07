@@ -1,47 +1,50 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
 import {
-  concreteKeys,
   constantConditions,
   DataFlow,
   distance,
   goalsFor,
+  keyMatcher,
   unreachableInstructions,
-  type Candidate,
   type Goal,
   type PlanDiagnostic,
 } from "./explorer-analysis.ts";
 import {
   EPOCH_MS,
   failureOf,
-  isSeeding,
-  PLAY_SETUP,
+  isClockInput,
   Session,
   short,
   stateKeys,
+  storageOf,
   type Data,
   type Engine,
   type ExplorerInput,
   type Prompt,
+  type SessionPath,
   type Setup,
   type Step,
-  type StoredValue,
+  type StorageEntry,
 } from "./explorer.ts";
 
 /**
  * The explorer's search: it plays a compiled project through every branch it can reach within a budget
- * ({@link explore}).
+ * ({@link explore}), across sessions.
  *
  * - States are deduplicated by `stateKeys`: a hash of the snapshot without what a script cannot observe.
- * - Search order: states of a directed attempt first ({@link Lead}), then play states, then seeded ones; within each,
- *   states whose step reached new instructions first, then states that differ from every explored one in more than
- *   clock, random state, and settled handles (their loop key), then the rest, least repeated first; and the newest
- *   first.
+ * - Sessions: the first starts with empty storage; a later one starts from the storage an explored state left, as the
+ *   player's next session would after playing to that point. No stored value is made up.
+ * - Search order: play states of a directed attempt first ({@link Lead}), then play states, then clock ones; within
+ *   each, states whose step reached new instructions first, then states that differ from every explored one in more
+ *   than clock, random state, and settled handles (their loop key), then the rest, least repeated first; and the
+ *   newest first.
  * - Directed search (see {@link explore}) aims at each condition that a step reached but left only one way.
  * - Traps are described at {@link findTraps}.
- * - Coverage labels: a line is `play` when a play step executed it, `seeded` when only steps after a seeded input or
- *   from a seeded start did, `unreachable` when no execution can reach it from the session start (constant conditions
- *   taking only their one way), and `unknown` otherwise.
+ * - Coverage labels: a line is `play` when a step of play executed it, in any session; `clock` when only steps after
+ *   the wall clock was set did; `unreachable` when no execution can reach it from the session start, constant
+ *   conditions taking only their one way (a literal, a condition the compiler proves constant, or one that reads only
+ *   stored keys whose values this package fixes); and `unknown` otherwise.
  */
 
 function record(value: unknown): Data {
@@ -63,20 +66,22 @@ const CLOSER_EXPANSIONS = 40;
 const DIRECTED_SHARE = 1 / 3;
 /** Expansions between two passes of directed search over the conditions left one way, or a tenth of the budget. */
 const ANALYZE_EVERY = 50;
-/** Directed attempts per condition way. */
+/** Directed attempts per condition way, apart from session chains. */
 const MAX_ATTEMPTS = 8;
 /** Values tried per source of a condition. */
 const MAX_CANDIDATES = 3;
 /** Answers directed search adds to one ask. */
 const MAX_DIRECTED_ANSWERS = 6;
-/** Inputs replayed after a changed answer to reach the condition again. */
+/** Inputs replayed after a changed answer, or in a new session, to reach the condition again. */
 const MAX_SUFFIX = 60;
 /** Variables whose closeness to a comparison steers the search at the same time. */
 const MAX_DISTANCE_TARGETS = 8;
+/** Sessions one chain toward a stored value may take. */
+const MAX_CHAIN = 100;
+/** Next sessions started from the storage of completed sessions without a target. */
+const MAX_NEXT_SESSIONS = 10;
 /** Compressed snapshots kept for going on from explored states; older ones are replayed when needed. */
 const STORE_BYTES = 256 * 1024 * 1024;
-/** Values of one stored key kept from play, to seed it elsewhere. */
-const OBSERVED_VALUES = 3;
 
 /** Wall clocks tried for a condition that reads the clock: times of day, weekdays, and later dates. */
 const CLOCK_VARIANTS = [-11.5, -6, 6, 11.5, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400].map(
@@ -85,16 +90,26 @@ const CLOCK_VARIANTS = [-11.5, -6, 6, 11.5, 24, 48, 72, 24 * 8, 24 * 40, 24 * 40
 
 type NodeStatus = "open" | "expanded" | "partial" | "completed" | "failed" | "stuck";
 
+/**
+ * How one session of the search starts: from the storage an explored state left (`origin`; none for the first
+ * session), at a wall clock.
+ */
+interface Start extends Setup {
+  readonly origin: number | null;
+  /** The sessions up to and including this one. */
+  readonly session: number;
+}
+
 interface Node {
   readonly id: number;
   readonly parent: number | null;
   readonly input: ExplorerInput | null;
   readonly depth: number;
   readonly loop: string;
-  /** The index of the start {@link Setup} of its path. */
-  readonly setup: number;
-  /** Whether the path started seeded or contains a seeded input. */
-  readonly seeded: boolean;
+  /** The index of the {@link Start} of its session. */
+  readonly start: number;
+  /** Whether its session started at another wall clock, or its path set the clock. */
+  readonly clock: boolean;
   /** The directed attempt, or closeness to a comparison, whose first place it shares; null for none. */
   readonly lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
@@ -115,14 +130,18 @@ export interface ExploreOptions {
   readonly diagnostics: readonly PlanDiagnostic[];
 }
 
-/** An input list from a start: the setup is present only for a seeded start. */
+/**
+ * A path across sessions: the earlier sessions, each from the storage the one before it left (the first from none),
+ * then the inputs of the last one, which starts at `wallClockMs` when that is not the play clock.
+ */
 export interface Repro {
-  readonly setup?: Setup;
+  readonly earlier?: readonly SessionPath[];
+  readonly wallClockMs?: number;
   readonly inputs: readonly ExplorerInput[];
 }
 
 /** A crash: one entry per runtime failure code and source span. */
-export interface CrashReport {
+export interface CrashReport extends Repro {
   code: string;
   message: string;
   path: string;
@@ -132,16 +151,14 @@ export interface CrashReport {
   endColumn: number;
   /** States that ended in this failure. */
   states: number;
-  /** Whether every path found to it is seeded: it may need state that play does not make. */
-  seeded: boolean;
-  /** The shortest input list found to the failure, a play one when there is. */
-  inputs: ExplorerInput[];
-  setup?: Setup;
+  /** Whether every path found to it set the wall clock. */
+  clock: boolean;
+  /** The shortest path found to the failure (`earlier`, `wallClockMs`, `inputs`), a play one when there is. */
   texts: readonly string[];
 }
 
 /** How a line was reached (see the module documentation). */
-export type Reach = "play" | "seeded" | "unreachable" | "unknown";
+export type Reach = "play" | "clock" | "unreachable" | "unknown";
 
 /** Line coverage of one file; `unvisited` ranges hold the lines play did not reach, with what else is known. */
 export interface FileCoverage {
@@ -149,7 +166,7 @@ export interface FileCoverage {
   coverableLines: number;
   visitedLines: number;
   percent: number;
-  unvisited: { lines: string; reach: Exclude<Reach, "play"> }[];
+  unvisited: { lines: string; reach: Exclude<Reach, "play">; reason?: string }[];
 }
 
 /** What a condition's missed way depends on, as directed search read it. */
@@ -173,12 +190,14 @@ export interface UnvisitedBranch {
   /** The first instruction and line of the missed way. */
   targetInstruction: number;
   targetLine: number | null;
-  /** `seeded` when a seeded step took the missed way, `unreachable` for a constant condition. */
+  /** `clock` when a clock step took the missed way, `unreachable` for a constant condition. */
   reach: Exclude<Reach, "play">;
+  /** Why the way is unreachable, or what kept directed search from it. */
+  reason?: string;
   /** What directed search found the condition depends on, and the attempts it made. */
   sources: SourceKind[];
   attempts: number;
-  /** For a `seeded` way, the shortest input list found to it. */
+  /** For a `clock` way, the shortest path found to it. */
   repro?: Repro;
 }
 
@@ -189,15 +208,17 @@ export interface ReachedBranch {
   condition: string;
   /** The way that was reached. */
   way: "true" | "false" | "enter" | "exit";
-  reach: "play" | "seeded";
+  reach: "play" | "clock";
   /** `directed` when a directed attempt or a step after one took it, `search` otherwise. */
   via: "directed" | "search";
   sources: SourceKind[];
-  /** The shortest input list found to it, a play one when there is. */
+  /** The sessions of its shortest path: 1 within the first session. */
+  sessions: number;
+  /** The shortest path found to it, a play one when there is. */
   repro: Repro;
 }
 
-export interface TrapReport {
+export interface TrapReport extends Repro {
   /** `loop`: the explored states repeat; `stuck`: a state where the player can do nothing and nothing happens. */
   kind: "loop" | "stuck";
   /** Explored states in the trap, and those outside it from which every explored path leads into it. */
@@ -207,11 +228,8 @@ export interface TrapReport {
   locations: string[];
   sampleTexts: string[];
   samplePrompts: string[];
-  /** Whether the shortest path into it is seeded. */
-  seeded: boolean;
-  /** The shortest input list found from the start into the trap. */
-  inputs: ExplorerInput[];
-  setup?: Setup;
+  /** Whether the shortest path into it (`earlier`, `wallClockMs`, `inputs`) sets the wall clock. */
+  clock: boolean;
 }
 
 export interface ExploreResult {
@@ -219,13 +237,15 @@ export interface ExploreResult {
     states: number;
     transitions: number;
     expanded: number;
+    /** Sessions started: the first, and those from the storage an explored state left. */
+    sessions: number;
     /** Inputs the runtime did not accept, such as an answer to an interaction inside a running timer block. */
     rejectedInputs: number;
     /**
      * Inputs whose operation threw, such as a runtime that rejects a snapshot it produced itself (`TSR101`): a problem
-     * of the explorer or the runtime, not of the package. `first` has the input list from the start that throws.
+     * of the explorer or the runtime, not of the package. `first` has the path from the start that throws.
      */
-    engineErrors: { count: number; first: { message: string; inputs: ExplorerInput[] } | null };
+    engineErrors: { count: number; first: ({ message: string } & Repro) | null };
     /** How executions were recorded: `trace` by the runtime's instruction trace, `steps` on a build without it. */
     recording: "trace" | "steps" | null;
     /** With `steps`: runs whose rest went unrecorded after a long stretch of known instructions. */
@@ -254,12 +274,14 @@ export interface ExploreResult {
     unvisitedBranches: UnvisitedBranch[];
   };
   directed: {
-    /** Condition ways play or seeded steps had left one way when directed search looked at them. */
+    /** Condition ways steps had left one way when directed search looked at them. */
     targets: number;
     attempts: number;
     /** Steps that directed attempts took. */
     transitions: number;
-    reached: { play: number; seeded: number };
+    reached: { play: number; clock: number };
+    /** Reached targets whose shortest path spans more than one session, and the most sessions one took. */
+    multiSession: { ways: number; longestChain: number };
     /** Targets and reached targets by what their condition depends on. */
     bySource: Record<SourceKind | "none", { targets: number; reached: number }>;
     ways: ReachedBranch[];
@@ -366,6 +388,25 @@ interface Lead {
   readonly target: number;
 }
 
+/** A session chain toward a stored value: the closest value reached so far, and how. */
+interface Chain {
+  /** The distance of the best storage so far from what the condition needs; 0 when it holds. */
+  best: number;
+  /** The storage entry with that value, as text, and the sessions it took. */
+  value: string;
+  sessions: number;
+  /** Sessions this chain started. */
+  started: number;
+  /** Passes without a closer value since the last session it started. */
+  stale: number;
+  /** An attempt of this chain is still queued. */
+  queued: boolean;
+  /** The storages measured so far, and the closest of them. */
+  scanned: number;
+  closest: { left: Left; distance: number; value: string } | null;
+  readonly matches: (key: string) => boolean;
+}
+
 /** A condition way that directed search aims at. */
 interface Target {
   readonly instruction: number;
@@ -373,15 +414,23 @@ interface Target {
   readonly way: 0 | 1;
   readonly goals: readonly Goal[];
   attempts: number;
-  reach: { label: "play" | "seeded"; via: "directed" | "search"; repro: Repro } | null;
+  reach: { label: "play" | "clock"; via: "directed" | "search"; repro: Repro } | null;
+  /** Session chains toward the stored values its condition needs, by key. */
+  readonly chains: Map<string, Chain>;
+  /** What keeps directed search from the way, when known. */
+  note: string | null;
 }
 
-/** A directed attempt: from an explored state, or from a new start with `setup`, apply `inputs` in turn. */
+/**
+ * A directed attempt: from an explored state, or in a new session from `start`, apply `inputs` in turn. A chain
+ * attempt is a session that raises a stored value toward a target.
+ */
 interface Attempt {
   readonly target: number;
   readonly from: number | null;
-  readonly setup: Setup | null;
+  readonly start: Start | null;
   readonly inputs: readonly ExplorerInput[];
+  readonly chain?: string;
 }
 
 /** A variable whose closeness to a comparison steers the search toward a target. */
@@ -392,15 +441,24 @@ interface DistanceTarget {
   readonly constant: number;
 }
 
-/** The first step that evaluated a condition: from a state (`null` for the session start) with an input. */
+/** The first step that evaluated a condition: from a state (`null` for a session start) with an input. */
 interface Witness {
   readonly node: number | null;
+  readonly start: number;
   readonly input: ExplorerInput | null;
+}
+
+/** Storage an explored state left: the state, its entries, and the sessions it took. */
+interface Left {
+  readonly node: number;
+  readonly entries: readonly StorageEntry[];
+  readonly sessions: number;
 }
 
 /**
  * Explores a compiled project's plan from a fresh session until every state is expanded and directed search has
- * nothing left to try, or a limit is reached.
+ * nothing left to try, or a limit is reached. Sessions after the first start from the storage an explored state left:
+ * a few from completed sessions, and chains toward the stored values conditions need.
  *
  * Directed search: every {@link ANALYZE_EVERY} expansions, and whenever nothing else is left, each condition that a
  * step reached but left one way becomes a target. The static data flow (`DataFlow`) finds what its condition reads,
@@ -409,13 +467,14 @@ interface Witness {
  * - an ask's answer: the ask is answered again on the path of the step that first evaluated the condition (its
  *   witness), with each value, and the rest of that path is replayed; the values also become answers of that ask
  *   wherever the search meets it;
- * - a stored value: the value is set from outside right before the witness step (`seeded`), and failing that, a new
- *   session starts with it in storage and replays the witness path;
- * - the clock: the player continues at other wall clock times before the witness step (`seeded`);
+ * - a stored value: sessions are chained. When an explored state left storage that satisfies the condition, a session
+ *   starts from it and replays the witness path; otherwise a session starts from the storage closest to it and
+ *   replays the path that led to that storage, as long as each session gets closer ({@link MAX_CHAIN} at most);
+ * - the clock: the player continues at other wall clock times before the witness step (`clock`);
  * - a variable the code counts or sets: states closer to the comparison, by `distance`, take the first place.
  *
  * A play attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target
- * is reached, and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; seeded states
+ * is reached, and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
  * take only their attempt's own steps and otherwise come after all play states. Directed work takes at most
  * {@link DIRECTED_SHARE} of all steps.
  */
@@ -426,23 +485,40 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const session = new Session(engine, plan, options.seed);
   const flow = new DataFlow(plan, instructions);
   const constants = constantConditions(instructions, files, options.diagnostics);
+  // Conditions that read only stored keys whose values this package fixes have one value too.
+  const fixed = new Map<number, { value: boolean; reason: string }>();
+  instructions.forEach((instruction, index) => {
+    const conditional =
+      instruction.kind === "jumpIfFalse" ||
+      (instruction.kind === "loopStart" && instruction.loopKind === "while");
+    if (!conditional || constants.has(index)) return;
+    const found = flow.constantFromStorage(instruction.condition ?? instruction.expression);
+    if (found !== null) fixed.set(index, found);
+  });
+  const allConstants = new Map(constants);
+  for (const [index, found] of fixed) allConstants.set(index, found.value);
   const store = new SnapshotStore();
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
   const loopSeen = new Map<string, number>();
   const frontier = new Frontier();
   const crashes = new Map<string, CrashReport>();
-  const setups: Setup[] = [PLAY_SETUP];
+  const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const witnesses = new Map<number, Witness>();
   const targets = new Map<number, Target>();
-  // Attempts that can reach a way by play (answers) go before seeded ones.
+  // Attempts that can reach a way by play (answers, sessions) go before clock ones.
   const playAttempts: Attempt[] = [];
-  const seededAttempts: Attempt[] = [];
+  const clockAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
   /** Waiting states by the ask instruction they wait at, a few each. */
   const askNodes = new Map<number, number[]>();
-  /** Values play stored, by key, for seeding a key elsewhere. */
-  const observed = new Map<string, Map<string, StoredValue>>();
+  /** Each distinct storage a play state left, in the order found, and the ones of completed sessions. */
+  const left: Left[] = [];
+  const leftKeys = new Set<string>();
+  const completedLeft: number[] = [];
+  let nextFromCompleted = 0;
+  /** Storage that started a next session without a target. */
+  const startedFrom = new Set<string>([JSON.stringify([])]);
   let transitions = 0;
   /** Steps of directed attempts. */
   let directedTransitions = 0;
@@ -454,54 +530,70 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let replays = 0;
   const engineErrors: ExploreResult["search"]["engineErrors"] = { count: 0, first: null };
 
-  const reproOf = (node: Node | null, input: ExplorerInput | null): Repro => {
+  const reproOf = (node: Node | null, input: ExplorerInput | null, startIndex: number): Repro => {
     const inputs = node === null ? [] : pathTo(nodes, node);
     if (input !== null) inputs.push(input);
-    const setup = setups[node?.setup ?? 0]!;
-    return setup === PLAY_SETUP ? { inputs } : { setup, inputs };
+    const earlier: SessionPath[] = [];
+    for (let start = starts[startIndex]!; start.origin !== null;) {
+      const origin = nodes[start.origin]!;
+      const before = starts[origin.start]!;
+      earlier.unshift(sessionPath(pathTo(nodes, origin), before.wallClockMs));
+      start = before;
+    }
+    const wallClockMs = starts[startIndex]!.wallClockMs;
+    return {
+      ...(earlier.length === 0 ? {} : { earlier }),
+      ...(wallClockMs === EPOCH_MS ? {} : { wallClockMs }),
+      inputs,
+    };
   };
 
-  /** Adds the state a step reached, or finds it among the explored ones; records witnesses, targets, and crashes. */
   const withinShare = () => directedWork <= transitions * DIRECTED_SHARE;
   const active = (lead: Lead | null): lead is Lead =>
     lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
   /**
-   * The order of a state: play states with a lead first, then play, then seeded; within those by tier, repeats, and
-   * newest. A seeded attempt takes its own steps but no first place after them, so that play goes first.
+   * The order of a state: play states with a lead first, then play, then clock; within those by tier, repeats, and
+   * newest. A clock attempt takes its own steps but no first place after them, so that play goes first.
    */
-  const leads = (node: Node): boolean => !node.seeded && active(node.lead);
+  const leads = (node: Node): boolean => !node.clock && active(node.lead);
   const order = (node: Node): readonly number[] => [
-    leads(node) ? 0 : node.seeded ? 2 : 1,
+    leads(node) ? 0 : node.clock ? 2 : 1,
     ...node.rank,
   ];
 
+  /** Adds the state a step reached, or finds it among the explored ones; records witnesses, targets, and crashes. */
   const transition = (
     parent: Node | null,
     input: ExplorerInput | null,
     step: Step,
-    setup: number,
+    startIndex: number,
     lead: Lead | null,
   ): Node => {
-    const seeded = (parent?.seeded ?? setup !== 0) || (input !== null && isSeeding(input));
+    const start = starts[startIndex]!;
+    const clock =
+      (parent?.clock ?? start.wallClockMs !== EPOCH_MS) || (input !== null && isClockInput(input));
     const inherited = lead ?? (parent !== null && active(parent.lead) ? parent.lead : null);
+    const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
     for (const way of step.ways) {
       const instruction = way >> 1;
       if (!witnesses.has(instruction))
-        witnesses.set(instruction, { node: parent?.id ?? null, input });
+        witnesses.set(instruction, { node: parent?.id ?? null, start: startIndex, input });
       const target = targets.get(way);
       if (target === undefined) continue;
-      const label = seeded ? "seeded" : "play";
-      const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
+      const label = clock ? "clock" : "play";
       const known = target.reach;
+      const knownSessions = known === null ? 0 : 1 + (known.repro.earlier?.length ?? 0);
       if (
         known === null ||
-        (known.label === "seeded" && label === "play") ||
-        (known.label === label && length < known.repro.inputs.length)
+        (known.label === "clock" && label === "play") ||
+        (known.label === label &&
+          (start.session < knownSessions ||
+            (start.session === knownSessions && length < known.repro.inputs.length)))
       )
         target.reach = {
           label,
           via: inherited !== null ? "directed" : "search",
-          repro: reproOf(parent, input),
+          repro: reproOf(parent, input, startIndex),
         };
     }
     const keys = stateKeys(step.snapshot);
@@ -520,8 +612,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       input,
       depth: parent === null ? 0 : parent.depth + 1,
       loop: keys.loop,
-      setup,
-      seeded,
+      start: startIndex,
+      clock,
       lead: inherited,
       rank: [step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2, repeats, -id],
       status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
@@ -532,10 +624,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     nodes.push(node);
     byState.set(keys.state, node.id);
     if (parent !== null) parent.edges.push(node.id);
-    if (node.status === "failed") recordCrash(crashes, step, node, reproOf(parent, input));
+    if (!clock) remember(step.snapshot, node);
+    if (node.status === "failed")
+      recordCrash(crashes, step, node, start.session, reproOf(parent, input, startIndex));
     if (node.status === "open") {
       store.put(node.id, step.snapshot, parent === null);
-      if (!seeded) observe(step.snapshot);
       const ask = node.prompt.instruction;
       if (ask !== null) {
         const waiting = askNodes.get(ask) ?? [];
@@ -548,21 +641,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return node;
   };
 
-  const observe = (snapshot: Data): void => {
-    for (const entry of list(snapshot.scriptStorage)) {
-      if (typeof entry.key !== "string") continue;
-      const value = entry.value;
-      if (
-        typeof value !== "string" &&
-        typeof value !== "number" &&
-        typeof value !== "boolean" &&
-        !isRecord(value)
-      )
-        continue;
-      const values = observed.get(entry.key) ?? new Map<string, StoredValue>();
-      if (values.size < OBSERVED_VALUES) values.set(JSON.stringify(value), value);
-      observed.set(entry.key, values);
-    }
+  /** Keeps the storage a play state left, once per distinct storage, for later sessions to start from. */
+  const remember = (snapshot: Data, node: Node): void => {
+    const entries = storageOf(snapshot);
+    const key = JSON.stringify(entries);
+    if (leftKeys.has(key)) return;
+    leftKeys.add(key);
+    left.push({ node: node.id, entries, sessions: starts[node.start]!.session });
+    if (node.status === "completed") completedLeft.push(left.length - 1);
   };
 
   /** A state's snapshot: stored, or replayed from its nearest ancestor that has one. */
@@ -583,7 +669,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     replays += 1;
     for (const step of chain.reverse()) {
       if (step.input === null) return null;
-      const next = session.apply(snapshot, step.input, step.seeded);
+      const next = session.apply(snapshot, step.input, step.clock);
       if (next === null) return null;
       snapshot = next.snapshot;
     }
@@ -593,16 +679,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** Applies one input to a state; null when the runtime rejects it or throws. */
   const step = (node: Node, snapshot: Data, input: ExplorerInput): Step | null => {
     try {
-      const next = session.apply(snapshot, input, node.seeded);
+      const next = session.apply(snapshot, input, node.clock);
       if (next === null) rejectedInputs += 1;
       else transitions += 1;
       return next;
     } catch (error) {
       // The runtime refused data it was given (RuntimeDataError): a harness problem, not a script failure.
       engineErrors.count += 1;
-      engineErrors.first ??= { message: String(error), inputs: [...pathTo(nodes, node), input] };
+      engineErrors.first ??= { message: String(error), ...reproOf(node, input, node.start) };
       return null;
     }
+  };
+
+  /** Starts a session from `start`; its first state, or null when the session ended before asking anything. */
+  const startSession = (start: Start, lead: Lead | null): { node: Node; snapshot: Data | null } => {
+    starts.push(start);
+    const first = session.start(start);
+    const node = transition(null, null, first, starts.length - 1, lead);
+    return { node, snapshot: first.snapshot.status === "waiting" ? first.snapshot : null };
   };
 
   /** Variables' values in a state, by name: the innermost binding, numbers and booleans as numbers. */
@@ -640,18 +734,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
   const runAttempt = (attempt: Attempt): void => {
     const target = targets.get(attempt.target);
-    if (target === undefined || target.reach !== null) return;
+    if (target === undefined) return;
+    const chain = attempt.chain === undefined ? undefined : target.chains.get(attempt.chain);
+    if (chain !== undefined) chain.queued = false;
+    if (target.reach !== null) return;
     attemptCount += 1;
     const lead: Lead = { remaining: ATTEMPT_EXPANSIONS, target: attempt.target };
     let node: Node;
     let snapshot: Data | null;
-    if (attempt.setup !== null) {
-      setups.push(attempt.setup);
-      const start = session.start(attempt.setup);
+    if (attempt.start !== null) {
+      ({ node, snapshot } = startSession(attempt.start, lead));
       directedTransitions += 1;
       directedWork += 1;
-      node = transition(null, null, start, setups.length - 1, lead);
-      snapshot = start.snapshot.status === "waiting" ? start.snapshot : null;
     } else {
       node = nodes[attempt.from ?? 0]!;
       snapshot = snapshotOf(node);
@@ -662,46 +756,167 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (next === null) break;
       directedTransitions += 1;
       directedWork += 1;
-      node = transition(node, input, next, node.setup, lead);
+      node = transition(node, input, next, node.start, lead);
       snapshot = next.snapshot.status === "waiting" ? next.snapshot : null;
     }
   };
 
-  /** Makes targets of the condition ways left one way, and schedules their attempts. */
+  /** The witness of a target: its state, the inputs from its session start through its step, and that start. */
+  const witnessOf = (target: Target) => {
+    const witness = witnesses.get(target.instruction);
+    const node = witness?.node == null ? null : nodes[witness.node]!;
+    const inputs = node === null ? [] : pathTo(nodes, node);
+    if (witness?.input != null) inputs.push(witness.input);
+    return { witness, node, inputs, start: starts[witness?.start ?? 0]! };
+  };
+
+  /**
+   * One step of a session chain toward a stored value: from the closest storage an explored play state left, a
+   * session that replays the witness path when that storage satisfies the condition, or else the path that led to that
+   * storage, to get closer still. Stops when sessions stop getting closer.
+   */
+  const chainStep = (code: number, target: Target, goal: Goal): boolean => {
+    if (goal.source.kind !== "storage" || target.reach !== null) return false;
+    const key = goal.source.key;
+    let chain = target.chains.get(key);
+    if (chain === undefined) {
+      chain = {
+        best: Infinity,
+        value: "",
+        sessions: 0,
+        started: 0,
+        stale: 0,
+        queued: false,
+        scanned: 0,
+        closest: null,
+        matches: keyMatcher(key),
+      };
+      target.chains.set(key, chain);
+    }
+    if (chain.queued || chain.stale >= 2) return false;
+    // Only the storages found since the last pass are measured.
+    for (; chain.scanned < left.length; chain.scanned += 1) {
+      const entry = left[chain.scanned]!;
+      const measured = storageDistance(entry.entries, chain.matches, goal);
+      const closest = chain.closest;
+      if (
+        measured.distance < Infinity &&
+        (closest === null ||
+          measured.distance < closest.distance ||
+          (measured.distance === closest.distance && entry.sessions < closest.left.sessions))
+      )
+        chain.closest = { left: entry, ...measured };
+    }
+    const best = chain.closest;
+    const need = describeNeed(key, goal);
+    if (best === null) {
+      target.note = `needs ${need}; no explored session stored it`;
+      return false;
+    }
+    const fromBest = (inputs: readonly ExplorerInput[]): Attempt => ({
+      target: code,
+      from: null,
+      start: {
+        origin: best.left.node,
+        storage: best.left.entries,
+        wallClockMs: EPOCH_MS,
+        session: best.left.sessions + 1,
+      },
+      inputs,
+      chain: key,
+    });
+    if (best.distance === 0) {
+      if (chain.best === 0) {
+        chain.stale = 2;
+        target.note = `needs ${need}; a session from storage that has it did not reach the condition`;
+        return false;
+      }
+      Object.assign(chain, {
+        best: 0,
+        value: best.value,
+        sessions: best.left.sessions,
+        queued: true,
+      });
+      chain.started += 1;
+      playAttempts.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
+      return true;
+    }
+    if (best.distance < chain.best && chain.started < MAX_CHAIN) {
+      Object.assign(chain, {
+        best: best.distance,
+        value: best.value,
+        sessions: best.left.sessions,
+        stale: 0,
+        queued: true,
+      });
+      chain.started += 1;
+      // The path that led to the closest storage, played again from it, to raise the value once more.
+      playAttempts.push(fromBest(pathTo(nodes, nodes[best.left.node]!).slice(0, MAX_SUFFIX)));
+      return true;
+    }
+    chain.stale += 1;
+    target.note = `needs ${need}; best reached: ${chain.value} after ${chain.sessions} session${chain.sessions === 1 ? "" : "s"}`;
+    return false;
+  };
+
+  /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
   const analyze = (): boolean => {
     let scheduled = false;
     instructions.forEach((instruction, index) => {
       if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
-      const taken = session.branches[index]! | session.seededBranches[index]!;
+      const taken = session.branches[index]! | session.clockBranches[index]!;
       if (taken !== 1 && taken !== 2) return;
-      if (constants.has(index) || Number(instruction.target) === index + 1) return;
+      if (allConstants.has(index) || Number(instruction.target) === index + 1) return;
       const way: 0 | 1 = taken === 1 ? 1 : 0;
       const code = index * 2 + way;
-      if (targets.has(code)) return;
+      const known = targets.get(code);
+      if (known !== undefined) {
+        for (const goal of known.goals) scheduled = chainStep(code, known, goal) || scheduled;
+        return;
+      }
       const condition = instruction.condition ?? instruction.expression;
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
       const goals = conditional ? goalsFor(flow, condition, way === 0) : [];
-      const target: Target = { instruction: index, way, goals, attempts: 0, reach: null };
+      const target: Target = {
+        instruction: index,
+        way,
+        goals,
+        attempts: 0,
+        reach: null,
+        chains: new Map(),
+        note: null,
+      };
       targets.set(code, target);
       scheduled = schedule(code, target) || scheduled;
     });
+    // A few next sessions from what completed sessions stored, as the player's next visit.
+    for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
+      if (startedFrom.size > MAX_NEXT_SESSIONS) break;
+      const entry = left[completedLeft[nextFromCompleted]!]!;
+      const key = JSON.stringify(entry.entries);
+      if (startedFrom.has(key)) continue;
+      startedFrom.add(key);
+      startSession(
+        {
+          origin: entry.node,
+          storage: entry.entries,
+          wallClockMs: EPOCH_MS,
+          session: entry.sessions + 1,
+        },
+        null,
+      );
+      scheduled = true;
+    }
     return scheduled;
   };
 
   const schedule = (code: number, target: Target): boolean => {
-    const witness = witnesses.get(target.instruction);
+    const { witness, node: witnessNode, inputs: fullPath, start: witnessStart } = witnessOf(target);
     const plan: Attempt[] = [];
     const add = (attempt: Attempt) => {
       if (plan.length < MAX_ATTEMPTS) plan.push(attempt);
     };
-    const witnessNode =
-      witness?.node === null || witness === undefined ? null : nodes[witness.node]!;
-    const fullPath = (): ExplorerInput[] => {
-      const inputs = witnessNode === null ? [] : pathTo(nodes, witnessNode);
-      if (witness?.input != null) inputs.push(witness.input);
-      return inputs;
-    };
-    const replayable = fullPath().length <= MAX_SUFFIX;
+    let chained = false;
     for (const goal of target.goals) {
       const source = goal.source;
       if (source.kind === "ask") {
@@ -717,56 +932,36 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const at = chain.findLastIndex((node) => node.prompt.instruction === source.instruction);
         if (at >= 0) {
           // The path's input `at` answered the ask; the new answer replaces it, and the inputs after it follow.
-          const suffix = fullPath()
-            .slice(at + 1)
-            .slice(0, MAX_SUFFIX);
+          const suffix = fullPath.slice(at + 1).slice(0, MAX_SUFFIX);
           for (const answer of answers)
             add({
               target: code,
               from: chain[at]!.id,
-              setup: null,
+              start: null,
               inputs: [{ kind: "text", text: answer }, ...suffix],
             });
         } else {
           for (const from of askNodes.get(source.instruction) ?? [])
             for (const answer of answers)
-              add({ target: code, from, setup: null, inputs: [{ kind: "text", text: answer }] });
+              add({ target: code, from, start: null, inputs: [{ kind: "text", text: answer }] });
         }
       } else if (source.kind === "storage") {
-        for (const key of concreteKeys(source.key, observed.keys())) {
-          for (const value of storedCandidates(goal.candidates, observed.get(key))) {
-            const seed: ExplorerInput = { kind: "storage", key, value };
-            if (witnessNode !== null && witness?.input != null)
-              add({
-                target: code,
-                from: witnessNode.id,
-                setup: null,
-                inputs: [seed, witness.input],
-              });
-            if (replayable)
-              add({
-                target: code,
-                from: null,
-                setup: { storage: value === null ? [] : [{ key, value }], wallClockMs: EPOCH_MS },
-                inputs: fullPath(),
-              });
-          }
-        }
+        chained = chainStep(code, target, goal) || chained;
       } else if (source.kind === "clock") {
         for (const wallClockMs of CLOCK_VARIANTS) {
           if (witnessNode !== null && witness?.input != null)
             add({
               target: code,
               from: witnessNode.id,
-              setup: null,
+              start: null,
               inputs: [{ kind: "clock", wallClockMs }, witness.input],
             });
-          else if (replayable)
+          else if (fullPath.length <= MAX_SUFFIX)
             add({
               target: code,
               from: null,
-              setup: { storage: [], wallClockMs },
-              inputs: fullPath(),
+              start: { ...witnessStart, wallClockMs },
+              inputs: fullPath,
             });
         }
       } else if (goal.comparison !== null && distanceTargets.length < MAX_DISTANCE_TARGETS) {
@@ -780,14 +975,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     target.attempts = plan.length;
     for (const attempt of plan)
-      (attempt.setup === null && !attempt.inputs.some(isSeeding)
-        ? playAttempts
-        : seededAttempts
+      (attempt.inputs.some(isClockInput) || (attempt.start?.wallClockMs ?? EPOCH_MS) !== EPOCH_MS
+        ? clockAttempts
+        : playAttempts
       ).push(attempt);
-    return plan.length > 0;
+    return plan.length > 0 || chained;
   };
 
-  transition(null, null, session.start(), 0, null);
+  transition(null, null, session.start(starts[0]!), 0, null);
   let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
   const outOfBudget = () => performance.now() - started >= options.budgetMs;
   let sinceAnalysis = 0;
@@ -807,7 +1002,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       analyze();
     }
     // Directed attempts and the rest of the search take turns, by steps.
-    const pending = playAttempts.length > 0 ? playAttempts : seededAttempts;
+    const pending = playAttempts.length > 0 ? playAttempts : clockAttempts;
     if (pending.length > 0 && (frontier.size === 0 || withinShare())) {
       runAttempt(pending.shift()!);
       continue;
@@ -856,19 +1051,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
-      transition(node, input, next, node.setup, closer < 0 ? null : closerLead(closer));
+      transition(node, input, next, node.start, closer < 0 ? null : closerLead(closer));
     }
     node.status = "expanded";
   }
 
-  const unreachable = unreachableInstructions(plan, instructions, constants);
   const coverage = lineCoverage(
     instructions,
     files,
     session,
     options.sources,
-    unreachable,
+    {
+      fromStart: unreachableInstructions(plan, instructions, constants),
+      withStorage: unreachableInstructions(plan, instructions, allConstants),
+    },
     constants,
+    fixed,
     targets,
   );
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
@@ -877,6 +1075,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       states: nodes.length,
       transitions,
       expanded,
+      sessions: starts.length,
       rejectedInputs,
       engineErrors,
       recording: session.recording,
@@ -901,21 +1100,49 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       directedTransitions,
     ),
     crashes: [...crashes.values()],
-    traps: findTraps(nodes, instructions, files, setups),
+    traps: findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start)),
   };
 }
 
-/** Values to seed a stored key with: the solved ones, else values play stored under it, else a few scalars. */
-function storedCandidates(
-  candidates: readonly Candidate[],
-  observedValues: ReadonlyMap<string, StoredValue> | undefined,
-): (StoredValue | null)[] {
-  const values: (StoredValue | null)[] = candidates.map((value) =>
-    typeof value === "object" ? null : value,
+function sessionPath(inputs: readonly ExplorerInput[], wallClockMs: number): SessionPath {
+  return wallClockMs === EPOCH_MS ? { inputs } : { inputs, wallClockMs };
+}
+
+/** How far a storage is from what a goal needs of a key: 0 when it holds; Infinity when nothing tells. */
+function storageDistance(
+  entries: readonly StorageEntry[],
+  matches: (key: string) => boolean,
+  goal: Goal,
+): { distance: number; value: string } {
+  const measure = (value: StorageEntry["value"] | undefined): number => {
+    if (value === undefined)
+      return goal.candidates.some((candidate) => typeof candidate === "object") ? 0 : Infinity;
+    const numeric =
+      typeof value === "number" ? value : typeof value === "boolean" ? Number(value) : null;
+    if (goal.comparison !== null && numeric !== null)
+      return distance(numeric, goal.comparison.operator, goal.comparison.constant);
+    if (goal.candidates.length === 0) return 0;
+    return goal.candidates.some((candidate) => candidate === value) ? 0 : Infinity;
+  };
+  let best = { distance: measure(undefined), value: "nothing stored" };
+  for (const entry of entries) {
+    if (!matches(entry.key)) continue;
+    const measured = measure(entry.value);
+    if (measured < best.distance || best.value === "nothing stored")
+      best = { distance: measured, value: `${entry.key} = ${JSON.stringify(entry.value)}` };
+  }
+  return best;
+}
+
+/** What a goal needs of a stored key, in words, such as `score > 100`. */
+function describeNeed(key: string, goal: Goal): string {
+  const name = key.replaceAll("\u0000", "*");
+  if (goal.comparison !== null)
+    return `${name} ${goal.comparison.operator} ${goal.comparison.constant}`;
+  const values = goal.candidates.map((candidate) =>
+    typeof candidate === "object" ? "nothing stored" : JSON.stringify(candidate),
   );
-  if (values.length === 0) values.push(...(observedValues?.values() ?? []));
-  if (values.length === 0) values.push(true, 1, "x");
-  return values.slice(0, MAX_CANDIDATES);
+  return values.length === 0 ? `a value stored as ${name}` : `${name} = ${values.join(" or ")}`;
 }
 
 function ancestry(nodes: readonly Node[], node: Node): Node[] {
@@ -927,6 +1154,7 @@ function ancestry(nodes: readonly Node[], node: Node): Node[] {
   return chain.reverse();
 }
 
+/** The inputs from a state's session start to it. */
 function pathTo(nodes: readonly Node[], node: Node): ExplorerInput[] {
   return ancestry(nodes, node)
     .map((current) => current.input)
@@ -937,31 +1165,31 @@ function recordCrash(
   crashes: Map<string, CrashReport>,
   step: Step,
   node: Node,
+  sessions: number,
   repro: Repro,
 ): void {
   const failure = failureOf(step.snapshot);
   const key = `${failure.code}@${failure.path}:${failure.line}:${failure.column}-${failure.endLine}:${failure.endColumn}`;
   const known = crashes.get(key);
-  const entry = {
-    seeded: node.seeded,
-    inputs: [...repro.inputs],
-    ...(repro.setup === undefined ? {} : { setup: repro.setup }),
-    texts: step.texts,
-  };
   if (known === undefined) {
-    crashes.set(key, { ...failure, states: 1, ...entry });
+    crashes.set(key, { ...failure, states: 1, clock: node.clock, ...repro, texts: step.texts });
     return;
   }
   known.states += 1;
+  const knownSessions = 1 + (known.earlier?.length ?? 0);
   const better =
-    (known.seeded && !node.seeded) ||
-    (known.seeded === node.seeded && entry.inputs.length < known.inputs.length);
+    (known.clock && !node.clock) ||
+    (known.clock === node.clock &&
+      (sessions < knownSessions ||
+        (sessions === knownSessions && repro.inputs.length < known.inputs.length)));
   if (!better) return;
-  known.seeded = entry.seeded;
-  known.inputs = entry.inputs;
-  known.texts = entry.texts;
-  if (entry.setup === undefined) delete known.setup;
-  else known.setup = entry.setup;
+  crashes.set(key, {
+    ...failure,
+    states: known.states,
+    clock: node.clock,
+    ...repro,
+    texts: step.texts,
+  });
 }
 
 /** Plan spans are compact: zero-based start/end line and column, and offsets into the file's source. */
@@ -1045,21 +1273,26 @@ function conditionText(instruction: Data, path: string, sources: ReadonlyMap<str
       };
 }
 
+const NO_PATH = "no execution path from the session start";
+const STORAGE_FIXED =
+  "only behind a condition on stored values that this package's saves never meet";
+
 function lineCoverage(
   instructions: readonly Data[],
   files: readonly string[],
   session: Session,
   sources: ReadonlyMap<string, string>,
-  unreachable: Uint8Array,
+  unreachable: { readonly fromStart: Uint8Array; readonly withStorage: Uint8Array },
   constants: ReadonlyMap<number, boolean>,
+  fixed: ReadonlyMap<number, { value: boolean; reason: string }>,
   targets: ReadonlyMap<number, Target>,
 ): ExploreResult["coverage"] {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
   instructions.forEach((_, index) => {
     if (
-      unreachable[index] === 1 &&
-      (session.visited[index] === 1 || session.seededVisited[index] === 1)
+      unreachable.withStorage[index] === 1 &&
+      (session.visited[index] === 1 || session.clockVisited[index] === 1)
     )
       contradictions += 1;
   });
@@ -1067,49 +1300,65 @@ function lineCoverage(
   const labelOf = (index: number): Reach =>
     session.visited[index] === 1
       ? "play"
-      : session.seededVisited[index] === 1
-        ? "seeded"
-        : claims && unreachable[index] === 1
+      : session.clockVisited[index] === 1
+        ? "clock"
+        : claims && unreachable.withStorage[index] === 1
           ? "unreachable"
           : "unknown";
-  const order: readonly Reach[] = ["play", "seeded", "unknown", "unreachable"];
-  // Per file, per line: the strongest label of the instructions starting on it.
-  const lines = new Map<string, Map<number, Reach>>();
+  const order: readonly Reach[] = ["play", "clock", "unknown", "unreachable"];
+  // Per file, per line: the strongest label of the instructions starting on it, and for `unreachable` its reason.
+  const lines = new Map<string, Map<number, { reach: Reach; reason?: string }>>();
   const lineOf = instructions.map((instruction) => compactSpan(instruction.span)?.line ?? null);
   instructions.forEach((_, index) => {
     const line = lineOf[index];
     if (line == null) return;
-    const file = lines.get(files[index]!) ?? new Map<number, Reach>();
+    const file = lines.get(files[index]!) ?? new Map<number, { reach: Reach; reason?: string }>();
     const label = labelOf(index);
     const known = file.get(line);
-    if (known === undefined || order.indexOf(label) < order.indexOf(known)) file.set(line, label);
+    if (known === undefined || order.indexOf(label) < order.indexOf(known.reach))
+      file.set(
+        line,
+        label === "unreachable"
+          ? { reach: label, reason: unreachable.fromStart[index] === 1 ? NO_PATH : STORAGE_FIXED }
+          : { reach: label },
+      );
     lines.set(files[index]!, file);
   });
   const percent = (part: number, whole: number) =>
     whole === 0 ? 100 : Math.round((part / whole) * 1000) / 10;
-  const reach: Record<Reach, number> = { play: 0, seeded: 0, unreachable: 0, unknown: 0 };
+  const reach: Record<Reach, number> = { play: 0, clock: 0, unreachable: 0, unknown: 0 };
   const fileCoverage: FileCoverage[] = [...lines]
     .sort(([left], [right]) => (left < right ? -1 : 1))
     .map(([path, fileLines]) => {
       const sorted = [...fileLines].sort(([left], [right]) => left - right);
-      for (const [, label] of sorted) reach[label] += 1;
-      const visited = sorted.filter(([, label]) => label === "play").length;
-      // Lines of one label with no line of another label between them form one range.
-      const ranges: { from: number; to: number; reach: Exclude<Reach, "play"> }[] = [];
+      for (const [, { reach: label }] of sorted) reach[label] += 1;
+      const visited = sorted.filter(([, { reach: label }]) => label === "play").length;
+      // Lines of one label and reason with no other line between them form one range.
+      const ranges: { from: number; to: number; reach: Exclude<Reach, "play">; reason?: string }[] =
+        [];
       let open: (typeof ranges)[number] | null = null;
-      for (const [line, label] of sorted) {
+      for (const [line, { reach: label, reason }] of sorted) {
         if (label === "play") open = null;
-        else if (open !== null && open.reach === label) open.to = line;
-        else ranges.push((open = { from: line, to: line, reach: label }));
+        else if (open !== null && open.reach === label && open.reason === reason) open.to = line;
+        else
+          ranges.push(
+            (open = {
+              from: line,
+              to: line,
+              reach: label,
+              ...(reason === undefined ? {} : { reason }),
+            }),
+          );
       }
       return {
         path,
         coverableLines: sorted.length,
         visitedLines: visited,
         percent: percent(visited, sorted.length),
-        unvisited: ranges.map(({ from, to, reach: label }) => ({
+        unvisited: ranges.map(({ from, to, reach: label, reason }) => ({
           lines: from === to ? `${from}` : `${from}-${to}`,
           reach: label,
+          ...(reason === undefined ? {} : { reason }),
         })),
       };
     });
@@ -1119,7 +1368,7 @@ function lineCoverage(
   instructions.forEach((instruction, index) => {
     if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
     const play = session.branches[index]!;
-    const seeded = session.seededBranches[index]!;
+    const clock = session.clockBranches[index]!;
     const target = Number(instruction.target);
     // A condition play never evaluated, or with both ways equal, is not listed.
     if (play === 0 || play === 3 || target === index + 1) return;
@@ -1128,13 +1377,22 @@ function lineCoverage(
     const way = play === 1 ? 1 : 0;
     const missedTarget = way === 1;
     const constant = constants.get(index);
+    const storage = fixed.get(index);
     const directed = targets.get(index * 2 + way);
     const label: Exclude<Reach, "play"> =
-      (seeded & (way === 0 ? 1 : 2)) !== 0
-        ? "seeded"
-        : claims && constant !== undefined
+      (clock & (way === 0 ? 1 : 2)) !== 0
+        ? "clock"
+        : claims && (constant !== undefined || storage !== undefined)
           ? "unreachable"
           : "unknown";
+    const reason =
+      label === "unreachable"
+        ? constant !== undefined
+          ? `the compiler proves the condition always ${constant}`
+          : storage?.reason
+        : label === "unknown"
+          ? (directed?.note ?? undefined)
+          : undefined;
     const reached = directed?.reach;
     unvisitedBranches.push({
       instruction: index,
@@ -1146,9 +1404,10 @@ function lineCoverage(
       targetInstruction: missedTarget ? target : index + 1,
       targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,
       reach: label,
+      ...(reason === undefined ? {} : { reason }),
       sources: directed === undefined ? [] : sourceKinds(directed.goals),
       attempts: directed?.attempts ?? 0,
-      ...(label === "seeded" && reached != null ? { repro: reached.repro } : {}),
+      ...(label === "clock" && reached != null ? { repro: reached.repro } : {}),
     });
   });
   return {
@@ -1180,7 +1439,8 @@ function directedSummary(
     variable: { targets: 0, reached: 0 },
     none: { targets: 0, reached: 0 },
   };
-  const reached = { play: 0, seeded: 0 };
+  const reached = { play: 0, clock: 0 };
+  const multiSession = { ways: 0, longestChain: 0 };
   const ways: ReachedBranch[] = [];
   for (const target of targets.values()) {
     const kinds = sourceKinds(target.goals);
@@ -1190,6 +1450,9 @@ function directedSummary(
     }
     if (target.reach === null) continue;
     reached[target.reach.label] += 1;
+    const sessions = 1 + (target.reach.repro.earlier?.length ?? 0);
+    if (sessions > 1) multiSession.ways += 1;
+    multiSession.longestChain = Math.max(multiSession.longestChain, sessions);
     const instruction = instructions[target.instruction]!;
     const path = files[target.instruction]!;
     ways.push({
@@ -1200,10 +1463,11 @@ function directedSummary(
       reach: target.reach.label,
       via: target.reach.via,
       sources: kinds,
+      sessions,
       repro: target.reach.repro,
     });
   }
-  return { targets: targets.size, attempts, transitions, reached, bySource, ways };
+  return { targets: targets.size, attempts, transitions, reached, multiSession, bySource, ways };
 }
 
 /**
@@ -1222,7 +1486,7 @@ function findTraps(
   nodes: readonly Node[],
   instructions: readonly Data[],
   files: readonly string[],
-  setups: readonly Setup[],
+  reproOf: (node: Node) => Repro,
 ): TrapReport[] {
   const groups = new Map<string, Node[]>();
   for (const node of nodes) {
@@ -1294,13 +1558,13 @@ function findTraps(
       pending.push(previous);
     }
   }
-  return bottom.map(({ component, index }) => {
+  const traps = bottom.map(({ component, index }) => {
     const members = component.flatMap((loop) => groups.get(loop)!);
     const cyclic = component.length > 1 || successors.get(component[0]!)!.has(component[0]!);
     // The shortest way in, a play one when there is.
     const entry = members.reduce((best, node) =>
-      (node.seeded ? 1 : 0) < (best.seeded ? 1 : 0) ||
-      ((node.seeded ? 1 : 0) === (best.seeded ? 1 : 0) && node.depth < best.depth)
+      (node.clock ? 1 : 0) < (best.clock ? 1 : 0) ||
+      ((node.clock ? 1 : 0) === (best.clock ? 1 : 0) && node.depth < best.depth)
         ? node
         : best,
     );
@@ -1310,7 +1574,6 @@ function findTraps(
       const span = at === null ? null : compactSpan(instructions[at]?.span);
       if (at !== null && span !== null) locations.add(`${files[at]}:${span.line}`);
     }
-    const setup = setups[entry.setup]!;
     return {
       kind: cyclic ? ("loop" as const) : ("stuck" as const),
       states: members.length,
@@ -1320,11 +1583,30 @@ function findTraps(
       samplePrompts: [
         ...new Set(members.map((node) => node.prompt.text).filter((text) => text !== "")),
       ].slice(0, 8),
-      seeded: entry.seeded,
-      inputs: pathTo(nodes, entry),
-      ...(setup === PLAY_SETUP ? {} : { setup }),
+      clock: entry.clock,
+      ...reproOf(entry),
     };
   });
+  // Later sessions meet the same loop with other storage: one trap per kind and place, by its shortest way in.
+  const merged = new Map<string, TrapReport>();
+  for (const trap of traps) {
+    const key = `${trap.kind}@${trap.locations.join("|")}`;
+    const known = merged.get(key);
+    if (known === undefined) {
+      merged.set(key, trap);
+      continue;
+    }
+    known.states += trap.states;
+    known.feederStates += trap.feederStates;
+    const shorter =
+      (known.clock && !trap.clock) ||
+      (known.clock === trap.clock &&
+        (trap.earlier?.length ?? 0) * 1_000_000 + trap.inputs.length <
+          (known.earlier?.length ?? 0) * 1_000_000 + known.inputs.length);
+    if (shorter)
+      merged.set(key, { ...trap, states: known.states, feederStates: known.feederStates });
+  }
+  return [...merged.values()];
 }
 
 /** Tarjan's strongly connected components, iteratively. */

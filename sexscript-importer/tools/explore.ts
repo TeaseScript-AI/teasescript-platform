@@ -10,9 +10,9 @@
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes.
  *
- * Every crash, trap, and way directed search reached has the input list from the start that reaches it (with the
- * seeded start, if any), and so does the first input whose runtime operation threw (an explorer or runtime problem,
- * not a script failure). `--replay` plays it again with the seed of the run, prints the transcript, and for a crash or
+ * Every crash, trap, and way directed search reached has the path from the start that reaches it (with its earlier
+ * sessions and start clock, if any), and so does the first input whose runtime operation threw (an explorer or
+ * runtime problem, not a script failure). `--replay` plays it again with the seed of the run, prints the transcript, and for a crash or
  * error exits 0 only when the same failure or error comes back. The report of a unit that compiles also has a compact
  * `catalog` block for the importer catalog's Explorer column.
  * Needs the repository build (`npm run build:typescript` in the repository root).
@@ -32,8 +32,7 @@ import {
   replay,
   type Engine,
   type ExplorerInput,
-  type Setup,
-  type StoredValue,
+  type SessionPath,
 } from "../src/explorer.ts";
 import { packageContentHash } from "./catalog.ts";
 
@@ -283,16 +282,16 @@ function withReplayCommands(result: ExploreResult, file: string) {
 
 /**
  * The compact view of an explored unit that the importer catalog shows in its Explorer column, in the shape the
- * catalog reads: coverage by play, crashes that play reaches (a crash only seeded state reaches may need state no
- * player makes, such as a value of another type), traps, the first of each, and the coverable lines by reach label. A
- * unit that does not compile has no block; the catalog reads the rest of the report.
+ * catalog reads: coverage by play, crashes (also those on a path that set the clock), traps, the first of each (a play
+ * crash when there is one), and the coverable lines by reach label. A unit that does not compile has no block; the
+ * catalog reads the rest of the report.
  */
 function catalogBlock(result: ExploreResult) {
-  const crash = result.crashes.find((entry) => !entry.seeded);
+  const crash = result.crashes.find((entry) => !entry.clock) ?? result.crashes[0];
   const location = result.traps.flatMap((trap) => trap.locations)[0];
   return {
     coveragePercent: result.coverage.percent,
-    crashes: result.crashes.filter((entry) => !entry.seeded).length,
+    crashes: result.crashes.length,
     traps: result.traps.length,
     firstCrash:
       crash === undefined
@@ -310,7 +309,8 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
     `${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
     `${crashes.length} crashes, ${traps.length} traps, ` +
     `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
-    `directed ${directed.reached.play} play + ${directed.reached.seeded} seeded of ${directed.targets}`
+    `directed ${directed.reached.play} play + ${directed.reached.clock} clock of ${directed.targets}, ` +
+    `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})`
   );
 }
 
@@ -381,7 +381,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       lines.push(
         `- Crash \`${text(crash.code)}\` at \`${text(crash.path)}:${count(crash.line)}:${count(crash.column)}\`: ` +
           `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs` +
-          `${crash.seeded === true ? ", needs seeded state" : ""}; \`${text(crash.replay)}\`)`,
+          `${crash.clock === true ? ", with the clock set" : ""}${records(crash.earlier).length > 0 ? `, in session ${records(crash.earlier).length + 1}` : ""}; \`${text(crash.replay)}\`)`,
       );
     }
     for (const trap of records(report.traps)) {
@@ -414,7 +414,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     }
     const reach = fields(coverage.reach);
     lines.push(
-      `- Lines: ${count(reach.play)} play, ${count(reach.seeded)} seeded, ${count(reach.unreachable)} unreachable, ` +
+      `- Lines: ${count(reach.play)} play, ${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ` +
         `${count(reach.unknown)} unknown`,
     );
     const directed = fields(report.directed);
@@ -427,7 +427,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       )
       .join(", ");
     lines.push(
-      `- Directed search: ${count(reached.play)} play and ${count(reached.seeded)} seeded of ` +
+      `- Directed search: ${count(reached.play)} play and ${count(reached.clock)} clock of ` +
         `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
         `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
@@ -442,30 +442,22 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
   return `${lines.join("\n")}\n`;
 }
 
-/** A stored value read back from a report: a scalar or a runtime composite; undefined when malformed. */
-function parseStored(value: unknown): StoredValue | undefined {
-  return typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    isRecord(value)
-    ? value
-    : undefined;
-}
-
-/** A seeded start read back from a report: undefined for none (a play start), null when malformed. */
-function parseSetup(value: unknown): Setup | undefined | null {
-  if (value === undefined) return undefined;
-  if (!isRecord(value) || !Array.isArray(value.storage)) return null;
-  const storage: { key: string; value: StoredValue }[] = [];
-  for (const entry of value.storage) {
-    const stored = isRecord(entry) ? parseStored(entry.value) : undefined;
-    if (!isRecord(entry) || typeof entry.key !== "string" || stored === undefined) return null;
-    storage.push({ key: entry.key, value: stored });
+/** The earlier sessions of a path read back from a report: none when absent, null when malformed. */
+function parseEarlier(value: unknown): SessionPath[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const sessions: SessionPath[] = [];
+  for (const entry of value) {
+    const inputs = isRecord(entry) ? parseInputs(entry.inputs) : null;
+    if (!isRecord(entry) || inputs === null) return null;
+    if (entry.wallClockMs !== undefined && typeof entry.wallClockMs !== "number") return null;
+    sessions.push(
+      typeof entry.wallClockMs === "number"
+        ? { inputs, wallClockMs: entry.wallClockMs }
+        : { inputs },
+    );
   }
-  return {
-    storage,
-    wallClockMs: typeof value.wallClockMs === "number" ? value.wallClockMs : EPOCH_MS,
-  };
+  return sessions;
 }
 
 /** An input list read back from a report, or null when an input is malformed. */
@@ -505,12 +497,6 @@ function parseInput(value: unknown): ExplorerInput | null {
         formFields[id] = field;
       }
       return { kind: "form", action: value.action, fields: formFields };
-    }
-    case "storage": {
-      const stored = value.value === null ? null : parseStored(value.value);
-      return typeof value.key === "string" && stored !== undefined
-        ? { kind: "storage", key: value.key, value: stored }
-        : null;
     }
     case "clock":
       return typeof value.wallClockMs === "number"
@@ -561,13 +547,14 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
     );
     return 2;
   }
-  // A reached way keeps its repro apart; a crash or trap has its inputs and setup at the top.
+  // A reached way keeps its path apart; a crash or trap has its inputs, earlier sessions, and clock at the top.
   const repro = isRecord(target.repro) ? target.repro : target;
   const inputs = parseInputs(repro.inputs);
-  const setup = parseSetup(repro.setup);
+  const earlier = parseEarlier(repro.earlier);
+  const wallClockMs = typeof repro.wallClockMs === "number" ? repro.wallClockMs : EPOCH_MS;
   if (
     inputs === null ||
-    setup === null ||
+    earlier === null ||
     typeof report.seed !== "number" ||
     typeof report.dir !== "string"
   ) {
@@ -584,11 +571,14 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
-  if (setup !== undefined)
+  earlier.forEach((session, index) =>
     process.stdout.write(
-      `Seeded start: wall clock ${new Date(setup.wallClockMs).toISOString()}, storage ${JSON.stringify(setup.storage)}\n`,
-    );
-  const replayed = replay(engine, unit.plan, report.seed, inputs, setup);
+      `Session ${index + 1}: ${session.inputs.map(describeInput).join("; ") || "(no input)"}, then its storage starts the next\n`,
+    ),
+  );
+  if (wallClockMs !== EPOCH_MS)
+    process.stdout.write(`The last session starts at ${new Date(wallClockMs).toISOString()}\n`);
+  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
   const { steps, failure } = replayed;
   for (const step of steps) {
     if (step.input !== null) process.stdout.write(`> ${describeInput(step.input)}\n`);
@@ -630,10 +620,8 @@ function describeInput(input: ExplorerInput): string {
       return input.action === "cancel"
         ? "cancel the form"
         : `submit the form${input.fields === undefined ? "" : ` with ${JSON.stringify(input.fields)}`}`;
-    case "storage":
-      return `(seeded) store ${JSON.stringify(input.value)} as ${JSON.stringify(input.key)}`;
     case "clock":
-      return `(seeded) continue at ${new Date(input.wallClockMs).toISOString()}`;
+      return `continue at ${new Date(input.wallClockMs).toISOString()}`;
     case "wait":
       return `wait until ${input.untilMs / 1000} s`;
     case "press":

@@ -80,6 +80,22 @@ if pick == "count" {
   if (load "fixture.visited") == true {
     say "Welcome back."
   }
+  save true as "fixture.visited"
+  let visits = load("fixture.visits", default: 0)
+  save visits + 1 as "fixture.visits"
+  if visits >= 3 {
+    say "Regular."
+  }
+  if (load "intro.legacy") == true {
+    say "Legacy profile."
+  }
+  save 1 as "fixture.level"
+  if (load "fixture.level") == 2 {
+    say "Level two."
+  }
+  if getTime().hour >= 22 {
+    say "Late."
+  }
   exit
 }
 while true {

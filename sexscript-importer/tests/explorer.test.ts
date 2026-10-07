@@ -35,7 +35,9 @@ async function fixture(engine: Engine) {
         message: String(entry.message),
       };
     });
-  return { source, plan, diagnostics };
+  // The one-based line of the fixture that holds `text`.
+  const lineOf = (text: string) => source.split("\n").findIndex((line) => line.includes(text)) + 1;
+  return { source, plan, diagnostics, lineOf };
 }
 
 test(
@@ -44,16 +46,16 @@ test(
   async () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    const { source, plan, diagnostics } = await fixture(engine);
+    const { source, plan, diagnostics, lineOf } = await fixture(engine);
     const result = explore(engine, plan, {
       seed: 1,
       budgetMs: 60_000,
-      maxStates: 2000,
+      maxStates: 5000,
       sources: new Map([["main.tease", source]]),
       diagnostics,
     });
 
-    // Every state the inputs reach is explored: "Left" exits, "Right" fails, "Stay" loops, "Count" counts and exits.
+    // Every state the inputs reach is explored, across sessions: "Left" exits, "Right" fails, "Stay" loops.
     assert.equal(result.search.stoppedBy, "exhausted");
     assert.ok(result.endStates.completed >= 1);
     assert.ok(result.endStates.failed >= 1);
@@ -61,72 +63,76 @@ test(
     // One crash per code and span, with the path that reaches it; replaying the path fails the same way.
     assert.equal(result.crashes.length, 1);
     const crash = result.crashes[0]!;
-    assert.deepEqual(
-      [crash.code, crash.path, crash.line, crash.seeded],
-      ["TSR025", "main.tease", 12, false],
-    );
+    assert.deepEqual([crash.code, crash.path, crash.line], ["TSR025", "main.tease", 12]);
     assert.deepEqual(crash.inputs, [{ kind: "option", index: 1, label: "Right" }]);
+    assert.equal(crash.earlier, undefined);
     const replayed = replay(engine, plan, 1, crash.inputs);
     assert.deepEqual(
       replayed.failure && [replayed.failure.code, replayed.failure.line, replayed.failure.column],
       [crash.code, crash.line, crash.column],
     );
 
-    // The button loop after "Stay" repeats one state (its action IDs and event numbers differ), which has no way out.
+    // The button loop after "Stay" repeats one state, in every session, and has no way out: one trap.
     assert.equal(result.traps.length, 1);
     const trap = result.traps[0]!;
     assert.equal(trap.kind, "loop");
-    assert.deepEqual(trap.locations, ["main.tease:87"]);
+    assert.deepEqual(trap.locations, [`main.tease:${lineOf('showButton "Again"')}`]);
     assert.deepEqual(trap.sampleTexts, ["You are stuck."]);
     assert.deepEqual(trap.inputs, [{ kind: "option", index: 2, label: "Stay" }]);
 
-    // Directed search answers the ask with the compared number, far from the ask: reached by play.
     const ways = result.directed.ways;
-    const secret = ways.find((way) => way.line === 77);
-    assert.deepEqual(secret && [secret.way, secret.reach, secret.via, secret.sources], [
-      "true",
-      "play",
-      "directed",
-      ["ask"],
-    ]);
-    // The new answer replaces the one on the path that first evaluated the condition, and the button after it follows.
+    const way = (text: string) => ways.find((entry) => entry.condition === text);
+    // Directed search answers the ask with the compared number, far from the ask, and replays the button after it.
+    const secret = way("n == 1234");
+    assert.deepEqual(
+      secret && [secret.way, secret.reach, secret.via, secret.sources, secret.sessions],
+      ["true", "play", "directed", ["ask"], 1],
+    );
     assert.deepEqual(secret?.repro.inputs.slice(-2), [
       { kind: "text", text: "1234" },
       { kind: "button", label: "Go on" },
     ]);
-    // A value only an earlier session could have stored: reached with seeded storage, and its repro replays there.
-    const back = ways.find((way) => way.line === 80);
-    assert.deepEqual(back && [back.way, back.reach, back.via, back.sources], [
-      "true",
-      "seeded",
-      "directed",
-      ["storage"],
-    ]);
-    assert.ok(
-      back?.repro.inputs.some(
-        (input) => input.kind === "storage" && input.key === "fixture.visited",
-      ),
-    );
-    const seededReplay = replay(engine, plan, 1, back?.repro.inputs ?? [], back?.repro.setup);
-    assert.equal(seededReplay.steps.at(-1)?.status, "halted");
-    assert.ok(seededReplay.steps.some((step) => step.texts.includes("Welcome back.")));
+    // A value the package stores is read in a next session, which starts from what an explored session left.
+    const back = way('(load "fixture.visited") == true');
+    assert.deepEqual(back && [back.reach, back.sources, back.sessions], ["play", ["storage"], 2]);
+    // A count of visits needs a chain of sessions, each from the storage the one before it left.
+    const regular = way("visits >= 3");
+    assert.deepEqual(regular && [regular.reach, regular.sessions], ["play", 4]);
+    assert.ok(result.directed.multiSession.longestChain >= 4);
+    const chained = replay(engine, plan, 1, regular?.repro.inputs ?? [], {
+      earlier: regular?.repro.earlier ?? [],
+    });
+    assert.equal(chained.steps.at(-1)?.status, "halted");
+    assert.ok(chained.steps.some((step) => step.texts.includes("Regular.")));
+    // The late hour is reached by continuing at another wall clock time: a clock way.
+    const late = way("getTime().hour >= 22");
+    assert.deepEqual(late && [late.reach, late.sources], ["clock", ["clock"]]);
 
-    // Line labels: play for the answered branch, seeded for the stored one, unreachable for a constant condition.
+    // Labels: play, clock, and unreachable with a static reason; no stored value is made up.
     const file = result.coverage.files.find((entry) => entry.path === "main.tease")!;
-    const labelOf = (line: number) =>
-      file.unvisited.find((range) => {
-        const [from = 0, to = from] = range.lines.split("-").map(Number);
+    const range = (text: string) =>
+      file.unvisited.find((entry) => {
+        const line = lineOf(text);
+        const [from = 0, to = from] = entry.lines.split("-").map(Number);
         return line >= from && line <= to;
-      })?.reach ?? "play";
-    assert.deepEqual(
-      [labelOf(78), labelOf(81), labelOf(8), labelOf(4)],
-      ["play", "seeded", "unreachable", "play"],
-    );
+      });
+    assert.equal(range('say "Secret number."'), undefined);
+    assert.equal(range('say "Regular."'), undefined);
+    assert.equal(range('say "Late."')?.reach, "clock");
+    assert.equal(range('say "Never shown."')?.reach, "unreachable");
+    assert.equal(range('say "Legacy profile."')?.reach, "unreachable");
+    assert.equal(range('say "Level two."')?.reach, "unreachable");
     assert.equal(result.coverage.staticContradictions, 0);
-    const never = result.coverage.unvisitedBranches.find((entry) => entry.line === 7);
-    assert.deepEqual(never && [never.missed, never.reach], ["true", "unreachable"]);
-    const stored = result.coverage.unvisitedBranches.find((entry) => entry.line === 80);
-    assert.deepEqual(stored && [stored.reach, stored.sources], ["seeded", ["storage"]]);
+    const branch = (text: string) =>
+      result.coverage.unvisitedBranches.find((entry) => entry.condition?.text === text);
+    assert.deepEqual(
+      [branch('pick == "never"')?.reach, branch('(load "intro.legacy") == true')?.reason],
+      ["unreachable", "key never saved in this package: intro.legacy"],
+    );
+    assert.match(
+      branch('(load "fixture.level") == 2')?.reason ?? "",
+      /every save of fixture\.level is a literal/u,
+    );
   },
 );
 
@@ -155,12 +161,12 @@ test(
     const result = explore(failing, plan, {
       seed: 1,
       budgetMs: 60_000,
-      maxStates: 2000,
+      maxStates: 5000,
       sources: new Map(),
       diagnostics,
     });
 
-    assert.equal(result.search.engineErrors.count, 1);
+    assert.ok(result.search.engineErrors.count >= 1);
     assert.equal(result.crashes.length, 1);
     const first = result.search.engineErrors.first!;
     assert.deepEqual(first.inputs, [{ kind: "option", index: 2, label: "Stay" }]);
