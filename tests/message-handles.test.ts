@@ -7,6 +7,7 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -15,22 +16,15 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan, withMessageSays } from "./helpers/message-says.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
 
 /*
- * Message handles (`docs/RUNTIME.md#message-handles`) through trusted plans: a placeholder
- * `timer(duration: 1 ms, async: true, label: …)` stands for a `say` whose result is a message handle, and `.text` is
- * read and written through functions whose parameters the compiler leaves to the runtime.
+ * Messages that change in place (V30 §37 "Updatable messages", `docs/RUNTIME.md#message-handles`): a `say` used as a
+ * value gives a `messageHandle`, whose `.text` reads and replaces the message's text.
  */
-
-function source(...lines: string[]): string {
-  return [MESSAGE_TEXT_FUNCTIONS, ...lines].join("\n");
-}
-
-const say = (text: string) => `timer(duration: 1 ms, async: true, label: ${JSON.stringify(text)})`;
 
 /** The messages the events show, in order of creation, each with its texts in order. */
 function messageTexts(events: readonly InterpreterEvent[]): string[][] {
@@ -42,21 +36,25 @@ function messageTexts(events: readonly InterpreterEvent[]): string[][] {
   return [...messages.values()];
 }
 
+function lines(...source: string[]): string {
+  return source.join("\n");
+}
+
 test("a say's handle reads its markup source and replaces or appends its text in place, through every copy", () => {
-  const plan = messageSayPlan(
-    source(
-      `let line = ${say("*Waiting*.")}`,
+  const compiled = plan(
+    lines(
+      'let line = say "*Waiting*.", instant',
       "let other = line",
-      'appendText(line, ".")',
-      'setText(other, "**Ready**")',
-      'setText(line, "**Ready**")',
-      'setText(line, "")',
-      "say textOf(other), instant",
+      'line.text += "."',
+      'other.text = "**Ready**"',
+      'line.text = "**Ready**"',
+      'line.text = ""',
+      "say other.text, instant",
       'say "${line == other}", instant',
       "exit",
     ),
   );
-  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(result.snapshot.status, "halted");
   const [shown, ...updates] = result.events.filter(
     (event) => event.kind === "say" || event.kind === "messageUpdated",
@@ -80,7 +78,6 @@ test("a say's handle reads its markup source and replaces or appends its text in
   const appended = updates[0]!;
   assert.ok(appended.kind === "messageUpdated");
   // The appended source is parsed whole, so the emphasis of the original text stays.
-  assert.equal(appended.content.blocks[0]?.kind, "paragraph");
   assert.deepEqual(appended.content, {
     kind: "messageMarkup",
     visibleText: "Waiting..",
@@ -99,19 +96,19 @@ test("a say's handle reads its markup source and replaces or appends its text in
   });
 });
 
-test("each run of a result-bearing say shows its own message, and a handle shows as its identity", () => {
-  const plan = messageSayPlan(
-    source(
-      "let lines = []",
+test("each run of a say value shows its own message, and a handle shows as its identity", () => {
+  const compiled = plan(
+    lines(
+      "let shown: messageHandle[] = []",
       "repeat 2 {",
-      `    lines.add(${say("Count")})`,
+      '    shown.add(say("Count", instant))',
       "}",
-      'appendText(lines[1], ": 2")',
-      "say lines[0], instant",
+      'shown[1].text += ": 2"',
+      "say shown[0], instant",
       "exit",
     ),
   );
-  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(result.snapshot.status, "halted");
   assert.deepEqual(messageTexts(result.events), [
     ["Count"],
@@ -120,48 +117,124 @@ test("each run of a result-bearing say shows its own message, and a handle shows
   ]);
 });
 
+test("a say value works wherever a value does, in source order, and one that does not run shows nothing", () => {
+  const compiled = plan(
+    lines(
+      "function shown(first: messageHandle, second: messageHandle) {",
+      '    first.text += " 1"',
+      "    return second",
+      "}",
+      'let last = shown(say("A", instant), say bubble() ("B", instant))',
+      'last.text += " 2"',
+      'if false and say("Never", instant) == last {',
+      "}",
+      "function made: messageHandle {",
+      '    return say "Returned", instant',
+      "}",
+      "let returned = made()",
+      'returned.text = "Returned!"',
+      "exit",
+    ),
+  );
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(messageTexts(result.events), [
+    ["A", "A 1"],
+    ["B", "B 2"],
+    ["Returned", "Returned!"],
+  ]);
+});
+
+test("the importer's growing dots and stroke counter play and resume alike at every boundary", () => {
+  const dots = lines(
+    'let waiting = say "Waiting.", instant',
+    "repeat 2 {",
+    "    wait 1 s",
+    '    waiting.text += "."',
+    "}",
+    "exit",
+  );
+  const counter = lines(
+    "let count: integer = 0",
+    'let strokes = say "Strokes: 0", instant',
+    "repeat 50 {",
+    "    wait 1 s",
+    "    count += 1",
+    '    strokes.text = "Strokes: ${count}"',
+    "}",
+    "exit",
+  );
+  const played = assertRuntimeResumeEquivalent(dots, { scenarioName: "growing dots" });
+  assert.deepEqual(messageTexts(played.events), [["Waiting.", "Waiting..", "Waiting..."]]);
+  const counted = assertRuntimeResumeEquivalent(counter, { scenarioName: "stroke counter" });
+  const [strokes] = messageTexts(counted.events);
+  assert.equal(strokes?.length, 51);
+  assert.equal(strokes?.at(-1), "Strokes: 50");
+});
+
 test("a method on a message's text keeps the text read before its arguments run, also across a wait", () => {
   // The method's receiver is prepared before the argument waits, so every boundary lies in between.
   assertRuntimeResumeEquivalent(
-    source(
+    lines(
       "function later {",
       "    wait 1 ms",
       '    return "B"',
       "}",
-      "function rewrite(message) {",
-      '    return message.text.replace("A", later())',
-      "}",
-      `let line = ${say("A")}`,
-      "say rewrite(line), instant",
+      'let line = say "A", instant',
+      'say line.text.replace("A", later()), instant',
       "exit",
     ),
-    { scenarioName: "prepared message text", transformPlan: withMessageSays },
+    { scenarioName: "prepared message text" },
   );
   // An argument that changes the text does not change the receiver read before it, as for a text variable.
-  const plan = messageSayPlan(
-    source(
-      "function later(message) {",
-      '    setText(message, "X")',
+  const compiled = plan(
+    lines(
+      "function later(message: messageHandle) {",
+      '    message.text = "X"',
       '    return "B"',
       "}",
-      "function rewrite(message) {",
-      '    return message.text.replace("A", later(message))',
-      "}",
-      `let line = ${say("A")}`,
-      "say rewrite(line), instant",
+      'let line = say "A", instant',
+      'say line.text.replace("A", later(line)), instant',
       "exit",
     ),
   );
-  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.deepEqual(messageTexts(result.events), [["A", "X"], ["B"]]);
 });
 
-test("a text write starts, ends, and moves no pacing, also while the message's own pacing runs", () => {
-  const plan = messageSayPlan(
-    source(`let line = ${say("Waiting")}`, 'setText(line, "Ready")', 'say "Next", 1', "exit"),
-    2,
+test("an append reads the text before its value waits, so a change made meanwhile is replaced", () => {
+  const compiled = plan(
+    lines(
+      'let line = say "Ready", instant',
+      'let tick = timer(duration: 1 s, async: true, display: "hidden") {',
+      '    line.text = "Changed by the timer"',
+      "}",
+      'line.text += askText "Add what?"',
+      "exit",
+    ),
   );
-  const shown = run(plan, createFreshRuntimeSnapshot(plan));
+  const asking = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  const changed = run(compiled, observeTime(compiled, asking.snapshot, 1_000).snapshot);
+  const action = changed.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction");
+  const answered = completeAction(compiled, changed.snapshot, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: action.interactionKind,
+    payload: { kind: "submittedText", submittedText: "!" },
+  });
+  const finished = run(compiled, answered.snapshot);
+  assert.deepEqual(
+    messageTexts([...asking.events, ...changed.events, ...answered.events, ...finished.events])[0],
+    ["Ready", "Changed by the timer", "Ready!"],
+  );
+});
+
+test("a text write starts, ends, and moves no pacing, also while the message's own pacing runs", () => {
+  const compiled = plan(
+    lines('let line = say "Waiting", 2', 'line.text = "Ready"', 'say "Next", 1', "exit"),
+  );
+  const shown = run(compiled, createFreshRuntimeSnapshot(compiled));
   // The next message still waits for the first one's two seconds.
   assert.equal(shown.snapshot.status, "waiting");
   assert.deepEqual(messageTexts(shown.events), [["Waiting", "Ready"]]);
@@ -171,20 +244,19 @@ test("a text write starts, ends, and moves no pacing, also while the message's o
 });
 
 test("a say staged behind pacing gives its handle only once its message is shown", () => {
-  const plan = messageSayPlan(
-    source('say "First", 1', `let line = ${say("Second")}`, 'appendText(line, "!")', "exit"),
-    2,
+  const compiled = plan(
+    lines('say "First", 1', 'let line = say "Second", 2', 'line.text += "!"', "exit"),
   );
-  const waiting = run(plan, createFreshRuntimeSnapshot(plan));
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
   assert.deepEqual(messageTexts(waiting.events), [["First"]]);
   // The prepared output keeps the source of its text; no message is live and no handle exists yet.
   assert.equal(waiting.snapshot.foregroundAction?.kind, "chatPacingGate");
   assert.deepEqual(waiting.snapshot.liveMessages, []);
-  const json = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
+  const json = serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot));
   assert.match(json, /"sourceText":"Second"/);
 
-  const released = run(plan, observeTime(plan, waiting.snapshot, 1_000).snapshot);
+  const released = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
   const restored = deserializeCheckpoint(json);
   const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 1_000).snapshot);
   assert.deepEqual(resumed.events, released.events);
@@ -193,66 +265,62 @@ test("a say staged behind pacing gives its handle only once its message is shown
 });
 
 test("an instant say that supersedes earlier pacing gives its handle at once", () => {
-  const plan = messageSayPlan(
-    source('say "First", 1', `let line = ${say("Now")}`, 'appendText(line, "!")', "exit"),
+  const compiled = plan(
+    lines('say "First", 1', 'let line = say "Now", instant', 'line.text += "!"', "exit"),
   );
-  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.deepEqual(messageTexts(result.events), [["First"], ["Now", "Now!"]]);
 });
 
-test("message handles resume equivalently at every boundary, through waits and a timer block", () => {
-  for (const pacing of ["instant", 1] as const) {
+test("message handles resume equivalently at every boundary, through waits, a timer block, and pacing", () => {
+  for (const pacing of ["instant", "1"]) {
     assertRuntimeResumeEquivalent(
-      source(
+      lines(
         "let count = 0",
-        `let dots = ${say("Waiting.")}`,
-        `let strokes = ${say("Strokes: 0")}`,
+        `let dots = say("Waiting.", ${pacing})`,
+        `let strokes = say "Strokes: 0", ${pacing}`,
         'let tick = timer(duration: 1 s, async: true, display: "hidden", repeat: true) {',
         "    count += 1",
-        '    setText(strokes, "Strokes: ${count}")',
+        '    strokes.text = "Strokes: ${count}"',
         "}",
         "repeat 2 {",
         "    wait 1 s",
-        '    appendText(dots, ".")',
+        '    dots.text += "."',
         "}",
         "wait 1500 ms",
         "tick.stop()",
-        'setText(dots, "Done after ${randomInteger(1..=6)}")',
-        "say textOf(strokes)",
+        'dots.text = "Done after ${randomInteger(1..=6)}"',
+        "say strokes.text",
         "exit",
       ),
-      {
-        scenarioName: `message handles, pacing ${pacing}`,
-        transformPlan: (compiled) => withMessageSays(compiled, pacing),
-      },
+      { scenarioName: `message handles, pacing ${pacing}` },
     );
   }
 });
 
 test("a public operation drops the messages no handle reaches, and keeps those a value still holds", () => {
-  const plan = messageSayPlan(
-    source(
+  const compiled = plan(
+    lines(
       "let kept = []",
-      "function show(text) {",
-      `    let shown = ${say("Local")}`,
-      "    return null",
+      "function show {",
+      '    let shown = say "Local", instant',
       "}",
       "function keep {",
-      `    kept.add({ line: ${say("Kept")} })`,
+      '    kept.add({ line: say("Kept", instant) })',
       "}",
-      "show(1)",
+      "show()",
       "keep()",
-      `let gone = [${say("Removed")}]`,
+      'let gone = [say("Removed", instant)]',
       "gone.removeFirst()",
-      `let captured = [${say("Captured")}]`,
+      'let captured = [say("Captured", instant)]',
       'let tick = timer(duration: 1 s, async: true, display: "hidden") {',
-      '    setText(captured[0], "Changed")',
+      '    captured[0].text = "Changed"',
       "}",
       "captured.removeFirst()",
       "exit",
     ),
   );
-  const ending = runUntilExit(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const ending = runUntilExit(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   const ids = new Map(
     ending.events.flatMap((event) => (event.kind === "say" ? [[event.text, event.sequence]] : [])),
   );
@@ -260,16 +328,16 @@ test("a public operation drops the messages no handle reaches, and keeps those a
   assert.deepEqual(ending.snapshot.liveMessages, [
     { messageId: ids.get("Kept")!, sourceText: "Kept" },
   ]);
-  assert.equal(validateRuntimeSnapshot(ending.snapshot, plan).valid, true);
+  assert.equal(validateRuntimeSnapshot(ending.snapshot, compiled).valid, true);
 });
 
 test("a handle that a timer block shares keeps its message while the block can still run", () => {
-  const plan = messageSayPlan(
-    source(
+  const compiled = plan(
+    lines(
       "function start {",
-      `    let line = ${say("Waiting")}`,
+      '    let line = say "Waiting", instant',
       '    timer(duration: 1 s, async: true, display: "hidden") {',
-      '        appendText(line, "!")',
+      '        line.text += "!"',
       "    }",
       "}",
       "start()",
@@ -277,35 +345,39 @@ test("a handle that a timer block shares keeps its message while the block can s
       "exit",
     ),
   );
-  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const waiting = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
   assert.equal(waiting.snapshot.liveMessages.length, 1);
-  const fired = run(plan, observeTime(plan, waiting.snapshot, 1_000).snapshot);
+  const fired = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
   assert.deepEqual(messageTexts([...waiting.events, ...fired.events]), [["Waiting", "Waiting!"]]);
   // Once the block has run, nothing reaches the message.
   assert.deepEqual(fired.snapshot.liveMessages, []);
 });
 
-test("a write that is not text, or to another property, fails before it changes the message", () => {
+test("a write the compiler cannot check fails at runtime before it changes the message", () => {
+  // Parameters without a type leave the receiver and value to the runtime.
   for (const [write, code] of [
     ["setText(line, 5)", "TSR050"],
     ['setColor(line, "red")', "TSR003"],
     ["say colorOf(line)", "TSR017"],
   ] as const) {
-    const plan = messageSayPlan(
-      source(
+    const compiled = plan(
+      lines(
+        "function setText(message, text) {",
+        "    message.text = text",
+        "}",
         "function setColor(message, color) {",
         "    message.color = color",
         "}",
         "function colorOf(message) {",
         "    return message.color",
         "}",
-        `let line = ${say("Kept")}`,
+        'let line = say "Kept", instant',
         write,
         "exit",
       ),
     );
-    const result = run(plan, createFreshRuntimeSnapshot(plan));
+    const result = run(compiled, createFreshRuntimeSnapshot(compiled));
     assert.equal(result.snapshot.status, "failed", write);
     assert.equal(result.snapshot.failure?.code, code, write);
     assert.deepEqual(messageTexts(result.events), [["Kept"]], write);
@@ -330,11 +402,11 @@ function changed(
 }
 
 test("restore rejects live messages that are malformed, out of order, or missing for a handle", () => {
-  const plan = messageSayPlan(
-    source('say "Before", instant', `let line = ${say("Waiting")}`, "wait 1 s", "exit"),
+  const compiled = plan(
+    lines('say "Before", instant', 'let line = say "Waiting", instant', "wait 1 s", "exit"),
   );
-  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
-  assert.equal(validateRuntimeSnapshot(waiting, plan).valid, true);
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(validateRuntimeSnapshot(waiting, compiled).valid, true);
   const [record] = waiting.liveMessages;
   assert.ok(record !== undefined);
   const earlier = { messageId: record.messageId - 1, sourceText: "Old" };
@@ -348,23 +420,20 @@ test("restore rejects live messages that are malformed, out of order, or missing
   ];
   for (const [name, change] of variants) {
     assert.equal(
-      validateRuntimeSnapshot(changed(waiting, change).snapshot, plan).valid,
+      validateRuntimeSnapshot(changed(waiting, change).snapshot, compiled).valid,
       false,
       name,
     );
   }
   // A record no handle reaches is harmless; the next operation drops it.
   const extra: RuntimeSnapshot = { ...waiting, liveMessages: [earlier, record] };
-  assert.equal(validateRuntimeSnapshot(extra, plan).valid, true);
-  assert.deepEqual(observeTime(plan, extra, 0).snapshot.liveMessages, [record]);
+  assert.equal(validateRuntimeSnapshot(extra, compiled).valid, true);
+  assert.deepEqual(observeTime(compiled, extra, 0).snapshot.liveMessages, [record]);
 });
 
-test("restore checks the source a staged result-bearing say keeps against its prepared text", () => {
-  const plan = messageSayPlan(
-    source('say "First", 1', `let line = ${say("**Second**")}`, "exit"),
-    2,
-  );
-  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
+test("restore checks the source a staged say value keeps against its prepared text", () => {
+  const compiled = plan(lines('say "First", 1', 'let line = say "**Second**", 2', "exit"));
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const gate = waiting.foregroundAction;
   assert.ok(gate?.kind === "chatPacingGate" && gate.preparedOutput !== null);
   assert.equal(gate.preparedOutput.sourceText, "**Second**");
@@ -372,42 +441,38 @@ test("restore checks the source a staged result-bearing say keeps against its pr
     waiting,
     (data) => delete data.foregroundAction.preparedOutput.sourceText,
   );
-  assert.equal(validateRuntimeSnapshot(withoutSource.snapshot, plan).valid, false);
+  assert.equal(validateRuntimeSnapshot(withoutSource.snapshot, compiled).valid, false);
   // The source must be the one the prepared content was parsed from.
   const otherSource = changed(
     waiting,
     (data) => (data.foregroundAction.preparedOutput.sourceText = "Second"),
   );
-  assert.equal(validateRuntimeSnapshot(otherSource.snapshot, plan).valid, false);
-  assert.equal(validateRuntimeSnapshot(changed(waiting, () => {}).snapshot, plan).valid, true);
+  assert.equal(validateRuntimeSnapshot(otherSource.snapshot, compiled).valid, false);
+  assert.equal(validateRuntimeSnapshot(changed(waiting, () => {}).snapshot, compiled).valid, true);
 });
 
 test("handles go with globals and callers across files, and a file's own handles end with it", () => {
   const files = [
     {
       path: "main.tease",
-      source: [
-        "global kept = []",
-        "global function appendText(message, text) {",
-        "    message.text += text",
-        "}",
-        `let local = ${say("Local")}`,
-        `kept.add(${say("Global")})`,
+      source: lines(
+        "global kept: messageHandle[] = []",
+        'let local = say "Local", instant',
+        'kept.add(say("Global", instant))',
         'call "other.tease"',
-        'appendText(local, "!")',
+        'local.text += "!"',
         'goto "last.tease"',
-      ].join("\n"),
+      ),
     },
     {
       path: "other.tease",
-      source: ['appendText(kept[0], "+")', `let mine = ${say("Other")}`, "end"].join("\n"),
+      source: lines('kept[0].text += "+"', 'let mine = say "Other", instant', "end"),
     },
-    { path: "last.tease", source: ['appendText(kept[0], "#")', "wait 1 s", "exit"].join("\n") },
+    { path: "last.tease", source: lines('kept[0].text += "#"', "wait 1 s", "exit") },
   ];
   const compiled = compileProject(files);
   assert.deepEqual(compiled.diagnostics, []);
-  const plan = withMessageSays(compiled.plan!);
-  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const waiting = run(compiled.plan!, createImmediatePacingRuntimeSnapshot(compiled.plan!));
   assert.equal(waiting.snapshot.status, "waiting");
   assert.deepEqual(messageTexts(waiting.events), [
     ["Local", "Local!"],
@@ -419,8 +484,5 @@ test("handles go with globals and callers across files, and a file's own handles
     waiting.snapshot.liveMessages.map((message) => message.sourceText),
     ["Global+#"],
   );
-  assertRuntimeResumeEquivalent(
-    files.map((file) => ({ path: file.path, source: file.source })),
-    { scenarioName: "message handles across files", transformPlan: withMessageSays },
-  );
+  assertRuntimeResumeEquivalent(files, { scenarioName: "message handles across files" });
 });

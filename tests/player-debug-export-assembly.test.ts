@@ -25,7 +25,6 @@ import {
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
-import { MESSAGE_TEXT_FUNCTIONS, messageSayPlan } from "./helpers/message-says.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const photoBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
@@ -471,15 +470,7 @@ test("session text adds the Stage path, media sources, notice messages, and the 
 test("a changed message's text is session text, the chat tail shows its current text, and its replay reproduces", async () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    messageSayPlan(
-      [
-        MESSAGE_TEXT_FUNCTIONS,
-        'let line = timer(duration: 1 ms, async: true, label: "Waiting")',
-        "wait 1 s",
-        `setText(line, "${SECRET}")`,
-        "exit",
-      ].join("\n"),
-    ),
+    ['let line = say "Waiting", instant', "wait 1 s", `line.text = "${SECRET}"`, "exit"].join("\n"),
     { recorder },
   );
   session = advancePlayerRuntimeTime(session, 60_000);
