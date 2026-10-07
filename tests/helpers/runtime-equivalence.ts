@@ -419,13 +419,15 @@ function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
     nextInstruction: snapshot.nextInstruction,
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     observedSessionTimeMs: snapshot.observedSessionTimeMs,
-    runnable: executionRunnable(snapshot),
+    runnable: executionRunnable(snapshot) && snapshot.randomControl?.pending == null,
     foregroundAction: snapshot.foregroundAction,
     backgroundActions: snapshot.backgroundActions,
     suspendedAction: interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
     cameraView: snapshot.cameraView,
     queuedBlocks: snapshot.pendingTimerHandlers.length,
     debugMode: snapshot.debugMode,
+    randomDraw: snapshot.randomControl?.pending?.draw ?? null,
+    forcedRandomChoices: snapshot.randomControl?.forcedChoices ?? 0,
   };
 }
 

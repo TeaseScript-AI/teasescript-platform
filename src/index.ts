@@ -141,6 +141,7 @@ export {
 } from "./runtime/script-storage.js";
 export {
   executeInstruction,
+  resumeRandomDraw,
   run,
   RuntimeDataError,
   stepToEvent,
@@ -151,6 +152,27 @@ export {
   type RuntimeRunOptions,
 } from "./runtime/engine.js";
 export type { RuntimeInstructionTrace } from "./runtime/instruction-trace.js";
+export {
+  listRandomSites,
+  pendingRandomDraw,
+  RANDOM_DRAW_KINDS,
+  type RandomChoiceReceipt,
+  type RandomControlFilter,
+  type RandomControlOptions,
+  type RandomDecision,
+  type RandomDecisionRefusal,
+  type RandomDrawKind,
+  type RandomDrawPendingOutcome,
+  type RandomDrawRequest,
+  type RandomDrawResolutionOutcome,
+  type RandomDrawView,
+  type RandomNatural,
+  type RandomOutcome,
+  type RandomSite,
+  type RandomSupport,
+  type RuntimePendingRandomDrawSnapshot,
+  type RuntimeRandomControlSnapshot,
+} from "./runtime/random-control.js";
 export {
   createFreshRuntimeSession,
   createRuntimeSession,
