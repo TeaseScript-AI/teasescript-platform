@@ -258,6 +258,27 @@
       "category": "b",
       "reason": "gagText reads its text parameter t by character (t[it]); untyped, the parameter cannot be proven text, so the conversion indexes it like a list, which stops the script. Every caller passes a text, so the parameter is declared String, and the characters convert to substring reads.",
       "diff": "gag-text-type.diff"
+    },
+    {
+      "id": "harden-spec-lists",
+      "layer": "source",
+      "category": "b",
+      "reason": "image-spec-lists writes each alternative group of an image spec as one text \"tits|pussy|ass\", but missed the soft harden([[TITS,PUSSY,ASS]]) calls in playStrokes, playEdges and cumChanceEdge, whose spec then reached multiplexTags as a list and stopped the script; write them the same way.",
+      "diff": "harden-spec-lists.diff"
+    },
+    {
+      "id": "edge-handler-null",
+      "layer": "source",
+      "category": "b",
+      "reason": "executeTrigger(\"toyEdged\") without a hold time calls the handler with th.defaultArg, which is null, and Groovy passed that null to { d=0 -> toy.addEdge(d) } rather than the default; addEdge tests d for truth, so the handler's default is null, which the converted parameter can then hold.",
+      "diff": "edge-handler-null.diff"
+    },
+    {
+      "id": "end-plan-wake",
+      "layer": "source",
+      "category": "b",
+      "reason": "endPlan's arg is the map that beginPlan schedules ([friendName: ..., waketime: ...]), whose arg[0] Groovy read as null, so !arg[0] was always true (the comment refers to an older version that passed the friend's name); indexing the converted record stops the script, so sleep is the truth of arg.waketime.",
+      "diff": "end-plan-wake.diff"
     }
   ]
 }
