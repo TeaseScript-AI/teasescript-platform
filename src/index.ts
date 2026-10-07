@@ -158,9 +158,11 @@ export {
   restoreRuntimeSession,
   RuntimeSessionError,
   type RuntimeSession,
+  type RuntimeSessionCall,
   type RuntimeSessionOptions,
   type RuntimeSessionOutcomeResult,
   type RuntimeSessionResult,
+  type RuntimeSessionVariables,
   type RuntimeSessionView,
 } from "./runtime/session.js";
 export {
@@ -249,7 +251,9 @@ export {
   type RuntimeCallArgumentSnapshot,
   type RuntimeCallFrameSnapshot,
   type RuntimeFileCallFrameSnapshot,
+  type RuntimeCameraViewSnapshot,
   type RuntimeFrameSnapshot,
+  type RuntimeLiveMessageSnapshot,
   type RuntimeParameterStateSnapshot,
   type RuntimeTemporarySnapshot,
   type RuntimeRepeatLoopFrameSnapshot,

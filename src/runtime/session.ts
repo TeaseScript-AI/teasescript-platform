@@ -60,11 +60,19 @@ import {
 import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
 import { captureExecutableData } from "./operations/support.js";
 import { isFrozenTemporalContext } from "../temporal.js";
+import type { PresentationSettings } from "../temporal.js";
+import type { SourceSpan } from "../source.js";
 import {
   createFreshRuntimeSnapshotWithValidatedPlan,
+  currentTemporalContext,
   withFrozenTemporalCaptures,
   type FreshRuntimeOptions,
+  type RuntimeBindingSnapshot,
+  type RuntimeCameraViewSnapshot,
   type RuntimeFailureSnapshot,
+  type RuntimeFrameSnapshot,
+  type RuntimeLiveMessageSnapshot,
+  type RuntimeScopeFrameSnapshot,
   type RuntimeInterruptibleActionSnapshot,
   type RuntimeSnapshot,
   type RuntimeStatus,
@@ -103,6 +111,36 @@ export interface RuntimeSessionView {
   readonly backgroundActions: readonly RuntimePendingActionSnapshot[];
   /** The foreground action of the path a running timer, media, or button block interrupted, or `null`. */
   readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
+  /** The default camera's view, or `null` before the first `showCamera`. */
+  readonly cameraView: RuntimeCameraViewSnapshot | null;
+  /** How many timer, media, and button blocks are queued to run. */
+  readonly queuedBlocks: number;
+}
+
+/** One active call, as a debugger shows it, without its variables or arguments. */
+export interface RuntimeSessionCall {
+  readonly id: number;
+  readonly kind: "function" | "file";
+  /** The plan ID and name of the called function or block; `null` for a file call. */
+  readonly functionId: number | null;
+  readonly functionName: string | null;
+  readonly callSiteSpan: SourceSpan;
+  /** Where execution continues when the call returns. */
+  readonly returnInstruction: number;
+  /** The scopes from this depth on belong to the call. */
+  readonly scopeBaseDepth: number;
+  /** For a running timer, media, or button block, the kind of block that interrupted the path; otherwise `null`. */
+  readonly interruption: "timer" | "media" | "button" | null;
+}
+
+/** The variables of a session, as a debugger lists them. */
+export interface RuntimeSessionVariables {
+  readonly globals: readonly RuntimeBindingSnapshot[];
+  readonly frames: readonly RuntimeScopeFrameSnapshot[];
+  /** Scopes that were left but that timer, media, or button blocks still share. */
+  readonly retainedScopes: readonly RuntimeScopeFrameSnapshot[];
+  /** The text that each message with a handle shows now. */
+  readonly liveMessages: readonly RuntimeLiveMessageSnapshot[];
 }
 
 /** The options of an operation that only takes a debug trace. */
@@ -264,6 +302,46 @@ export class RuntimeSession {
         foregroundAction: state.foregroundAction,
         backgroundActions: state.backgroundActions,
         suspendedAction: interruptFrame(state)?.timerInterruption?.suspendedAction ?? null,
+        cameraView: state.cameraView,
+        queuedBlocks: state.pendingTimerHandlers.length,
+      }),
+    );
+  }
+
+  /** The date and time presentation in force where execution stands. */
+  public temporalPresentation(): PresentationSettings {
+    return this.#read((state) => published(currentTemporalContext(state).presentation));
+  }
+
+  /** The active calls, outermost first, in work proportional to the call depth. */
+  public callStack(): readonly RuntimeSessionCall[] {
+    return this.#read((state) =>
+      published(
+        state.callFrames.map((frame) => ({
+          id: frame.id,
+          kind: frame.kind,
+          functionId: frame.kind === "function" ? frame.functionId : null,
+          functionName: frame.kind === "function" ? frame.functionName : null,
+          callSiteSpan: frame.callSiteSpan,
+          returnInstruction: frame.returnInstruction,
+          scopeBaseDepth: frame.scopeBaseDepth,
+          interruption: interruptionKind(frame),
+        })),
+      ),
+    );
+  }
+
+  /**
+   * The globals, scopes, kept scopes, and live message texts, as detached, deeply frozen copies: an explicit inspection
+   * whose work is proportional to the variables and their values.
+   */
+  public variables(): RuntimeSessionVariables {
+    return this.#read((state) =>
+      published({
+        globals: state.globals,
+        frames: state.frames,
+        retainedScopes: state.retainedScopes,
+        liveMessages: state.liveMessages,
       }),
     );
   }
@@ -371,6 +449,13 @@ export class RuntimeSessionError extends Error {
     super(message, options);
     this.name = "RuntimeSessionError";
   }
+}
+
+function interruptionKind(frame: RuntimeFrameSnapshot): RuntimeSessionCall["interruption"] {
+  const interruption = frame.kind === "function" ? frame.timerInterruption : null;
+  if (interruption === null) return null;
+  if ("timerId" in interruption) return "timer";
+  return "mediaId" in interruption ? "media" : "button";
 }
 
 function executed(done: RuntimeOperationResult): RuntimeSessionResult {

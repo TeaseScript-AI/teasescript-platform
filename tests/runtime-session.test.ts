@@ -34,6 +34,7 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 
 /*
  * Engine-owned runtime sessions (docs/RUNTIME.md#runtime-sessions). The shared resume-equivalence helper compares
@@ -558,4 +559,70 @@ exit
   session.completeAction(choiceRequest(session, 1));
   session.run();
   assert.deepEqual(session.callReturnInstructions(), []);
+});
+
+test("the debugger reads give the state's calls, variables, camera, queue, and date presentation", () => {
+  const plan = compileValidPlan(`global level = 2
+let names = ["a", "b"]
+let note = say "Waiting", instant
+function hold(seconds) {
+    timer async 1 {
+        note.text = "Tick"
+        wait 5
+    }
+    wait seconds
+    return seconds
+}
+let held = hold(10)
+exit
+`);
+  const session = createFreshRuntimeSession(plan, {
+    temporalContext: AMSTERDAM,
+    wallClockMs: 1_700_000_000_000,
+    baseDelayMs: 0,
+    delayPerWordMs: 0,
+    delayPerCharacterMs: 0,
+  });
+  session.run();
+  session.observeTime(1_000);
+  assert.equal(session.view().queuedBlocks, 1);
+  session.run();
+  const exported = session.exportSnapshot();
+
+  // A block interrupted the function's wait: the stack is the function, then the timer block.
+  const calls = session.callStack();
+  assert.deepEqual(
+    calls.map((call) => [call.kind, call.functionName, call.interruption]),
+    [
+      ["function", "hold", null],
+      ["function", "timer expiry", "timer"],
+    ],
+  );
+  assert.deepEqual(
+    calls.map((call) => [call.id, call.returnInstruction, call.scopeBaseDepth, call.callSiteSpan]),
+    exported.callFrames.map((frame) => [
+      frame.id,
+      frame.returnInstruction,
+      frame.scopeBaseDepth,
+      frame.callSiteSpan,
+    ]),
+  );
+  assert.equal(session.view().suspendedAction?.kind, "delay");
+
+  const variables = session.variables();
+  assert.deepEqual(variables, {
+    globals: exported.globals,
+    frames: exported.frames,
+    retainedScopes: exported.retainedScopes,
+    liveMessages: exported.liveMessages,
+  });
+  assert.deepEqual(
+    variables.liveMessages.map((message) => message.sourceText),
+    ["Tick"],
+  );
+  assert.equal(Reflect.set(variables.globals[0]!, "name", "changed"), false);
+
+  assert.deepEqual(session.temporalPresentation(), AMSTERDAM.presentation);
+  assert.deepEqual(session.view().cameraView, null);
+  assert.deepEqual(session.view().queuedBlocks, 0);
 });
