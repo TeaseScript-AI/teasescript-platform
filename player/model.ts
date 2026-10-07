@@ -43,9 +43,18 @@ export interface PlayerMessagePresentation {
   /** Completed choice, button, or form, distinct from a free-text or numeric response. */
   readonly responseKind?: "choice" | "button" | "form";
   readonly presentation?: MessagePresentation;
+  /**
+   * A submitted form's answer: every field in field order, a toggle with its state and any other field with its value
+   * as shown, which the Player shows one per line; `text` is its plain form.
+   */
+  readonly formSummary?: readonly PlayerFormSummaryLine[];
   /** A message of the later state Debug's rewind can restore, which the inspected state has not reached; shown grey. */
   readonly future?: true;
 }
+
+export type PlayerFormSummaryLine =
+  | { readonly kind: "toggle"; readonly label: string; readonly on: boolean }
+  | { readonly kind: "value"; readonly label: string; readonly value: string };
 
 export interface PlayerSessionEventPresentation {
   readonly kind: "session-event";
@@ -110,8 +119,8 @@ export type PlayerForegroundPresentation =
     };
 
 /**
- * The controls of a pending form as its answers stand: each field by its ID, the submit button, a status such as
- * `3 of 5 selected`, and the field the composer edits. A toggle is `pressed` while on; a toggle with options and a cycle
+ * The controls of a pending form as its answers stand: each field by its ID, the submit button, and the field the
+ * composer edits. A toggle is `pressed` while on; a toggle with options and a cycle
  * show their current option as `state`, whose colour wins over the field's; a typed field shows its value as `state`,
  * or `null` without one.
  */
@@ -121,7 +130,6 @@ export interface PlayerFormPresentation {
   readonly submit: { readonly label: string; readonly authoredFill?: string };
   /** The button that cancels the whole form, or `null` when the form must be submitted. */
   readonly cancel: { readonly label: string; readonly authoredFill?: string } | null;
-  readonly status: string;
   readonly editor: PlayerFormEditorPresentation | null;
 }
 

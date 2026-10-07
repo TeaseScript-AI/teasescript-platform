@@ -803,21 +803,24 @@ used, such as on a page that is not a secure context, a request that allows only
 
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
-viewport height (at most `24rem`), and the submit button, the cancel button of a form written with `cancel:`, and a
-polite status badge (`3 of 43 selected`, or `5 of 6 set` when not every field is a toggle) stay below it. A toggle is a Player action button with toggle semantics
-(`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it shows
-`label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next option.
-The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
+viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay
+below it, without a count of the answers: each field shows its own. A toggle is a Player action button with toggle
+semantics (`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it
+shows `label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next
+option. The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
 `label: value`, or `Set…` (`Not set` when optional) without one; activating it opens it in the composer, which takes the
 field's name, its `hint:` as the input hint (`label…` by default), and the numeric keyboard or the date or time control
 of its kind, with the field's text selected so typing replaces it and Enter keeps it. The edited field stays pressed in
 and is marked current. Enter commits it and returns focus to the field's button; a refused answer keeps the text with
 the composer notice. While a field is edited, **Back** (and Escape in the input) closes it and drops the text, and
-**Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every control keeps the
-action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and adds nothing to
-the transcript; submitting adds the summary line with the `›` response marker. Exact unambiguous text of one field
-label or of the submit or cancel button activates it from the composer, as for `choose`. A form with a time limit closes
-at it without a transcript line, as a `showButton` timeout does.
+**Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every
+control keeps the action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and
+adds nothing to the transcript; submitting adds the player's answer listing every field
+([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
+of the `›` response marker; screen readers read its plain text. A form with a cycle whose value several of its options
+share is shown as that plain text with the `›` marker, since its result cannot say which of them was shown. Exact
+unambiguous text of one field label or of the submit or cancel button activates it from the composer, as for `choose`. A
+form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
@@ -838,7 +841,8 @@ vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
 apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
-without moving the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate
+without moving the label; pressing reduces the depth. Neither changes the rim colour or the button's size; only keyboard
+focus (`:focus-visible`) draws an outline. Controls scroll away with the transcript; there is no separate
 button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
 following the latest content. After completion, the active controls disappear and the existing runtime transcript
 records the response. Completed choices and buttons carry a visible `›` marker in the transcript, distinct from typed

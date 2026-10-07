@@ -66,7 +66,7 @@ export function resolveInteractionCompletion(
       return action.ui.cancel === null
         ? { ok: false, message: "This form has no cancel button; it must be submitted." }
         : { ok: true, result: null, transcriptText: action.ui.cancel.text };
-    return submitForm(action.ui, action.form);
+    return submitForm(action.ui, action.form, context.presentation);
   }
   if (action.interactionKind === "button") {
     return payload.kind === "activate" && action.ui.kind === "button"
