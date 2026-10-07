@@ -21,21 +21,31 @@ export interface ScriptHost {
   }>;
 }
 
+/** The `title` and `author` of a script's header, each `null` when the header does not give it. */
+export interface ScriptIdentity {
+  readonly title: string | null;
+  readonly author: string | null;
+}
+
 /**
  * Compiles the host's script, without running it, and prepares Start; a script that does not compile, or a package
  * that cannot be opened, yields the failure the Player shows instead. Stored values are read before Start too, so Start
- * runs within the player's activation.
+ * runs within the player's activation. `identity` is the title and author of `main.tease`'s header, for the title bar.
  */
 export function prepareHostedScript(
   player: PlayerSessionHost,
   host: ScriptHost,
-): ShallowRef<ScriptFailure | null> {
+): {
+  readonly failure: ShallowRef<ScriptFailure | null>;
+  readonly identity: ShallowRef<ScriptIdentity>;
+} {
   const failure = shallowRef<ScriptFailure | null>(null);
+  const identity = shallowRef<ScriptIdentity>({ title: null, author: null });
   void Promise.all([host.load(), player.loadScriptStorage()]).then(
     ([{ project, problems }]) => {
+      identity.value = scriptIdentity(project);
       // The title names the script where saved data of several scripts is listed.
-      const title = scriptTitle(project);
-      if (title !== null) player.rememberScriptName(title);
+      if (identity.value.title !== null) player.rememberScriptName(identity.value.title);
       const compilation = compilePlayerProject(project);
       const plan = compilation.plan;
       if (plan === null) {
@@ -67,16 +77,19 @@ export function prepareHostedScript(
       };
     },
   );
-  return failure;
+  return { failure, identity };
 }
 
-/** The `title` of `main.tease`'s header, or `null`. */
-function scriptTitle(project: string | PlayerProject): string | null {
+/** The `title` and `author` of `main.tease`'s header; a blank field counts as absent. */
+function scriptIdentity(project: string | PlayerProject): ScriptIdentity {
   const source =
     typeof project === "string"
       ? project
       : project.files.find((file) => file.path === MAIN_FILE_PATH)?.source;
-  if (source === undefined) return null;
-  const title = readScriptHeader(lex(source)).header?.title ?? null;
-  return title === null || title.trim() === "" ? null : title.trim();
+  const header = source === undefined ? null : readScriptHeader(lex(source)).header;
+  const field = (value: string | null | undefined) => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed === "" ? null : trimmed;
+  };
+  return { title: field(header?.title), author: field(header?.author) };
 }

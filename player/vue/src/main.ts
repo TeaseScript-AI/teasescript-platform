@@ -45,8 +45,14 @@ const app = developmentPreview
           // The script's storage scope identifies it; development packages and the demo have no release version.
           debugPackage: { id: host.storageScope, version: null },
         });
-        const failure = prepareHostedScript(player, host);
-        return () => h(PlayerApp, { player, failure: failure.value });
+        const { failure, identity } = prepareHostedScript(player, host);
+        return () =>
+          h(PlayerApp, {
+            player,
+            failure: failure.value,
+            title: identity.value.title ?? "",
+            author: identity.value.author ?? "",
+          });
       },
     });
 app.mount("#app");

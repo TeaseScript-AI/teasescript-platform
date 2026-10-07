@@ -10,7 +10,7 @@ import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
-import { prepareHostedScript, type ScriptHost } from "./hostedScript";
+import { prepareHostedScript, type ScriptHost, type ScriptIdentity } from "./hostedScript";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
@@ -114,7 +114,8 @@ const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
 });
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
 let failure: ShallowRef<ScriptFailure | null> | null = null;
-if (packageHost !== null) failure = prepareHostedScript(player, packageHost);
+let identity: ShallowRef<ScriptIdentity> | null = null;
+if (packageHost !== null) ({ failure, identity } = prepareHostedScript(player, packageHost));
 else if (cameraScenario)
   void player
     .loadScriptStorage()
@@ -145,7 +146,8 @@ else
     v-model:theme-intent="themeIntent"
     :player="player"
     :tools="tools"
-    :title="packageHost === null ? 'Evening by the coast' : ''"
+    :title="packageHost === null ? 'Evening by the coast' : (identity?.title ?? '')"
+    :author="identity?.author ?? ''"
     :failure="failure ?? null"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
     :debug="debug"

@@ -1,0 +1,6 @@
+---
+title: "A title too long for the title bar of a narrow screen"
+author: "Author fixture"
+---
+say "Long title fixture"
+exit
