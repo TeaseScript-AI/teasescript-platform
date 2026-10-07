@@ -60,8 +60,8 @@ const ATTEMPT_EXPANSIONS = 20;
 /** Expansions, in all, that states closer to a target's comparison keep the first place for. */
 const CLOSER_EXPANSIONS = 40;
 /**
- * The part of all steps that directed work may take: directed attempts, and expansions of states in the first place.
- * Above it, play goes first again until it has caught up.
+ * The part of all runtime operations that directed work may take: directed attempts, next sessions, and expansions of
+ * states in the first place. Above it, play goes first again until it has caught up.
  */
 const DIRECTED_SHARE = 1 / 3;
 /** Expansions between two passes of directed search over the conditions left one way, or a tenth of the budget. */
@@ -473,10 +473,10 @@ interface Left {
  * - the clock: the player continues at other wall clock times before the witness step (`clock`);
  * - a variable the code counts or sets: states closer to the comparison, by `distance`, take the first place.
  *
- * A play attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target
- * is reached, and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
+ * An answer attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target
+ * is reached (a session chain goes on from the storage it reached instead), and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
  * take only their attempt's own steps and otherwise come after all play states. Directed work takes at most
- * {@link DIRECTED_SHARE} of all steps.
+ * {@link DIRECTED_SHARE} of all runtime operations, which measure what steps cost.
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
@@ -506,8 +506,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const witnesses = new Map<number, Witness>();
   const targets = new Map<number, Target>();
-  // Attempts that can reach a way by play (answers, sessions) go before clock ones.
+  // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
+  const chainAttempts: Attempt[] = [];
   const clockAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
   /** Waiting states by the ask instruction they wait at, a few each. */
@@ -522,7 +523,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let transitions = 0;
   /** Steps of directed attempts. */
   let directedTransitions = 0;
-  /** Steps of directed attempts and of expansions in the first place. */
+  /**
+   * Runtime operations of directed work: attempts, next sessions, and expansions in the first place. A step's
+   * operations measure its cost, which differs a lot between packages and steps.
+   */
   let directedWork = 0;
   let attemptCount = 0;
   let expanded = 0;
@@ -548,7 +552,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     };
   };
 
-  const withinShare = () => directedWork <= transitions * DIRECTED_SHARE;
+  const withinShare = () => directedWork <= session.operations * DIRECTED_SHARE;
   const active = (lead: Lead | null): lead is Lead =>
     lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
   /**
@@ -747,13 +751,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (chain !== undefined) chain.queued = false;
     if (target.reach !== null) return;
     attemptCount += 1;
-    const lead: Lead = { remaining: ATTEMPT_EXPANSIONS, target: attempt.target };
+    const work = session.operations;
+    // A chain's next session comes from the storage it reached, so its states take no first place of their own.
+    const lead: Lead | null =
+      attempt.chain === undefined
+        ? { remaining: ATTEMPT_EXPANSIONS, target: attempt.target }
+        : null;
     let node: Node;
     let snapshot: Data | null;
     if (attempt.start !== null) {
       ({ node, snapshot } = startSession(attempt.start, lead));
       directedTransitions += 1;
-      directedWork += 1;
     } else {
       node = nodes[attempt.from ?? 0]!;
       snapshot = snapshotOf(node);
@@ -763,10 +771,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const next = step(node, snapshot, input);
       if (next === null) break;
       directedTransitions += 1;
-      directedWork += 1;
       node = transition(node, input, next, node.start, lead);
       snapshot = next.snapshot.status === "waiting" ? next.snapshot : null;
     }
+    directedWork += session.operations - work;
   };
 
   /** The witness of a target: its state, the inputs from its session start through its step, and that start. */
@@ -846,7 +854,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         queued: true,
       });
       chain.started += 1;
-      playAttempts.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
+      chainAttempts.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
       return true;
     }
     if (best.distance < chain.best && chain.started < MAX_CHAIN) {
@@ -859,7 +867,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       });
       chain.started += 1;
       // The path that led to the closest storage, played again from it, to raise the value once more.
-      playAttempts.push(fromBest(pathTo(nodes, nodes[best.left.node]!).slice(0, MAX_SUFFIX)));
+      chainAttempts.push(fromBest(pathTo(nodes, nodes[best.left.node]!).slice(0, MAX_SUFFIX)));
       return true;
     }
     chain.stale += 1;
@@ -899,11 +907,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     });
     // A few next sessions from what completed sessions stored, as the player's next visit.
     for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
-      if (startedFrom.size > MAX_NEXT_SESSIONS) break;
+      if (startedFrom.size > MAX_NEXT_SESSIONS || !withinShare()) break;
       const entry = left[completedLeft[nextFromCompleted]!]!;
       const key = JSON.stringify(entry.entries);
       if (startedFrom.has(key)) continue;
       startedFrom.add(key);
+      const work = session.operations;
       startSession(
         {
           origin: entry.node,
@@ -913,6 +922,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         },
         null,
       );
+      directedWork += session.operations - work;
       scheduled = true;
     }
     return scheduled;
@@ -1010,7 +1020,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       analyze();
     }
     // Directed attempts and the rest of the search take turns, by steps.
-    const pending = playAttempts.length > 0 ? playAttempts : clockAttempts;
+    const pending =
+      playAttempts.length > 0
+        ? playAttempts
+        : chainAttempts.length > 0
+          ? chainAttempts
+          : clockAttempts;
     if (pending.length > 0 && (frontier.size === 0 || withinShare())) {
       runAttempt(pending.shift()!);
       continue;
@@ -1053,9 +1068,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         stoppedBy = "budget";
         break search;
       }
+      const work = session.operations;
       const next = step(node, snapshot, input);
+      if (leading) directedWork += session.operations - work;
       if (next === null) continue;
-      if (leading) directedWork += 1;
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));

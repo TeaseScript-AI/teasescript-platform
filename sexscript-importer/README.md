@@ -286,10 +286,11 @@ storage closest to it and plays again the path that led there, to raise the valu
 session gets closer (100 sessions at most). When no explored session gets there, the way stays `unknown` with the
 reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock the player continues at
 other wall clock times (times of day, weekdays, later dates) before that step, as a real player's time varies; a step
-after that is a clock step. A play attempt's states share the first place for 20 expansions in all, until the
-condition takes the missed way, and play states that bring a variable the code counts or sets closer to the comparison
+after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
+condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
 share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
-work takes at most a third of all steps.
+work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations,
+which measure what steps cost.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with

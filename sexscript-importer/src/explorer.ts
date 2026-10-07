@@ -343,6 +343,8 @@ export class Session {
   readonly clockBranches: Uint8Array;
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
+  /** Runtime operations called so far: the work the session's steps took. */
+  operations = 0;
   readonly #engine: Engine;
   readonly #plan: Data;
   readonly #instructions: Data[];
@@ -352,11 +354,18 @@ export class Session {
   #literals: Literals[] | undefined;
 
   constructor(engine: Engine, plan: Data, seed: number) {
-    this.#engine = engine;
+    // Every runtime operation copies and checks the snapshot, so their count measures the work steps take.
+    this.#engine = {
+      call: (name, ...args) => {
+        this.operations += 1;
+        return engine.call(name, ...args);
+      },
+      project: engine.project,
+    };
     this.#plan = plan;
     this.#instructions = list(plan.instructions);
     this.#seed = seed;
-    this.#recorder = new Recorder(engine, plan);
+    this.#recorder = new Recorder(this.#engine, plan);
     this.visited = new Uint8Array(this.#instructions.length);
     this.clockVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
