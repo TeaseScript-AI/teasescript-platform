@@ -1354,7 +1354,8 @@ async function titleBarScenario(cdp, origin) {
   assertEqual(await value(cdp, title), "The house", "Title only");
 
   const full = "A title too long for the title bar of a narrow screen by Author fixture";
-  const popover = `document.querySelector('[data-player-title-popover]')?.textContent.trim() ?? null`;
+  // The bar's tooltip, read once: its content also holds a copy for assistive technology.
+  const tooltip = `document.querySelector('[data-player-title-tooltip] [role="tooltip"]')?.textContent.trim() ?? null`;
   await setViewport(cdp, 390, 760);
   await open("package=title-long");
   await waitFor(
@@ -1366,22 +1367,22 @@ async function titleBarScenario(cdp, origin) {
   await touchTap(cdp, "[data-player-title-full]");
   await waitFor(
     cdp,
-    `${popover} === ${JSON.stringify(full)}`,
+    `${tooltip} === ${JSON.stringify(full)}`,
     5_000,
     "A tap did not show the full title",
   );
 
-  // A title without spaces wraps inside the popover rather than running off the screen.
+  // A title without spaces wraps inside the tooltip rather than running off the screen.
   await open("package=title-unbroken");
   await touchTap(cdp, "[data-player-title-full]");
-  await waitFor(cdp, `!!document.querySelector('[data-player-title-popover]')`);
+  await waitFor(cdp, `!!document.querySelector('[data-player-title-tooltip]')`);
   assertEqual(
     await value(
       cdp,
-      `(() => { const popover = document.querySelector('[data-player-title-popover]'); return popover.scrollWidth <= popover.clientWidth && popover.getBoundingClientRect().right <= innerWidth; })()`,
+      `(() => { const tooltip = document.querySelector('[data-player-title-tooltip]'); const box = tooltip.getBoundingClientRect(); return tooltip.scrollWidth <= tooltip.clientWidth && box.left >= 0 && box.right <= innerWidth; })()`,
     ),
     true,
-    "An unbroken title ran out of its popover",
+    "An unbroken title ran out of its tooltip or off the screen",
   );
   // A bar too narrow for the title hides it visually and keeps it plain text, never an invisible control.
   await setViewport(cdp, 180, 760);
@@ -1408,11 +1409,11 @@ async function titleBarScenario(cdp, origin) {
       cdp,
       `document.querySelector('[data-player-top-bar]').hasAttribute('data-revealed')`,
     );
-    assertEqual(await value(cdp, popover), null, "The tap that revealed the bar opened the title");
+    assertEqual(await value(cdp, tooltip), null, "The tap that revealed the bar opened the title");
     await touchTap(cdp, "[data-player-title-full]");
     await waitFor(
       cdp,
-      `${popover} === ${JSON.stringify(full)}`,
+      `${tooltip} === ${JSON.stringify(full)}`,
       5_000,
       "A tap did not show the full title",
     );

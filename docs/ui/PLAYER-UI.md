@@ -245,8 +245,8 @@ appears in the top controls when the sidebar is hidden and in the tools framewor
 
 The title pill shows the `title` and `author` of the package's `main.tease` header: "BuzzQuiz by NIFOC99", the title
 only, or "by NIFOC99", with the author in quieter text; without either it is absent, with no fallback. A pill the bar
-cuts off opens the full title and author in a popover on a tap or click; otherwise it is plain text. Which identity a
-multi-script package or the active script should show remains open.
+cuts off shows the full title and author in the bar's tooltip on hover, keyboard focus, or a tap; otherwise it is plain
+text. Which identity a multi-script package or the active script should show remains open.
 
 The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
 title-bar A/B setting chooses the presentation:
