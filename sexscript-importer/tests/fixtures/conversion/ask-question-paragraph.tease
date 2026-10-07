@@ -23,8 +23,12 @@ let mood = askInteger """
 """, default: 1
 say "I trust you didn't fail or missed something!"
 let done = askText "Did you do everything as I told you?", default: "yes"
-// Where no paragraph asks, the last one is the question.
+// Where no paragraph asks, the last one is the question; a word that only starts like an instruction is none.
 say "Let's be sure:"
 let locked = askText "Is this an image of you locked up", default: "yes"
-say "${multiplier} ${visits} ${mood} ${done} ${locked}"
+let suffix = "tings"
+say "Set${suffix} can be changed."
+say "Seté is a name."
+let changed = askText "A remark.", default: "no"
+say "${multiplier} ${visits} ${mood} ${done} ${locked} ${changed}"
 exit

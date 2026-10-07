@@ -250,7 +250,7 @@ const QUESTION_END = /\?(?:[\s)\]}"'`’”»*_~]|\[\/[^\]]*\]|<\/[^>]*>)*$/u;
 // Opening markup and quotes before a paragraph's first word.
 const OPENING = /^(?:[\s*_~#>"'`‘“«]|\[[^\]/][^\]]*\]|<[^>/][^>]*>)*/u;
 const INSTRUCTION =
-  /^(?:Enter|Type|Choose|Select|Pick|Write|Tell|Give|Name|How|What|Which|Please|Input|Insert|Answer|Click|Press|Set)\b/iu;
+  /^(?:Enter|Type|Choose|Select|Pick|Write|Tell|Give|Name|How|What|Which|Please|Input|Insert|Answer|Click|Press|Set)(?![\p{L}\p{M}\p{N}_\u{F0000}-\u{FFFFD}])/iu;
 
 /**
  * The paragraph that asks (owner decision 2026-10-07, option E): the last one that ends with a question mark, or else
