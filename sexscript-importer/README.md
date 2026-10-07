@@ -251,7 +251,7 @@ them at the top.
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
   [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
-  [--[no-]realign] <unit-dir>... --out <dir>
+  [--[no-]realign] [--[no-]progress-leads] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -314,7 +314,9 @@ reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`.
 other wall clock times (times of day, weekdays, later dates) before that step, as a real player's time varies; a step
 after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
 condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
-share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
+share it for 40 (with `--progress-leads`, an expansion in that first place that brings a state closer again does not
+count, so a loop that needs many rounds is followed to the constant, while one that gets no closer uses its 40 up);
+clock states take only their attempt's own steps and otherwise come after all play states. Directed
 work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations
 (fresh sessions, runs, inputs, and automatic answers), a deterministic measure of what steps cost.
 

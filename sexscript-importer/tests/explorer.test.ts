@@ -523,6 +523,45 @@ test(
 );
 
 test(
+  "with progress leads, a loop that needs a hundred rounds to cross a compared constant is followed to it beside a wide tree of choices",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // "Tree" offers six rounds of three choices that conditions compare, so many states and cells; "Count" needs a
+    // hundred presses before "Done.".
+    const rounds = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `  let pick${index} = choose a: "A${index}", b: "B${index}", c: "C${index}"\n` +
+        `  if pick${index} == "a" {\n    say "a${index}"\n  }\n  showButton "Next${index}"\n`,
+    ).join("");
+    const source =
+      `let side = choose tree: "Tree", count: "Count"\nif side == "tree" {\n${rounds}  exit\n}\n` +
+      'let count = 0\nwhile count < 100 {\n  showButton "Stroke"\n  count += 1\n}\nsay "Done."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2400,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+      progressLeads: true,
+    });
+    const done = source.split("\n").findIndex((line) => line.includes('say "Done."')) + 1;
+    const file = result.coverage.files.find((entry) => entry.path === "main.tease")!;
+    assert.ok(
+      !file.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return done >= from && done <= to;
+      }),
+    );
+  },
+);
+
+test(
   "with compared answers, a typed ask is also answered with what the code compares the answer with in that state, such as the line to type",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

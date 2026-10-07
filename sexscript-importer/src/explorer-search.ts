@@ -200,6 +200,12 @@ export interface ExploreOptions {
    * of its chain taking their other way. Off by default.
    */
   readonly realign?: boolean;
+  /**
+   * Progress keeps a lead: an expansion in the first place for a variable's closeness to a comparison that brings a
+   * state closer still does not use up an expansion of that lead, so a loop that needs many rounds to cross a compared
+   * constant is followed to it, while one that gets no closer uses its lead up. Off by default.
+   */
+  readonly progressLeads?: boolean;
 }
 
 /**
@@ -1985,6 +1991,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     const leading = leads(node);
     if (leading && node.lead !== null) node.lead.remaining -= 1;
+    let refunded = false;
     // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
     const stored = store.get(node.id);
     const base = stored === null ? replayTo(node) : restore(node, stored);
@@ -2035,7 +2042,19 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
-      transition(node, input, next, node.start, closer < 0 ? null : closerLead(closer));
+      const lead = closer < 0 ? null : closerLead(closer);
+      // With progress leads, an expansion of a state that leads by closeness, and that gets closer again, is given back.
+      if (
+        options.progressLeads === true &&
+        leading &&
+        lead !== null &&
+        node.lead === lead &&
+        !refunded
+      ) {
+        lead.remaining += 1;
+        refunded = true;
+      }
+      transition(node, input, next, node.start, lead);
       if (lastStepNew || closer >= 0) {
         productive = true;
         at.inputs.add(inputKey(input));
