@@ -925,7 +925,7 @@ export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Sl
     { slot: Slot; numbers: Set<number>; durations: Set<number>; strings: Set<string> }
   >();
   const add = (kind: Slot["kind"], name: string, length: boolean, constant: unknown) => {
-    const id = `${kind}:${name}${length ? ".length" : ""}`;
+    const id = JSON.stringify([kind, name, length]);
     let known = slots.get(id);
     if (known === undefined) {
       const strings = new Set<string>();

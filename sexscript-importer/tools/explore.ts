@@ -887,7 +887,17 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   );
   if (replayed.error !== null) process.stdout.write(`Runtime operation threw: ${replayed.error}\n`);
   if (error) {
-    const reproduced = replayed.error === text(target.message);
+    // A state the runtime refused to restore: the path reaches it without a throw, and restoring it throws.
+    let thrown = replayed.error;
+    if (thrown === null) {
+      try {
+        engine.createRuntimeSession(unit.plan, replayed.snapshot);
+      } catch (refused) {
+        thrown = String(refused);
+        process.stdout.write(`Restoring the state reached threw: ${thrown}\n`);
+      }
+    }
+    const reproduced = thrown === text(target.message);
     process.stdout.write(reproduced ? "Reproduced.\n" : "Not reproduced.\n");
     return reproduced ? 0 : 1;
   }

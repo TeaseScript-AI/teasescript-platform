@@ -372,9 +372,10 @@ A path has the inputs of each session: the earlier sessions (`earlier`), each fr
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
-runtime operation that throws, such as a runtime that rejects a state it produced when exporting it (`TSR101`), is no
-crash of the package: it ends that runtime session, the search goes on from the state before the input, and the report
-counts these under `search.engineErrors` with the path of the first, which `--error` replays.
+runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime
+refuses to restore, is no crash of the package: it ends that runtime session, the search goes on from the state before
+the input, and the report counts these under `search.engineErrors` with the path of the first, which `--error` replays
+(a refused state by restoring the state the path reaches).
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its

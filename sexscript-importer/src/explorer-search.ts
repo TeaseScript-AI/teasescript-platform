@@ -353,9 +353,9 @@ export interface ExploreResult {
     /** Inputs the runtime did not accept, such as an answer to an interaction inside a running timer block. */
     rejectedInputs: number;
     /**
-     * Inputs whose operation threw, such as a runtime that rejects a state it produced itself when exporting it
-     * (`TSR101`): a problem of the explorer or the runtime, not of the package. `first` has the path from the start
-     * that throws.
+     * Inputs whose operation threw, such as a runtime whose event sequence runs out (`TSR101`), and stored states the
+     * runtime refused to restore: a problem of the explorer or the runtime, not of the package. `first` has the path
+     * from the start that throws, or to the state that was refused.
      */
     engineErrors: { count: number; first: ({ message: string } & Repro) | null };
     /** Why the search stopped: `budget` is the time budget, `operations` the work budget. */
@@ -677,18 +677,20 @@ class Cells {
       }
       found.set(source, id);
     };
-    // The innermost binding of a name first; then those kept for a block, and the globals.
-    const scopes = [
-      ...list(snapshot.frames).toReversed(),
-      ...list(snapshot.retainedScopes).toReversed(),
-      { bindings: snapshot.globals },
-    ];
-    for (const scope of scopes) {
-      for (const binding of list(scope.bindings)) {
-        const slots = typeof binding.name === "string" ? this.#byName.get(binding.name) : undefined;
-        for (const slot of slots ?? []) put(slot, String(slot), binding.value);
-      }
-    }
+    // The innermost binding of a name in scope first, then the globals; each scope kept for a block is read apart, as
+    // which of them a block sees depends on the call that kept it.
+    const read = (scopes: readonly Data[], key: (slot: number, scope: number) => string) =>
+      scopes.forEach((scope, index) => {
+        for (const binding of list(scope.bindings)) {
+          const slots =
+            typeof binding.name === "string" ? this.#byName.get(binding.name) : undefined;
+          for (const slot of slots ?? []) put(slot, key(slot, index), binding.value);
+        }
+      });
+    read([...list(snapshot.frames).toReversed(), { bindings: snapshot.globals }], (slot) =>
+      String(slot),
+    );
+    read(list(snapshot.retainedScopes), (slot, index) => `${slot}@${index}`);
     for (const entry of list(snapshot.scriptStorage)) {
       const key = entry.key;
       if (typeof key !== "string") continue;
