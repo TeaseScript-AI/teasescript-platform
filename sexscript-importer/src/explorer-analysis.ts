@@ -1025,7 +1025,7 @@ const TIMING_WINDOW = 40;
 
 /**
  * The expressions the code compares the results of interactions with, by the instruction of the interaction, when their
- * value can be read from a state (variables, properties, indices, and arithmetic), at most four per interaction:
+ * value can be read from a state (variables, properties, indices, and arithmetic), the four nearest the interaction:
  *
  * - `asks`: typed asks (text and number, also when the code computes the prompt), in each comparison or text test
  *   (`answer == line`, `answer.contains(word)`) whose one side comes from the answer (`DataFlow.flowOf`);
@@ -1053,7 +1053,8 @@ export function comparedWith(
       return button !== undefined && at - button <= TIMING_WINDOW && typed(button) ? [button] : [];
     });
   };
-  const found = new Map<number, Map<string, unknown>>();
+  /** Per interaction, the expressions found, by shape, with how far from it the comparison is. */
+  const found = new Map<number, Map<string, { expression: unknown; distance: number }>>();
   const pair = (answer: unknown, other: unknown, at: number) => {
     if (!readable(other)) return;
     // A timed button's result divided by a duration (`/ 10 s`) is compared in that unit: the other side, read in
@@ -1069,11 +1070,14 @@ export function comparedWith(
             right: { kind: "literal", value: unit / 1000 },
           };
     for (const source of sources(answer, at)) {
-      const known = found.get(source) ?? new Map<string, unknown>();
+      const known =
+        found.get(source) ?? new Map<string, { expression: unknown; distance: number }>();
       const key = JSON.stringify(compared, (name, item: unknown) =>
         name === "span" ? undefined : item,
       );
-      if (known.size < 4) known.set(key, compared);
+      const distance = Math.abs(at - source);
+      if ((known.get(key)?.distance ?? Infinity) > distance)
+        known.set(key, { expression: compared, distance });
       found.set(source, known);
     }
   };
@@ -1114,7 +1118,16 @@ export function comparedWith(
     )
       results.set(instruction.temporaryId, held);
   });
-  return new Map([...found].map(([ask, expressions]) => [ask, [...expressions.values()]]));
+  // The comparisons nearest the interaction first: a name other code also uses (`answer`) brings in theirs.
+  return new Map(
+    [...found].map(([ask, expressions]) => [
+      ask,
+      [...expressions.values()]
+        .sort((left, right) => left.distance - right.distance)
+        .slice(0, 4)
+        .map(({ expression }) => expression),
+    ]),
+  );
 }
 
 /** The duration in milliseconds an expression divides by (`took / 10 s`), the first one found; null without one. */

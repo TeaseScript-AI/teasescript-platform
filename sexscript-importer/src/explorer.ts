@@ -916,11 +916,17 @@ function comparedValues(
   return [...found];
 }
 
-/** The variables of a state by name, each by its innermost binding. */
+/**
+ * The variables of a state by name, each by its innermost binding: in scope, else kept for a running timer, media, or
+ * button block, else global.
+ */
 function bindingsOf(snapshot: Data): Map<string, unknown> {
   const bindings = new Map<string, unknown>();
   for (const binding of list(snapshot.globals))
     if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  for (const frame of list(snapshot.retainedScopes))
+    for (const binding of list(frame.bindings))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
   for (const frame of list(snapshot.frames))
     for (const binding of list(frame.bindings))
       if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
@@ -979,14 +985,15 @@ function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): R
     case "property": {
       const object = valueOf(value.object, bindings);
       const holder = record(object);
-      if (value.name === "length")
-        return typeof object === "string"
-          ? [...object].length
-          : Array.isArray(holder.items)
-            ? holder.items.length
-            : undefined;
-      const properties = holder.kind === "object" ? list(holder.properties) : [];
-      return readValue(properties.find((property) => property.name === value.name)?.value);
+      // An object's property by name, also one named `length`; the length of a text, list, set, or dict.
+      if (holder.kind === "object")
+        return readValue(
+          list(holder.properties).find((property) => property.name === value.name)?.value,
+        );
+      if (value.name !== "length") return undefined;
+      if (typeof object === "string") return [...object].length;
+      if (Array.isArray(holder.items)) return holder.items.length;
+      return Array.isArray(holder.entries) ? holder.entries.length : undefined;
     }
     case "index": {
       const object = record(valueOf(value.object, bindings));

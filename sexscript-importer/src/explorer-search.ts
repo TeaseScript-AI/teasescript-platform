@@ -15,7 +15,7 @@ import {
   type PlanDiagnostic,
   type Slot,
 } from "./explorer-analysis.ts";
-import { clockModel, flipGap, holdsAt, timeContext } from "./explorer-time.ts";
+import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "./explorer-time.ts";
 import {
   EPOCH_MS,
   failureOf,
@@ -871,7 +871,7 @@ interface Target {
   readonly way: 0 | 1;
   readonly goals: readonly Goal[];
   /** With realignment: the goals of the earlier conditions of its `else if` chain taking their other way. */
-  readonly guards: readonly Goal[];
+  readonly guards: readonly Guard[];
   attempts: number;
   reach: { label: "play" | "clock"; via: "directed" | "search"; repro: Repro } | null;
   /** Session chains toward the stored values its condition needs, by key. */
@@ -1432,11 +1432,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       allowance.skipped += ahead - index;
       return { input, next: ahead + 1 };
     }
-    const buttons = choices.filter((choice) => choice.kind !== "wait" && choice.kind !== "press");
-    if (buttons.length !== 1 || buttons[0]!.kind !== "button" || allowance.forced >= MAX_FORCED)
+    // The only button there is, pressed at once (a timed one also offers presses after thinking).
+    const others = choices.filter((choice) => choice.kind !== "wait" && choice.kind !== "press");
+    const button = others.find(
+      (choice): choice is Extract<ExplorerInput, { kind: "button" }> =>
+        choice.kind === "button" && choice.afterMs === undefined,
+    );
+    if (
+      button === undefined ||
+      others.some((choice) => !(choice.kind === "button" && choice.label === button.label)) ||
+      allowance.forced >= MAX_FORCED
+    )
       return null;
     allowance.forced += 1;
-    return { input: buttons[0]!, next: index };
+    return { input: button, next: index };
   };
 
   /** Where time steps from a state count as tried: its cell, or without cells its loop key. */
@@ -1569,9 +1578,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const entry = left[chain.scanned]!;
       const measured = storageDistance(entry.entries, chain.matches, goal);
       // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
-      for (const guard of target.guards)
-        if (guard !== goal && guard.source.kind === "storage" && guard.source.key !== key)
-          measured.distance += guardDistance(entry.entries, guard);
+      for (const guard of target.guards) measured.distance += guardDistance(entry.entries, guard);
       const closest = chain.closest;
       if (
         measured.distance < Infinity &&
@@ -1655,11 +1662,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
       const guards =
         options.realign === true
-          ? (elseIfs.get(index) ?? []).flatMap((earlier) =>
-              goalsFor(flow, instructions[earlier]!.condition, false),
-            )
+          ? (elseIfs.get(index) ?? []).map((earlier) => ({
+              condition: instructions[earlier]!.condition,
+              goals: goalsFor(flow, instructions[earlier]!.condition, false),
+            }))
           : [];
-      const goals = [...(conditional ? goalsFor(flow, condition, way === 0) : []), ...guards];
+      const goals = [
+        ...(conditional ? goalsFor(flow, condition, way === 0) : []),
+        ...guards.flatMap((guard) => guard.goals),
+      ];
       const target: Target = {
         instruction: index,
         way,
@@ -1934,14 +1945,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           const found = realign(runtime, inputs, index, allowance);
           if (found === null) return null;
           ({ input: applying, next } = found);
-          if ((applying !== input || next !== index + 1) && currentEntry !== null)
+          if (
+            (JSON.stringify(applying) !== JSON.stringify(input) || next !== index + 1) &&
+            currentEntry !== null
+          )
             realigned.add(currentEntry);
         } else if (!fitsPending(input, session.options(runtime))) return null;
         const stepped = step(node, runtime, applying);
         if (stepped === null) return null;
         const reached = transition(node, applying, stepped, node.start, null);
         reach(reached, stepped.snapshot);
-        if (applying === input && next === index + 1) applied.set(key, reached.id);
+        applied.set(`${node.id} ${JSON.stringify(applying)}`, reached.id);
+        if (next === index + 1) applied.set(key, reached.id);
         node = reached;
         runtime = stepped.snapshot.status === "waiting" ? stepped.runtime : null;
         index = next;
@@ -2404,20 +2419,12 @@ function inputKey(input: ExplorerInput): string {
  * asked; another wall clock or a later continue fits any waiting state.
  */
 function aligned(input: ExplorerInput, options: readonly ExplorerInput[]): ExplorerInput | null {
+  // An input that fits as it is stays the same input.
+  if (fitsPending(input, options)) return input;
   switch (input.kind) {
-    case "clock":
-    case "later":
-      return input;
     case "option":
       return (
-        options.find(
-          (option) =>
-            option.kind === "option" &&
-            option.label === input.label &&
-            option.index === input.index,
-        ) ??
-        options.find((option) => option.kind === "option" && option.label === input.label) ??
-        null
+        options.find((option) => option.kind === "option" && option.label === input.label) ?? null
       );
     case "press":
       return (
@@ -2426,7 +2433,7 @@ function aligned(input: ExplorerInput, options: readonly ExplorerInput[]): Explo
     case "wait":
       return options.find((option) => option.kind === "wait") ?? null;
     default:
-      return fitsPending(input, options) ? input : null;
+      return null;
   }
 }
 
@@ -2441,7 +2448,7 @@ function elseIfChains(instructions: readonly Data[]): Map<number, number[]> {
   instructions.forEach((instruction, index) => {
     const target = Number(instruction.target);
     if (instruction.kind !== "jumpIfFalse" || instructions[target - 1]?.kind !== "jump") return;
-    for (let next = target; next < Math.min(instructions.length, target + 8); next += 1) {
+    for (let next = target; next < instructions.length; next += 1) {
       const kind = instructions[next]!.kind;
       if (kind === "jumpIfFalse") {
         chains.set(next, [index, ...(chains.get(index) ?? [])]);
@@ -2453,17 +2460,33 @@ function elseIfChains(instructions: readonly Data[]): Map<number, number[]> {
   return chains;
 }
 
+/** An earlier condition of an `else if` chain, which must take its other way, with the goals for that way. */
+interface Guard {
+  readonly condition: unknown;
+  readonly goals: readonly Goal[];
+}
+
 /**
- * How far a storage is from what an earlier condition of an `else if` chain needs to take its other way (see
- * {@link storageDistance}); 0 when nothing is stored under the key, which leaves that condition false as far as the
- * search can tell.
+ * How far a storage is from what an earlier condition of an `else if` chain needs, to take its other way: 0 when the
+ * condition, read from the storage alone (`storedHolds`, with each load's default for an unset key), is false;
+ * otherwise, or when it reads more than storage, how far its stored values are from its goals (see
+ * {@link storageDistance}), at least 1 when it holds.
  */
-function guardDistance(entries: readonly StorageEntry[], guard: Goal): number {
-  if (guard.source.kind !== "storage") return 0;
-  const matches = keyMatcher(guard.source.key);
-  if (!entries.some((entry) => matches(entry.key))) return 0;
-  const measured = storageDistance(entries, matches, guard).distance;
-  return Number.isFinite(measured) ? measured : 1;
+function guardDistance(entries: readonly StorageEntry[], guard: Guard): number {
+  const holds = storedHolds(
+    guard.condition,
+    new Map(entries.map((entry) => [entry.key, entry.value])),
+  );
+  if (holds === false) return 0;
+  let distance = 0;
+  for (const goal of guard.goals) {
+    if (goal.source.kind !== "storage") continue;
+    const matches = keyMatcher(goal.source.key);
+    if (!entries.some((entry) => matches(entry.key))) continue;
+    const measured = storageDistance(entries, matches, goal).distance;
+    distance += Number.isFinite(measured) ? measured : 1;
+  }
+  return holds === true ? Math.max(1, distance) : distance;
 }
 
 /**

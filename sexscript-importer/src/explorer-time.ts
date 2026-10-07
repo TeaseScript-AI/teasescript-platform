@@ -677,6 +677,32 @@ function magnitude(value: Value): number | undefined {
     : undefined;
 }
 
+/**
+ * Whether a condition holds on stored values alone (a load's default for an unset key); undefined when it reads
+ * anything else, such as a variable, a call, or the clock.
+ */
+export function storedHolds(
+  condition: unknown,
+  storage: ReadonlyMap<string, unknown>,
+): boolean | undefined {
+  const model: ClockModel = {
+    comparisons: new Map(),
+    definitions: new Map(),
+    ambiguous: new Set(),
+    helpers: new Map(),
+  };
+  const none = new Map<number, Data>();
+  if (clockReads(condition, model, none).size > 0) return undefined;
+  const value = valueAt(condition, {
+    temporaries: none,
+    model,
+    context: { bindings: new Map(), storage },
+    now: 0,
+    inside: new Set(),
+  });
+  return typeof value === "boolean" ? value : undefined;
+}
+
 /** The context of a state's snapshot: its variables, innermost binding first, and its stored values. */
 export function timeContext(snapshot: Data): TimeContext {
   const bindings = new Map<string, unknown>();

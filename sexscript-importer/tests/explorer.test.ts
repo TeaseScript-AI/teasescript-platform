@@ -9,7 +9,7 @@ import {
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
-import { clockModel, holdsAt, timeContext } from "../src/explorer-time.ts";
+import { clockModel, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
 import {
   EPOCH_MS,
   loadEngine,
@@ -207,9 +207,16 @@ test(
     const { source, plan, diagnostics } = await fixture(engine);
     const options = { seed: 1, budgetMs: 60_000, diagnostics, sources: new Map() };
     const corpus = explore(engine, plan, { ...options, maxStates: 12, corpus: [] }).corpus!.entries;
-    // The reconversion asks for a button first, and lists "Right" before "Left".
+    // On the same plan, entries replay as they are: nothing is realigned, and no step more is taken.
+    const same = (realign: boolean) =>
+      explore(engine, plan, { ...options, maxStates: 12, corpus, realign }).corpus!;
+    assert.deepEqual([same(true).realigned, same(true).replaySteps], [0, same(false).replaySteps]);
+    // The reconversion asks for a timed button first, and lists "Right" before "Left".
     const moved = source
-      .replace('say "Welcome."', 'say "Welcome."\nshowButton "Ready"')
+      .replace(
+        'say "Welcome."',
+        'say "Welcome."\nlet spent = showButton "Ready"\nif spent > 30 s {\n  say "Slow."\n}',
+      )
       .replace('left: "Left", right: "Right"', 'right: "Right", left: "Left"');
     const { plan: movedPlan } = engine.compileProject([{ path: "main.tease", source: moved }], {
       builtins: [],
@@ -226,6 +233,23 @@ test(
     assert.equal(realigned.stale, 0);
     assert.equal(realigned.realigned, withInputs.length);
     assert.ok(realigned.coverageAtStart.visitedLines > strict.coverageAtStart.visitedLines);
+
+    // An earlier condition of an `else if` chain is read from stored values, an unset key by its load's default.
+    const { plan: guarded } = engine.compileProject(
+      [
+        {
+          path: "main.tease",
+          source: 'if (load "a", default: true) == true {\n  say "A."\n}\nexit\n',
+        },
+      ],
+      { builtins: [] },
+    );
+    assert.ok(isRecord(guarded));
+    const condition = (Array.isArray(guarded.instructions) ? guarded.instructions : [])
+      .filter(isRecord)
+      .find((instruction) => instruction.kind === "jumpIfFalse")!.condition;
+    assert.equal(storedHolds(condition, new Map()), true);
+    assert.equal(storedHolds(condition, new Map([["a", false]])), false);
   },
 );
 
@@ -701,6 +725,35 @@ test(
     assert.equal(result.search.stoppedBy, "exhausted");
     assert.equal(result.endStates.completed, 1);
     assert.ok(result.crashes.length === 0 && result.traps.length === 0);
+
+    // Five asks each compare their own `answer` with their own word, and an object property named `length` is read as
+    // the property: every word is answered.
+    const asks = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `function ask${index} {\n  let word = "word${index}"\n  let answer = askText "Say ${index}"\n` +
+        `  if answer == word {\n    say "Hit ${index}."\n  }\n}\n`,
+    ).join("");
+    const words =
+      `${asks}ask0()\nask1()\nask2()\nask3()\nask4()\nlet info = { length: "secret" }\nlet reply = askText "Say it"\n` +
+      'if reply == info.length {\n  say "Secret."\n}\nexit\n';
+    const { plan: wordPlan } = engine.compileProject([{ path: "main.tease", source: words }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(wordPlan));
+    const said = explore(engine, wordPlan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 5000,
+      sources: new Map(),
+      diagnostics: [],
+      comparedAnswers: true,
+    });
+    assert.equal(said.search.stoppedBy, "exhausted");
+    assert.deepEqual(
+      said.coverage.files[0]!.unvisited.filter((range) => range.reach === "unknown"),
+      [],
+    );
   },
 );
 
