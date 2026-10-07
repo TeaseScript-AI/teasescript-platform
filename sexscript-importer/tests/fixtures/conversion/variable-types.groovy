@@ -110,3 +110,14 @@ def joinNames = { ->
 }
 def joined = joinNames()
 show("Names ${joined.length()}")
+// A function with a `return null` may give null where its other results have no known type.
+def implement = "nothing"
+def pickOwned = { keys ->
+	for (key in keys) { if (loadBoolean(key) != true) keys -= key }
+	if (keys.isEmpty()) return null
+	return keys[getRandom(keys.size())]
+}
+def chooseImplement = { -> implement = pickOwned(["toys.paddle", "toys.ruler"]) }
+chooseImplement()
+if (implement == "toys.paddle") show("Paddle")
+else show("No implement")

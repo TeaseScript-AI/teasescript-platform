@@ -670,6 +670,12 @@ function analyse(
   // narrowing in a branch, as a local does.
   const reassigned = assignedNames(statements);
   const localNullTested = blockNullTests(statements);
+  // Functions with a `return null`, whose result may be null even where its other values have no known type.
+  const nullReturning = new Set(
+    statements.flatMap((item) =>
+      item.kind === "function" && returnsNull(item.body) ? [item.name] : [],
+    ),
+  );
   for (const item of bindings.values()) item.inferred = undefined;
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
@@ -757,6 +763,24 @@ function analyse(
     ) {
       // A variable that starts as null keeps the type of its first value, optional (#504 decision 1a).
       target.inferred = value;
+      return;
+    }
+    // A call of a function that returns null by `return null` stores that null, so the variable needs an optional
+    // type also where the function's other values have no known type (ADR 0021 rule 1.9).
+    const called =
+      statement.kind === "assign" && statement.operator === "=" ? statement.value : null;
+    if (
+      called?.kind === "call" &&
+      nullReturning.has(called.name) &&
+      nonNull(value).kind === "unknown"
+    ) {
+      const type = bindingType(target);
+      if (
+        target.declaration !== null &&
+        type !== undefined &&
+        !["optional", "unknown", "null"].includes(type.kind)
+      )
+        return change(() => (target.optional = true));
       return;
     }
     // A storage read is checked when stored; it may be null, which matters only where the program tests the variable

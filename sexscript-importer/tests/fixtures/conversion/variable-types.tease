@@ -10,6 +10,15 @@ function sexscriptLegacyText(value): string? {
   }
   return "${value}"
 }
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
 // A variable that starts with a whole number and later holds fractions widens to a number by itself (#504 option B).
 let tempo: number = 1
 tempo = 0.75
@@ -163,4 +172,27 @@ function joinNames {
 let joined = joinNames()
 // NOTE SX_LENGTH_RECEIVER line 112: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 say "Names ${joined.length}"
+// A function with a `return null` may give null where its other results have no known type.
+let implement: string? = "nothing"
+function pickOwned(keys) {
+  for key in keys {
+    if load(key) != true {
+      keys = sexscriptLegacyListMinus(keys, [key])
+    }
+  }
+  // NOTE SX_LENGTH_RECEIVER line 117: Groovy isEmpty() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  if keys.length == 0 {
+    return null
+  }
+  return keys.random
+}
+function chooseImplement {
+  implement = pickOwned(["toys.paddle", "toys.ruler"])
+}
+chooseImplement()
+if implement == "toys.paddle" {
+  say "Paddle"
+} else {
+  say "No implement"
+}
 exit
