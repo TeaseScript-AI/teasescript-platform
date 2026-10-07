@@ -239,9 +239,14 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - `break`/`continue` with a label leave an outer loop; TeaseScript jumps affect only the innermost loop, so they are
   reported. A statement that only computes a value (often `==` written for `=`) had no effect and is dropped with a
   `NOTE`.
+- A loop's range and a `randomInteger` draw end at a whole number (#689). A bound that may hold a fraction, by the
+  importer's types, ends where Groovy stopped: `n.times` loops `0..toInteger(n)`, an inclusive range ends at
+  `floor(b)`, an exclusive one and `nextInt(b)` at `ceil(b)` (`0..<2.5` went through 0, 1, and 2; `SX_RANGE_FLOOR`);
+  whole bounds stay as written.
 - Known residual differences, found by adversarial review and left as is because they need unusual input or fail
   loudly: Groovy integer ranges contain only whole numbers, while a converted range case also matches a fractional
-  value; a `times` count or list index that is fractional or negative only at runtime fails in TeaseScript; two
+  value; a `times` count or list index that is fractional, where the importer cannot tell, or negative only at runtime
+  fails in TeaseScript; two
   scripts that load the same module directory share one set of function and field facts; a variable that shadows
   `Calendar` is still read as the Calendar class; functions authored with the importer's `sexscriptLegacy` prefix
   collide with generated helpers; a closure parameter declared `int` does not truncate later stores, as a typed local
