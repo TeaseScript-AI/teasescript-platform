@@ -118,3 +118,6 @@ if (loadBoolean("game.choice")) show("Chosen " + choiceText)
 def hints = ["first"]
 hints.add(load("game.hint" + slot))
 show("Hints " + hints.size())
+// A parameter that a text holding values of another type too is passed to tests for both.
+def describe = { what -> if (what == null) show("Nothing to wear.") }
+describe(outfit)

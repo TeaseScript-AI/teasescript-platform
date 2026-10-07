@@ -777,30 +777,49 @@ function withEmptyText(
         }
     }
   });
-  // What each binding takes besides text: `null`, the types of other values the importer knows here, or `unknown`; a
-  // global's, from every file.
+  // What each binding takes besides text: `null`, the types of other values the importer knows here, or `unknown`,
+  // also through the text it copies; a global's, from every file.
   const others = programs.map(() => new Map<string, Set<string>>());
   const globalOthers = new Map<string, Set<string>>();
+  const othersOf = (index: number, binding: string): Set<string> => {
+    const name = global(binding);
+    const map = name === null ? others[index]! : globalOthers;
+    const types = map.get(name ?? binding) ?? new Set<string>();
+    map.set(name ?? binding, types);
+    return types;
+  };
   flows.forEach((flow, index) => {
     for (const { binding, value, scope } of flow) {
       if (holds(index, value, scope)) continue;
-      const name = global(binding);
-      const map = name === null ? others[index]! : globalOthers;
-      const types = map.get(name ?? binding) ?? new Set<string>();
-      types.add(
+      othersOf(index, binding).add(
         isNullLiteral(value)
           ? "null"
           : value.kind === "load"
             ? "unknown"
             : (valueType(value) ?? "unknown"),
       );
-      map.set(name ?? binding, types);
     }
   });
-  const othersOf = (index: number, binding: string): Set<string> => {
-    const name = global(binding);
-    return (name === null ? others[index]!.get(binding) : globalOthers.get(name)) ?? new Set();
-  };
+  for (let changed = true; changed;) {
+    changed = false;
+    flows.forEach((flow, index) => {
+      for (const { binding, value, scope } of flow) {
+        const source =
+          value.kind === "variable"
+            ? scope.resolve(value.name)
+            : value.kind === "call" && value.local === true
+              ? `return:${value.name}`
+              : null;
+        if (source === null || !holdsRead(index, source)) continue;
+        const types = othersOf(index, binding);
+        for (const type of othersOf(index, source))
+          if (!types.has(type)) {
+            types.add(type);
+            changed = true;
+          }
+      }
+    });
+  }
   return programs.map((program, index) => {
     const diagnostics = [...program.diagnostics];
     const note = (code: string, message: string, span: IrStatement["span"]): void => {

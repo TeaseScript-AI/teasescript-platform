@@ -256,4 +256,11 @@ if sexscriptLegacyBooleanText(load("game.choice", default: "")) == true {
 let hints = ["first"]
 hints.add(load("game.hint${slot}", default: ""))
 say "Hints ${hints.length}"
+// A parameter that a text holding values of another type too is passed to tests for both.
+function describe(what) {
+  if what == null or what == "" {
+    say "Nothing to wear."
+  }
+}
+describe(outfit)
 exit
