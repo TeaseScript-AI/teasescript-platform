@@ -589,6 +589,8 @@ class SemanticValidator {
           "askImage",
           // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
           "pi",
+          // The engine reads `debugMode` from the session.
+          "debugMode",
         ].includes(name),
       ),
     );
@@ -1792,6 +1794,14 @@ class SemanticValidator {
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
     this.#recordSharedWrite(rootName(target), scope);
     if (target.kind === "identifier") {
+      if (target.name === "debugMode") {
+        this.#report(
+          semanticCode.invalidAssignment,
+          "Cannot assign to 'debugMode', which is read-only.",
+          target.span,
+        );
+        return;
+      }
       const binding = scope.resolve(target.name);
       this.#recordRootAccess(target.name, binding, target.span);
       if (binding === undefined) {
@@ -1879,6 +1889,8 @@ class SemanticValidator {
       }
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
+        // Protected, so never a binding: the engine reads it from the session.
+        if (expression.name === "debugMode") return;
         const binding = scope.resolve(expression.name);
         this.#recordRootAccess(expression.name, binding, expression.span);
         if (binding === undefined) {

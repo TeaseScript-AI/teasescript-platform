@@ -75,6 +75,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "mod",
   "clamp",
   "pi",
+  "debugMode",
   "sum",
   "average",
   "median",

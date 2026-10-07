@@ -2239,6 +2239,7 @@ function expressionFreeSayStagingClone(
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
     // Records are never changed in place; a shown message adds one.
     liveMessages: givesHandle ? [...snapshot.liveMessages] : snapshot.liveMessages,
+    debugMode: snapshot.debugMode,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure: snapshot.failure,

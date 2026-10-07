@@ -311,12 +311,25 @@ export class Evaluator {
   #evaluateLeaf(
     expression: Extract<
       ExpressionPlan,
-      { kind: "literal" | "duration" | "identifier" | "temporary" | "preparedReference" }
+      {
+        kind:
+          "literal" | "duration" | "identifier" | "debugMode" | "temporary" | "preparedReference";
+      }
     >,
   ): SerializableRuntimeValue {
     switch (expression.kind) {
       case "literal":
         return expression.value;
+      case "debugMode":
+        // The host sets it, so a read has no recorded origin.
+        this.trace?.readState(
+          stateKey("debugMode"),
+          null,
+          "debugMode",
+          this.snapshot.debugMode,
+          true,
+        );
+        return this.snapshot.debugMode;
       case "duration":
         return storedDuration(durationParts(expression));
       case "identifier": {
@@ -691,6 +704,7 @@ export class Evaluator {
         case "literal":
         case "duration":
         case "identifier":
+        case "debugMode":
         case "temporary":
         case "preparedReference":
           value = this.#evaluateLeaf(expression);
