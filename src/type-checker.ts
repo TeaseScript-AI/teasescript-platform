@@ -4646,11 +4646,19 @@ class TypeChecker {
     });
     const all = [...inputs, ...Object.values(named)];
     if (problems.length === 0 && all.every((one) => one.known !== undefined)) {
-      const result = numeric.apply(
-        inputs.map((one) => one.known!),
-        Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
-      );
-      if (typeof result !== "number")
+      const known = inputs.map((one) => one.known!);
+      // A random result is never computed here; only its arguments are checked.
+      const result =
+        numeric.random !== undefined
+          ? numeric.random(known)
+          : numeric.apply(
+              known,
+              Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
+              () => {
+                throw new Error(`${name}(...) draws no random numbers.`);
+              },
+            );
+      if (result !== undefined && typeof result !== "number")
         this.#report(typeCode.invalidOperand, result.failure, expression.span);
     }
     const result = numeric.result(inputs, named);

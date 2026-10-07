@@ -291,11 +291,12 @@ The current function subset includes:
 Implemented value operations include the V30 §8 text operations, joining two texts or two lists with `+` (§4), list
 `join`, `addAll`, `sort`, `shuffle`, `take`, and `takeLast`, the `intersection`, `union`, and `difference` of lists and
 sets, the §13 conversions `toString`, `toNumber`, `toInteger`, and `toBoolean` with `default:`, the numeric functions
-`round` (also with `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp` and the constant
-`pi`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
-`linearRegression`, and `predict`, and the §4 weighted choice `randomWeighted`. When the receiver or argument type is
-known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` for argument counts and names; other values are checked
-when the operation runs.
+`round` (also with `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
+the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
+and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
+`linearRegression`, and `predict`, and the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
+`randomBeta`, and `randomPert`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
+`TSV020`/`TSV022` for argument counts and names; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
 list and set elements, dict values, object properties, parameters, and function results keep one type, including types

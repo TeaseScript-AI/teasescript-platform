@@ -263,7 +263,7 @@ test("the numeric functions are protected names", () => {
 
 test("pow gives the correctly rounded result with the same operations on every JavaScript engine", () => {
   const pow = (base: number, exponent: number) =>
-    NUMERIC_FUNCTIONS.get("pow")!.apply([base, exponent], {});
+    NUMERIC_FUNCTIONS.get("pow")!.apply([base, exponent], {}, () => 0);
   // Whole powers of whole numbers, rounded once from the exact BigInt power.
   for (const [base, exponent] of [
     [477, 6],

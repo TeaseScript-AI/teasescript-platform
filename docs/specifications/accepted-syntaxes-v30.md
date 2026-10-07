@@ -437,6 +437,26 @@ one draw of the session RNG. An empty dict or list is runtime error `TSR018`, a 
 `TSR039`, and a weight that is not a number `TSR060`; a weight of another type or a missing property is a compile error
 when the compiler can see it.
 
+### Random distributions
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+```text
+let pause = randomNormal(30, 5)            // around 30, mostly between 20 and 40
+let share = randomBeta(2, 5)               // from 0 through 1, mostly low
+let reps = round(randomPert(5, 10, 20))    // from 5 through 20, most likely near 10
+```
+
+- `randomNormal(mean, spread)` draws from the normal distribution with that mean and standard deviation; `spread` is
+  at least 0. Each call makes two draws of the session RNG.
+- `randomBeta(alpha, beta)` draws a number from 0 through 1 from the beta distribution, for `alpha` and `beta` above 0.
+- `randomPert(min, mostLikely, max)` draws from `min` through `max`, most often near `mostLikely`, from the PERT
+  distribution: `min + (max - min) × randomBeta(1 + 4 × (mostLikely - min) / (max - min), 1 + 4 × (max - mostLikely) /
+  (max - min))`, for `min <= mostLikely <= max`. With `min` equal to `max` it returns `min`.
+- `randomBeta` and `randomPert` sample by rejection: a call makes at least 6 draws, about 6 to 8 on average, and at
+  most 386. The number depends only on the parameters and the draws, so replay and checkpoint resume repeat it.
+- Each returns a `number`. Invalid parameters are a compile error when the compiler can see them, and runtime error
+  `TSR039` otherwise; a `randomNormal` result too large to represent is `TSR036`.
+
 ## 5. Logical and comparison operators
 **Status:** Accepted
 
@@ -1306,6 +1326,39 @@ round(pi * 2 * 2, decimals: 2)   // 12.57
 - `sqrt` and `pow` give the same result on every device and browser.
 - Considered and left out: the operators `**` and `^`, the constant `e`, `log(x, base)`, hyperbolic functions,
   factorial, `gcd`, bitwise operations, and general number formatting.
+
+### Exponentials, logarithms, and angles
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+| Function | Result |
+| --- | --- |
+| `exp(value)` | e raised to the value |
+| `ln(value)` | the natural logarithm, for a value above 0 |
+| `log10(value)` | the logarithm to base 10, for a value above 0: `log10(1000)` is `3` |
+| `sin(degrees)`, `cos(degrees)`, `tan(degrees)` | the sine, cosine, or tangent of an angle in degrees |
+| `asin(value)`, `acos(value)` | the angle in degrees of a sine or cosine from -1 through 1 |
+| `atan(value)` | the angle in degrees of a tangent, between -90 and 90 |
+| `atan2(y, x)` | the angle in degrees of the direction from the origin to the point (x, y), above -180 and up to 180 |
+
+Angles are in degrees, both the argument of `sin`, `cos`, and `tan` and the result of `asin`, `acos`, `atan`, and
+`atan2`. `asin` gives -90 through 90, `acos` 0 through 180, and `atan2(0, 0)` is 0. Each function returns a `number`.
+
+```text
+sin(30)          // 0.5
+cos(90)          // 0
+tan(45)          // 1
+atan2(1, -1)     // 135
+log10(0.001)     // -3
+round(exp(1), decimals: 5)   // 2.71828
+```
+
+- A call without a finite result fails like the other numeric functions: `ln` or `log10` of a number of at most 0,
+  `asin` or `acos` of a number outside -1 through 1, `tan` of an odd multiple of 90, and `exp` of a number too large.
+  It is a compile error when the compiler can see the arguments, and runtime error `TSR036` otherwise.
+- The results are the same on every device and browser, because the engine computes them with its own arithmetic
+  instead of the browser's. They are the nearest number to the exact result in all but extremely rare cases. Exact
+  angles give exact results, such as `sin(30)` and `cos(90)`, and `log10` of a power of ten as written, such as `0.001`,
+  is exactly that power.
 
 ## 14. Scope
 **Status:** Accepted
@@ -4772,6 +4825,19 @@ stddev
 linearRegression
 predict
 randomWeighted
+randomNormal
+randomBeta
+randomPert
+exp
+ln
+log10
+sin
+cos
+tan
+asin
+acos
+atan
+atan2
 toString
 toNumber
 toInteger

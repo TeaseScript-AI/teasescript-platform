@@ -1,4 +1,19 @@
 import { rounded, withoutNegativeZero } from "./conversions.js";
+import {
+  acosDegrees,
+  asinDegrees,
+  atan2Degrees,
+  atanDegrees,
+  cosDegrees,
+  exp,
+  ln,
+  log10,
+  randomBeta,
+  randomNormal,
+  randomPert,
+  sinDegrees,
+  tanDegrees,
+} from "./deterministic-math.js";
 
 /** What the compiler knows about one argument of a numeric function. */
 export interface NumericArgument {
@@ -21,11 +36,17 @@ export interface NumericFunction {
     inputs: readonly NumericArgument[],
     named: Readonly<Record<string, NumericArgument>>,
   ) => "integer" | "number" | "unknown";
-  /** The finite result, or why the call has none. */
+  /** The finite result, or why the call has none; a random function draws from the session RNG with `draw`. */
   readonly apply: (
     values: readonly number[],
     named: Readonly<Record<string, number>>,
+    draw: () => number,
   ) => number | NumericFailure;
+  /**
+   * Marks a function that draws from the session RNG, and gives why its arguments are invalid. The runtime checks them
+   * before any draw; the compiler checks arguments it can see, but never computes a random result.
+   */
+  readonly random?: (values: readonly number[]) => NumericFailure | undefined;
 }
 
 /**
@@ -46,6 +67,30 @@ function rounding(name: string): NumericFunction {
     apply: ([value]) => rounded(name, value!),
   };
 }
+
+/**
+ * A function of one or two numbers whose result is always a `number`, computed by an engine-independent function that
+ * gives `undefined` when there is no finite result; `failure` then explains why.
+ */
+function real(
+  parameters: readonly string[],
+  example: string,
+  compute: (...values: number[]) => number | undefined,
+  failure: (values: readonly number[]) => string,
+): NumericFunction {
+  return {
+    parameters,
+    example,
+    result: () => "number",
+    apply: (values) => {
+      const result = compute(...values);
+      return result === undefined ? noResult(failure(values)) : withoutNegativeZero(result);
+    },
+  };
+}
+
+const LOGARITHM = (name: string) => (values: readonly number[]) =>
+  `${name}(${values[0]}) has no result: only a number above 0 has a logarithm.`;
 
 /** `integer` when every input is one, `number` when every input is a number, and `unknown` otherwise. */
 function together(inputs: readonly NumericArgument[]): "integer" | "number" | "unknown" {
@@ -136,7 +181,108 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
           : Math.min(Math.max(value!, min!), max!),
     },
   ],
+  [
+    "exp",
+    real(
+      ["value"],
+      "exp(1)",
+      exp,
+      ([value]) => `exp(${value}) gives a number too large to represent. Use smaller values.`,
+    ),
+  ],
+  ["ln", real(["value"], "ln(10)", ln, LOGARITHM("ln"))],
+  ["log10", real(["value"], "log10(1000)", log10, LOGARITHM("log10"))],
+  ["sin", real(["degrees"], "sin(30)", sinDegrees, () => "")],
+  ["cos", real(["degrees"], "cos(60)", cosDegrees, () => "")],
+  [
+    "tan",
+    real(
+      ["degrees"],
+      "tan(45)",
+      tanDegrees,
+      ([degrees]) =>
+        `tan(${degrees}) has no result: the tangent of ${degrees} degrees is infinite.`,
+    ),
+  ],
+  [
+    "asin",
+    real(
+      ["value"],
+      "asin(0.5)",
+      asinDegrees,
+      ([value]) => `asin(${value}) has no result: only a number from -1 through 1 has an arcsine.`,
+    ),
+  ],
+  [
+    "acos",
+    real(
+      ["value"],
+      "acos(0.5)",
+      acosDegrees,
+      ([value]) =>
+        `acos(${value}) has no result: only a number from -1 through 1 has an arccosine.`,
+    ),
+  ],
+  ["atan", real(["value"], "atan(1)", atanDegrees, () => "")],
+  ["atan2", real(["y", "x"], "atan2(1, 1)", atan2Degrees, () => "")],
+  [
+    "randomNormal",
+    {
+      parameters: ["mean", "spread"],
+      example: "randomNormal(20, 5)",
+      result: () => "number",
+      random: ([, spread]) =>
+        spread! < 0
+          ? {
+              failure: `randomNormal(...) needs a spread of at least 0, not ${spread}.`,
+              code: "TSR039",
+            }
+          : undefined,
+      apply: ([mean, spread], _, draw) =>
+        sampled("randomNormal", randomNormal(mean!, spread!, draw)),
+    },
+  ],
+  [
+    "randomBeta",
+    {
+      parameters: ["alpha", "beta"],
+      example: "randomBeta(2, 5)",
+      result: () => "number",
+      random: ([alpha, beta]) =>
+        alpha! > 0 && beta! > 0
+          ? undefined
+          : {
+              failure: `randomBeta(...) needs an alpha and a beta above 0, not ${alpha} and ${beta}.`,
+              code: "TSR039",
+            },
+      apply: ([alpha, beta], _, draw) => sampled("randomBeta", randomBeta(alpha!, beta!, draw)),
+    },
+  ],
+  [
+    "randomPert",
+    {
+      parameters: ["min", "mostLikely", "max"],
+      example: "randomPert(5, 10, 20)",
+      result: () => "number",
+      random: ([min, mostLikely, max]) =>
+        min! <= mostLikely! && mostLikely! <= max!
+          ? undefined
+          : {
+              failure: `randomPert(...) needs min <= mostLikely <= max, not ${min}, ${mostLikely}, and ${max}.`,
+              code: "TSR039",
+            },
+      apply: ([min, mostLikely, max], _, draw) =>
+        sampled("randomPert", randomPert(min!, mostLikely!, max!, draw)),
+    },
+  ],
 ]);
+
+/** A drawn value, or the failure of one that is too large to represent. */
+function sampled(name: string, value: number | undefined): number | NumericFailure {
+  return value === undefined
+    ? noResult(`${name}(...) gives a number too large to represent. Use smaller values.`)
+    : withoutNegativeZero(value);
+}
 
 function noResult(failure: string): NumericFailure {
   return { failure, code: "TSR036" };
