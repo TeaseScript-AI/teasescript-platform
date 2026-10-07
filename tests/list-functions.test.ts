@@ -251,10 +251,27 @@ test("possibly null lists and values of list functions need a check first", () =
   assert.deepEqual(diagnostics(`${DYNAMIC}say predict(dynamic(1), "x")\nexit`), [
     [
       "TSV043",
-      "predict(...) needs numbers, dates, datetimes, or timestamps, not text (string).",
+      "predict(...) needs a number, date, datetime, or timestamp as its x, not text (string).",
       '"x"',
     ],
   ]);
+  assert.deepEqual(
+    diagnostics('function measure(line: object) {\n    return predict(line, "a")\n}\nexit'),
+    [
+      [
+        "TSV043",
+        "predict(...) needs a number, date, datetime, or timestamp as its x, not text (string).",
+        '"a"',
+      ],
+    ],
+  );
+  // Each kind x may be is checked on its own; the line decides at runtime.
+  assert.deepEqual(
+    said(
+      "function measure(line, point: number | date) {\n    return predict(line, point)\n}\nsay measure(linearRegression([1, 2]), 2)\nexit",
+    ),
+    ["3"],
+  );
   assert.deepEqual(diagnostics(`${DYNAMIC}say sum(dynamic([{ n: 1 }]), by: 1)\nexit`), [
     [
       "TSV043",

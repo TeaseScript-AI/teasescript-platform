@@ -326,12 +326,26 @@ function predictType(context: Context): StaticType {
   if (!shape(context, 2, [], "2 arguments (line, x)")) return UNKNOWN_TYPE;
   const line = call.arguments[0]!.value;
   const x = call.arguments[1]!.value;
-  const type = forUse(typeOf(line));
-  if (!isKnown(type)) {
-    // Whatever the line, x is a number or a date and time value that is measured in days.
-    valueKind(context, forUse(typeOf(x)), ["number", "date", "datetime", "timestamp"], x);
+  // Whatever the line, each kind x may be is a number or a date and time value that is measured in days.
+  const other = members(forUse(typeOf(x)))
+    .map(resolved)
+    .find(
+      (member) =>
+        isKnown(member) &&
+        !(["integer", "number", "date", "datetime", "timestamp"] as const).some((kind) =>
+          isScalar(member, kind),
+        ),
+    );
+  if (other !== undefined) {
+    problem(
+      context,
+      `${name}(...) needs a number, date, datetime, or timestamp as its x, not ${describeValue(other)}.`,
+      x,
+    );
     return UNKNOWN_TYPE;
   }
+  const type = forUse(typeOf(line));
+  if (!isKnown(type)) return UNKNOWN_TYPE;
   const object = resolved(type);
   const property = (key: string): StaticType | undefined =>
     object.kind === "object" ? (object.properties?.get(key) ?? undefined) : undefined;
