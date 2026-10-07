@@ -230,7 +230,7 @@ function describe(exported, values) {
     if (replay !== null)
       for (const operation of replay.operations)
         lines.push(
-          `call ${operation.seq} ${operation.kind} ${debugExportJson(operation.args)} -> ${operation.outcome ?? `threw ${operation.thrown}`}`,
+          `call ${operation.seq} ${operation.kind} ${debugExportJson(operation.args)} -> ${operation.outcome ?? `threw ${operation.thrown}`}${operation.randomChoices.length === 0 ? "" : `, chose ${debugExportJson(operation.randomChoices)}`}${operation.pausedAt === null ? "" : `, paused at draw ${operation.pausedAt}`}`,
         );
     for (const [name, section] of Object.entries(sections))
       lines.push(`${name}: ${debugExportJson(section)}`);

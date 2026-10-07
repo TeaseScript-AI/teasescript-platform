@@ -149,7 +149,7 @@ The technical report, always included, locates the failure without runtime value
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
-`version: 3`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+`version: 4`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
 covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
@@ -158,7 +158,12 @@ and its role, `current` or `lastGood`; the replay data; photos; and readable sec
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
 `applyExternalStorageEdit` with the edit, and `updateInteraction` with the form edit, each with its plain arguments, outcome, emitted event range, resulting
-status, or thrown error name and the status the call started from. It adds no plan, snapshot, or checkpoint revision.
+status, or thrown error name and the status the call started from, the random outcomes chosen during it, and the
+[random draw](RUNTIME.md#controlled-randomness) it stands paused at, or `null`. A call that paused stays one record
+while the Player resolves its draws: each resolution adds its events to it, and a chosen one also its outcome; calls
+the engine refuses meanwhile are not recorded; only a resolution of a draw that paused before the
+anchor is a `resumeRandomDraw` call of its own. Replay decides each recorded draw as recorded, every other one
+naturally, and pauses where the call stood paused. It adds no plan, snapshot, or checkpoint revision.
 
 In every build, the Player's `player/debug-recorder.ts` records each session from its Start or Continue: the anchor
 before its first call and copies of every call's plain arguments and results, beside the session and outside its state.
