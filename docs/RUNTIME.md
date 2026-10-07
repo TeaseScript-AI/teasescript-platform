@@ -17,7 +17,8 @@ of it: `state` holds the view, projections, active calls, and date and time pres
 rewind point, or a saved-data adoption. An operation goes through a publication that shows the current state; once an
 operation changed the state, one made from an earlier publication throws. When an operation throws, the error reaches
 the Player, and the next use rebuilds the state of the latest publication from the calls the session's [debug
-recorder](DEBUGGER.md#debug-export) logged, so play continues from the state the Player showed.
+recorder](DEBUGGER.md#debug-export) logged, so play continues from the state the Player showed. An operation's events
+reach the transcript only once the run that follows it has finished, so the transcript stays as shown too.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
