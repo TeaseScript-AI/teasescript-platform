@@ -37,6 +37,13 @@ const onScreen = useElementVisibility(root);
 props.player.refreshSceneTimeWhile(() => onScreen.value && (now.value?.timers.length ?? 0) > 0);
 
 const at = (location: PlayerDebugSourceLocation) => `${location.path}:${location.line}`;
+// Where the script stopped: the error and its statement after a failure, which the error dialog's Open in Debug shows.
+const ended = computed(() => {
+  const failure = props.player.session.value?.state.failure ?? null;
+  return failure === null
+    ? "Ended"
+    : `Error ${failure.code} at ${at({ path: failure.path, line: failure.span.start.line + 1 })}`;
+});
 const waitLabels: Record<PlayerDebugWaitKind, string> = {
   wait: "Wait",
   timer: "Timer",
@@ -108,7 +115,7 @@ const imageOrigin = computed(() => {
         <div class="flex min-w-0 gap-2">
           <dt class="text-muted-foreground">Next</dt>
           <dd class="min-w-0 break-all font-mono" data-debug-now-next>
-            {{ now.next ? at(now.next) : "Ended" }}
+            {{ now.next ? at(now.next) : ended }}
           </dd>
         </div>
         <div class="flex min-w-0 gap-2">

@@ -46,7 +46,8 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   settles or loses the foreground, and does not show before Start or Continue or after the session ends.
 - **Now** shows where the session is, derived on demand from canonical state and the Stage's own load reports. Paths
   are package paths relative to the entry script's folder, with every subfolder, and lines are one-based:
-  - **Next** is the execution cursor; **Waiting at** is the statement whose foreground action the script waits for,
+  - **Next** is the execution cursor, or after a script error the error and its statement, where the error dialog's
+    **Open in Debug** shows it; **Waiting at** is the statement whose foreground action the script waits for,
     named by kind (wait, timer, button, pacing, and so on). A collapsed **Call chain** lists the active functions,
     called files, and timer, media cue, or permanent-button blocks, innermost first, each with its call site or the
     position it interrupted.
