@@ -599,13 +599,15 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   `keptPaced`). A fixed text's own reading time is shorter than the literal kept wait after it, so only a pending
   reading time delays it; a text with values, or one before a computed wait, may also make the pause longer by its
   own reading time. Computed waits, a wait that another wait follows, waits after
-  the importer's system texts, and beats keep their `instant` text as before. Beats (owner decision 2026-10-07): the
-  wait after a text without letters, a count or a pause such as `3` or `. . .` (`SX_WAIT_BEAT`, `beats`), and a loop's
-  tick, a wait of a second at most after a text the loop's body builds anew each pass, as in a countdown or a clock
-  (`SX_WAIT_TICK`, `ticks`); animations keep theirs as updatable messages (above). A beat keeps its `instant`, so a
-  text whose replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead
-  (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or from a loop's earlier pass,
-  gives way to the beat.
+  the importer's system texts, and beats keep their `instant` text as before. Beats (owner decision 2026-10-07), the
+  wait whatever its length: the wait after a text without letters, a count or a pause such as `3`, `. . .`, or a
+  number (`SX_WAIT_BEAT`, `beats`), and a loop's tick, a wait of a second at most after a text the loop's body builds
+  anew each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`); animations and counters keep theirs as
+  updatable messages (above), whose first message keeps `instant` as a beat does. A beat split into paragraphs keeps
+  `instant` on its last paragraph, so the text shows whole at once. A beat keeps its `instant`, so a text whose
+  replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead, a beat itself
+  in turn unless it was split (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or
+  from a loop's earlier pass, gives way to the beat.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is

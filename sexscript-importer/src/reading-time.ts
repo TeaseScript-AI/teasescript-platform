@@ -28,9 +28,9 @@ const visibleText = await loadVisibleText();
  * shortens it, as the visible text of its message markup; a value interpolated at runtime counts as empty, so the
  * measure is the shortest reading time the text can have. A wait stays as it is where another wait follows it, a pause
  * the author made; after the system speaker's text, which the importer adds; and where it keeps a beat (owner decision
- * 2026-10-07): after a text without letters, which has nothing to read (`3`, `...`), and a loop's tick, a second at
- * most after a text the loop's body builds anew each pass, as a clock or a countdown does. A beat's text keeps
- * `instant`. Animations keep their waits as updatable messages (withMessageHandles).
+ * 2026-10-07), whatever its length: after a text without letters, which has nothing to read (`3`, `...`, a number), and
+ * a loop's tick, a second at most after a text the loop's body builds anew each pass, as a clock or a countdown does. A
+ * beat's text keeps `instant`, as do the messages of animations and counters (withMessageHandles), whose waits stay.
  */
 export function withReadingTimes(
   statements: IrStatement[],
@@ -58,17 +58,7 @@ export function withReadingTimes(
       if (wait?.kind !== "wait" || wait.visible) return;
       const milliseconds = literalMilliseconds(wait);
       const after = nested[next[waitIndex]!];
-      if (milliseconds === null || statement.speaker === SYSTEM_SPEAKER || after?.kind === "wait") {
-        result[index] = { ...statement, instant: true };
-        return;
-      }
-      if (milliseconds > READING_WAIT_RATIO * shortestReadingTime(statement.value)) {
-        result[waitIndex] = { ...wait, afterText: true };
-        report(
-          "SX_WAIT_KEPT",
-          "The legacy wait after this text is longer than 1.5 times the text's reading time, time for an action or a task, so it stays and the text appears without reading time.",
-          statement,
-        );
+      if (statement.speaker === SYSTEM_SPEAKER) {
         result[index] = { ...statement, instant: true };
         return;
       }
@@ -83,13 +73,32 @@ export function withReadingTimes(
         return;
       }
       // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown.
-      if (loopBody && milliseconds <= TICK_MS && builtAtRuntime(statement.value)) {
+      if (
+        loopBody &&
+        milliseconds !== null &&
+        milliseconds <= TICK_MS &&
+        builtAtRuntime(statement.value)
+      ) {
         report(
           "SX_WAIT_TICK",
           "The legacy wait after this text, which the loop builds anew each pass, is the loop's tick, a clock or a countdown, so it stays and the text appears without reading time.",
           statement,
         );
         result[index] = { ...statement, instant: true, beat: true };
+        return;
+      }
+      if (milliseconds === null || after?.kind === "wait") {
+        result[index] = { ...statement, instant: true };
+        return;
+      }
+      if (milliseconds > READING_WAIT_RATIO * shortestReadingTime(statement.value)) {
+        result[waitIndex] = { ...wait, afterText: true };
+        report(
+          "SX_WAIT_KEPT",
+          "The legacy wait after this text is longer than 1.5 times the text's reading time, time for an action or a task, so it stays and the text appears without reading time.",
+          statement,
+        );
+        result[index] = { ...statement, instant: true };
         return;
       }
       report(
@@ -114,8 +123,9 @@ export function withReadingTimes(
  * else, at the start of a function, a loop's body, or a script, after a call or a transfer, or where a reading time of
  * a text with values may still run, the text keeps its own reading time instead and waits for the one before it.
  *
- * A beat keeps `instant` (owner decision 2026-10-07), so a text whose replaced reading time may still run when a beat
- * is said keeps its legacy wait and `instant` instead, as before the rule; a reading time of unknown origin, after a
+ * A beat keeps `instant` (owner decision 2026-10-07), as does the message that starts an animation or a counter
+ * (withMessageHandles), so a text whose replaced reading time may still run when a beat is said keeps its legacy wait
+ * and `instant` instead, as before the rule; a reading time of unknown origin, after a
  * call or where a loop's earlier pass may have left one, gives way to the beat. This runs after the passes that split,
  * shorten, and fold texts, on the texts they leave.
  */
@@ -127,11 +137,27 @@ export function withoutCutReadingTimes(
   const restored = new Set<WaitStatement>();
   let current = statements;
   for (;;) {
-    const found = new Set<WaitStatement>();
-    walkTexts(current, (wait) => found.add(wait), null);
-    const added = [...found].filter((wait) => !restored.has(wait));
-    if (added.length === 0) break;
-    for (const wait of added) restored.add(wait);
+    // A text that keeps its wait is said at once again, a beat itself, unless it was split, so the replaced waits whose
+    // reading times may run when it is said stay in turn; they are known from the same walk.
+    const pending: WaitStatement[] = [];
+    const before = new Map<WaitStatement, WaitStatement[]>();
+    const split = new Set<WaitStatement>();
+    walkTexts(
+      current,
+      (wait) => pending.push(wait),
+      null,
+      (wait, sources) => {
+        if (before.has(wait)) split.add(wait);
+        before.set(wait, [...(before.get(wait) ?? []), ...sources]);
+      },
+    );
+    const count = restored.size;
+    for (let wait = pending.pop(); wait !== undefined; wait = pending.pop()) {
+      if (restored.has(wait)) continue;
+      restored.add(wait);
+      if (!split.has(wait)) pending.push(...(before.get(wait) ?? []));
+    }
+    if (restored.size === count) break;
     current = withRestoredWaits(current, restored, diagnostics);
   }
   return walkTexts(current, () => {}, diagnostics);
@@ -164,13 +190,15 @@ function joined(first: Running, second: Running): Running {
 }
 
 /**
- * One walk over the statements: takes `instant` away where a reading time may still run, and reports to `beat` the
- * replaced waits whose reading time a beat would end. `diagnostics` is null for a walk that only looks.
+ * One walk over the statements: takes `instant` away where a reading time may still run, reports to `beat` the
+ * replaced waits whose reading time a beat would end, and to `said` the replaced waits whose reading times may still run
+ * when a text whose own wait was replaced is said. `diagnostics` is null for a walk that only looks.
  */
 function walkTexts(
   statements: IrStatement[],
   beat: (wait: WaitStatement) => void,
   diagnostics: MigrationDiagnostic[] | null,
+  said: (wait: WaitStatement, sources: ReadonlySet<WaitStatement>) => void = () => {},
 ): IrStatement[] {
   const paced = (statement: IrStatement): void => {
     diagnostics?.push({
@@ -205,18 +233,18 @@ function walkTexts(
     return [result, state];
   };
   const step = (item: IrStatement, running: Running): [IrStatement, Running] => {
-    // A message kept in a handle (withMessageHandles) is said as a `say` is, after its text is computed.
+    // A message kept in a handle (withMessageHandles) is said as a `say` is, after its text is computed; one said at
+    // once starts an animation or a counter, a beat.
     if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
-      const { instant, ...message } = item.value;
-      const before = after([message.value], running);
-      if (instant !== true || before.left === 0) return [item, NONE];
-      paced(item);
-      return [{ ...item, value: message }, NONE];
+      const before = after([item.value.value], running);
+      if (item.value.instant === true) before.sources.forEach(beat);
+      return [item, NONE];
     }
     switch (item.kind) {
       case "say": {
         // The text is computed first, which may say something itself.
         const before = own(item, running);
+        if (item.readingTime !== undefined) said(item.readingTime, before.sources);
         if (item.instant === true) {
           if (before.left === 0) return [item, NONE];
           // A beat stays as the legacy script timed it; the texts whose reading time it would end keep their waits.
@@ -407,8 +435,9 @@ function significant(statement: IrStatement): boolean {
   return statement.kind !== "blank" && statement.kind !== "comment";
 }
 
-/** Whether a fixed text shows no letter, as a count or a pause does (`3`, `?`, `. . .`). */
+/** Whether a fixed text shows no letter, as a count or a pause does (`3`, `?`, `. . .`), or is a number. */
 function letterless(value: IrExpression): boolean {
+  if (value.kind === "literal" && typeof value.value === "number") return true;
   return (
     value.kind === "literal" &&
     typeof value.value === "string" &&

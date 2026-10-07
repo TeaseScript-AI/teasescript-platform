@@ -56,3 +56,25 @@ show("Pause")
 wait(1)
 wait(2)
 show("Done.")
+
+// A beat keeps its timing whatever its wait, a number is a count too, and an animation keeps its timing; a text whose
+// replaced reading time a beat would cut keeps its legacy wait.
+show("Get ready.")
+wait(1)
+show("10")
+wait(3)
+show(5)
+wait(1)
+show("Good.")
+wait(1)
+show("Wait.")
+wait(1)
+show("Wait..")
+wait(1)
+show("Wait...")
+wait(1)
+// The last paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
+for (int left = 3; left > 0; left--) {
+    show("Starting soon.\n\nStarting in " + left)
+    wait(1)
+}

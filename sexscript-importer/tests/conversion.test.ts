@@ -1487,6 +1487,9 @@ test(
       computedWait:
         'def delay = { show("Good."); wait(1); return 1 }\nshowButton("Start")\nshow("Hold.")\nwait(delay())\nshow("Next.")\nwait(20)',
       beat: 'show("Good.")\nwait(1)\nfor (int i = 3; i > 0; i--) {\n show("Starting in " + i)\n wait(1)\n}',
+      longBeat: 'show("Good.")\nwait(1)\nshow("3")\nwait(3)',
+      number: 'show("Good.")\nwait(1)\nshow(3)\nwait(1)',
+      animation: 'show("Good.")\nwait(1)\nshow("Wait.")\nwait(1)\nshow("Wait..")\nwait(1)',
       media:
         'def image = { show("Good."); wait(1); return "test.jpg" }\nshowButton("Start")\nsetImage(image())\nshow("Hold.")\nwait(20)',
       askThenText:

@@ -57,4 +57,29 @@ say "Pause", instant
 wait 1
 wait 2
 say "Done."
+
+// A beat keeps its timing whatever its wait, a number is a count too, and an animation keeps its timing; a text whose
+// replaced reading time a beat would cut keeps its legacy wait.
+say "Get ready.", instant
+wait 1
+say "10", instant
+wait 3
+say 5, instant
+wait 1
+say "Good.", instant
+wait 1
+let line = say "Wait.", instant
+wait 1
+line.text += "."
+wait 1
+line.text += "."
+wait 1
+// The last paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
+left = 3
+while left > 0 {
+  say "Starting soon."
+  say "Starting in ${left}", instant
+  wait 1
+  left -= 1
+}
 exit
