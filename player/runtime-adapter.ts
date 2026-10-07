@@ -1677,9 +1677,15 @@ function applyOperation(
   operation: RuntimeSessionResult & { readonly outcome: { readonly kind: string } },
   continueOn: string | null,
 ): PlayerRuntimeSession {
-  const next = appendRuntimeEvents(session, operation.events);
   if (operation.outcome.kind !== continueOn)
-    return publish(next, !REFUSALS.has(operation.outcome.kind));
+    return publish(
+      appendRuntimeEvents(session, operation.events),
+      !REFUSALS.has(operation.outcome.kind),
+    );
+  // The operation's events are presented as they stood before the continuation, but only once it ran: when it throws,
+  // the session goes on from the publication before the operation, which never showed them.
+  const presentation =
+    operation.events.length === 0 ? null : session.engine.temporalPresentation(session);
   // The continuation runs on the same engine-owned state before anything publishes. It returns at once when nothing is
   // runnable.
   const continuation = session.engine.call(
@@ -1689,6 +1695,7 @@ function applyOperation(
     (runtime) => runtime.run(traceOptions(session.debugTrace)),
     true,
   );
+  const next = appendRuntimeEvents(session, operation.events, presentation);
   return publish(appendRuntimeEvents(next, continuation.events));
 }
 
@@ -1867,6 +1874,7 @@ function appendTranscript(
 function appendRuntimeEvents(
   session: PlayerRuntimeSession,
   events: readonly InterpreterEvent[],
+  presentation: PresentationSettings | null = null,
 ): PlayerRuntimeSession {
   if (events.length === 0) return Object.freeze(session);
   // EVIDENCE: emptySession creates an unfrozen adapter-owned speaker accumulator for every session.
@@ -1883,7 +1891,7 @@ function appendRuntimeEvents(
     messageRows,
     speakers,
     events,
-    session.engine.temporalPresentation(session),
+    presentation ?? session.engine.temporalPresentation(session),
   );
   return Object.freeze({
     ...session,
