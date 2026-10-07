@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import { Maximize, Minimize, Moon, Sun } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import Popover from "@/components/ui/popover/Popover.vue";
-import PopoverContent from "@/components/ui/popover/PopoverContent.vue";
-import PopoverTrigger from "@/components/ui/popover/PopoverTrigger.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -38,10 +35,11 @@ function cancelHide() {
   hideTimer = undefined;
 }
 
-// A title cut off by the bar's width opens in full from its pill; otherwise the pill is plain text.
+// A title cut off by the bar's width shows in full in the bar's tooltip, also on a tap; otherwise the pill is plain text.
 const titleText = ref<HTMLElement | null>(null);
 const truncated = ref(false);
 const fullTitleOpen = ref(false);
+const fullTitle = computed(() => (props.title && props.author ? `${props.title} by ${props.author}` : props.title || `by ${props.author}`));
 // Below the bar width that hides the title visually, it stays plain text for assistive technology, never a control.
 function measureTitle() {
   const text = titleText.value;
@@ -64,6 +62,15 @@ watch(truncated, (cut) => {
 function changeFullTitle(open: boolean) {
   fullTitleOpen.value = open;
   if (!open) hideLater();
+}
+// Touch has no hover, and the trigger's own press closes the tooltip: a tap toggles it from how it was before the press.
+let tapOpens: boolean | null = null;
+function pressFullTitle(event: PointerEvent) {
+  tapOpens = event.pointerType === "touch" ? !fullTitleOpen.value : null;
+}
+function tapFullTitle() {
+  if (tapOpens !== null) changeFullTitle(tapOpens);
+  tapOpens = null;
 }
 
 function hideLater() {
@@ -113,14 +120,13 @@ onBeforeUnmount(cancelHide);
   >
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
     <h1 class="player-top-bar-title">
-      <Popover v-if="truncated" :open="fullTitleOpen" @update:open="changeFullTitle">
-        <PopoverTrigger as-child>
-          <button type="button" data-player-title-full><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
-        </PopoverTrigger>
-        <PopoverContent align="start" class="w-auto max-w-[calc(100vw-2rem)] p-3 text-sm wrap-anywhere" data-player-title-popover>
-          {{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span>
-        </PopoverContent>
-      </Popover>
+      <Tooltip v-if="truncated" :open="fullTitleOpen" @update:open="changeFullTitle">
+        <TooltipTrigger as-child>
+          <button type="button" data-player-title-full @pointerdown.capture="pressFullTitle" @click="tapFullTitle"><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
+        </TooltipTrigger>
+        <!-- A long title wraps within the screen, also one without spaces. -->
+        <TooltipContent :collision-padding="8" class="max-w-(--reka-tooltip-content-available-width) wrap-anywhere" data-player-title-tooltip>{{ fullTitle }}</TooltipContent>
+      </Tooltip>
       <span v-else-if="title || author"><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></span>
     </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
