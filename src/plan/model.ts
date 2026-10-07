@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 69;
+export const INSTRUCTION_PLAN_VERSION = 70;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -890,6 +890,7 @@ export type ExpressionPlan =
   | LiteralExpressionPlan
   | DurationExpressionPlan
   | IdentifierExpressionPlan
+  | DebugModeExpressionPlan
   | ListExpressionPlan
   | ObjectExpressionPlan
   | SetExpressionPlan
@@ -931,6 +932,11 @@ export interface DurationExpressionPlan extends ExpressionPlanBase {
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {
   readonly kind: "identifier";
   readonly name: string;
+}
+
+/** A read of the protected `debugMode`: the session's current Debug state, which the host sets (`setDebugMode`). */
+export interface DebugModeExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "debugMode";
 }
 
 export interface TemporaryExpressionPlan extends ExpressionPlanBase {

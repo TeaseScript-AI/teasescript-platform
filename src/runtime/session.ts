@@ -41,6 +41,7 @@ import {
   recordValidatedContinueCapture,
   type ContinueCaptureOutcome,
 } from "./operations/continue-capture.js";
+import { setValidatedDebugMode, type DebugModeOutcome } from "./operations/debug-mode.js";
 import { reportValidatedMediaLoad, type MediaReportOutcome } from "./operations/media-reports.js";
 import {
   pressValidatedPermanentButton,
@@ -115,6 +116,8 @@ export interface RuntimeSessionView {
   readonly cameraView: RuntimeCameraViewSnapshot | null;
   /** How many timer, media, and button blocks are queued to run. */
   readonly queuedBlocks: number;
+  /** What the protected `debugMode` reads now. */
+  readonly debugMode: boolean;
 }
 
 /** One active call, as a debugger shows it, without its variables or arguments. */
@@ -290,6 +293,17 @@ export class RuntimeSession {
     );
   }
 
+  public setDebugMode(
+    enabled: unknown,
+    options: TraceOptions = {},
+  ): RuntimeSessionOutcomeResult<DebugModeOutcome> {
+    return this.#operate(
+      () => traceOptions(options),
+      (state, checked) => setValidatedDebugMode(this.#plan, state, enabled, checked),
+      settled,
+    );
+  }
+
   public view(): RuntimeSessionView {
     return this.#read((state) =>
       published({
@@ -304,6 +318,7 @@ export class RuntimeSession {
         suspendedAction: interruptFrame(state)?.timerInterruption?.suspendedAction ?? null,
         cameraView: state.cameraView,
         queuedBlocks: state.pendingTimerHandlers.length,
+        debugMode: state.debugMode,
       }),
     );
   }
