@@ -126,7 +126,8 @@ function listFunctionType(
       if (percentile) {
         const share = positionalArguments(call)[1]!;
         const value = known(share);
-        if (!isAssignable(NUMBER_TYPE, context.typeOf(share)))
+        // A percentage that may be null has been reported already; its other members are checked here.
+        if (!isAssignable(NUMBER_TYPE, forUse(context.typeOf(share))))
           problem(
             context,
             `${name}(...) needs a number as its percentage, not ${describeValue(forUse(context.typeOf(share)))}.`,
@@ -224,7 +225,7 @@ function valuesType(
   );
   if (property === undefined) return element;
   const propertyType = typeOf(property);
-  if (!isAssignable(STRING_TYPE, propertyType)) {
+  if (!isAssignable(STRING_TYPE, forUse(propertyType))) {
     problem(
       context,
       `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(forUse(propertyType))}.`,
@@ -234,7 +235,7 @@ function valuesType(
   }
   const key = staticVisibleText(property);
   const found: StaticType[] = [];
-  for (const member of members(nonNullType(element)).map(resolved)) {
+  for (const member of members(element).map(resolved)) {
     if (!isKnown(member)) return UNKNOWN_TYPE;
     if (member.kind !== "object") {
       problem(
@@ -261,7 +262,7 @@ function valuesType(
 
 /**
  * The kind of values of `type`, one of `allowed` (where `number` also allows `integer`), or `undefined` when the
- * compiler cannot tell or has reported a problem. A possibly null value is checked by its other members (V30 §34).
+ * compiler cannot tell or has reported a problem. A value that may be null is a problem: the function reads every value.
  */
 function valueKind(
   context: Context,
@@ -269,7 +270,7 @@ function valueKind(
   allowed: readonly ValueKind[],
   at: Expression,
 ): ValueKind | undefined {
-  const parts = members(nonNullType(type)).map(resolved);
+  const parts = members(type).map(resolved);
   if (parts.length === 0 || !parts.every(isKnown)) return undefined;
   const kinds = new Set<ValueKind>();
   for (const part of parts) {
@@ -327,6 +328,17 @@ function predictType(context: Context): StaticType {
     object.kind === "object" ? (object.properties?.get(key) ?? undefined) : undefined;
   const intercept = property("intercept");
   const start = property("start");
+  const fields = [property("slope"), intercept, start];
+  if (
+    fields.some((field) => field !== undefined && members(field).some((one) => one.kind === "null"))
+  ) {
+    problem(
+      context,
+      `${name}(...) needs a line from linearRegression(...), whose slope, intercept, and start are never null.`,
+      line,
+    );
+    return UNKNOWN_TYPE;
+  }
   if (
     object.kind !== "object" ||
     (object.properties !== null &&

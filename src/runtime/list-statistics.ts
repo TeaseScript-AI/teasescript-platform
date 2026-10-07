@@ -195,19 +195,30 @@ function percentage(value: SerializableRuntimeValue, span: SourceSpan): number {
   return value;
 }
 
-/** A statistic of numbers in list order, which fixes the rounding of every sum. */
+/**
+ * A statistic of numbers in list order, which fixes the rounding of every sum. The numbers are first divided by a power
+ * of 2 that brings the largest within 2, which is exact, so the sums cannot overflow and tiny differences keep their
+ * precision; the result is multiplied back. Where nothing overflows, the result is the same as without the scaling.
+ */
 function statistic(name: string, values: readonly number[], share: number): number {
-  const total = (items: readonly number[]): number => items.reduce((sum, item) => sum + item, 0);
+  const exponent = scaleExponent(values);
+  const scaled = values.map((value) => timesPowerOfTwo(value, -exponent));
+  const back = (value: number): number => timesPowerOfTwo(value, exponent);
   switch (name) {
     case "sum":
-      return total(values);
+      return back(total(scaled));
     case "average":
-      return total(values) / values.length;
+      return back(total(scaled) / scaled.length);
     case "stddev": {
-      // The sample standard deviation, from the squared distances to the average.
-      const average = total(values) / values.length;
-      return Math.sqrt(
-        total(values.map((value) => (value - average) * (value - average))) / (values.length - 1),
+      // The sample standard deviation. The sum of the distances to the rounded average corrects the squared distances
+      // for the rounding of the average (the corrected two-pass algorithm), and equal values have none.
+      if (values.every((value) => value === values[0])) return 0;
+      const average = total(scaled) / scaled.length;
+      const distances = scaled.map((value) => value - average);
+      const drift = total(distances);
+      const squares = total(distances.map((distance) => distance * distance));
+      return back(
+        Math.sqrt(Math.max(0, squares - (drift * drift) / scaled.length) / (scaled.length - 1)),
       );
     }
     default: {
@@ -215,25 +226,96 @@ function statistic(name: string, values: readonly number[], share: number): numb
       // share of the way that the rank p/100 × (n - 1) passes the lower one. The rank stays scaled by 100 until the
       // last step, so that a whole percentage gives its fraction with one rounding: the 90th of 8 values is 6.3.
       const sorted = [...values].sort((left, right) => left - right);
-      const scaled = (name === "median" ? 50 : share) * (sorted.length - 1);
-      const lower = Math.floor(scaled / 100);
-      const fraction = (scaled - lower * 100) / 100;
+      const rank = (name === "median" ? 50 : share) * (sorted.length - 1);
+      const lower = Math.floor(rank / 100);
+      const fraction = (rank - lower * 100) / 100;
       const low = sorted[lower]!;
       if (fraction === 0) return low;
       const high = sorted[lower + 1]!;
-      // Halving is exact, so the middle of two values cannot overflow where their sum would.
-      return fraction === 0.5 ? low / 2 + high / 2 : low + fraction * (high - low);
+      if (low === high) return low;
+      // Between two values scaled like the others, so their difference and middle cannot overflow or vanish.
+      const ends = scaleExponent([low, high]);
+      const [from, to] = [timesPowerOfTwo(low, -ends), timesPowerOfTwo(high, -ends)];
+      return timesPowerOfTwo(
+        fraction === 0.5 ? (from + to) / 2 : from + fraction * (to - from),
+        ends,
+      );
     }
   }
 }
 
-/** The x positions of points: steps from the first point, or days from it for date and time values. */
+function total(items: readonly number[]): number {
+  let sum = 0;
+  for (const item of items) sum += item;
+  return sum;
+}
+
+const TWO_32 = 4294967296;
+
+/**
+ * The exponent of a power of 2 that brings the largest magnitude of `values` to at least 1 and below 2, or 0 when every
+ * value is 0.
+ */
+function scaleExponent(values: readonly number[]): number {
+  let largest = 0;
+  for (const value of values) largest = Math.max(largest, Math.abs(value));
+  if (largest === 0) return 0;
+  let exponent = 0;
+  while (largest >= TWO_32) {
+    largest /= TWO_32;
+    exponent += 32;
+  }
+  while (largest < 1 / TWO_32) {
+    largest *= TWO_32;
+    exponent -= 32;
+  }
+  while (largest >= 2) {
+    largest /= 2;
+    exponent += 1;
+  }
+  while (largest < 1) {
+    largest *= 2;
+    exponent -= 1;
+  }
+  return exponent;
+}
+
+/** `value` × 2^`exponent`, exact while the result is a normal double; a subnormal result is rounded once. */
+function timesPowerOfTwo(value: number, exponent: number): number {
+  // The factor 2^exponent is a double from 2^-1074 through 2^1023; beyond, the first of two steps is exact.
+  if (exponent > 1023) return value * powerOfTwo(exponent - 1023) * powerOfTwo(1023);
+  if (exponent < -1074) return value * powerOfTwo(exponent + 1074) * powerOfTwo(-1074);
+  return value * powerOfTwo(exponent);
+}
+
+/** 2^`exponent` for an exponent from -1074 through 1023, by squaring, every step a power of 2 within range. */
+function powerOfTwo(exponent: number): number {
+  let result = 1;
+  let factor = exponent < 0 ? 0.5 : 2;
+  for (let remaining = Math.abs(exponent); remaining > 0;) {
+    if (remaining % 2 === 1) result *= factor;
+    remaining = Math.floor(remaining / 2);
+    if (remaining > 0) factor *= factor;
+  }
+  return result;
+}
+
+/**
+ * The x positions of points: steps from the first point, or days from it for date and time values, as `offsets` × 2^
+ * `exponent`, so that offsets of numbers spread across the whole range stay finite.
+ */
 type Positions =
-  | { readonly kind: "steps"; readonly start: number; readonly offsets: readonly number[] }
+  | {
+      readonly kind: "steps";
+      readonly start: number;
+      readonly offsets: readonly number[];
+      readonly exponent: number;
+    }
   | {
       readonly kind: "days";
       readonly start: SerializableRuntimeTemporal;
       readonly offsets: readonly number[];
+      readonly exponent: number;
     };
 
 /**
@@ -278,27 +360,17 @@ export function linearRegression(
   const amounts = amountsOf(name, ys, true, span);
   const values =
     amounts.kind === "numbers" ? amounts.values : amounts.values.map((parts) => parts.milliseconds);
-  const count = values.length;
-  const sum = (items: readonly number[]): number => items.reduce((total, item) => total + item, 0);
-  const meanX = sum(positions.offsets) / count;
-  const meanY = sum(values) / count;
-  const dx = positions.offsets.map((offset) => offset - meanX);
-  const dy = values.map((value) => value - meanY);
-  const sxx = sum(dx.map((value) => value * value));
-  const sxy = sum(dx.map((value, index) => value * dy[index]!));
-  const syy = sum(dy.map((value) => value * value));
-  if (sxx === 0)
+  if (positions.offsets.every((offset) => offset === 0))
     throw fault(
       "TSR036",
       `${name}(...) has no result: every point has the same x, so no line fits.`,
       span,
     );
-  const slope = sxy / sxx;
-  // The line's value at the first point, whose offset is 0.
-  const intercept = meanY - slope * meanX;
-  // Every y the same is a horizontal line that fits exactly.
-  const r2 = syy === 0 ? 1 : Math.min(1, Math.max(0, (sxy / sxx) * (sxy / syy)));
-  if (![slope, intercept, r2].every(Number.isFinite))
+  const line = values.every((value) => value === values[0])
+    ? // Every y the same is a horizontal line that fits exactly.
+      { slope: 0, intercept: values[0]!, r2: 1 }
+    : leastSquares(positions.offsets, positions.exponent, values);
+  if (![line.slope, line.intercept].every(Number.isFinite))
     throw fault("TSR036", `${name}(...) gives a number too large to represent.`, span);
   const amount = (value: number): SerializableRuntimeValue =>
     amounts.kind === "numbers"
@@ -306,6 +378,7 @@ export function linearRegression(
         ? 0
         : value
       : storedDuration({ months: 0, days: 0, milliseconds: value });
+  const { slope, intercept, r2 } = line;
   return createSerializableObject([
     { name: "slope", value: amount(slope) },
     { name: "intercept", value: amount(intercept) },
@@ -317,6 +390,40 @@ export function linearRegression(
   ]);
 }
 
+/**
+ * The line through points (offset × 2^`exponent`, value) that comes closest by least squares, with its value at offset
+ * 0. Offsets and values are scaled by powers of 2 to within 2 first, which is exact, so no sum or product overflows or
+ * vanishes, and the sums of distances to the rounded averages correct the sums of products (the corrected two-pass
+ * algorithm). Where nothing overflows, the scaling does not change the result.
+ */
+function leastSquares(
+  offsets: readonly number[],
+  offsetExponent: number,
+  values: readonly number[],
+): { readonly slope: number; readonly intercept: number; readonly r2: number } {
+  const xExponent = scaleExponent(offsets);
+  const yExponent = scaleExponent(values);
+  const xs = offsets.map((offset) => timesPowerOfTwo(offset, -xExponent));
+  const ys = values.map((value) => timesPowerOfTwo(value, -yExponent));
+  const count = xs.length;
+  const meanX = total(xs) / count;
+  const meanY = total(ys) / count;
+  const dx = xs.map((x) => x - meanX);
+  const dy = ys.map((y) => y - meanY);
+  const driftX = total(dx);
+  const driftY = total(dy);
+  const sxx = total(dx.map((value) => value * value)) - (driftX * driftX) / count;
+  const sxy = total(dx.map((value, index) => value * dy[index]!)) - (driftX * driftY) / count;
+  const syy = total(dy.map((value) => value * value)) - (driftY * driftY) / count;
+  const slope = sxy / sxx;
+  return {
+    slope: timesPowerOfTwo(slope, yExponent - xExponent - offsetExponent),
+    // The line's value at the first point, whose offset is 0.
+    intercept: timesPowerOfTwo(meanY - slope * meanX, yExponent),
+    r2: syy <= 0 ? 1 : Math.min(1, Math.max(0, (sxy / sxx) * (sxy / syy))),
+  };
+}
+
 /** The x positions of `count` points: their indexes, or the values in `xs`, numbers or one kind of date and time. */
 function positionsOf(
   xs: readonly SerializableRuntimeValue[] | undefined,
@@ -324,14 +431,23 @@ function positionsOf(
   span: SourceSpan,
 ): Positions {
   if (xs === undefined)
-    return { kind: "steps", start: 0, offsets: Array.from({ length: count }, (_, index) => index) };
+    return {
+      kind: "steps",
+      start: 0,
+      offsets: Array.from({ length: count }, (_, index) => index),
+      exponent: 0,
+    };
   const numbers = xs.filter((x) => typeof x === "number");
   if (numbers.length === xs.length) {
-    const start = numbers[0]!;
-    const offsets = numbers.map((x) => x - start);
-    if (!offsets.every(Number.isFinite))
-      throw fault("TSR036", "linearRegression(...) gives a number too large to represent.", span);
-    return { kind: "steps", start, offsets };
+    // Scaled first, so that the offset between the smallest and the largest number cannot overflow.
+    const exponent = scaleExponent(numbers);
+    const scaled = numbers.map((x) => timesPowerOfTwo(x, -exponent));
+    return {
+      kind: "steps",
+      start: numbers[0]!,
+      offsets: scaled.map((x) => x - scaled[0]!),
+      exponent,
+    };
   }
   const first = xs[0]!;
   const temporals = xs.filter(
@@ -351,7 +467,7 @@ function positionsOf(
       span,
     );
   }
-  return { kind: "days", start, offsets: temporals.map((x) => daysFrom(start, x)) };
+  return { kind: "days", start, offsets: temporals.map((x) => daysFrom(start, x)), exponent: 0 };
 }
 
 /** The days from `start` to `value`, both dates, datetimes, or timestamps; a time of day is a fraction of a day. */
@@ -409,17 +525,28 @@ export function predict(
       `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeRuntimeValue(line)}.`,
       span,
     );
-  let offset: number | undefined;
-  if (typeof start === "number") offset = typeof x === "number" ? x - start : undefined;
-  else if (start !== undefined && isTemporal(start) && isTemporal(x) && x.kind === start.kind)
-    offset = daysFrom(start, x);
-  if (offset === undefined)
+  // A horizontal line has its intercept everywhere. Two numbers more than the largest double apart are halved first,
+  // which is exact, so that a finite prediction does not fail on their distance.
+  let change: number | undefined;
+  if (typeof start === "number") {
+    if (typeof x === "number") {
+      const offset = x - start;
+      change =
+        slopeAmount === 0
+          ? 0
+          : Number.isFinite(offset)
+            ? slopeAmount * offset
+            : 2 * (slopeAmount * (x / 2 - start / 2));
+    }
+  } else if (start !== undefined && isTemporal(start) && isTemporal(x) && x.kind === start.kind)
+    change = slopeAmount === 0 ? 0 : slopeAmount * daysFrom(start, x);
+  if (change === undefined)
     throw fault(
       "TSR059",
       `predict(...) needs ${startKind === "number" ? "a number" : startKind === "datetime" ? "a date and time" : `a ${startKind}`} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
       span,
     );
-  const value = interceptAmount + slopeAmount * offset;
+  const value = interceptAmount + change;
   if (!Number.isFinite(value))
     throw fault("TSR036", "predict(...) gives a number too large to represent.", span);
   return durations
@@ -476,29 +603,25 @@ export function weightedChoices(
   });
   if (!numbers.some((weight) => weight > 0))
     throw fault("TSR039", `${name}(...) needs at least one weight above 0.`, span);
-  if (!Number.isFinite(numbers.reduce((total, weight) => total + weight, 0)))
-    throw fault(
-      "TSR036",
-      `${name}(...) has weights that add up to a number too large to represent.`,
-      span,
-    );
   return { choices, weights: numbers };
 }
 
 /**
- * The index a draw in [0, 1) chooses: each choice has a share of the total weight, in order. Rounding can put the
- * scaled draw at the total itself, which chooses the last choice with weight.
+ * The index a draw in [0, 1) chooses: each choice has a share of the total weight, in order. The weights are scaled by
+ * a power of 2 that brings the largest within 2, which is exact, so that their total neither overflows nor vanishes and
+ * only their proportions count. Rounding can put the scaled draw at the total itself, which chooses the last choice
+ * with weight.
  */
 export function weightedIndex(weights: readonly number[], draw: number): number {
-  let total = 0;
-  for (const weight of weights) total += weight;
-  const target = draw * total;
+  const exponent = scaleExponent(weights);
+  const scaled = weights.map((weight) => timesPowerOfTwo(weight, -exponent));
+  const target = draw * total(scaled);
   let reached = 0;
   let last = 0;
-  for (let index = 0; index < weights.length; index += 1) {
+  for (let index = 0; index < scaled.length; index += 1) {
     if (weights[index]! === 0) continue;
     last = index;
-    reached += weights[index]!;
+    reached += scaled[index]!;
     if (target < reached) return index;
   }
   return last;

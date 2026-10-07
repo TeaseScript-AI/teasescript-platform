@@ -160,6 +160,54 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     assert.deepEqual(failure(`${DYNAMIC}say ${call}\nexit`), [code, message], call);
 });
 
+test("statistics and trends keep their precision for equal, close, tiny, and huge values", () => {
+  assert.deepEqual(
+    said(
+      [
+        // Equal values have no spread, also when their rounded average differs from them.
+        'say "${linearRegression([0.1, 0.1, 0.1]).r2} ${stddev([0.1, 0.1, 0.1])} ${stddev([10000000000000000, 10000000000000002])}"',
+        'say "${stddev([0, 1e-200])} ${average([1e308, 1e308])} ${percentile([-1e308, 1e308], 25)} ${median([5e-324, 5e-324])}"',
+        'say linearRegression([{ x: 0, y: 0 }, { x: 1e200, y: 1 }], x: "x", y: "y")',
+        'say "${linearRegression([0, 1e200]).r2}"',
+        // A horizontal line predicts its value even where the distance to its start overflows.
+        'let level = linearRegression([{ x: -1e308, y: 1 }, { x: -1e308 + 1e292, y: 1 }], x: "x", y: "y")',
+        'say "${predict(level, 1e308)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      "1 0 1.4142135623730951",
+      "7.071067811865475e-201 1e+308 -5e+307 5e-324",
+      "{ slope: 1e-200, intercept: 0, r2: 1, start: 0 }",
+      "1",
+      "1",
+    ],
+  );
+});
+
+test("possibly null lists and values of list functions need a check first", () => {
+  assert.deepEqual(
+    diagnostics(
+      [
+        "function measure(samples: integer[]?, share: number?) {",
+        "    let result: integer = sum(samples)",
+        "    say percentile([1, 2], share)",
+        "    return result",
+        "}",
+        "say measure(null, null)",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV043", "'samples' may be null. Check it first: if samples != null { ... }", "samples"],
+      ["TSV043", "'share' may be null. Check it first: if share != null { ... }", "share"],
+    ],
+  );
+  assert.deepEqual(diagnostics("let samples: integer?[] = [1, null]\nsay sum(samples)\nexit"), [
+    ["TSV043", "sum(...) needs numbers or durations, not null.", "samples"],
+  ]);
+});
+
 test("take and takeLast return a new list of the first or last elements", () => {
   assert.deepEqual(
     said(
@@ -309,6 +357,13 @@ test("randomWeighted chooses with one draw of the session generator, in proporti
     assert.equal(chosen, draw! * 4 < 3 ? "a" : "c", `seed ${seed}`);
     // One draw only: the next random() is the generator's second number.
     assert.equal(Number(after), next, `seed ${seed}`);
+  }
+  // Only the proportions of the weights count, not their size.
+  for (const seed of [5000, 123456789, 987654321, 2654435761]) {
+    const chosen = ["5e-324", "1", "1e308"].map(
+      (weight) => said(`say randomWeighted(dict{ "a": ${weight}, "b": ${weight} })\nexit`, seed)[0],
+    );
+    assert.deepEqual(new Set(chosen).size, 1, `seed ${seed}: ${chosen.join(", ")}`);
   }
   // A list of objects gives a copy of the chosen element.
   assert.deepEqual(

@@ -4648,6 +4648,13 @@ class TypeChecker {
         (member) => !isKnown(member) || resolved(member).kind === "list",
       );
     if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list)) {
+      // An argument that may be null names the check first (ADR 0021 rule 1.9); the checks below use its other members.
+      expression.arguments.forEach((item, index) => {
+        const all = members(values[index]!);
+        const passing = all.filter((member) => member.kind !== "null");
+        if (passing.length > 0 && passing.length < all.length)
+          this.#reportMayBe(item.value, NULL_TYPE, passing);
+      });
       const check = listFunctionCheck(
         name,
         expression,
