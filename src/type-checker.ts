@@ -2866,6 +2866,7 @@ class TypeChecker {
         if (entry?.kind === "variable") return placeRead(this.#currentType(entry.variable));
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
+        if (expression.name === "debugMode") return BOOLEAN_TYPE;
         return UNKNOWN_TYPE;
       }
       case "listLiteral":

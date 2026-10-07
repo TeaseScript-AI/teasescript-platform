@@ -2929,6 +2929,9 @@ function assembleExpression(
             span: copySpan(expression.span),
           };
     case "identifier":
+      // `debugMode` is protected, so no binding can have its name.
+      if (expression.name === "debugMode")
+        return { kind: "debugMode", span: copySpan(expression.span) };
       return { kind: "identifier", name: expression.name, span: copySpan(expression.span) };
     case "parenthesizedExpression":
       return child(expression.expression);

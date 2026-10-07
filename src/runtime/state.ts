@@ -112,7 +112,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 56;
+export const RUNTIME_SNAPSHOT_VERSION = 57;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -163,6 +163,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "cameraView",
   "nextPermanentButtonId",
   "liveMessages",
+  "debugMode",
   "maxCallDepth",
   "status",
   "failure",
@@ -452,6 +453,8 @@ export interface RuntimeSnapshot {
    * order. A public operation drops the messages no handle reaches anymore before it returns.
    */
   readonly liveMessages: RuntimeLiveMessageSnapshot[];
+  /** What the protected `debugMode` reads: whether the host runs the session in Debug. Only the host changes it. */
+  debugMode: boolean;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -467,6 +470,8 @@ export interface FreshRuntimeOptions {
    * session sees the change; otherwise storage is session-local.
    */
   readonly persistentScriptStorage?: boolean;
+  /** What the protected `debugMode` reads at first; `false` without one. `setDebugMode` changes it later. */
+  readonly debugMode?: boolean;
   readonly maxCallDepth?: number;
   readonly initialSessionTimeMs?: number;
   readonly baseDelayMs?: number;
@@ -566,6 +571,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   if (typeof persistentScriptStorage !== "boolean") {
     throw new TypeError("persistentScriptStorage must be a boolean.");
   }
+  const debugMode = capturedOptions.debugMode === undefined ? false : capturedOptions.debugMode;
+  if (typeof debugMode !== "boolean") throw new TypeError("debugMode must be a boolean.");
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     if (scriptGlobals.has(name))
@@ -637,6 +644,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     cameraView: null,
     nextPermanentButtonId: 1,
     liveMessages: [],
+    debugMode,
     maxCallDepth,
     status: "ready",
     failure: null,
@@ -737,6 +745,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     cameraView: snapshot.cameraView === null ? null : { ...snapshot.cameraView },
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
     liveMessages: snapshot.liveMessages.map((message) => ({ ...message })),
+    debugMode: snapshot.debugMode,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -1296,6 +1305,7 @@ function validateCapturedRuntimeSnapshotDetails(
   if (typeof value.scriptStoragePersistent !== "boolean") {
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
+  if (typeof value.debugMode !== "boolean") errors.push("Runtime debugMode must be a boolean.");
   validateInteractionResultHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");

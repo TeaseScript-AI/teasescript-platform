@@ -1439,10 +1439,10 @@ function argumentKey(callFrameId: number, parameter: string): string {
 
 /**
  * Runtime state that values are read from besides variables: a speaker's properties, a timer, media, or permanent
- * button, the camera view, and the catalog of tagged photos.
+ * button, the camera view, the catalog of tagged photos, and `debugMode`.
  */
 export function stateKey(
-  kind: "speaker" | "timer" | "media" | "button" | "message" | "camera" | "photos",
+  kind: "speaker" | "timer" | "media" | "button" | "message" | "camera" | "photos" | "debugMode",
   id = 0,
 ): string {
   return `x${kind}:${id}`;
