@@ -14,7 +14,7 @@ import { innermostFileCallIndex } from "../activations.js";
 import { leaveScopes, sweepRetainedScopes } from "../captures.js";
 import { RuntimeFault } from "../errors.js";
 import type { Evaluator } from "../evaluator.js";
-import { nextXorShift32 } from "../random.js";
+import { drawFromSessionGenerator, sampleIndex } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
 import { cloneTransferDestination } from "../state.js";
 import { isScriptReference } from "../value-predicates.js";
@@ -230,13 +230,14 @@ function drawDestination(
   trace: TraceStore | null,
 ): PlanDestination {
   if (!("pick" in destination)) return destination;
-  const before = snapshot.rng.state;
+  const count = destination.pick.length;
   const picked =
-    destination.pick[Math.floor(nextXorShift32(snapshot.rng) * destination.pick.length)]!;
-  if (trace !== null) {
-    trace.random("glob", null, destination.pick.length, null, before, snapshot.rng.state);
-    trace.randomResult(plan.files[picked.file]!.path);
-  }
+    destination.pick[
+      drawFromSessionGenerator(snapshot.rng, trace, "glob", null, count, null, (draw) =>
+        sampleIndex(draw, count),
+      )
+    ]!;
+  trace?.randomResult(plan.files[picked.file]!.path);
   return picked;
 }
 

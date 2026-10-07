@@ -8,7 +8,7 @@ import type {
 } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
-import { nextXorShift32 } from "../random.js";
+import { drawFromSessionGenerator, sampleRangeInteger } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
 import {
@@ -223,19 +223,16 @@ function drawWholeSeconds(
   trace: TraceStore | null,
 ): number {
   const length = range.end - range.start + (range.inclusive ? 1 : 0);
-  const before = snapshot.rng.state;
-  const seconds = range.start + Math.floor(nextXorShift32(snapshot.rng) * length);
-  if (trace !== null) {
-    trace.random(
-      "timerRepeat",
-      null,
-      length,
-      { kind: "range", ...range },
-      before,
-      snapshot.rng.state,
-    );
-    trace.randomResult(seconds);
-  }
+  const seconds = drawFromSessionGenerator(
+    snapshot.rng,
+    trace,
+    "timerRepeat",
+    null,
+    length,
+    { kind: "range", ...range },
+    (draw) => sampleRangeInteger(draw, range, length),
+  );
+  trace?.randomResult(seconds);
   return seconds;
 }
 
