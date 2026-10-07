@@ -114,7 +114,12 @@ import {
   stringLength,
 } from "./string-operations.js";
 import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
-import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
+import {
+  LOAD_KEY_MESSAGE,
+  findScriptStorageEntry,
+  storageKey,
+  storageKeyPlace,
+} from "./script-storage.js";
 import {
   addSerializableSetValue,
   clearSerializableSet,
@@ -1072,6 +1077,16 @@ export class Evaluator {
             continue;
           }
           value = result.value;
+          // The default takes the place of the stored value, so it fits the load's type, or is null.
+          if (expression.type !== null)
+            assertValueType(
+              value,
+              {
+                type: { kind: "union", members: [expression.type, { kind: "null" }] },
+                place: storageKeyPlace(frame.key!),
+              },
+              expression.default!.span,
+            );
           trace?.load(frame.key!, false, true, value, expression.span);
           break;
       }

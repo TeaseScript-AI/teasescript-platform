@@ -577,7 +577,7 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["jump", "target"],
   ["loopStart", "loopKind", "loopId", "expression", "continueTarget", "target"],
   ["loopControl", "action", "loopId", "target"],
-  ["storeTemporary", "temporaryId", "value", "expectBoolean"],
+  ["storeTemporary", "temporaryId", "value", "expectBoolean", "typeCheck"],
   ["clearTemporary", "temporaryId"],
   ["clearTemporaries", "temporaryIds"],
   ["callFunction", "functionId", "arguments", "destinationTemporary", "returnInstruction"],
@@ -776,6 +776,7 @@ function validateInstruction(
           ),
         );
       }
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "prepareSaySpeaker":
       if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {

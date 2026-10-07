@@ -19,6 +19,8 @@ export interface StorageKeyType {
   readonly at: SourceSpan;
   /** Whether a load declares the type, by the variable it starts or is assigned to. */
   readonly declared: boolean;
+  /** The type of each load without a declared type, in checking order, which the later ones must agree with. */
+  readonly loads: readonly { readonly type: StaticType; readonly at: SourceSpan }[];
 }
 
 /** A load of a storage key written as a string literal, with the type it reads the stored value as, without `null`. */
@@ -38,50 +40,57 @@ export interface StorageLoad {
  * types reports it.
  */
 export function storageKeyTypes(loads: readonly StorageLoad[]): Map<string, StorageKeyType> {
-  const keys = new Map<string, { type: StaticType; at: SourceSpan; declared: boolean }>();
+  const keys = new Map<
+    string,
+    {
+      type: StaticType;
+      at: SourceSpan;
+      declared: boolean;
+      loads: { readonly type: StaticType; readonly at: SourceSpan }[];
+    }
+  >();
   for (const load of loads) {
     const kept = keys.get(load.key);
     if (load.declared) {
-      if (kept?.declared !== true)
-        keys.set(load.key, { type: detachedType(load.type), at: load.at, declared: true });
+      if (kept === undefined)
+        keys.set(load.key, {
+          type: detachedType(load.type),
+          at: load.at,
+          declared: true,
+          loads: [],
+        });
+      else if (!kept.declared)
+        Object.assign(kept, { type: detachedType(load.type), at: load.at, declared: true });
       continue;
     }
     if (kept === undefined) {
-      keys.set(load.key, { type: detachedType(load.type), at: load.at, declared: false });
+      const type = detachedType(load.type);
+      keys.set(load.key, { type, at: load.at, declared: false, loads: [{ type, at: load.at }] });
       continue;
     }
+    kept.loads.push({ type: detachedType(load.type), at: load.at });
     if (kept.declared) continue;
     const narrower = isAssignable(kept.type, load.type);
     const wider = isAssignable(load.type, kept.type);
     if (narrower && wider) settle(kept.type, detachedType(load.type), load.at);
-    else if (narrower)
-      keys.set(load.key, { type: detachedType(load.type), at: load.at, declared: false });
+    else if (narrower) Object.assign(kept, { type: detachedType(load.type), at: load.at });
   }
   return keys;
 }
 
 /**
  * A copy of a type that shares nothing with the places of a check: still undecided parts are new open slots, and
- * numbers derive from no variable. A key keeps it from one check to the next, and each `load` reads a new copy, whose
- * undecided parts may hold any stored value: they are marked as holding a value the compiler cannot know at `loadedAt`.
+ * numbers derive from no variable. A key keeps it from one check to the next.
  */
-export function detachedType(type: StaticType, loadedAt?: SourceSpan): StaticType {
-  return runCompileTask(detachedTask(type, { loadedAt }));
+export function detachedType(type: StaticType): StaticType {
+  return runCompileTask(detachedTask(type));
 }
 
-function* detachedTask(
-  typeToDetach: StaticType,
-  options: { readonly loadedAt?: SourceSpan | undefined },
-): CompileTask<StaticType> {
-  const { loadedAt } = options;
+function* detachedTask(typeToDetach: StaticType): CompileTask<StaticType> {
   const type = resolved(typeToDetach);
   switch (type.kind) {
     case "open":
-      return {
-        ...openType(),
-        sawNull: type.sawNull,
-        ...(loadedAt === undefined ? {} : { heldUnknown: loadedAt }),
-      };
+      return { ...openType(), sawNull: type.sawNull };
     case "scalar":
       return type.values === undefined && type.origins === undefined
         ? type
@@ -89,18 +98,17 @@ function* detachedTask(
     case "list":
     case "set":
     case "dict":
-      return { kind: type.kind, element: yield* compileChild(detachedTask(type.element, options)) };
+      return { kind: type.kind, element: yield* compileChild(detachedTask(type.element)) };
     case "object": {
       if (type.properties === null) return type;
       const properties: PropertyTable = new Map();
       for (const [name, value] of type.properties)
-        properties.set(name, yield* compileChild(detachedTask(value, options)));
+        properties.set(name, yield* compileChild(detachedTask(value)));
       return { kind: "object", properties };
     }
     case "union": {
       const parts: StaticType[] = [];
-      for (const member of type.members)
-        parts.push(yield* compileChild(detachedTask(member, options)));
+      for (const member of type.members) parts.push(yield* compileChild(detachedTask(member)));
       return union(parts);
     }
     default:
@@ -120,7 +128,12 @@ export function sameStorageKeyTypes(
       other === undefined ||
       other.at !== kept.at ||
       other.declared !== kept.declared ||
-      !sameType(other.type, kept.type)
+      !sameType(other.type, kept.type) ||
+      other.loads.length !== kept.loads.length ||
+      other.loads.some(
+        (load, index) =>
+          load.at !== kept.loads[index]!.at || !sameType(load.type, kept.loads[index]!.type),
+      )
     )
       return false;
   }

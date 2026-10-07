@@ -829,9 +829,10 @@ test("a load the compiler cannot type is checked where its value is stored", () 
     const result = run(compiled, createFreshRuntimeSnapshot(compiled, { scriptStorage: storage }));
     return [result.snapshot.failure?.code, result.snapshot.failure?.message];
   };
+  // A load checks a default it cannot know against its own type before the variable takes it.
   assert.deepEqual(failure('let backup: number = load("missing", default: identity("backup"))'), [
     "TSR058",
-    "'backup' holds a number, so it cannot take text (string).",
+    'Storage key "missing" holds a number or null, so it cannot take text (string).',
   ]);
   assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k" + "", default: 0'), [
     "TSR058",

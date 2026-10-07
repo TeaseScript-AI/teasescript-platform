@@ -926,6 +926,8 @@ function executePlannedInstruction(
       if (instruction.expectBoolean && typeof value !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
       }
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
       setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       if (evaluator.trace !== null) {
         const copied =

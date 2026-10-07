@@ -3113,6 +3113,12 @@ class TypeChecker {
             );
         } else if (kept?.declared === true) {
           read = detachedType(kept.type);
+          // A default the compiler cannot know may be anything, also null; it is checked when the load uses it.
+          if (mayBeUnknown(fallback)) {
+            this.storageLoads.push({ key, type: read, at: expression.span, declared: false });
+            this.#runtimeChecks.push({ site: expression, place: read, label: storageLabel(key) });
+            return optional(read);
+          }
           if (givenKind !== "never" && !isAssignable(read, given))
             this.#report(
               typeCode.typeMismatch,
@@ -3132,15 +3138,17 @@ class TypeChecker {
           // A default of a type the compiler cannot know, or that no value decided yet, gives a value it cannot know.
           if (givenKind === "unknown" || givenKind === "open") return UNKNOWN_TYPE;
           read = given;
-          if (
-            kept !== undefined &&
-            !isAssignable(kept.type, read) &&
-            !isAssignable(read, kept.type)
-          ) {
-            const both = union([kept.type, read]);
+          // Each earlier load without a declared type accepts every value of this one, or this one of it.
+          const earlier = kept?.loads ?? [];
+          const position = earlier.findIndex((load) => load.at === expression.span);
+          const conflict = (position === -1 ? earlier : earlier.slice(0, position)).find(
+            (load) => !isAssignable(load.type, read) && !isAssignable(read, load.type),
+          );
+          if (conflict !== undefined) {
+            const both = union([conflict.type, read]);
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is loaded as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
+              `${storageLabel(key)} is loaded as ${describeValue(conflict.type)} on ${this.#line(conflict.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
               expression.span,
             );
           }
@@ -3155,8 +3163,9 @@ class TypeChecker {
         // A default the compiler cannot know is checked where a variable with a declared type takes it.
         if (mayBeUnknown(fallback)) return UNKNOWN_TYPE;
         if (own !== undefined) return own;
-        // A part that no value decided is checked by nothing when the script runs.
-        const type = detachedType(read, expression.span);
+        // A part that no value decided, such as the elements of `default: []`, is checked by nothing when the script
+        // runs, so it holds values the compiler cannot know, also after a later value decides the variable's part.
+        const type = decidedType(detachedType(read));
         return isNullable(fallback) ? optional(type) : type;
       }
       case "typeTestExpression":

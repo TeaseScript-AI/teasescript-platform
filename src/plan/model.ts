@@ -295,6 +295,8 @@ export interface StoreTemporaryInstruction extends InstructionBase {
   readonly temporaryId: number;
   readonly value: ExpressionPlan;
   readonly expectBoolean: boolean;
+  /** For the default of a `load` that runs instructions: the type the default must fit, as the load's result. */
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 /** Captures the resolved output speaker before later say operands run. */

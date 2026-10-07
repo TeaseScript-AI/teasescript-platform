@@ -2540,11 +2540,21 @@ export class InstructionCompiler {
     };
     this.instructions.push(conditionalInstruction);
     const lowered = yield* compileChild(this.#lowerExpressionTask(defaultValue));
+    // The default takes the place of the stored value, so it fits the load's type, or is null.
+    const check = this.typeChecks.get(expression);
     this.instructions.push({
       kind: "storeTemporary",
       temporaryId: resultTemporary,
       value: lowered.plan,
       expectBoolean: false,
+      ...(check === undefined
+        ? {}
+        : {
+            typeCheck: {
+              type: { kind: "union", members: [check.type, { kind: "null" }] },
+              place: check.place,
+            },
+          }),
       span: copySpan(defaultValue.span),
     });
     this.instructions[conditional] = {

@@ -452,3 +452,67 @@ test("plan validation rejects malformed storage types and load types", () => {
   const withoutType: unknown = JSON.parse(text.replace(',"type":{"kind":"integer"}', ""));
   assert.deepEqual(errorsOf(withoutType)[0]?.[0], "TSC002");
 });
+
+test("loaded parts that no type decided stay checked where they are used", () => {
+  // Regression (#690 review): a value added to a loaded empty list decided the type of the stored elements too.
+  for (const [fallback, element] of [
+    ["[]", "a[0]"],
+    ["set[]", "a.toList()[0]"],
+  ] as const) {
+    const compiled = plan(
+      `let a = load("k", default: ${fallback})\na.add(1)\nlet n: integer = ${element}\nexit`,
+    );
+    const stored = fallback === "[]" ? "list" : "set";
+    const result = run(
+      compiled,
+      createFreshRuntimeSnapshot(compiled, {
+        scriptStorage: [{ key: "k", value: { kind: stored, items: ["bad"] } }],
+      }),
+    );
+    assert.equal(result.snapshot.failure?.code, "TSR058", fallback);
+  }
+});
+
+test("a default the compiler cannot know takes the key's declared type and is checked", () => {
+  // Regression (#690 review): an unknown default dropped the type another load declares.
+  const source =
+    'function f(raw) {\n  let x = load("k", default: raw)\n  save x as "seen"\n}\nf("bad")\nlet declared: integer = load("k", default: 0)\nexit';
+  const compiled = plan(source);
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(
+    [result.snapshot.failure?.code, result.snapshot.failure?.message],
+    [
+      "TSR058",
+      'Storage key "k" holds a whole number (integer) or null, so it cannot take text (string).',
+    ],
+  );
+  assert.deepEqual(result.snapshot.scriptStorage, []);
+  assert.deepEqual(
+    codes(
+      'function f(raw) {\n  let x = load("k", default: raw)\n  x = true\n}\nlet declared: integer = load("k", default: 0)\nexit',
+    ),
+    ["TSV041"],
+  );
+  // The same check covers a default that waits.
+  const waiting = plan(
+    'function slow(raw) {\n  wait 1 ms\n  return raw\n}\nfunction f(raw) {\n  let x = load("k", default: slow(raw))\n}\nf("bad")\nlet declared: integer = load("k", default: 0)\nexit',
+  );
+  let snapshot = run(waiting, createImmediatePacingRuntimeSnapshot(waiting)).snapshot;
+  snapshot = run(waiting, observeTime(waiting, snapshot, 10).snapshot).snapshot;
+  assert.equal(snapshot.failure?.code, "TSR058");
+});
+
+test("every pair of loads without a declared type agrees, not only each with the narrowest", () => {
+  // Regression (#690 review): a narrower first load hid two unions that do not accept each other.
+  assert.deepEqual(
+    errors(
+      'let base = load("k", default: 0)\nfunction f(raw: integer | string) {\n  let a = load("k", default: raw)\n}\nfunction g(raw: integer | boolean) {\n  let b = load("k", default: raw)\n}\nexit',
+    ).map(([code, message]) => [code, message]),
+    [
+      [
+        "TSV041",
+        `Storage key "k" is loaded as a whole number (integer) or text (string) on line 3, so it cannot be loaded as a whole number (integer) or true or false (boolean) here. To allow both, declare its type at one load, as in 'let value: integer | string | boolean = load(...)'.`,
+      ],
+    ],
+  );
+});
