@@ -2291,7 +2291,8 @@ function withNestedStatements(
  * A loop that only redraws a countdown until `waited = getTimestamp().toSeconds() - start` reaches a limit kept the
  * legacy player busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
  * body that only shows text and sets its own locals before recomputing `waited`, it becomes a visible timer over the
- * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text.
+ * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text; a limit not above 0 runs no timer, as
+ * the loop did not run.
  */
 function withVisibleCountdowns(statements: IrStatement[], context: LowerContext): IrStatement[] {
   return statements.flatMap((statement, index): IrStatement[] => {
@@ -2328,9 +2329,35 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
       "The legacy loop redrew a countdown as fast as it could until the time was up; it became a visible timer over the same time, whose display replaces the redrawn text.",
       statement.span,
     );
+    const timer: IrStatement = {
+      kind: "wait",
+      duration: condition.right,
+      visible: true,
+      unit: "s",
+      span: statement.span,
+    };
+    // A limit already reached, such as a negative typed time, ran the legacy loop not once.
+    const limit = condition.right.kind === "literal" ? condition.right.value : null;
     return [
       ...diagnosticNotes(context, firstDiagnostic),
-      { kind: "wait", duration: condition.right, visible: true, unit: "s", span: statement.span },
+      ...(typeof limit === "number"
+        ? limit > 0
+          ? [timer]
+          : []
+        : [
+            {
+              kind: "if",
+              condition: {
+                kind: "binary",
+                operator: ">",
+                left: condition.right,
+                right: { kind: "literal", value: 0 },
+              },
+              then: [timer],
+              else: [],
+              span: statement.span,
+            } satisfies IrStatement,
+          ]),
     ];
   });
 }
