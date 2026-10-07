@@ -1,0 +1,15 @@
+let rules = say "Read [the rules](https://example.com/rules) first.", instant
+let counter = say "Strokes: 0", instant
+let index = 0
+repeat 40 {
+    index += 1
+    say "History line ${index}: some words so that the conversation scrolls.", instant
+}
+let grow = timer(duration: 5 s, async: true, display: "hidden") {
+    counter.text = "Strokes: 1\nThe counter grew by a line.\nAnd another one."
+}
+let gone = timer(duration: 14 s, async: true, display: "hidden") {
+    rules.text = "The rules are gone."
+}
+let answer = askText "Type anything to stop"
+exit
