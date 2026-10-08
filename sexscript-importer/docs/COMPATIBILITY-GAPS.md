@@ -637,8 +637,9 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   background sound, took no time in legacy, so the wait is the text's (owner decision 2026-10-08): where it stays, the
   text is a beat said at once with its sound, also as the last text of every branch of an `if` before the sound
   (DisciplineClinic's strokes; `SX_WAIT_SOUND_BEAT`, `soundBeats`), and where the reading time replaces it, the sound
-  starts before its text so that the two come together, unless computing the text has an effect
-  (`SX_SOUND_WITH_TEXT`, `soundsWithText`). A background sound that surely plays waits for the reading time before it,
+  starts before its text so that the two come together, where the text is fixed or only interpolates variables
+  (`SX_SOUND_WITH_TEXT`, `soundsWithText`; a value read through a variable, as `list[i]`, may rely on a test before
+  it that the sound, which waits, lets lapse). A background sound that surely plays waits for the reading time before it,
   as media do. A beat keeps its `instant`, so a text whose
   replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead, a beat itself
   in turn unless it was split (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or

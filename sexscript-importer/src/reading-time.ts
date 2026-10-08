@@ -126,9 +126,10 @@ export function withReadingTimes(
         "The legacy wait after this text timed its reading, at most 1.5 times the Player's reading time of the text, so the Player's skippable reading time replaces it.",
         statement,
       );
-      // The sound starts before its text, so that it plays with it rather than after the reading time, where computing
-      // the text first changes nothing.
-      if (sound !== -1 && !hasEffect(statement.value)) {
+      // The sound starts before its text, so that it plays with it rather than after the reading time, where the text
+      // only reads variables: a value read through one, as `list[i]`, may rely on a test before it that the sound,
+      // which waits, would let lapse.
+      if (sound !== -1 && readsOnlyVariables(statement.value)) {
         report(
           "SX_SOUND_WITH_TEXT",
           "The sound after this text starts before it, so that it plays with the text, as legacy started it at once, rather than after the reading time that replaces the legacy wait.",
@@ -150,6 +151,15 @@ const SOUND_BEAT =
 /** A text said at once with the sound that starts after it, a beat that sets its own timing. */
 function soundBeat(text: Extract<IrStatement, { kind: "say" }>): IrStatement {
   return { ...text, instant: true, beat: true };
+}
+
+/** Whether a text is fixed or interpolates only variables. */
+function readsOnlyVariables(value: IrExpression): boolean {
+  if (value.kind === "literal") return true;
+  return (
+    value.kind === "template" &&
+    value.parts.every((part) => "text" in part || part.value.kind === "variable")
+  );
 }
 
 /** Whether a statement starts a sound and goes on at once, as legacy playBackgroundSound() did. */
