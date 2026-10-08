@@ -638,10 +638,7 @@ test("lowers a simple C-style for loop through a range", () => {
 
   const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
-  assert.equal(
-    emitTease(program),
-    ["for i in 0..3 {", "  say i", "}", "exit", ""].join("\n"),
-  );
+  assert.equal(emitTease(program), ["for i in 0..3 {", "  say i", "}", "exit", ""].join("\n"));
 });
 
 test("runs the update step of a C-style for loop that counts down before continue", () => {
