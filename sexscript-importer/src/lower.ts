@@ -9861,7 +9861,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "*") {
     const repeated = repetition(node, context);
     if (repeated !== undefined) return repeated;
-    // A part or a result whose type the importer cannot tell may be text or a list, which Groovy repeated.
+    // A part or a result whose type the importer cannot tell may be text or a list, which Groovy repeated; a count that
+    // may hold a fraction, which a repetition rarely takes, multiplies a number.
     const leftNode = asNode(node.left);
     const rightNode = asNode(node.right);
     if (
@@ -9870,7 +9871,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       leftNode.kind !== "variable" &&
       leftNode.kind !== "constant" &&
       inferType(leftNode, context.types) === UNKNOWN &&
-      (inferType(rightNode, context.types) & NUMBER) !== 0
+      (inferType(rightNode, context.types) & NUMBER) !== 0 &&
+      !mayBeFractional(rightNode, context)
     ) {
       const value = lowerExpression(leftNode, context);
       const count = lowerExpression(rightNode, context);
