@@ -13,6 +13,7 @@ export function developmentPackageHost(id: string) {
   return {
     // A stable, opaque script-storage scope per package, as for the repository demo.
     storageScope: `development-package:${id}`,
+    name: id,
     resolveAsset: (path: string): string | null =>
       files.has(path) ? developmentPackageFileUrl(id, path) : null,
     /** The package as a project, and what the server could not read of it; rejects when it cannot be opened. */

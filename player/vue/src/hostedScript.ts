@@ -14,6 +14,8 @@ import { readScriptHeader } from "../../../src/script-header.js";
 /** The trusted host of one script: its storage scope, how its references resolve, and how its project loads. */
 export interface ScriptHost {
   readonly storageScope: string;
+  /** The package's name, such as its folder, which the random draw picker's breadcrumb starts with, if known. */
+  readonly name?: string;
   resolveAsset(path: string): string | null;
   load(): Promise<{
     readonly project: string | PlayerProject;

@@ -1038,11 +1038,12 @@ not language; without it every draw is natural and costs one more check.
 - **Draws.** A draw is one random operation as the script sees it: `random()`, `chance`, `randomInteger`, list and set
   `.random`, the element `${...}` selects from a list, a tagged image or script pick, `randomWeighted`, `randomNormal`,
   `randomBeta`, `randomPert`, a `shuffle()` of two or more items, a timer's ranged duration and each next round of a
-  repeating ranged timer, and a glob destination of `goto`, `call`, or the fallback at `end`. Its `kind` is the
-  debug trace's operation name; its `site` is `path:line:column` in its file, counted from 1 (a timer round uses its
-  timer's duration, a glob its statement), and `listRandomSites(plan)` lists every site with its kinds. Its `drawId` is
-  the generator state before it: one execution path never meets an ID twice, and a restored or forked session meets
-  the same draw with the same ID.
+  repeating ranged timer, and a glob destination of `goto`, `call`, or the fallback at `end`. Its `kind` is the debug
+  trace's operation name; its `site` is `path:line:column` in its file, counted from 1 (a timer round uses its timer's
+  duration, a glob its statement), and `listRandomSites(plan)` lists every site with its kinds and `endLine` and
+  `endColumn`, where the draw's source ends, exclusive, so a host can mark it; a site with several kinds ends where its
+  first one does. Its `drawId` is the generator state before it: one execution path never meets an ID twice, and a
+  restored or forked session meets the same draw with the same ID.
 - **Natural first.** The engine samples the natural result first, with exactly the generator steps it always takes; a
   chosen outcome replaces only the result. The generator advances as for the natural draw, so later draws stay the
   same until the chosen outcome changes what runs.
