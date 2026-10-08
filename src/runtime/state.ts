@@ -3632,25 +3632,7 @@ export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
   // The records not reached yet. Once every record is reached nothing is dropped, so the search stops there.
   const messages = new Set(snapshot.liveMessages.map((message) => message.messageId));
   const media = new Set(snapshot.settledMedia.map((record) => record.mediaId));
-  for (const invocation of snapshot.pendingTimerHandlers) {
-    if ("mediaId" in invocation) media.delete(invocation.mediaId);
-  }
-  for (const frame of snapshot.callFrames) {
-    if (
-      frame.kind === "function" &&
-      frame.timerInterruption !== null &&
-      "mediaId" in frame.timerInterruption
-    )
-      media.delete(frame.timerInterruption.mediaId);
-  }
-  const roots = identityRootValues(
-    [...snapshot.frames, ...snapshot.retainedScopes, { bindings: snapshot.globals }],
-    snapshot.speakers,
-    snapshot.loopFrames,
-    snapshot.temporaries,
-    snapshot.callFrames,
-  );
-  reachRecords(roots, messages, media);
+  reachRecords(collectionRoots(snapshot), messages, media);
   if (messages.size > 0) {
     let kept = 0;
     for (const message of snapshot.liveMessages) {
@@ -3664,6 +3646,34 @@ export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
       if (!media.has(record.mediaId)) snapshot.settledMedia[kept++] = record;
     }
     snapshot.settledMedia.length = kept;
+  }
+}
+
+/**
+ * The values `identityRootValues` gives for `snapshot`, scope by scope without copying its scope lists, and then the
+ * handle each queued or running media cue block binds when it runs.
+ */
+function* collectionRoots(snapshot: RuntimeSnapshot): Generator<unknown, void, undefined> {
+  yield* identityRootValues(snapshot.frames, null, null, null, null);
+  yield* identityRootValues(snapshot.retainedScopes, null, null, null, null);
+  yield* identityRootValues([{ bindings: snapshot.globals }], null, null, null, null);
+  yield* identityRootValues(
+    null,
+    snapshot.speakers,
+    snapshot.loopFrames,
+    snapshot.temporaries,
+    snapshot.callFrames,
+  );
+  for (const invocation of snapshot.pendingTimerHandlers) {
+    if ("mediaId" in invocation) yield { kind: "mediaHandle", mediaId: invocation.mediaId };
+  }
+  for (const frame of snapshot.callFrames) {
+    if (
+      frame.kind === "function" &&
+      frame.timerInterruption !== null &&
+      "mediaId" in frame.timerInterruption
+    )
+      yield { kind: "mediaHandle", mediaId: frame.timerInterruption.mediaId };
   }
 }
 

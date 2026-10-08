@@ -419,7 +419,7 @@ test("an ordinary session step captures and validates only its new input", () =>
 
 test("a kept settled media handle does not make a session step walk unrelated values", () => {
   // Diagnostic scale evidence, not a capacity contract: the work of one step must not grow with the size of a large
-  // value walked beside the handle, nor with the number of values after the variable that holds the handle.
+  // value walked beside the handle, nor with the number of values or retained scopes after the variable that holds it.
   const work = (source: string, globals: NonNullable<FreshRuntimeOptions["globals"]>) => {
     const session = createFreshRuntimeSession(compileValidPlan(source), { ...IMMEDIATE, globals });
     session.run();
@@ -444,6 +444,29 @@ test("a kept settled media handle does not make a session step walk unrelated va
   const separate = (count: number) =>
     Object.fromEntries(Array.from({ length: count }, (_, index) => [`value${index}`, index]));
   assert.deepEqual(work(inVariable, separate(2_000)), work(inVariable, separate(4)));
+  // Each pending timer keeps the scope of the call that started it.
+  const retained = (count: number) =>
+    [
+      "function register(n: integer) {",
+      "  let captured = n",
+      "  timer async 1000 {",
+      "    let seen = captured",
+      "  }",
+      "}",
+      'let keeper = playAudio async "a.mp3"',
+      "keeper.stop()",
+      "let i = 0",
+      `while i < ${count} {`,
+      "  register(i)",
+      "  i += 1",
+      "}",
+      "wait 1000",
+      "exit",
+    ].join("\n");
+  assert.equal(
+    work(retained(2_000), {}).recordReachVisits,
+    work(retained(4), {}).recordReachVisits,
+  );
 });
 
 test("an operation that throws ends its session, and argument errors leave it usable", () => {
