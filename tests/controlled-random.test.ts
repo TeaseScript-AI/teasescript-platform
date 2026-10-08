@@ -453,6 +453,18 @@ test("every paused draw names a site that listRandomSites lists, counted from 1"
   );
 });
 
+test("a site ends where its draw's source ends, so a host can mark the draw", () => {
+  const source =
+    "let items = [1, 2]\nlet x = randomInteger(1..=6) + items.random\nlet y = chance(\n  25\n)\nexit";
+  const lines = source.split("\n");
+  const marked = listRandomSites(compileValidPlan(source)).map((site) =>
+    site.line === site.endLine
+      ? lines[site.line - 1]!.slice(site.column - 1, site.endColumn - 1)
+      : `${lines[site.line - 1]!.slice(site.column - 1)}…${lines[site.endLine - 1]!.slice(0, site.endColumn - 1)}`,
+  );
+  assert.deepEqual(marked, ["randomInteger(1..=6)", "items.random", "chance(…)"]);
+});
+
 test("a builtin the unit called before a pause is not called again when it resumes, also after a restore", () => {
   const scenario = SCENARIOS.builtinBeforeDraw!();
   let calls = 0;
