@@ -42,7 +42,7 @@ function destinationTargets(destination: unknown, plan: Data): unknown[] {
  * entries of the timer, cue, and button blocks an instruction sets up. Interactions continue after their answer;
  * `exit` continues nowhere.
  */
-function successors(
+export function successors(
   plan: Data,
   instructions: readonly Data[],
   dead: ReadonlyMap<number, boolean>,
@@ -69,6 +69,8 @@ function successors(
     if (instruction.kind === "setFallback")
       fallbacks.push(...destinationTargets(instruction.destination, plan));
   });
+  // Every `end` goes to the same places: one list for all of them.
+  const endTargets = numbers([...fileReturns, ...fallbacks]);
   return instructions.map((instruction, index) => {
     const constant = dead.get(index);
     switch (instruction.kind) {
@@ -90,7 +92,7 @@ function successors(
       case "returnVoid":
         return returnPoints.get(functionOf.get(index) ?? 0) ?? [];
       case "end":
-        return numbers([...fileReturns, ...fallbacks]);
+        return endTargets;
       case "transfer":
         return numbers([
           ...destinationTargets(instruction.destination, plan),
@@ -98,6 +100,9 @@ function successors(
         ]);
       case "callFunction":
         return numbers([entry(instruction.functionId)]);
+      case "prepareParameterDefault":
+        // A supplied argument skips the default.
+        return numbers([index + 1, instruction.target]);
       case "startTimer":
       case "showPermanentButton":
         return numbers([index + 1, entry(instruction.handlerFunctionId)]);
@@ -250,7 +255,7 @@ function scalar(value: unknown): SavedScalar | undefined {
 }
 
 /** A variable whose every assignment is one `load` of a literal key, with no default or a literal one. */
-interface LoadAlias {
+export interface LoadAlias {
   readonly key: string;
   readonly fallback: SavedScalar | null;
 }
@@ -272,6 +277,22 @@ function keyText(expression: unknown): string | null {
       part.kind === "text" && typeof part.value === "string" ? part.value : KEY_PLACEHOLDER,
     )
     .join("");
+}
+
+/** The variables an expression reads; a called function's name is no variable. */
+export function namesIn(expression: unknown): Set<string> {
+  const names = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (isRecord(value)) {
+      if (value.kind === "identifier" && typeof value.name === "string") names.add(value.name);
+      const callee = value.kind === "call" && record(value.callee).kind === "identifier";
+      for (const [key, item] of Object.entries(value))
+        if (key !== "span" && !(callee && key === "callee")) walk(item);
+    }
+  };
+  walk(expression);
+  return names;
 }
 
 /** The name a call calls, for a plain name or a method. */
@@ -300,10 +321,20 @@ export class DataFlow {
   readonly #saves = new Map<string, SavedValue[]>();
   /** Variables whose every assignment is the same `load`, by name; null for any other variable. */
   readonly #loads = new Map<string, LoadAlias | null>();
+  /** The function each instruction of a function body belongs to, by its ID. */
+  readonly #functionOf = new Map<number, number>();
 
-  constructor(plan: Data, instructions: readonly Data[]) {
+  /**
+   * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
+   * the typed ask it is; without it, only an ask with a fixed prompt is.
+   */
+  constructor(
+    plan: Data,
+    instructions: readonly Data[],
+    settings: { computedPrompts?: boolean } = {},
+  ) {
     const functions = list(plan.functions);
-    const functionOf = new Map<number, number>();
+    const functionOf = this.#functionOf;
     for (const definition of functions) {
       const end = Number(definition.endInstruction);
       for (let index = Number(definition.entryInstruction); index <= end; index += 1)
@@ -315,7 +346,9 @@ export class DataFlow {
         typeof instruction.destinationTemporary !== "number"
       )
         return;
-      const ui = record(instruction.ui);
+      const ui = record(
+        instruction.ui ?? (settings.computedPrompts === true ? instruction.preparedUi : undefined),
+      );
       if (ui.kind === "text" || ui.kind === "number" || ui.kind === "temporal")
         this.#typedAsks.add(index);
       this.#temporary(instruction.destinationTemporary).asks.add(index);
@@ -374,6 +407,19 @@ export class DataFlow {
     }
   }
 
+  /**
+   * The load a variable only ever holds (`let ready = load("ready", default: true)`): its key and default; null for
+   * another variable.
+   */
+  loadAlias(name: string): LoadAlias | null {
+    return this.#loads.get(name) ?? null;
+  }
+
+  /** The function an instruction is in, by its ID; 0 for a file's own code. */
+  functionAt(index: number): number {
+    return this.#functionOf.get(index) ?? 0;
+  }
+
   /** The asks, stored keys, and clock reads an expression's value comes from. */
   flowOf(expression: unknown): Flow {
     const flow = emptyFlow();
@@ -416,20 +462,8 @@ export class DataFlow {
       ...[...flow.keys].map((key) => ({ kind: "storage" as const, key })),
       ...(flow.clock ? [{ kind: "clock" as const }] : []),
     ];
-    const names = new Set<string>();
-    const walk = (value: unknown): void => {
-      if (Array.isArray(value)) value.forEach(walk);
-      else if (isRecord(value)) {
-        if (value.kind === "identifier" && typeof value.name === "string") names.add(value.name);
-        // A called function's name is no variable.
-        const callee = value.kind === "call" && record(value.callee).kind === "identifier";
-        for (const [key, item] of Object.entries(value))
-          if (key !== "span" && !(callee && key === "callee")) walk(item);
-      }
-    };
-    walk(expression);
     // A variable is a source of its own when the code assigns it: it counts, or no ask, key, or clock reaches it.
-    for (const name of names) {
+    for (const name of namesIn(expression)) {
       const known = this.#variables.get(name);
       const external =
         known !== undefined && (known.asks.size > 0 || known.keys.size > 0 || known.clock);
@@ -885,19 +919,631 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
   return goals;
 }
 
+/**
+ * A value that the plan's conditions compare with constants: a named binding, or a stored key by its text or a pattern
+ * with {@link KEY_PLACEHOLDER} parts; or its `length`, for `name.length`; with those constants.
+ */
+export interface Slot {
+  readonly kind: "binding" | "storage";
+  readonly name: string;
+  readonly length: boolean;
+  /** The numbers, the durations in milliseconds (`t < 15 s`), each ascending, and the texts it is compared with. */
+  readonly numbers: readonly number[];
+  readonly durations: readonly number[];
+  readonly strings: ReadonlySet<string>;
+}
+
+/**
+ * The slots of every condition and `while` loop: in each of their comparisons with a constant (a literal or a duration),
+ * the bindings the compared side names and the stored keys its value comes from (`DataFlow.flowOf`), each with the
+ * constant; for `x.length`, the length of `x` and of the keys `x` comes from. A value compared with no constant is no
+ * slot, as nothing tells which of its values differ.
+ */
+export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Slot[] {
+  const slots = new Map<
+    string,
+    { slot: Slot; numbers: Set<number>; durations: Set<number>; strings: Set<string> }
+  >();
+  const add = (kind: Slot["kind"], name: string, length: boolean, constant: unknown) => {
+    const id = JSON.stringify([kind, name, length]);
+    let known = slots.get(id);
+    if (known === undefined) {
+      const strings = new Set<string>();
+      known = {
+        slot: { kind, name, length, numbers: [], durations: [], strings },
+        numbers: new Set(),
+        durations: new Set(),
+        strings,
+      };
+      slots.set(id, known);
+    }
+    const duration = record(constant);
+    if (typeof constant === "number") known.numbers.add(constant);
+    else if (typeof constant === "string") known.strings.add(constant);
+    else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
+      known.durations.add(duration.milliseconds);
+  };
+  const compared = (subject: unknown, constant: unknown) => {
+    const value = record(subject);
+    const length = value.kind === "property" && value.name === "length";
+    const object = length ? value.object : subject;
+    if (length && record(object).kind === "identifier")
+      add("binding", String(record(object).name), true, constant);
+    else if (!length) for (const name of namesIn(subject)) add("binding", name, false, constant);
+    for (const key of flow.flowOf(object).keys) add("storage", key, length, constant);
+  };
+  for (const instruction of instructions) {
+    const conditional =
+      instruction.kind === "jumpIfFalse" ||
+      (instruction.kind === "loopStart" && instruction.loopKind === "while");
+    if (!conditional) continue;
+    const condition = instruction.condition ?? instruction.expression;
+    for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);
+    // Comparisons with a duration, which `atomsFor` leaves to the clock and the asks.
+    const walk = (expression: unknown): void => {
+      const value = record(expression);
+      if (value.kind === "group") walk(value.expression);
+      if (value.kind === "unary") walk(value.operand);
+      if (value.kind !== "binary") return;
+      const comparison = String(value.operator) in FLIP;
+      if (comparison && record(value.right).kind === "duration") compared(value.left, value.right);
+      else if (comparison && record(value.left).kind === "duration")
+        compared(value.right, value.left);
+      else {
+        walk(value.left);
+        walk(value.right);
+      }
+    };
+    walk(condition);
+  }
+  return [...slots.values()].map(({ slot, numbers, durations }) => ({
+    ...slot,
+    numbers: [...numbers].sort((left, right) => left - right),
+    durations: [...durations].sort((left, right) => left - right),
+  }));
+}
+
+/** Comparison operators whose sides the explorer reads as compared values. */
+const COMPARED = new Set(["==", "!=", "<", "<=", ">", ">="]);
+const ARITHMETIC = new Set(["+", "-", "*", "/", "%"]);
+
+/**
+ * Whether the explorer can read an expression's value from a state: it reads variables, through properties, indices,
+ * and arithmetic, and is no literal of its own.
+ */
+function readable(expression: unknown, top = true): boolean {
+  const value = record(expression);
+  switch (value.kind) {
+    case "literal":
+      return !top;
+    case "identifier":
+      return true;
+    case "group":
+      return readable(value.expression, top);
+    case "unary":
+      return value.operator === "-" && readable(value.operand, top);
+    case "binary":
+      return (
+        ARITHMETIC.has(String(value.operator)) &&
+        readable(value.left, false) &&
+        readable(value.right, false) &&
+        (!top || namesIn(value).size > 0)
+      );
+    case "property":
+      return readable(value.object, false) && namesIn(value).size > 0;
+    case "index":
+      return (
+        readable(value.object, false) && readable(value.index, false) && namesIn(value).size > 0
+      );
+    default:
+      return false;
+  }
+}
+
+/** Instructions after a timed button or a clock read within which the code that times it is looked for. */
+const TIMING_WINDOW = 40;
+/** The expressions kept per typed ask or timed button that the code compares its answer or time with. */
+const MAX_COMPARED = 4;
+
+/**
+ * The expressions the code compares the results of interactions with, by the instruction of the interaction, when their
+ * value can be read from a state (variables, properties, indices, and arithmetic), the four nearest the interaction:
+ *
+ * - `asks`: typed asks (text and number, also when the code computes the prompt), in each comparison or text test
+ *   (`answer == line`, `answer.contains(word)`) whose one side comes from the answer (`DataFlow.flowOf`);
+ * - `timed`: buttons whose result is the time the player took, in each comparison shortly after the button that
+ *   compares that result itself (`(showButton "Done") / 1 s > count`).
+ */
+export function comparedWith(
+  flow: DataFlow,
+  instructions: readonly Data[],
+  kind: "asks" | "timed",
+): Map<number, unknown[]> {
+  const typed = (index: number) => {
+    const instruction = record(instructions[index]);
+    const ui = record(instruction.ui ?? instruction.preparedUi);
+    return kind === "asks"
+      ? ui.kind === "text" || ui.kind === "number"
+      : ui.kind === "button" && instruction.expectedResult === "duration";
+  };
+  /** The temporaries that hold a button's result as it was given, by temporary, as of the instruction looked at. */
+  const results = new Map<number, number>();
+  const sources = (answer: unknown, at: number): number[] => {
+    if (kind === "asks") return [...flow.flowOf(answer).asks].filter(typed);
+    return temporariesIn(answer).flatMap((temporary) => {
+      const button = results.get(temporary);
+      return button !== undefined && at - button <= TIMING_WINDOW && typed(button) ? [button] : [];
+    });
+  };
+  /**
+   * Per interaction, at most {@link MAX_COMPARED} expressions found, by shape. A timed button's are the first ones after
+   * it. A typed ask's are those nearest it, those in its own function first: a name other code also uses (`answer`)
+   * brings in theirs.
+   */
+  const found = new Map<
+    number,
+    Map<string, { expression: unknown; rank: readonly [number, number] }>
+  >();
+  const worse = (left: readonly [number, number], right: readonly [number, number]) =>
+    left[0] - right[0] || left[1] - right[1];
+  const pair = (answer: unknown, other: unknown, at: number) => {
+    if (!readable(other)) return;
+    // A timed button's result divided by a duration (`/ 10 s`) is compared in that unit: the other side, read in
+    // seconds, is scaled by it.
+    const unit = kind === "timed" ? divisorOf(answer) : null;
+    const compared =
+      unit === null
+        ? other
+        : {
+            kind: "binary",
+            operator: "*",
+            left: other,
+            right: { kind: "literal", value: unit / 1000 },
+          };
+    for (const source of sources(answer, at)) {
+      const known =
+        found.get(source) ??
+        new Map<string, { expression: unknown; rank: readonly [number, number] }>();
+      found.set(source, known);
+      const key = JSON.stringify(compared, (name, item: unknown) =>
+        name === "span" ? undefined : item,
+      );
+      if (kind === "timed") {
+        if (known.size < MAX_COMPARED) known.set(key, { expression: compared, rank: [0, 0] });
+        continue;
+      }
+      const rank = [
+        flow.functionAt(at) === flow.functionAt(source) ? 0 : 1,
+        Math.abs(at - source),
+      ] as const;
+      const before = known.get(key);
+      if (before !== undefined) {
+        if (worse(rank, before.rank) < 0) known.set(key, { expression: compared, rank });
+        continue;
+      }
+      if (known.size < MAX_COMPARED) {
+        known.set(key, { expression: compared, rank });
+        continue;
+      }
+      const [last, kept] = [...known].reduce((most, entry) =>
+        worse(entry[1].rank, most[1].rank) > 0 ? entry : most,
+      );
+      if (worse(rank, kept.rank) < 0) {
+        known.delete(last);
+        known.set(key, { expression: compared, rank });
+      }
+    }
+  };
+  const walk = (value: unknown, at: number): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, at);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "binary" && COMPARED.has(String(value.operator))) {
+      pair(value.left, value.right, at);
+      pair(value.right, value.left, at);
+    }
+    const callee = record(value.callee);
+    if (
+      value.kind === "call" &&
+      callee.kind === "property" &&
+      TEXT_TESTS.has(String(callee.name))
+    ) {
+      for (const argument of list(value.arguments)) {
+        pair(callee.object, argument.value, at);
+        pair(argument.value, callee.object, at);
+      }
+    }
+    for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item, at);
+  };
+  instructions.forEach((instruction, index) => {
+    walk(instruction, index);
+    if (instruction.kind === "interaction" && typeof instruction.destinationTemporary === "number")
+      results.set(instruction.destinationTemporary, index);
+    const value = record(instruction.value);
+    const held = typeof value.temporaryId === "number" ? results.get(value.temporaryId) : undefined;
+    if (
+      instruction.kind === "storeTemporary" &&
+      value.kind === "temporary" &&
+      typeof instruction.temporaryId === "number" &&
+      held !== undefined
+    )
+      results.set(instruction.temporaryId, held);
+  });
+  return new Map(
+    [...found].map(([ask, expressions]) => [
+      ask,
+      [...expressions.values()]
+        .sort((left, right) => worse(left.rank, right.rank))
+        .map(({ expression }) => expression),
+    ]),
+  );
+}
+
+/** The duration in milliseconds an expression divides by (`took / 10 s`), the first one found; null without one. */
+function divisorOf(expression: unknown): number | null {
+  if (Array.isArray(expression)) {
+    for (const item of expression) {
+      const found = divisorOf(item);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (!isRecord(expression)) return null;
+  const right = record(expression.right);
+  if (
+    expression.kind === "binary" &&
+    expression.operator === "/" &&
+    right.kind === "duration" &&
+    typeof right.milliseconds === "number"
+  )
+    return right.milliseconds;
+  for (const [key, item] of Object.entries(expression)) {
+    if (key === "span") continue;
+    const found = divisorOf(item);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** The temporaries an expression reads. */
+function temporariesIn(expression: unknown): number[] {
+  const found: number[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (isRecord(value)) {
+      if (value.kind === "temporary" && typeof value.temporaryId === "number")
+        found.push(value.temporaryId);
+      for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+    }
+  };
+  walk(expression);
+  return found;
+}
+
+/** Constants a condition compares with: numbers, and durations in milliseconds. */
+export interface Constants {
+  readonly numbers: number[];
+  readonly durations: number[];
+}
+
+/** A difference of two clock reads, from the instruction of the first to the one that takes the difference. */
+export interface ClockDifference extends Constants {
+  readonly from: number;
+  readonly at: number;
+  /**
+   * The conditions that compare it with constants or values not from the clock: they time what happens between the
+   * reads, not when the player comes back.
+   */
+  readonly conditions: number[];
+}
+
+/**
+ * The differences of clock reads the code times something with (`start = getTimestamp().toSeconds()`, a button, then
+ * `took = getTimestamp().toSeconds() - start`), with the conditions shortly after that compare the difference and the
+ * constants they compare it with (`took < 5`); also a difference a condition takes itself.
+ */
+export function clockDifferences(flow: DataFlow, instructions: readonly Data[]): ClockDifference[] {
+  /** The clock read each variable holds, by name, as of the instruction looked at: where it was read. */
+  const reads = new Map<string, number>();
+  /** Where a side of a difference read the clock: here, or where the variable it names got its clock read. */
+  const readAt = (side: unknown, here: number): number | null => {
+    const value = record(side);
+    if (value.kind === "group") return readAt(value.expression, here);
+    if (value.kind === "identifier" && typeof value.name === "string")
+      return reads.get(value.name) ?? null;
+    return value.kind === "call" && callsClock(value) ? here : null;
+  };
+  /** The two reads of a difference of clock reads (`now - start`), earlier first; null for another value. */
+  const readsOf = (expression: unknown, here: number): { from: number; at: number } | null => {
+    const value = record(expression);
+    if (value.kind === "group") return readsOf(value.expression, here);
+    if (value.kind !== "binary" || value.operator !== "-") return null;
+    const at = readAt(value.left, here);
+    let from: number | null = null;
+    for (const name of namesIn(value.right)) from ??= reads.get(name) ?? null;
+    return at === null || from === null || from >= at ? null : { from, at };
+  };
+  const differences: (ClockDifference & { readonly name: string | null })[] = [];
+  /** The difference each variable holds, by name, as of the instruction looked at; another value ends it. */
+  const held = new Map<string, ClockDifference>();
+  /** The variables whose difference was updated from itself since (`took = took / 1000`): in other units. */
+  const transformed = new Set<string>();
+  /** Conditions that also compare a difference with a value from the clock: not only how long the player took. */
+  const unmeasured = new Set<number>();
+  const add = (difference: ClockDifference, constant: unknown, condition: number) => {
+    if (!difference.conditions.includes(condition)) difference.conditions.push(condition);
+    const duration = record(constant);
+    if (typeof constant === "number" && !difference.numbers.includes(constant))
+      difference.numbers.push(constant);
+    if (
+      duration.kind === "duration" &&
+      typeof duration.milliseconds === "number" &&
+      !difference.durations.includes(duration.milliseconds)
+    )
+      difference.durations.push(duration.milliseconds);
+  };
+  instructions.forEach((instruction, index) => {
+    const name =
+      instruction.kind === "assign"
+        ? targetName(instruction.target)
+        : (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
+            typeof instruction.name === "string"
+          ? instruction.name
+          : null;
+    if (name !== null) {
+      // A variable holds a clock read from a bare read on, and a difference until it is set to a value not computed from
+      // itself (`took = took / 1000` keeps it).
+      const difference = readsOf(instruction.value, index);
+      if (difference !== null) {
+        const taken = { name, ...difference, numbers: [], durations: [], conditions: [] };
+        differences.push(taken);
+        held.set(name, taken);
+        transformed.delete(name);
+      } else if (!namesIn(instruction.value).has(name)) {
+        held.delete(name);
+        transformed.delete(name);
+      } else if (held.has(name)) transformed.add(name);
+      if (difference === null && readAt(instruction.value, index) === index) reads.set(name, index);
+      else reads.delete(name);
+    }
+    const conditional =
+      instruction.kind === "jumpIfFalse" ||
+      (instruction.kind === "loopStart" && instruction.loopKind === "while");
+    if (!conditional) return;
+    const condition = instruction.condition ?? instruction.expression;
+    const compared = (subject: unknown, constant: unknown) => {
+      const taken = readsOf(subject, index);
+      if (taken !== null) {
+        const own = { name: null, ...taken, numbers: [], durations: [], conditions: [] };
+        differences.push(own);
+        add(own, constant, index);
+      }
+      // A condition further on, or after an update in other units, still compares the difference, but its constant is
+      // not taken for the button.
+      for (const name of namesIn(subject)) {
+        const difference = held.get(name);
+        if (difference !== undefined && index > difference.at)
+          add(
+            difference,
+            index - difference.at <= TIMING_WINDOW && !transformed.has(name) ? constant : undefined,
+            index,
+          );
+      }
+    };
+    for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);
+    // A comparison with a duration gives its constant; one with another value (`took <= limit`) only the condition.
+    const walk = (expression: unknown): void => {
+      const value = record(expression);
+      if (value.kind === "group") walk(value.expression);
+      if (value.kind === "unary") walk(value.operand);
+      if (value.kind !== "binary") return;
+      const left = record(value.left);
+      const right = record(value.right);
+      if (!(String(value.operator) in FLIP)) {
+        walk(value.left);
+        walk(value.right);
+      } else if (right.kind === "duration") compared(value.left, value.right);
+      else if (left.kind === "duration") compared(value.right, value.left);
+      else if (left.kind !== "literal" && right.kind !== "literal") {
+        // Against a value that does not come from the clock (`took <= limit`), only how long the player took varies.
+        for (const [subject, other] of [
+          [value.left, value.right],
+          [value.right, value.left],
+        ] as const) {
+          if (!flow.flowOf(other).clock) compared(subject, undefined);
+          // Both sides from the clock: not only how long the player took.
+          else if (flow.flowOf(subject).clock) unmeasured.add(index);
+        }
+      }
+    };
+    walk(condition);
+  });
+  return differences
+    .filter((difference) => difference.conditions.length > 0)
+    .map(({ from, at, numbers, durations, conditions }) => ({
+      from,
+      at,
+      numbers,
+      durations,
+      conditions: conditions.filter((condition) => !unmeasured.has(condition)),
+    }));
+}
+
+/** Whether an expression reads the clock itself: calls a getter of the current date or time. */
+export function callsClock(expression: unknown): boolean {
+  if (Array.isArray(expression)) return expression.some(callsClock);
+  if (!isRecord(expression)) return false;
+  if (expression.kind === "call" && CLOCK_GETTERS.has(calleeName(expression) ?? "")) return true;
+  return Object.entries(expression).some(([key, item]) => key !== "span" && callsClock(item));
+}
+
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */
 export function keyMatcher(pattern: string): (key: string) => boolean {
   if (!pattern.includes(KEY_PLACEHOLDER)) return (key) => key === pattern;
-  const parts = pattern
-    .split(KEY_PLACEHOLDER)
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
-  const matcher = new RegExp(`^${parts.join(".*")}$`, "u");
-  return (key) => matcher.test(key);
+  const parts = pattern.split(KEY_PLACEHOLDER);
+  const matcher = new RegExp(
+    `^${parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join(".*")}$`,
+    "u",
+  );
+  // The parts in order, without a regular expression, which many keys and patterns make slow: the first at the start,
+  // the last at the end, each other one after the one before. A key with a line break is left to the expression.
+  const first = parts[0]!;
+  const last = parts.at(-1)!;
+  const middle = parts.slice(1, -1);
+  const least = parts.reduce((length, part) => length + part.length, 0);
+  return (key) => {
+    if (/[\n\r\u2028\u2029]/u.test(key)) return matcher.test(key);
+    if (key.length < least || !key.startsWith(first) || !key.endsWith(last)) return false;
+    const end = key.length - last.length;
+    let at = first.length;
+    for (const part of middle) {
+      const found = key.indexOf(part, at);
+      if (found < 0 || found + part.length > end) return false;
+      at = found + part.length;
+    }
+    return true;
+  };
 }
 
 /** Whether a save's key (text or pattern) may be the key a load reads (text). */
 function keysMayMatch(saved: string, read: string): boolean {
   return keyMatcher(saved)(read);
+}
+
+/** A value a condition's atom compares, as {@link conditionDistance} reads it; undefined when it cannot be read. */
+export type AtomValue = string | number | boolean | null | undefined;
+
+/** How far values are from making a condition come out a way: atoms not satisfied, and their summed distances. */
+export interface ConditionDistance {
+  readonly unsatisfied: number;
+  readonly sum: number;
+}
+
+/**
+ * Whether a condition's way needs all of its parts (`and` for true, `or` for false), each of which counts for the
+ * branch distance ({@link conditionDistance}).
+ */
+export function conjunctive(condition: unknown, wanted: boolean): boolean {
+  const value = record(condition);
+  if (value.kind === "group") return conjunctive(value.expression, wanted);
+  if (value.kind === "unary" && value.operator === "not")
+    return conjunctive(value.operand, !wanted);
+  return (
+    value.kind === "binary" &&
+    ((value.operator === "and" && wanted) || (value.operator === "or" && !wanted))
+  );
+}
+
+/**
+ * The branch distance of a condition from coming out `wanted`, with each atom's value read by `read`: an `and` that
+ * needs all of its parts sums them, one that needs any takes the nearest (fewest atoms unsatisfied, then least
+ * distance); an atom compared with a literal counts 0 when it holds, else its numeric {@link distance}, or 1 for
+ * another value. An atom that cannot be read counts as neither.
+ */
+export function conditionDistance(
+  condition: unknown,
+  wanted: boolean,
+  read: (subject: unknown) => AtomValue,
+): ConditionDistance {
+  const value = record(condition);
+  const none = { unsatisfied: 0, sum: 0 };
+  if (value.kind === "group") return conditionDistance(value.expression, wanted, read);
+  if (value.kind === "unary" && value.operator === "not")
+    return conditionDistance(value.operand, !wanted, read);
+  if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
+    const parts = [
+      conditionDistance(value.left, wanted, read),
+      conditionDistance(value.right, wanted, read),
+    ];
+    if ((value.operator === "and") === wanted)
+      return {
+        unsatisfied: parts[0]!.unsatisfied + parts[1]!.unsatisfied,
+        sum: parts[0]!.sum + parts[1]!.sum,
+      };
+    return parts[0]!.unsatisfied < parts[1]!.unsatisfied ||
+      (parts[0]!.unsatisfied === parts[1]!.unsatisfied && parts[0]!.sum <= parts[1]!.sum)
+      ? parts[0]!
+      : parts[1]!;
+  }
+  // A text test (`name.contains("shirt")`) holds as the text method says.
+  if (value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "")) {
+    const text = read(record(value.callee).object);
+    const argument = list(value.arguments)
+      .map((entry) => literalText(entry.value))
+      .find((item) => item !== null);
+    if (typeof text !== "string" || argument === undefined || argument === null) return none;
+    return textTest(calleeName(value) ?? "", text, argument) === wanted
+      ? none
+      : { unsatisfied: 1, sum: 1 };
+  }
+  const [atom] = atomsFor(condition, wanted);
+  if (atom === undefined) return none;
+  const actual = read(atom.subject);
+  if (actual === undefined) return none;
+  const holds = atom.wanted ? atom.operator : negate(atom.operator);
+  // Whether it holds, as the runtime compares (`1` is not `true`), then how far it is when it does not: at least
+  // something, and at most FAR_AWAY, also past what a number can tell.
+  const satisfied = compares(actual, holds, atom.constant);
+  if (satisfied === undefined || satisfied) return none;
+  const numeric = typeof actual === "boolean" ? Number(actual) : actual;
+  const constant = typeof atom.constant === "boolean" ? Number(atom.constant) : atom.constant;
+  const away =
+    typeof numeric === "number" && typeof constant === "number"
+      ? distance(numeric, holds, constant)
+      : 1;
+  return { unsatisfied: 1, sum: Number.isNaN(away) || away <= 0 ? 1 : Math.min(away, FAR_AWAY) };
+}
+
+/** The distance an atom that does not hold counts at most, so that sums stay exact enough to compare. */
+const FAR_AWAY = 1e12;
+
+/** Whether `left operator right` holds for numbers, or texts, booleans, and null compared for equality or order. */
+function compares(left: AtomValue, operator: string, right: AtomValue): boolean | undefined {
+  if (left === undefined || right === undefined) return undefined;
+  if (operator === "==") return left === right;
+  if (operator === "!=") return left !== right;
+  const both =
+    (typeof left === "number" && typeof right === "number") ||
+    (typeof left === "string" && typeof right === "string");
+  if (!both) return undefined;
+  switch (operator) {
+    case "<":
+      return left < right;
+    case "<=":
+      return left <= right;
+    case ">":
+      return left > right;
+    case ">=":
+      return left >= right;
+    default:
+      return undefined;
+  }
+}
+
+/** What a text method that tests a text (`contains`, `startsWith`, ...) gives for `text` and its argument. */
+function textTest(method: string, text: string, argument: string): boolean {
+  switch (method) {
+    case "contains":
+      return text.includes(argument);
+    case "startsWith":
+      return text.startsWith(argument);
+    case "endsWith":
+      return text.endsWith(argument);
+    case "equalsIgnoreCase":
+      return text.toLowerCase() === argument.toLowerCase();
+    default:
+      return text === argument;
+  }
+}
+
+/**
+ * A branch distance as one number that orders as the pair does: fewer atoms unsatisfied first, then a smaller sum, up
+ * to {@link FAR_AWAY}, below the weight of one atom more, and exact to well under one for the atoms a condition has.
+ */
+export function branchDistance(found: ConditionDistance): number {
+  return found.unsatisfied * 2 * FAR_AWAY + Math.min(found.sum, FAR_AWAY);
 }
 
 /** How far a variable's value is from making `value operator constant` true: 0 when it holds. */

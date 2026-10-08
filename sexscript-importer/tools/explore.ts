@@ -3,15 +3,28 @@
  * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
- * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
- *          [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>
+ * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]
+ *          [--workers 1|2] [--until-stalled]
+ *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
+ *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
+ *          [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
- * given.
+ * given. `--until-stalled` runs each unit until it is done or stalled instead (see `ExploreOptions.untilStalled`), with
+ * no state limit and a time cap of two hours unless `--max-states` or `--budget-seconds` is given; the report's
+ * `search.audit` says how it ended: `complete`, `stalled`, `spiral`, or `capped`.
+ *
+ * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
+ * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
+ * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too), and conjunctive
+ * steering (a way that needs all parts of its condition is steered to by their summed distance), and random choices (the
+ * explorer also chooses other outcomes of random draws) are on by default (`--no-cells`, `--no-later`,
+ * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
+ * off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -40,11 +53,36 @@ import {
   replay,
   type Engine,
   type ExplorerInput,
+  type RandomChoice,
   type SessionPath,
 } from "../src/explorer.ts";
 import { packageContentHash } from "./catalog.ts";
 
 const SELF = fileURLToPath(import.meta.url);
+/** Until stalled, the default time cap per unit. */
+const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
+/** Missed ways the summary lists per unit, by the code behind them. */
+const WORKING_TOWARD_ROWS = 8;
+
+/** The search strategies a corpus records, in one order. */
+const STRATEGIES = [
+  "cells",
+  "later",
+  "comparedAnswers",
+  "realign",
+  "progressLeads",
+  "conjunctive",
+  "guidance",
+  "randomChoices",
+  "quitAnywhere",
+] as const;
+
+/** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
+function strategiesKey(strategies: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify(
+    Object.fromEntries(STRATEGIES.map((name) => [name, strategies[name] === true])),
+  );
+}
 
 /** What identifies a unit's report, and its compilation; the report of a compiled unit adds an {@link ExploreResult}. */
 interface ReportHeader {
@@ -69,10 +107,12 @@ async function main(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
+    allowNegative: true,
     options: {
       "budget-seconds": { type: "string" },
       "budget-ops": { type: "string" },
-      "max-states": { type: "string", default: "20000" },
+      "max-states": { type: "string" },
+      "store-mb": { type: "string" },
       seed: { type: "string", default: "1" },
       workers: { type: "string", default: "1" },
       out: { type: "string" },
@@ -83,7 +123,18 @@ async function main(args: string[]): Promise<void> {
       way: { type: "string" },
       corpus: { type: "string" },
       rounds: { type: "string", default: "1" },
-      "no-summary": { type: "boolean", default: false },
+      // `--no-summary`, as `allowNegative` reads it.
+      summary: { type: "boolean", default: true },
+      cells: { type: "boolean", default: true },
+      later: { type: "boolean", default: true },
+      "compared-answers": { type: "boolean", default: true },
+      realign: { type: "boolean", default: true },
+      "progress-leads": { type: "boolean", default: true },
+      conjunctive: { type: "boolean", default: true },
+      guidance: { type: "boolean", default: false },
+      "random-choices": { type: "boolean", default: true },
+      "quit-anywhere": { type: "boolean", default: false },
+      "until-stalled": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -95,15 +146,25 @@ async function main(args: string[]): Promise<void> {
     });
     return;
   }
+  const untilStalled = values["until-stalled"];
   const budgetOps = values["budget-ops"] === undefined ? null : Number(values["budget-ops"]);
-  // Without a work budget the time budget is 60 s by default; with one, only a time budget given applies.
+  // Without a work budget the time budget is 60 s by default; with one, only a time budget given applies. Until stalled,
+  // the time budget is a cap of two hours by default.
   const budgetSeconds =
     values["budget-seconds"] === undefined
-      ? budgetOps === null
-        ? 60
-        : null
+      ? untilStalled
+        ? UNTIL_STALLED_CAP_SECONDS
+        : budgetOps === null
+          ? 60
+          : null
       : Number(values["budget-seconds"]);
-  const maxStates = Number(values["max-states"]);
+  const maxStates =
+    values["max-states"] === undefined
+      ? untilStalled
+        ? Number.MAX_SAFE_INTEGER
+        : 20000
+      : Number(values["max-states"]);
+  const storeMb = values["store-mb"] === undefined ? null : Number(values["store-mb"]);
   const seed = Number(values.seed);
   const workers = Number(values.workers);
   const rounds = Number(values.rounds);
@@ -118,15 +179,19 @@ async function main(args: string[]): Promise<void> {
         !Number.isSafeInteger(budgetOps * 2 ** (rounds - 1)))) ||
     !Number.isSafeInteger(maxStates) ||
     maxStates < 1 ||
+    (storeMb !== null && !(Number.isSafeInteger(storeMb) && storeMb >= 1)) ||
     !Number.isSafeInteger(seed) ||
     (workers !== 1 && workers !== 2) ||
     !Number.isSafeInteger(rounds) ||
     rounds < 1 ||
-    (rounds > 1 && values.corpus === undefined)
+    (rounds > 1 && (values.corpus === undefined || untilStalled))
   ) {
     process.stderr.write(
-      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
-        "         [--corpus <dir> [--rounds N]] <unit-dir>... --out <dir>\n" +
+      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]\n" +
+        "         [--workers 1|2] [--until-stalled]\n" +
+        "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
+        "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
+        "         [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -153,8 +218,30 @@ async function main(args: string[]): Promise<void> {
         `Round ${round}: ${remaining.length} units, ${describeBudget(budgets)} each\n`,
       );
     process.exitCode =
-      (await exploreUnits(remaining, { ...budgets, maxStates, seed, corpus }, out, workers)) ||
-      process.exitCode;
+      (await exploreUnits(
+        remaining,
+        {
+          ...budgets,
+          maxStates,
+          untilStalled,
+          storeMb,
+          seed,
+          corpus,
+          strategies: {
+            cells: values.cells,
+            later: values.later,
+            comparedAnswers: values["compared-answers"],
+            realign: values.realign,
+            progressLeads: values["progress-leads"],
+            conjunctive: values.conjunctive,
+            guidance: values.guidance,
+            randomChoices: values["random-choices"],
+            quitAnywhere: values["quit-anywhere"],
+          },
+        },
+        out,
+        workers,
+      )) || process.exitCode;
     if (corpus === null) break;
     // A unit goes on while its corpus says it was not exhausted; one that did not compile has no corpus.
     const going = await Promise.all(
@@ -164,7 +251,7 @@ async function main(args: string[]): Promise<void> {
     );
     remaining = remaining.filter((_, index) => going[index]);
   }
-  if (!values["no-summary"]) {
+  if (values.summary) {
     const reports = await Promise.all(
       names.map(async (name) => {
         const file = path.join(out, `${name}.json`);
@@ -180,9 +267,25 @@ interface RunSettings {
   budgetSeconds: number | null;
   budgetOps: number | null;
   maxStates: number;
+  /** Run until done or stalled, the budgets only caps. */
+  untilStalled: boolean;
+  /** The snapshot store's limit in MiB, or null for the default. */
+  storeMb: number | null;
   seed: number;
   /** The corpus folder, or null without one. */
   corpus: string | null;
+  /** The search strategies that can be switched off (see `ExploreOptions`). */
+  strategies: {
+    cells: boolean;
+    later: boolean;
+    comparedAnswers: boolean;
+    realign: boolean;
+    progressLeads: boolean;
+    conjunctive: boolean;
+    guidance: boolean;
+    randomChoices: boolean;
+    quitAnywhere: boolean;
+  };
 }
 
 /** Explores units with one budget, in this process or in two; returns 1 when a process failed. */
@@ -192,7 +295,8 @@ async function exploreUnits(
   out: string,
   workers: number,
 ): Promise<number> {
-  const { budgetSeconds, budgetOps, maxStates, seed, corpus } = settings;
+  const { budgetSeconds, budgetOps, maxStates, untilStalled, storeMb, seed, corpus, strategies } =
+    settings;
   if (workers === 2 && dirs.length > 1) {
     const flags = [
       "--max-states",
@@ -205,7 +309,13 @@ async function exploreUnits(
     ];
     if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
     if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
+    if (storeMb !== null) flags.push("--store-mb", String(storeMb));
+    if (untilStalled) flags.push("--until-stalled");
     if (corpus !== null) flags.push("--corpus", corpus);
+    for (const [name, on] of Object.entries(strategies)) {
+      const flag = name.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
+      flags.push(on ? `--${flag}` : `--no-${flag}`);
+    }
     const groups = [
       dirs.filter((_, index) => index % 2 === 0),
       dirs.filter((_, index) => index % 2 === 1),
@@ -243,7 +353,7 @@ async function exploreUnits(
       const { entries, ...counts } = result.corpus;
       const written = corpusFile(corpus, dir);
       const exhausted = result.search.stoppedBy === "exhausted";
-      const bytes = await writeCorpus(written, header, exhausted, entries);
+      const bytes = await writeCorpus(written, header, exhausted, settings.strategies, entries);
       corpusReport = { ...counts, file: written, bytes, exhausted };
     }
     const report = {
@@ -315,7 +425,8 @@ async function exploreUnit(
   if (
     stored?.exhausted === true &&
     stored.contentHash === unit.contentHash &&
-    stored.seed === settings.seed
+    stored.seed === settings.seed &&
+    stored.strategies === strategiesKey(settings.strategies)
   )
     return null;
   const header: ReportHeader = {
@@ -339,9 +450,12 @@ async function exploreUnit(
       budgetMs: settings.budgetSeconds === null ? Infinity : settings.budgetSeconds * 1000,
       ...(settings.budgetOps === null ? {} : { budgetOps: settings.budgetOps }),
       maxStates: settings.maxStates,
+      ...(settings.untilStalled ? { untilStalled: true } : {}),
+      ...(settings.storeMb === null ? {} : { storeBytes: settings.storeMb * 1024 ** 2 }),
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
       ...(settings.corpus === null ? {} : { corpus: stored?.entries ?? [] }),
+      ...settings.strategies,
     }),
   };
 }
@@ -354,6 +468,8 @@ interface StoredCorpus {
   contentHash: string;
   seed: number;
   exhausted: boolean;
+  /** The search strategies of the run that wrote it, as JSON: an exhausted search with others may not be exhausted. */
+  strategies: string;
   entries: CorpusEntry[];
 }
 
@@ -391,6 +507,8 @@ async function readCorpus(file: string): Promise<StoredCorpus | null> {
     contentHash: text(stored.contentHash),
     seed: count(stored.seed),
     exhausted: stored.exhausted === true,
+    // A corpus from before strategies were recorded had them all off.
+    strategies: strategiesKey(isRecord(stored.strategies) ? stored.strategies : {}),
     entries,
   };
 }
@@ -418,6 +536,7 @@ async function writeCorpus(
   file: string,
   header: ReportHeader,
   exhausted: boolean,
+  strategies: RunSettings["strategies"],
   entries: readonly CorpusEntry[],
 ): Promise<number> {
   const { unit, contentHash, explorer, seed } = header;
@@ -427,6 +546,7 @@ async function writeCorpus(
     explorer,
     seed,
     exhausted,
+    strategies,
     writtenAt: new Date().toISOString(),
   });
   const body = `${head.slice(0, -1)},"entries":[\n${entries.map((entry) => JSON.stringify(entry)).join(",\n")}\n]}\n`;
@@ -488,7 +608,11 @@ function withReplayCommands(result: ExploreResult, file: string) {
  * catalog reads the rest of the report.
  */
 function catalogBlock(result: ExploreResult) {
-  const crash = result.crashes.find((entry) => !entry.clock) ?? result.crashes[0];
+  // A crash of play first, then one only play with chosen random outcomes reached, then a clock one.
+  const crash =
+    result.crashes.find((entry) => !entry.clock && entry.chosen !== true) ??
+    result.crashes.find((entry) => !entry.clock) ??
+    result.crashes[0];
   const location = result.traps.flatMap((trap) => trap.locations)[0];
   return {
     coveragePercent: result.coverage.percent,
@@ -497,7 +621,13 @@ function catalogBlock(result: ExploreResult) {
     firstCrash:
       crash === undefined
         ? null
-        : { code: crash.code, path: crash.path, line: crash.line, message: crash.message },
+        : {
+            code: crash.code,
+            path: crash.path,
+            line: crash.line,
+            message: crash.message,
+            ...(crash.chosen === true ? { chosen: true } : {}),
+          },
     firstTrap: location === undefined ? null : { location },
     reach: result.coverage.reach,
   };
@@ -514,13 +644,19 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
         `(${corpus.stale} stale, ${corpus.replayMs} ms), then `;
   return (
     `${fromCorpus}${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
-    `${crashes.length} crashes, ${traps.length} traps, ` +
+    `${crashes.length} crashes` +
+    (crashes.some((crash) => crash.chosen === true)
+      ? ` (${crashes.filter((crash) => crash.chosen === true).length} only with chosen random outcomes)`
+      : "") +
+    `, ${traps.length} traps, ` +
     `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
-    `directed ${directed.reached.play} play + ${directed.reached.clock} clock of ${directed.targets}, ` +
+    `directed ${directed.reached.play} play + ${directed.reached.clock} clock` +
+    (directed.reached.chosen === undefined ? "" : ` + ${directed.reached.chosen} chosen`) +
+    ` of ${directed.targets}, ` +
     `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})` +
     (corpus === null ? "" : `, ${corpus.written} corpus entries kept`) +
     `, ${search.operations} operations, ${Math.round(search.cpuMs / 1000)} s CPU` +
-    (top === undefined ? "" : `, ${top.percent}% of expansions at ${top.location}`)
+    (top === undefined ? "" : `, ${top.percent}% of expansions at ${top.location} (${top.kind})`)
   );
 }
 
@@ -616,7 +752,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
         `${records(report.traps).length} | ${count(endStates.completed)} | ${count(endStates.failed)} | ` +
         `${count(endStates.stuck)} | ${count(endStates.open)} | ${measured(search.operations)} | ` +
         `${measured(search.elapsedMs, 1000, " s")} | ${measured(search.cpuMs, 1000, " s")} | ` +
-        `${top === undefined ? "" : `${count(top.percent)}% ${text(top.location)}`} |`,
+        `${top === undefined ? "" : `${count(top.percent)}% ${text(top.location)}${typeof top.kind === "string" ? ` (${top.kind})` : ""}`} |`,
     );
   }
   for (const report of reports) {
@@ -635,7 +771,8 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       lines.push(
         `- Crash \`${text(crash.code)}\` at \`${text(crash.path)}:${count(crash.line)}:${count(crash.column)}\`: ` +
           `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs` +
-          `${crash.clock === true ? ", with the clock set" : ""}${records(crash.earlier).length > 0 ? `, in session ${records(crash.earlier).length + 1}` : ""}; \`${text(crash.replay)}\`)`,
+          `${crash.clock === true ? ", with the clock set" : ""}` +
+          `${crash.chosen === true ? ", only with chosen random outcomes" : ""}${records(crash.earlier).length > 0 ? `, in session ${records(crash.earlier).length + 1}` : ""}; \`${text(crash.replay)}\`)`,
       );
     }
     for (const trap of records(report.traps)) {
@@ -668,9 +805,17 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     }
     const reach = fields(coverage.reach);
     lines.push(
-      `- Lines: ${count(reach.play)} play, ${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ` +
-        `${count(reach.unknown)} unknown`,
+      `- Lines: ${count(reach.play)} play, ` +
+        (reach.chosen === undefined ? "" : `${count(reach.chosen)} play (chosen random), `) +
+        `${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ${count(reach.unknown)} unknown`,
     );
+    // What a player reaches only with a particular run of luck, apart from what play reaches anyway.
+    if (reach.chosen !== undefined)
+      lines.push(
+        `- Only with chosen random outcomes: ${count(reach.chosen)} lines, ` +
+          `${count(fields(fields(report.directed).reached).chosen)} ways, ` +
+          `${records(report.crashes).filter((crash) => crash.chosen === true).length} crashes`,
+      );
     const directed = fields(report.directed);
     const reached = fields(directed.reached);
     const bySource = Object.entries(fields(directed.bySource))
@@ -681,10 +826,27 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       )
       .join(", ");
     lines.push(
-      `- Directed search: ${count(reached.play)} play and ${count(reached.clock)} clock of ` +
+      `- Directed search: ${count(reached.play)} play` +
+        (reached.chosen === undefined ? "" : `, ${count(reached.chosen)} play (chosen random),`) +
+        ` and ${count(reached.clock)} clock of ` +
         `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
         `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
+    const audit = fields(fields(report.search).audit);
+    if (typeof audit.result === "string") {
+      const progress = fields(audit.progress);
+      const spiral = fields(audit.spiral);
+      lines.push(
+        `- Until stalled: ${audit.result}` +
+          (typeof spiral.location === "string"
+            ? ` at \`${spiral.location}\` (${count(spiral.share)}% of the expansions since the last progress)`
+            : "") +
+          `; last progress after ${count(audit.lastProgressAt)} operations, window ${count(audit.window)}; ` +
+          `progress: ${count(progress.code)} new code, ${count(progress.ways)} new ways, ${count(progress.closer)} closer ` +
+          `(and ${count(progress.cells)} new cells, which do not hold a run up)`,
+      );
+    }
+    lines.push(...workingToward(records(coverage.unvisitedBranches)));
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);
     if (count(engineErrors.count) > 0)
@@ -694,6 +856,73 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** Ways still missed, those with the most code behind them first: what each needs, and why play did not get there. */
+function workingToward(branches: readonly Readonly<Record<string, unknown>>[]): string[] {
+  const shown = branches
+    .filter((branch) => count(branch.behindLines) > 0)
+    .sort((left, right) => count(right.behindLines) - count(left.behindLines))
+    .slice(0, WORKING_TOWARD_ROWS);
+  if (shown.length === 0) return [];
+  return [
+    "- Working toward (the missed ways with the most code behind them):",
+    ...shown.map((branch) => {
+      const written = text(fields(branch.condition).text) || "?";
+      // A switch case's condition reads as its pattern.
+      const condition = branch.case === true ? `case ${written}` : written;
+      const needs =
+        branch.missed === "true" || branch.missed === "enter" ? condition : `not (${condition})`;
+      const best = fields(branch.best);
+      const parts = records(branch.parts);
+      const dependsOn = texts(branch.dependsOn);
+      const value = (closest: Readonly<Record<string, unknown>>) =>
+        typeof closest.value === "number" ? count(closest.value) : String(closest.value);
+      const subject = text(best.needs)
+        .split(" ")
+        .slice(0, text(best.needs).startsWith("stored ") ? 2 : 1)
+        .join(" ");
+      const closest =
+        branch.best === undefined
+          ? ""
+          : `${best.trend === "improving" ? "still improving" : "no progress"}: the closest ` +
+            `${best.atOperations === undefined ? "storage" : "state"} had \`${subject}\` = ${value(best)} in session ` +
+            `${count(best.session)}` +
+            `${best.atOperations === undefined || best.trend === "improving" ? "" : `, no closer after ${count(best.atOperations)} operations`}` +
+            ` (needs \`${text(best.needs)}\`)`;
+      // The other parts: met in some state (not necessarily together), or not measured.
+      const listed = (status: string) =>
+        parts
+          .filter((part) => part.status === status && text(part.needs) !== text(best.needs))
+          .map(
+            (part) =>
+              `\`${text(part.needs)}\`${part.of === "earlier condition" ? " (earlier condition)" : ""}` +
+              (status === "met" ? ` (${value(fields(part.closest))})` : ""),
+          );
+      const others = [
+        ...(listed("met").length > 0 ? [`met in some state: ${listed("met").join(", ")}`] : []),
+        ...(listed("unmet").length > 0 ? [`also unmet: ${listed("unmet").join(", ")}`] : []),
+        ...(listed("unmeasured").length > 0
+          ? [`not measured: ${listed("unmeasured").join(", ")}`]
+          : []),
+      ].join("; ");
+      const why =
+        branch.reach === "unreachable"
+          ? `unreachable: ${text(branch.reason)}`
+          : branch.reach === "clock"
+            ? "reached only at another wall clock time"
+            : closest !== ""
+              ? `${closest}${others === "" ? "" : `; ${others}`}`
+              : branch.reason !== undefined
+                ? `no progress: ${text(branch.reason)}${others === "" ? "" : `; ${others}`}`
+                : others !== ""
+                  ? `no progress; ${others}`
+                  : dependsOn.length > 0
+                    ? `no progress; depends on ${dependsOn.join(", ")}`
+                    : "no progress; what it depends on is not traced";
+      return `  - \`${text(branch.path)}:${count(branch.line)}\` needs \`${needs}\` (${count(branch.behindLines)} lines behind): ${why}`;
+    }),
+  ];
 }
 
 /** The earlier sessions of a path read back from a report: none when absent, null when malformed. */
@@ -727,6 +956,28 @@ function parseInputs(value: unknown): ExplorerInput[] | null {
 }
 
 function parseInput(value: unknown): ExplorerInput | null {
+  const input = parseInputKind(value);
+  if (input === null || !isRecord(value) || value.random === undefined) return input;
+  // The random outcomes the explorer chose during the input, one per draw; the runtime checks each outcome against its
+  // draw, and an input whose outcomes are not all taken does not fit.
+  if (!Array.isArray(value.random) || value.random.length === 0) return null;
+  const random: RandomChoice[] = [];
+  for (const choice of value.random) {
+    if (
+      !isRecord(choice) ||
+      !Number.isSafeInteger(choice.drawId) ||
+      random.some((known) => known.drawId === choice.drawId) ||
+      typeof choice.site !== "string" ||
+      !isRecord(choice.outcome) ||
+      typeof choice.outcome.kind !== "string"
+    )
+      return null;
+    random.push({ drawId: Number(choice.drawId), site: choice.site, outcome: choice.outcome });
+  }
+  return { ...input, random };
+}
+
+function parseInputKind(value: unknown): ExplorerInput | null {
   if (!isRecord(value)) return null;
   const label = text(value.label);
   switch (value.kind) {
@@ -758,6 +1009,13 @@ function parseInput(value: unknown): ExplorerInput | null {
         : null;
     case "wait":
       return typeof value.untilMs === "number" ? { kind: "wait", untilMs: value.untilMs } : null;
+    case "later":
+      // Time only goes forward between the inputs of a path.
+      return typeof value.afterMs === "number" &&
+        Number.isSafeInteger(value.afterMs) &&
+        value.afterMs > 0
+        ? { kind: "later", afterMs: value.afterMs }
+        : null;
     case "press":
       return typeof value.buttonId === "number"
         ? { kind: "press", buttonId: value.buttonId, label }
@@ -825,14 +1083,26 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
-  earlier.forEach((session, index) =>
+  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
+  // An earlier session that waits after its last input is one the player quit there; the narration stops where a
+  // runtime operation threw.
+  earlier.slice(0, replayed.earlier.length + 1).forEach((session, index) => {
+    const status = replayed.earlier[index];
+    const end =
+      status === undefined
+        ? "a runtime operation threw"
+        : status === "halted"
+          ? "it ends; its storage starts the next"
+          : status === "waiting"
+            ? `the player quits after input ${session.inputs.length}; its storage starts the next`
+            : `it ends ${status}; its storage starts the next`;
     process.stdout.write(
-      `Session ${index + 1}: ${session.inputs.map(describeInput).join("; ") || "(no input)"}, then its storage starts the next\n`,
-    ),
-  );
+      `Session ${index + 1}${session.wallClockMs === undefined ? "" : ` at ${new Date(session.wallClockMs).toISOString()}`}: ` +
+        `${session.inputs.map(describeInput).join("; ") || "(no input)"}, then ${end}\n`,
+    );
+  });
   if (wallClockMs !== EPOCH_MS)
     process.stdout.write(`The last session starts at ${new Date(wallClockMs).toISOString()}\n`);
-  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
   const { steps, failure } = replayed;
   for (const step of steps) {
     if (step.input !== null) process.stdout.write(`> ${describeInput(step.input)}\n`);
@@ -845,7 +1115,17 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   );
   if (replayed.error !== null) process.stdout.write(`Runtime operation threw: ${replayed.error}\n`);
   if (error) {
-    const reproduced = replayed.error === text(target.message);
+    // A state the runtime refused to restore: the path reaches it without a throw, and restoring it throws.
+    let thrown = replayed.error;
+    if (thrown === null) {
+      try {
+        engine.createRuntimeSession(unit.plan, replayed.snapshot);
+      } catch (refused) {
+        thrown = String(refused);
+        process.stdout.write(`Restoring the state reached threw: ${thrown}\n`);
+      }
+    }
+    const reproduced = thrown === text(target.message);
     process.stdout.write(reproduced ? "Reproduced.\n" : "Not reproduced.\n");
     return reproduced ? 0 : 1;
   }
@@ -860,7 +1140,23 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   return reproduced ? 0 : 1;
 }
 
+/** A time gap in words: whole days from two days on, else hours, else seconds. */
+function describeGap(milliseconds: number): string {
+  const hours = milliseconds / 3_600_000;
+  if (hours >= 48 && hours % 24 === 0) return `${hours / 24} days`;
+  return hours >= 1 ? `${hours} h` : `${milliseconds / 1000} s`;
+}
+
 function describeInput(input: ExplorerInput): string {
+  const chosen = (input.random ?? []).map(
+    (choice) => `${choice.site} ${JSON.stringify(choice.outcome)}`,
+  );
+  return chosen.length === 0
+    ? describeInputKind(input)
+    : `${describeInputKind(input)} (random chosen: ${chosen.join(", ")})`;
+}
+
+function describeInputKind(input: ExplorerInput): string {
   switch (input.kind) {
     case "option":
       return `choose ${input.index}: ${input.label}`;
@@ -880,5 +1176,7 @@ function describeInput(input: ExplorerInput): string {
       return `wait until ${input.untilMs / 1000} s`;
     case "press":
       return `press permanent [${input.label}]`;
+    case "later":
+      return `continue ${describeGap(input.afterMs)} later`;
   }
 }

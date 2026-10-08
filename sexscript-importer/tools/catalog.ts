@@ -178,7 +178,7 @@ export interface PlayCheck {
 
 /**
  * The fields of a headless `explore.ts` report the Explorer column uses. A report's `catalog` block, when present, is
- * read first: `{ coveragePercent, crashes, traps, firstCrash: { code, path, line, message } | null, firstTrap:
+ * read first: `{ coveragePercent, crashes, traps, firstCrash: { code, path, line, message, chosen? } | null, firstTrap:
  * { location } | null, reach }`, the counts as numbers and `reach` the number of lines per reach label; a field it
  * lacks comes from the full report, except `reach`, which only the block gives.
  */
@@ -213,6 +213,8 @@ export interface ExplorerReport {
     readonly code: string;
     readonly where: string | null;
     readonly message: string;
+    /** True when only play with chosen random outcomes reached it. */
+    readonly chosen?: boolean;
   } | null;
   readonly firstTrap: { readonly kind: string | null; readonly where: string | null } | null;
   /** Lines per reach label of `src/explorer.ts`, such as `play` or `unreachable`, when the catalog block gives them. */
@@ -241,6 +243,7 @@ const PIN_STORAGE_KEY = "sexscript-catalog-pins";
 /** How the explorer's reach labels read in the Explorer details; see `Reach` in `src/explorer.ts`. */
 const REACH_LABELS: Readonly<Record<string, string>> = {
   play: "reached by play",
+  chosen: "reached by play with chosen random outcomes",
   seededState: "reached only from a prepared state",
   unreachable: "proven unreachable",
   unknown: "of unknown reach",
@@ -727,6 +730,7 @@ export function parseExplorerReport(value: unknown): ExplorerReport | null {
       code: fields.code,
       where: file === null ? null : `${file}${line === null ? "" : `:${line}`}`,
       message: text(fields.message) ?? "",
+      ...(fields.chosen === true ? { chosen: true } : {}),
     };
   };
   const block = record(value.catalog);
@@ -1198,7 +1202,9 @@ function renderExplorer(entry: CatalogEntry): string {
     ...(firstCrash === null
       ? []
       : [
-          `First crash: ${firstCrash.code}${firstCrash.where === null ? "" : ` at ${firstCrash.where}`}.${firstCrash.message === "" ? "" : ` ${firstCrash.message}`}`,
+          `First crash: ${firstCrash.code}${firstCrash.where === null ? "" : ` at ${firstCrash.where}`}` +
+            `${firstCrash.chosen === true ? ", only with chosen random outcomes" : ""}.` +
+            `${firstCrash.message === "" ? "" : ` ${firstCrash.message}`}`,
         ]),
     ...(firstTrap === null
       ? []

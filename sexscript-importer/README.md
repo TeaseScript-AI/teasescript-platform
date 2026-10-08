@@ -270,8 +270,10 @@ them at the top.
 
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
-node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
-  [--corpus <corpus-dir> [--rounds N]] <unit-dir>... --out <dir>
+node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--store-mb N] [--seed 1] [--workers 1|2] \
+  [--until-stalled] [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
+  [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] [--[no-]random-choices] \
+  [--[no-]quit-anywhere] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -282,14 +284,34 @@ action is a branch point. The options are every button and choice option; for a 
 switched (and all on, all off), each other option of a cycle, each typed field at its bounds, and cancel where the
 form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1`, `1000000` (and
 `0.5` for `askNumber`), the text `x`, and dates and times at both ends of a day or year. Each constant that the code
-compares with near the ask adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. A button whose result the
-script keeps (`(showButton …) / 1 s`) can also be pressed after the player thinks for just over each compared number
-of seconds (60 s without one). Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
+compares with near the ask adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. With compared answers (on by
+default, off with `--no-compared-answers`), a text or number ask is also answered with the values, in the state at the ask, of what the code compares its answer
+with (a variable, or a property, index, or sum of variables, found through the data flow), such as the line a script
+asks the player to type: three at most, and `v - 1`, `v`, and `v + 1` for a number `v`; and directed search (below)
+also answers asks whose prompt the code computes (`askText "Type: ${line}"`), which it otherwise leaves out. A button whose result the
+script keeps (`(showButton …) / 1 s`, `beg < 15 s`) can also be pressed after the player thinks for just over each
+compared number of seconds or duration (60 s without one), or of the value in the state that the time is compared with
+(`(showButton …) / 1 s > count`). So can any button between two clock reads whose difference a condition compares
+with a constant (`took = getTimestamp().toSeconds() - start` after it, then `took < 5`), just past that constant. Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
 each shown permanent button, are options too. Media loads succeed with one second per pass, `takePhoto` finds no
 camera, `askImage` gets one stored image, pacing is instant, and the clock starts at 2026-10-02 12:00 UTC. The first
 session starts with empty storage. A later session starts from the storage an explored state left, as the player's
 next session would after playing to that point: a few from completed sessions, and chains toward stored values that
 conditions need (below). The explorer never makes up a stored value.
+
+With `--until-stalled`, a run has no work budget: it goes on while it makes progress and stops on its own, with a
+time cap (two hours unless `--budget-seconds` is given) and no state limit unless `--max-states` is given. Progress is
+a step that runs new code, takes a condition way no step took, or comes closer to a comparison a way play has not taken needs (a
+variable's closest state, or a stored value's session chain, below). The run stops when it made no progress for a
+window of operations: 20,000 plus 20 per coverable line, or three times the longest stretch without progress that
+progress still ended, whichever is more, so a small script finishes soon and a run that found something after a long
+stretch keeps looking as long again. New cells (below) are counted but do not hold a run up: cells of counters keep
+coming long after anything else does. Directed search looks again every quarter window, and the window starts after
+a corpus replay. `search.audit` says how the run ended: `complete` (nothing left to try, and no line or missed way of
+unknown reach), `stalled` (no progress for the window, or nothing left to try with code of unknown reach), `spiral` (a stall in which one place took at least half of the
+expansions since the last progress: the place and its prompt, a problem of the explorer), or `capped` (a cap came
+first); with the window at the end, the last progress, the longest stretch without progress, and the progress by
+kind. The summary has a line for it, and the missed ways the run was working toward (below) say what it would need.
 
 States are deduplicated by a hash of the snapshot that leaves out what no script can observe: event sequence numbers,
 the next free IDs, and the last settlement record. The runtime's own IDs (actions, scopes, call frames, timers, media,
@@ -297,8 +319,19 @@ buttons) are renumbered by rank, because only their equality and order matter. T
 in. The search first expands directed states (below), then states whose step reached new instructions in any
 session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
-first. Waiting states keep their snapshots
-as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
+first. The search ranks states by cells (`--no-cells` switches this off). A cell is where a state waits (its pending action, the return
+points of its calls, and the pass of each `for` and `repeat` loop) with the bucket of each value that conditions compare
+with constants: each variable and stored key (also through the data flow, each key a key template matches apart) a
+comparison reads, or its length, bucketed as unset, `null`, `true` or `false`, a compared text or other text, or a
+number's or duration's place among its compared constants (below, at, between, or above them). A step that shows such
+a value, or a change of one, for the first time counts as reaching new instructions, and among the other states those
+of the cells expanded least go first, before the loop key. A cell groups states coarsely: a condition that computes
+with a value (`n + 1 == 3`) can still tell states of one cell apart. A loop that keeps making states no condition
+tells apart, such as a counter no condition reads, so no longer takes most of the search; the report's `search.cells`
+counts the slots, cells, values, and changes found. Waiting states keep their tagged snapshots (below): the JSON's
+exact bytes packed with zstd level 1, after the first eight with a dictionary made of those, and the tag (up to an
+eighth of the memory, from 256 MiB to 4 GiB, or `--store-mb N`; a state whose snapshot was dropped is replayed from an
+ancestor; `search.store` has the limit, the peak, and the drops). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
 `--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic
 answers, the corpus replay's included), checked before each step: a step that started finishes, so a run can go over N
@@ -315,22 +348,99 @@ that ask wherever the search meets it. For a stored value, sessions are chained:
 that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
 storage closest to it and plays again the path that led there, to raise the value once more, for as long as each
 session gets closer (100 sessions at most). When no explored session gets there, the way stays `unknown` with the
-reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock the player continues at
-other wall clock times (times of day, weekdays, later dates) before that step, as a real player's time varies; a step
-after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
-condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
-share it for 40; clock states take only their attempt's own steps and otherwise come after all play states. Directed
-work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations
-(fresh sessions, runs, inputs, and automatic answers), a deterministic measure of what steps cost.
+reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock, without forward time
+(below), the player continues at other wall clock times (times of day, weekdays, later dates) before that step, as a
+real player's time varies; a step after that is a clock step. An answer attempt's states share the first place for 20
+expansions in all, until the condition takes the missed way (a session chain goes on from the storage it reached
+instead), and play states that bring a variable the code counts or sets closer to the comparison share it for 40 (with
+progress leads, on by default and off with `--no-progress-leads`, an expansion in that first place that brings a state
+closer again does not count, so a loop that needs many rounds is followed to the constant, while one that gets no
+closer uses its 40 up); clock states take only their attempt's own steps and otherwise come after all play states.
+With conjunctive steering (on by default, off with `--no-conjunctive`), a way that needs all parts of its condition
+(`a >= 5 and b <= 6` true, an `or` false) is steered by the condition's branch distance instead of each part's
+closeness: a state is closer when fewer of the parts it can read are unsatisfied, or as many but nearer in sum (an `or`
+the way needs either part of takes the nearer part), and a session chain toward a stored value of the condition also
+counts how far its parts on other keys are.
+With `--guidance`, a static map of the plan steers too: its control flow (conditions, calls and returns, file
+transfers, the blocks a timer, cue, or button sets up; constant conditions cut; a session's end leading to the next
+session's start) gives each instruction the number of decisions (conditions and prompts, a next session as three) to
+the largest region of code play has not reached yet (of at least ten instructions), measured again at each analysis.
+A step that brings a state nearer to that region shares a lead toward it, as closeness to a comparison does, for 40
+expansions; once the region is reached or its lead spent, the next largest region not tried yet is. It is off by
+default: on the units measured it gained nothing. Directed work (attempts and expansions in the first place) takes at
+most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
+of what steps cost; starting next visits takes at most another third, apart from it.
+
+With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
+(`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
+random integers, picks from a collection, weighted picks, tag queries, and glob file transfers), which run naturally
+unless it chooses. A step also offers the other outcomes of
+the first four draws it made (`randomDrawAlternatives`: all of a small support, 16 representative ones of a large one;
+at most three per draw, each outcome of a draw site once per waiting place and input) as steps with the same input and
+that outcome chosen, also after directed steps. Those steps and the expansions of the states after them take at most a
+sixteenth of all runtime operations while other states are open, checked before each input (a state cut short goes on
+later with the inputs it has not tried), and all of them when none is; they can cost much more than other steps. Such
+states are apart from play's, also where the runtime state is the same, with their own loop keys and cell expansions,
+so that they do not move play states back; they give no leads, time steps, directed attempts, or storage for next
+visits, and a way only they reached stays a goal of directed search. A path records only the outcomes it
+chose, one per draw, as the `random` list of the input during which they were drawn (draw ID, site, and outcome), so
+repros, the corpus, and `--replay` choose them again; a replay or corpus path with chosen outcomes plays them also
+without the flag, and an input whose outcomes are not all drawn and taken does not fit. Play with a chosen outcome is
+play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts, the directed ways,
+and the crashes show it apart, as does a line per unit in `summary.md` with the lines, ways, and crashes only it
+reached: what a player hits only with a particular run of luck.
+
+With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
+who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
+`getTimestamp().toSeconds() - lastVisit > day`), also through variables computed from the clock in one way, helpers
+that return one part of the date or time (exactly when they only return it; a helper that adjusts it is an
+approximation), and functions that only compute a value (they bind, assign, branch, load, call such functions, and
+return; at most 500 instructions and four calls deep), with no function singled out by name, and evaluates it in a state
+at a later wall
+clock, with the state's variables and stored values; a variable set once that the state has no value for yet, such as
+at the start of a session, from the value it is set to (a load with a key from a variable set once to a text too). A
+state that waits where such a condition was read next gets time steps: `later` inputs to just past the first moment, within 400 days, at which one of those comparisons comes out
+the other way, as far as the explorer finds it: at the second, minute, hour, or day boundaries where a compared part
+of the date or time changes, where compared elapsed times meet (also two arguments of a function whose result is
+compared, as `compare(a, b) <= 0` changes where `a` and `b` meet), or else by sampling at doublings of a minute and
+halving (the next 18:01, the next weekday, saved time plus a day and a minute, inside or past a window). Each is tried
+once per cell and outcome; where the condition was first read, the state the step left, or the session start, gets
+them too. Their outcomes at a state's wall clock are part of its cell, so a new outcome or change of one counts as
+reaching something new. A later session starts a minute after the wall clock where the state it continues stands,
+and also in the windows of every clock comparison sessions have read so far, as its first state would compute them
+(a return window such as back too soon and too late, from a stored time of the last visit): just past and just before
+each moment one changes, and midway between two, each once per outcome of them all, at most eight from a storage, and
+again from the same storage when sessions read more comparisons later; a session chain keeps the gap of the session
+it continues. A condition that compares how long the player took between two clock reads (a reaction time held in a
+variable, against a constant or another value) gets no forward time: think times at the button between the reads
+reach it, and coming back later changes nothing. For a clock condition the explorer cannot read in full, or reads
+only through an approximate helper, it also tries a fixed ladder: continuing an hour, an evening, a night, a morning,
+a day, two or three days, a week, 40 days, or 400 days later just before the step that read it, or starting that
+session that much later. All these steps are play, and a path records them: its `later` inputs and each session's
+start clock. A gap must be positive. Only a session that does not start after the clock where the state it continues
+stands, such as one of an old corpus entry, is a clock start. The report's `search.time` counts the conditions that
+read the clock, the places they were read after, and the time steps taken by states and sessions.
+With `--quit-anywhere`, a player can quit at any moment, and what the session saved so far stays: next visits also
+start from the storage of explored states a session did not complete, at most 20, within the next visits' share and
+once per storage, one per analysis pass. The first is the one with the most stored cells no next visit started from
+had: the values of the keys the script reads (those conditions compare, those loads read, and those a call gives a
+function that loads its parameter), and their changes in its session; such visits get the windows of the comparisons
+read so far once. They are play; a path records the earlier session up to its last input, and `--replay` says where the
+player quit. The report counts them as `search.quitVisits`. It is off by default: it reaches return flows that only a
+saved but uncompleted session leads to, at the cost of first-session depth on the units measured.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
 `instructionTrace: true`, and the condition ways come from the trace's branch edges. A path runs in one runtime
 session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between operations: the explorer exports the state
-once per step, for its hash and the snapshot store, restores a stored state once to expand it, and tries each input on
-its own copy: a fork of it for all inputs but the last, which goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
+once per step as a tagged snapshot (`exportTaggedSnapshot`: its JSON and a tag that proves this process's engine wrote
+it for this plan), reads the JSON for its hash and keeps both in the snapshot store, restores a stored state once to
+expand it, which the runtime does without checking it again while the tag holds and checks otherwise (a snapshot it
+refuses is counted under `search.engineErrors`), and tries each input on its own copy: a fork of it for all inputs but
+the last, which goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
 from, for comparisons. Each line has
-a label: `play` when a play step executed it, in any session; `clock` when only steps after the wall clock was set did;
+a label: `play` when a play step executed it, in any session; `chosen` when only play with chosen random outcomes did;
+`clock` when only steps after the wall clock was set did;
 `unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control
 flow in which a constant condition takes only its one way; and `unknown` otherwise. A condition is constant when it is a
 literal, when the compiler proves it always true or false (`TSV046`), or when it reads only stored keys whose values
@@ -342,31 +452,51 @@ no line is labelled `unreachable` (`staticContradictions`).
 The report `<out>/<unit>.json` has these parts:
 
 - for a unit that compiles, a `catalog` block for the importer catalog's Explorer column: `coveragePercent` by play,
-  the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`) and `firstTrap` (`location`)
-  or `null`, and `reach`, the coverable lines by label (`play`, `clock`, `unreachable`, `unknown`);
+  the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`, and `chosen` when only play
+  with chosen random outcomes reached it) and `firstTrap` (`location`) or `null`, and `reach`, the coverable lines by
+  label (`play`, `chosen` with random choices, `clock`, `unreachable`, `unknown`);
 - per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
   their label;
 - each condition and loop that play reached but left only one way, with its source, the missed way, its first line,
-  what it depends on, the directed attempts, its label, and the reason, when known;
+  what it depends on (`dependsOn`: variables, stored keys, asks, the clock), the directed attempts, its label, and the
+  reason, when known; `behindLines`, the coverable lines no state ran that the missed way leads to through code no state
+  ran (a call goes into its function and on after it; a return, an end, or a transfer to a computed destination stops
+  the count); `parts`, one per comparison and value source the way needs (also from the earlier conditions of its
+  `else if` chain, which must not hold): `met` when some explored state or stored value satisfied it (not necessarily
+  together with the other parts), `unmet` with the closest one, or `unmeasured`; `best`, what keeps the way closed as
+  far as measured: of the condition's own unmet parts, the furthest from holding when the way needs all of them, the
+  nearest when any one would do, and none when they combine both ways; and `case` for a `switch` case, whose condition
+  text is its pattern. A variable is read in the innermost running call of the condition's function, over the
+  top-level variables of its file, as a value of the compared constant's type; its closest state counts from when the
+  condition became a target, with its value, its session, the operations done when a state first came that close, and
+  `trend` (`improving` when a state beat the first one watched and did so in the last quarter of the run's
+  operations, else `flat`). For a stored value, it is the closest storage a state left;
 - `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
   directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
-  there is), and whether that path set the clock;
+  there is), and whether that path set the clock or chose a random outcome;
 - the traps;
 - the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out;
 - in `search`, what stopped it (`exhausted`, `budget` for time, `operations` for work, or `maxStates`), the runtime
   operations, the elapsed and CPU time, and `expansionsByPrompt`: the five places where the most expanded states
-  waited (the `path:line` of their pending action, with its prompt) and their share of all expansions. It shows where
-  the search spends its work; most expansions at one place is often a loop the search keeps going round, worth checking
-  before raising the budget, though paths that converge on one prompt can concentrate there too.
+  waited (the `path:line` of their pending action, with its prompt), their share of all expansions, how many of those
+  were `productive` (a step from them reached new instructions, a cell or slot value or change of value not seen
+  before, or a state closer to a directed comparison), and their `kind`: a `spiral` when fewer than half were
+  productive, such as a loop that changes nothing any condition reads, worth checking before raising the budget; else
+  a `hub` when steps by two or more inputs were productive, such as a menu many paths pass; else a `progressing loop`,
+  one input taken again and again with something new each time, such as a counter that moves toward a compared
+  constant.
 
 A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
-and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
+and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit, and
+per unit the missed ways with the most lines behind them: what each needs, and why play did not get there (the closest
+state to the comparison it needs, still improving or not, the reason directed search knows, or what it depends on).
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
-runtime operation that throws, such as a runtime that rejects a state it produced when exporting it (`TSR101`), is no
-crash of the package: it ends that runtime session, the search goes on from the state before the input, and the report
-counts these under `search.engineErrors` with the path of the first, which `--error` replays.
+runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime
+refuses to restore, is no crash of the package: it ends that runtime session, the search goes on from the state before
+the input, and the report counts these under `search.engineErrors` with the path of the first, which `--error` replays
+(a refused state by restoring the state the path reaches).
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
@@ -381,7 +511,12 @@ the search's own steps, each session from the storage the one before it left, wh
 sessions left, and the states; an input is applied to a state once. The search then goes on with the rest of the
 budget, and states the replay went on from, which an earlier run expanded, come after all others. An entry is `stale`
 from the first input that no longer fits the pending action (another option or button label, another kind of ask,
-another deadline) or that the runtime rejects; it is replayed up to there. At the end the corpus is written back
+another deadline) or that the runtime rejects; it is replayed up to there. With realignment (on by default, off with
+`--no-realign`), a replay of a corpus entry or of a directed attempt's path goes on instead: with the input that fits there (the option or button with the same
+label, the wait there is), with a later input of the path that fits (skipping up to 8), or with the only button there
+is (up to 8), and the report's `corpus.realigned` counts the entries that needed it; the path a report keeps is the
+inputs actually applied. The goals of a condition after `else` then also include the earlier conditions of its chain
+taking their other way, and a session chain measures how close a storage is by those too. At the end the corpus is written back
 minimized: the paths to the crashes and traps, then, by greedy set cover over lines and condition ways (play and clock
 apart), paths of steps that covered one first, until they cover all the run covered, without one that the others cover;
 entries of another seed, and those the budget left unreplayed, stay as they are. The report's `corpus` block has the
@@ -393,6 +528,23 @@ not exhausted yet. Directed attempts and session chains start over in each run; 
 corpus.
 
 The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.
+
+To compare a change to the explorer with the explorer before it (a gate), explore the same units with the same work
+budget and seeds with both, and compare the reports:
+
+```sh
+node tools/explore-compare.ts <base-out> <candidate-out> [--favourite <unit>]... [--no-lines] > gate.md
+```
+
+Each folder holds the reports of one run, or one subfolder per seed (`s1/`, `s2/`, ...). The first table has the
+coverage by seed, how the search stopped, states per second, and the gate: a unit fails when the candidate's mean is
+more than 1 pp below the base's lowest, when a seed the base exhausted is not exhausted at least as well, or when a crash
+or trap the base found is missing. A net change can hide a loss elsewhere, so the second table counts the lines and
+condition ways each side visited and the other did not, per seed, and the lines consistently lost or gained (visited by
+one side in at least two thirds of the seeds and by the other in none), with their files and ranges and the search
+figures that help explain them (states, sessions, time steps, quit visits, traps, open states, the top hotspot). A
+`--favourite` unit with consistently lost lines is marked `EXPLAIN`. Lines are counted from compiling each unit, as the
+explorer counts them.
 
 ## Tests
 

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
+import type { ClockDifference, Constants } from "./explorer-analysis.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
@@ -18,9 +19,11 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  * list ({@link replay}).
  *
  * Each path runs in an engine-owned runtime session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between
- * operations. The explorer handles the whole state only where it needs it: one checked export per step for the
- * search's state hash and store, a checked import to go on from a stored state, and a trusted copy (a fork) for each
- * input tried from one state but the last.
+ * operations. The explorer handles the whole state only where it needs it: one tagged export per step
+ * (`exportTaggedSnapshot`: the snapshot's JSON and a tag that proves this process's engine wrote it), which the search
+ * reads for its state hash and keeps in its store as it is; a restore of that tagged JSON to go on from a stored state,
+ * which the runtime does without checking it again while the tag holds; and a trusted copy (a fork) for each input
+ * tried from one state but the last.
  */
 
 /** A runtime result read field by field. */
@@ -36,7 +39,23 @@ const RUNTIME_OPERATIONS = [
   "recordContinueCapture",
 ] as const;
 const RUNTIME_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
-const RUNTIME_READS = ["view", "callReturnInstructions", "exportSnapshot", "fork"] as const;
+const RUNTIME_READS = [
+  "view",
+  "callReturnInstructions",
+  "exportSnapshot",
+  "exportTrustedSnapshot",
+  "exportTaggedSnapshot",
+  "fork",
+] as const;
+
+/**
+ * A snapshot as the runtime writes it for a trusted host: its JSON, and a tag that proves this process's engine wrote it
+ * for one plan (`TaggedRuntimeSnapshot`). Both are kept exactly as they are.
+ */
+export interface TaggedSnapshot {
+  readonly json: string;
+  readonly tag: string;
+}
 
 /**
  * One runtime session, as the explorer drives it. Its results, view, and projections are detached frozen data. An
@@ -51,8 +70,15 @@ export interface Runtime {
   view: () => Data;
   /** Where each active call continues when it returns, outermost first. */
   callReturnInstructions: () => number[];
-  /** The complete state as plain data, checked by the runtime, which later operations do not change. */
+  /**
+   * The complete state as plain data that later operations do not change, copied without the runtime's check
+   * (`exportTrustedSnapshot`): the explorer keeps it itself, and the runtime checks it when a session restores it.
+   */
+  exportTrustedSnapshot: () => Data;
+  /** The same, checked by the runtime (`exportSnapshot`), for a host that keeps it apart from the explorer. */
   exportSnapshot: () => Data;
+  /** The state as its JSON with the runtime's tag (`exportTaggedSnapshot`), which a restore in this process trusts. */
+  exportTaggedSnapshot: () => TaggedSnapshot;
   /** An independent session with a copy of the state. */
   fork: () => Runtime;
 }
@@ -63,8 +89,18 @@ export interface Engine {
   compileSource: (source: string, options: unknown) => Data;
   /** A session at the start of a plan; `options` may give the `capabilities` every operation uses. */
   createFreshRuntimeSession: (plan: Data, fresh: Data, options?: Data) => Runtime;
-  /** A session that goes on from a snapshot, which the runtime checks completely. */
-  createRuntimeSession: (plan: Data, snapshot: Data) => Runtime;
+  /** A session that goes on from a snapshot, which the runtime checks completely; `options` as for a fresh one. */
+  createRuntimeSession: (plan: Data, snapshot: Data, options?: Data) => Runtime;
+  /**
+   * A session that goes on from a tagged snapshot: unchecked when its tag proves that a session of this same plan object
+   * exported it in this process, else checked completely; `options` as for a fresh one.
+   */
+  createTaggedRuntimeSession: (plan: Data, tagged: TaggedSnapshot, options?: Data) => Runtime;
+  /** The outcomes of a random draw to try besides its natural one, at most `limit`, and whether they are all. */
+  randomDrawAlternatives: (
+    draw: Data,
+    limit: number,
+  ) => { alternatives: Data[]; complete: boolean };
 }
 
 const repositoryIndexUrl = repositoryBuildUrl("src/index.js");
@@ -87,6 +123,8 @@ export async function loadEngine(): Promise<Engine> {
   const compileSource = exported("compileSource");
   const fresh = exported("createFreshRuntimeSession");
   const restore = exported("createRuntimeSession");
+  const restoreTagged = exported("createTaggedRuntimeSession");
+  const alternatives = exported("randomDrawAlternatives");
   return {
     compileProject: (sources, options) => {
       const value: unknown = compileProject(sources, options);
@@ -100,7 +138,17 @@ export async function loadEngine(): Promise<Engine> {
       return value;
     },
     createFreshRuntimeSession: (plan, start, options) => runtimeOf(fresh(plan, start, options)),
-    createRuntimeSession: (plan, snapshot) => runtimeOf(restore(plan, snapshot)),
+    createRuntimeSession: (plan, snapshot, options) =>
+      runtimeOf(options === undefined ? restore(plan, snapshot) : restore(plan, snapshot, options)),
+    createTaggedRuntimeSession: (plan, tagged, options) =>
+      runtimeOf(
+        options === undefined ? restoreTagged(plan, tagged) : restoreTagged(plan, tagged, options),
+      ),
+    randomDrawAlternatives: (draw, limit) => {
+      const value: unknown = alternatives(draw, limit);
+      const found = isRecord(value) ? value : {};
+      return { alternatives: list(found.alternatives), complete: found.complete === true };
+    },
   };
 }
 
@@ -114,7 +162,12 @@ function runtimeOf(session: unknown): Runtime {
     }),
   );
   const result = (
-    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportSnapshot",
+    name:
+      | (typeof RUNTIME_OPERATIONS)[number]
+      | "view"
+      | "exportSnapshot"
+      | "exportTrustedSnapshot"
+      | "exportTaggedSnapshot",
     ...args: unknown[]
   ): Data => {
     const value: unknown = methods.get(name)!.apply(session, args);
@@ -131,7 +184,14 @@ function runtimeOf(session: unknown): Runtime {
         ? value.filter((position): position is number => typeof position === "number")
         : [];
     },
+    exportTrustedSnapshot: () => result("exportTrustedSnapshot"),
     exportSnapshot: () => result("exportSnapshot"),
+    exportTaggedSnapshot: () => {
+      const value = result("exportTaggedSnapshot");
+      if (typeof value.json !== "string" || typeof value.tag !== "string")
+        throw new Error("exportTaggedSnapshot() returned an unexpected result shape.");
+      return { json: value.json, tag: value.tag };
+    },
     fork: () => runtimeOf(methods.get("fork")!.apply(session, [])),
   };
 }
@@ -139,14 +199,39 @@ function runtimeOf(session: unknown): Runtime {
 /** A stored value as the runtime keeps it in script storage: a scalar or a composite. */
 export type StoredValue = string | number | boolean | Data;
 
+/** The kinds of random draw the explorer chooses outcomes of with random choices: those that pick what happens. */
+export const RANDOM_KINDS = [
+  "chance",
+  "randomInteger",
+  "collectionRandom",
+  "randomWeighted",
+  "tagQuery",
+  "glob",
+] as const;
+
 /** One key of script storage. */
 export interface StorageEntry {
   readonly key: string;
   readonly value: StoredValue;
 }
 
-/** One input of a path from the start; `label` fields only explain the input to a reader. */
-export type ExplorerInput =
+/**
+ * A random draw's outcome the explorer chose instead of the natural one: the draw by its ID (the generator state before
+ * it, the same in every replay of the path), its site to read, and the outcome as the runtime gives it.
+ */
+export interface RandomChoice {
+  readonly drawId: number;
+  readonly site: string;
+  readonly outcome: Data;
+}
+
+/**
+ * One input of a path from the start; `label` fields only explain the input to a reader. `random` chooses outcomes of
+ * random draws the step after the input makes; every other draw takes its natural outcome.
+ */
+export type ExplorerInput = InputKind & { readonly random?: readonly RandomChoice[] };
+
+type InputKind =
   | { readonly kind: "option"; readonly index: number; readonly label: string }
   /** `afterMs`: the player first thinks that long, for a button whose result is the time it took. */
   | { readonly kind: "button"; readonly label: string; readonly afterMs?: number }
@@ -164,7 +249,9 @@ export type ExplorerInput =
   | { readonly kind: "wait"; readonly untilMs: number }
   | { readonly kind: "press"; readonly buttonId: number; readonly label: string }
   /** The player continues at another wall clock time (epoch milliseconds): a `clock` input. */
-  | { readonly kind: "clock"; readonly wallClockMs: number };
+  | { readonly kind: "clock"; readonly wallClockMs: number }
+  /** The player saves and continues `afterMs` later than the wall clock now; only a positive gap is accepted. */
+  | { readonly kind: "later"; readonly afterMs: number };
 
 /** Whether an input sets the wall clock. */
 export function isClockInput(input: ExplorerInput): boolean {
@@ -173,11 +260,12 @@ export function isClockInput(input: ExplorerInput): boolean {
 
 /**
  * How a session starts: the storage an earlier explored session left (none for the first), and the wall clock. A
- * start at another wall clock than {@link EPOCH_MS} is a `clock` start.
+ * start at another wall clock than {@link EPOCH_MS} is a `clock` start unless `clock` says otherwise.
  */
 export interface Setup {
   readonly storage: readonly StorageEntry[];
   readonly wallClockMs: number;
+  readonly clock?: boolean;
 }
 
 /** One session of a path: its inputs, and its start wall clock when that is not {@link EPOCH_MS}. */
@@ -198,6 +286,25 @@ export function storageOf(snapshot: Data): StorageEntry[] {
       ? [{ key: entry.key, value }]
       : [];
   });
+}
+
+/**
+ * The wall clock where a state stands, in epoch milliseconds: the clock of its temporal capture in force (the session
+ * start's, or the last Continue's) plus the session time since; {@link EPOCH_MS} plus the session time without one.
+ */
+export function wallClockOf(snapshot: Data): number {
+  const now =
+    typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
+  let capture: Data | undefined;
+  for (const candidate of list(snapshot.temporalCaptures))
+    if (typeof candidate.boundaryMs === "number" && candidate.boundaryMs <= now)
+      capture = candidate;
+  // Session times may hold fractions of a millisecond; the runtime rounds a wall clock to whole ones.
+  return Math.round(
+    typeof capture?.epochMs === "number" && typeof capture.boundaryMs === "number"
+      ? capture.epochMs + now - capture.boundaryMs
+      : EPOCH_MS + now,
+  );
 }
 
 /** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
@@ -242,6 +349,8 @@ export interface Prompt {
 export interface Step {
   /** The state the step reached, exported once: later operations of {@link runtime} do not change it. */
   readonly snapshot: Data;
+  /** The same export as the runtime wrote it, with its tag, to keep and restore as it is. */
+  readonly tagged: TaggedSnapshot;
   /** The runtime session in that state, to go on from. */
   readonly runtime: Runtime;
   /** Instructions this step executed for the first time, for its kind of coverage (see {@link Session}). */
@@ -255,6 +364,8 @@ export interface Step {
    * condition was true, a loop entered), way 1 goes to the instruction's target.
    */
   readonly ways: readonly number[];
+  /** With random choices: the random draws the step made that the explorer may choose (`RANDOM_KINDS`), in order. */
+  readonly draws: readonly Data[];
 }
 
 function record(value: unknown): Data {
@@ -306,7 +417,7 @@ function execute(runtime: Runtime): Execution {
 }
 
 /** A step before the state it reached is exported. */
-type Settled = Omit<Step, "snapshot" | "runtime">;
+type Settled = Omit<Step, "snapshot" | "tagged" | "runtime">;
 
 /**
  * The project's plan with the engine, which runs inputs and records the instructions and condition ways they execute.
@@ -322,8 +433,40 @@ export class Session {
   /** Per conditional instruction, the ways play took: 1 for the next instruction, 2 for its target. */
   readonly branches: Uint8Array;
   readonly clockBranches: Uint8Array;
+  /** Instructions and condition ways only play with a chosen random outcome executed ("play (chosen random)"). */
+  readonly chosenVisited: Uint8Array;
+  readonly chosenBranches: Uint8Array;
+  /**
+   * With random choices, sessions pause no draw but let the explorer decide the draws of {@link RANDOM_KINDS}: natural
+   * unless an input chose an outcome for its draw ID; and the step reports those draws, for the explorer to try others.
+   */
+  randomChoices = false;
+  /** The outcomes the input being applied chose, by draw ID, and the draws the current step made. */
+  readonly #decisions = new Map<number, Data>();
+  /** The draws an input's chosen outcomes were taken at, while it is applied. */
+  readonly #taken = new Set<number>();
+  /** While an input with chosen outcomes is applied: the coverage marks it set, undone when it does not fit. */
+  #marks: { array: Uint8Array; index: number; value: number }[] | null = null;
+  #draws: Data[] = [];
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
+  /**
+   * The expressions the code compares a typed ask's answer with (`comparedWith`), by the ask's instruction: their
+   * values in the state at the ask are answers too, such as the line the script asks the player to type.
+   */
+  readonly comparedWith = new Map<number, readonly unknown[]>();
+  /**
+   * The player may think before pressing a button that the code times (see {@link thinkTimes}): the expressions a
+   * timed button's result is compared with, by its instruction (`(showButton "Done") / 1 s > count`); and the
+   * differences of clock reads compared with constants (`clockDifferences`), for the buttons between the two reads.
+   */
+  readonly timedWith = new Map<number, readonly unknown[]>();
+  readonly clockDifferences: ClockDifference[] = [];
+  /**
+   * Whether values in a state are read as the running code sees them ({@link bindingsOf}, {@link valueOf}), as compared
+   * answers need; otherwise, for timed buttons alone, as before them.
+   */
+  scopedReads = false;
   /**
    * Runtime operations called so far, a deterministic measure of the work the session's steps took: fresh sessions,
    * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
@@ -345,30 +488,76 @@ export class Session {
     this.clockVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
     this.clockBranches = new Uint8Array(this.#instructions.length);
+    this.chosenVisited = new Uint8Array(this.#instructions.length);
+    this.chosenBranches = new Uint8Array(this.#instructions.length);
   }
 
-  /** A fresh session, run until the player is first asked; a clock session at another wall clock than the play one. */
-  start(setup: Setup = PLAY_SETUP): Step {
+  /** The options sessions are made with: with random choices, the control that decides the explorer's draws. */
+  #options(): Data | undefined {
+    if (!this.randomChoices) return undefined;
+    return {
+      randomControl: {
+        filter: { kinds: RANDOM_KINDS },
+        decide: (draw: Data) => {
+          this.#draws.push(draw);
+          const outcome =
+            typeof draw.drawId === "number" ? this.#decisions.get(draw.drawId) : undefined;
+          if (outcome === undefined) return { kind: "natural" };
+          this.#taken.add(Number(draw.drawId));
+          return { kind: "choose", outcome };
+        },
+      },
+    };
+  }
+
+  /**
+   * A fresh session, run until the player is first asked; a clock session at another wall clock than the play one, and
+   * a `chosen` one after a session whose path chose a random outcome.
+   */
+  start(setup: Setup = PLAY_SETUP, chosen = false): Step {
     this.operations += 1;
     const runtime = this.#counted(
-      this.#engine.createFreshRuntimeSession(this.#plan, {
-        seed: this.#seed,
-        baseDelayMs: 0,
-        delayPerWordMs: 0,
-        delayPerCharacterMs: 0,
-        // The runtime keeps storage sorted by key.
-        scriptStorage: [...setup.storage].sort((left, right) =>
-          left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
-        ),
-        wallClockMs: setup.wallClockMs,
-      }),
+      this.#engine.createFreshRuntimeSession(
+        this.#plan,
+        {
+          seed: this.#seed,
+          baseDelayMs: 0,
+          delayPerWordMs: 0,
+          delayPerCharacterMs: 0,
+          // The runtime keeps storage sorted by key.
+          scriptStorage: [...setup.storage].sort((left, right) =>
+            left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+          ),
+          wallClockMs: setup.wallClockMs,
+        },
+        this.#options(),
+      ),
     );
-    return this.#reached(runtime, this.#settle(runtime, setup.wallClockMs !== EPOCH_MS));
+    this.#draws = [];
+    return this.#reached(
+      runtime,
+      this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS, chosen),
+    );
+  }
+
+  /** A session that goes on from a tagged state this session's engine exported: unchecked while its tag holds. */
+  restoreTagged(tagged: TaggedSnapshot): Runtime {
+    const options = this.#options();
+    return this.#counted(
+      options === undefined
+        ? this.#engine.createTaggedRuntimeSession(this.#plan, tagged)
+        : this.#engine.createTaggedRuntimeSession(this.#plan, tagged, options),
+    );
   }
 
   /** A session that goes on from a stored state. */
   restore(snapshot: Data): Runtime {
-    return this.#counted(this.#engine.createRuntimeSession(this.#plan, snapshot));
+    const options = this.#options();
+    return this.#counted(
+      options === undefined
+        ? this.#engine.createRuntimeSession(this.#plan, snapshot)
+        : this.#engine.createRuntimeSession(this.#plan, snapshot, options),
+    );
   }
 
   /**
@@ -376,18 +565,21 @@ export class Session {
    * runtime rejects the input. Either way `runtime` goes on in place: to try other inputs from the same state, give
    * each a fork.
    */
-  apply(runtime: Runtime, input: ExplorerInput, clock: boolean): Step | null {
-    const settled = this.#apply(runtime, input, clock);
+  apply(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen = false): Step | null {
+    const settled = this.#apply(runtime, input, clock, chosen);
     return settled === null ? null : this.#reached(runtime, settled);
   }
 
   /** {@link apply} without exporting the state reached, to replay a path: whether the runtime accepted the input. */
-  advance(runtime: Runtime, input: ExplorerInput, clock: boolean): boolean {
-    return this.#apply(runtime, input, clock) !== null;
+  advance(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen = false): boolean {
+    return this.#apply(runtime, input, clock, chosen) !== null;
   }
 
-  /** The inputs the player has in the state of `runtime` (whose `view` it is); none in an ended state. */
-  options(runtime: Runtime, view: Data = runtime.view()): ExplorerInput[] {
+  /**
+   * The inputs the player has in the state of `runtime` (whose `view` it is); none in an ended state. `state` gives its
+   * snapshot, for the values a typed answer is compared with ({@link comparedWith}); without it, those are left out.
+   */
+  options(runtime: Runtime, view: Data = runtime.view(), state?: () => Data): ExplorerInput[] {
     if (view.status !== "waiting") return [];
     const options: ExplorerInput[] = [];
     const action = record(view.foregroundAction);
@@ -395,20 +587,33 @@ export class Session {
     if (action.kind === "interaction") {
       const ui = record(action.ui);
       const literals = this.#nearbyLiterals(runtime, action);
-      const directed =
-        typeof action.owningInstruction === "number"
-          ? (this.directedAnswers.get(action.owningInstruction) ?? [])
-          : [];
-      options.push(...interactionOptions(ui, literals, directed, record(action.form)));
+      const ask = typeof action.owningInstruction === "number" ? action.owningInstruction : null;
+      const directed = ask === null ? [] : (this.directedAnswers.get(ask) ?? []);
+      const expressions = ask === null ? undefined : this.comparedWith.get(ask);
+      const compared =
+        expressions === undefined || state === undefined
+          ? []
+          : comparedValues(expressions, state(), ui.kind === "number" ? ui.integer === true : null);
+      options.push(
+        ...interactionOptions(ui, literals, [...compared, ...directed], record(action.form)),
+      );
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
-      // happens meanwhile.
-      if (
+      // happens meanwhile. So is a button between two clock reads whose difference a condition compares, and one
+      // whose result is compared with a value in the state.
+      const kept =
         ui.kind === "button" &&
         action.expectedResult === "duration" &&
-        action.destinationTemporary !== null
-      ) {
+        action.destinationTemporary !== null;
+      const timed = ui.kind === "button" ? this.#timedConstants(runtime, action, state) : null;
+      if (kept || (timed !== null && timed.numbers.length + timed.durations.length > 0)) {
         const now = Number(view.observedSessionTimeMs);
-        for (const afterMs of thinkTimes(literals)) {
+        const constants = kept
+          ? {
+              numbers: [...literals.numbers, ...(timed?.numbers ?? [])],
+              durations: [...literals.durations, ...(timed?.durations ?? [])],
+            }
+          : timed!;
+        for (const afterMs of thinkTimes(constants)) {
           if (until === null || now + afterMs < until)
             options.push({ kind: "button", label: String(ui.buttonLabel), afterMs });
         }
@@ -458,14 +663,46 @@ export class Session {
     };
   }
 
-  #apply(runtime: Runtime, input: ExplorerInput, clock: boolean): Settled | null {
-    return this.#input(runtime, runtime.view(), input)
-      ? this.#settle(runtime, clock || isClockInput(input))
-      : null;
+  #apply(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen: boolean): Settled | null {
+    // The outcomes the input chose, for the draws the step makes; play with them is play with chosen randomness.
+    this.#decisions.clear();
+    if (input.random !== undefined && !this.randomChoices)
+      throw new Error("An input with chosen random outcomes needs a session with random choices.");
+    for (const choice of input.random ?? []) this.#decisions.set(choice.drawId, choice.outcome);
+    this.#taken.clear();
+    this.#marks = input.random === undefined ? null : [];
+    this.#draws = [];
+    try {
+      const settled = this.#input(runtime, runtime.view(), input)
+        ? this.#settle(
+            runtime,
+            clock || isClockInput(input),
+            chosen || (input.random?.length ?? 0) > 0,
+          )
+        : null;
+      // The input did not fit as recorded unless each outcome it chose was drawn and taken, and no draw waits (the
+      // runtime holds a draw whose chosen outcome it refused).
+      if (
+        settled !== null &&
+        input.random !== undefined &&
+        (input.random.some((choice) => !this.#taken.has(choice.drawId)) ||
+          runtime.view().randomDraw != null)
+      ) {
+        for (const { array, index, value } of (this.#marks ?? []).toReversed())
+          array[index] = value;
+        return null;
+      }
+      return settled;
+    } finally {
+      this.#decisions.clear();
+      this.#taken.clear();
+      this.#marks = null;
+    }
   }
 
   #reached(runtime: Runtime, settled: Settled): Step {
-    return { ...settled, snapshot: runtime.exportSnapshot(), runtime };
+    const tagged = runtime.exportTaggedSnapshot();
+    return { ...settled, snapshot: parseSnapshot(tagged.json), tagged, runtime };
   }
 
   /** Gives the session in the state `view` shows one input; whether the runtime accepted it. */
@@ -534,6 +771,13 @@ export class Session {
         result = runtime.call("recordContinueCapture", { wallClockMs: input.wallClockMs });
         accepted = "recorded";
         break;
+      case "later":
+        if (!(input.afterMs > 0 && Number.isSafeInteger(input.afterMs))) return false;
+        result = runtime.call("recordContinueCapture", {
+          wallClockMs: wallClockOf(runtime.exportTrustedSnapshot()) + input.afterMs,
+        });
+        accepted = "recorded";
+        break;
     }
     return record(result.outcome).kind === accepted;
   }
@@ -570,7 +814,7 @@ export class Session {
    * Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can
    * happen. Records what ran as play or as clock coverage.
    */
-  #settle(runtime: Runtime, clock: boolean): Settled {
+  #settle(runtime: Runtime, clock: boolean, chosen: boolean): Settled {
     const texts: string[] = [];
     const executed = new Set<number>();
     const ways = new Set<number>();
@@ -581,7 +825,7 @@ export class Session {
       if (view.runnable === true) {
         const execution = execute(runtime);
         collectTexts(execution.events, texts);
-        newInstructions += this.#record(execution, clock, executed, ways);
+        newInstructions += this.#record(execution, clock, chosen, executed, ways);
         view = runtime.view();
       }
       if (view.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
@@ -619,6 +863,7 @@ export class Session {
       instructions: [...executed],
       texts: texts.slice(-KEPT_TEXTS),
       ways: [...ways],
+      draws: this.#draws,
     };
   }
 
@@ -626,13 +871,20 @@ export class Session {
    * Marks an execution's instructions and condition ways as play or clock coverage, adds them to the step's, and counts
    * the instructions new to it: new to play for a play step, new to both for a clock one.
    */
-  #record(execution: Execution, clock: boolean, executed: Set<number>, ways: Set<number>): number {
-    const visited = clock ? this.clockVisited : this.visited;
-    const branches = clock ? this.clockBranches : this.branches;
+  #record(
+    execution: Execution,
+    clock: boolean,
+    chosen: boolean,
+    executed: Set<number>,
+    ways: Set<number>,
+  ): number {
+    const visited = clock ? this.clockVisited : chosen ? this.chosenVisited : this.visited;
+    const branches = clock ? this.clockBranches : chosen ? this.chosenBranches : this.branches;
     let fresh = 0;
     for (const index of execution.instructions) {
       if (index < 0 || index >= visited.length) continue;
-      if (visited[index] === 0 && (!clock || this.visited[index] === 0)) fresh += 1;
+      if (visited[index] === 0 && ((!clock && !chosen) || this.visited[index] === 0)) fresh += 1;
+      if (visited[index] === 0) this.#marks?.push({ array: visited, index, value: 0 });
       visited[index] = 1;
       executed.add(index);
     }
@@ -641,6 +893,7 @@ export class Session {
       if (instruction?.kind !== "jumpIfFalse" && instruction?.kind !== "loopStart") continue;
       const way = to === from + 1 ? 0 : to === instruction.target ? 1 : -1;
       if (way < 0) continue;
+      this.#marks?.push({ array: branches, index: from, value: branches[from]! });
       branches[from]! |= way === 0 ? 1 : 2;
       ways.add(from * 2 + way);
     }
@@ -657,7 +910,7 @@ export class Session {
       action.owningInstruction,
       ...runtime.callReturnInstructions().toReversed(),
     ].filter((position): position is number => typeof position === "number");
-    const found: Literals = { numbers: [], strings: [] };
+    const found: Literals = { numbers: [], strings: [], durations: [] };
     for (let distance = 0; distance <= LITERAL_WINDOW; distance += 1) {
       for (const position of positions) {
         for (const index of distance === 0
@@ -669,13 +922,51 @@ export class Session {
             if (!found.numbers.includes(value)) found.numbers.push(value);
           for (const value of literals.strings)
             if (!found.strings.includes(value)) found.strings.push(value);
+          for (const value of literals.durations)
+            if (!found.durations.includes(value)) found.durations.push(value);
         }
       }
     }
     return {
       numbers: found.numbers.slice(0, MAX_LITERALS),
       strings: found.strings.slice(0, MAX_LITERALS),
+      durations: found.durations.slice(0, MAX_LITERALS),
     };
+  }
+
+  /**
+   * The constants a button is timed against beyond its compared literals: those of the clock differences whose two
+   * reads enclose it, or enclose where a call that leads to it returns; and the values, in the state (when `state`
+   * gives it), of what a timed button's result is compared with.
+   */
+  #timedConstants(runtime: Runtime, action: Data, state?: () => Data): Constants | null {
+    if (this.clockDifferences.length === 0 && this.timedWith.size === 0) return null;
+    const found: Constants = { numbers: [], durations: [] };
+    const positions = [
+      action.owningInstruction,
+      ...(this.clockDifferences.length === 0 ? [] : runtime.callReturnInstructions()),
+    ].filter((position): position is number => typeof position === "number");
+    for (const difference of this.clockDifferences) {
+      if (!positions.some((position) => difference.from < position && position <= difference.at))
+        continue;
+      found.numbers.push(...difference.numbers);
+      found.durations.push(...difference.durations);
+    }
+    const expressions =
+      typeof action.owningInstruction === "number"
+        ? this.timedWith.get(action.owningInstruction)
+        : undefined;
+    if (expressions !== undefined && state !== undefined) {
+      const bindings = bindingsOf(state(), this.scopedReads);
+      for (const expression of expressions) {
+        const value = valueOf(expression, bindings, this.scopedReads);
+        const duration = record(value);
+        if (typeof value === "number") found.numbers.push(value);
+        else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
+          found.durations.push(duration.milliseconds);
+      }
+    }
+    return found;
   }
 
   /** The earliest time at which something happens without the player, or null when nothing will. */
@@ -750,10 +1041,11 @@ const TEMPORAL_ANSWERS: Readonly<Record<string, readonly string[]>> = {
   datetime: ["2026-10-02T12:00", "2026-10-02T00:00", "2026-10-02T23:59"],
 };
 
-/** Constants an instruction compares with. */
-interface Literals {
+/** Constants an instruction compares with; durations in milliseconds. */
+interface Literals extends Constants {
   numbers: number[];
   strings: string[];
+  durations: number[];
 }
 
 /** Instructions searched on each side of an ask and of each return point for compared constants. */
@@ -764,11 +1056,16 @@ const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">="]);
 /** Text methods whose literal argument an answer can match. */
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
 
-/** The literals an instruction's expressions compare with (`x < 10`, `answer == "yes"`, `answer.contains("no")`). */
+/**
+ * The literals an instruction's expressions compare with (`x < 10`, `answer == "yes"`, `answer.contains("no")`,
+ * `beg < 15 s`).
+ */
 function comparedLiterals(instruction: Data): Literals {
-  const found: Literals = { numbers: [], strings: [] };
+  const found: Literals = { numbers: [], strings: [], durations: [] };
   const take = (value: unknown) => {
     const literal = record(value);
+    if (literal.kind === "duration" && typeof literal.milliseconds === "number")
+      found.durations.push(literal.milliseconds);
     if (literal.kind !== "literal") return;
     if (typeof literal.value === "number") found.numbers.push(literal.value);
     if (typeof literal.value === "string" && literal.value.trim() !== "")
@@ -790,9 +1087,169 @@ function comparedLiterals(instruction: Data): Literals {
   return found;
 }
 
-/** Think times before a timed button: just past each compared constant, read as seconds, or {@link THINK_MS}. */
-function thinkTimes(literals: Literals): number[] {
-  const seconds = literals.numbers.filter((value) => value >= 1 && value <= 3600);
+/** Values a typed answer is compared with, tried per ask. */
+const MAX_COMPARED_VALUES = 3;
+
+/**
+ * The values of compared expressions in a state, as answers to a typed ask: texts for a text ask (`integer` null); for a
+ * number ask (`integer` tells whether it takes integers only), each number `v` as `v - 1`, `v`, and `v + 1`. Variables
+ * are read from their innermost binding.
+ */
+function comparedValues(
+  expressions: readonly unknown[],
+  snapshot: Data,
+  integer: boolean | null,
+): string[] {
+  const bindings = bindingsOf(snapshot, true);
+  const found = new Set<string>();
+  for (const expression of expressions) {
+    const value = valueOf(expression, bindings, true);
+    if (integer === null && typeof value === "string" && value.trim() !== "") found.add(value);
+    if (integer !== null && typeof value === "number" && (!integer || Number.isSafeInteger(value)))
+      for (const near of [value - 1, value, value + 1]) found.add(String(near));
+    if (found.size >= MAX_COMPARED_VALUES) break;
+  }
+  return [...found];
+}
+
+/**
+ * The variables of a state by name. `scoped`: those the running code sees, each by its innermost binding: the scopes of
+ * the active call, the variables it captured (a timer, media, or button block keeps them), the scope it was declared
+ * in, and the globals. Otherwise every scope's, the innermost last, and the globals.
+ */
+function bindingsOf(snapshot: Data, scoped: boolean): Map<string, unknown> {
+  const bindings = new Map<string, unknown>();
+  const take = (scope: Data | undefined) => {
+    for (const binding of list(scope?.bindings))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  };
+  for (const binding of list(snapshot.globals))
+    if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  const frames = list(snapshot.frames);
+  const call = list(snapshot.callFrames).at(-1);
+  if (!scoped || call === undefined) {
+    for (const frame of frames) take(frame);
+    return bindings;
+  }
+  const scopes = new Map(
+    [...frames, ...list(snapshot.retainedScopes)].map((scope) => [scope.id, scope]),
+  );
+  take(scopes.get(call.rootScopeId));
+  for (const capture of list(call.captures)) {
+    const binding = list(scopes.get(capture.scopeId)?.bindings).find(
+      (entry) => entry.name === capture.name,
+    );
+    if (binding !== undefined && typeof capture.name === "string")
+      bindings.set(capture.name, binding.value);
+  }
+  for (const frame of frames.slice(Number(call.scopeBaseDepth) || 0)) take(frame);
+  return bindings;
+}
+
+/** A runtime value as the explorer reads it: a scalar, a composite record, or undefined for none it can read. */
+type ReadValue = string | number | boolean | null | Data | undefined;
+
+function readValue(value: unknown): ReadValue {
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+    ? value
+    : isRecord(value)
+      ? value
+      : undefined;
+}
+
+/** An expression's value in a state, from its variables' values, or undefined when it cannot be read. */
+function valueOf(
+  expression: unknown,
+  bindings: ReadonlyMap<string, unknown>,
+  current: boolean,
+): ReadValue {
+  const value = record(expression);
+  switch (value.kind) {
+    case "literal":
+      return readValue(value.value);
+    case "identifier":
+      return typeof value.name === "string" ? readValue(bindings.get(value.name)) : undefined;
+    case "group":
+      return valueOf(value.expression, bindings, current);
+    case "unary": {
+      const operand = valueOf(value.operand, bindings, current);
+      return value.operator === "-" && typeof operand === "number" ? -operand : undefined;
+    }
+    case "binary": {
+      const left = valueOf(value.left, bindings, current);
+      const right = valueOf(value.right, bindings, current);
+      if (value.operator === "+" && typeof left === "string" && typeof right === "string")
+        return left + right;
+      if (typeof left !== "number" || typeof right !== "number") return undefined;
+      switch (value.operator) {
+        case "+":
+          return left + right;
+        case "-":
+          return left - right;
+        case "*":
+          return left * right;
+        case "/":
+          return right === 0 ? undefined : left / right;
+        case "%":
+          return right === 0 ? undefined : left % right;
+        default:
+          return undefined;
+      }
+    }
+    case "property": {
+      const object = valueOf(value.object, bindings, current);
+      const holder = record(object);
+      // Read as before compared answers: the length of a text or list, else an object's property.
+      if (!current)
+        return value.name === "length"
+          ? typeof object === "string"
+            ? [...object].length
+            : Array.isArray(holder.items)
+              ? holder.items.length
+              : undefined
+          : readValue(
+              (holder.kind === "object" ? list(holder.properties) : []).find(
+                (property) => property.name === value.name,
+              )?.value,
+            );
+      // An object's property by name, also one named `length`; the length of a text, list, set, or dict.
+      if (holder.kind === "object")
+        return readValue(
+          list(holder.properties).find((property) => property.name === value.name)?.value,
+        );
+      if (value.name !== "length") return undefined;
+      if (typeof object === "string") return [...object].length;
+      if (Array.isArray(holder.items)) return holder.items.length;
+      return Array.isArray(holder.entries) ? holder.entries.length : undefined;
+    }
+    case "index": {
+      const object = record(valueOf(value.object, bindings, current));
+      const index = valueOf(value.index, bindings, current);
+      if (object.kind === "list" && typeof index === "number" && Array.isArray(object.items))
+        return current && (!Number.isSafeInteger(index) || index < 0)
+          ? undefined
+          : readValue(object.items.at(index));
+      if (object.kind === "dict" && typeof index === "string")
+        return readValue(list(object.entries).find((entry) => entry.key === index)?.value);
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Think times before a timed button: just past each compared number, read as seconds, and each compared duration, in
+ * whole seconds; {@link THINK_MS} without one.
+ */
+function thinkTimes(literals: Constants): number[] {
+  const seconds = [
+    ...literals.numbers,
+    ...literals.durations.map((milliseconds) => milliseconds / 1000),
+  ].filter((value) => value >= 1 && value <= 3600);
   return seconds.length === 0
     ? [THINK_MS]
     : [...new Set(seconds.map((value) => (Math.floor(value) + 1) * 1000))];
@@ -932,6 +1389,8 @@ const UNOBSERVABLE_KEYS = new Set([
   "nextMediaId",
   "nextPermanentButtonId",
   "lastSettlement",
+  // How many random outcomes were chosen: the script cannot see it, and the explorer pauses at no draw.
+  "randomControl",
 ]);
 /** IDs the runtime hands out as it goes; only their equality and order matter, so they are renumbered by rank. */
 const ID_FAMILIES: Readonly<Record<string, string>> = {
@@ -961,7 +1420,7 @@ function idFamily(holder: unknown, key: string): string | undefined {
  * read. The loop key also leaves out every time (`…Ms`), the random state, and settled handles: a heuristic that
  * makes the iterations of a loop that waits, or picks at random, look alike.
  */
-export function stateKeys(snapshot: Data): { state: string; loop: string } {
+export function stateKeys(snapshot: Data): { readonly state: string; readonly loop: string } {
   const ids = new Map<string, Set<number>>();
   const collect = (value: unknown, holder: unknown, key: string): void => {
     if (Array.isArray(value)) for (const item of value) collect(item, value, "");
@@ -997,7 +1456,22 @@ export function stateKeys(snapshot: Data): { state: string; loop: string } {
         }),
       )
       .digest("base64");
-  return { state: key(false), loop: key(true) };
+  // The loop key only for a state not seen before: a known state's is known.
+  let loop: string | null = null;
+  return {
+    state: key(false),
+    get loop() {
+      loop ??= key(true);
+      return loop;
+    },
+  };
+}
+
+/** A snapshot read back from the JSON the runtime wrote. */
+export function parseSnapshot(json: string): Data {
+  const value: unknown = JSON.parse(json);
+  if (!isRecord(value)) throw new Error("A snapshot's JSON is not an object.");
+  return value;
 }
 
 /** A runtime failure as a report shows it, with one-based lines and columns. */
@@ -1042,8 +1516,14 @@ export function replay(
   snapshot: Data;
   failure: ReturnType<typeof failureOf> | null;
   error: string | null;
+  /** How each earlier session ended: `halted` when it completed, else where the player quit (`waiting`). */
+  earlier: string[];
 } {
   const session = new Session(engine, plan, seed);
+  // A path with chosen random outcomes replays them; its other draws stay natural, as without control.
+  session.randomChoices = [...(path.earlier ?? []).map((earlier) => earlier.inputs), inputs].some(
+    (list) => list.some((input) => input.random !== undefined),
+  );
   let storage: readonly StorageEntry[] = [];
   const run = (wallClockMs: number, list: readonly ExplorerInput[], record: boolean) => {
     let step = session.start({ storage, wallClockMs });
@@ -1075,10 +1555,18 @@ export function replay(
     }
     return { step, steps, error };
   };
+  const ends: string[] = [];
   for (const earlier of path.earlier ?? []) {
     const done = run(earlier.wallClockMs ?? EPOCH_MS, earlier.inputs, false);
     if (done.error !== null)
-      return { steps: [], snapshot: done.step.snapshot, failure: null, error: done.error };
+      return {
+        steps: [],
+        snapshot: done.step.snapshot,
+        failure: null,
+        error: done.error,
+        earlier: ends,
+      };
+    ends.push(String(done.step.snapshot.status));
     storage = storageOf(done.step.snapshot);
   }
   const last = run(path.wallClockMs ?? EPOCH_MS, inputs, true);
@@ -1087,5 +1575,6 @@ export function replay(
     snapshot: last.step.snapshot,
     failure: last.step.snapshot.status === "failed" ? failureOf(last.step.snapshot) : null,
     error: last.error,
+    earlier: ends,
   };
 }
