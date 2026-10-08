@@ -1291,8 +1291,9 @@ function analyse(
     if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind === "unknown" && known !== undefined)
       analysis.saved.set(item, sharedValueType(known));
   }
-  // A saved value computed from such variables, `7 + points`, takes the types their other values share: Groovy's
-  // `90 + (points - 90) / 2` made a number of a whole-number read.
+  // A saved value computed from a variable that a whole-number or number read starts, `7 + points`, takes the type of
+  // that read with the variable's later values: Groovy's `90 + (points - 90) / 2` made a number of a whole-number read.
+  // Another variable without a type of its own, such as a parameter, stays unknown.
   for (const [item, scope] of savedScopes) {
     if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind !== "unknown") continue;
     const type = expressionType(
@@ -1303,8 +1304,11 @@ function analyse(
         const own = bindingType(found);
         if (own !== undefined && nonNull(own).kind !== "unknown")
           return scope.rulesOutNull(found) ? nonNull(own) : own;
-        const known = assignedTypes.get(found);
-        return known === undefined ? UNKNOWN : sharedValueType(known);
+        const start = found.declaration?.value;
+        if (start?.kind !== "load" || (start.integer !== true && start.number !== true))
+          return UNKNOWN;
+        const read = scalar(start.number === true ? "number" : "integer");
+        return sharedValueType([read, ...(assignedTypes.get(found) ?? [])]);
       },
       (name) => results.get(name),
     );
