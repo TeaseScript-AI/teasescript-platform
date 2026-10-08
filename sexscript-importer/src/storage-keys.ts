@@ -496,7 +496,15 @@ export function withStorageDefaults(
   };
   const block = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), fill));
-  const filled = withTypedTextReads(programs, routed).map((program) => ({
+  // Keys that may hold a list or a dict, whose text a template would not give.
+  const collections = new Set(
+    [...read.keys(), ...routed.keys(), ...saved.keys(), ...openSaved].filter(
+      (key) =>
+        openSaved.has(key) ||
+        [...(saved.get(key) ?? [])].some((type) => type.endsWith("[]") || type.startsWith("dict")),
+    ),
+  );
+  const filled = withTypedTextReads(programs, routed, collections).map((program) => ({
     ...program,
     statements: block(program.statements),
   }));
@@ -530,6 +538,7 @@ export function withStorageDefaults(
 function withTypedTextReads(
   programs: readonly MigrationProgram[],
   routed: ReadonlyMap<string, ReadonlySet<string>>,
+  collections: ReadonlySet<string>,
 ): MigrationProgram[] {
   const textHelper = helperName("text");
   return programs.map((program) => {
@@ -546,7 +555,7 @@ function withTypedTextReads(
               ? next.positional[0]!
               : null;
           if (wrapped?.kind === "load" && literalKey(wrapped.key) !== null)
-            return storedText(wrapped);
+            return storedText(wrapped, collections);
           const key = next.kind === "load" ? literalKey(next.key) : null;
           if (
             next.kind !== "load" ||
@@ -557,7 +566,7 @@ function withTypedTextReads(
             return next;
           const { read, fill: _fill, open: _open, ...load } = next;
           code = read === "string" ? "SX_LOAD_STRING_TEXT" : "SX_LOAD_BOOLEAN_TEXT";
-          if (read === "string") return storedText(load);
+          if (read === "string") return storedText(load, collections);
           // A missing value reads as false through the helper, as a default of false or null did.
           const fallback = load.defaultValue;
           const kept =
@@ -588,18 +597,27 @@ function withTypedTextReads(
 /**
  * A text read of a key that values of another type are saved under too, as the stored value's text: a missing one is
  * the empty text (withEmptyText), or the value the script gave instead, through a default of an open type, which fits
- * whatever the key's loads read: `"${load "k", default: sexscriptLegacyValue("")}"`.
+ * whatever the key's loads read: `"${load "k", default: sexscriptLegacyValue("")}"`. A key that may hold a list or a
+ * dict reads through the text cast, which a template's choice of one item does not give:
+ * `"${sexscriptLegacyCastText(load "k", default: sexscriptLegacyValue(""))}"`.
  */
-function storedText(load: Extract<IrExpression, { kind: "load" }>): IrExpression {
+function storedText(
+  load: Extract<IrExpression, { kind: "load" }>,
+  collections: ReadonlySet<string>,
+): IrExpression {
   const { read: _read, fill: _fill, open: _open, ...bare } = load;
   const fallback =
     bare.defaultValue === undefined ||
     (bare.defaultValue.kind === "literal" && bare.defaultValue.value === null)
       ? { kind: "literal" as const, value: "" }
       : bare.defaultValue;
+  const value: IrExpression = { ...bare, defaultValue: helperCall("value", [fallback]) };
+  const key = literalKey(bare.key);
   return {
     kind: "template",
-    parts: [{ value: { ...bare, defaultValue: helperCall("value", [fallback]) } }],
+    parts: [
+      { value: key !== null && collections.has(key) ? helperCall("castText", [value]) : value },
+    ],
   };
 }
 
@@ -1435,7 +1453,7 @@ function withUsedHelpers(
       ),
     ),
   );
-  for (const helper of ["value", "text", "booleanText", "missingText"] as const) {
+  for (const helper of ["value", "text", "booleanText", "missingText", "castText"] as const) {
     const name = helperName(helper);
     const defines = (program: MigrationProgram, global = false): boolean =>
       program.statements.some(

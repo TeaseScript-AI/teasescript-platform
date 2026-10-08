@@ -1,3 +1,9 @@
+function sexscriptLegacyCastText(valueValue2) {
+  if valueValue2 == null {
+    return null
+  }
+  return toString(valueValue2)
+}
 // NOTE SX_LOAD_KEY_DECLARED: Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.
 global function sexscriptLegacyKeyTypes {
   let savedMarked: integer? = load "game.marked", default: null
@@ -97,5 +103,5 @@ let score = sexscriptLegacyLoadInteger("game.points")
 score = echo(1.5)
 save 7 + score as "game.score"
 // NOTE SX_LOAD_STRING_TEXT line 51: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.
-say "Score ${load("game.score", default: sexscriptLegacyValue(""))}"
+say "Score ${sexscriptLegacyCastText(load("game.score", default: sexscriptLegacyValue("")))}"
 exit
