@@ -170,8 +170,9 @@ if saved == null {
 let counted: integer | string | null = 0
 // NOTE SX_LOAD_KEEPS_VALUE line 75: Groovy stored null in 'counted' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
 counted = load "game.count${slot}", default: counted
-// A read of a computed key into a variable or a list of a known type reads that type's empty value where the script
-// uses it up, and makes the variable or the list's items optional where it keeps its null.
+// A read of a computed key into a variable of a known type reads that type's empty value where the script uses it up,
+// and makes the variable optional where it keeps its null; an item of a list of a known type reads the item type's
+// empty value, also where the script tests it for null.
 let stage: integer = sexscriptLegacyLoadInteger("game.stage${slot}", 0)
 say "Stage ${stage + 1}"
 let owned = load "toys.item${slot}", default: false
@@ -179,24 +180,24 @@ if owned == true {
   say "Owned."
 }
 let bonus = 0
-// NOTE SX_LOAD_KEEPS_VALUE line 83: Groovy stored null in 'bonus' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+// NOTE SX_LOAD_KEEPS_VALUE line 84: Groovy stored null in 'bonus' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
 bonus = load "game.bonus${slot}", default: bonus
-// NOTE SX_PLUS_OPERAND_TYPE line 84: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+// NOTE SX_PLUS_OPERAND_TYPE line 85: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Bonus ${bonus + 1}"
 let best: integer? = 0
 best = load "game.best${slot}", default: null
 if best == null {
   say "No best."
 }
-let picks: string?[] = ["a", "b"]
-picks[0] = load "game.pick${slot}", default: null
-// NOTE SX_INDEX_PAST_END line 90: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+let picks = ["a", "b"]
+picks[0] = load "game.pick${slot}", default: ""
+// NOTE SX_INDEX_PAST_END line 91: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(picks, 0) == null {
   say "No pick."
 }
 let counts = [1, 2]
 counts[1] = load "game.count${slot}", default: 0
-// NOTE SX_PLUS_OPERAND_TYPE line 93: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+// NOTE SX_PLUS_OPERAND_TYPE line 94: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Count ${counts[1] + 1}"
 // A text that a function returns tests for the empty text where the script tests the call for null, also in a
 // parameter's default, and a copy that the script sets to null holds the empty text.
@@ -216,7 +217,7 @@ if noteCopy == "" {
   say "Cleared."
 }
 // A result that may be a value the importer cannot tell too tests for both, calling the function once.
-// NOTE SX_LOAD_OPEN_NULL line 104: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+// NOTE SX_LOAD_OPEN_NULL line 105: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let oldHints = load "game.oldHints", default: sexscriptLegacyValue(null)
 function readHint {
   say "A hint?"
@@ -247,7 +248,7 @@ work()
 // A flag read of a key that the package saves text under, and reads as text too, reads the flag from the text.
 save "true" as "game.choice"
 let choiceText = load "game.choice", default: ""
-// NOTE SX_LOAD_BOOLEAN_TEXT line 116: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
+// NOTE SX_LOAD_BOOLEAN_TEXT line 117: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
 if sexscriptLegacyBooleanText(load("game.choice", default: "")) == true {
   say "Chosen ${choiceText}"
 }
@@ -311,12 +312,12 @@ say "Mood ${mood}"
 let laps = 0
 laps = toInteger(sexscriptLegacyLoadInteger("game.laps", 0))
 say "Laps ${laps}"
-// An item of a list in a list that the script tests for null keeps the null of a computed key's read, as do items added.
-let shelves: string?[][] = [["old"]]
-shelves[0][0] = load "game.shelf${slot}", default: null
-shelves[0].add(load("game.extra${slot}", default: null))
-// NOTE SX_INDEX_PAST_END line 156: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-// NOTE SX_INDEX_PAST_END line 156: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// An item of a list in a list reads the item type's empty value too, as does an item that add() appends.
+let shelves = [["old"]]
+shelves[0][0] = load "game.shelf${slot}", default: ""
+shelves[0].add(load("game.extra${slot}", default: ""))
+// NOTE SX_INDEX_PAST_END line 157: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 157: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
   say "Empty shelf."
 }

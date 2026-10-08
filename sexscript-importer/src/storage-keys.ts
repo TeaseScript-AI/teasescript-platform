@@ -204,51 +204,16 @@ function telling(value: IrExpression): boolean {
 /**
  * A read of a computed key has no type (#690), but its default must fit the place it goes to: into a variable of a known
  * type, a read whose null is used up gets that type's empty value (`load "toys.${id}", default: false`), and one that
- * keeps its null makes the variable optional (`let level: integer? = ...`); into an item of a list of a known type, a
- * read gets the item type's empty value, or makes the items optional (`string?[]`) where the script tests the list's
- * items for null; a read anywhere else keeps `default: null`. The marks of used-up reads (`fill`) end here.
+ * keeps its null makes the variable optional (`let level: integer? = ...`); into an item of a list of a known type, also
+ * of a list in a list or one that `add()` appends, a read gets the item type's empty value, as does a read that keeps an
+ * open null there; a read anywhere else keeps `default: null`. The marks of used-up reads (`fill`) end here.
  */
 function withTypedComputedReads(programs: readonly MigrationProgram[]): MigrationProgram[] {
   return programs.map((program) => {
-    // Each binding's declared type: its annotation, or the type of the value it starts with; and the lists whose items
-    // the script compares with null, also through the helper that reads past the end.
+    // Each binding's declared type: its annotation, or the type of the value it starts with.
     const declared = new Map<string, string>();
-    const itemTested = new Set<string>();
-    const itemAt = helperName("itemAt");
-    // The variable a place is in and how many items deep: `values[0][1]` is two items into `values`.
-    type Place = { binding: string; depth: number };
-    const placeOf = (value: IrExpression, scope: Scope): Place | null => {
-      let depth = 0;
-      let current = value;
-      for (;;) {
-        if (current.kind === "index") current = current.target;
-        else if (current.kind === "call" && current.name === itemAt && current.positional[0])
-          current = current.positional[0];
-        else break;
-        depth += 1;
-      }
-      return current.kind === "variable" ? { binding: scope.resolve(current.name), depth } : null;
-    };
-    const placeKey = ({ binding, depth }: Place): string => `${binding}#${depth}`;
     const collect = (items: readonly IrStatement[], scope: Scope): void => {
       for (const item of items) {
-        if (item.kind === "function") {
-          collect(item.body, scope.inner(item));
-          continue;
-        }
-        const visit = (value: IrExpression): IrExpression => {
-          if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
-            for (const [side, other] of [
-              [value.left, value.right],
-              [value.right, value.left],
-            ] as const) {
-              const place = isNullLiteral(other) ? placeOf(side, scope) : null;
-              if (place !== null && place.depth > 0) itemTested.add(placeKey(place));
-            }
-          }
-          return mapChildren(value, visit);
-        };
-        mapOwnExpressions(item, visit);
         if (item.kind === "let") {
           const type = item.type ?? (item.value.kind === "load" ? null : valueType(item.value));
           const binding = scope.declare(item.name, item.span);
@@ -262,9 +227,8 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
     };
     collect(program.statements, Scope.file());
     const nullable = (type: string): boolean => /\?$|\bnull\b/u.test(type);
-    // Variables a read that keeps its null makes optional, and lists whose innermost items it makes optional.
+    // Variables a read that keeps its null makes optional.
     const optionals = new Set<string>();
-    const optionalItems = new Set<string>();
     const itemType = (type: string | null): string | null =>
       type?.endsWith("[]") === true ? type.slice(0, -2) : null;
     // The type of a place `depth` items deeper than `value`, a variable or an item of one.
@@ -274,25 +238,6 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
       let type: string | null = declared.get(scope.resolve(value.name)) ?? null;
       for (let level = 0; level < depth; level += 1) type = itemType(type);
       return type;
-    };
-    // An item place whose null the script tests, and whose items are the list's innermost, can be optional.
-    const optionalPlace = (place: Place | null, type: string): string | null => {
-      if (place === null || !itemTested.has(placeKey(place)) || type.includes(" | ")) return null;
-      const whole = declared.get(place.binding) ?? "";
-      return whole === `${type}${"[]".repeat(place.depth)}` ? place.binding : null;
-    };
-    // The type of a place a read goes to: a variable, or an item of a list, also of a list in a list.
-    const typed = (
-      target: IrExpression,
-      scope: Scope,
-    ): { type: string; binding?: string; place?: Place | null; item?: true } | null => {
-      if (target.kind === "variable") {
-        const binding = scope.resolve(target.name);
-        const type = declared.get(binding);
-        return type === undefined ? null : { type, binding };
-      }
-      const type = target.kind === "index" ? typeOf(target, scope) : null;
-      return type === null ? null : { type, place: placeOf(target, scope), item: true };
     };
     const strip = (value: IrExpression): IrExpression => {
       const next = mapChildren(value, strip);
@@ -317,25 +262,24 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               ? next.value
               : null;
           if (read !== null && (next.kind === "let" || next.kind === "assign")) {
-            const target =
-              next.kind === "let"
-                ? next.type === undefined
-                  ? null
-                  : { type: next.type }
-                : typed(next.target, scope);
-            if (target !== null && !nullable(target.type)) {
-              const { fill, ...load } = read;
-              const empty = emptyValue(target.type);
-              if ("item" in target) {
-                const list = optionalPlace(target.place ?? null, target.type);
-                if (list !== null) optionalItems.add(list);
-                else if (empty !== null)
+            const { fill, ...load } = read;
+            if (next.kind === "assign" && next.target.kind === "index") {
+              const type = typeOf(next.target, scope);
+              const empty = type === null || nullable(type) ? null : emptyValue(type);
+              if (empty !== null) next = { ...next, value: { ...load, defaultValue: empty } };
+            } else {
+              const binding =
+                next.kind === "assign" && next.target.kind === "variable"
+                  ? scope.resolve(next.target.name)
+                  : null;
+              const type = next.kind === "let" ? (next.type ?? null) : declared.get(binding ?? "");
+              if (type !== undefined && type !== null && !nullable(type)) {
+                const empty = emptyValue(type);
+                if (fill === true && empty !== null)
                   next = { ...next, value: { ...load, defaultValue: empty } };
-              } else if (fill === true && empty !== null)
-                next = { ...next, value: { ...load, defaultValue: empty } };
-              else if (next.kind === "let")
-                next = { ...next, type: optional(target.type), value: load };
-              else if (target.binding !== undefined) optionals.add(target.binding);
+                else if (next.kind === "let") next = { ...next, type: optional(type), value: load };
+                else if (binding !== null) optionals.add(binding);
+              }
             }
           }
           // A read that a list of a known type takes as a new item: a computed key's, or one that keeps an open null.
@@ -343,8 +287,7 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
             next.kind === "expression" &&
             next.expression.kind === "methodCall" &&
             next.expression.name === "add" &&
-            next.expression.arguments.length === 1 &&
-            (next.expression.target.kind === "variable" || next.expression.target.kind === "index")
+            next.expression.arguments.length === 1
               ? next.expression
               : null;
           const taken = added?.arguments[0];
@@ -357,21 +300,13 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               : taken.defaultValue !== undefined && isOpenNull(taken.defaultValue))
           ) {
             const type = typeOf(added.target, scope, 1);
-            const place = placeOf(added.target, scope);
-            if (type !== null && place !== null) {
-              const empty = emptyValue(type);
-              const list = optionalPlace({ ...place, depth: place.depth + 1 }, type);
-              if (list !== null) optionalItems.add(list);
-              else if (!nullable(type) && empty !== null) {
-                const { fill: _fill, ...load } = taken;
-                const defaultValue =
-                  literalKey(load.key) === null ? empty : helperCall("value", [empty]);
-                itemDefault = literalKey(load.key) !== null;
-                next = {
-                  ...next,
-                  expression: { ...added, arguments: [{ ...load, defaultValue }] },
-                };
-              }
+            const empty = type === null || nullable(type) ? null : emptyValue(type);
+            if (empty !== null) {
+              const { fill: _fill, ...load } = taken;
+              const defaultValue =
+                literalKey(load.key) === null ? empty : helperCall("value", [empty]);
+              itemDefault = literalKey(load.key) !== null;
+              next = { ...next, expression: { ...added, arguments: [{ ...load, defaultValue }] } };
             }
           }
           if (next.kind === "let") scope.declare(next.name, next.span);
@@ -382,7 +317,7 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
         itemDefaults,
       );
     const statements = block(program.statements, Scope.file());
-    if (optionals.size === 0 && optionalItems.size === 0) return { ...program, statements };
+    if (optionals.size === 0) return { ...program, statements };
     const optionalize = (items: IrStatement[], scope: Scope): IrStatement[] =>
       items.map((item) => {
         if (item.kind === "function")
@@ -391,13 +326,9 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
         if (next.kind !== "let") return next;
         const binding = scope.declare(next.name, next.span);
         const type = next.type ?? valueType(next.value);
-        if (type === null) return next;
-        if (optionalItems.has(binding)) {
-          const levels = type.match(/(?:\[\])+$/u)?.[0] ?? "";
-          const item = type.slice(0, type.length - levels.length);
-          if (levels !== "" && !nullable(item)) return { ...next, type: `${item}?${levels}` };
-        }
-        return !optionals.has(binding) || nullable(type) ? next : { ...next, type: optional(type) };
+        return type === null || !optionals.has(binding) || nullable(type)
+          ? next
+          : { ...next, type: optional(type) };
       });
     return { ...program, statements: optionalize(statements, Scope.file()) };
   });

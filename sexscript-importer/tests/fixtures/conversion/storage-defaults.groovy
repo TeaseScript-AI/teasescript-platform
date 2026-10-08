@@ -73,8 +73,9 @@ def saved = load("game.slot" + slot)
 if (saved == null) show("Empty slot.")
 def counted = 0
 counted = loadString("game.count" + slot)
-// A read of a computed key into a variable or a list of a known type reads that type's empty value where the script
-// uses it up, and makes the variable or the list's items optional where it keeps its null.
+// A read of a computed key into a variable of a known type reads that type's empty value where the script uses it up,
+// and makes the variable optional where it keeps its null; an item of a list of a known type reads the item type's
+// empty value, also where the script tests it for null.
 int stage = loadInteger("game.stage" + slot)
 show("Stage " + (stage + 1))
 def owned = loadBoolean("toys.item" + slot)
@@ -149,7 +150,7 @@ show("Mood " + mood)
 int laps = 0
 laps = loadInteger("game.laps")
 show("Laps " + laps)
-// An item of a list in a list that the script tests for null keeps the null of a computed key's read, as do items added.
+// An item of a list in a list reads the item type's empty value too, as does an item that add() appends.
 def shelves = [["old"]]
 shelves[0][0] = load("game.shelf" + slot)
 shelves[0].add(load("game.extra" + slot))
