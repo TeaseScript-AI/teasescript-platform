@@ -178,6 +178,19 @@ subsystems may still have different maturity levels.
     [ADR 0019](../decisions/0019-resource-limit-governance.md), [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md),
     [`RUNTIME.md`](../RUNTIME.md), [`TESTING.md`](../TESTING.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
+- [ ] **Incremental snapshot and checkpoint persistence**
+  - **Outcome:** Persist snapshots and checkpoints as deltas, so per-step persistence cost no longer scales with the
+    total retained state of a long session. Owner direction, 2026-10-08; the design is not chosen yet and must keep
+    checkpoint validation, restore equivalence and deterministic order intact.
+  - **Trigger:** Start once the syntax is fixed, or earlier if long-session measurements show persistence cost dominating
+    after the bounded-record work in #707 and #708.
+  - **Reference:** **Establish a runtime performance baseline and optimization plan**, [`RUNTIME.md`](../RUNTIME.md), and
+    [`TOKEN-BURNERS.md`](TOKEN-BURNERS.md).
+
+- [ ] **Maintain a list of token burners**
+  - **Outcome:** Keep [`TOKEN-BURNERS.md`](TOKEN-BURNERS.md) current: large, optional, well-specified work packages the
+    Owner can launch when spare weekly agent budget would otherwise expire. Owner direction, 2026-10-08.
+
 - [ ] **Establish Player bundle and startup performance baseline**
   - **Outcome:** Measure the production Player's cold and warm startup, compressed bundle sizes, module contribution,
     cache reuse, and normal-playback dependency graph. Use that evidence to remove accidental dependencies and choose
