@@ -18,10 +18,10 @@
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
  * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too), and conjunctive
- * steering (a way that needs all parts of its condition is steered to by their summed distance) are on by default
- * (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`
- * switch them off). `--guidance` leads states toward the largest region of code not reached yet, and
- * `--random-choices` lets the explorer choose the outcomes of random draws (see `src/explorer-search.ts`).
+ * steering (a way that needs all parts of its condition is steered to by their summed distance), and random choices (the
+ * explorer also chooses other outcomes of random draws) are on by default (`--no-cells`, `--no-later`,
+ * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
+ * off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -123,7 +123,7 @@ async function main(args: string[]): Promise<void> {
       "progress-leads": { type: "boolean", default: true },
       conjunctive: { type: "boolean", default: true },
       guidance: { type: "boolean", default: false },
-      "random-choices": { type: "boolean", default: false },
+      "random-choices": { type: "boolean", default: true },
     },
   });
   if (values.replay !== undefined) {

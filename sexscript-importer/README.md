@@ -355,9 +355,10 @@ default: on the units measured it gained nothing. Directed work (attempts and ex
 most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
 of what steps cost; starting next visits takes at most another third, apart from it.
 
-With `--random-choices`, random outcomes are choices too (`docs/RUNTIME.md#controlled-randomness`): sessions let the
-explorer decide the draws that pick what happens (`chance`, random integers, picks from a collection, weighted picks,
-tag queries, and glob file transfers), which run naturally unless it chooses. A step also offers the other outcomes of
+With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
+(`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
+random integers, picks from a collection, weighted picks, tag queries, and glob file transfers), which run naturally
+unless it chooses. A step also offers the other outcomes of
 the first four draws it made (`randomDrawAlternatives`: all of a small support, 16 representative ones of a large one;
 at most three per draw, each outcome of a draw site once per waiting place and input) as steps with the same input and
 that outcome chosen, also after directed steps. Those steps and the expansions of the states after them take at most a
@@ -371,7 +372,7 @@ repros, the corpus, and `--replay` choose them again; a replay or corpus path wi
 without the flag, and an input whose outcomes are not all drawn and taken does not fit. Play with a chosen outcome is
 play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts, the directed ways,
 and the crashes show it apart, as does a line per unit in `summary.md` with the lines, ways, and crashes only it
-reached: what a player hits only with a particular run of luck. It is off by default.
+reached: what a player hits only with a particular run of luck.
 
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
