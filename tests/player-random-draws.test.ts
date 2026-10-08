@@ -290,16 +290,14 @@ test("a picker answer counts before the draws it lets run, so they decide from i
   await host.activate();
   await settle(context);
   const site = random.draw.value!.site;
+  // An answer the engine refuses counts nothing, and the draw still waits.
+  assert.equal(random.resolve({ kind: "number", value: 123 }), false);
+  assert.deepEqual(random.tried(site).history, []);
+  assert.equal(random.tried(site).counts.size, 0);
   random.setNext(site, "untried");
   assert.equal(random.resolve({ kind: "boolean", value: false }), true);
   assert.deepEqual(said(host), ["false", "true"], "the next draw takes the outcome not taken yet");
   assert.deepEqual(random.tried(site).history, ["false", "true"], "in the order taken");
-  assert.equal(random.resolve("natural"), false, "no draw waits");
-  assert.deepEqual(
-    random.tried(site).history,
-    ["false", "true"],
-    "a refused answer counts nothing",
-  );
 });
 
 test("a restored state waits at its draw for the picker only once input adopts it", async (context) => {
