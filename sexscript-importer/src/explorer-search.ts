@@ -4,6 +4,8 @@ import {
   comparedSlots,
   clockDifferences,
   comparedWith,
+  conditionDistance,
+  conjunctive,
   constantConditions,
   DataFlow,
   distance,
@@ -12,6 +14,8 @@ import {
   namesIn,
   callsClock,
   unreachableInstructions,
+  type AtomValue,
+  type ConditionDistance,
   type Goal,
   type LoadAlias,
   type PlanDiagnostic,
@@ -208,6 +212,12 @@ export interface ExploreOptions {
    * constant is followed to it, while one that gets no closer uses its lead up. Off by default.
    */
   readonly progressLeads?: boolean;
+  /**
+   * A way that needs all parts of its condition (`and` true, `or` false) is steered by the condition's branch distance:
+   * a state is closer when fewer of its atoms are unsatisfied, or as many but nearer in sum, and a storage chain counts
+   * the parts on other keys too. Off by default.
+   */
+  readonly conjunctive?: boolean;
 }
 
 /**
@@ -896,12 +906,38 @@ interface Attempt {
   readonly later?: true;
 }
 
-/** A variable whose closeness to a comparison steers the search toward a target. */
-interface DistanceTarget {
-  readonly target: number;
-  readonly name: string;
-  readonly operator: string;
-  readonly constant: number;
+/**
+ * What steers the search toward a target by closeness: a variable's to a comparison, or, for a way that needs all parts
+ * of its condition, the condition's branch distance (`conditionDistance`).
+ */
+type DistanceTarget =
+  | {
+      readonly kind: "variable";
+      readonly target: number;
+      readonly name: string;
+      readonly operator: string;
+      readonly constant: number;
+    }
+  | {
+      readonly kind: "condition";
+      readonly target: number;
+      readonly condition: unknown;
+      readonly wanted: boolean;
+    };
+
+/** A branch distance as one number: fewer atoms unsatisfied first, then less distance. */
+function branchDistance(found: ConditionDistance): number {
+  return found.unsatisfied * 1e9 + found.sum;
+}
+
+/** A plain value as a condition's atom reads it; undefined for another. */
+function atomScalar(value: unknown): AtomValue {
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+    ? value
+    : undefined;
 }
 
 /** The first step that evaluated a condition: from a state (`null` for a session start) with an input. */
@@ -1419,9 +1455,52 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return known;
   };
 
+  /**
+   * Reads a condition's atoms from variables and stored values: a load, or a variable that only holds one load when it
+   * has no value of its own. A stored key `skip` passes is not read.
+   */
+  const atomReader =
+    (
+      variables: ReadonlyMap<string, unknown>,
+      storage: ReadonlyMap<string, unknown>,
+      skip: (key: string) => boolean = () => false,
+    ) =>
+    (subject: unknown): AtomValue => {
+      const node = record(subject);
+      const stored = (key: string, fallback: unknown): AtomValue =>
+        skip(key) ? undefined : atomScalar(storage.has(key) ? storage.get(key) : fallback);
+      if (node.kind === "storageLoad") {
+        const key = record(node.key);
+        const fallback = record(node.default);
+        if (key.kind !== "literal" || typeof key.value !== "string") return undefined;
+        if (node.default != null && fallback.kind !== "literal") return undefined;
+        return stored(key.value, node.default == null ? null : fallback.value);
+      }
+      if (node.kind !== "identifier" || typeof node.name !== "string") return undefined;
+      if (variables.has(node.name)) return atomScalar(variables.get(node.name));
+      const alias = flow.loadAlias(node.name);
+      return alias === null ? undefined : stored(alias.key, alias.fallback);
+    };
+  /** The variables of a state by name, innermost binding last, as they are. */
+  const variablesOf = (snapshot: Data): Map<string, unknown> => {
+    const values = new Map<string, unknown>();
+    for (const scope of [{ bindings: snapshot.globals }, ...list(snapshot.frames)])
+      for (const binding of list(scope.bindings))
+        if (typeof binding.name === "string") values.set(binding.name, binding.value);
+    return values;
+  };
+
   const distances = (snapshot: Data): number[] => {
     const values = bindings(snapshot);
+    let read: ((subject: unknown) => AtomValue) | null = null;
     return distanceTargets.map((goal) => {
+      if (goal.kind === "condition") {
+        read ??= atomReader(
+          variablesOf(snapshot),
+          new Map(storageOf(snapshot).map((entry) => [entry.key, entry.value])),
+        );
+        return branchDistance(conditionDistance(goal.condition, goal.wanted, read));
+      }
       const value = values.get(goal.name);
       return value === undefined ? Infinity : distance(value, goal.operator, goal.constant);
     });
@@ -1587,10 +1666,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       target.chains.set(key, chain);
     }
     if (chain.queued || chain.stale >= 2) return false;
+    // A way that needs all parts of its condition: a storage is also as far as the parts on other keys are.
+    const condition =
+      instructions[target.instruction]!.condition ?? instructions[target.instruction]!.expression;
+    const whole = options.conjunctive === true && conjunctive(condition, target.way === 0);
     // Only the storages found since the last pass are measured.
     for (; chain.scanned < left.length; chain.scanned += 1) {
       const entry = left[chain.scanned]!;
       const measured = storageDistance(entry.entries, chain.matches, goal);
+      if (whole && measured.distance < Infinity)
+        measured.distance += conditionDistance(
+          condition,
+          target.way === 0,
+          atomReader(
+            new Map(),
+            new Map(entry.entries.map((stored) => [stored.key, stored.value])),
+            chain.matches,
+          ),
+        ).sum;
       // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
       for (const guard of target.guards) measured.distance += guardDistance(entry.entries, guard);
       const closest = chain.closest;
@@ -1754,6 +1847,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     /** With forward time: the attempts that continue later, once per target. */
     const laterPlan: Attempt[] = [];
     let timed = false;
+    // A way that needs all parts of its condition is steered by the condition's branch distance, not each part's.
+    const condition =
+      instructions[target.instruction]!.condition ?? instructions[target.instruction]!.expression;
+    const whole = options.conjunctive === true && conjunctive(condition, target.way === 0);
+    let measuredWhole = false;
     for (const goal of target.goals) {
       const source = goal.source;
       if (source.kind === "ask") {
@@ -1865,12 +1963,23 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             });
         }
       } else if (goal.comparison !== null && distanceTargets.length < MAX_DISTANCE_TARGETS) {
-        distanceTargets.push({
-          target: code,
-          name: source.name,
-          operator: goal.comparison.operator,
-          constant: goal.comparison.constant,
-        });
+        if (whole) {
+          if (!measuredWhole)
+            distanceTargets.push({
+              kind: "condition",
+              target: code,
+              condition,
+              wanted: target.way === 0,
+            });
+          measuredWhole = true;
+        } else
+          distanceTargets.push({
+            kind: "variable",
+            target: code,
+            name: source.name,
+            operator: goal.comparison.operator,
+            constant: goal.comparison.constant,
+          });
       }
     }
     target.attempts = plan.length + laterPlan.length;

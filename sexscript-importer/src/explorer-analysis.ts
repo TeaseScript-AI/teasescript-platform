@@ -1377,6 +1377,80 @@ function keysMayMatch(saved: string, read: string): boolean {
   return keyMatcher(saved)(read);
 }
 
+/** A value a condition's atom compares, as {@link conditionDistance} reads it; undefined when it cannot be read. */
+export type AtomValue = string | number | boolean | null | undefined;
+
+/** How far values are from making a condition come out a way: atoms not satisfied, and their summed distances. */
+export interface ConditionDistance {
+  readonly unsatisfied: number;
+  readonly sum: number;
+}
+
+/**
+ * Whether a condition's way needs all of its parts (`and` for true, `or` for false), each of which counts for the
+ * branch distance ({@link conditionDistance}).
+ */
+export function conjunctive(condition: unknown, wanted: boolean): boolean {
+  const value = record(condition);
+  if (value.kind === "group") return conjunctive(value.expression, wanted);
+  if (value.kind === "unary" && value.operator === "not")
+    return conjunctive(value.operand, !wanted);
+  return (
+    value.kind === "binary" &&
+    ((value.operator === "and" && wanted) || (value.operator === "or" && !wanted))
+  );
+}
+
+/**
+ * The branch distance of a condition from coming out `wanted`, with each atom's value read by `read`: an `and` that
+ * needs all of its parts sums them, one that needs any takes the nearest (fewest atoms unsatisfied, then least
+ * distance); an atom compared with a literal counts 0 when it holds, else its numeric {@link distance}, or 1 for
+ * another value. An atom that cannot be read counts as neither.
+ */
+export function conditionDistance(
+  condition: unknown,
+  wanted: boolean,
+  read: (subject: unknown) => AtomValue,
+): ConditionDistance {
+  const value = record(condition);
+  const none = { unsatisfied: 0, sum: 0 };
+  if (value.kind === "group") return conditionDistance(value.expression, wanted, read);
+  if (value.kind === "unary" && value.operator === "not")
+    return conditionDistance(value.operand, !wanted, read);
+  if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
+    const parts = [
+      conditionDistance(value.left, wanted, read),
+      conditionDistance(value.right, wanted, read),
+    ];
+    if ((value.operator === "and") === wanted)
+      return {
+        unsatisfied: parts[0]!.unsatisfied + parts[1]!.unsatisfied,
+        sum: parts[0]!.sum + parts[1]!.sum,
+      };
+    return parts[0]!.unsatisfied < parts[1]!.unsatisfied ||
+      (parts[0]!.unsatisfied === parts[1]!.unsatisfied && parts[0]!.sum <= parts[1]!.sum)
+      ? parts[0]!
+      : parts[1]!;
+  }
+  const [atom] = atomsFor(condition, wanted);
+  if (atom === undefined) return none;
+  const actual = read(atom.subject);
+  if (actual === undefined) return none;
+  const holds = atom.wanted ? atom.operator : negate(atom.operator);
+  const numeric = typeof actual === "boolean" ? Number(actual) : actual;
+  const constant = typeof atom.constant === "boolean" ? Number(atom.constant) : atom.constant;
+  const away =
+    typeof numeric === "number" && typeof constant === "number"
+      ? distance(numeric, holds, constant)
+      : holds === "==" || holds === "!="
+        ? (holds === "==") === (numeric === constant)
+          ? 0
+          : 1
+        : Infinity;
+  if (!Number.isFinite(away)) return none;
+  return away === 0 ? none : { unsatisfied: 1, sum: away };
+}
+
 /** How far a variable's value is from making `value operator constant` true: 0 when it holds. */
 export function distance(value: number, operator: string, constant: number): number {
   switch (operator) {

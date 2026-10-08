@@ -5,6 +5,8 @@ import { isRecord } from "../src/ast.ts";
 import {
   clockDifferences,
   comparedWith,
+  conditionDistance,
+  conjunctive,
   DataFlow,
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
@@ -905,5 +907,43 @@ test(
     );
     const moved = session.apply(start.runtime, { kind: "later", afterMs: 3_600_000 }, false);
     assert.equal(wallClockOf(moved!.snapshot), now + 3_600_000);
+  },
+);
+
+test(
+  "the branch distance of a condition sums the parts its way needs all of, takes the nearest of alternatives, and counts satisfied and unreadable atoms as nothing",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const conditionOf = (text: string) => {
+      const source = `let a = 0\nlet b = 0\nlet c = 0\nif ${text} {\n  say "Hit."\n}\nexit\n`;
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      return instructions.find((instruction) => instruction.kind === "jumpIfFalse")!.condition;
+    };
+    const values = new Map<string, number>([
+      ["a", 3],
+      ["b", 10],
+    ]);
+    const read = (subject: unknown) =>
+      isRecord(subject) && subject.kind === "identifier"
+        ? values.get(String(subject.name))
+        : undefined;
+    const measure = (text: string, wanted = true) =>
+      conditionDistance(conditionOf(text), wanted, read);
+    // Both parts: 2 short of 5, and 4 over 6; a satisfied part adds nothing, nor does one that cannot be read.
+    assert.deepEqual(measure("a >= 5 and b <= 6"), { unsatisfied: 2, sum: 6 });
+    assert.deepEqual(measure("a >= 1 and b <= 6"), { unsatisfied: 1, sum: 4 });
+    assert.deepEqual(measure("a >= 5 and c == 1"), { unsatisfied: 1, sum: 2 });
+    // Either part: the one with fewer atoms unsatisfied, then the nearer.
+    assert.deepEqual(measure("(a >= 5 and b <= 6) or a == 2"), { unsatisfied: 1, sum: 1 });
+    // A false way of an `or` needs both parts false.
+    assert.equal(conjunctive(conditionOf("a == 3 or b == 10"), false), true);
+    assert.equal(conjunctive(conditionOf("a == 3 or b == 10"), true), false);
+    assert.deepEqual(measure("a == 3 or b == 10", false), { unsatisfied: 2, sum: 2 });
   },
 );
