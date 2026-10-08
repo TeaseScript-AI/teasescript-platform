@@ -126,6 +126,10 @@ def mixedNote = loadString("game.mixedNote")
 mixedNote = 2
 def checkNote = { item = mixedNote -> return item == "" }
 show("Note " + checkNote() + " " + checkNote(null))
+// An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
+def profile = [name: "Guest"]
+profile.name = loadString("game.profileName")
+show("Profile " + profile.name)
 // A list of one function is apart from a list of the same name in another.
 def firstItem = { -> def items = ["a"]; items[0] = loadString("game.item"); return items[0] }
 def emptyItem = { -> def items = [""]; def v = items[0]; return v == null }

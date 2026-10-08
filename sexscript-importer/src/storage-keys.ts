@@ -633,10 +633,10 @@ const BOOLEAN_TEXT =
  * own variable (owner decision R1, 2026-10-08): such a read of a key that only text is read from and saved under, and
  * a legacy text read of a computed key, gets `default: ""`, and the null tests of the read or of its variable test for
  * the empty text instead, `x == null` as `x == ""`, or both, `x == null or x == ""`, where the variable holds values of
- * another type too; a null the script sets to the variable is the empty text too. A list's item takes the empty value
- * of its type (R2), so putting the value into a list keeps it there. A read whose value the script copies, into
- * another variable, a dict, or an object, passes to a script function, or returns, itself or through its variable,
- * keeps legacy null: its key is declared `string?` (withDeclaredKeys), and no test elsewhere changes. A null
+ * another type too; a null the script sets to the variable is the empty text too. A typed place, such as a list's item
+ * or an object's field, takes its type's empty value (R2), so putting the value there keeps it local. A read whose
+ * value the script copies into another variable, passes to a script function, or returns, itself or through its
+ * variable, keeps legacy null: its key is declared `string?` (withDeclaredKeys), and no test elsewhere changes. A null
  * that the script saves under a key that no read keeps null of is the empty text. A variable is the binding its name
  * resolves to (Scope), or a global's in every file. A stored empty text so counts as missing.
  */
@@ -710,17 +710,9 @@ function withEmptyText(
       }
       // The open-value helper gives its argument itself.
       const itself = value.kind === "call" && value.name === helperName("value") && passes;
-      // A list's items take their type's empty value instead (R2), so a value put into a list is no copy here.
-      const copies =
-        itself ||
-        value.kind === "object" ||
-        (value.kind === "call" && value.local === true) ||
-        (value.kind === "methodCall" && COPYING_METHODS.has(value.name));
-      if (value.kind === "methodCall") {
-        visit(value.target, scope, false);
-        for (const argument of value.arguments) visit(argument, scope, copies);
-        return value;
-      }
+      // A typed place, such as a list's item or an object's field, takes its type's empty value instead (R2), so a
+      // value put there is no copy here.
+      const copies = itself || (value.kind === "call" && value.local === true);
       return mapChildren(value, (child) => visit(child, scope, copies));
     };
     const block = (items: readonly IrStatement[], scope: Scope): void => {
@@ -741,10 +733,9 @@ function withEmptyText(
               : item.target.kind === "variable"
                 ? item.target.name
                 : undefined;
-          if (target === undefined && item.kind === "assign") {
-            // Set into a dict or an object, the value is copied; into a list, the item takes the empty value (R2).
-            visit(item.value, scope, item.target.kind !== "index" || item.target.dict === true);
-          } else {
+          // Set into a list, a dict, or an object, the place takes its type's empty value (R2).
+          if (target === undefined) visit(item.value, scope, false);
+          else {
             const source = item.value.kind === "variable" ? scope.resolve(item.value.name) : null;
             const resolved = target === null || target === undefined ? null : scope.resolve(target);
             // A copy of a variable into another passes it on; set to itself, it stays.
@@ -954,9 +945,6 @@ function withEmptyText(
     return { ...program, statements: widen(statements, Scope.file()), diagnostics };
   });
 }
-
-/** Methods that put their arguments into a dict, which copies them; a list's items take the empty value instead (R2). */
-const COPYING_METHODS = new Set(["put", "set"]);
 
 /**
  * The variables in scope at a point of a walk over a file: each `let`, parameter, and loop variable is a binding of its
