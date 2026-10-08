@@ -2005,7 +2005,9 @@ let name = askText "What is your name?", default: "Slave", hint: "Type your name
 The question, `default:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
 the two options may be written in either order.
 The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
-accepts what a field text accepts, so a list is an error. Without a question nothing is said.
+accepts what a field text accepts, so a list is an error. Without a question nothing is said. In the head of `if`,
+`while`, `repeat`, `for`, or `switch`, the `{` of the block ends a compact ask or `choose`, so `if askBoolean { ... }`
+asks without a question.
 
 ### Text input
 

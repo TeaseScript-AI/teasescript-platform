@@ -67,11 +67,11 @@ test("askBoolean says its question, shows Yes and No or its own texts, and retur
 });
 
 test("compact and parenthesized askBoolean and askBooleans compile to the same plan", () => {
-  const plan = (expression: string) =>
-    JSON.stringify(
-      compileValidPlan(`${PRELUDE}let result = ${expression}\nexit`),
-      (key: string, value: unknown) => (key === "span" || key === "sourceSpan" ? undefined : value),
+  const program = (source: string) =>
+    JSON.stringify(compileValidPlan(`${PRELUDE}${source}\nexit`), (key: string, value: unknown) =>
+      key === "span" || key === "sourceSpan" ? undefined : value,
     );
+  const plan = (expression: string) => program(`let result = ${expression}`);
   for (const [bounded, compact] of [
     ["askBoolean()", "askBoolean"],
     ['askBoolean("Ready?")', 'askBoolean "Ready?"'],
@@ -90,6 +90,11 @@ test("compact and parenthesized askBoolean and askBooleans compile to the same p
     ],
   ])
     assert.equal(plan(bounded!), plan(compact!), bounded);
+  // The block's `{` ends a compact ask without a question in the head of a block statement.
+  for (const head of ["if askBoolean", "while askBoolean", "repeat askInteger"]) {
+    const block = (ask: string) => program(`${ask} {\n    say "Again", instant\n}`);
+    assert.equal(block(`${head}()`), block(head), head);
+  }
 
   const errors = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);

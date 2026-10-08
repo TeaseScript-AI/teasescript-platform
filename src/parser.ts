@@ -252,7 +252,10 @@ class Parser {
     readonly offset: number | null;
   } | null = null;
   #recoveredAtStatementBoundary = false;
-  /** Inside a media cue position or a switch subject, where the following block `{` ends a compact interaction. */
+  /**
+   * Inside a media cue position, a permanent button's text, or the head of a block statement such as `if` or `switch`,
+   * where the following block `{` ends a compact interaction.
+   */
   #blockEndsCompactInteraction = false;
   /**
    * The `save` `as` that ends an enclosing storage operand, and a bare `default` after a `load` key, the earlier form
@@ -2484,7 +2487,7 @@ class Parser {
 
   *#parseIfStatement(): ParseTask<IfStatement | null> {
     const keyword = this.#advance();
-    const condition = this.#parseRequiredExpression();
+    const condition = this.#parseBlockHead();
     if (condition === null) {
       this.#synchronizeStatement();
       return null;
@@ -2524,10 +2527,7 @@ class Parser {
       this.#skipMalformedBlock();
       return null;
     }
-    const enclosingBlockEndsInteraction = this.#blockEndsCompactInteraction;
-    this.#blockEndsCompactInteraction = true;
-    const subject = this.#parseRequiredExpression();
-    this.#blockEndsCompactInteraction = enclosingBlockEndsInteraction;
+    const subject = this.#parseBlockHead();
     if (subject === null) {
       this.#synchronizeStatement();
       return null;
@@ -2700,7 +2700,7 @@ class Parser {
 
   *#parseRepeatStatement(): ParseTask<RepeatStatement | null> {
     const keyword = this.#advance();
-    const count = this.#parseRequiredExpression();
+    const count = this.#parseBlockHead();
     if (count === null) {
       this.#synchronizeStatement();
       return null;
@@ -2759,7 +2759,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const iterable = this.#parseRequiredExpression();
+    const iterable = this.#parseBlockHead();
     if (iterable === null) {
       this.#synchronizeStatement();
       return null;
@@ -2779,7 +2779,7 @@ class Parser {
 
   *#parseWhileStatement(): ParseTask<WhileStatement | null> {
     const keyword = this.#advance();
-    const condition = this.#parseRequiredExpression();
+    const condition = this.#parseBlockHead();
     if (condition === null) {
       this.#synchronizeStatement();
       return null;
@@ -3039,6 +3039,20 @@ class Parser {
 
   #parseRequiredExpression(): Expression | null {
     return runParse(this.#parseRequiredExpressionTask());
+  }
+
+  /**
+   * The expression before the block of `if`, `while`, `repeat`, `for`, or `switch`, where the block's `{` ends a compact
+   * interaction, so `if askBoolean { ... }` asks without a question.
+   */
+  #parseBlockHead(): Expression | null {
+    const enclosing = this.#blockEndsCompactInteraction;
+    this.#blockEndsCompactInteraction = true;
+    try {
+      return this.#parseRequiredExpression();
+    } finally {
+      this.#blockEndsCompactInteraction = enclosing;
+    }
   }
 
   #parseExpression(): Expression | null {
