@@ -681,6 +681,12 @@ test(
         true,
       ],
       [
+        "time kept through a function",
+        'function stamp {\n  return getTimestamp()\n}\nlet start = stamp()\nshowButton "Go"\n' +
+          'if (getTimestamp() - start) / 1 s >= 300 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
         "repeated without cells",
         'let n = 0\nwhile n < 2 {\n  showButton "Go"\n  n += 1\n}\nif getDateTime().hour >= 22 {\n' +
           '  say "Hit."\n}\nexit\n',
@@ -787,10 +793,12 @@ test(
         "global function sexscriptLegacyLoadInteger(key, whenMissing = null) {\n  let value = load key, default: null\n" +
         "  if value == null {\n    return whenMissing\n  }\n  return sexscriptLegacyValue(toInteger(value))\n}\n" +
         'function noisy(key) {\n  say "Loading."\n  return load key, default: 0\n}\n' +
+        "let offset = 0\nfunction shifted(key) {\n  offset = 1\n  return load key, default: 0\n}\n" +
         "function forever(n) {\n  return forever(n + 1)\n}\n";
       for (const [load, expected] of [
         ['sexscriptLegacyLoadInteger("${scriptText}.last")', [false, true]],
         ['noisy("${scriptText}.last")', [undefined, undefined]],
+        ['shifted("${scriptText}.last")', [undefined, undefined]],
         ["forever(1)", [undefined, undefined]],
       ] as const) {
         const source =

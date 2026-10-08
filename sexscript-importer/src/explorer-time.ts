@@ -195,22 +195,54 @@ function pureFunctions(
   // A function that calls one that is not is not either; one that calls one that reads the clock reads it too.
   const callers = new Map<number, number[]>();
   for (const [id, callees] of candidates)
-    for (const callee of callees) callers.set(callee, [...(callers.get(callee) ?? []), id]);
+    for (const callee of callees) {
+      const known = callers.get(callee);
+      if (known === undefined) callers.set(callee, [id]);
+      else known.push(id);
+    }
   const rejected = [...candidates].flatMap(([id, callees]) =>
     callees.some((callee) => !candidates.has(callee)) ? [id] : [],
   );
   for (let id = rejected.pop(); id !== undefined; id = rejected.pop()) {
     if (!candidates.delete(id)) continue;
-    rejected.push(...(callers.get(id) ?? []).filter((caller) => candidates.has(caller)));
+    for (const caller of callers.get(id) ?? []) if (candidates.has(caller)) rejected.push(caller);
   }
   const reading = [...clock].filter((id) => candidates.has(id));
   const readsClock = new Set<number>();
   for (let id = reading.pop(); id !== undefined; id = reading.pop()) {
     if (readsClock.has(id) || !candidates.has(id)) continue;
     readsClock.add(id);
-    reading.push(...(callers.get(id) ?? []));
+    for (const caller of callers.get(id) ?? []) reading.push(caller);
   }
   return { pure: new Set(candidates.keys()), clock: readsClock };
+}
+
+/** The functions that save, also through functions they call. */
+function savingFunctions(functions: readonly Data[], instructions: readonly Data[]): Set<number> {
+  const saving = new Set<number>();
+  const callers = new Map<number, number[]>();
+  for (const definition of functions) {
+    const id = Number(definition.id);
+    const end = Math.min(Number(definition.endInstruction), instructions.length);
+    for (let index = Number(definition.entryInstruction); index < end; index += 1) {
+      const instruction = instructions[index]!;
+      if (instruction.kind === "storageWrite") saving.add(id);
+      if (instruction.kind === "callFunction") {
+        const callee = Number(instruction.functionId);
+        const known = callers.get(callee);
+        if (known === undefined) callers.set(callee, [id]);
+        else known.push(id);
+      }
+    }
+  }
+  const queue = [...saving];
+  for (let id = queue.pop(); id !== undefined; id = queue.pop())
+    for (const caller of callers.get(id) ?? [])
+      if (!saving.has(caller)) {
+        saving.add(caller);
+        queue.push(caller);
+      }
+  return saving;
 }
 
 /** Whether an expression calls a getter of the current date or time. */
@@ -467,8 +499,15 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   // left, so it is not read from that value.
   const next = successors(plan, instructions, new Map());
   const afterSave = new Uint8Array(instructions.length);
+  // A block a timer, cue, or button runs may save at any time after it is set up: from there too.
+  const saving = savingFunctions(functions, instructions);
   const queue = instructions.flatMap((instruction, index) =>
-    instruction.kind === "storageWrite" ? [index] : [],
+    instruction.kind === "storageWrite" ||
+    [instruction.handlerFunctionId, instruction.finishFunctionId]
+      .concat(list(instruction.cues).map((cue) => cue.functionId))
+      .some((id) => typeof id === "number" && saving.has(id))
+      ? [index]
+      : [],
   );
   for (let at = queue.pop(); at !== undefined; at = queue.pop())
     for (const target of next[at] ?? [])
@@ -504,7 +543,9 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
         !values.every(
           ({ value, temporaries }) =>
             namesOf(value).has(name) ||
-            (!clockCall(value) && clockReads(value, model, temporaries).size > 0),
+            (!clockCall(value) &&
+              !capturesClock(value, temporaries) &&
+              clockReads(value, model, temporaries).size > 0),
         )
       )
         continue;
@@ -513,6 +554,14 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
       else definitions.set(name, composed);
       added = true;
     }
+  }
+  /** Whether a value is what a function that reads the clock gives (`start = stamp()`): a time kept, like a bare read. */
+  function capturesClock(value: Data, temporaries: ReadonlyMap<number, Data>): boolean {
+    const call =
+      value.kind === "temporary" && typeof value.temporaryId === "number"
+        ? record(temporaries.get(value.temporaryId))
+        : value;
+    return typeof call.functionId === "number" && clockFunctions.has(call.functionId);
   }
   /**
    * One definition of a variable from its assignments: its one computation, with the updates from itself that follow
@@ -823,17 +872,15 @@ function runFunction(id: number, args: readonly Data[], reading: Reading): Value
   const depth = (reading.frame?.depth ?? 0) + 1;
   if (definition === undefined || depth > FUNCTION_DEPTH) return undefined;
   const parameters = list(definition.parameters);
-  const frame: Frame = {
-    locals: new Map(),
-    values: new Map(),
-    depth,
-    steps: reading.frame?.steps ?? reading.steps ?? { left: FUNCTION_STEPS },
-  };
+  // One budget for the whole value: its arguments' calls too.
+  const steps = reading.frame?.steps ?? reading.steps ?? { left: FUNCTION_STEPS };
+  const caller: Reading = { ...reading, steps };
+  const frame: Frame = { locals: new Map(), values: new Map(), depth, steps };
   const supplied = new Set<number>();
   for (const argument of args) {
     const index = parameters.findIndex((parameter) => parameter.name === argument.parameterName);
     if (index < 0) return undefined;
-    const value = valueAt(argument.value, reading);
+    const value = valueAt(argument.value, caller);
     if (value === undefined) return undefined;
     frame.locals.set(String(parameters[index]!.name), value);
     supplied.add(index);
