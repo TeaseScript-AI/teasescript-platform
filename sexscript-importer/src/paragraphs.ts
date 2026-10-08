@@ -344,7 +344,7 @@ function dedent(piece: string): string {
 
 /**
  * Whether a text's blank lines lay it out rather than separate paragraphs: two or more lines with columns aligned by
- * runs of spaces or tabs, a ruled line of `-`, `=`, `*`, and the like, an empty box, a table row with two or more `|`,
+ * runs of spaces or tabs, a ruled line of `-`, `=`, `*`, and the like, also in bold or italic, an empty box, a table row with two or more `|`,
  * or a block of value rows (isValueRow), three or more, or two that make up half of the text, as in a heading over
  * scores or settings.
  */
@@ -357,12 +357,15 @@ function isLayout(text: string): boolean {
     (line) => /\S {3,}\S/u.test(line) || /: {2,}\S/u.test(line) || /\S\t+\S/u.test(line),
   );
   if (aligned.length >= 2) return true;
-  const ruled = lines.some(
-    (line) =>
-      /^[-=_*#~+|<>/\\. ]+$/u.test(line) &&
-      /[-=_*#~+|]/u.test(line) &&
-      line.replace(/[ .<>/\\]/gu, "").length >= 4,
-  );
+  // A ruled line in a span, `**------**`, is one too; the delimiters of a span around a whole line are no rule.
+  const ruled = lines
+    .map((line) => /^(\*\*|\*|~~)(.+)\1$/u.exec(line)?.[2] ?? line)
+    .some(
+      (line) =>
+        /^[-=_*#~+|<>/\\. ]+$/u.test(line) &&
+        /[-=_*#~+|]/u.test(line) &&
+        line.replace(/[ .<>/\\]/gu, "").length >= 4,
+    );
   // An empty box, `[  ]`, stands for a place on the screen.
   const box = lines.some((line) => /^[[(]\s*[\])]$/u.test(line));
   if (ruled || box || lines.some((line) => (line.match(/\|/gu) ?? []).length >= 2)) return true;

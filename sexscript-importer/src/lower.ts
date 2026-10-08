@@ -1699,35 +1699,53 @@ function withLegacyMarkup(
   stripsTags = false,
 ): IrStatement[] {
   let dropped = 0;
-  const markup = (value: IrExpression, any: boolean): IrExpression => {
-    const parts: TextPart[] | null =
+  const fileVariables = new Set(
+    statements.flatMap((statement) => (statement.kind === "let" ? [statement.name] : [])),
+  );
+  const markup = (
+    value: IrExpression,
+    any: boolean,
+    constants: ReadonlyMap<string, string>,
+  ): IrExpression => {
+    const given: TextPart[] | null =
       value.kind === "literal" && typeof value.value === "string"
         ? [{ text: value.value }]
         : value.kind === "template"
           ? value.parts
           : null;
-    if (parts === null) return value;
+    if (given === null) return value;
     if (
       !any &&
-      (stripsTags || !parts.some((part) => "text" in part && SHOWN_HTML_TAG.test(part.text)))
+      (stripsTags || !given.some((part) => "text" in part && SHOWN_HTML_TAG.test(part.text)))
     )
       return value;
+    const parts = withFoldedSpanValues(given, constants);
     const result = legacyHtmlToMarkup(parts, { fragment: !any });
     if (!result.changed) return value;
     if (result.dropped) dropped += 1;
     return templateOrLiteral(result.parts);
   };
   // Every text of a statement, inner values first; a say's own text also has its entities decoded.
-  const deep = (value: IrExpression): IrExpression => markup(mapChildren(value, deep), false);
-  const convert = (items: IrStatement[]): IrStatement[] =>
-    items.map((statement) => {
-      if (statement.kind === "function") return { ...statement, body: convert(statement.body) };
-      const nested = withNestedStatements(statement, convert);
+  const convert = (items: IrStatement[], constants: ReadonlyMap<string, string>): IrStatement[] => {
+    const deep = (value: IrExpression): IrExpression =>
+      markup(mapChildren(value, deep), false, constants);
+    return items.map((statement) => {
+      if (statement.kind === "function") {
+        const own = constantTexts(statement, fileVariables);
+        const body = withoutNestedSpans(
+          withoutUnreadLets(convert(statement.body, own), own),
+          statement,
+          fileVariables,
+        );
+        return { ...statement, body };
+      }
+      const nested = withNestedStatements(statement, (body) => convert(body, constants));
       if (nested.kind === "say")
-        return { ...nested, value: markup(mapChildren(nested.value, deep), true) };
+        return { ...nested, value: markup(mapChildren(nested.value, deep), true, constants) };
       return mapOwnExpressions(nested, deep);
     });
-  const converted = convert(statements);
+  };
+  const converted = convert(statements, new Map());
   if (dropped === 0) return converted;
   const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
   context.diagnostics.push({ code: "SX_HTML_LAYOUT", severity: "warning", message, span: null });
@@ -1735,6 +1753,210 @@ function withLegacyMarkup(
     { kind: "comment", text: `// NOTE SX_HTML_LAYOUT: ${message}`, trailing: false, span: null },
     ...converted,
   ];
+}
+
+/**
+ * A function's texts that never change: variables it declares once with a text literal, `let dots = "\n\n....... "`,
+ * and never sets again, with no parameter or script variable of the same name.
+ */
+function constantTexts(
+  fn: Extract<IrStatement, { kind: "function" }>,
+  fileVariables: ReadonlySet<string>,
+): Map<string, string> {
+  const declared = new Map<string, number>();
+  const literal = new Map<string, string>();
+  const changed = new Set<string>(fn.parameters.map((parameter) => parameter.name));
+  const visit = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "let") {
+        declared.set(item.name, (declared.get(item.name) ?? 0) + 1);
+        if (item.value.kind === "literal" && typeof item.value.value === "string")
+          literal.set(item.name, item.value.value);
+      }
+      if (item.kind === "assign" && item.target.kind === "variable") changed.add(item.target.name);
+      if (item.kind === "for") {
+        changed.add(item.variable);
+        if (item.valueVariable !== undefined) changed.add(item.valueVariable);
+      }
+      if (item.kind !== "function")
+        withNestedStatements(item, (body) => {
+          visit(body);
+          return body;
+        });
+    }
+  };
+  visit(fn.body);
+  return new Map(
+    [...literal].filter(
+      ([name]) => declared.get(name) === 1 && !changed.has(name) && !fileVariables.has(name),
+    ),
+  );
+}
+
+/**
+ * The parts with each value that is a constant text (constantTexts) inside an HTML span written as that text, so that
+ * the markup conversion sees its line breaks as it sees the span's own text: legacy joined it into the HTML first.
+ */
+function withFoldedSpanValues(
+  parts: readonly TextPart[],
+  constants: ReadonlyMap<string, string>,
+): TextPart[] {
+  if (constants.size === 0) return [...parts];
+  let depth = 0;
+  return parts.map((part) => {
+    if ("text" in part) {
+      for (const match of part.text.matchAll(/<(\/?)(b|strong|i|em|strike|s|del)\b[^<>]*>/giu))
+        depth = Math.max(0, depth + (match[1] === "/" ? -1 : 1));
+      return part;
+    }
+    const constant = part.value.kind === "variable" ? constants.get(part.value.name) : undefined;
+    return depth > 0 && constant !== undefined ? { text: constant } : part;
+  });
+}
+
+/**
+ * A function's variable that every read shows as the whole of a span, `say "**${message}**"`, gets its span from those
+ * reads, so an assignment of the same span around one value, `message = "**${dialog}**"` from legacy HTML that wrapped
+ * the text in `<b>` twice, keeps only the value: nested delimiters would show as written.
+ */
+function withoutNestedSpans(
+  statements: IrStatement[],
+  fn: Extract<IrStatement, { kind: "function" }>,
+  fileVariables: ReadonlySet<string>,
+): IrStatement[] {
+  // The span mark around each variable at every read: a mark, or null where a read is anything else.
+  const marks = new Map<string, string | null>();
+  const note = (name: string, mark: string | null): void => {
+    marks.set(name, marks.has(name) && marks.get(name) !== mark ? null : mark);
+  };
+  const wrapped = (parts: readonly TextPart[], at: number): string | null => {
+    const before = parts[at - 1];
+    const after = parts[at + 1];
+    if (before === undefined || after === undefined || !("text" in before) || !("text" in after))
+      return null;
+    const mark = /(?:^|[^*~])(\*\*|\*|~~)$/u.exec(before.text)?.[1];
+    if (mark === undefined || !after.text.startsWith(mark) || after.text.startsWith(`${mark}*`))
+      return null;
+    return mark;
+  };
+  const read = (value: IrExpression): IrExpression => {
+    if (value.kind === "template")
+      value.parts.forEach((part, at) => {
+        if ("value" in part && part.value.kind === "variable")
+          note(part.value.name, wrapped(value.parts, at));
+      });
+    else if (value.kind === "variable") note(value.name, null);
+    if (value.kind === "template")
+      for (const part of value.parts)
+        if ("value" in part && part.value.kind !== "variable") read(part.value);
+    return value.kind === "template" ? value : mapChildren(value, read);
+  };
+  const visit = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "assign" && item.target.kind === "variable") read(item.value);
+      else mapOwnExpressions(item, read);
+      withNestedStatements(item, (body) => {
+        visit(body);
+        return body;
+      });
+    }
+  };
+  visit(statements);
+  const locals = new Set(fn.parameters.map((parameter) => parameter.name));
+  const collect = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "let") locals.add(item.name);
+      withNestedStatements(item, (body) => {
+        collect(body);
+        return body;
+      });
+    }
+  };
+  collect(statements);
+  // A text that is one span of the mark on one line, as `**${dialog}**` or `**Center cheek**`, without the delimiters.
+  const unwrap = (target: string, value: IrExpression): IrExpression | null => {
+    const mark = marks.get(target);
+    if (mark === undefined || mark === null || !locals.has(target) || fileVariables.has(target))
+      return null;
+    const parts: TextPart[] | null =
+      value.kind === "literal" && typeof value.value === "string"
+        ? [{ text: value.value }]
+        : value.kind === "template"
+          ? value.parts
+          : null;
+    const first = parts?.[0];
+    const last = parts?.at(-1);
+    if (parts === null || first === undefined || last === undefined) return null;
+    if (!("text" in first) || !("text" in last)) return null;
+    const texts = parts.flatMap((part) => ("text" in part ? [part.text] : []));
+    const inside = texts.join("\u{F0000}");
+    const span = new RegExp(
+      `^${escapeRegExp(mark)}(?![*~])([^\\n]*?)(?<![*~])${escapeRegExp(mark)}$`,
+      "u",
+    );
+    const body = span.exec(inside)?.[1];
+    if (body === undefined || body.includes(mark)) return null;
+    const trimmed = parts.map((part, at) => {
+      if (!("text" in part)) return part;
+      let text = part.text;
+      if (at === 0) text = text.slice(mark.length);
+      if (at === parts.length - 1) text = text.slice(0, text.length - mark.length);
+      return { text };
+    });
+    return value.kind === "template"
+      ? templateOrLiteral(trimmed)
+      : { kind: "literal", value: body };
+  };
+  const rewrite = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => {
+      const nested = withNestedStatements(item, rewrite);
+      if (
+        nested.kind === "assign" &&
+        nested.operator === "=" &&
+        nested.target.kind === "variable"
+      ) {
+        const value = unwrap(nested.target.name, nested.value);
+        return value === null ? nested : { ...nested, value };
+      }
+      if (nested.kind === "let") {
+        const value = unwrap(nested.name, nested.value);
+        return value === null ? nested : { ...nested, value };
+      }
+      return nested;
+    });
+  return rewrite(statements);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/** The statements without the `let` of a constant text that nothing reads any more. */
+function withoutUnreadLets(
+  statements: IrStatement[],
+  constants: ReadonlyMap<string, string>,
+): IrStatement[] {
+  if (constants.size === 0) return statements;
+  const read = new Set<string>();
+  const collect = (value: IrExpression): IrExpression => {
+    if (value.kind === "variable") read.add(value.name);
+    return mapChildren(value, collect);
+  };
+  const visit = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      mapOwnExpressions(item, collect);
+      withNestedStatements(item, (body) => {
+        visit(body);
+        return body;
+      });
+    }
+  };
+  visit(statements);
+  const prune = (items: IrStatement[]): IrStatement[] =>
+    items
+      .filter((item) => !(item.kind === "let" && constants.has(item.name) && !read.has(item.name)))
+      .map((item) => withNestedStatements(item, prune));
+  return prune(statements);
 }
 
 function lowerHelperCompilationUnit(

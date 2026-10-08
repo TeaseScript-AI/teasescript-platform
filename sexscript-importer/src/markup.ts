@@ -121,7 +121,9 @@ export function legacyHtmlToMarkup(
 
 /**
  * Markup spans need text right inside their delimiters and end at a line break, so spaces inside move out, a span
- * closes before each line break and opens again after it, and an empty span disappears.
+ * closes before each line break and opens again on the next line that has text, and an empty span disappears; a line
+ * without text, such as the blank line between paragraphs, gets no delimiters. A span inside one of its own kind adds
+ * nothing, as in HTML, so only the outer one has delimiters, also where a legacy text never closed it.
  */
 function settleSpans(text: string): string {
   const pattern = new RegExp(`([${OPEN}${CLOSE}])(\\*\\*|\\*|~~)`, "gu");
@@ -134,39 +136,52 @@ function settleSpans(text: string): string {
   }
   tokens.push(text.slice(last));
   let output = "";
+  // The open spans, and those of them not written yet on the current line, which open before its next text.
   const stack: string[] = [];
-  let pending = "";
+  let pending: string[] = [];
+  const written = (): string[] => stack.slice(0, stack.length - pending.length);
+  // How many more spans of a kind are open inside the one on the stack.
+  const inner = new Map<string, number>();
   for (const token of tokens) {
     if (typeof token === "string") {
       const lines = token.split("\n");
       lines.forEach((line, index) => {
         if (index > 0) {
-          // Close the open spans at the line break and reopen them on the next line.
-          output += [...stack].reverse().join("") + "\n";
-          pending = stack.join("");
+          // Close the spans this line opened at the line break and reopen them on the next line with text.
+          output += [...written()].reverse().join("") + "\n";
+          pending = [...stack];
         }
         if (line === "") return;
         const leading = /^\s*/u.exec(line)![0];
-        output += leading + pending + line.slice(leading.length);
-        pending = "";
+        output += leading + pending.join("") + line.slice(leading.length);
+        pending = [];
       });
       continue;
     }
     if (token.open) {
-      stack.push(token.mark);
-      pending += token.mark;
+      if (stack.includes(token.mark)) inner.set(token.mark, (inner.get(token.mark) ?? 0) + 1);
+      else {
+        stack.push(token.mark);
+        pending.push(token.mark);
+      }
+      continue;
+    }
+    const nested = inner.get(token.mark) ?? 0;
+    if (nested > 0) {
+      inner.set(token.mark, nested - 1);
       continue;
     }
     const index = stack.lastIndexOf(token.mark);
     if (index < 0) continue;
     stack.splice(index, 1);
-    if (pending.endsWith(token.mark)) {
+    const unwritten = pending.lastIndexOf(token.mark);
+    if (unwritten >= 0) {
       // The span held no text.
-      pending = pending.slice(0, -token.mark.length);
+      pending.splice(unwritten, 1);
       continue;
     }
     const trailing = /\s*$/u.exec(output)![0];
     output = output.slice(0, output.length - trailing.length) + token.mark + trailing;
   }
-  return output + [...stack].reverse().join("");
+  return output + [...written()].reverse().join("");
 }
