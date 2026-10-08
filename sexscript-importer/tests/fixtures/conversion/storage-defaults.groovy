@@ -126,6 +126,11 @@ def mixedNote = loadString("game.mixedNote")
 mixedNote = 2
 def checkNote = { item = mixedNote -> return item == "" }
 show("Note " + checkNote() + " " + checkNote(null))
+// A variable that such a text is copied into holds its null too, where no null test rules it out.
+def firstPic = loadString("game.firstPic")
+def shownPic = "none"
+if (getBoolean("Show the first?")) shownPic = firstPic
+show("Picture " + shownPic)
 // An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
 def profile = [name: "Guest"]
 profile.name = loadString("game.profileName")

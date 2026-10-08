@@ -694,8 +694,19 @@ function withEmptyText(
   };
   const isReceiver = (index: number, binding: string): boolean =>
     receivers[index]!.has(binding) || globalReceivers.has(global(binding) ?? "");
-  type Flow = { index: number; binding: string; value: IrExpression; scope: Scope };
+  type Flow = {
+    index: number;
+    binding: string;
+    value: IrExpression;
+    scope: Scope;
+    item: IrStatement;
+  };
   const flows: Flow[] = [];
+  // Copies of a variable that a null test around them rules out null for, as the compiler narrows it there.
+  const testedCopies = new Set<IrStatement>();
+  // Lists that text reads are set into, whose items are text, by binding; a global's by name.
+  const textLists = programs.map(() => new Set<string>());
+  const globalTextLists = new Set<string>();
   programs.forEach((program, index) => {
     const pass = (binding: string): void => {
       const name = global(binding);
@@ -715,7 +726,11 @@ function withEmptyText(
       const copies = itself || (value.kind === "call" && value.local === true);
       return mapChildren(value, (child) => visit(child, scope, copies));
     };
-    const block = (items: readonly IrStatement[], scope: Scope): void => {
+    const block = (
+      items: readonly IrStatement[],
+      scope: Scope,
+      nonNull: ReadonlySet<string> = new Set(),
+    ): void => {
       for (const item of items) {
         if (item.kind === "function") {
           const inner = scope.inner(item);
@@ -734,24 +749,42 @@ function withEmptyText(
                 ? item.target.name
                 : undefined;
           // Set into a list, a dict, or an object, the place takes its type's empty value (R2).
-          if (target === undefined) visit(item.value, scope, false);
-          else {
+          if (target === undefined) {
+            visit(item.value, scope, false);
+            const list =
+              item.kind === "assign" &&
+              item.target.kind === "index" &&
+              item.target.target.kind === "variable"
+                ? scope.resolve(item.target.target.name)
+                : null;
+            if (list !== null && read !== null) {
+              textLists[index]!.add(list);
+              if (global(list) !== null) globalTextLists.add(global(list)!);
+            }
+          } else {
             const source = item.value.kind === "variable" ? scope.resolve(item.value.name) : null;
             const resolved = target === null || target === undefined ? null : scope.resolve(target);
             // A copy of a variable into another passes it on; set to itself, it stays.
             visit(item.value, scope, read === null && (source === null || source !== resolved));
+            if (source !== null && nonNull.has(source)) testedCopies.add(item);
             const binding = assigned(item, scope)!;
             if (read !== null) {
               receivers[index]!.add(binding);
               if (global(binding) !== null) globalReceivers.add(global(binding)!);
               readTargets.set(read, { index, binding });
-            } else flows.push({ index, binding, value: item.value, scope });
+            } else flows.push({ index, binding, value: item.value, scope, item });
           }
         } else if (item.kind === "return") {
           if (item.value !== null) visit(item.value, scope, true);
         } else mapOwnValues(item, (value) => visit(value, scope, false));
+        if (item.kind === "if") {
+          const tested = nullTested(item.condition, scope);
+          block(item.then, scope.inner(item), new Set([...nonNull, ...tested.then]));
+          block(item.else, scope.inner(item), new Set([...nonNull, ...tested.else]));
+          continue;
+        }
         withNestedBlocks(item, (body) => {
-          block(body, scope.inner(item));
+          block(body, scope.inner(item), nonNull);
           return body;
         });
       }
@@ -782,6 +815,31 @@ function withEmptyText(
     const target = readTargets.get(read);
     return target === undefined || own(target.index, target.binding);
   };
+  // Bindings that may hold the null of a text read: a variable that a read keeps null of is set to, and one that such a
+  // variable is copied into. A global's by name.
+  const nullable = programs.map(() => new Set<string>());
+  const globalNullable = new Set<string>();
+  const isNullable = (index: number, binding: string): boolean =>
+    nullable[index]!.has(binding) || globalNullable.has(global(binding) ?? "");
+  const nullRead = (read: IrExpression): boolean =>
+    !local(read) && read.kind === "load" && read.defaultValue === undefined;
+  const makeNullable = (index: number, binding: string): void => {
+    const name = global(binding);
+    if (name !== null) globalNullable.add(name);
+    else nullable[index]!.add(binding);
+  };
+  for (const [read, { index, binding }] of readTargets)
+    if (nullRead(read)) makeNullable(index, binding);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const { index, binding, value, scope, item } of flows) {
+      const source = value.kind === "variable" ? scope.resolve(value.name) : null;
+      if (source === null || testedCopies.has(item)) continue;
+      if (!isNullable(index, source) || isNullable(index, binding)) continue;
+      makeNullable(index, binding);
+      changed = true;
+    }
+  }
   // Keys that a read keeps null of, under which a saved null stays null.
   const nullKeys = new Set<string>();
   for (const read of [...passedReads, ...readTargets.keys()]) {
@@ -815,7 +873,14 @@ function withEmptyText(
       );
       return EMPTY;
     };
+    // Variables that text, or the null of a text read, is set to after their start.
     const widened = new Set<string>();
+    const nullWidened = new Set<string>();
+    const textItem = (value: IrExpression, scope: Scope): boolean => {
+      if (value.kind !== "index" || value.target.kind !== "variable") return false;
+      const list = scope.resolve(value.target.name);
+      return textLists[index]!.has(list) || globalTextLists.has(global(list) ?? "");
+    };
     const rewriteIn = (scope: Scope, span: IrStatement["span"]) => {
       const rewrite = (value: IrExpression): IrExpression => {
         const next = mapChildren(value, rewrite);
@@ -891,8 +956,19 @@ function withEmptyText(
         // Null set to an own variable of a text read is the empty text, which its tests test for.
         if (isNullLiteral(next.value) && own(index, binding))
           return [{ ...next, value: nullSet(span) }];
-        const read = readOf(item.kind === "let" || item.kind === "assign" ? item.value : EMPTY);
-        if (next.kind === "assign" && read !== null) widened.add(binding);
+        const value = item.kind === "let" || item.kind === "assign" ? item.value : EMPTY;
+        const read = readOf(value);
+        if (next.kind === "assign" && (read !== null || textItem(value, scope)))
+          widened.add(binding);
+        if (
+          next.kind === "assign" &&
+          (read !== null
+            ? nullRead(read)
+            : value.kind === "variable" &&
+              !testedCopies.has(item) &&
+              isNullable(index, scope.resolve(value.name)))
+        )
+          nullWidened.add(binding);
         if (next.kind !== "let" || read === null || !own(index, binding) || next.type !== undefined)
           return [next];
         const held = typeOf(binding);
@@ -917,8 +993,8 @@ function withEmptyText(
         ];
       });
     const statements = block(program.statements, Scope.file());
-    // A variable that text is read into after another value started it holds both; an own variable of a text read,
-    // whose null tests test for the empty text now, holds no null.
+    // A variable that text is read into after another value started it holds both, and null too where the text may be
+    // missing; an own variable of a text read, whose null tests test for the empty text now, holds no null.
     const widen = (items: IrStatement[], scope: Scope): IrStatement[] =>
       items.map((item) => {
         if (item.kind === "function") {
@@ -931,19 +1007,47 @@ function withEmptyText(
         const reads = widened.has(binding) || readOf(next.value) !== null;
         if (next.type === "string?" && reads && own(index, binding) && !mixed(binding))
           return { ...next, type: "string" };
-        if (next.type !== undefined) {
-          // A declared type that text is read into later takes text too.
-          if (!widened.has(binding) || /\bstring\b/u.test(next.type)) return next;
-          const declared = next.type.replace(/\?$/u, "").replace(/ \| null$/u, "");
-          return { ...next, type: `${unionType([declared, "string"])!} | null` };
-        }
-        if (!widened.has(binding)) return next;
-        const start = valueType(next.value);
-        if (start === null || start === "string") return next;
-        return { ...next, type: `${unionType([start, "string"])!} | null` };
+        const text = widened.has(binding);
+        const nulls = nullWidened.has(binding);
+        const declared = text || nulls ? (next.type ?? valueType(next.value)) : null;
+        if (declared === null) return next;
+        const holdsText = /\bstring\b/u.test(declared);
+        const holdsNull = /\?$|\bnull\b/u.test(declared);
+        if ((!text || holdsText) && (!nulls || holdsNull)) return next;
+        const base = declared.replace(/\?$/u, "").replace(/ \| null$/u, "");
+        const held = text && !holdsText ? unionType([base, "string"])! : base;
+        return {
+          ...next,
+          type: (text && !holdsText) || nulls || holdsNull ? optional(held) : held,
+        };
       });
     return { ...program, statements: widen(statements, Scope.file()), diagnostics };
   });
+}
+
+/** The variables that a condition rules out null for where it holds, and where it does not: `x != null and ...`. */
+function nullTested(condition: IrExpression, scope: Scope): { then: string[]; else: string[] } {
+  if (condition.kind === "unary" && condition.operator === "not") {
+    const inner = nullTested(condition.value, scope);
+    return { then: inner.else, else: inner.then };
+  }
+  if (condition.kind === "binary" && condition.operator === "and") {
+    const left = nullTested(condition.left, scope);
+    const right = nullTested(condition.right, scope);
+    return { then: [...left.then, ...right.then], else: [] };
+  }
+  if (condition.kind !== "binary" || (condition.operator !== "==" && condition.operator !== "!="))
+    return { then: [], else: [] };
+  const side = isNullLiteral(condition.right)
+    ? condition.left
+    : isNullLiteral(condition.left)
+      ? condition.right
+      : null;
+  if (side?.kind !== "variable") return { then: [], else: [] };
+  const binding = scope.resolve(side.name);
+  return condition.operator === "!="
+    ? { then: [binding], else: [] }
+    : { then: [], else: [binding] };
 }
 
 /**
