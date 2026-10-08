@@ -665,7 +665,7 @@ function storedText(
   const value: IrExpression =
     defaultValue === undefined || isNullLiteral(defaultValue)
       ? { ...bare, read: "string" }
-      : { ...bare, defaultValue: helperCall("value", [defaultValue]) };
+      : { ...bare, read: "string", defaultValue: helperCall("value", [defaultValue]) };
   const key = literalKey(bare.key);
   return {
     kind: "template",
@@ -978,20 +978,21 @@ function withEmptyText(
         // A stored text reads the empty text where missing while its value stays local, and keeps null through the
         // text helpers where it goes on.
         const routed = routedRead(value);
-        if (routed !== null && routed.defaultValue === undefined && next.kind === "template") {
+        if (routed !== null && next.kind === "template") {
           const part = next.parts[0]!;
           const cast =
             "value" in part &&
             part.value.kind === "call" &&
             part.value.name === helperName("castText");
           const { read: _read, ...inner } = routedRead(next)!;
-          if (local(routed)) {
-            const load = { ...inner, defaultValue: helperCall("value", [EMPTY]) };
-            return {
-              kind: "template",
-              parts: [{ value: cast ? helperCall("castText", [load]) : load }],
-            };
-          }
+          const template = (load: IrExpression): IrExpression => ({
+            kind: "template",
+            parts: [{ value: cast ? helperCall("castText", [load]) : load }],
+          });
+          // The script's own default stays.
+          if (routed.defaultValue !== undefined) return template(inner);
+          if (local(routed))
+            return template({ ...inner, defaultValue: helperCall("value", [EMPTY]) });
           const load = {
             ...inner,
             defaultValue: helperCall("value", [{ kind: "literal", value: null }]),
