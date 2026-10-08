@@ -295,7 +295,8 @@ test(
       ].map((file) => ({ path: file }));
       const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
       const source = emitTease(program!);
-      assert.match(source, /^for file in findImages\(all: \[sexscriptLegacyPathTag\(/mu);
+      // The folder's variable holds one path, so the tag is known at conversion time.
+      assert.match(source, /^for file in findImages\(all: \["images-mistress-pack-1"\]\)/mu);
       const storage = new Map();
       const result = projectResult.runner(
         [{ path: "main.tease", source }],
@@ -307,6 +308,78 @@ test(
         { status: "halted", failure: null },
       );
       assert.equal(storage.get("names"), "a1.jpg,b22.PNG");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// A walk through a sounds or videos folder, or through the subfolders of an images folder, goes through the package's
+// files or subfolders there, listed at conversion time; a folder the package does not hold is named in a note.
+test(
+  "walks a package folder as the files or subfolders it holds",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("runner" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-folders-"));
+    try {
+      const sourcePath = path.join(directory, "folders.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          'def base = getDataFolder().replaceAll("\\\\\\\\", "/")',
+          "def tracks = []",
+          'new File(base + "sounds/Beats/").eachFile() { file ->',
+          '  if (file.isFile() && file.getAbsolutePath().indexOf(".mp3") > 0) tracks << file.getAbsolutePath()',
+          "}",
+          "def decks = []",
+          'new File("images/Decks/").eachFile() { file ->',
+          "  if (file.isDirectory()) decks << file.getName()",
+          "}",
+          "def videos = []",
+          'def dh = new File(getDataFolder() + "videos/random/")',
+          "dh.eachFile { videos << it.name }",
+          'save("tracks", tracks.join(","))',
+          'save("decks", decks.join(","))',
+          'save("videos", videos.size())',
+          "",
+        ].join("\n"),
+      );
+      const files = [
+        "sounds/Beats/a.mp3",
+        "sounds/Beats/b.wav",
+        "sounds/Beats/c.mp3",
+        "images/Decks/Red/1.png",
+        "images/Decks/Blue/1.png",
+      ];
+      const media = files
+        .filter((file) => file.startsWith("images/"))
+        .map((file) => ({ path: file.slice("images/".length) }));
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
+        media,
+        files,
+      });
+      const source = emitTease(program!);
+      assert.match(
+        source,
+        /^for file in \["Beats\/a\.mp3", "Beats\/b\.wav", "Beats\/c\.mp3"\] \{$/mu,
+      );
+      assert.match(source, /^for file in \["Decks\/Blue", "Decks\/Red"\] \{$/mu);
+      assert.match(
+        source,
+        /NOTE SX_FOLDER_FILES line 12: .*videos\/random, which the package does not hold/u,
+      );
+      const storage = new Map();
+      const result = projectResult.runner([{ path: "main.tease", source }], {}, { storage });
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+      assert.deepEqual(Object.fromEntries(storage), {
+        tracks: "Beats/a.mp3,Beats/c.mp3",
+        decks: "Blue,Red",
+        videos: 0,
+      });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

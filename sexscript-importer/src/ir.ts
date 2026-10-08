@@ -238,8 +238,8 @@ export type IrExpression =
   /** `decimal` writes a whole number as a decimal (`1.0`), which TeaseScript types as a number rather than an integer. */
   | { kind: "literal"; value: string | number | boolean | null; action?: true; decimal?: true }
   | { kind: "variable"; name: string }
-  /** `set` marks a set literal `set[...]` (V30 §16). */
-  | { kind: "list"; items: IrExpression[]; set?: true }
+  /** `set` marks a set literal `set[...]` (V30 §16); `lines` writes a long list with an item on each line. */
+  | { kind: "list"; items: IrExpression[]; set?: true; lines?: true }
   /**
    * An object literal, or with `dict` a dict literal `dict{ ... }` (#536). A property with `key` has a key that is
    * computed or not a name, written `[key]: value` or `"key": value`; `name` is unused then.

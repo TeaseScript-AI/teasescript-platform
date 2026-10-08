@@ -257,6 +257,8 @@ interface LowerContext {
   textVariables: ReadonlySet<string>;
   /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
   imagePaths: Set<string>;
+  /** Loop variables that hold the package path of a subfolder of a walked folder (listedFolderWalk). */
+  listedFolders: Set<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -1436,6 +1438,7 @@ export function lowerParsedFile(
     integerArrays: new Set(),
     textVariables: new Set(),
     imagePaths: new Set(),
+    listedFolders: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -2296,6 +2299,7 @@ function lowerHelperMethod(
     integerArrays: new Set(),
     textVariables: new Set(),
     imagePaths: new Set(),
+    listedFolders: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -5847,16 +5851,29 @@ function lowerCallStatement(
       { kind: "exit", span },
     ];
   }
-  // Going through the files of an images folder goes through the folder's images (imageFolderWalk).
-  if (
-    call?.name === "eachFile" &&
-    receiver !== null &&
-    context.media !== null &&
-    call.arguments.length === 1 &&
-    call.arguments[0]!.kind === "closure"
-  ) {
-    const walk = imageFolderWalk(node, receiver, call.arguments[0]!, span, context);
-    if (walk !== undefined) return walk;
+  // Going through the files of a package folder goes through the package's files there (listedFolderWalk), and through
+  // an images folder through the folder's images (imageFolderWalk).
+  const walkClosure = call?.arguments.at(-1);
+  const recursive =
+    call?.name === "eachFileRecurse"
+      ? call.arguments.length === 1
+        ? ("all" as const)
+        : call.arguments.length === 2 && isFilesOnly(call.arguments[0]!)
+          ? ("files" as const)
+          : undefined
+      : call?.name === "eachFile" && call.arguments.length === 1
+        ? null
+        : undefined;
+  if (receiver !== null && walkClosure?.kind === "closure" && recursive !== undefined) {
+    const listed =
+      context.files === null
+        ? undefined
+        : listedFolderWalk(node, receiver, walkClosure, recursive, span, context);
+    if (listed !== undefined) return listed;
+    if (recursive === null && context.media !== null) {
+      const walk = imageFolderWalk(node, receiver, walkClosure, span, context);
+      if (walk !== undefined) return walk;
+    }
   }
   // Looking through the player's pictures on the computer becomes asking for a photo (owner decision).
   if (
@@ -14008,7 +14025,9 @@ function imageFolderPaths(receiver: AstNode, context: LowerContext): AstNode[] |
   );
   return paths.length > 0 &&
     paths.length === constructors.length &&
-    paths.every((path) => /^\/?images\//iu.test(staticPath(path).text))
+    paths.every((path) =>
+      /^\/?images\//iu.test(resolvedPath(path, context) ?? staticPath(path).text),
+    )
     ? paths
     : null;
 }
@@ -14046,9 +14065,9 @@ function imageFolderListing(
 ): IrExpression | null | undefined {
   const paths = imageFolderPaths(receiver, context);
   if (paths === null) return undefined;
-  const fixed = isFileConstructor(receiver) ? staticPath(paths[0]!) : null;
+  const fixed = isFileConstructor(receiver) ? resolvedPath(paths[0]!, context) : null;
   let tag: IrExpression;
-  if (fixed?.complete === true) tag = { kind: "literal", value: pathTag(fixed.text) };
+  if (fixed !== null) tag = { kind: "literal", value: pathTag(fixed) };
   else {
     // A variable holds the path itself (fileTests).
     const path = lowerExpression(isFileConstructor(receiver) ? paths[0]! : receiver, context);
@@ -16620,6 +16639,11 @@ function isFileConstructor(node: AstNode): boolean {
 /** Members that go through the files of a folder with a closure. */
 const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"]);
 
+/** Groovy's `FileType.FILES`, also written `groovy.io.FileType.FILES`, which walks only through files. */
+function isFilesOnly(node: AstNode): boolean {
+  return node.kind === "property" && constantString(node.property) === "FILES";
+}
+
 /**
  * The `new File(path)` values whose only use is `.exists()`, `.listFiles()`, or a walk through the folder's files
  * (FOLDER_WALKS): directly as its receiver, or kept in a variable that nothing reads otherwise
@@ -16954,6 +16978,183 @@ function imageFolderWalk(
 }
 
 /**
+ * The text of a path that a script fixes before it runs, with `getDataFolder()` as the package root and a variable
+ * that only ever holds one such path read as that path; null for a computed path.
+ */
+function resolvedPath(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): string | null {
+  const literal = constantString(node);
+  if (literal !== null) return literal;
+  if (isDataFolder(node)) return "";
+  const variable = variableName(node);
+  if (node.kind === "variable" && variable !== null) {
+    const key = bindingKey(node, context.bindings) ?? variable;
+    if (seen.has(key)) return null;
+    const assigned = context.assignedValues.get(key) ?? [];
+    const initializer = context.constantInitializers.get(variable);
+    const values = assigned.length > 0 ? assigned : initializer === undefined ? [] : [initializer];
+    const texts = values.map((value) => resolvedPath(value, context, new Set([...seen, key])));
+    return texts.length > 0 && texts.every((text) => text !== null && text === texts[0])
+      ? texts[0]!
+      : null;
+  }
+  if (node.kind === "gstring") {
+    const strings = Array.isArray(node.strings) ? node.strings : [];
+    const values = nodeArray(node.values);
+    let text = "";
+    for (let index = 0; index < strings.length; index += 1) {
+      const piece: unknown = strings[index];
+      if (typeof piece === "string") text += piece;
+      const value = values[index];
+      if (value === undefined) continue;
+      const part = resolvedPath(value, context, seen);
+      if (part === null) return null;
+      text += part;
+    }
+    return text;
+  }
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    const start = left === null ? null : resolvedPath(left, context, seen);
+    const rest = right === null ? null : resolvedPath(right, context, seen);
+    return start === null || rest === null ? null : start + rest;
+  }
+  return null;
+}
+
+/** The package folder a walk goes through, `sounds/Deck/`, from the path its File names; null for a computed one. */
+function walkedFolder(receiver: AstNode, context: LowerContext): string | null {
+  const variable = variableName(receiver);
+  const constructors = isFileConstructor(receiver)
+    ? [receiver]
+    : variable !== null && context.fileVariables.has(variable)
+      ? [...context.filePathOwners].flatMap(([value, owner]) => (owner === variable ? [value] : []))
+      : [];
+  const texts = constructors.map((value) => {
+    const path = nodeArray(asNode(value.arguments)?.items)[0];
+    return path === undefined ? null : resolvedPath(path, context);
+  });
+  if (texts.length === 0 || texts.some((text) => text === null || text !== texts[0])) return null;
+  const folder = texts[0]!.replaceAll("\\", "/").replace(/^(?:\.?\/)+/u, "");
+  return folder.endsWith("/") ? folder : `${folder}/`;
+}
+
+/** The members of a File that a closure asks of its parameter. */
+function askedMembers(body: AstNode, variable: string): Set<string> {
+  const members = new Set<string>();
+  walkAst(body, (node) => {
+    const member =
+      node.kind === "property"
+        ? constantString(node.property)
+        : node.kind === "methodCall"
+          ? constantString(node.method)
+          : null;
+    if (member !== null && variableName(node.object) === variable) members.add(member);
+  });
+  return members;
+}
+
+const LISTED_MEDIA_FOLDERS = new Set(["images", "sounds", "videos"]);
+
+/**
+ * A walk through a package folder of images, sounds, or videos whose path the script fixes, as a loop over the
+ * package's files or subfolders there, listed at conversion time: `eachFile`, which also visited subfolders, and
+ * `eachFileRecurse`, also only through files (`FileType.FILES`). A walk through the images of one folder stays with
+ * the folder's tag (imageFolderWalk); the list serves sounds and videos, subfolders, a walk through every level, and a
+ * folder the package does not hold, which a note names. Undefined for a computed folder, another folder, or a closure
+ * that tells files from subfolders where the folder holds both.
+ */
+function listedFolderWalk(
+  node: AstNode,
+  receiver: AstNode,
+  closure: AstNode,
+  recursive: "all" | "files" | null,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | undefined {
+  const body = asNode(closure.body);
+  const parameters = groovyParameters(closure.parameters);
+  if (body?.kind !== "block" || parameters === null || parameters.length > 1) return undefined;
+  const folder = walkedFolder(receiver, context);
+  const root = folder?.split("/")[0]?.toLowerCase();
+  if (folder === null || root === undefined || !LISTED_MEDIA_FOLDERS.has(root)) return undefined;
+  const variable = closure.parameterSpecified === true ? parameters[0]!.name : "it";
+  const asked = askedMembers(body, variable);
+  const tellsKinds = ["isFile", "file", "isDirectory", "directory"].some((member) =>
+    asked.has(member),
+  );
+  const returns = closureReturns(body);
+  if (returns.some(({ insideLoop, value }) => insideLoop || value !== null)) return undefined;
+  const prefix = folder.toLowerCase();
+  const below = context.actualFiles
+    .filter((file) => file.toLowerCase().startsWith(prefix))
+    .map((file) => file.slice(prefix.length));
+  const files = below.filter((rest) => recursive !== null || !rest.includes("/"));
+  const folders =
+    recursive === "files"
+      ? []
+      : [
+          ...new Set(
+            below.flatMap((rest) => {
+              const parts = rest.split("/").slice(0, -1);
+              return recursive === null
+                ? parts.slice(0, 1)
+                : parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+            }),
+          ),
+        ].sort();
+  if (tellsKinds && files.length > 0 && folders.length > 0) return undefined;
+  // A walk that tells files from subfolders goes through the kind the folder holds.
+  const listsFolders = tellsKinds ? folders.length > 0 : false;
+  // A walk through the images the package holds in one folder finds them by the folder's tag (imageFolderWalk).
+  if (root === "images" && recursive === null && !listsFolders && files.length > 0)
+    return undefined;
+  const entries = tellsKinds ? (listsFolders ? folders : files) : [...files, ...folders];
+  // The package holds the images and sounds folders' files at its root; other folders keep their names.
+  const packagePath = (rest: string): string =>
+    root === "videos" ? `${folder}${rest}` : `${folder.slice(root.length + 1)}${rest}`;
+  const listed = folder.replace(/\/$/u, "");
+  addDiagnostic(
+    context,
+    "SX_FOLDER_FILES",
+    "warning",
+    entries.length === 0
+      ? `The legacy script went through the ${listsFolders ? "subfolders" : "files"} of ${listed}, which the package does not hold, so this goes through none.`
+      : `The legacy script went through the ${listsFolders ? "subfolders" : "files"} of ${listed}; this goes through the package's ${listsFolders ? "subfolders" : "files"} there, as listed at conversion time.`,
+    node.span,
+  );
+  const variables = listsFolders ? context.listedFolders : context.imagePaths;
+  const known = variables.has(variable);
+  variables.add(variable);
+  try {
+    if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
+    const loopBody = lowerBlock(body, context);
+    return [
+      {
+        kind: "for",
+        variable,
+        collection: {
+          kind: "list",
+          items: entries.map((entry): IrExpression => ({
+            kind: "literal",
+            value: packagePath(entry),
+          })),
+          lines: true,
+        },
+        body: returns.length > 0 ? withoutFinalContinue(returnsAsContinue(loopBody)) : loopBody,
+        span,
+      },
+    ];
+  } finally {
+    if (!known) variables.delete(variable);
+  }
+}
+
+/**
  * What a folder walk asked of a File that is an image of the folder (imageFolderWalk): its name, its path, and whether
  * it is a file. Undefined for another receiver or member.
  */
@@ -16963,13 +17164,15 @@ function listedImageMember(
   context: LowerContext,
 ): IrExpression | undefined {
   const variable = variableName(receiver);
-  if (variable === null || !context.imagePaths.has(variable)) return undefined;
+  if (variable === null) return undefined;
+  const folder = context.listedFolders.has(variable);
+  if (!folder && !context.imagePaths.has(variable)) return undefined;
   const path: IrExpression = { kind: "variable", name: variable };
   if (member === "name" || member === "getName") return useHelper(context, "fileName", [path]);
   if (["path", "getPath", "absolutePath", "getAbsolutePath", "toString"].includes(member))
     return path;
-  if (member === "isFile" || member === "file") return { kind: "literal", value: true };
-  if (member === "isDirectory" || member === "directory") return { kind: "literal", value: false };
+  if (member === "isFile" || member === "file") return { kind: "literal", value: !folder };
+  if (member === "isDirectory" || member === "directory") return { kind: "literal", value: folder };
   return undefined;
 }
 
