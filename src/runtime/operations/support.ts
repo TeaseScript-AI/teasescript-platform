@@ -183,7 +183,7 @@ export function captureExecutableData(
   return Object.freeze({ plan: capturedPlan.plan, snapshot: capturedSnapshot.snapshot });
 }
 
-/** The result of a public operation, whose state no longer keeps the message and settled media records nothing reaches. */
+/** The result of a public operation, whose state no longer keeps the message and settled records nothing reaches. */
 export function result(
   snapshot: RuntimeSnapshot,
   events: readonly InterpreterEvent[],
