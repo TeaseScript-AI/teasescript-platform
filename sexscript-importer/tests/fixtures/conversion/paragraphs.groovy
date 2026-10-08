@@ -40,3 +40,17 @@ pics = getBoolean("Take pictures now?", "Yes", "No")
 save("game.pics", pics)
 rounds = getInteger("Rounds now?", rounds)
 save("game.rounds", rounds)
+// DisciplineClinic Punish: a list of alternative texts that the script only picks one of to say has its texts split as
+// a text said directly is, and the same draw picks the same alternative.
+def dialogArray = []
+def dialog = ""
+dialogArray = ["Are you satisfied with the session you had?\n\nAre you feeling well punished?",
+	"Well..\n\nDid she do a good job?",
+	"Tell me, how do you feel?"]
+dialog = dialogArray[getRandom(dialogArray.size)]
+show(dialog)
+// DisciplineClinic Punish: a picked text that the script reads again, here as a question, stays one message.
+dialogArray = ["You need to learn this.\n\nTake your position.", "Bend over."]
+dialog = dialogArray[getRandom(dialogArray.size)]
+show(dialog)
+def response = getSelectedValue(dialog, ["I understand.", "Please, no."])

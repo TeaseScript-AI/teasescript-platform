@@ -186,7 +186,9 @@ export interface FeasibilityReport {
    * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph (the
    * question the last paragraph, `questions`; the question with the remarks after it, `questionRemarks`; or the last
    * paragraph where none asks, `questionFallbacks`), form questions whose later paragraphs became the outro, single
-   * paragraphs without the blank lines around them, and texts left whole as layout or by the unit's keepParagraphs.
+   * paragraphs without the blank lines around them, and texts left whole as layout or by the unit's keepParagraphs;
+   * lists of texts said one picked text at a time and split the same way (withParagraphPicks, `picks`), or left whole
+   * where the list or the picked text has other uses (`picksKept`).
    */
   paragraphs: {
     says: number;
@@ -197,6 +199,8 @@ export interface FeasibilityReport {
     trimmed: number;
     layout: number;
     kept: number;
+    picks: number;
+    picksKept: number;
   };
   /**
    * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
@@ -383,6 +387,8 @@ export function analyzeFeasibility(
       trimmed: 0,
       layout: 0,
       kept: 0,
+      picks: 0,
+      picksKept: 0,
     },
     readingWaits: {
       replaced: 0,
@@ -528,6 +534,8 @@ export function analyzeFeasibility(
       else if (code === "SX_SETTINGS_FORM") report.forms.sequences += 1;
       else if (code === "SX_MENU_FORM") report.forms.menus += 1;
       else if (code === "SX_PARAGRAPHS") report.paragraphs.says += 1;
+      else if (code === "SX_PARAGRAPH_PICK") report.paragraphs.picks += 1;
+      else if (code === "SX_PARAGRAPH_PICK_KEPT") report.paragraphs.picksKept += 1;
       else if (code === "SX_PARAGRAPH_QUESTION") report.paragraphs.questions += 1;
       else if (code === "SX_PARAGRAPH_QUESTION_REMARKS") report.paragraphs.questionRemarks += 1;
       else if (code === "SX_PARAGRAPH_QUESTION_FALLBACK") report.paragraphs.questionFallbacks += 1;
