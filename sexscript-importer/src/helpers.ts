@@ -394,13 +394,13 @@ function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrState
 /**
  * The part a Groovy range index `from..to`, or `from..<to` when `exclusive`, covers: the positions from `low` up to but
  * not including `high`, and whether it `runsBack`. Like Groovy's subListBorders, a negative end counts from
- * the end first; the range runs backwards where `from` then comes after `to`, and leaves out its `to` end when
- * exclusive.
+ * the end first, after a fraction is dropped toward zero; the range runs backwards where `from` then comes after `to`,
+ * and leaves out its `to` end when exclusive.
  */
 const positions = (): IrStatement[] => [
-  letS("first", v("from")),
+  letS("first", { kind: "call", name: "toInteger", positional: [v("from")], named: {} }),
   ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
-  letS("last", v("to")),
+  letS("last", { kind: "call", name: "toInteger", positional: [v("to")], named: {} }),
   ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
   letS("runsBack", bin(">", v("first"), v("last"))),
   letS("low", v("first")),
@@ -1337,6 +1337,10 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["value", "from", "to", "values", "exclusive"],
         [
           ...positions(),
+          // A part that reaches past the end replaces the elements up to the end.
+          ifS(bin(">", v("high"), prop(v("value"), "length")), [
+            set(v("high"), prop(v("value"), "length")),
+          ]),
           letS("items", {
             kind: "methodCall",
             target: v("value"),

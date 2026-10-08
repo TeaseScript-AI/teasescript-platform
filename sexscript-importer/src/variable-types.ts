@@ -942,7 +942,7 @@ function analyse(
       if (child.kind === "index" && child.dict !== true && child.index.kind !== "range") {
         const target = nonNull(typeOf(child.target, scope));
         if (target.kind === "scalar" && target.name === "string") {
-          textIndexes.set(child, isNumber(typeOf(child.index, scope)));
+          textIndexes.add(child);
           analysis.indexes.add(child);
         } else textIndexes.delete(child);
       }
@@ -2219,8 +2219,11 @@ const TRUTH_HELPER = "sexscriptLegacyTruth";
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
-/** Indexes of a value typing proves text, by whether their position may hold a fraction. */
-const textIndexes = new WeakMap<IrExpression, boolean>();
+/**
+ * Indexes of a value typing proves text. A position that may hold a fraction stays as it is: Groovy found no `getAt`
+ * of a text for it and failed, as the converted read does.
+ */
+const textIndexes = new WeakSet<IrExpression>();
 
 /** Groovy truth of a variable of a scalar type: not null, and not 0, "", or false. */
 function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
@@ -2285,9 +2288,8 @@ function withIntegerIndexes<T extends IrStatement>(
     const truthType = plainTruths.get(value);
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);
-    const textIndex = textIndexes.get(value);
-    if (copy.kind === "index" && textIndex !== undefined)
-      return helperCall("textAt", [copy.target, textIndex ? truncated(copy.index) : copy.index]);
+    if (copy.kind === "index" && textIndexes.has(value))
+      return helperCall("textAt", [copy.target, copy.index]);
     if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
     if (copy.kind === "range") {
       const name = copy.count === true ? "toInteger" : copy.inclusive ? "floor" : "ceil";

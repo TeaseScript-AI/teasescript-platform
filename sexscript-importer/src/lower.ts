@@ -5550,7 +5550,18 @@ function lowerAssignment(
   ) {
     context.syntheticHelpers.add("spliced");
     const range = target.index;
+    // Groovy computed the values before the range, so values with an effect come first where the range computes.
+    const rangeNode = targetNode.kind === "binary" ? asNode(targetNode.right) : null;
+    const settled = (end: unknown): boolean => {
+      const node = asNode(end);
+      return node === null || isRepeatableExpression(node) || negativeConstantIndex(node) !== null;
+    };
+    const first =
+      !isPure(right, context) && !(settled(rangeNode?.from) && settled(rangeNode?.to))
+        ? freshName("values", context)
+        : null;
     return [
+      ...(first === null ? [] : [{ kind: "let" as const, name: first, value, span }]),
       {
         kind: "assign",
         target: target.target,
@@ -5559,7 +5570,7 @@ function lowerAssignment(
           target.target,
           range.from,
           range.to,
-          value,
+          first === null ? value : { kind: "variable", name: first },
           ...exclusive(range),
         ]),
         span,

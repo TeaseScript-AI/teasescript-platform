@@ -25,11 +25,11 @@ function sexscriptLegacyTextAt(text, position) {
   return text.substring(at, at + 1)
 }
 function sexscriptLegacySlice(value, from, to, exclusive = false) {
-  let first = from
+  let first = toInteger(from)
   if first < 0 {
     first += value.length
   }
-  let last = to
+  let last = toInteger(to)
   if last < 0 {
     last += value.length
   }
@@ -73,11 +73,11 @@ function sexscriptLegacySlice(value, from, to, exclusive = false) {
   return sexscriptLegacyValue(part)
 }
 function sexscriptLegacySpliced(value, from, to, values, exclusive = false) {
-  let first = from
+  let first = toInteger(from)
   if first < 0 {
     first += value.length
   }
-  let last = to
+  let last = toInteger(to)
   if last < 0 {
     last += value.length
   }
@@ -93,6 +93,9 @@ function sexscriptLegacySpliced(value, from, to, values, exclusive = false) {
       low = last + 1
     }
     high = first + 1
+  }
+  if high > value.length {
+    high = value.length
   }
   let items = value.take(low)
   if values is list {

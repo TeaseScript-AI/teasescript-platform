@@ -234,11 +234,12 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
   if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
   if (operator === "[") {
-    // A text read by a position or a range is text.
+    // A text read by a position or a range is text, as the lowering reads a text that may be null.
     const target = inferType(asNode(node.left), environment);
-    if (onlyOf(target, STRING) && target !== 0) return STRING;
+    if (onlyOf(target, STRING | NULL) && (target & STRING) !== 0) return STRING;
     // A list read by a range is the list of those elements.
-    if (asNode(node.right)?.kind === "range") return LIST;
+    if (asNode(node.right)?.kind === "range")
+      return onlyOf(target, LIST | NULL) && (target & LIST) !== 0 ? LIST : UNKNOWN;
     if (environment.elementsPending === true) return 0;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
