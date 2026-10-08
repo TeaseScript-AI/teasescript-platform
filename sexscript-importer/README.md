@@ -498,6 +498,23 @@ corpus.
 
 The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.
 
+To compare a change to the explorer with the explorer before it (a gate), explore the same units with the same work
+budget and seeds with both, and compare the reports:
+
+```sh
+node tools/explore-compare.ts <base-out> <candidate-out> [--favourite <unit>]... [--no-lines] > gate.md
+```
+
+Each folder holds the reports of one run, or one subfolder per seed (`s1/`, `s2/`, ...). The first table has the
+coverage by seed, how the search stopped, states per second, and the gate: a unit fails when the candidate's mean is
+more than 1 pp below the base's lowest, when a seed the base exhausted is not exhausted at least as well, or when a crash
+or trap the base found is missing. A net change can hide a loss elsewhere, so the second table counts the lines and
+condition ways each side visited and the other did not, per seed, and the lines consistently lost or gained (visited by
+one side in at least two thirds of the seeds and by the other in none), with their files and ranges and the search
+figures that help explain them (states, sessions, time steps, quit visits, traps, open states, the top hotspot). A
+`--favourite` unit with consistently lost lines is marked `EXPLAIN`. Lines are counted from compiling each unit, as the
+explorer counts them.
+
 ## Tests
 
 ```sh
