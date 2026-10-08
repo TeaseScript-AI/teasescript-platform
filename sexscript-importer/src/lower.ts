@@ -9775,8 +9775,8 @@ function isSingleValueType(type: number): boolean {
 
 /**
  * A dict key (#536): text. A number key becomes text, with a note where the dict also has text keys, since Groovy
- * kept 1 and "1" apart; on a dict with number keys, a key of unknown type becomes text too. A key that may be null is
- * reported.
+ * kept 1 and "1" apart; on a dict with number keys, a key of unknown type becomes text too. A key that may be null
+ * becomes text as well: null is "null", a key no dict of the script holds, so a null key finds nothing, as in Groovy.
  */
 function dictKey(
   keyNode: AstNode,
@@ -9794,18 +9794,10 @@ function dictKey(
     return { kind: "literal", value: String(literal) };
   }
   const keyType = inferType(keyNode, context.types);
-  if ((keyType & NULL) !== 0 && keyType !== UNKNOWN) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_DICT_KEY",
-      "This map key may be null; dict keys are text (#536).",
-    );
-  }
   const key = lowerExpression(keyNode, context);
   if (key === null) return null;
   if (onlyOf(keyType, STRING) || (keyType === UNKNOWN && !numberKeys)) return key;
-  noteDictKeyText(node, context);
+  if (!onlyOf(keyType, STRING | NULL)) noteDictKeyText(node, context);
   return templateOrLiteral([{ value: key }]);
 }
 

@@ -221,7 +221,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   test found, a key written earlier in the same block, or the key of a loop over `keySet()`. Groovy kept a key's type,
   so `1` and `"1"` were different keys, while dict keys are text: number keys become text with a note
   (`SX_DICT_KEY_TEXT`), at every number key of a dict that text keys reach too, and a key of unknown type becomes text
-  in a dict that number keys reach. A repeated literal key kept its first position and its last value, which the dict
+  in a dict that number keys reach. A key that may be null becomes text as well: null is `"null"`, a key no dict of the
+  corpus holds, so a null key finds nothing, as a Groovy map held nothing under null (ToyExpanded `toys[stateToy]`,
+  where a stored toy name may be missing). A repeated literal key kept its first position and its last value, which the dict
   literal merges with a note (`SX_DICT_DUPLICATE_KEY`). A map whose values have different types (also through property
   writes or lists with different element types), a runtime key on a map not held in a variable, and a dict compared with
   a map that may be an object are reported (`SX_DICT_VALUE_TYPE`, `SX_DYNAMIC_MAP_ACCESS`, `SX_DICT_EQUALITY`); a map
