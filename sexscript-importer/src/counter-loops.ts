@@ -12,51 +12,89 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * outside its loops names it, so a later loop of the same counter goes through a range too.
  */
 export function withCounterLoops(statements: IrStatement[]): IrStatement[] {
-  // How often the file names each variable; a counter that it names only in the counter loops goes through ranges.
-  const outside = nameUses(statements);
-  const candidates: Array<{ counter: string; names: number }> = [];
-  const find = (items: readonly IrStatement[], locals: ReadonlySet<string>): void => {
+  // Each function is a region of names of its own, the file's top level another; a counter that a function declares is
+  // that function's, any other the file's, which its top level and the functions that do not declare it share.
+  interface Region {
+    uses: Map<string, number>;
+    inLoops: Map<string, number>;
+    declares: ReadonlySet<string>;
+  }
+  const top: Region = { uses: nameUses(statements), inLoops: new Map(), declares: new Set() };
+  const regions = new Map<IrStatement, Region>();
+  const find = (
+    items: readonly IrStatement[],
+    region: Region,
+    locals: ReadonlySet<string>,
+  ): void => {
     items.forEach((item, index) => {
       const loop = counterLoop(items, index, statements, locals);
       if (loop !== null) {
         const names = nameUses([items[index - 1]!, item]).get(loop.counter) ?? 0;
-        candidates.push({ counter: loop.counter, names });
+        region.inLoops.set(loop.counter, (region.inLoops.get(loop.counter) ?? 0) + names);
+      }
+      if (item.kind === "function") {
+        const own = functionLocals(item);
+        const inner: Region = { uses: nameUses(item.body), inLoops: new Map(), declares: own };
+        regions.set(item, inner);
+        find(item.body, inner, own);
+        return;
       }
       withNestedBlocks(item, (body) => {
-        find(body, item.kind === "function" ? functionLocals(item) : locals);
+        find(body, region, locals);
         return body;
       });
     });
   };
-  find(statements, new Set());
-  const inLoops = new Map<string, number>();
-  for (const { counter, names } of candidates)
-    inLoops.set(counter, (inLoops.get(counter) ?? 0) + names);
-  const own = (counter: string): boolean => inLoops.get(counter) === outside.get(counter);
-  const rewrite = (items: IrStatement[], locals: ReadonlySet<string>): IrStatement[] => {
+  find(statements, top, new Set());
+  // The file's names: its top level's, and those of the functions that do not declare them.
+  const shared = (name: string): boolean => {
+    let uses = top.uses.get(name) ?? 0;
+    let inLoops = top.inLoops.get(name) ?? 0;
+    for (const region of regions.values()) {
+      if (region.declares.has(name)) {
+        // A function's own names are apart from the file's; the top level's count included them.
+        uses -= region.uses.get(name) ?? 0;
+        continue;
+      }
+      inLoops += region.inLoops.get(name) ?? 0;
+    }
+    return uses === inLoops;
+  };
+  const own = (counter: string, region: Region): boolean =>
+    region !== top && region.declares.has(counter)
+      ? (region.uses.get(counter) ?? 0) === (region.inLoops.get(counter) ?? 0)
+      : shared(counter);
+  const rewrite = (
+    items: IrStatement[],
+    region: Region,
+    locals: ReadonlySet<string>,
+  ): IrStatement[] => {
     const result: IrStatement[] = [];
     items.forEach((item, index) => {
       const loop = counterLoop(items, index, statements, locals);
-      if (loop !== null && own(loop.counter)) {
+      if (loop !== null && own(loop.counter, region)) {
         result.pop();
         result.push({
           kind: "for",
           variable: loop.counter,
           collection: { kind: "range", from: loop.from, to: loop.to, inclusive: loop.inclusive },
-          body: rewrite(loop.body, locals),
+          body: rewrite(loop.body, region, locals),
           span: item.span,
         });
         return;
       }
-      result.push(
-        withNestedBlocks(item, (body) =>
-          rewrite(body, item.kind === "function" ? functionLocals(item) : locals),
-        ),
-      );
+      if (item.kind === "function") {
+        result.push({
+          ...item,
+          body: rewrite(item.body, regions.get(item)!, functionLocals(item)),
+        });
+        return;
+      }
+      result.push(withNestedBlocks(item, (body) => rewrite(body, region, locals)));
     });
     return result;
   };
-  return rewrite(statements, new Set());
+  return rewrite(statements, top, new Set());
 }
 
 /** How often the statements name each variable: reading or setting it, declaring it, or going through values into it. */

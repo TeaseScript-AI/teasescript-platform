@@ -134,18 +134,15 @@ say "Odds ${odds}"
 // Positions computed from values of unknown type, and a literal position past a literal list, grow the list.
 function joinDecks(first, second, offset) {
   let joined = []
-  let i = 0
-  while i < 2 {
+  for i in 0..2 {
     // NOTE SX_LIST_GROWTH line 41: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
     if i < joined.length {
       joined[i] = first[i]
     } else {
       joined.add(first[i])
     }
-    i += 1
   }
-  i = 0
-  while i < 2 {
+  for i in 0..2 {
     // NOTE SX_PLUS_OPERAND_TYPE line 42: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
     // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
     if i + offset < joined.length {
@@ -153,7 +150,6 @@ function joinDecks(first, second, offset) {
     } else {
       joined.add(second[i])
     }
-    i += 1
   }
   return joined
 }
