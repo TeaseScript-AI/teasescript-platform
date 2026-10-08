@@ -705,6 +705,25 @@ test(
       const bound = timeContext({ globals: [{ name: "hour", value: 14 }] });
       assert.equal(holdsAt(comparison!, model, bound, EPOCH_MS), undefined, update);
     }
+    // A condition that also compares how long the player took, inline, with a value from the clock is not only timed by
+    // the player: it keeps forward time.
+    {
+      const source =
+        "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
+        'showButton "Check"\nlet bound = limit()\nif (getTimestamp().toSeconds() - start) <= bound and ' +
+        '(getTimestamp().toSeconds() - start) >= 0 {\n  say "Hit."\n}\nexit\n';
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const condition = instructions.findLastIndex(
+        (instruction) => instruction.kind === "jumpIfFalse",
+      );
+      const differences = clockDifferences(new DataFlow(plan, instructions), instructions);
+      assert.ok(differences.length > 0);
+      assert.ok(differences.every((difference) => !difference.conditions.includes(condition)));
+    }
     // Updates from itself compose with the clock read before them: one that adds 1 at 17:00 compares 18, also after
     // forty doublings, each computed once; a literal between them ends that.
     const doubled = Array.from({ length: 40 }, () => "h = h + h\n").join("");
@@ -926,7 +945,7 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const conditionOf = (text: string) => {
-      const source = `let a = 0\nlet b = 0\nlet c = 0\nlet half = 0\nlet name = ""\nif ${text} {\n  say "Hit."\n}\nexit\n`;
+      const source = `let a = 0\nlet b = 0\nlet c = 0\nlet half = 0\nlet name = ""\nlet flag = 0\nif ${text} {\n  say "Hit."\n}\nexit\n`;
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       const instructions = Array.isArray(plan.instructions)
@@ -934,7 +953,7 @@ test(
         : [];
       return instructions.find((instruction) => instruction.kind === "jumpIfFalse")!.condition;
     };
-    const values = new Map<string, number | string>([
+    const values = new Map<string, number | string | boolean>([
       ["a", 3],
       ["b", 10],
       ["half", 0.5],
@@ -959,9 +978,16 @@ test(
     // An atom counts as it holds: a fraction above 0, a text that contains another.
     assert.deepEqual(measure('half > 0 and name.contains("foo")'), { unsatisfied: 0, sum: 0 });
     assert.deepEqual(measure('name.contains("foo")', false), { unsatisfied: 1, sum: 1 });
-    // Fewer atoms unsatisfied come first, however far the one left is.
+    // A number is not a boolean, as the runtime compares.
+    values.set("flag", 1);
+    assert.deepEqual(measure("flag == true"), { unsatisfied: 1, sum: 1 });
+    // Fewer atoms unsatisfied come first, however far the one left is; a step of one still counts far away.
     assert.ok(
       branchDistance({ unsatisfied: 1, sum: 2e9 }) < branchDistance({ unsatisfied: 2, sum: 1 }),
+    );
+    assert.ok(
+      branchDistance({ unsatisfied: 1, sum: 1e12 - 1 }) <
+        branchDistance({ unsatisfied: 1, sum: 1e12 }),
     );
   },
 );
@@ -1024,5 +1050,27 @@ test(
     const steered = run(true);
     assert.equal(steered.search.stoppedBy, "exhausted");
     assert.equal(steered.coverage.visitedLines, plain.coverage.visitedLines);
+    // A way that needs both counters is steered to by their summed distance.
+    const both =
+      'let a = 0\nlet b = 0\nwhile true {\n  let pick = choose up: "A", down: "B", stop: "Stop"\n' +
+      '  if pick == "up" {\n    a += 1\n  } else if pick == "down" {\n    b += 1\n  } else {\n    exit\n  }\n' +
+      '  if a >= 3 and b >= 2 {\n    say "Both."\n    exit\n  }\n}\n';
+    const { plan: bothPlan } = engine.compileProject([{ path: "main.tease", source: both }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(bothPlan));
+    const counted = explore(engine, bothPlan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 5000,
+      sources: new Map(),
+      diagnostics: [],
+      conjunctive: true,
+      guidance: true,
+    });
+    assert.ok(counted.endStates.completed > 0);
+    assert.ok(
+      !counted.coverage.files[0]!.unvisited.some((range) => range.lines.split("-").includes("13")),
+    );
   },
 );

@@ -69,6 +69,8 @@ export function successors(
     if (instruction.kind === "setFallback")
       fallbacks.push(...destinationTargets(instruction.destination, plan));
   });
+  // Every `end` goes to the same places: one list for all of them.
+  const endTargets = numbers([...fileReturns, ...fallbacks]);
   return instructions.map((instruction, index) => {
     const constant = dead.get(index);
     switch (instruction.kind) {
@@ -90,7 +92,7 @@ export function successors(
       case "returnVoid":
         return returnPoints.get(functionOf.get(index) ?? 0) ?? [];
       case "end":
-        return numbers([...fileReturns, ...fallbacks]);
+        return endTargets;
       case "transfer":
         return numbers([
           ...destinationTargets(instruction.destination, plan),
@@ -1348,7 +1350,8 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
           [value.right, value.left],
         ] as const) {
           if (!flow.flowOf(other).clock) compared(subject, undefined);
-          else if ([...namesIn(subject)].some((name) => held.has(name))) unmeasured.add(index);
+          // Both sides from the clock: not only how long the player took.
+          else if (flow.flowOf(subject).clock) unmeasured.add(index);
         }
       }
     };
@@ -1477,16 +1480,17 @@ export function conditionDistance(
   const actual = read(atom.subject);
   if (actual === undefined) return none;
   const holds = atom.wanted ? atom.operator : negate(atom.operator);
+  // Whether it holds, as the runtime compares (`1` is not `true`), then how far it is when it does not: at least
+  // something, and at most FAR_AWAY, also past what a number can tell.
+  const satisfied = compares(actual, holds, atom.constant);
+  if (satisfied === undefined || satisfied) return none;
   const numeric = typeof actual === "boolean" ? Number(actual) : actual;
   const constant = typeof atom.constant === "boolean" ? Number(atom.constant) : atom.constant;
-  // Whether it holds, then how far it is when it does not: at least something, also past what a number can tell.
-  const satisfied = compares(numeric, holds, constant);
-  if (satisfied === undefined || satisfied) return none;
   const away =
     typeof numeric === "number" && typeof constant === "number"
       ? distance(numeric, holds, constant)
       : 1;
-  return { unsatisfied: 1, sum: Number.isFinite(away) && away > 0 ? Math.min(away, FAR_AWAY) : 1 };
+  return { unsatisfied: 1, sum: Number.isNaN(away) || away <= 0 ? 1 : Math.min(away, FAR_AWAY) };
 }
 
 /** The distance an atom that does not hold counts at most, so that sums stay exact enough to compare. */
@@ -1532,11 +1536,11 @@ function textTest(method: string, text: string, argument: string): boolean {
 }
 
 /**
- * A branch distance as one number that orders as the pair does: fewer atoms unsatisfied first, then a smaller sum
- * (which only adds a fraction below one).
+ * A branch distance as one number that orders as the pair does: fewer atoms unsatisfied first, then a smaller sum, up
+ * to {@link FAR_AWAY}, below the weight of one atom more, and exact to well under one for the atoms a condition has.
  */
 export function branchDistance(found: ConditionDistance): number {
-  return found.unsatisfied + found.sum / (1 + found.sum);
+  return found.unsatisfied * 2 * FAR_AWAY + Math.min(found.sum, FAR_AWAY);
 }
 
 /** How far a variable's value is from making `value operator constant` true: 0 when it holds. */
