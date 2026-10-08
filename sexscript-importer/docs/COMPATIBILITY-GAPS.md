@@ -764,6 +764,16 @@ Found while evaluating the proposals, besides the importer work listed above; no
 - **Menus over a union variable:** the option list of a menu is proven from Groovy types at conversion time, which
   cannot see that `dialog` holds a list right after `dialog = ["Back"] + mistressArray`; `main` would narrow it there.
 - **Safe navigation:** `x?.size()` converts like `x.size()`, which fails where Groovy gave null (0 corpus sites).
+- **Null tests around a kept-null text (R1):** a text read whose value goes on keeps legacy null, so the variables it
+  is copied into and the parameters it is passed to are declared `T?`, except under a null test of it, as the compiler
+  narrows there. The importer drops that test's fact around script calls in a condition, a loop, or a statement with
+  two calls, where the call may set the variable, so a parameter that is only passed the tested value there is
+  declared `T?` anyway and its non-null uses fail compilation (`TSV043`). Compile-only, 0 corpus sites (r42):
+  `if (own != null) { for (int i = 0; i < 2; i++) measure(own) }` and `if (own != null) show(f(own) + g(own))`, with
+  `own = loadString(k)` and `def measure = { value = "x" -> value.length() }`.
+- **Kept-null texts used as non-null:** a kept-null read used where legacy would have failed on null, such as
+  spinthebottle's returned `snapfile` read with `snapfile.toLowerCase()`, fails compilation (`TSV043`) where C gave
+  the empty text; spinthebottle did not compile before either.
 - **Concatenation that starts with possibly null text:** `dialog + count + ...` with `dialog: string?` keeps a numeric
   `+` for its first pair, which the type pass rejects (1 `Punish` site).
 - **Groovy type inference is per file and flow-insensitive:** a closure's parameters and `def` locals have types of
