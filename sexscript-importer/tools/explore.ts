@@ -14,10 +14,10 @@
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
  * given.
  *
- * Cell ranking is on by default (`--no-cells` switches it off). `--later` makes time go forward as play,
- * `--compared-answers` answers typed asks with what the code compares the answer with, `--realign` lets replays go on
- * past inputs that no longer fit, and `--progress-leads` lets progress toward a compared constant keep its lead (see
- * `src/explorer-search.ts`); `--no-…` switches each off.
+ * Cell ranking and forward time, which makes time go forward as play, are on by default (`--no-cells` and `--no-later`
+ * switch them off). `--compared-answers` answers typed asks with what the code compares the answer with, `--realign`
+ * lets replays go on past inputs that no longer fit, and `--progress-leads` lets progress toward a compared constant
+ * keep its lead (see `src/explorer-search.ts`); `--no-…` switches each off.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -93,7 +93,7 @@ async function main(args: string[]): Promise<void> {
       // `--no-summary`, as `allowNegative` reads it.
       summary: { type: "boolean", default: true },
       cells: { type: "boolean", default: true },
-      later: { type: "boolean", default: false },
+      later: { type: "boolean", default: true },
       "compared-answers": { type: "boolean", default: false },
       realign: { type: "boolean", default: false },
       "progress-leads": { type: "boolean", default: false },

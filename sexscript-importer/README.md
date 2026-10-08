@@ -310,9 +310,9 @@ that ask wherever the search meets it. For a stored value, sessions are chained:
 that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
 storage closest to it and plays again the path that led there, to raise the value once more, for as long as each
 session gets closer (100 sessions at most). When no explored session gets there, the way stays `unknown` with the
-reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock the player continues at
-other wall clock times (times of day, weekdays, later dates) before that step, as a real player's time varies; a step
-after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
+reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock, without forward time
+(below), the player continues at other wall clock times (times of day, weekdays, later dates) before that step, as a
+real player's time varies; a step after that is a clock step. An answer attempt's states share the first place for 20 expansions in all, until the
 condition takes the missed way (a session chain goes on from the storage it reached instead), and play states that bring a variable the code counts or sets closer to the comparison
 share it for 40 (with `--progress-leads`, an expansion in that first place that brings a state closer again does not
 count, so a loop that needs many rounds is followed to the constant, while one that gets no closer uses its 40 up);
@@ -320,8 +320,9 @@ clock states take only their attempt's own steps and otherwise come after all pl
 work (attempts, next sessions, and expansions in the first place) takes at most a third of all runtime operations
 (fresh sessions, runs, inputs, and automatic answers), a deterministic measure of what steps cost.
 
-With `--later`, time only goes forward and is play, as for a player who comes back later. The explorer reads each
-comparison in a condition that reads the clock (`hour >= 18`, `getTimestamp().toSeconds() - lastVisit > day`), also
+With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
+who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
+`getTimestamp().toSeconds() - lastVisit > day`), also
 through variables computed from the clock in one way and helpers that return one part of the date or time (exactly
 when they only return it; a helper that adjusts it is an approximation), and evaluates it in a state at a later wall
 clock, with the state's variables and stored values. A state that waits where such a condition was read next gets
