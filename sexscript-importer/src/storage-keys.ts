@@ -794,10 +794,17 @@ function withEmptyText(
     const block = (
       items: readonly IrStatement[],
       scope: Scope,
-      nonNull: ReadonlySet<string> = new Set(),
+      tested: ReadonlySet<string> = new Set(),
     ): void => {
+      // The variables a null test rules out null for here, until the script sets them again.
+      const nonNull = new Set(tested);
+      const forget = (statement: IrStatement): void => {
+        for (const name of setNames(statement)) nonNull.delete(scope.resolve(name));
+      };
       for (const item of items) {
-        nonNullHere = nonNull;
+        // A loop's body may run again after it sets a variable.
+        if (item.kind === "while" || item.kind === "repeat" || item.kind === "for") forget(item);
+        nonNullHere = new Set(nonNull);
         if (item.kind === "function") {
           functions[index]!.set(item.name, item);
           const inner = scope.inner(item);
@@ -845,15 +852,15 @@ function withEmptyText(
           if (item.value !== null) visit(item.value, scope, true);
         } else mapOwnValues(item, (value) => visit(value, scope, false));
         if (item.kind === "if") {
-          const tested = nullTested(item.condition, scope);
-          block(item.then, scope.inner(item), new Set([...nonNull, ...tested.then]));
-          block(item.else, scope.inner(item), new Set([...nonNull, ...tested.else]));
-          continue;
-        }
-        withNestedBlocks(item, (body) => {
-          block(body, scope.inner(item), nonNull);
-          return body;
-        });
+          const facts = nullTested(item.condition, scope);
+          block(item.then, scope.inner(item), new Set([...nonNull, ...facts.then]));
+          block(item.else, scope.inner(item), new Set([...nonNull, ...facts.else]));
+        } else
+          withNestedBlocks(item, (body) => {
+            block(body, scope.inner(item), nonNull);
+            return body;
+          });
+        forget(item);
       }
     };
     block(program.statements, Scope.file());
@@ -1174,6 +1181,21 @@ function routedRead(value: IrExpression): Extract<IrExpression, { kind: "load" }
   return inner?.kind === "load" && inner.read === "string" && literalKey(inner.key) !== null
     ? inner
     : null;
+}
+
+/** The names of the variables that a statement, or a statement in it, sets with `=` or declares. */
+function setNames(statement: IrStatement): Set<string> {
+  const names = new Set<string>();
+  const visit = (item: IrStatement): void => {
+    if (item.kind === "let") names.add(item.name);
+    if (item.kind === "assign" && item.target.kind === "variable") names.add(item.target.name);
+    withNestedBlocks(item, (body) => {
+      body.forEach(visit);
+      return body;
+    });
+  };
+  visit(statement);
+  return names;
 }
 
 /** The variables that a condition rules out null for where it holds, and where it does not: `x != null and ...`. */

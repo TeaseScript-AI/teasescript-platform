@@ -145,11 +145,17 @@ def scoreText = loadString("game.scoreText")
 def scoreCopy = scoreText
 show("Score " + (scoreCopy == null))
 def saveScore = { save("game.scoreText", 10) }
-// A parameter that a call passes such a text to only under a null test holds no null, and a template the script wrote
-// around a read keeps its text, also where it is copied.
+// A parameter that a call passes such a text to only under a null test holds no null, unless the script set the text
+// again before the call, and a template the script wrote around a read keeps its text, also where it is copied.
 def measure = { measured = "fallback" -> show("Size " + measured.length()) }
 def measuredText = loadString("game.measured")
 if (measuredText != null) measure(measuredText)
+def recheck = { checked = "fallback" -> show("Checked " + (checked == null)) }
+def checkedText = loadString("game.checked")
+if (checkedText != null) {
+    checkedText = null
+    recheck(checkedText)
+}
 def written = "${load('game.written')}"
 def writtenCopy = written
 show("Written " + writtenCopy)
