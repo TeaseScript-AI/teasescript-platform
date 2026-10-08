@@ -230,8 +230,8 @@ function validTimerRecord(
 }
 
 /**
- * Every issued timer ID has exactly one active or settled record, handles refer only to issued IDs, and queued
- * expiry blocks refer to their timer's own block in scene-time order.
+ * Each issued timer ID has at most one active or settled record, every handle and every queued or running expiry block
+ * has the record of its timer, and queued expiry blocks refer to their timer's own block in scene-time order.
  */
 export function validateTimerState(
   value: Record<string, unknown>,
@@ -290,8 +290,9 @@ export function validateTimerState(
       }
     }
   }
-  if (records.size !== nextTimerId - 1 || [...records.keys()].some((id) => id >= nextTimerId)) {
-    errors.push("Runtime timers do not match the issued timer IDs.");
+  // Settled timers that nothing reaches anymore are dropped, so issued IDs may have no record.
+  if ([...records.keys()].some((id) => id >= nextTimerId)) {
+    errors.push("Runtime timer IDs must be issued IDs below nextTimerId.");
   }
   // A timer names the activation that started it: an issued scope that, while it still exists, is a root.
   const scopeFiles = new Map(
@@ -312,7 +313,7 @@ export function validateTimerState(
     }
   }
   for (const id of handleIds) {
-    if (!records.has(id)) errors.push("Runtime timer handle refers to an unissued timer.");
+    if (!records.has(id)) errors.push("Runtime timer handle refers to a timer without a record.");
   }
   const queue = value.pendingTimerHandlers;
   if (!isCanonicalJsonArray(queue)) {

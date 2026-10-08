@@ -5,7 +5,7 @@ import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 /**
  * Asynchronous timer state. The enclosing background action owns an ADR 0016 action ID for ordering and events; the
  * timer ID is the separate identity behind opaque handles. No Player completion targets a timer, and its settlements
- * do not replace `lastSettlement`. Settled records remain so handles stay readable.
+ * do not replace `lastSettlement`. A settled record stays while a handle or one of its blocks still reaches it.
  */
 export type RuntimeTimerState = "running" | "paused" | "finished" | "stopped";
 
