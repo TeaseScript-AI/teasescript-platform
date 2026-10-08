@@ -16,7 +16,11 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { nextXorShift32 } from "../src/runtime/random.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import {
+  createFreshRuntimeSnapshot,
+  validateRuntimeSnapshot,
+  type RuntimeSnapshot,
+} from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "./helpers/player-state.js";
@@ -761,7 +765,8 @@ test("malformed restored timer, handle, queue, and interrupt data is rejected", 
   const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
   const frame = ["snapshot", "callFrames", 0];
   const cases: ReadonlyArray<readonly [JsonPath, Json]> = [
-    [["snapshot", "nextTimerId"], 5],
+    // Settled timers that nothing reaches are dropped, so a record must only have an issued ID.
+    [["snapshot", "nextTimerId"], 1],
     [["snapshot", "settledTimers", 0, "state"], "running"],
     [["snapshot", "settledTimers", 0, "elapsedMs"], -1],
     [["snapshot", "frames", 0, "bindings", 0, "value"], { kind: "timerHandle", timerId: 9 }],
@@ -1467,4 +1472,93 @@ test("restore rejects a non-string display, and a failed session keeps its pacin
   assert.deepEqual(observed.events, []);
   assert.equal(observed.snapshot.observedSessionTimeMs, 5);
   assert.equal(observed.snapshot.currentSessionTimeMs, failed.snapshot.currentSessionTimeMs);
+});
+
+test("settled timers stay readable through every handle and expiry block that still reaches them", () => {
+  const source = [
+    "let kept = []",
+    "let table = dict{}",
+    "function scene {",
+    "  let local = timer async 1",
+    "  timer async 3 {",
+    '    say "timer ${local.state}"',
+    "  }",
+    "  local.stop()",
+    "}",
+    "function short {",
+    "  timer async 1 {",
+    "    wait 1",
+    '    say "late block"',
+    "  }",
+    "}",
+    "scene()",
+    "short()",
+    "kept.add(timer async 5)",
+    "kept[0].stop()",
+    'table["keyed"] = timer async 5',
+    'table["keyed"].stop()',
+    "wait 4",
+    'say "${kept[0].state} ${table["keyed"].state} ${kept[0].elapsed}"',
+    "exit",
+  ].join("\n");
+  const { boundaries, events } = assertRuntimeResumeEquivalent(source);
+  const said = events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  assert.deepEqual(said, ["late block", "timer stopped", "stopped stopped 0 s"]);
+  // The list and the dict keep theirs; the rest went once their scope or block no longer needed them.
+  assert.deepEqual(
+    boundaries.at(-1)?.settledTimers.map((timer) => timer.timerId),
+    [4, 5],
+  );
+});
+
+test("a long start and stop loop keeps settledTimers and the snapshot bounded", () => {
+  const session = new Session(
+    [
+      "let count = 0",
+      "while count < 200 {",
+      "  let lap = timer async 5",
+      "  lap.stop()",
+      "  count += 1",
+      "  wait 1",
+      "}",
+      'say "stopped ${count}"',
+      "exit",
+    ].join("\n"),
+  );
+  const sizes: number[] = [];
+  for (let second = 1; second <= 200; second += 1) {
+    // Only this round's timer, which `lap` still holds during its wait, is kept.
+    assert.equal(session.snapshot.settledTimers.length, 1, `after second ${second - 1}`);
+    sizes.push(JSON.stringify(session.snapshot).length);
+    session.at(second * 1_000);
+  }
+  assert.deepEqual(session.said(), ["stopped 200"]);
+  // Without collection each stopped round would add its record; the state grows by less than one record.
+  const record = JSON.stringify(
+    new Session("let lap = timer async 5\nlap.stop()\nwait 1\nexit").snapshot.settledTimers.at(0),
+  ).length;
+  assert.ok(sizes.at(-1)! - sizes[10]! < record);
+});
+
+test("restore requires a record for every timer handle, and the next operation drops the others", () => {
+  const session = new Session(
+    "let t: timer | integer = timer async 5\nt.stop()\nwait 1\nt = 0\nwait 1\nexit",
+  );
+  // The handle in `t` keeps the stopped timer's record.
+  assert.equal(session.snapshot.settledTimers.length, 1);
+  const record = JSON.stringify(session.snapshot.settledTimers[0]);
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape.
+  const unrecorded = JSON.parse(JSON.stringify(session.snapshot)) as RuntimeSnapshot;
+  unrecorded.settledTimers.length = 0;
+  assert.equal(validateRuntimeSnapshot(unrecorded, session.plan).valid, false);
+  // Once `t = 0` ran, the operation drops the record. A state that still holds it, as an earlier revision kept every
+  // record, is valid, and its next operation drops it.
+  session.at(1_000);
+  assert.equal(session.snapshot.settledTimers.length, 0);
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape.
+  const kept = JSON.parse(JSON.stringify(session.snapshot)) as RuntimeSnapshot;
+  // EVIDENCE: fixture: the record the state held before its handle was overwritten.
+  kept.settledTimers.push(JSON.parse(record) as RuntimeSnapshot["settledTimers"][number]);
+  assert.equal(validateRuntimeSnapshot(kept, session.plan).valid, true);
+  assert.deepEqual(observeTime(session.plan, kept, 1_500).snapshot.settledTimers, []);
 });
