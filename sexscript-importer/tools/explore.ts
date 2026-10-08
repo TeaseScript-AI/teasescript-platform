@@ -15,10 +15,10 @@
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
  * given.
  *
- * Cell ranking, forward time (time goes forward as play), and progress leads (progress toward a compared constant keeps
- * its lead) are on by default (`--no-cells`, `--no-later`, `--no-progress-leads` switch them off). `--compared-answers`
- * answers typed asks with what the code compares the answer with, `--realign` lets replays go on past inputs that no
- * longer fit, `--conjunctive` steers toward a way that needs all parts of its condition by their summed distance, and
+ * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
+ * lead), and compared answers (typed asks are also answered with what the code compares the answer with) are on by
+ * default (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers` switch them off). `--realign`
+ * lets replays go on past inputs that no longer fit, `--conjunctive` steers toward a way that needs all parts of its condition by their summed distance, and
  * `--guidance` puts states nearer to code not reached yet first (see `src/explorer-search.ts`); `--no-…` switches each
  * off.
  *
@@ -97,7 +97,7 @@ async function main(args: string[]): Promise<void> {
       summary: { type: "boolean", default: true },
       cells: { type: "boolean", default: true },
       later: { type: "boolean", default: true },
-      "compared-answers": { type: "boolean", default: false },
+      "compared-answers": { type: "boolean", default: true },
       realign: { type: "boolean", default: false },
       "progress-leads": { type: "boolean", default: true },
       conjunctive: { type: "boolean", default: false },
