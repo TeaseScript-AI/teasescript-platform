@@ -1227,7 +1227,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const askNodes = new Map<number, number[]>();
   /** Each distinct storage a play state left, in the order found, and the ones of completed sessions. */
   const left: Left[] = [];
-  const leftKeys = new Set<string>();
+  const leftKeys = new Map<string, number>();
+  const completedKeys = new Set<string>();
   const completedLeft: number[] = [];
   let nextFromCompleted = 0;
   /** Storage that started a next session without a target. */
@@ -1441,14 +1442,31 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return node;
   };
 
-  /** Keeps the storage a play state left, once per distinct storage, for later sessions to start from. */
+  /**
+   * Keeps the storage a play state left, once per distinct storage, for later sessions to start from; a session that
+   * completes with a storage an earlier state already left (saved before its last prompt) still counts as completed.
+   */
   const remember = (snapshot: Data, node: Node): void => {
     const entries = storageOf(snapshot);
     const key = JSON.stringify(entries);
-    if (leftKeys.has(key)) return;
-    leftKeys.add(key);
-    left.push({ node: node.id, entries, sessions: starts[node.start]!.session });
-    if (node.status === "completed") completedLeft.push(left.length - 1);
+    const known = leftKeys.get(key);
+    if (known === undefined) {
+      leftKeys.set(key, left.length);
+      left.push({ node: node.id, entries, sessions: starts[node.start]!.session });
+      if (node.status === "completed") {
+        completedLeft.push(left.length - 1);
+        completedKeys.add(key);
+      }
+      return;
+    }
+    if (node.status !== "completed" || completedKeys.has(key)) return;
+    completedKeys.add(key);
+    left.push({
+      node: node.id,
+      entries: left[known]!.entries,
+      sessions: starts[node.start]!.session,
+    });
+    completedLeft.push(left.length - 1);
   };
 
   /**

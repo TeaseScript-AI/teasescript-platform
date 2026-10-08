@@ -728,12 +728,17 @@ test(
     // A return window learned in an earlier session, from a time away the session computes when it starts: a next
     // session starts inside it, after "too soon" and before "too late", which neither a minute nor a day later is; also
     // when a visit outside it leaves the storage as it was, so that the window is learned from the same storage.
-    for (const outside of ["", "    exit\n"]) {
+    // And from a session that saves before its last prompt, which completes with the storage a state before it left.
+    for (const [outside, bye] of [
+      ["", ""],
+      ["    exit\n", ""],
+      ["", 'showButton "Bye"\n'],
+    ]) {
       const source =
         'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
         `if last > 0 {\n  if away < 7200 {\n    say "Too soon."\n${outside}` +
         `  } else if away > 18000 {\n    say "Too late."\n${outside}  } else {\n    say "Welcome back."\n  }\n}\n` +
-        'save getTimestamp().toSeconds() as "last"\nexit\n';
+        `save getTimestamp().toSeconds() as "last"\n${bye}exit\n`;
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       const result = explore(engine, plan, {
@@ -750,7 +755,7 @@ test(
           const [from = 0, to = from] = range.lines.split("-").map(Number);
           return welcome >= from && welcome <= to;
         }),
-        outside,
+        `${outside}${bye}`,
       );
       assert.equal(result.coverage.reach.clock, 0);
     }
