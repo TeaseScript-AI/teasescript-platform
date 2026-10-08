@@ -3,6 +3,7 @@ import { ref, type ShallowRef } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
+import type { KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
@@ -58,6 +59,7 @@ const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{
   capturedMediaRepository?: CapturedMediaRepository | null;
+  keptSessions?: KeptSessionStore;
   /** The package `?package=<id>` selects; the preview plays it instead of a development scenario. */
   packageHost?: ScriptHost | null;
 }>();
@@ -76,7 +78,12 @@ const player = usePlayerSession(
         scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
         // As in the default build: an image the script saves a reference to stays in this browser for later runs.
         capturedMedia: { repository: props.capturedMediaRepository ?? null },
-        savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
+        savedData: browserSavedData(
+          browserStorage(),
+          props.capturedMediaRepository ?? null,
+          props.keptSessions,
+        ),
+        ...(props.keptSessions && { keptSessions: props.keptSessions }),
         debugPackage: { id: packageHost.storageScope, version: null },
       }
     : {
@@ -89,7 +96,11 @@ const player = usePlayerSession(
         ...(cameraScenario && {
           scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
           capturedMedia: { repository: props.capturedMediaRepository ?? null },
-          savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
+          savedData: browserSavedData(
+            browserStorage(),
+            props.capturedMediaRepository ?? null,
+            props.keptSessions,
+          ),
         }),
       },
 );
@@ -208,8 +219,12 @@ else
         </fieldset>
         <fieldset class="grid min-w-0 gap-2" data-notice-preview>
           <legend class="mb-2">Player notices</legend>
-          <Button class="min-w-0" variant="outline" @click="showSampleNotices">Show every notice level</Button>
-          <Button class="min-w-0" variant="outline" @click="clearSampleNotices">Clear notices</Button>
+          <Button class="min-w-0" variant="outline" @click="showSampleNotices"
+            >Show every notice level</Button
+          >
+          <Button class="min-w-0" variant="outline" @click="clearSampleNotices"
+            >Clear notices</Button
+          >
         </fieldset>
       </div>
     </template>

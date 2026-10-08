@@ -1,26 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { CircleAlert, RotateCcw } from "@lucide/vue";
+import { CircleAlert } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { RuntimeSessionView } from "../../../src/index.js";
 
-// How a session ended, as one short line above the composer (PLAYER-UI "Session end and failure"): after an error it
-// says so and offers Details, which opens the error dialog; after an ordinary end, once the end dialog is closed, it
-// offers Play again. The transcript and Stage stay.
+// A session an error stopped, as one short line above the composer (PLAYER-UI "Session end and failure"): it says so and
+// offers Details, which opens the error dialog. The transcript and Stage stay.
 const props = defineProps<{
   state: Pick<RuntimeSessionView, "failure" | "status"> | null;
   /** The error name of an exception of the Player itself. */
   hostError: string | null;
-  canPlayAgain: boolean;
-  /** While the end dialog is open, the end line waits until it closes, so the end is said once. */
-  endDialogOpen: boolean;
 }>();
-const emit = defineEmits<{ details: []; playAgain: [] }>();
+const emit = defineEmits<{ details: [] }>();
 
 const failure = computed(() => props.state?.failure ?? null);
-const ended = computed(
-  () => props.state?.status === "halted" && props.hostError === null && !props.endDialogOpen,
-);
 const line = ref<HTMLElement | null>(null);
 defineExpose({
   /** Focuses the line's control, where a dialog about the end returns focus; `false` without one. */
@@ -33,9 +26,8 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="failure || hostError || ended" ref="line" class="runtime-end" data-runtime-end>
+  <div v-if="failure || hostError" ref="line" class="runtime-end" data-runtime-end>
     <p
-      v-if="failure || hostError"
       class="flex items-center gap-2 rounded-md border bg-card py-1 ps-3 pe-1 text-sm text-destructive shadow-sm"
       data-runtime-failure
     >
@@ -50,25 +42,6 @@ defineExpose({
         @click="emit('details')"
       >
         Details
-      </Button>
-    </p>
-    <p
-      v-else
-      class="flex items-center gap-1 rounded-md border bg-card ps-3 text-sm text-muted-foreground shadow-sm"
-      :class="canPlayAgain ? 'pe-1' : 'py-2 pe-3'"
-      role="status"
-      data-runtime-ended
-    >
-      The end.
-      <Button
-        v-if="canPlayAgain"
-        variant="ghost"
-        class="min-h-11"
-        data-runtime-play-again
-        @click="emit('playAgain')"
-      >
-        <RotateCcw />
-        Play again
       </Button>
     </p>
   </div>

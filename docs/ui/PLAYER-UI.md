@@ -426,11 +426,24 @@ Debug off removes the buttons without re-creating the transcript's rows.
 
 ## Session start and user activation
 
-The Player does not run a script on page load. A script that does not compile cannot start: instead of Start, the
-Player lists its diagnostics, each with its file, line, and message. Before the first runtime entry of a new session, it
-shows an explicit Start control; after a page load that restores an existing session, it shows an explicit Continue control before
-execution resumes. The player's activation of that control is the user activation that later audible media playback
-relies on, so scripts may play audio from their first statement without a separate unlock step. Start and Continue
+The Player does not run a script on page load. It opens on the start page: the menu and the title bar, and in the
+middle the `title` and "by" `author` of the script's `main.tease` header, either alone when only it is given and
+neither without them, above an explicit **Start** control, which takes focus. The transcript, composer, and Stage stay
+hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player lists its
+diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
+audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
+
+The Player keeps the session in this browser: at each interaction it newly presents, when it ends, and when the page
+is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
+save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
+again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
+goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
+stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
+a kept session whose events lack what the Player reads from them, such as a message's markup or an answer's form, is
+not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
+moment after an answer, can be lost. A saved-data import of the script discards its kept session
+([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
+scenario, keeps none. Start and Continue
 also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
 the account setting when the host supplies one, else the browser's. They are session data
 ([Date and time context](../RUNTIME.md#date-and-time-context)).
@@ -439,8 +452,9 @@ If the browser still refuses required audible playback, the Player surfaces a de
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
 cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
 click. In the Player the
-session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
-checkpoint storage and automatic resume across page reloads are tracked in #469.
+session is created only when Start is activated; Continue resumes a kept session. Keeping a session across browsers or
+devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in another tab,
+are tracked in #469.
 
 ## Session end and failure
 
@@ -448,8 +462,9 @@ An ordinary end opens the end dialog by itself: **The end**, a review placeholde
 review is a placeholder that sends and stores nothing: a 1 to 5 star rating, a radio group of 44px stars chosen by click
 or arrow keys, an empty "Write a review (optional)", and **Send review**, unavailable, with the note "Sending reviews
 will be possible once TeaseScript has its website.". An end Debug's [rewind](../DEBUGGER.md#rewind) restores does not
-open it again. Once the session has ended and the dialog is closed, a quiet line above the composer says "The end." and
-offers **Play again**, which starts a new session like Start; Close returns focus there.
+open it again. While the dialog is open the session stays behind it, so its last messages remain visible; closing it,
+with Close or Escape, returns to the [start page](#session-start-and-user-activation), whose Start begins a new session
+and takes focus.
 
 When a script error stops the session, a line above the composer says "The script stopped because of an error." and
 offers **Details**; after an exception of the Player itself it says "The Player ran into an error." An error notice with

@@ -42,7 +42,7 @@ interface RewindHost {
     }) => PlayerRuntimeSession,
   ): void;
   activate(): void;
-  playAgain(): Promise<void>;
+  toStartPage(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   prepareInput(): true | Promise<boolean>;
   setDebugTracing(on: boolean): void;
@@ -733,7 +733,8 @@ test("a session-local state that rewind adopted leaves Play again session-local"
   assert.equal(host.rewind.inspecting.value, false);
   assert.equal(host.session.value?.state.status, "halted");
 
-  await host.playAgain();
+  await host.toStartPage();
+  await host.activate();
   await settle(context);
   await choose(context, host, "Go");
   assert.equal(said(host).at(-1), "1");

@@ -132,6 +132,7 @@ async function main() {
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
       await titleBarScenario(cdp, origin);
+      await keptSessionScenario(cdp, origin, profile);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -158,7 +159,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the end line's Play again, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -496,8 +497,9 @@ async function scriptStorageScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-player-settings]')`);
     await waitFor(cdp, `!!document.querySelector('[data-clear-saved-data]')`);
   };
+  // A new visit to the demo, which starts a new session.
   const reloadBeforeStart = async () => {
-    await cdp.call("Page.reload");
+    await navigate(cdp, `${origin}/player/`);
     await waitFor(
       cdp,
       `!!document.querySelector('${start}') && !document.querySelector('[data-player-settings]')`,
@@ -1334,6 +1336,132 @@ async function packageScenario(cdp, origin) {
  * a title cut off by a narrow bar opens in full on a tap, and on short screens with the auto-hide bar the first tap only
  * reveals the bar.
  */
+// The start page shows the script's header, and the session it starts is kept: a reload continues it where it was, also
+// with a photo only the session holds, and after `exit` the session stays behind the end dialog until it is closed,
+// which returns to the start page.
+async function keptSessionScenario(cdp, origin, profile) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-start]";
+  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
+  const choice = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
+  // Keeping is asynchronous browser storage; a reload waits until the kept snapshot includes `text`, such as the label
+  // of the interaction it should come back to.
+  const kept = (text) =>
+    evaluate(
+      cdp,
+      `return new Promise((resolve) => {
+        const request = indexedDB.open('teasescript-kept-sessions');
+        request.onsuccess = () => {
+          const sessions = request.result.transaction('sessions').objectStore('sessions').getAll();
+          sessions.onsuccess = () => {
+            request.result.close();
+            resolve(sessions.result.some((session) => session.snapshotJson.includes(${JSON.stringify(JSON.stringify(text))})));
+          };
+          sessions.onerror = () => resolve(false);
+        };
+        request.onerror = () => resolve(false);
+      })`,
+    );
+  const reloadOnceKept = async (text) => {
+    const deadline = Date.now() + 8_000;
+    while (!(await kept(text))) {
+      if (Date.now() > deadline) throw new Error("The session was not kept");
+      await delay(50);
+    }
+    await cdp.call("Page.reload");
+  };
+  await navigate(cdp, `${origin}/player/?package=kept-session`);
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-start-title]')?.textContent + ' / ' + document.querySelector('[data-start-author]')?.textContent`,
+    ),
+    "Kept session fixture / by Author fixture",
+    "The start page shows the header's title and author",
+  );
+  assertEqual(
+    await value(cdp, `document.activeElement === document.querySelector('${start}')`),
+    true,
+    "Start takes focus on the start page",
+  );
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `!!${choice("One point")}`);
+
+  await reloadOnceKept("One point");
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `!!${choice("One point")}`);
+  assertEqual(
+    await value(
+      cdp,
+      `${messages}.flatMap((text) => text.match(/This is visit \\d+\\./g) ?? []).join()`,
+    ),
+    "This is visit 1.",
+    "Continue resumes the kept session without running its start again",
+  );
+
+  await physicalClick(cdp, `[data-foreground-controls] button`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-end-dialog]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `!document.querySelector('${start}') && ${messages}.some((text) => text.includes('You chose 1.'))`,
+    ),
+    true,
+    "After exit the session stays behind the end dialog",
+  );
+  await physicalClick(cdp, "[data-session-end-close]");
+  await waitFor(
+    cdp,
+    `document.querySelector('${start}')?.textContent.trim() === 'Start' && document.activeElement === document.querySelector('${start}')`,
+    5_000,
+    "Closing the end dialog returns to the start page, whose Start takes focus",
+  );
+  await cdp.call("Page.reload");
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('This is visit 2.'))`,
+    8_000,
+    "A session that ended is not kept: the next one starts anew",
+  );
+
+  // A chosen picture the script shows after its saved reference was deleted comes back with the session, although a
+  // later visit reclaims the stored photo no saved value references.
+  const chosen = join(profile, "kept-photo.png");
+  await writeFile(chosen, solidPng(24, 16, [200, 90, 40]));
+  const stageImage = `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth > 0 && image.getAttribute('src').startsWith('blob:'); })()`;
+  await navigate(cdp, `${origin}/player/?package=kept-photo`);
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `${stageImage} && !!${choice("Done")}`,
+    8_000,
+    "The chosen picture is not shown",
+  );
+  await reloadOnceKept("Done");
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${stageImage} && !!${choice("Done")}`,
+    8_000,
+    "The picture the kept session shows did not come back after a reload",
+  );
+}
+
 async function titleBarScenario(cdp, origin) {
   const title = `document.querySelector('.player-top-bar-title').textContent`;
   const open = async (query) => {
@@ -4787,8 +4915,8 @@ async function errorCallPathScenario(cdp, origin) {
 
 /**
  * An ordinary end opens the end dialog with its review placeholder, a five-star radio group and an unavailable Send
- * review, and Close, focused, as its one control to close besides Escape; the end line then offers Play again, which
- * starts the script anew like Start. An end Debug's rewind restores does not open the dialog again.
+ * review, and Close, focused, as its one control to close besides Escape; closing it returns to the start page, whose
+ * Start begins the script anew.
  */
 async function sessionEndScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
@@ -4866,23 +4994,16 @@ async function sessionEndScenario(cdp, origin) {
     "An arrow key did not choose the next star",
   );
   await physicalClick(cdp, "[data-session-end-close]");
+  const onStartPage = `!${dialog} && document.querySelector('[data-session-start]')?.textContent.trim() === 'Start' && document.activeElement === document.querySelector('[data-session-start]')`;
   await waitFor(
     cdp,
-    `!${dialog} && document.activeElement?.matches('[data-runtime-play-again]')`,
+    onStartPage,
     5_000,
-    "Closing the end dialog did not return focus to the end line",
+    "Closing the end dialog did not return to the start page with its Start focused",
   );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('[data-runtime-ended]').textContent.replace(/\\s+/g, ' ').trim()`,
-    ),
-    "The end. Play again",
-    "The end line",
-  );
-  // The end line's Play again starts the script anew; Escape also closes the dialog.
-  await physicalClick(cdp, "[data-runtime-play-again]");
-  await waitFor(cdp, startedAnew, 5_000, "The end line's Play again did not start anew");
+  // Start begins the script anew; Escape also closes the dialog.
+  await physicalClick(cdp, "[data-session-start]");
+  await waitFor(cdp, startedAnew, 5_000, "Start after the end did not start anew");
   await finish();
   for (const type of ["keyDown", "keyUp"])
     await cdp.call("Input.dispatchKeyEvent", {
@@ -4891,33 +5012,7 @@ async function sessionEndScenario(cdp, origin) {
       code: "Escape",
       windowsVirtualKeyCode: 27,
     });
-  await waitFor(
-    cdp,
-    `!${dialog} && document.activeElement?.matches('[data-runtime-play-again]')`,
-    5_000,
-    "Escape did not close the end dialog",
-  );
-
-  // Forward and Return of Debug's rewind bring the end back without opening the dialog again.
-  await start(`${origin}/player/?dev&package=session-end`);
-  await finish();
-  await physicalClick(cdp, "[data-session-end-close]");
-  await waitFor(cdp, `!${dialog}`);
-  await evaluate(
-    cdp,
-    `const button = [...document.querySelectorAll('.transcript-entry')].find((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes('Finish'))?.querySelector('[data-back-to-here]'); button?.setAttribute('data-smoke-back', ''); button?.scrollIntoView({ block: 'center' });`,
-  );
-  await settledClick(cdp, "[data-smoke-back]");
-  await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
-  await settledClick(cdp, "[data-rewind-forward]");
-  await waitFor(cdp, `!!document.querySelector('[data-runtime-ended]')`);
-  await settledClick(cdp, "[data-rewind-return]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-ended]')`,
-  );
-  await delay(300);
-  assertEqual(await value(cdp, `!!${dialog}`), false, "A restored end opened the end dialog again");
+  await waitFor(cdp, onStartPage, 5_000, "Escape did not close the end dialog for the start page");
 }
 
 /**
@@ -4986,7 +5081,13 @@ async function heldPressScenario(cdp, origin) {
   await steady("a form toggle");
 }
 
+// Each visit starts without the session the Player keeps for a script (PLAYER-UI "Session start and user activation"), so
+// scenarios stay independent of the order they run in; `keptSessionScenario` reloads to keep it.
 async function navigate(cdp, url) {
+  await cdp.call("IndexedDB.deleteDatabase", {
+    securityOrigin: new URL(url).origin,
+    databaseName: "teasescript-kept-sessions",
+  });
   const response = await cdp.call("Page.navigate", { url });
   if (response?.result?.errorText) throw new Error(response.result.errorText);
   await waitFor(cdp, `document.readyState === 'complete'`);

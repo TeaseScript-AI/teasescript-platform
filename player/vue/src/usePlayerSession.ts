@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef, watch } from "vue";
-import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
+import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import { createBrowserCaptureHost, browserMediaUrls } from "../../browser-capture.js";
 import { CaptureDevice } from "../../capture-device.js";
 import {
@@ -32,9 +32,11 @@ import {
   playerRuntimeMediaOrigin,
   playerRuntimePermanentButtons,
   playerRuntimeSnapshot,
+  playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
+  restorePlayerRuntimeSessionAt,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -52,6 +54,13 @@ import {
 } from "../../debug-history.js";
 import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
 import { DebugRecorder } from "../../debug-recorder.js";
+import {
+  capturedMediaReferencesInJson,
+  keptPhotoReferences,
+  keptSession,
+  memoryKeptSessionStore,
+  type KeptSessionStore,
+} from "../../kept-sessions.js";
 import { RuntimeDebugContext } from "../../../src/index.js";
 import type { SavedDataHost } from "../../saved-data.js";
 import { playerBuildIdentity } from "./buildIdentity";
@@ -76,6 +85,8 @@ import {
 import {
   validateScriptStorageEntries,
   type CapturedMediaAdmission,
+  type InstructionPlan,
+  type InterpreterEvent,
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
   type TemporalContext,
@@ -128,6 +139,12 @@ export interface PlayerSessionOptions {
    * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
    */
   temporalContext?: () => TemporalContext;
+  /**
+   * Where the script's session is kept, so that a reload or a later visit in this browser continues it (PLAYER-UI
+   * "Session start and user activation"); in this page's memory by default. Only a script with storage that the host
+   * prepares with `prepareScript` keeps one.
+   */
+  keptSessions?: KeptSessionStore;
   /** Opens where Debug's rewind history spills snapshots; IndexedDB by default, `null` keeps them in memory. */
   debugHistorySpill?: () => Promise<DebugHistorySpill | null>;
   /** Characters of state JSON a rewind history keeps in memory before it spills; diagnostic tuning for tests. */
@@ -137,6 +154,8 @@ export interface PlayerSessionOptions {
 type Activation = {
   readonly kind: "start" | "continue";
   readonly begin: () => PlayerRuntimeSession;
+  /** The marks a continued session had, which it keeps. */
+  readonly marks?: DebugHistoryMarks;
 };
 
 /**
@@ -184,7 +203,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const capturedMediaPersistence =
     options.scriptStorage &&
     (options.capabilities?.camera === true || options.capturedMedia !== undefined)
-      ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
+      ? capturedMediaStorage(
+          options.scriptStorage,
+          capturedMedia,
+          browserCapturedMediaLocks(),
+          keptPhotoReferences(options.keptSessions),
+        )
       : undefined;
   const storageProvider = capturedMediaPersistence ?? options.scriptStorage;
   // Every change this Player makes to the stored values goes through here, which keeps the values the next Start loads
@@ -792,6 +816,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (ownChosen) {
         if (sessionInProgress.value || inspecting.value) endSession();
         rewindRetirements.value++;
+        // A session being kept is kept before the import discards it.
+        while (keeping !== null) await keeping;
       }
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
@@ -810,6 +836,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               media.close();
             }
           }
+          // The script's next session loads the imported values: a kept session, with its older view, does not go on.
+          await keptSessions.discard(script.scope).catch(() => {});
         } catch (error) {
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
@@ -876,6 +904,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     jumpedRevision.value = -1;
     session.value = next;
     clock.rebase();
+    // The session that runs is the one a reload continues.
+    if (!paused) keepSessionLater();
   }
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
@@ -891,6 +921,172 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (current === before ? previous?.state.status !== "halted" : current !== rewoundGeneration)
       endings.value++;
   });
+
+  // The script's kept session, which a reload or a later visit continues (PLAYER-UI "Session start and user
+  // activation"); only a script with storage keeps one, under its storage scope.
+  const keptSessions = options.keptSessions ?? memoryKeptSessionStore();
+  const keptScope = options.scriptStorage?.scope ?? null;
+  // The plan of the script, which a kept session runs.
+  let scriptPlan: InstructionPlan | null = null;
+  // What is kept of the shown session, so that keeping it again adds only the events after it: whether the plan is kept,
+  // and how many events, the last of which is `last`. A new session starts with none.
+  let kept: {
+    readonly plan: boolean;
+    readonly count: number;
+    readonly last: InterpreterEvent | null;
+  } = { plan: false, count: 0, last: null };
+  let keeping: Promise<void> | null = null;
+  let keepAgain = false;
+  /**
+   * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
+   * time; a request meanwhile keeps the session as it is once that is done. A state Debug's rewind shows for inspection
+   * is never kept: the session it left is.
+   */
+  function keepSessionLater() {
+    if (keeping !== null) {
+      keepAgain = true;
+      return;
+    }
+    keeping = (async () => {
+      // The caller finishes first, such as a Continue that gives the session its marks.
+      await Promise.resolve();
+      do {
+        keepAgain = false;
+        await keepOnce();
+      } while (keepAgain && !disposed);
+    })().finally(() => (keeping = null));
+  }
+  async function keepOnce() {
+    const current = session.value;
+    // Only a script a host prepared with `prepareScript` keeps its session.
+    if (keptScope === null || scriptPlan === null || current === null) return;
+    if (inspecting.value || activation.value !== null) return;
+    // Taken before anything waits: later operations change the session.
+    let snapshotJson: string;
+    try {
+      snapshotJson = playerRuntimeSnapshotJson(current);
+    } catch {
+      return;
+    }
+    const events = current.events;
+    const from =
+      kept.count <= events.length && (kept.count === 0 || events[kept.count - 1] === kept.last)
+        ? kept.count
+        : 0;
+    const count = events.length;
+    const added = events.slice(from, count);
+    const last = events[count - 1] ?? null;
+    const planJson = kept.plan && from > 0 ? null : JSON.stringify(current.plan);
+    const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
+    // The photos no save stored go with the session; a stored one stays stored while the session uses it
+    // (`capturedMediaStorage`).
+    const photos = capturedMedia.sessionRecords(
+      capturedMediaReferencesInJson(snapshotJson + JSON.stringify(added)),
+    );
+    try {
+      // A new session replaces the one kept before, with its photos.
+      if (from === 0) await keptSessions.discard(keptScope);
+      // A photo already kept stays as it is.
+      for (const photo of photos) await keptSessions.media.add(photo).catch(() => {});
+      await keptSessions.publish(keptScope, {
+        planJson,
+        snapshotJson,
+        eventsFrom: from,
+        events: added,
+        marks,
+      });
+      kept = { plan: true, count, last };
+    } catch {
+      // The session kept before stays; a reload continues from there.
+    }
+  }
+  /** Keeps the shown session as it is now and waits until it is kept. */
+  async function keepSession(): Promise<void> {
+    keepSessionLater();
+    while (keeping !== null) await keeping;
+  }
+  // The session is kept at each interaction it newly presents and when it ends, and when the page is hidden.
+  let keptActionId: number | null = null;
+  watch(session, (current) => {
+    if (current === null || inspecting.value) return;
+    const actionId = activePlayerRuntimeInteraction(current.state)?.actionId ?? null;
+    const ended = current.state.status === "halted" || current.state.status === "failed";
+    if ((actionId === null || actionId === keptActionId) && !ended) return;
+    keptActionId = actionId;
+    keepSessionLater();
+  });
+  useEventListener(
+    () => (typeof document === "undefined" ? undefined : document),
+    "visibilitychange",
+    () => {
+      if (document.visibilityState === "hidden") keepSessionLater();
+    },
+  );
+  /**
+   * Prepares a session of `plan`, which `create` starts: Continue when the script keeps a session that can go on, else
+   * Start. Call it instead of `prepare` once the stored values are loaded.
+   */
+  async function prepareScript(
+    plan: InstructionPlan,
+    create: PlayerSessionStart,
+    sources?: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    scriptPlan = plan;
+    lastStart.value = create;
+    if (sources !== undefined) scriptSources = sources;
+    await prepareKept();
+  }
+  /** Shows Continue when the script keeps a session that can go on, else Start. */
+  async function prepareKept(): Promise<void> {
+    const continued = scriptPlan === null ? null : await restoreKept(scriptPlan);
+    if (disposed) return;
+    if (continued !== null) {
+      kept = {
+        plan: true,
+        count: continued.session.events.length,
+        last: continued.session.events.at(-1) ?? null,
+      };
+      prepareRestore(continued.session, continued.marks);
+    } else if (lastStart.value !== null) prepare(lastStart.value);
+  }
+  /**
+   * The kept session, restored, when it runs `plan` and has not ended; else `null`. The photos only it uses are its
+   * session media again.
+   */
+  async function restoreKept(
+    plan: InstructionPlan,
+  ): Promise<{ readonly session: PlayerRuntimeSession; readonly marks: DebugHistoryMarks } | null> {
+    if (keptScope === null) return null;
+    const stored = await keptSessions.session(keptScope).catch(() => null);
+    const found = stored === null ? null : keptSession(stored);
+    if (found === null || found.planJson !== JSON.stringify(plan)) return null;
+    let restored: PlayerRuntimeSession;
+    try {
+      restored = restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events);
+    } catch {
+      return null;
+    }
+    if (restored.state.status === "halted" || restored.state.status === "failed") return null;
+    for (const reference of capturedMediaReferencesInJson(
+      found.snapshotJson + JSON.stringify(found.events),
+    ))
+      capturedMedia.restoreSessionMedia(
+        reference,
+        await keptSessions.media.get(keptScope, reference).catch(() => null),
+      );
+    return { session: restored, marks: found.marks };
+  }
+  /**
+   * Returns to the start page once the session ended by `exit`, which the host does when the player closes the end
+   * dialog; the ended session is kept first, so a reload starts anew.
+   */
+  async function toStartPage(): Promise<void> {
+    if (session.value?.state.status !== "halted") return;
+    await keepSession();
+    if (disposed || session.value?.state.status !== "halted") return;
+    endSession();
+    await prepareKept();
+  }
   /**
    * Readies the session for input before the input is evaluated: an inspected state Debug's rewind restored is adopted
    * first. `true` when input may go ahead at once, else whether it may once the state is adopted; a state that could
@@ -1034,7 +1230,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
-  function prepareRestore(restored: PlayerRuntimeSession) {
+  function prepareRestore(restored: PlayerRuntimeSession, marks?: DebugHistoryMarks) {
     activationToken++;
     openingCamera.value = false;
     camera.release();
@@ -1049,6 +1245,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           temporalCapture(),
         ).session;
       },
+      ...(marks === undefined ? {} : { marks }),
     };
   }
   /**
@@ -1087,17 +1284,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     captures.reset();
     startFrom(pending);
   }
-  /** Whether Play again can start the script anew now: it was started before, and no session or import runs. */
-  const canPlayAgain = computed(
-    () =>
-      lastStart.value !== null && !sessionInProgress.value && !clearing.value && !importing.value,
-  );
-  /** Starts the script anew like Start, from the player's click; it runs only when `canPlayAgain`. */
-  function playAgain(): Promise<void> {
-    if (!canPlayAgain.value) return Promise.resolve();
-    prepare(lastStart.value!);
-    return activate();
-  }
   /** Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. */
   function startFrom(pending: Activation) {
     hostError.value = null;
@@ -1109,6 +1295,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     start(next);
+    // A new session replaces the one kept before.
+    if (pending.kind === "start") {
+      kept = { plan: false, count: 0, last: null };
+      keptActionId = null;
+    }
+    if (pending.marks !== undefined) {
+      debugEdits.value = pending.marks.editedWhileDebugging;
+      rewound.value = pending.marks.rewoundWhileDebugging;
+    }
   }
 
   return {
@@ -1354,12 +1549,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       },
     },
     prepare,
+    prepareScript,
     prepareRestore,
     activate,
+    toStartPage,
     /** The source text of a file of the script, or `null` when its host did not supply it. */
     scriptSource: (path: string): string | null => scriptSources.get(path) ?? null,
-    canPlayAgain,
-    playAgain,
     /** Changes whenever a session ends as it plays, including at its Start; not when Debug's rewind restores an end. */
     endings: computed(() => endings.value),
     /** The capture a new session records at Start; Continue records its own. */
