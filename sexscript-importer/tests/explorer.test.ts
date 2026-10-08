@@ -13,7 +13,7 @@ import {
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
-import { clockModel, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
+import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
 import {
   EPOCH_MS,
   loadEngine,
@@ -1341,5 +1341,51 @@ test(
     assert.ok(steered.directed.attempts > 0);
     assert.ok(steered.directed.ways.some((way) => way.reach === "chosen"));
     assert.ok(covers(steered, 64) && covers(steered, 66));
+  },
+);
+
+test(
+  "with forward time, time logic a creator writes by hand is read with no converter helper: a return window through a helper function of their own is reached in each of its parts, as play",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let last = load "visit", default: 0\nfunction hoursSince(stamp) {\n  return (getTimestamp().toSeconds() - stamp) / 3600\n}\n' +
+      'showButton "Hello"\nif last == 0 {\n  say "First visit."\n} else if hoursSince(last) < 2 {\n  say "Back so soon?"\n' +
+      '} else if hoursSince(last) > 48 {\n  say "Where have you been?"\n} else {\n  say "Welcome back."\n}\n' +
+      'save getTimestamp().toSeconds() as "visit"\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 2000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      later: true,
+    });
+    const lineOf = (text: string) =>
+      source.split("\n").findIndex((line) => line.includes(text)) + 1;
+    for (const text of ["First visit.", "Back so soon?", "Where have you been?", "Welcome back."]) {
+      const line = lineOf(text);
+      assert.ok(
+        !result.coverage.files[0]!.unvisited.some((range) => {
+          const [from = 0, to = from] = range.lines.split("-").map(Number);
+          return line >= from && line <= to;
+        }),
+        text,
+      );
+    }
+    assert.equal(result.coverage.reach.clock, 0);
+    // The model reads both comparisons through the helper: back from a visit just now, "so soon" ends two hours later.
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const model = clockModel(plan, instructions);
+    assert.equal(model.comparisons.size, 2);
+    const [soon] = [...model.comparisons.values()][0]!;
+    const visited = timeContext({ scriptStorage: [{ key: "visit", value: EPOCH_MS / 1000 }] });
+    assert.equal(holdsAt(soon!, model, visited, EPOCH_MS), true);
+    const gap = flipGap(soon!, model, visited, EPOCH_MS)!;
+    assert.ok(gap >= 2 * 3_600_000 && gap <= 2 * 3_600_000 + 120_000, String(gap));
   },
 );

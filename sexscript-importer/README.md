@@ -378,14 +378,15 @@ With forward time (on by default; `--no-later` switches it off), time only goes 
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
 `getTimestamp().toSeconds() - lastVisit > day`), also through variables computed from the clock in one way, helpers
 that return one part of the date or time (exactly when they only return it; a helper that adjusts it is an
-approximation), the converted scripts' `sexscriptLegacyCompare` (where its two values meet), and functions that only
-compute a value (they bind, assign, branch, load, call such functions, and return; at most 500 instructions and four
-calls deep; such as the converted `sexscriptLegacyLoadInteger`), and evaluates it in a state at a later wall
+approximation), and functions that only compute a value (they bind, assign, branch, load, call such functions, and
+return; at most 500 instructions and four calls deep), with no function singled out by name, and evaluates it in a state
+at a later wall
 clock, with the state's variables and stored values; a variable set once that the state has no value for yet, such as
 at the start of a session, from the value it is set to (a load with a key from a variable set once to a text too). A
 state that waits where such a condition was read next gets time steps: `later` inputs to just past the first moment, within 400 days, at which one of those comparisons comes out
 the other way, as far as the explorer finds it: at the second, minute, hour, or day boundaries where a compared part
-of the date or time changes, where compared elapsed times meet, or else by sampling at doublings of a minute and
+of the date or time changes, where compared elapsed times meet (also two arguments of a function whose result is
+compared, as `compare(a, b) <= 0` changes where `a` and `b` meet), or else by sampling at doublings of a minute and
 halving (the next 18:01, the next weekday, saved time plus a day and a minute, inside or past a window). Each is tried
 once per cell and outcome; where the condition was first read, the state the step left, or the session start, gets
 them too. Their outcomes at a state's wall clock are part of its cell, so a new outcome or change of one counts as

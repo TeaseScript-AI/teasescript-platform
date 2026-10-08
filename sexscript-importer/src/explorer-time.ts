@@ -25,11 +25,6 @@ function list(value: unknown): Data[] {
 }
 
 const CLOCK_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
-/**
- * The helper every converted script has to compare two values as legacy SexScript did: -1, 0, or 1, with null before
- * everything else. Its calls are read with their arguments; other functions of a script are not.
- */
-const COMPARE_HELPER = "sexscriptLegacyCompare";
 const PARTS = new Set(["year", "month", "day", "hour", "minute", "second", "weekdayNumber"]);
 const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">=", "in"]);
 const MINUTE = 60_000;
@@ -103,7 +98,7 @@ export interface ClockModel {
   readonly instructions: readonly Data[];
   /**
    * Variables set once, and never otherwise: to a literal (`let scriptText = "dc"`), or to another value that is not
-   * computed from the clock (`let last = sexscriptLegacyLoadInteger("${scriptText}.last")`); read from these where a
+   * computed from the clock (`let last = loadNumber("${prefix}.last")`); read from these where a
    * state has no value for them yet, such as at the start of a session.
    */
   readonly once: ReadonlyMap<string, Definition>;
@@ -395,7 +390,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     const producer = instructions[index]!;
     if (producer.kind === "storeTemporary") return record(producer.value);
     const name = String(record(functions[Number(producer.functionId) - 1]).name);
-    const runs = name === COMPARE_HELPER || pure.has(Number(producer.functionId));
+    const runs = pure.has(Number(producer.functionId));
     return {
       kind: "call",
       callee: { kind: "identifier", name },
@@ -831,19 +826,6 @@ function callAt(node: Data, reading: Reading): Value {
   if (helper !== undefined) return part(helper.part, reading.now);
   if (typeof node.functionId === "number" && reading.model.pure.has(node.functionId))
     return runFunction(node.functionId, list(node.arguments), reading);
-  if (callee.kind === "identifier" && name === COMPARE_HELPER) {
-    const [left, right] = list(node.arguments).map((argument) => valueAt(argument.value, reading));
-    if (left === undefined || right === undefined) return undefined;
-    if (left === null || right === null) return left === right ? 0 : left === null ? -1 : 1;
-    // Values of one kind only, as the runtime compares them: numbers, texts, or moments or durations alike.
-    const kindOf = (value: Value) =>
-      typeof value === "object" && value !== null ? value.kind : typeof value;
-    if (kindOf(left) !== kindOf(right)) return undefined;
-    const a = typeof left === "string" ? left : magnitude(left);
-    const b = typeof right === "string" ? right : magnitude(right);
-    if (a === undefined || b === undefined) return undefined;
-    return a < b ? -1 : a > b ? 1 : 0;
-  }
   if (callee.kind === "property") {
     const object = valueAt(callee.object, reading);
     if (typeof object === "object" && object !== null && object.kind === "timestamp") {
@@ -1117,26 +1099,16 @@ export function flipGap(
     context,
     inside: new Map<string, Definition | null>(),
   };
-  // The converter's compare helper against 0 changes where its two values meet: measure those instead.
-  const compared = helperOperands(comparison);
-  const subject = compared?.[0] ?? comparison.left;
-  const apart = (at: number, right: unknown) => {
+  const apart = (at: number, left: unknown, right: unknown) => {
     const then = { ...reading, now: at, memo: new Map<Definition, Value>() };
-    const left = magnitude(valueAt(subject, then));
+    const value = magnitude(valueAt(left, then));
     const bound = magnitude(valueAt(right, then));
-    return left === undefined || bound === undefined ? undefined : left - bound;
+    return value === undefined || bound === undefined ? undefined : value - bound;
   };
-  const range = record(comparison.right);
-  const bounds =
-    compared !== null
-      ? [compared[1]]
-      : comparison.operator === "in"
-        ? [range.start, range.end]
-        : [comparison.right];
   const meetings: number[] = [];
-  for (const bound of bounds) {
-    const before = apart(now, bound);
-    const after = apart(now + HOUR, bound);
+  for (const [left, right] of meetingPairs(comparison)) {
+    const before = apart(now, left, right);
+    const after = apart(now + HOUR, left, right);
     if (before === undefined || after === undefined || before === after) continue;
     const at = now - (before / (after - before)) * HOUR;
     for (const near of [at, at + 1000, at + MINUTE])
@@ -1163,21 +1135,31 @@ export function flipGap(
 }
 
 /**
- * The two values of a comparison of the converter's compare helper with 0 (`sexscriptLegacyCompare(a, b) <= 0`, also
- * through the temporary that holds its result), which come out as `a <= b`; null for another comparison.
+ * The pairs of values whose meeting may change a comparison: its two sides (a range's bounds each with the value), and
+ * for a side that a script's function computes from its arguments (also through the temporary that holds its result),
+ * each two of those arguments, as `compare(a, b) <= 0` changes only where `a` and `b` meet.
  */
-function helperOperands(comparison: ClockComparison): [unknown, unknown] | null {
-  const call = (side: Data): Data | null => {
+function meetingPairs(comparison: ClockComparison): [unknown, unknown][] {
+  const range = record(comparison.right);
+  const pairs: [unknown, unknown][] =
+    comparison.operator === "in"
+      ? [
+          [comparison.left, range.start],
+          [comparison.left, range.end],
+        ]
+      : [[comparison.left, comparison.right]];
+  for (const side of [comparison.left, comparison.right]) {
     const value =
       side.kind === "temporary" && typeof side.temporaryId === "number"
         ? record(comparison.temporaries.get(side.temporaryId))
         : side;
-    return value.kind === "call" && calleeName(value) === COMPARE_HELPER ? value : null;
-  };
-  const zero = (side: Data) => side.kind === "literal" && side.value === 0;
-  const found = zero(comparison.right) ? call(comparison.left) : null;
-  const args = found === null ? [] : list(found.arguments);
-  return args.length === 2 ? [args[0]!.value, args[1]!.value] : null;
+    if (value.kind !== "call" || typeof value.functionId !== "number") continue;
+    const args = list(value.arguments).map((argument) => argument.value);
+    args.forEach((first, index) => {
+      for (const second of args.slice(index + 1)) pairs.push([first, second]);
+    });
+  }
+  return pairs;
 }
 
 /** A value's size as a number: a number itself, or the milliseconds of a duration or moment. */
