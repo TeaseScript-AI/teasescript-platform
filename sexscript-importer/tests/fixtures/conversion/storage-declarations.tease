@@ -65,4 +65,9 @@ let tags = ["new"]
 // NOTE SX_LOAD_OPEN_NULL line 34: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps an open type, and a missing value is the empty value of the list's items, which cannot hold null.
 tags.add(load("game.tag", default: sexscriptLegacyValue("")))
 say "Tags ${tags.length}"
+// So does such a read into an item of a list of a known type.
+let labels = ["first"]
+// NOTE SX_LOAD_OPEN_NULL line 38: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps an open type, and a missing value is the empty value of the list's items, which cannot hold null.
+labels[0] = load "game.label", default: sexscriptLegacyValue("")
+say "Label ${labels[0]}"
 exit

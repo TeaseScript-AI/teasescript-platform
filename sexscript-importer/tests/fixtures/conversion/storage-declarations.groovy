@@ -33,3 +33,7 @@ show("Filled " + (filled == null))
 def tags = ["new"]
 tags.add(load("game.tag"))
 show("Tags " + tags.size())
+// So does such a read into an item of a list of a known type.
+def labels = ["first"]
+labels[0] = load("game.label")
+show("Label " + labels[0])

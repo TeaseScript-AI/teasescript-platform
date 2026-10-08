@@ -261,6 +261,28 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
             literalKey(next.value.key) === null
               ? next.value
               : null;
+          // A read that keeps an open null into an item of a list of a known type reads the item type's empty value too.
+          const openItem =
+            next.kind === "assign" &&
+            next.operator === "=" &&
+            next.target.kind === "index" &&
+            next.value.kind === "load" &&
+            literalKey(next.value.key) !== null &&
+            next.value.defaultValue !== undefined &&
+            isOpenNull(next.value.defaultValue)
+              ? next.value
+              : null;
+          if (openItem !== null && next.kind === "assign") {
+            const type = typeOf(next.target, scope);
+            const empty = type === null || nullable(type) ? null : emptyValue(type);
+            if (empty !== null) {
+              itemDefault = true;
+              next = {
+                ...next,
+                value: { ...openItem, defaultValue: helperCall("value", [empty]) },
+              };
+            }
+          }
           if (read !== null && (next.kind === "let" || next.kind === "assign")) {
             const { fill, ...load } = read;
             if (next.kind === "assign" && next.target.kind === "index") {
