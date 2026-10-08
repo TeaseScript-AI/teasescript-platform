@@ -1,4 +1,5 @@
 import { isRecord } from "./ast.ts";
+import { successors } from "./explorer-analysis.ts";
 
 /**
  * Forward time for the explorer's search (`ExploreOptions.later`): the comparisons in conditions that read the clock,
@@ -96,6 +97,8 @@ export interface ClockModel {
    * functions and instructions to run them from.
    */
   readonly pure: ReadonlySet<number>;
+  /** Those of them that read the clock, also through such functions they call. */
+  readonly clockFunctions: ReadonlySet<number>;
   readonly functions: readonly Data[];
   readonly instructions: readonly Data[];
   /**
@@ -136,10 +139,14 @@ const PURE_INSTRUCTIONS = new Set([
 const PURE_CALLS = new Set(["toSeconds", "toMilliseconds", ...CLOCK_GETTERS]);
 
 /**
- * The functions of a plan that only compute a value: their instructions bind, assign, branch, call such functions, and
- * return; their expressions call no function but numeric ones and the clock. Storage loads are reads.
+ * The functions of a plan that only compute a value: their instructions bind, assign their own parameters and variables,
+ * branch, call such functions, and return; their expressions call no function but numeric ones and the clock. Storage
+ * loads are reads. With those of them that read the clock, also through such functions they call.
  */
-function pureFunctions(functions: readonly Data[], instructions: readonly Data[]): Set<number> {
+function pureFunctions(
+  functions: readonly Data[],
+  instructions: readonly Data[],
+): { pure: Set<number>; clock: Set<number> } {
   const calls = (value: unknown): boolean => {
     if (Array.isArray(value)) return value.every(calls);
     if (!isRecord(value)) return true;
@@ -150,33 +157,68 @@ function pureFunctions(functions: readonly Data[], instructions: readonly Data[]
     return Object.entries(value).every(([key, item]) => key === "span" || calls(item));
   };
   const candidates = new Map<number, number[]>();
+  const clock = new Set<number>();
   for (const definition of functions) {
     const id = Number(definition.id);
-    const end = Number(definition.endInstruction);
+    // A function's instructions run from its entry up to, not including, its end.
+    const end = Math.min(Number(definition.endInstruction), instructions.length);
+    const entry = Number(definition.entryInstruction);
+    const own = new Set(
+      list(definition.parameters).flatMap((parameter) =>
+        typeof parameter.name === "string" ? [parameter.name] : [],
+      ),
+    );
+    for (let index = entry; index < end; index += 1)
+      if (
+        instructions[index]?.kind === "declareBinding" &&
+        typeof instructions[index]!.name === "string"
+      )
+        own.add(String(instructions[index]!.name));
     const callees: number[] = [];
     let ok = definition.handler == null;
-    // A function's end may be one past the plan's last instruction.
-    const last = Math.min(end, instructions.length - 1);
-    for (let index = Number(definition.entryInstruction); ok && index <= last; index += 1) {
-      const instruction = instructions[index];
-      if (instruction === undefined || !PURE_INSTRUCTIONS.has(String(instruction.kind))) ok = false;
-      else if (instruction.kind === "assign" && record(instruction.target).kind !== "identifier")
+    for (let index = entry; ok && index < end; index += 1) {
+      const instruction = instructions[index]!;
+      const target = record(instruction.target);
+      if (!PURE_INSTRUCTIONS.has(String(instruction.kind))) ok = false;
+      // Only its own variables: an assignment to another changes what the code outside reads.
+      else if (
+        instruction.kind === "assign" &&
+        !(target.kind === "identifier" && own.has(String(target.name)))
+      )
         ok = false;
       else if (!calls(instruction)) ok = false;
-      if (instruction?.kind === "callFunction") callees.push(Number(instruction.functionId));
+      if (callsClock(instruction)) clock.add(id);
+      if (instruction.kind === "callFunction") callees.push(Number(instruction.functionId));
     }
     if (ok) candidates.set(id, callees);
   }
-  // A function that calls one that is not is not either; until none is left out.
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [id, callees] of candidates)
-      if (callees.some((callee) => !candidates.has(callee))) {
-        candidates.delete(id);
-        changed = true;
-      }
+  // A function that calls one that is not is not either; one that calls one that reads the clock reads it too.
+  const callers = new Map<number, number[]>();
+  for (const [id, callees] of candidates)
+    for (const callee of callees) callers.set(callee, [...(callers.get(callee) ?? []), id]);
+  const rejected = [...candidates].flatMap(([id, callees]) =>
+    callees.some((callee) => !candidates.has(callee)) ? [id] : [],
+  );
+  for (let id = rejected.pop(); id !== undefined; id = rejected.pop()) {
+    if (!candidates.delete(id)) continue;
+    rejected.push(...(callers.get(id) ?? []).filter((caller) => candidates.has(caller)));
   }
-  return new Set(candidates.keys());
+  const reading = [...clock].filter((id) => candidates.has(id));
+  const readsClock = new Set<number>();
+  for (let id = reading.pop(); id !== undefined; id = reading.pop()) {
+    if (readsClock.has(id) || !candidates.has(id)) continue;
+    readsClock.add(id);
+    reading.push(...(callers.get(id) ?? []));
+  }
+  return { pure: new Set(candidates.keys()), clock: readsClock };
+}
+
+/** Whether an expression calls a getter of the current date or time. */
+function callsClock(expression: unknown): boolean {
+  if (Array.isArray(expression)) return expression.some(callsClock);
+  if (!isRecord(expression)) return false;
+  if (expression.kind === "call" && CLOCK_GETTERS.has(calleeName(expression) ?? "")) return true;
+  return Object.entries(expression).some(([key, item]) => key !== "span" && callsClock(item));
 }
 
 function calleeName(call: Data): string | null {
@@ -222,6 +264,11 @@ function clockReads(
       if (!helper.exact) found.add("approximate");
     }
     if (plain && CLOCK_GETTERS.has(name)) found.add("timestamp");
+    if (
+      typeof expression.functionId === "number" &&
+      model.clockFunctions.has(expression.functionId)
+    )
+      found.add("timestamp");
   }
   if (expression.kind === "property" && PARTS.has(String(expression.name)))
     if (clockCall(record(expression.object))) found.add(String(expression.name));
@@ -286,7 +333,7 @@ function namesOf(expression: unknown, names: Set<string> = new Set()): Set<strin
  */
 export function clockModel(plan: Data, instructions: readonly Data[]): ClockModel {
   const functions = list(plan.functions);
-  const pure = pureFunctions(functions, instructions);
+  const { pure, clock: clockFunctions } = pureFunctions(functions, instructions);
   // The instructions that produce each temporary, in order: a stored value, or a call's result.
   const producers = new Map<number, number[]>();
   instructions.forEach((instruction, index) => {
@@ -382,6 +429,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     ambiguous,
     helpers,
     pure,
+    clockFunctions,
     functions,
     instructions,
     once,
@@ -401,8 +449,9 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     for (const parameter of list(definition.parameters))
       if (typeof parameter.name === "string") elsewhere.add(parameter.name);
   instructions.forEach((instruction, index) => {
-    if (instruction.kind === "loopStart" && typeof instruction.variable === "string")
-      elsewhere.add(instruction.variable);
+    if (instruction.kind === "loopStart")
+      for (const variable of [instruction.variable, instruction.valueVariable])
+        if (typeof variable === "string") elsewhere.add(variable);
     const target = record(instruction.target);
     const name =
       instruction.kind === "assign"
@@ -414,8 +463,21 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
           : null;
     if (typeof name === "string") setBy.set(name, [...(setBy.get(name) ?? []), index]);
   });
+  // Where something may have been saved before: a variable set there may read a stored value saved since a state was
+  // left, so it is not read from that value.
+  const next = successors(plan, instructions, new Map());
+  const afterSave = new Uint8Array(instructions.length);
+  const queue = instructions.flatMap((instruction, index) =>
+    instruction.kind === "storageWrite" ? [index] : [],
+  );
+  for (let at = queue.pop(); at !== undefined; at = queue.pop())
+    for (const target of next[at] ?? [])
+      if (target >= 0 && target < instructions.length && afterSave[target] === 0) {
+        afterSave[target] = 1;
+        queue.push(target);
+      }
   for (const [name, indices] of setBy) {
-    if (indices.length !== 1 || elsewhere.has(name)) continue;
+    if (indices.length !== 1 || elsewhere.has(name) || afterSave[indices[0]!] === 1) continue;
     const value = record(instructions[indices[0]!]!.value);
     once.set(name, { value, temporaries: temporariesAt(value, indices[0]!), prior: null });
   }
@@ -582,7 +644,8 @@ function part(name: string, milliseconds: number): number | undefined {
 }
 
 const NUMERIC = new Map<string, (value: number) => number>([
-  ["round", Math.round],
+  // Half away from zero, as the runtime rounds.
+  ["round", (value) => Math.sign(value) * Math.round(Math.abs(value))],
   ["floor", Math.floor],
   ["ceil", Math.ceil],
   ["abs", Math.abs],
@@ -605,6 +668,8 @@ interface Reading {
   readonly memo: Map<Definition, Value>;
   /** Inside a script's function the model runs: its variables, its temporaries' values, and how deep the call is. */
   readonly frame?: Frame | undefined;
+  /** The instructions left for the script's functions it runs, shared by all of them for one value. */
+  readonly steps?: { left: number } | undefined;
 }
 
 /** A script's function the model runs: its variables, its temporaries' values, how deep the call is, steps left. */
@@ -645,6 +710,7 @@ function valueAt(expression: unknown, reading: Reading): Value {
           ...reading,
           temporaries: set.temporaries,
           frame: undefined,
+          steps: reading.frame?.steps ?? reading.steps,
         });
         reading.memo.set(set, value);
         return value;
@@ -737,9 +803,13 @@ function callAt(node: Data, reading: Reading): Value {
     }
     return undefined;
   }
+  // One plain argument only: another one (`decimals:`) changes what the function does.
   const transform = NUMERIC.get(name);
-  const argument = valueAt(list(node.arguments)[0]?.value, reading);
-  return transform !== undefined && typeof argument === "number" ? transform(argument) : undefined;
+  const args = list(node.arguments);
+  if (transform === undefined || args.length !== 1 || typeof args[0]!.name === "string")
+    return undefined;
+  const argument = valueAt(args[0]!.value, reading);
+  return typeof argument === "number" ? transform(argument) : undefined;
 }
 
 /**
@@ -757,7 +827,7 @@ function runFunction(id: number, args: readonly Data[], reading: Reading): Value
     locals: new Map(),
     values: new Map(),
     depth,
-    steps: reading.frame?.steps ?? { left: FUNCTION_STEPS },
+    steps: reading.frame?.steps ?? reading.steps ?? { left: FUNCTION_STEPS },
   };
   const supplied = new Set<number>();
   for (const argument of args) {
@@ -769,8 +839,8 @@ function runFunction(id: number, args: readonly Data[], reading: Reading): Value
     supplied.add(index);
   }
   const inside: Reading = { ...reading, frame };
-  const end = Number(definition.endInstruction);
-  for (let at = Number(definition.entryInstruction); at <= end;) {
+  const end = Math.min(Number(definition.endInstruction), model.instructions.length);
+  for (let at = Number(definition.entryInstruction); at < end;) {
     if ((frame.steps.left -= 1) < 0) return undefined;
     const instruction = model.instructions[at]!;
     const set = (name: unknown, expression: unknown): boolean => {
@@ -1089,6 +1159,7 @@ export function storedHolds(
     ambiguous: new Set(),
     helpers: new Map(),
     pure: new Set(),
+    clockFunctions: new Set(),
     functions: [],
     instructions: [],
     once: new Map(),
