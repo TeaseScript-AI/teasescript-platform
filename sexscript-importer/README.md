@@ -349,9 +349,16 @@ comparisons with constants give the values that take the missed way. An ask is a
 the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
 that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
 that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
-storage closest to it and plays again the path that led there, to raise the value once more, for as long as each
-session gets closer (100 sessions at most). When no explored session gets there, the way stays `unknown` with the
-reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock, without forward time
+storage closest to it and replays a route: a whole session seen to bring the value closer (up to 1,000 inputs), the one
+with the least work per unit of progress, as the session it comes from took it and then as its replays measure it.
+Every eighth session replays another of the routes kept (eight at most) instead, in turn, as effects depend on the
+state and a route that was worse can become better. Each session is real play from the storage the one before it left,
+and the next starts at once while sessions get closer (100 sessions at most); when one does not, another route is
+tried before the chain gives up. When no explored session gets there, the way stays `unknown` with the reason, such as
+`needs score > 100; best reached: score = 37 after 37 sessions`. The report gives each chain that started sessions with
+its way (`chains`): its sessions, the closest value, the route it repeats (its first inputs and end, its inputs, and its
+operations per unit of progress), how many routes it measured, and its last switches between routes, with why;
+`summary.md` lists the chains with the most sessions. For the clock, without forward time
 (below), the player continues at other wall clock times (times of day, weekdays, later dates) before that step, as a
 real player's time varies; a step after that is a clock step. An answer attempt's states share the first place for 20
 expansions in all, until the condition takes the missed way (a session chain goes on from the storage it reached

@@ -850,6 +850,44 @@ test(
 );
 
 test(
+  "a chain toward a stored count repeats the route with the least work per unit of progress, session after session, measures the others now and then, and reports its route",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // The long way adds two visits after eighty presses; the short way adds one after one press: less work per visit.
+    const source =
+      'let visits = load "fixture.visits", default: 0\n' +
+      'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
+      'if pick == "long" {\n  for step in 1..=80 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\n' +
+      'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
+      'if visits >= 40 {\n  say "Regular."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const way = result.directed.ways.find((entry) => entry.condition === "visits >= 40");
+    assert.equal(way?.reach, "play");
+    const [chain] = way?.chains ?? [];
+    assert.equal(chain?.key, "fixture.visits");
+    assert.ok((chain?.sessions ?? 0) >= 30);
+    // The route repeated is the short way, two inputs; the long way was measured too.
+    assert.deepEqual(chain?.route && [chain.route.at.startsWith("Short way"), chain.route.inputs], [
+      true,
+      2,
+    ]);
+    assert.ok((chain?.routesMeasured ?? 0) >= 2);
+    assert.ok(chain?.switches.some((change) => change.reason === "another route, measured again"));
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

@@ -855,6 +855,12 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
     }
     lines.push(...workingToward(records(coverage.unvisitedBranches)));
+    lines.push(
+      ...sessionChains([
+        ...records(coverage.unvisitedBranches),
+        ...records(fields(report.directed).ways),
+      ]),
+    );
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);
     if (count(engineErrors.count) > 0)
@@ -864,6 +870,37 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * The session chains toward stored values with the most sessions: the route each repeats (its work per unit of
+ * progress), how many routes it measured, and its last switch between routes, with why.
+ */
+function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): string[] {
+  const chains = ways
+    .flatMap((way) =>
+      records(way.chains).map((chain) => ({ chain, at: `${text(way.path)}:${count(way.line)}` })),
+    )
+    .sort((left, right) => count(right.chain.sessions) - count(left.chain.sessions))
+    .slice(0, WORKING_TOWARD_ROWS);
+  if (chains.length === 0) return [];
+  return [
+    "- Session chains (the most sessions first):",
+    ...chains.map(({ chain, at }) => {
+      const route = fields(chain.route);
+      const last = records(chain.switches).at(-1);
+      return (
+        `  - \`${at}\` \`${text(chain.key)}\`: ${count(chain.sessions)} sessions, closest ${text(chain.closest)}; ` +
+        (chain.route === null || chain.route === undefined
+          ? "no route measured"
+          : `route ${text(route.at)} (${count(route.inputs)} inputs, ${count(route.workPerUnit)} operations per unit)`) +
+        `; ${count(chain.routesMeasured)} routes measured` +
+        (last === undefined
+          ? ""
+          : `; last switch at session ${count(last.sessions)}: ${text(last.reason)}`)
+      );
+    }),
+  ];
 }
 
 /** Ways still missed, those with the most code behind them first: what each needs, and why play did not get there. */
