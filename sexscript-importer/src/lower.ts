@@ -90,6 +90,8 @@ interface ClosureInfo {
   implicitParameter: boolean;
   minArgs: number;
   maxArgs: number;
+  /** Declared in a block of the script, such as an `if` body, and lifted to the top as a script function. */
+  nested?: boolean;
 }
 
 export interface HelperFunctionInfo {
@@ -4392,7 +4394,7 @@ function lowerClosureDeclaration(
         context,
         closure,
         "SX_CLOSURE_DISCOVERY",
-        `Closure ${name} was not discovered during the prepass.`,
+        `Closure ${name} is declared in a block of the script and reads a variable of such a block, or another declaration has its name; TeaseScript declares functions at the top of the script, so pass those values as parameters.`,
       ),
     ];
   }
@@ -4498,18 +4500,22 @@ function lowerClosureDeclaration(
         context,
       );
     const ownDiagnostics = context.diagnostics.slice(firstDiagnostic);
-    return [
-      {
-        kind: "function",
-        name,
-        parameters,
-        body: lowered,
-        span,
-        ...(ownDiagnostics.some((diagnostic) => diagnostic.severity === "error")
-          ? { ownDiagnostics }
-          : {}),
-      },
-    ];
+    const declaration: IrStatement = {
+      kind: "function",
+      name,
+      parameters,
+      body: lowered,
+      span,
+      ...(ownDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+        ? { ownDiagnostics }
+        : {}),
+    };
+    // A closure of a block of the script moves to the top, before the first statement that uses it.
+    if (info.nested === true) {
+      context.closureFunctions.push(declaration);
+      return [];
+    }
+    return [declaration];
   } finally {
     context.functionDepth -= 1;
     context.currentFunction = outerFunction;
@@ -16346,13 +16352,7 @@ function moduleLoaderDirectory(closure: AstNode): string | null {
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
   const result = new Map<string, ClosureInfo>();
-  for (const statement of nodeArray(body.statements)) {
-    const expression =
-      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-    if (expression?.kind !== "declaration") continue;
-    const name = variableName(expression.left);
-    const closure = asNode(expression.right);
-    if (name === null || closure?.kind !== "closure") continue;
+  const add = (name: string, closure: AstNode, nested: boolean): void => {
     const implicitParameter = closure.parameterSpecified !== true;
     const parameters = groovyParameters(closure.parameters) ?? [];
     const minArgs = implicitParameter
@@ -16362,7 +16362,53 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
       implicitParameter,
       minArgs,
       maxArgs: implicitParameter ? 0 : parameters.length,
+      ...(nested ? { nested } : {}),
     });
+  };
+  for (const statement of nodeArray(body.statements)) {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    if (expression?.kind !== "declaration") continue;
+    const name = variableName(expression.left);
+    const closure = asNode(expression.right);
+    if (name === null || closure?.kind !== "closure") continue;
+    add(name, closure, false);
+  }
+  // A closure declared in a block of the script, such as an `if` body, becomes a script function at the top too
+  // (TeaseScript declares functions there), where nothing else declares its name and it reads no variable that a block
+  // of the script declares.
+  const declarations = new Map<string, number>();
+  walkAst(body, (node) => {
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    if (name !== null) declarations.set(name, (declarations.get(name) ?? 0) + 1);
+  });
+  const blockLocals = new Set<string>();
+  const nested: Array<{ name: string; closure: AstNode }> = [];
+  const visit = (node: AstNode): void => {
+    if (node.kind === "closure") return;
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      const closure = asNode(node.right);
+      if (name !== null) blockLocals.add(name);
+      if (name !== null && closure?.kind === "closure" && declarations.get(name) === 1)
+        nested.push({ name, closure });
+    }
+    for (const child of nodeChildren(node)) visit(child);
+  };
+  for (const statement of nodeArray(body.statements)) {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    for (const child of nodeChildren(expression?.kind === "declaration" ? expression : statement))
+      visit(child);
+  }
+  const lifted = new Set(nested.map(({ name }) => name));
+  for (const { name, closure } of nested) {
+    let reads = false;
+    walkAst(closure, (node) => {
+      const read = node.kind === "variable" ? variableName(node) : null;
+      if (read !== null && blockLocals.has(read) && !lifted.has(read)) reads = true;
+    });
+    if (!reads && !result.has(name)) add(name, closure, true);
   }
 
   walkAst(body, (node) => {

@@ -1,8 +1,12 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
+// MIGRATION INCOMPLETE: 2 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args) {
+  if action == "scriptCallback4" {
+    scriptCallback4()
+    return
+  }
 }
 function announceCallback1(t) {
   say "Count ${t}"
@@ -24,4 +28,27 @@ function scriptCallback2 {
 // A closure called where it is written calls its function directly.
 let limits = scriptCallback2()
 say "Up to ${limits.high}"
+// A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
+// functions; one that reads a variable of such a block stays unconverted.
+let punish = null
+say "Estim connected?"
+function shock(message, shocks) {
+  say message
+  // NOTE SX_IMPLICIT_RETURN_VALUE line 20: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
+  for it in 1..=floor(shocks) {
+    wait 1
+  }
+}
+function scriptCallback4 {
+  return shock("Ouch", 2)
+}
+if (choose yes: "Yes", no: "No") == "yes" {
+  let note = "Careful"
+  // TODO SX_CLOSURE_DISCOVERY line 23: Closure warn is declared in a block of the script and reads a variable of such a block, or another declaration has its name; TeaseScript declares functions at the top of the script, so pass those values as parameters.
+  // | def warn = { -> show(note) }
+  punish = "scriptCallback4"
+}
+if punish != null and punish != "" {
+  sexscriptLegacyCall(punish, [])
+}
 exit
