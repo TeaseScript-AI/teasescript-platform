@@ -3,13 +3,13 @@
  * opening the package in the TeaseScript Player, and hard-links the packages' legacy Groovy and converted `.tease`
  * files next to it under `source/`, for `serve-catalog.ts` to show as plain text.
  *
- * Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>]... [--explorer <dir>]... [--verified <dir>]
- *   [--approved <file>] <converted-root> <output.html>
+ * Usage: node tools/catalog.ts [--player <origin>] [--build <repository>] [--play-checks <dir>]... [--explorer <dir>]...
+ *   [--verified <dir>] [--approved <file>] <converted-root> <output.html>
  *
  * `--player https://host:port` makes the Player links absolute, for a page served from another origin than the
  * Player; without it they are `/player/?package=<id>`. A package is read and compiled as the Player does: the
- * playground server's package scan, then the real compiler's `compileProject` with the package images (repository
- * build required). The status comes from, in this order: the owner-approved list (`--approved`, a Markdown table
+ * playground server's package scan, then the real compiler's `compileProject` with the package images, from the
+ * build (`npm run build`) of this repository or of the checkout `--build` names, such as the served Player's. The status comes from, in this order: the owner-approved list (`--approved`, a Markdown table
  * whose first column names the package), the frozen verified copies (`--verified`, which replace the converted
  * package in the list), the Player checks of `play-check.ts` (`--play-checks`) for the package's current `.tease`
  * files, and otherwise the compiler and the importer's report in `.report.json`. A verified copy is offered beside
@@ -21,7 +21,7 @@
 import { createHash } from "node:crypto";
 import { copyFile, link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { isRecord } from "../src/ast.ts";
 
@@ -255,6 +255,7 @@ async function main(rawArgs: string[]): Promise<void> {
     allowPositionals: true,
     options: {
       player: { type: "string", default: "" },
+      build: { type: "string" },
       "play-checks": { type: "string", multiple: true },
       explorer: { type: "string", multiple: true },
       verified: { type: "string" },
@@ -263,7 +264,7 @@ async function main(rawArgs: string[]): Promise<void> {
   });
   if (positionals.length !== 2) {
     process.stderr.write(
-      "Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>]... [--explorer <dir>]... [--verified <dir>] [--approved <file>] <converted-root> <output.html>\n",
+      "Usage: node tools/catalog.ts [--player <origin>] [--build <repository>] [--play-checks <dir>]... [--explorer <dir>]... [--verified <dir>] [--approved <file>] <converted-root> <output.html>\n",
     );
     process.exit(2);
   }
@@ -274,7 +275,7 @@ async function main(rawArgs: string[]): Promise<void> {
     values.approved === undefined
       ? new Set<string>()
       : approvedPackages(await readFile(values.approved, "utf8").catch(() => ""));
-  const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools(), {
+  const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools(values.build), {
     ...(values["play-checks"] === undefined
       ? {}
       : { playChecks: values["play-checks"].map((folder) => path.resolve(folder)) }),
@@ -322,9 +323,15 @@ export function packageContentHash(
   return hash.digest("hex");
 }
 
-/** Loads the playground server's package scan and the compiler from the repository build (`npm run build`). */
-export async function loadRepositoryCatalogTools(): Promise<CatalogTools> {
-  const distRoot = new URL("../../dist/", import.meta.url);
+/**
+ * Loads the playground server's package scan and the compiler from the build (`npm run build`) of the repository
+ * checkout `repository`, by default this one.
+ */
+export async function loadRepositoryCatalogTools(repository?: string): Promise<CatalogTools> {
+  const distRoot =
+    repository === undefined
+      ? new URL("../../dist/", import.meta.url)
+      : pathToFileURL(`${path.resolve(repository, "dist")}/`);
   let folderModule: Record<string, unknown>;
   let compilerModule: Record<string, unknown>;
   try {

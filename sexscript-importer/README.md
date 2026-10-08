@@ -132,8 +132,8 @@ node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/exte
 # from sexscript-importer/:
 node tools/play-check.ts [--base https://host:4443] [--runs N] [--steps N] [--only id,id] external/converted external/play-checks
 node tools/verify-package.ts --checks external/play-checks --verified external/verified --manual "<note>" external/converted <id>
-node tools/catalog.ts [--player https://host:port] --play-checks external/play-checks [--explorer <dir>]... \
-  --verified external/verified [--approved docs/APPROVED.md] external/converted external/catalog/index.html
+node tools/catalog.ts [--player https://host:port] [--build <repository>] --play-checks external/play-checks \
+  [--explorer <dir>]... --verified external/verified [--approved docs/APPROVED.md] external/converted external/catalog/index.html
 ```
 
 `convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
@@ -253,7 +253,8 @@ package's current `.tease` files.
 `external/verified/<id>/` and adds a row to [`docs/VERIFIED.md`](docs/VERIFIED.md). It never replaces a verified copy.
 
 `catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
-`compileProject` with the package images. Under the time it was written, in the reader's time zone, a few counts:
+`compileProject` with the package images, from this repository's build or, with `--build`, from that of another
+checkout, such as the one the served Player was built in. Under the time it was written, in the reader's time zone, a few counts:
 the packages listed, that convert fully, compile, and play to the end, then the other counts that are not zero, each
 explained in its tooltip. A filter under each of the title, author, keywords, and description columns narrows the
 rows on that column, the filters combined; a coverage range and a sort order (coverage, crashes, traps) use the
