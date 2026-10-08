@@ -552,6 +552,16 @@ figures that help explain them (states, sessions, time steps, quit visits, traps
 `--favourite` unit with consistently lost lines is marked `EXPLAIN`. Lines are counted from compiling each unit, as the
 explorer counts them.
 
+Known limits:
+
+- Content behind a long automatic chain (a loop of waits with nothing else to do, past a hundred waits) waits longer:
+  such a chain's passes share a cell, so they no longer look new. Seen in BreatheAcademy (the ending after its long
+  countdown; −4.3 points in a 13-unit gate, from one seed) and Domme3 (`spanking.tease` 863–878, after a 300-stroke
+  chain). A later step that weighs work per operation or schedules by session depth should check these first.
+- A step settles at most 1,000 automatic operations (`MAX_AUTO_OPERATIONS`). An automatic run longer than that, such as
+  more than a thousand camera requests in a row, ends the step with the request still pending, and the state is
+  reported as stuck although settling could go on.
+
 ## Tests
 
 ```sh
