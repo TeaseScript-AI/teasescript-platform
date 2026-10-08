@@ -56,6 +56,24 @@ import { packageContentHash } from "./catalog.ts";
 
 const SELF = fileURLToPath(import.meta.url);
 
+/** The search strategies a corpus records, in one order. */
+const STRATEGIES = [
+  "cells",
+  "later",
+  "comparedAnswers",
+  "realign",
+  "progressLeads",
+  "conjunctive",
+  "guidance",
+] as const;
+
+/** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
+function strategiesKey(strategies: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify(
+    Object.fromEntries(STRATEGIES.map((name) => [name, strategies[name] === true])),
+  );
+}
+
 /** What identifies a unit's report, and its compilation; the report of a compiled unit adds an {@link ExploreResult}. */
 interface ReportHeader {
   unit: string;
@@ -412,24 +430,6 @@ interface StoredCorpus {
   /** The search strategies of the run that wrote it, as JSON: an exhausted search with others may not be exhausted. */
   strategies: string;
   entries: CorpusEntry[];
-}
-
-/** The search strategies a corpus records, in one order. */
-const STRATEGIES = [
-  "cells",
-  "later",
-  "comparedAnswers",
-  "realign",
-  "progressLeads",
-  "conjunctive",
-  "guidance",
-] as const;
-
-/** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
-function strategiesKey(strategies: Readonly<Record<string, unknown>>): string {
-  return JSON.stringify(
-    Object.fromEntries(STRATEGIES.map((name) => [name, strategies[name] === true])),
-  );
 }
 
 function corpusFile(corpus: string, dir: string): string {
