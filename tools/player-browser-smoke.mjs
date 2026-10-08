@@ -1506,10 +1506,10 @@ async function debugRoomScenario(cdp, origin) {
   };
 
   const bug = `document.querySelector('[data-debug-room-indicator]')`;
-  // The fill layer under the outline, filled with the theme's error red exactly in the bug's body and head, and whether
+  // The fill layer under the outline, filled with the theme's debug mark exactly in the bug's body and head, and whether
   // the outline's lines keep the text colour.
-  const errorRed = `(() => { const probe = document.createElement('span'); probe.style.color = 'var(--theme-status-error)'; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; })()`;
-  const filled = `[...(${bug}.querySelectorAll('[data-debug-room-fill] path') ?? [])].filter((path) => getComputedStyle(path).fill !== 'none').map((path) => (getComputedStyle(path).fill === ${errorRed} ? '' : 'not red: ') + path.getAttribute('d').slice(0, 6)).join(' ')`;
+  const markRed = `(() => { const probe = document.createElement('span'); probe.style.color = 'var(--theme-debug-mark)'; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; })()`;
+  const filled = `[...(${bug}.querySelectorAll('[data-debug-room-fill] path') ?? [])].filter((path) => getComputedStyle(path).fill !== 'none').map((path) => (getComputedStyle(path).fill === ${markRed} ? '' : 'not red: ') + path.getAttribute('d').slice(0, 6)).join(' ')`;
   const outline = `(() => { const style = getComputedStyle(${bug}.querySelector('svg:not([data-debug-room-fill])')); return style.stroke === style.color && style.fill === 'none'; })()`;
   await navigate(cdp, `${origin}/player/?package=debug-room&room=debug`);
   await waitFor(cdp, `${control} === 'Start debug session'`);

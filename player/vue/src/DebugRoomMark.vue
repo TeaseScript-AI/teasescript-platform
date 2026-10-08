@@ -6,9 +6,9 @@ import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 
 // The debug room's mark before the title in the title pill (DEBUGGER.md "Debug room"), named by the bar's tooltip: an
-// outlined bug, whose body and head are filled with the theme's error red while Debug is on, which stays red whatever the
-// accent; its lines keep the text colour. It takes the pointer for its own tooltip, so hovering it does not also open the
-// cut-off title's.
+// outlined bug, whose body and head are filled with the theme's debug mark, one red in light and dark whatever the
+// accent, while Debug is on; its lines keep the text colour. It takes the pointer for its own tooltip, so hovering it
+// does not also open the cut-off title's.
 const props = defineProps<{ on?: boolean }>();
 const label = computed(() => (props.on ? "Debug session · Debug on" : "Debug session · Debug off"));
 </script>
@@ -56,6 +56,6 @@ const label = computed(() => (props.on ? "Debug session · Debug on" : "Debug se
 /* Lucide's bug draws its body second and its head last. */
 .debug-room-fill :deep(path:nth-child(2)),
 .debug-room-fill :deep(path:nth-child(11)) {
-  fill: var(--theme-status-error, CanvasText);
+  fill: var(--theme-debug-mark, CanvasText);
 }
 </style>
