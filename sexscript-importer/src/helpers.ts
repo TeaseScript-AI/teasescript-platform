@@ -196,6 +196,7 @@ export type HelperName =
   | "slice"
   | "spliced"
   | "repeatList"
+  | "times"
   | "compare"
   | "replaceChars"
   | "askInteger"
@@ -248,7 +249,13 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
-  if (needed.has("loadInteger") || needed.has("loadFloat") || needed.has("slice"))
+  if (needed.has("times")) needed.add("repeatList");
+  if (
+    needed.has("loadInteger") ||
+    needed.has("loadFloat") ||
+    needed.has("slice") ||
+    needed.has("times")
+  )
     needed.add("value");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
@@ -310,6 +317,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "slice",
   "spliced",
   "repeatList",
+  "times",
   "compare",
   "replaceChars",
   "askInteger",
@@ -1368,7 +1376,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS(
             bin("and", bin(">", v("high"), prop(v("value"), "length")), {
               kind: "typeTest",
-              value: v("to"),
+              value: v("high"),
               type: "integer",
             }),
             [set(v("high"), prop(v("value"), "length"))],
@@ -1522,6 +1530,59 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             span: null,
           },
           ret(v("result")),
+        ],
+      ),
+  },
+  // Groovy `value * count` for a value whose type only the running script knows: text and a list repeat, with a
+  // fractional count cut to whole times, and a number multiplies.
+  times: {
+    name: "sexscriptLegacyTimes",
+    build: () =>
+      fn(
+        "sexscriptLegacyTimes",
+        ["value", "count"],
+        [
+          ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+            ret({
+              kind: "call",
+              name: "sexscriptLegacyValue",
+              positional: [
+                {
+                  kind: "methodCall",
+                  target: v("value"),
+                  name: "repeat",
+                  arguments: [
+                    { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
+                  ],
+                },
+              ],
+              named: {},
+            }),
+          ]),
+          ifS({ kind: "typeTest", value: v("value"), type: "list" }, [
+            ret({
+              kind: "call",
+              name: "sexscriptLegacyValue",
+              positional: [
+                {
+                  kind: "call",
+                  name: "sexscriptLegacyRepeatList",
+                  positional: [
+                    v("value"),
+                    { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
+                  ],
+                  named: {},
+                },
+              ],
+              named: {},
+            }),
+          ]),
+          ret({
+            kind: "call",
+            name: "sexscriptLegacyValue",
+            positional: [bin("*", v("value"), v("count"))],
+            named: {},
+          }),
         ],
       ),
   },

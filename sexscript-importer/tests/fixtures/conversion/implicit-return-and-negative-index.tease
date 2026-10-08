@@ -100,7 +100,7 @@ function sexscriptLegacySpliced(value, from, to, values, exclusive = false) {
     }
     high = first + 1
   }
-  if high > value.length and to is integer {
+  if high > value.length and high is integer {
     high = value.length
   }
   let items = value.take(low)

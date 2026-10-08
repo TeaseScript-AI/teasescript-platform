@@ -741,10 +741,16 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
       node.kind === "binary" &&
       ["==", "!=", "in", "<", ">", "<=", ">=", "<=>"].includes(String(node.operator))
     ) {
+      // An ordering puts null before any value, also a number, which the empty text is not.
+      const ordering = !["==", "!=", "in"].includes(String(node.operator));
+      const apart = (side: AstNode | null): boolean =>
+        ordering
+          ? side?.kind === "constant" && typeof side.value === "string" && side.value !== ""
+          : distinct(side);
       const left = asNode(node.left);
       const right = asNode(node.right);
-      if (!distinct(right)) pass(left);
-      if (!distinct(left)) pass(right);
+      if (!apart(right)) pass(left);
+      if (!apart(left)) pass(right);
     }
     // `value.equals(other)` and its kin tell null from an empty value as `==` does.
     if (
@@ -9855,6 +9861,22 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "*") {
     const repeated = repetition(node, context);
     if (repeated !== undefined) return repeated;
+    // A part or a result whose type the importer cannot tell may be text or a list, which Groovy repeated.
+    const leftNode = asNode(node.left);
+    const rightNode = asNode(node.right);
+    if (
+      leftNode !== null &&
+      rightNode !== null &&
+      leftNode.kind !== "variable" &&
+      leftNode.kind !== "constant" &&
+      inferType(leftNode, context.types) === UNKNOWN &&
+      (inferType(rightNode, context.types) & NUMBER) !== 0
+    ) {
+      const value = lowerExpression(leftNode, context);
+      const count = lowerExpression(rightNode, context);
+      if (value === null || count === null) return null;
+      return useHelper(context, "times", [value, count]);
+    }
   }
   if (operator === "instanceof") {
     const test = instanceTest(node, context);
@@ -11491,12 +11513,15 @@ function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
       return { kind: "call", name: "toNumber", positional: [value], named: {} };
     case "String":
     case "java.lang.String": {
-      // Groovy's cast keeps text as it is and null as null.
+      // Groovy's cast keeps text as it is and null as null; a list or an object keeps `toString`, which the compiler
+      // checks, as its text has no faithful form yet.
       const type = inferType(valueNode!, context.types);
       if (onlyOf(type, STRING) && type !== 0) return value;
-      return (type & NULL) === 0
-        ? { kind: "call", name: "toString", positional: [value], named: {} }
-        : useHelper(context, "text", [value]);
+      return (type & NULL) !== 0 &&
+        type !== UNKNOWN &&
+        onlyOf(type, STRING | NUMBER | BOOLEAN | NULL)
+        ? useHelper(context, "text", [value])
+        : { kind: "call", name: "toString", positional: [value], named: {} };
     }
     case "Boolean":
     case "boolean":
