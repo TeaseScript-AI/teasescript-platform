@@ -1054,6 +1054,8 @@ interface Witness {
 interface Left {
   readonly node: number;
   readonly entries: readonly StorageEntry[];
+  /** The storage as JSON, which tells storages apart. */
+  readonly key: string;
   readonly sessions: number;
 }
 
@@ -1435,6 +1437,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const completedLeft: number[] = [];
   let nextFromCompleted = 0;
   let quitVisits = 0;
+  let completedVisits = 0;
   /** With quit-anywhere next visits: the stored cells of the storages next visits started from. */
   const seedCells = new Set<string>();
   const cellsOfLeft = new Map<number, readonly string[]>();
@@ -1687,7 +1690,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const known = leftKeys.get(key);
     if (known === undefined) {
       leftKeys.set(key, left.length);
-      left.push({ node: node.id, entries, sessions: starts[node.start]!.session });
+      left.push({ node: node.id, entries, key, sessions: starts[node.start]!.session });
       if (node.status === "completed") {
         completedLeft.push(left.length - 1);
         completedKeys.add(key);
@@ -1699,6 +1702,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     left.push({
       node: node.id,
       entries: left[known]!.entries,
+      key,
       sessions: starts[node.start]!.session,
     });
     completedLeft.push(left.length - 1);
@@ -2256,12 +2260,19 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     };
     // A few next sessions from what completed sessions stored, as the player's next visit.
     for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
-      // Quit visits have their own count.
-      if (startedFrom.size - quitVisits > MAX_NEXT_SESSIONS || !withinNextShare()) break;
+      // With quit-anywhere next visits, completed ones have their own count.
+      if (
+        (quitAnywhere
+          ? completedVisits >= MAX_NEXT_SESSIONS
+          : startedFrom.size > MAX_NEXT_SESSIONS) ||
+        !withinNextShare()
+      )
+        break;
       const entry = left[completedLeft[nextFromCompleted]!]!;
       const key = JSON.stringify(entry.entries);
       if (startedFrom.has(key)) continue;
       startedFrom.add(key);
+      completedVisits += 1;
       visitFrom(entry, key, true);
       scheduled = true;
     }
@@ -2271,7 +2282,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       let best: number | null = null;
       let bestNew = 0;
       left.forEach((entry, index) => {
-        if (startedFrom.has(JSON.stringify(entry.entries))) return;
+        // A completed session's storage is a completed visit's.
+        if (startedFrom.has(entry.key) || completedKeys.has(entry.key)) return;
         let cells = cellsOfLeft.get(index);
         if (cells === undefined) {
           cells = cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage);
@@ -2285,10 +2297,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       });
       if (best !== null) {
         const entry = left[best]!;
-        const key = JSON.stringify(entry.entries);
-        startedFrom.add(key);
+        startedFrom.add(entry.key);
         quitVisits += 1;
-        visitFrom(entry, key, false);
+        visitFrom(entry, entry.key, false);
         scheduled = true;
       }
     }
@@ -2525,8 +2536,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const node = transition(null, null, begun, starts.length - 1, null);
       reach(node, begun.snapshot);
       // A session after a chosen outcome leaves play its own next visit from the same storage.
-      if (origin !== null && !origin.chosen && !clockStart(starts.at(-1)!))
+      if (origin !== null && !origin.chosen && !clockStart(starts.at(-1)!)) {
         startedFrom.add(JSON.stringify(storage));
+        // A next visit a corpus path made counts as one started from its storage for the cells quit visits look for.
+        if (quitAnywhere)
+          for (const cell of cellsOf(storage, starts[origin.start]!.storage)) seedCells.add(cell);
+      }
       startFrom.set(key, starts.length - 1);
       firstOf.set(starts.length - 1, node.id);
       firstNodeOf.set(starts.length - 1, node.id);

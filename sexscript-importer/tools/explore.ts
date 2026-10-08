@@ -970,14 +970,23 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
   const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
-  // An earlier session that did not complete is one the player quit after its last input.
-  earlier.forEach((session, index) =>
+  // An earlier session that waits after its last input is one the player quit there; the narration stops where a
+  // runtime operation threw.
+  earlier.slice(0, replayed.earlier.length + 1).forEach((session, index) => {
+    const status = replayed.earlier[index];
+    const end =
+      status === undefined
+        ? "a runtime operation threw"
+        : status === "halted"
+          ? "it ends; its storage starts the next"
+          : status === "waiting"
+            ? `the player quits after input ${session.inputs.length}; its storage starts the next`
+            : `it ends ${status}; its storage starts the next`;
     process.stdout.write(
       `Session ${index + 1}${session.wallClockMs === undefined ? "" : ` at ${new Date(session.wallClockMs).toISOString()}`}: ` +
-        `${session.inputs.map(describeInput).join("; ") || "(no input)"}, then ` +
-        `${replayed.earlier[index] === "halted" ? "it ends" : `the player quits after input ${session.inputs.length}`}; its storage starts the next\n`,
-    ),
-  );
+        `${session.inputs.map(describeInput).join("; ") || "(no input)"}, then ${end}\n`,
+    );
+  });
   if (wallClockMs !== EPOCH_MS)
     process.stdout.write(`The last session starts at ${new Date(wallClockMs).toISOString()}\n`);
   const { steps, failure } = replayed;
