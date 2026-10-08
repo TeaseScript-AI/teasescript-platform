@@ -381,6 +381,7 @@ function exhaustedAtStay(engine: Engine, plan: Data, runtime: Runtime): Runtime 
     callReturnInstructions: () => inner.callReturnInstructions(),
     exportTrustedSnapshot: () => inner.exportTrustedSnapshot(),
     exportSnapshot: () => inner.exportSnapshot(),
+    exportTaggedSnapshot: () => inner.exportTaggedSnapshot(),
     fork: () => exhaustedAtStay(engine, plan, inner.fork()),
   };
 }
@@ -397,6 +398,8 @@ test(
         exhaustedAtStay(engine, plan, engine.createFreshRuntimeSession(plan, fresh)),
       createRuntimeSession: (plan, snapshot) =>
         exhaustedAtStay(engine, plan, engine.createRuntimeSession(plan, snapshot)),
+      createTaggedRuntimeSession: (plan, tagged) =>
+        exhaustedAtStay(engine, plan, engine.createTaggedRuntimeSession(plan, tagged)),
     };
     const { plan, diagnostics, lineOf } = await fixture(engine);
     // A session used again after its operation threw would throw RuntimeSessionError out of `explore`.
@@ -433,17 +436,22 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const { plan, diagnostics } = await fixture(engine);
-    // The explorer keeps trusted exports, which the runtime checks only when a session restores one; here it refuses
-    // every state that waits at "Go on".
+    // The explorer keeps tagged exports and restores them; here the runtime refuses every state that waits at "Go on".
     let refused = 0;
+    const refuse = (json: string) => {
+      if (!json.includes('"Go on"')) return;
+      refused += 1;
+      throw Object.assign(new Error("refused"), { name: "RuntimeDataError" });
+    };
     const refusing: Engine = {
       ...engine,
       createRuntimeSession: (target, snapshot) => {
-        if (JSON.stringify(snapshot).includes('"Go on"')) {
-          refused += 1;
-          throw Object.assign(new Error("refused"), { name: "RuntimeDataError" });
-        }
+        refuse(JSON.stringify(snapshot));
         return engine.createRuntimeSession(target, snapshot);
+      },
+      createTaggedRuntimeSession: (target, tagged) => {
+        refuse(tagged.json);
+        return engine.createTaggedRuntimeSession(target, tagged);
       },
     };
     const result = explore(refusing, plan, {

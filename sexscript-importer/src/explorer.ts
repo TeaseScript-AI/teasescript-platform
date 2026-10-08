@@ -19,9 +19,11 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  * list ({@link replay}).
  *
  * Each path runs in an engine-owned runtime session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between
- * operations. The explorer handles the whole state only where it needs it: one trusted export per step for the
- * search's state hash and store (`exportTrustedSnapshot`, as the explorer keeps the snapshot itself), a checked import
- * to go on from a stored state, and a trusted copy (a fork) for each input tried from one state but the last.
+ * operations. The explorer handles the whole state only where it needs it: one tagged export per step
+ * (`exportTaggedSnapshot`: the snapshot's JSON and a tag that proves this process's engine wrote it), which the search
+ * reads for its state hash and keeps in its store as it is; a restore of that tagged JSON to go on from a stored state,
+ * which the runtime does without checking it again while the tag holds; and a trusted copy (a fork) for each input
+ * tried from one state but the last.
  */
 
 /** A runtime result read field by field. */
@@ -42,8 +44,18 @@ const RUNTIME_READS = [
   "callReturnInstructions",
   "exportSnapshot",
   "exportTrustedSnapshot",
+  "exportTaggedSnapshot",
   "fork",
 ] as const;
+
+/**
+ * A snapshot as the runtime writes it for a trusted host: its JSON, and a tag that proves this process's engine wrote it
+ * for one plan (`TaggedRuntimeSnapshot`). Both are kept exactly as they are.
+ */
+export interface TaggedSnapshot {
+  readonly json: string;
+  readonly tag: string;
+}
 
 /**
  * One runtime session, as the explorer drives it. Its results, view, and projections are detached frozen data. An
@@ -65,6 +77,8 @@ export interface Runtime {
   exportTrustedSnapshot: () => Data;
   /** The same, checked by the runtime (`exportSnapshot`), for a host that keeps it apart from the explorer. */
   exportSnapshot: () => Data;
+  /** The state as its JSON with the runtime's tag (`exportTaggedSnapshot`), which a restore in this process trusts. */
+  exportTaggedSnapshot: () => TaggedSnapshot;
   /** An independent session with a copy of the state. */
   fork: () => Runtime;
 }
@@ -77,6 +91,11 @@ export interface Engine {
   createFreshRuntimeSession: (plan: Data, fresh: Data, options?: Data) => Runtime;
   /** A session that goes on from a snapshot, which the runtime checks completely; `options` as for a fresh one. */
   createRuntimeSession: (plan: Data, snapshot: Data, options?: Data) => Runtime;
+  /**
+   * A session that goes on from a tagged snapshot: unchecked when its tag proves that a session of this same plan object
+   * exported it in this process, else checked completely; `options` as for a fresh one.
+   */
+  createTaggedRuntimeSession: (plan: Data, tagged: TaggedSnapshot, options?: Data) => Runtime;
   /** The outcomes of a random draw to try besides its natural one, at most `limit`, and whether they are all. */
   randomDrawAlternatives: (
     draw: Data,
@@ -104,6 +123,7 @@ export async function loadEngine(): Promise<Engine> {
   const compileSource = exported("compileSource");
   const fresh = exported("createFreshRuntimeSession");
   const restore = exported("createRuntimeSession");
+  const restoreTagged = exported("createTaggedRuntimeSession");
   const alternatives = exported("randomDrawAlternatives");
   return {
     compileProject: (sources, options) => {
@@ -120,6 +140,10 @@ export async function loadEngine(): Promise<Engine> {
     createFreshRuntimeSession: (plan, start, options) => runtimeOf(fresh(plan, start, options)),
     createRuntimeSession: (plan, snapshot, options) =>
       runtimeOf(options === undefined ? restore(plan, snapshot) : restore(plan, snapshot, options)),
+    createTaggedRuntimeSession: (plan, tagged, options) =>
+      runtimeOf(
+        options === undefined ? restoreTagged(plan, tagged) : restoreTagged(plan, tagged, options),
+      ),
     randomDrawAlternatives: (draw, limit) => {
       const value: unknown = alternatives(draw, limit);
       const found = isRecord(value) ? value : {};
@@ -138,7 +162,12 @@ function runtimeOf(session: unknown): Runtime {
     }),
   );
   const result = (
-    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportSnapshot" | "exportTrustedSnapshot",
+    name:
+      | (typeof RUNTIME_OPERATIONS)[number]
+      | "view"
+      | "exportSnapshot"
+      | "exportTrustedSnapshot"
+      | "exportTaggedSnapshot",
     ...args: unknown[]
   ): Data => {
     const value: unknown = methods.get(name)!.apply(session, args);
@@ -157,6 +186,12 @@ function runtimeOf(session: unknown): Runtime {
     },
     exportTrustedSnapshot: () => result("exportTrustedSnapshot"),
     exportSnapshot: () => result("exportSnapshot"),
+    exportTaggedSnapshot: () => {
+      const value = result("exportTaggedSnapshot");
+      if (typeof value.json !== "string" || typeof value.tag !== "string")
+        throw new Error("exportTaggedSnapshot() returned an unexpected result shape.");
+      return { json: value.json, tag: value.tag };
+    },
     fork: () => runtimeOf(methods.get("fork")!.apply(session, [])),
   };
 }
@@ -314,6 +349,8 @@ export interface Prompt {
 export interface Step {
   /** The state the step reached, exported once: later operations of {@link runtime} do not change it. */
   readonly snapshot: Data;
+  /** The same export as the runtime wrote it, with its tag, to keep and restore as it is. */
+  readonly tagged: TaggedSnapshot;
   /** The runtime session in that state, to go on from. */
   readonly runtime: Runtime;
   /** Instructions this step executed for the first time, for its kind of coverage (see {@link Session}). */
@@ -380,7 +417,7 @@ function execute(runtime: Runtime): Execution {
 }
 
 /** A step before the state it reached is exported. */
-type Settled = Omit<Step, "snapshot" | "runtime">;
+type Settled = Omit<Step, "snapshot" | "tagged" | "runtime">;
 
 /**
  * The project's plan with the engine, which runs inputs and records the instructions and condition ways they execute.
@@ -500,6 +537,16 @@ export class Session {
     return this.#reached(
       runtime,
       this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS, chosen),
+    );
+  }
+
+  /** A session that goes on from a tagged state this session's engine exported: unchecked while its tag holds. */
+  restoreTagged(tagged: TaggedSnapshot): Runtime {
+    const options = this.#options();
+    return this.#counted(
+      options === undefined
+        ? this.#engine.createTaggedRuntimeSession(this.#plan, tagged)
+        : this.#engine.createTaggedRuntimeSession(this.#plan, tagged, options),
     );
   }
 
@@ -654,7 +701,8 @@ export class Session {
   }
 
   #reached(runtime: Runtime, settled: Settled): Step {
-    return { ...settled, snapshot: runtime.exportTrustedSnapshot(), runtime };
+    const tagged = runtime.exportTaggedSnapshot();
+    return { ...settled, snapshot: parseSnapshot(tagged.json), tagged, runtime };
   }
 
   /** Gives the session in the state `view` shows one input; whether the runtime accepted it. */
@@ -1417,6 +1465,13 @@ export function stateKeys(snapshot: Data): { readonly state: string; readonly lo
       return loop;
     },
   };
+}
+
+/** A snapshot read back from the JSON the runtime wrote. */
+export function parseSnapshot(json: string): Data {
+  const value: unknown = JSON.parse(json);
+  if (!isRecord(value)) throw new Error("A snapshot's JSON is not an object.");
+  return value;
 }
 
 /** A runtime failure as a report shows it, with one-based lines and columns. */

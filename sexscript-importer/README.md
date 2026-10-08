@@ -314,8 +314,8 @@ a value, or a change of one, for the first time counts as reaching new instructi
 of the cells expanded least go first, before the loop key. A cell groups states coarsely: a condition that computes
 with a value (`n + 1 == 3`) can still tell states of one cell apart. A loop that keeps making states no condition
 tells apart, such as a counter no condition reads, so no longer takes most of the search; the report's `search.cells`
-counts the slots, cells, values, and changes found. Waiting states keep their snapshots
-as their exact JSON bytes packed with zstd level 1, after the first eight with a dictionary made of those (up to an
+counts the slots, cells, values, and changes found. Waiting states keep their tagged snapshots (below): the JSON's
+exact bytes packed with zstd level 1, after the first eight with a dictionary made of those, and the tag (up to an
 eighth of the memory, from 256 MiB to 4 GiB, or `--store-mb N`; a state whose snapshot was dropped is replayed from an
 ancestor; `search.store` has the limit, the peak, and the drops). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
@@ -419,10 +419,11 @@ Coverage counts executed plan instructions and maps them to the lines they start
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
 `instructionTrace: true`, and the condition ways come from the trace's branch edges. A path runs in one runtime
 session (`docs/RUNTIME.md#runtime-sessions`), which keeps its state between operations: the explorer exports the state
-once per step, for its hash and the snapshot store, as a trusted export without the runtime's check (it keeps the
-snapshot itself), restores a stored state once to expand it, which the runtime checks (a snapshot it refuses is counted
-under `search.engineErrors`), and tries each input on its own copy: a fork of it for all inputs but the last, which
-goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
+once per step as a tagged snapshot (`exportTaggedSnapshot`: its JSON and a tag that proves this process's engine wrote
+it for this plan), reads the JSON for its hash and keeps both in the snapshot store, restores a stored state once to
+expand it, which the runtime does without checking it again while the tag holds and checks otherwise (a snapshot it
+refuses is counted under `search.engineErrors`), and tries each input on its own copy: a fork of it for all inputs but
+the last, which goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
 from, for comparisons. Each line has
 a label: `play` when a play step executed it, in any session; `chosen` when only play with chosen random outcomes did;
 `clock` when only steps after the wall clock was set did;

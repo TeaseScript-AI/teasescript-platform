@@ -29,6 +29,7 @@ import {
   EPOCH_MS,
   failureOf,
   isClockInput,
+  parseSnapshot,
   Session,
   wallClockOf,
   short,
@@ -43,6 +44,7 @@ import {
   type Setup,
   type Step,
   type StorageEntry,
+  type TaggedSnapshot,
 } from "./explorer.ts";
 
 /**
@@ -535,9 +537,9 @@ export interface ExploreResult {
 }
 
 /**
- * The snapshots of waiting states, so that directed search can go on from any explored state: the exact bytes a snapshot
- * is written as (its JSON now; the engine's exported bytes with their MAC once restores can take them), packed with zstd
- * level 1 and, after the first few, a dictionary made of the first ones' bytes. Above its limit (an eighth of the
+ * The snapshots of waiting states, so that directed search can go on from any explored state: the tagged snapshots the
+ * runtime exported (`exportTaggedSnapshot`), their JSON's exact bytes packed with zstd level 1 (after the first few with
+ * a dictionary made of the first ones' bytes) and their tag, so that a restore takes them unchecked. Above its limit (an eighth of the
  * memory by default, from 256 MiB to 4 GiB) the oldest ones that are not pinned are dropped; a state without one is
  * replayed.
  */
@@ -545,7 +547,7 @@ class SnapshotStore {
   peakBytes = 0;
   evicted = 0;
   readonly limitBytes: number;
-  readonly #entries = new Map<number, { data: Uint8Array; dictionary: boolean }>();
+  readonly #entries = new Map<number, { data: Uint8Array; dictionary: boolean; tag: string }>();
   readonly #pinned = new Set<number>();
   readonly #first: Uint8Array[] = [];
   #dictionary: Buffer | null = null;
@@ -555,17 +557,28 @@ class SnapshotStore {
     this.limitBytes = limitBytes;
   }
 
-  put(id: number, snapshot: Data, pinned = false): void {
-    this.putBytes(id, snapshotBytes(snapshot), pinned);
+  /** Keeps a tagged snapshot: its JSON's bytes and its tag, exactly as the runtime wrote them. */
+  put(id: number, tagged: TaggedSnapshot, pinned = false): void {
+    this.putBytes(id, Buffer.from(tagged.json, "utf8"), tagged.tag, pinned);
   }
 
-  get(id: number): Data | null {
+  /** A kept tagged snapshot as it was written, to restore. */
+  getTagged(id: number): TaggedSnapshot | null {
+    const entry = this.#entries.get(id);
     const bytes = this.getBytes(id);
-    return bytes === null ? null : snapshotFrom(bytes);
+    return entry === undefined || bytes === null
+      ? null
+      : { json: Buffer.from(bytes).toString("utf8"), tag: entry.tag };
   }
 
-  /** Keeps a snapshot's exact bytes, which {@link getBytes} gives back as they were. */
-  putBytes(id: number, bytes: Uint8Array, pinned = false): void {
+  /** A kept snapshot, read. */
+  get(id: number): Data | null {
+    const tagged = this.getTagged(id);
+    return tagged === null ? null : parseSnapshot(tagged.json);
+  }
+
+  /** Keeps a snapshot's exact bytes and its tag, which {@link getBytes} and {@link getTagged} give back as they were. */
+  putBytes(id: number, bytes: Uint8Array, tag: string, pinned = false): void {
     if (this.#dictionary === null && this.#first.length < DICTIONARY_SNAPSHOTS) {
       this.#first.push(bytes);
       if (this.#first.length === DICTIONARY_SNAPSHOTS) {
@@ -583,7 +596,7 @@ class SnapshotStore {
     );
     const known = this.#entries.get(id);
     if (known !== undefined) this.#bytes -= known.data.length;
-    this.#entries.set(id, { data, dictionary });
+    this.#entries.set(id, { data, dictionary, tag });
     this.#bytes += data.length;
     if (pinned) this.#pinned.add(id);
     this.peakBytes = Math.max(this.peakBytes, this.#bytes);
@@ -611,19 +624,6 @@ class SnapshotStore {
     this.#entries.delete(id);
     this.#bytes -= entry.data.length;
   }
-}
-
-/**
- * The exact bytes the store keeps of a snapshot: its JSON. A restore that checks the engine's own exported bytes (with
- * their MAC) would keep those instead, and {@link snapshotFrom} would hand them back.
- */
-function snapshotBytes(snapshot: Data): Uint8Array {
-  return Buffer.from(JSON.stringify(snapshot), "utf8");
-}
-
-function snapshotFrom(bytes: Uint8Array): Data | null {
-  const value: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-  return isRecord(value) ? value : null;
 }
 
 /** A binary heap of open states by rank: lower comes first, compared element by element. */
@@ -1722,7 +1722,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (crash !== null) crashNodes.set(crash, node.id);
     }
     if (node.status === "open") {
-      store.put(node.id, step.snapshot, parent === null);
+      store.put(node.id, step.tagged, parent === null);
       const ask = node.prompt.instruction;
       if (ask !== null && !chosen) {
         const waiting = askNodes.get(ask) ?? [];
@@ -1771,9 +1771,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const replayTo = (node: Node): Runtime | null => {
     const chain: Node[] = [];
     let current: Node | undefined = node;
-    let snapshot: Data | null = null;
+    let snapshot: TaggedSnapshot | null = null;
     while (current !== undefined && snapshot === null) {
-      snapshot = store.get(current.id);
+      snapshot = store.getTagged(current.id);
       if (snapshot === null) {
         chain.push(current);
         current = current.parent === null ? undefined : nodes[current.parent];
@@ -1792,7 +1792,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
   /** A runtime session in a node's state: from its stored snapshot, or replayed. */
   const runtimeOf = (node: Node): Runtime | null => {
-    const stored = store.get(node.id);
+    const stored = store.getTagged(node.id);
     return stored === null ? replayTo(node) : restore(node, stored);
   };
 
@@ -1801,13 +1801,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     store.get(node.id) ?? replayTo(node)?.exportTrustedSnapshot() ?? null;
 
   /**
-   * A runtime session in the state of a node's snapshot. The snapshots are trusted exports (`docs/RUNTIME.md#runtime-
-   * sessions`), which the runtime checks here, where they cross into it again: a snapshot it refuses
-   * (`RuntimeDataError`) is a problem of the explorer or the runtime, counted with the engine errors; null then.
+   * A runtime session in the state of a node's tagged snapshot (`docs/RUNTIME.md#runtime-sessions`), which the runtime
+   * takes unchecked while its tag holds and checks otherwise: a snapshot it refuses (`RuntimeDataError`) is a problem of
+   * the explorer or the runtime, counted with the engine errors; null then.
    */
-  const restore = (node: Node, snapshot: Data): Runtime | null => {
+  const restore = (node: Node, snapshot: TaggedSnapshot): Runtime | null => {
     try {
-      return session.restore(snapshot);
+      return session.restoreTagged(snapshot);
     } catch (error) {
       if (error instanceof Error && error.name === "RuntimeSessionError") throw error;
       engineErrors.count += 1;
@@ -2799,17 +2799,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (leading && node.lead !== null) node.lead.remaining -= 1;
     let refunded = false;
     // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
-    const stored = store.get(node.id);
-    const base = stored === null ? replayTo(node) : restore(node, stored);
+    const tagged = store.getTagged(node.id);
+    const base = tagged === null ? replayTo(node) : restore(node, tagged);
+    // The stored snapshot read only where it is needed.
+    let read: Data | null | undefined;
+    const storedSnapshot = () => (read ??= tagged === null ? null : parseSnapshot(tagged.json));
     if (base === null) {
       node.status = "expanded";
       continue;
     }
-    const inputs = session.options(base, base.view(), () => stored ?? base.exportTrustedSnapshot());
+    const inputs = session.options(
+      base,
+      base.view(),
+      () => storedSnapshot() ?? base.exportTrustedSnapshot(),
+    );
     // With forward time, a state that waits where a clock condition is read next can also continue later.
     if (times !== null && clockAfter.has(clockKey(node.waitsAt)))
       for (const gap of timeSteps(
-        stored ?? base.exportTrustedSnapshot(),
+        storedSnapshot() ?? base.exportTrustedSnapshot(),
         node.waitsAt,
         wallEnd[node.id]!,
         timeCell(node),
@@ -2845,7 +2852,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     let productive = false;
     node.status = "partial";
     const closeness =
-      distanceTargets.length === 0 ? [] : distances(stored ?? base.exportTrustedSnapshot());
+      distanceTargets.length === 0
+        ? []
+        : distances(storedSnapshot() ?? base.exportTrustedSnapshot());
     // A state after a chosen random outcome goes back to its queue when its share is spent, to go on later with the
     // inputs it has not tried.
     let ran = 0;
