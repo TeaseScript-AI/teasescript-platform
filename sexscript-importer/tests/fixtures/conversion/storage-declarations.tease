@@ -88,4 +88,14 @@ if (choose yes: "Yes", no: "No") == "yes" {
   points = 90 + (points - 90) / 2
 }
 save 7 + points as "game.points"
+// A value of unknown type that such a variable gets too may be of any type, so the key the result is saved under stays
+// open, and its text read reads whatever is stored.
+function echo(n) {
+  return n
+}
+let score = sexscriptLegacyLoadInteger("game.points")
+score = echo(1.5)
+save 7 + score as "game.score"
+// NOTE SX_LOAD_STRING_TEXT line 51: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.
+say "Score ${load("game.score", default: sexscriptLegacyValue(""))}"
 exit

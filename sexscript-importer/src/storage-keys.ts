@@ -426,6 +426,8 @@ export function withStorageDefaults(
   layout: PackageLayout = { published: programs.map(() => true), main: null },
 ): MigrationProgram[] {
   const saved = new Map<string, Set<string>>();
+  // Keys that a value of no known type is saved under, which may be a number or another value (`open`).
+  const openSaved = new Set<string>();
   const defaulted = new Map<string, Set<string>>();
   const read = new Map<string, Set<string>>();
   const note = (map: Map<string, Set<string>>, key: string, type: string | null): void => {
@@ -448,7 +450,8 @@ export function withStorageDefaults(
     const scan = (items: IrStatement[]): IrStatement[] =>
       items.map((item) => {
         const key = item.kind === "save" ? literalKey(item.key) : null;
-        if (key !== null && item.kind === "save")
+        if (key !== null && item.kind === "save" && item.open === true) openSaved.add(key);
+        else if (key !== null && item.kind === "save")
           note(
             saved,
             key,
@@ -466,6 +469,8 @@ export function withStorageDefaults(
   const routed = new Map<string, Set<string>>();
   for (const [key, types] of read) {
     const held = saved.has(key) ? [...saved.get(key)!] : [...types];
+    // A value of an open type may be of another type than any read.
+    if (openSaved.has(key)) held.push("");
     const kept = [...types].filter((type) => held.every((other) => other === type));
     if (kept.length === types.size) continue;
     routed.set(key, new Set([...types].filter((type) => !kept.includes(type))));
@@ -473,7 +478,9 @@ export function withStorageDefaults(
     else read.set(key, new Set(kept));
   }
   const keyType = (key: string): string | null =>
-    keptType(saved.get(key)) ?? (saved.has(key) ? null : keptType(defaulted.get(key)));
+    openSaved.has(key)
+      ? null
+      : (keptType(saved.get(key)) ?? (saved.has(key) ? null : keptType(defaulted.get(key))));
 
   const fill = (value: IrExpression): IrExpression => {
     const next = mapChildren(value, fill);
@@ -495,7 +502,13 @@ export function withStorageDefaults(
   }));
   // The type a key holds: what its reads read and default to and what is saved under it, a union where they mix.
   const declaredType = (key: string): string | null =>
-    unionType([...(read.get(key) ?? []), ...(defaulted.get(key) ?? []), ...(saved.get(key) ?? [])]);
+    openSaved.has(key)
+      ? null
+      : unionType([
+          ...(read.get(key) ?? []),
+          ...(defaulted.get(key) ?? []),
+          ...(saved.get(key) ?? []),
+        ]);
   const textKeys = new Set(
     [...new Set([...read.keys(), ...saved.keys(), ...defaulted.keys()])].filter(
       (key) => declaredType(key) === "string",

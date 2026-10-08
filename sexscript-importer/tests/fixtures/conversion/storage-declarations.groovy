@@ -42,3 +42,10 @@ if (loadInteger("game.points") == null) save("game.points", 80)
 def points = loadInteger("game.points")
 if (getBoolean("Halve the distance to 90?")) points = 90 + (points - 90) / 2
 save("game.points", 7 + points)
+// A value of unknown type that such a variable gets too may be of any type, so the key the result is saved under stays
+// open, and its text read reads whatever is stored.
+def echo = { n -> n }
+def score = loadInteger("game.points")
+score = echo(1.5)
+save("game.score", 7 + score)
+show("Score " + loadString("game.score"))

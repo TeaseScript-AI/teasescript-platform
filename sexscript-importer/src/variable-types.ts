@@ -592,6 +592,7 @@ export function enforceVariableTypes(
           const type = saved.get(statement);
           const valueType = type === undefined ? null : annotation(nonNull(type));
           if (statementConflicts.has(statement)) return statement;
+          if (type === OPEN_SAVE) return withIntegerIndexes({ ...statement, open: true }, indexes);
           return withIntegerIndexes(
             valueType === null ? statement : { ...statement, valueType },
             indexes,
@@ -1303,16 +1304,28 @@ function analyse(
     analysis.returned.set(item.name, returns);
     returns = null;
   }
+  // A variable that a whole-number or number read starts and that also gets a value of unknown type.
+  const openRead = (found: Binding): boolean => {
+    const start = found.declaration?.value;
+    return (
+      start?.kind === "load" &&
+      (start.integer === true || start.number === true) &&
+      unknownAssigned.has(found)
+    );
+  };
   for (const [item, variable] of savedVariables) {
     const known = assignedTypes.get(variable);
-    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind === "unknown" && known !== undefined)
-      analysis.saved.set(item, sharedValueType(known));
+    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind !== "unknown") continue;
+    if (openRead(variable)) analysis.saved.set(item, OPEN_SAVE);
+    else if (known !== undefined) analysis.saved.set(item, sharedValueType(known));
   }
   // A saved value computed from a variable that a whole-number or number read starts, `7 + points`, takes the type of
   // that read with the variable's later values: Groovy's `90 + (points - 90) / 2` made a number of a whole-number read.
-  // Another variable without a type of its own, such as a parameter, stays unknown.
+  // Another variable without a type of its own, such as a parameter, stays unknown; one that a read starts and that also
+  // gets a value of unknown type makes the save open.
   for (const [item, scope] of savedScopes) {
     if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind !== "unknown") continue;
+    let open = false;
     const type = expressionType(
       item.value,
       (name) => {
@@ -1322,11 +1335,11 @@ function analyse(
         if (own !== undefined && nonNull(own).kind !== "unknown")
           return scope.rulesOutNull(found) ? nonNull(own) : own;
         const start = found.declaration?.value;
-        if (
-          start?.kind !== "load" ||
-          (start.integer !== true && start.number !== true) ||
-          unknownAssigned.has(found)
-        )
+        if (openRead(found)) {
+          open = true;
+          return UNKNOWN;
+        }
+        if (start?.kind !== "load" || (start.integer !== true && start.number !== true))
           return UNKNOWN;
         const read = scalar(start.number === true ? "number" : "integer");
         return sharedValueType([read, ...(assignedTypes.get(found) ?? [])]);
@@ -1334,6 +1347,7 @@ function analyse(
       (name) => results.get(name),
     );
     if (nonNull(type).kind !== "unknown") analysis.saved.set(item, type);
+    else if (open) analysis.saved.set(item, OPEN_SAVE);
   }
   return analysis;
 }
@@ -2291,6 +2305,11 @@ const TRUTH_HELPER = "sexscriptLegacyTruth";
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
 /** Operators that need one type on each side, where an element of several types is read open (findIndexes). */
+/**
+ * The saved type of a value that a number read starts and a value of unknown type may change (analyse): unknown, and
+ * the save keeps the key's type open (`open`).
+ */
+const OPEN_SAVE: TeaseType = { kind: "unknown" };
 const OPEN_OPERATORS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">="]);
 /** Elements of lists of several types that an operation reads open, through sexscriptLegacyValue (findIndexes). */
 const openElements = new WeakSet<IrExpression>();
