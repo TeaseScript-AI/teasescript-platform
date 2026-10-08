@@ -241,6 +241,7 @@ const PIN_STORAGE_KEY = "sexscript-catalog-pins";
 /** How the explorer's reach labels read in the Explorer details; see `Reach` in `src/explorer.ts`. */
 const REACH_LABELS: Readonly<Record<string, string>> = {
   play: "reached by play",
+  chosen: "reached by play with chosen random outcomes",
   seededState: "reached only from a prepared state",
   unreachable: "proven unreachable",
   unknown: "of unknown reach",

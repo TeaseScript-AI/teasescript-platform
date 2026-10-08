@@ -5,8 +5,8 @@
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
- *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] <unit-dir>...
- *          --out <dir>
+ *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
+ *          [--[no-]random-choices] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -20,8 +20,8 @@
  * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too), and conjunctive
  * steering (a way that needs all parts of its condition is steered to by their summed distance) are on by default
  * (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`
- * switch them off). `--guidance` leads states toward the largest region of code not reached yet (see
- * `src/explorer-search.ts`).
+ * switch them off). `--guidance` leads states toward the largest region of code not reached yet, and
+ * `--random-choices` lets the explorer choose the outcomes of random draws (see `src/explorer-search.ts`).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -50,6 +50,7 @@ import {
   replay,
   type Engine,
   type ExplorerInput,
+  type RandomChoice,
   type SessionPath,
 } from "../src/explorer.ts";
 import { packageContentHash } from "./catalog.ts";
@@ -65,6 +66,7 @@ const STRATEGIES = [
   "progressLeads",
   "conjunctive",
   "guidance",
+  "randomChoices",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -121,6 +123,7 @@ async function main(args: string[]): Promise<void> {
       "progress-leads": { type: "boolean", default: true },
       conjunctive: { type: "boolean", default: true },
       guidance: { type: "boolean", default: false },
+      "random-choices": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -164,8 +167,8 @@ async function main(args: string[]): Promise<void> {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
-        "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] <unit-dir>...\n" +
-        "         --out <dir>\n" +
+        "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
+        "         [--[no-]random-choices] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -207,6 +210,7 @@ async function main(args: string[]): Promise<void> {
             progressLeads: values["progress-leads"],
             conjunctive: values.conjunctive,
             guidance: values.guidance,
+            randomChoices: values["random-choices"],
           },
         },
         out,
@@ -249,6 +253,7 @@ interface RunSettings {
     progressLeads: boolean;
     conjunctive: boolean;
     guidance: boolean;
+    randomChoices: boolean;
   };
 }
 
@@ -595,7 +600,9 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
     `${fromCorpus}${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
     `${crashes.length} crashes, ${traps.length} traps, ` +
     `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
-    `directed ${directed.reached.play} play + ${directed.reached.clock} clock of ${directed.targets}, ` +
+    `directed ${directed.reached.play} play + ${directed.reached.clock} clock` +
+    (directed.reached.chosen === undefined ? "" : ` + ${directed.reached.chosen} chosen`) +
+    ` of ${directed.targets}, ` +
     `${search.sessions} sessions (longest chain ${directed.multiSession.longestChain})` +
     (corpus === null ? "" : `, ${corpus.written} corpus entries kept`) +
     `, ${search.operations} operations, ${Math.round(search.cpuMs / 1000)} s CPU` +
@@ -747,8 +754,9 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     }
     const reach = fields(coverage.reach);
     lines.push(
-      `- Lines: ${count(reach.play)} play, ${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ` +
-        `${count(reach.unknown)} unknown`,
+      `- Lines: ${count(reach.play)} play, ` +
+        (reach.chosen === undefined ? "" : `${count(reach.chosen)} play (chosen random), `) +
+        `${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ${count(reach.unknown)} unknown`,
     );
     const directed = fields(report.directed);
     const reached = fields(directed.reached);
@@ -760,7 +768,9 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       )
       .join(", ");
     lines.push(
-      `- Directed search: ${count(reached.play)} play and ${count(reached.clock)} clock of ` +
+      `- Directed search: ${count(reached.play)} play` +
+        (reached.chosen === undefined ? "" : `, ${count(reached.chosen)} play (chosen random),`) +
+        ` and ${count(reached.clock)} clock of ` +
         `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
         `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
@@ -806,6 +816,25 @@ function parseInputs(value: unknown): ExplorerInput[] | null {
 }
 
 function parseInput(value: unknown): ExplorerInput | null {
+  const input = parseInputKind(value);
+  if (input === null || !isRecord(value) || value.random === undefined) return input;
+  // The random outcomes the explorer chose during the input; the runtime checks each outcome against its draw.
+  if (!Array.isArray(value.random) || value.random.length === 0) return null;
+  const random: RandomChoice[] = [];
+  for (const choice of value.random) {
+    if (
+      !isRecord(choice) ||
+      !Number.isSafeInteger(choice.drawId) ||
+      typeof choice.site !== "string" ||
+      !isRecord(choice.outcome)
+    )
+      return null;
+    random.push({ drawId: Number(choice.drawId), site: choice.site, outcome: choice.outcome });
+  }
+  return { ...input, random };
+}
+
+function parseInputKind(value: unknown): ExplorerInput | null {
   if (!isRecord(value)) return null;
   const label = text(value.label);
   switch (value.kind) {
@@ -965,6 +994,15 @@ function describeGap(milliseconds: number): string {
 }
 
 function describeInput(input: ExplorerInput): string {
+  const chosen = (input.random ?? []).map(
+    (choice) => `${choice.site} ${JSON.stringify(choice.outcome)}`,
+  );
+  return chosen.length === 0
+    ? describeInputKind(input)
+    : `${describeInputKind(input)} (random chosen: ${chosen.join(", ")})`;
+}
+
+function describeInputKind(input: ExplorerInput): string {
   switch (input.kind) {
     case "option":
       return `choose ${input.index}: ${input.label}`;

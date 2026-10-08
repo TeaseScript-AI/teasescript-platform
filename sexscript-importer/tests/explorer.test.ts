@@ -1194,3 +1194,73 @@ test(
     );
   },
 );
+
+test(
+  "with random choices, other outcomes of a draw are steps of play with chosen random outcomes, which repros, the corpus, and replays keep",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'showButton "Go"\nif chance(25) {\n  say "Lucky."\n}\nlet roll = randomInteger(1..=3)\nif roll == 1 {\n' +
+      '  say "One."\n} else if roll == 2 {\n  say "Two."\n} else {\n  say "Three."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const lineOf = (text: string) =>
+      source.split("\n").findIndex((line) => line.includes(text)) + 1;
+    const said = ["Lucky.", "One.", "Two.", "Three."].map(lineOf);
+    const run = (randomChoices: boolean, corpus: readonly CorpusEntry[] = []) =>
+      explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 5000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        corpus,
+        randomChoices,
+      });
+    const unvisited = (result: ReturnType<typeof run>) =>
+      said.filter((line) =>
+        result.coverage.files[0]!.unvisited.some((range) => {
+          const [from, to = from] = range.lines.split("-").map(Number);
+          return line >= from! && line <= to!;
+        }),
+      );
+    // Natural play takes one outcome of each draw: at least two of the texts are missed.
+    const plain = run(false);
+    assert.ok(unvisited(plain).length >= 2);
+    assert.equal(plain.coverage.reach.chosen, undefined);
+    const chosen = run(true);
+    assert.equal(chosen.search.stoppedBy, "exhausted");
+    assert.deepEqual(unvisited(chosen), []);
+    assert.ok(chosen.coverage.reach.chosen! >= 2);
+    assert.equal(chosen.coverage.unvisitedBranches.length, 0);
+    // The corpus keeps the paths with chosen outcomes: only the outcomes chosen, each another than natural play's, and
+    // a replay takes the same way each time.
+    const entries = chosen.corpus?.entries ?? [];
+    const natural = replay(engine, plan, 1, [{ kind: "button", label: "Go" }]).steps.at(-1)!.texts;
+    const forced = entries.filter((entry) =>
+      entry.inputs.some((input) => input.random !== undefined),
+    );
+    assert.ok(forced.length >= 2);
+    const probe = new Session(engine, plan, 1);
+    probe.randomChoices = true;
+    const started = probe.start();
+    const draws = probe.apply(started.runtime, { kind: "button", label: "Go" }, false)!.draws;
+    const naturalOf = new Map(draws.map((draw) => [draw.drawId, JSON.stringify(draw.natural)]));
+    assert.equal(naturalOf.size, 2);
+    for (const entry of forced) {
+      for (const choice of entry.inputs.flatMap((input) => input.random ?? []))
+        assert.notEqual(JSON.stringify(choice.outcome), naturalOf.get(choice.drawId));
+      const replayed = replay(engine, plan, 1, entry.inputs);
+      const texts = replayed.steps.at(-1)!.texts;
+      assert.equal(replayed.error, null);
+      assert.notDeepEqual(texts, natural);
+      assert.deepEqual(replay(engine, plan, 1, entry.inputs).steps.at(-1)!.texts, texts);
+    }
+    // A run without random choices replays them, as play with chosen outcomes.
+    const resumed = run(false, entries);
+    assert.deepEqual(unvisited(resumed), []);
+    assert.ok(resumed.coverage.reach.chosen! >= 2);
+  },
+);

@@ -97,6 +97,9 @@ const MAX_DIRECTED_ANSWERS = 6;
 const MAX_SUFFIX = 60;
 /** Variables whose closeness to a comparison steers the search at the same time. */
 const MAX_DISTANCE_TARGETS = 8;
+/** With random choices: the other outcomes tried of one draw, and the draws of one step that get them. */
+const RANDOM_ALTERNATIVES = 3;
+const RANDOM_DRAWS_PER_STEP = 4;
 /** With guidance: the fewest instructions a region of code not reached yet must have to be led toward. */
 const MIN_REGION = 10;
 /** The target of the guidance lead, which is no condition's. */
@@ -156,6 +159,8 @@ interface Node {
   readonly start: number;
   /** Whether its session started at another wall clock, or its path set the clock. */
   readonly clock: boolean;
+  /** Whether its path chose a random outcome (`ExplorerInput.random`). */
+  readonly chosen: boolean;
   /** The directed attempt, or closeness to a comparison, whose first place it shares; null for none. */
   readonly lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
@@ -234,6 +239,13 @@ export interface ExploreOptions {
    * of code play has not reached yet shares a lead toward it, as closeness to a comparison does. Off by default.
    */
   readonly guidance?: boolean;
+  /**
+   * Random outcomes as choices: the random draws a step makes that pick what happens (`RANDOM_KINDS`) also get their
+   * other outcomes (at most {@link RANDOM_ALTERNATIVES} each, each outcome of a site once), as steps with the same input
+   * and that choice (`ExplorerInput.random`), which their paths keep; natural outcomes are not recorded. Play after a
+   * chosen outcome is labelled "play (chosen random)" (`chosen`). Off by default.
+   */
+  readonly randomChoices?: boolean;
 }
 
 /**
@@ -293,12 +305,17 @@ export interface CrashReport extends Repro {
   states: number;
   /** Whether every path found to it set the wall clock. */
   clock: boolean;
+  /** True when its path chose a random outcome: then no play path without chosen outcomes was found. */
+  chosen?: boolean;
   /** The shortest path found to the failure (`earlier`, `wallClockMs`, `inputs`), a play one when there is. */
   texts: readonly string[];
 }
 
-/** How a line was reached (see the module documentation). */
-export type Reach = "play" | "clock" | "unreachable" | "unknown";
+/**
+ * How a line or way was reached: by play; by play with a chosen random outcome ("play (chosen random)", which counts as
+ * play); only by clock steps; or not, proven unreachable or of unknown reach.
+ */
+export type Reach = "play" | "chosen" | "clock" | "unreachable" | "unknown";
 
 /** Line coverage of one file; `unvisited` ranges hold the lines play did not reach, with what else is known. */
 export interface FileCoverage {
@@ -306,7 +323,7 @@ export interface FileCoverage {
   coverableLines: number;
   visitedLines: number;
   percent: number;
-  unvisited: { lines: string; reach: Exclude<Reach, "play">; reason?: string }[];
+  unvisited: { lines: string; reach: Exclude<Reach, "play" | "chosen">; reason?: string }[];
 }
 
 /** What a condition's missed way depends on, as directed search read it. */
@@ -331,7 +348,7 @@ export interface UnvisitedBranch {
   targetInstruction: number;
   targetLine: number | null;
   /** `clock` when a clock step took the missed way, `unreachable` for a constant condition. */
-  reach: Exclude<Reach, "play">;
+  reach: Exclude<Reach, "play" | "chosen">;
   /** Why the way is unreachable, or what kept directed search from it. */
   reason?: string;
   /** What directed search found the condition depends on, and the attempts it made. */
@@ -348,7 +365,7 @@ export interface ReachedBranch {
   condition: string;
   /** The way that was reached. */
   way: "true" | "false" | "enter" | "exit";
-  reach: "play" | "clock";
+  reach: "play" | "chosen" | "clock";
   /** `directed` when a directed attempt or a step after one took it, `search` otherwise. */
   via: "directed" | "search";
   sources: SourceKind[];
@@ -445,11 +462,11 @@ export interface ExploreResult {
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
     coverableLines: number;
-    /** Lines play reached. */
+    /** Lines play reached, also with chosen random outcomes. */
     visitedLines: number;
     percent: number;
-    /** Coverable lines by label. */
-    reach: Record<Reach, number>;
+    /** Coverable lines by reach; `chosen` only with random choices. */
+    reach: Partial<Record<Reach, number>>;
     instructions: number;
     visitedInstructions: number;
     /**
@@ -466,7 +483,8 @@ export interface ExploreResult {
     attempts: number;
     /** Steps that directed attempts took. */
     transitions: number;
-    reached: { play: number; clock: number };
+    /** With random choices also `chosen`: ways only play with a chosen random outcome reached. */
+    reached: { play: number; clock: number; chosen?: number };
     /** Reached targets whose shortest path spans more than one session, and the most sessions one took. */
     multiSession: { ways: number; longestChain: number };
     /** Targets and reached targets by what their condition depends on. */
@@ -908,7 +926,7 @@ interface Target {
   /** With realignment: the goals of the earlier conditions of its `else if` chain taking their other way. */
   readonly guards: readonly Guard[];
   attempts: number;
-  reach: { label: "play" | "clock"; via: "directed" | "search"; repro: Repro } | null;
+  reach: { label: "play" | "chosen" | "clock"; via: "directed" | "search"; repro: Repro } | null;
   /** Session chains toward the stored values its condition needs, by key. */
   readonly chains: Map<string, Chain>;
   /** What keeps directed search from the way, when known. */
@@ -1005,6 +1023,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const instructions = list(plan.instructions);
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
+  const chooses = options.randomChoices === true;
+  // Corpus paths with chosen random outcomes replay them also without random choices; other draws stay natural.
+  session.randomChoices =
+    chooses ||
+    (options.corpus ?? []).some((entry) =>
+      [...(entry.earlier ?? []), entry].some((part) =>
+        part.inputs.some((input) => input.random !== undefined),
+      ),
+    );
+  /** With random choices: the outcomes tried at each draw site, so that each is tried once. */
+  const randomTried = new Set<string>();
   const flow = new DataFlow(plan, instructions, {
     computedPrompts: options.comparedAnswers === true,
   });
@@ -1331,6 +1360,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   ): Node => {
     const start = starts[startIndex]!;
     const clock = (parent?.clock ?? clockStart(start)) || (input !== null && isClockInput(input));
+    const chosen = (parent?.chosen ?? false) || (input?.random?.length ?? 0) > 0;
     const inherited = lead ?? (parent !== null && active(parent.lead) ? parent.lead : null);
     const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
     const stepItems = items === null ? NO_ITEMS : items.of(step, clock);
@@ -1355,12 +1385,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         witnesses.set(instruction, { node: parent?.id ?? null, start: startIndex, input });
       const target = targets.get(way);
       if (target === undefined) continue;
-      const label = clock ? "clock" : "play";
+      const label = clock ? "clock" : chosen ? "chosen" : "play";
       const known = target.reach;
       const knownSessions = known === null ? 0 : 1 + (known.repro.earlier?.length ?? 0);
+      const strength = (reach: "play" | "chosen" | "clock") =>
+        reach === "play" ? 0 : reach === "chosen" ? 1 : 2;
       if (
         known === null ||
-        (known.label === "clock" && label === "play") ||
+        strength(label) < strength(known.label) ||
         (known.label === label &&
           (start.session < knownSessions ||
             (start.session === knownSessions && length < known.repro.inputs.length)))
@@ -1401,6 +1433,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       loop: keys.loop,
       start: startIndex,
       clock,
+      chosen,
       lead: inherited,
       rank: [
         step.newInstructions > 0 || place?.novel === true ? 0 : repeats === 0 ? 1 : 2,
@@ -1494,7 +1527,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const runtime = restore(current, snapshot);
     if (runtime === null) return null;
     for (const step of chain.reverse()) {
-      if (step.input === null || !session.advance(runtime, step.input, step.clock)) return null;
+      if (step.input === null || !session.advance(runtime, step.input, step.clock, step.chosen))
+        return null;
     }
     return runtime;
   };
@@ -1532,7 +1566,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    */
   const step = (node: Node, runtime: Runtime, input: ExplorerInput): Step | null => {
     try {
-      const next = session.apply(runtime, input, node.clock);
+      const next = session.apply(runtime, input, node.clock, node.chosen);
       if (next === null) rejectedInputs += 1;
       else transitions += 1;
       return next;
@@ -2431,16 +2465,33 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     node.status = "partial";
     const closeness =
       distanceTargets.length === 0 ? [] : distances(stored ?? base.exportTrustedSnapshot());
-    for (const [index, input] of inputs.entries()) {
+    for (let index = 0; index < inputs.length; index += 1) {
+      const input = inputs[index]!;
       const stop = spent();
       if (stop !== null) {
         stoppedBy = stop;
         break search;
       }
       const work = session.operations;
-      const next = step(node, index === inputs.length - 1 ? base : base.fork(), input);
+      // With random choices the state's session stays as it is: other outcomes may follow the last input.
+      const last = index === inputs.length - 1 && !chooses;
+      const next = step(node, last ? base : base.fork(), input);
       if (leading) directedWork += session.operations - work;
       if (next === null) continue;
+      // The other outcomes of the draws the step made, each with the same input: once per outcome of a site.
+      for (const draw of chooses ? next.draws.slice(0, RANDOM_DRAWS_PER_STEP) : []) {
+        if (typeof draw.drawId !== "number" || typeof draw.site !== "string") continue;
+        for (const outcome of engine.randomDrawAlternatives(draw, RANDOM_ALTERNATIVES)
+          .alternatives) {
+          const tried = `${draw.site} ${JSON.stringify(outcome)}`;
+          if (randomTried.has(tried)) continue;
+          randomTried.add(tried);
+          inputs.push({
+            ...input,
+            random: [...(input.random ?? []), { drawId: draw.drawId, site: draw.site, outcome }],
+          });
+        }
+      }
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
@@ -2488,6 +2539,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     constants,
     fixed,
     targets,
+    session.randomChoices,
   );
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
   const sessionCount = Math.max(0, ...starts.map((start) => start.session));
@@ -2584,6 +2636,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     targets,
     attemptCount,
     directedTransitions,
+    session.randomChoices,
   );
   const corpus = corpusResult();
   // The run's time and CPU time end here, with everything but the search figures computed.
@@ -2753,6 +2806,15 @@ function inputKey(input: ExplorerInput): string {
 function aligned(input: ExplorerInput, options: readonly ExplorerInput[]): ExplorerInput | null {
   // An input that fits as it is stays the same input.
   if (fitsPending(input, options)) return input;
+  // One that takes its place keeps the random outcomes it chose.
+  const found = alignedKind(input, options);
+  return found === null || input.random === undefined ? found : { ...found, random: input.random };
+}
+
+function alignedKind(
+  input: ExplorerInput,
+  options: readonly ExplorerInput[],
+): ExplorerInput | null {
   switch (input.kind) {
     case "option":
       return (
@@ -2965,14 +3027,25 @@ function recordCrash(
   const key = `${failure.code}@${failure.path}:${failure.line}:${failure.column}-${failure.endLine}:${failure.endColumn}`;
   const known = crashes.get(key);
   if (known === undefined) {
-    crashes.set(key, { ...failure, states: 1, clock: node.clock, ...repro, texts: step.texts });
+    crashes.set(key, {
+      ...failure,
+      states: 1,
+      clock: node.clock,
+      ...(node.chosen ? { chosen: true } : {}),
+      ...repro,
+      texts: step.texts,
+    });
     return key;
   }
   known.states += 1;
   const knownSessions = 1 + (known.earlier?.length ?? 0);
+  // A play path is better than one with chosen random outcomes, which is better than a clock one.
+  const rank = (clock: boolean, chosen: boolean) => (clock ? 2 : chosen ? 1 : 0);
+  const knownRank = rank(known.clock, known.chosen === true);
+  const nodeRank = rank(node.clock, node.chosen);
   const better =
-    (known.clock && !node.clock) ||
-    (known.clock === node.clock &&
+    nodeRank < knownRank ||
+    (nodeRank === knownRank &&
       (sessions < knownSessions ||
         (sessions === knownSessions && repro.inputs.length < known.inputs.length)));
   if (!better) return null;
@@ -2980,6 +3053,7 @@ function recordCrash(
     ...failure,
     states: known.states,
     clock: node.clock,
+    ...(node.chosen ? { chosen: true } : {}),
     ...repro,
     texts: step.texts,
   });
@@ -3080,13 +3154,16 @@ function lineCoverage(
   constants: ReadonlyMap<number, boolean>,
   fixed: ReadonlyMap<number, { value: boolean; reason: string }>,
   targets: ReadonlyMap<number, Target>,
+  randomChoices: boolean,
 ): ExploreResult["coverage"] {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
   instructions.forEach((_, index) => {
     if (
       unreachable.withStorage[index] === 1 &&
-      (session.visited[index] === 1 || session.clockVisited[index] === 1)
+      (session.visited[index] === 1 ||
+        session.chosenVisited[index] === 1 ||
+        session.clockVisited[index] === 1)
     )
       contradictions += 1;
   });
@@ -3094,12 +3171,14 @@ function lineCoverage(
   const labelOf = (index: number): Reach =>
     session.visited[index] === 1
       ? "play"
-      : session.clockVisited[index] === 1
-        ? "clock"
-        : claims && unreachable.withStorage[index] === 1
-          ? "unreachable"
-          : "unknown";
-  const order: readonly Reach[] = ["play", "clock", "unknown", "unreachable"];
+      : session.chosenVisited[index] === 1
+        ? "chosen"
+        : session.clockVisited[index] === 1
+          ? "clock"
+          : claims && unreachable.withStorage[index] === 1
+            ? "unreachable"
+            : "unknown";
+  const order: readonly Reach[] = ["play", "chosen", "clock", "unknown", "unreachable"];
   // Per file, per line: the strongest label of the instructions starting on it, and for `unreachable` its reason.
   const lines = new Map<string, Map<number, { reach: Reach; reason?: string }>>();
   const lineOf = instructions.map((instruction) => compactSpan(instruction.span)?.line ?? null);
@@ -3120,19 +3199,31 @@ function lineCoverage(
   });
   const percent = (part: number, whole: number) =>
     whole === 0 ? 100 : Math.round((part / whole) * 1000) / 10;
-  const reach: Record<Reach, number> = { play: 0, clock: 0, unreachable: 0, unknown: 0 };
+  const reach: Partial<Record<Reach, number>> = {
+    play: 0,
+    ...(randomChoices ? { chosen: 0 } : {}),
+    clock: 0,
+    unreachable: 0,
+    unknown: 0,
+  };
   const fileCoverage: FileCoverage[] = [...lines]
     .sort(([left], [right]) => (left < right ? -1 : 1))
     .map(([path, fileLines]) => {
       const sorted = [...fileLines].sort(([left], [right]) => left - right);
       for (const [, { reach: label }] of sorted) reach[label] += 1;
-      const visited = sorted.filter(([, { reach: label }]) => label === "play").length;
+      const visited = sorted.filter(
+        ([, { reach: label }]) => label === "play" || label === "chosen",
+      ).length;
       // Lines of one label and reason with no other line between them form one range.
-      const ranges: { from: number; to: number; reach: Exclude<Reach, "play">; reason?: string }[] =
-        [];
+      const ranges: {
+        from: number;
+        to: number;
+        reach: Exclude<Reach, "play" | "chosen">;
+        reason?: string;
+      }[] = [];
       let open: (typeof ranges)[number] | null = null;
       for (const [line, { reach: label, reason }] of sorted) {
-        if (label === "play") open = null;
+        if (label === "play" || label === "chosen") open = null;
         else if (open !== null && open.reach === label && open.reason === reason) open.to = line;
         else
           ranges.push(
@@ -3161,7 +3252,8 @@ function lineCoverage(
   const unvisitedBranches: UnvisitedBranch[] = [];
   instructions.forEach((instruction, index) => {
     if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
-    const play = session.branches[index]!;
+    // Play with chosen random outcomes is play.
+    const play = session.branches[index]! | session.chosenBranches[index]!;
     const clock = session.clockBranches[index]!;
     const target = Number(instruction.target);
     // A condition play never evaluated, or with both ways equal, is not listed.
@@ -3173,7 +3265,7 @@ function lineCoverage(
     const constant = constants.get(index);
     const storage = fixed.get(index);
     const directed = targets.get(index * 2 + way);
-    const label: Exclude<Reach, "play"> =
+    const label: Exclude<Reach, "play" | "chosen"> =
       (clock & (way === 0 ? 1 : 2)) !== 0
         ? "clock"
         : claims && (constant !== undefined || storage !== undefined)
@@ -3224,6 +3316,7 @@ function directedSummary(
   targets: ReadonlyMap<number, Target>,
   attempts: number,
   transitions: number,
+  randomChoices: boolean,
 ): ExploreResult["directed"] {
   const bySource: ExploreResult["directed"]["bySource"] = {
     ask: { targets: 0, reached: 0 },
@@ -3233,7 +3326,8 @@ function directedSummary(
     variable: { targets: 0, reached: 0 },
     none: { targets: 0, reached: 0 },
   };
-  const reached = { play: 0, clock: 0 };
+  const reached: { play: number; clock: number; chosen?: number } = { play: 0, clock: 0 };
+  if (randomChoices) reached.chosen = 0;
   const multiSession = { ways: 0, longestChain: 0 };
   const ways: ReachedBranch[] = [];
   for (const target of targets.values()) {
@@ -3243,7 +3337,8 @@ function directedSummary(
       if (target.reach !== null) bySource[kind].reached += 1;
     }
     if (target.reach === null) continue;
-    reached[target.reach.label] += 1;
+    if (target.reach.label === "chosen") reached.chosen = (reached.chosen ?? 0) + 1;
+    else reached[target.reach.label] += 1;
     const sessions = 1 + (target.reach.repro.earlier?.length ?? 0);
     if (sessions > 1) multiSession.ways += 1;
     multiSession.longestChain = Math.max(multiSession.longestChain, sessions);

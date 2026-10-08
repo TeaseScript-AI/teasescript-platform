@@ -75,8 +75,13 @@ export interface Engine {
   compileSource: (source: string, options: unknown) => Data;
   /** A session at the start of a plan; `options` may give the `capabilities` every operation uses. */
   createFreshRuntimeSession: (plan: Data, fresh: Data, options?: Data) => Runtime;
-  /** A session that goes on from a snapshot, which the runtime checks completely. */
-  createRuntimeSession: (plan: Data, snapshot: Data) => Runtime;
+  /** A session that goes on from a snapshot, which the runtime checks completely; `options` as for a fresh one. */
+  createRuntimeSession: (plan: Data, snapshot: Data, options?: Data) => Runtime;
+  /** The outcomes of a random draw to try besides its natural one, at most `limit`, and whether they are all. */
+  randomDrawAlternatives: (
+    draw: Data,
+    limit: number,
+  ) => { alternatives: Data[]; complete: boolean };
 }
 
 const repositoryIndexUrl = repositoryBuildUrl("src/index.js");
@@ -99,6 +104,7 @@ export async function loadEngine(): Promise<Engine> {
   const compileSource = exported("compileSource");
   const fresh = exported("createFreshRuntimeSession");
   const restore = exported("createRuntimeSession");
+  const alternatives = exported("randomDrawAlternatives");
   return {
     compileProject: (sources, options) => {
       const value: unknown = compileProject(sources, options);
@@ -112,7 +118,13 @@ export async function loadEngine(): Promise<Engine> {
       return value;
     },
     createFreshRuntimeSession: (plan, start, options) => runtimeOf(fresh(plan, start, options)),
-    createRuntimeSession: (plan, snapshot) => runtimeOf(restore(plan, snapshot)),
+    createRuntimeSession: (plan, snapshot, options) =>
+      runtimeOf(options === undefined ? restore(plan, snapshot) : restore(plan, snapshot, options)),
+    randomDrawAlternatives: (draw, limit) => {
+      const value: unknown = alternatives(draw, limit);
+      const found = isRecord(value) ? value : {};
+      return { alternatives: list(found.alternatives), complete: found.complete === true };
+    },
   };
 }
 
@@ -152,14 +164,39 @@ function runtimeOf(session: unknown): Runtime {
 /** A stored value as the runtime keeps it in script storage: a scalar or a composite. */
 export type StoredValue = string | number | boolean | Data;
 
+/** The kinds of random draw the explorer chooses outcomes of with random choices: those that pick what happens. */
+export const RANDOM_KINDS = [
+  "chance",
+  "randomInteger",
+  "collectionRandom",
+  "randomWeighted",
+  "tagQuery",
+  "glob",
+] as const;
+
 /** One key of script storage. */
 export interface StorageEntry {
   readonly key: string;
   readonly value: StoredValue;
 }
 
-/** One input of a path from the start; `label` fields only explain the input to a reader. */
-export type ExplorerInput =
+/**
+ * A random draw's outcome the explorer chose instead of the natural one: the draw by its ID (the generator state before
+ * it, the same in every replay of the path), its site to read, and the outcome as the runtime gives it.
+ */
+export interface RandomChoice {
+  readonly drawId: number;
+  readonly site: string;
+  readonly outcome: Data;
+}
+
+/**
+ * One input of a path from the start; `label` fields only explain the input to a reader. `random` chooses outcomes of
+ * random draws the step after the input makes; every other draw takes its natural outcome.
+ */
+export type ExplorerInput = InputKind & { readonly random?: readonly RandomChoice[] };
+
+type InputKind =
   | { readonly kind: "option"; readonly index: number; readonly label: string }
   /** `afterMs`: the player first thinks that long, for a button whose result is the time it took. */
   | { readonly kind: "button"; readonly label: string; readonly afterMs?: number }
@@ -290,6 +327,8 @@ export interface Step {
    * condition was true, a loop entered), way 1 goes to the instruction's target.
    */
   readonly ways: readonly number[];
+  /** With random choices: the random draws the step made that the explorer may choose (`RANDOM_KINDS`), in order. */
+  readonly draws: readonly Data[];
 }
 
 function record(value: unknown): Data {
@@ -357,6 +396,17 @@ export class Session {
   /** Per conditional instruction, the ways play took: 1 for the next instruction, 2 for its target. */
   readonly branches: Uint8Array;
   readonly clockBranches: Uint8Array;
+  /** Instructions and condition ways only play with a chosen random outcome executed ("play (chosen random)"). */
+  readonly chosenVisited: Uint8Array;
+  readonly chosenBranches: Uint8Array;
+  /**
+   * With random choices, sessions pause no draw but let the explorer decide the draws of {@link RANDOM_KINDS}: natural
+   * unless an input chose an outcome for its draw ID; and the step reports those draws, for the explorer to try others.
+   */
+  randomChoices = false;
+  /** The outcomes the input being applied chose, by draw ID, and the draws the current step made. */
+  readonly #decisions = new Map<number, Data>();
+  #draws: Data[] = [];
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
   /**
@@ -397,33 +447,61 @@ export class Session {
     this.clockVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
     this.clockBranches = new Uint8Array(this.#instructions.length);
+    this.chosenVisited = new Uint8Array(this.#instructions.length);
+    this.chosenBranches = new Uint8Array(this.#instructions.length);
+  }
+
+  /** The options sessions are made with: with random choices, the control that decides the explorer's draws. */
+  #options(): Data | undefined {
+    if (!this.randomChoices) return undefined;
+    return {
+      randomControl: {
+        filter: { kinds: RANDOM_KINDS },
+        decide: (draw: Data) => {
+          this.#draws.push(draw);
+          const outcome =
+            typeof draw.drawId === "number" ? this.#decisions.get(draw.drawId) : undefined;
+          return outcome === undefined ? { kind: "natural" } : { kind: "choose", outcome };
+        },
+      },
+    };
   }
 
   /** A fresh session, run until the player is first asked; a clock session at another wall clock than the play one. */
   start(setup: Setup = PLAY_SETUP): Step {
     this.operations += 1;
     const runtime = this.#counted(
-      this.#engine.createFreshRuntimeSession(this.#plan, {
-        seed: this.#seed,
-        baseDelayMs: 0,
-        delayPerWordMs: 0,
-        delayPerCharacterMs: 0,
-        // The runtime keeps storage sorted by key.
-        scriptStorage: [...setup.storage].sort((left, right) =>
-          left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
-        ),
-        wallClockMs: setup.wallClockMs,
-      }),
+      this.#engine.createFreshRuntimeSession(
+        this.#plan,
+        {
+          seed: this.#seed,
+          baseDelayMs: 0,
+          delayPerWordMs: 0,
+          delayPerCharacterMs: 0,
+          // The runtime keeps storage sorted by key.
+          scriptStorage: [...setup.storage].sort((left, right) =>
+            left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+          ),
+          wallClockMs: setup.wallClockMs,
+        },
+        this.#options(),
+      ),
     );
+    this.#draws = [];
     return this.#reached(
       runtime,
-      this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS),
+      this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS, false),
     );
   }
 
   /** A session that goes on from a stored state. */
   restore(snapshot: Data): Runtime {
-    return this.#counted(this.#engine.createRuntimeSession(this.#plan, snapshot));
+    const options = this.#options();
+    return this.#counted(
+      options === undefined
+        ? this.#engine.createRuntimeSession(this.#plan, snapshot)
+        : this.#engine.createRuntimeSession(this.#plan, snapshot, options),
+    );
   }
 
   /**
@@ -431,14 +509,14 @@ export class Session {
    * runtime rejects the input. Either way `runtime` goes on in place: to try other inputs from the same state, give
    * each a fork.
    */
-  apply(runtime: Runtime, input: ExplorerInput, clock: boolean): Step | null {
-    const settled = this.#apply(runtime, input, clock);
+  apply(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen = false): Step | null {
+    const settled = this.#apply(runtime, input, clock, chosen);
     return settled === null ? null : this.#reached(runtime, settled);
   }
 
   /** {@link apply} without exporting the state reached, to replay a path: whether the runtime accepted the input. */
-  advance(runtime: Runtime, input: ExplorerInput, clock: boolean): boolean {
-    return this.#apply(runtime, input, clock) !== null;
+  advance(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen = false): boolean {
+    return this.#apply(runtime, input, clock, chosen) !== null;
   }
 
   /**
@@ -529,10 +607,24 @@ export class Session {
     };
   }
 
-  #apply(runtime: Runtime, input: ExplorerInput, clock: boolean): Settled | null {
-    return this.#input(runtime, runtime.view(), input)
-      ? this.#settle(runtime, clock || isClockInput(input))
-      : null;
+  #apply(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen: boolean): Settled | null {
+    // The outcomes the input chose, for the draws the step makes; play with them is play with chosen randomness.
+    this.#decisions.clear();
+    if (input.random !== undefined && !this.randomChoices)
+      throw new Error("An input with chosen random outcomes needs a session with random choices.");
+    for (const choice of input.random ?? []) this.#decisions.set(choice.drawId, choice.outcome);
+    this.#draws = [];
+    try {
+      return this.#input(runtime, runtime.view(), input)
+        ? this.#settle(
+            runtime,
+            clock || isClockInput(input),
+            chosen || (input.random?.length ?? 0) > 0,
+          )
+        : null;
+    } finally {
+      this.#decisions.clear();
+    }
   }
 
   #reached(runtime: Runtime, settled: Settled): Step {
@@ -648,7 +740,7 @@ export class Session {
    * Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can
    * happen. Records what ran as play or as clock coverage.
    */
-  #settle(runtime: Runtime, clock: boolean): Settled {
+  #settle(runtime: Runtime, clock: boolean, chosen: boolean): Settled {
     const texts: string[] = [];
     const executed = new Set<number>();
     const ways = new Set<number>();
@@ -659,7 +751,7 @@ export class Session {
       if (view.runnable === true) {
         const execution = execute(runtime);
         collectTexts(execution.events, texts);
-        newInstructions += this.#record(execution, clock, executed, ways);
+        newInstructions += this.#record(execution, clock, chosen, executed, ways);
         view = runtime.view();
       }
       if (view.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
@@ -697,6 +789,7 @@ export class Session {
       instructions: [...executed],
       texts: texts.slice(-KEPT_TEXTS),
       ways: [...ways],
+      draws: this.#draws,
     };
   }
 
@@ -704,13 +797,19 @@ export class Session {
    * Marks an execution's instructions and condition ways as play or clock coverage, adds them to the step's, and counts
    * the instructions new to it: new to play for a play step, new to both for a clock one.
    */
-  #record(execution: Execution, clock: boolean, executed: Set<number>, ways: Set<number>): number {
-    const visited = clock ? this.clockVisited : this.visited;
-    const branches = clock ? this.clockBranches : this.branches;
+  #record(
+    execution: Execution,
+    clock: boolean,
+    chosen: boolean,
+    executed: Set<number>,
+    ways: Set<number>,
+  ): number {
+    const visited = clock ? this.clockVisited : chosen ? this.chosenVisited : this.visited;
+    const branches = clock ? this.clockBranches : chosen ? this.chosenBranches : this.branches;
     let fresh = 0;
     for (const index of execution.instructions) {
       if (index < 0 || index >= visited.length) continue;
-      if (visited[index] === 0 && (!clock || this.visited[index] === 0)) fresh += 1;
+      if (visited[index] === 0 && ((!clock && !chosen) || this.visited[index] === 0)) fresh += 1;
       visited[index] = 1;
       executed.add(index);
     }
@@ -1214,6 +1313,8 @@ const UNOBSERVABLE_KEYS = new Set([
   "nextMediaId",
   "nextPermanentButtonId",
   "lastSettlement",
+  // How many random outcomes were chosen: the script cannot see it, and the explorer pauses at no draw.
+  "randomControl",
 ]);
 /** IDs the runtime hands out as it goes; only their equality and order matter, so they are renumbered by rank. */
 const ID_FAMILIES: Readonly<Record<string, string>> = {
@@ -1326,6 +1427,10 @@ export function replay(
   error: string | null;
 } {
   const session = new Session(engine, plan, seed);
+  // A path with chosen random outcomes replays them; its other draws stay natural, as without control.
+  session.randomChoices = [...(path.earlier ?? []).map((earlier) => earlier.inputs), inputs].some(
+    (list) => list.some((input) => input.random !== undefined),
+  );
   let storage: readonly StorageEntry[] = [];
   const run = (wallClockMs: number, list: readonly ExplorerInput[], record: boolean) => {
     let step = session.start({ storage, wallClockMs });

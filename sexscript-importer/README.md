@@ -272,7 +272,8 @@ them at the top.
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
   [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
-  [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] <unit-dir>... --out <dir>
+  [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] [--[no-]random-choices] \
+  <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -354,6 +355,16 @@ default: on the units measured it gained nothing. Directed work (attempts and ex
 most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
 of what steps cost; starting next visits takes at most another third, apart from it.
 
+With `--random-choices`, random outcomes are choices too (`docs/RUNTIME.md#controlled-randomness`): sessions let the
+explorer decide the draws that pick what happens (`chance`, random integers, picks from a collection, weighted picks,
+tag queries, and glob file transfers), which run naturally unless it chooses. A step also gets the other outcomes of
+the first four draws it made (`randomDrawAlternatives`, at most three per draw, each outcome of a draw site once in a
+run) as steps with the same input and that outcome chosen. A path records only the outcomes it chose, as the
+`random` list of the input during which they were drawn (draw ID, site, and outcome), so repros, the corpus, and
+`--replay` choose them again; a replay or corpus path with chosen outcomes plays them also without the flag. Play with
+a chosen outcome is play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts,
+the directed ways, and the crashes show it apart. It is off by default.
+
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
 `getTimestamp().toSeconds() - lastVisit > day`), also through variables computed from the clock in one way, helpers
@@ -393,7 +404,8 @@ snapshot itself), restores a stored state once to expand it, which the runtime c
 under `search.engineErrors`), and tries each input on its own copy: a fork of it for all inputs but the last, which
 goes on in the restored session. `TEASESCRIPT_DIST` names another repository build with runtime sessions to load the compiler and runtime
 from, for comparisons. Each line has
-a label: `play` when a play step executed it, in any session; `clock` when only steps after the wall clock was set did;
+a label: `play` when a play step executed it, in any session; `chosen` when only play with chosen random outcomes did;
+`clock` when only steps after the wall clock was set did;
 `unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control
 flow in which a constant condition takes only its one way; and `unknown` otherwise. A condition is constant when it is a
 literal, when the compiler proves it always true or false (`TSV046`), or when it reads only stored keys whose values
@@ -406,7 +418,8 @@ The report `<out>/<unit>.json` has these parts:
 
 - for a unit that compiles, a `catalog` block for the importer catalog's Explorer column: `coveragePercent` by play,
   the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`) and `firstTrap` (`location`)
-  or `null`, and `reach`, the coverable lines by label (`play`, `clock`, `unreachable`, `unknown`);
+  or `null`, and `reach`, the coverable lines by label (`play`, `chosen` with random choices, `clock`, `unreachable`,
+  `unknown`);
 - per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
   their label;
 - each condition and loop that play reached but left only one way, with its source, the missed way, its first line,
@@ -414,7 +427,7 @@ The report `<out>/<unit>.json` has these parts:
 - `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
   directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
-  there is), and whether that path set the clock;
+  there is), and whether that path set the clock or chose a random outcome;
 - the traps;
 - the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out;
 - in `search`, what stopped it (`exhausted`, `budget` for time, `operations` for work, or `maxStates`), the runtime
