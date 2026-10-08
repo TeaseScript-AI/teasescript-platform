@@ -182,8 +182,8 @@ subsystems may still have different maturity levels.
   - **Outcome:** Persist snapshots and checkpoints as deltas, so per-step persistence cost no longer scales with the
     total retained state of a long session. Owner direction, 2026-10-08; the design is not chosen yet and must keep
     checkpoint validation, restore equivalence and deterministic order intact.
-  - **Trigger:** Start once the syntax is fixed (Beta), or earlier if long-session measurements show persistence cost
-    dominating after the bounded-record work in #707 and #708.
+  - **Trigger:** Start once the syntax is fixed, or earlier if long-session measurements show persistence cost dominating
+    after the bounded-record work in #707 and #708.
   - **Reference:** **Establish a runtime performance baseline and optimization plan**, [`RUNTIME.md`](../RUNTIME.md), and
     [`TOKEN-BURNERS.md`](TOKEN-BURNERS.md).
 

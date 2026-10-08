@@ -14,6 +14,6 @@ expire, for example during a holiday. Owner direction, 2026-10-08.
 - **Incremental snapshot and checkpoint persistence**
   - **Outcome:** Persist snapshots and checkpoints as deltas, so per-step persistence cost no longer scales with the
     total retained state of a long session.
-  - **Ready when:** The syntax is fixed (Beta) and a design note has chosen the delta format, its validation, and its
-    restore-equivalence tests.
+  - **Not launchable yet:** it needs the syntax fixed and a design note that chooses the delta format, its validation, and
+    its restore-equivalence tests.
   - **Reference:** the roadmap item **Incremental snapshot and checkpoint persistence**.
