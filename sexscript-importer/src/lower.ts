@@ -812,8 +812,10 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         // Every value set later is one of a known type, never null; an input the player answers gives a value.
         (values.get(key) ?? []).every(
           (value) =>
-            // The start itself; a null set later passes the variable on (passedOnValues).
+            // The start itself, also a declaration without a value; a null set later passes the variable on
+            // (passedOnValues).
             isNullConstant(value) ||
+            isEmptyGroovyExpression(value) ||
             (inferType(value, types) & NULL) === 0 ||
             (value.kind === "methodCall" &&
               value.implicitThis === true &&

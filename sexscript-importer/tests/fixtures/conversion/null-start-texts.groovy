@@ -1,8 +1,8 @@
-// A text or a flag declared as null whose later values all have one type starts empty: no code compares it with null
-// or passes it on, and Groovy truth treats null like the empty text and false.
+// A text or a flag declared as null, or without a value, whose later values all have one type starts empty: no code
+// compares it with null or passes it on, and Groovy truth treats null like the empty text and false.
 def name = null
 def ask = { -> name = getString("Your name?", "") }
-def finished = null
+def finished
 if (!name) ask()
 if (getBoolean("Finished?")) finished = true
 if (!finished) show("Keep going, ${name}")
