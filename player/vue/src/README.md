@@ -21,8 +21,9 @@ specification.
   checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. Starting or
   restoring a session rebases the clock so no gap is consumed; see
   [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
-  the explicit Start control (`SessionActivation.vue`) and creates it only on that click; a restored session waits for
-  Continue. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
+  the explicit Start control on the start page (`SessionActivation.vue`, with the header's title and author) and
+  creates it only on that click. It keeps the session in `player/kept-sessions.ts`, so a reload shows Continue, which
+  restores it; closing the end dialog after `exit` returns to the start page. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
   `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
   clock observation, which runs every 100 ms while media loads or plays. With the camera capability, Start
@@ -76,7 +77,8 @@ specification.
   truncates inside a pill without clipping its shadow and then shows in full in the bar's tooltip. `hostedScript.ts` reads both
   from the `main.tease` header. Sidebar and display controls share `--player-top-control-radius`.
 - `PlayerComposition.vue` uses Reka Splitter, also underlying shadcn-vue Resizable, for pointer/keyboard allocation
-  between stage and conversation. Starting ratio and minimum sizes remain visual trials.
+  between stage and conversation, which it hides, still laid out, on the start page. Starting ratio and minimum sizes
+  remain visual trials.
 - `ConversationSurface.vue` places the overlay and forwards margin wheel input to `Transcript.vue`, excluding nested
   tools, composer input, horizontal gestures and browser zoom. Its measured composer inset keeps final content reachable.
 - `Transcript.vue` owns virtualization, grouping and scrolling. Its scrollport includes conversation padding to avoid

@@ -1,3 +1,4 @@
+import { keptPhotoReferences, type KeptSessionStore } from "./kept-sessions.js";
 import { browserMediaUrls } from "./browser-capture.js";
 import { CapturedMediaStore, type CapturedMediaRepository } from "./captured-media.js";
 import {
@@ -43,6 +44,7 @@ export interface SavedDataHost {
 export function browserSavedData(
   storage: Storage | undefined,
   repository: CapturedMediaRepository | null,
+  keptSessions?: KeptSessionStore,
   locks: CapturedMediaLocks = browserCapturedMediaLocks(),
 ): SavedDataHost {
   return {
@@ -66,7 +68,13 @@ export function browserSavedData(
     persistence(scope) {
       const media = new CapturedMediaStore(repository, browserMediaUrls, scope);
       return {
-        storage: capturedMediaStorage(createLocalScriptStorage(storage, scope), media, locks),
+        // The photos a script's kept session uses stay stored, as its Player keeps them (PLAYER-UI "Session start").
+        storage: capturedMediaStorage(
+          createLocalScriptStorage(storage, scope),
+          media,
+          locks,
+          keptPhotoReferences(keptSessions),
+        ),
         media,
       };
     },

@@ -41,7 +41,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
   `debug-export-assembly.ts` builds an export from the player's choices. `debug-history.ts` keeps Debug's rewind
   history and `debug-history-indexeddb.ts` the database it spills to (see
   [`DEBUGGER.md`](../docs/DEBUGGER.md#rewind)); `restorePlayerRuntimeSessionAt` in `runtime-adapter.ts` restores its
-  states.
+  states, and those of the session `kept-sessions.ts` keeps for a reload (see
+  [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#session-start-and-user-activation)).
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,

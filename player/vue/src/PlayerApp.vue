@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onErrorCaptured, provide, ref, watch } from "vue";
+import { computed, nextTick, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -192,6 +192,20 @@ watch(props.player.endings, () => {
   if (!endDialogOpen.value) endDialogOpening.value += 1;
   endDialogOpen.value = true;
 });
+// The start page (PLAYER-UI "Session start and user activation") shows while no session is shown, or one waits for its
+// Start or Continue. After `exit` the session stays behind the end dialog, so its last messages stay visible; closing
+// the dialog returns to the start page, whose Start then takes focus.
+const onStartPage = computed(
+  () => props.player.session.value === null || props.player.activation.value !== null,
+);
+const startPage = ref<InstanceType<typeof SessionActivation> | null>(null);
+watch(endDialogOpen, (open, wasOpen) => {
+  if (wasOpen && !open)
+    void props.player.toStartPage().then(async () => {
+      await nextTick();
+      startPage.value?.focus();
+    });
+});
 const errorDialogOpen = ref(false);
 const errorDialogOpening = ref(0);
 function showErrorDetails() {
@@ -371,7 +385,7 @@ async function toggleFullscreen() {
       <slot v-else name="tool" v-bind="scope" />
     </template>
     <template #default="{ sidebarVisible }">
-      <PlayerComposition>
+      <PlayerComposition :start-page="onStartPage && !failure">
         <template #topbar>
           <PlayerTopBar
             :title="title"
@@ -445,8 +459,11 @@ async function toggleFullscreen() {
           </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation
-            v-else
+            v-else-if="onStartPage"
+            ref="startPage"
             :activation="player.activation.value"
+            :title="title"
+            :author="author"
             @activate="player.activate"
           />
           <DebugExportDialog
@@ -457,7 +474,6 @@ async function toggleFullscreen() {
           <SessionEndDialog
             :key="endDialogOpening"
             v-model:open="endDialogOpen"
-            @return-focus="runtimeEnd?.focus()"
           />
           <SessionErrorDialog
             :key="errorDialogOpening"
@@ -530,10 +546,7 @@ async function toggleFullscreen() {
               ref="runtimeEnd"
               :state="session?.state ?? null"
               :host-error="player.hostError.value"
-              :can-play-again="player.canPlayAgain.value"
-              :end-dialog-open="endDialogOpen"
               @details="showErrorDetails"
-              @play-again="void player.playAgain()"
             />
             <!-- Closest to the composer, also below a failure the inspected state shows. -->
             <RewindInspection

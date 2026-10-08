@@ -130,17 +130,21 @@ export function browserCapturedMediaLocks(): CapturedMediaLocks {
     },
   };
 }
+/** Media of a scope in use besides what its saved values reference, such as by a session kept for a reload. */
+export type MediaInUse = (scope: string) => Promise<Iterable<string>>;
+
 /**
- * Removes stored media of the scope that no saved value references any more. It runs only while no Player of the
- * scope is live, against a fresh read of the saved values; when either cannot be established it defers.
+ * Removes stored media of the scope that no saved value references any more, nor `inUse` names. It runs only while no
+ * Player of the scope is live, against a fresh read of the saved values; when either cannot be established it defers.
  */
 export async function sweepCapturedMedia(
   provider: ScriptStorageProvider,
   media: CapturedMediaStore,
   locks: CapturedMediaLocks,
+  inUse?: MediaInUse,
 ): Promise<boolean> {
   return locks.whenIdle(provider.scope, async () => {
-    const referenced = new Set<string>();
+    const referenced = new Set<string>(inUse === undefined ? [] : await inUse(provider.scope));
     for (const entry of await provider.load())
       for (const reference of capturedMediaReferences(entry.value)) referenced.add(reference);
     await media.sweep(referenced);
@@ -163,11 +167,12 @@ export function capturedMediaStorage(
   provider: ScriptStorageProvider,
   media: CapturedMediaStore,
   locks: CapturedMediaLocks,
+  inUse?: MediaInUse,
 ): CapturedMediaPersistence {
   let release = () => {};
   const ready = (async () => {
     // A failed sweep only defers reclamation.
-    await sweepCapturedMedia(provider, media, locks).catch(() => false);
+    await sweepCapturedMedia(provider, media, locks, inUse).catch(() => false);
     const live = locks.holdLive(provider.scope);
     release = () => live.release();
     if ((await live.granted) === "failed") media.disableDurable();

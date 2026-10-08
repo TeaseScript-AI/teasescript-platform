@@ -1,5 +1,6 @@
 import { createApp, h } from "vue";
 import { openIndexedDbMediaRepository } from "../../indexeddb-media-repository.js";
+import { memoryKeptSessionStore, openIndexedDbKeptSessionStore } from "../../kept-sessions.js";
 import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
@@ -27,9 +28,12 @@ const host: ScriptHost =
     : developmentPackageHost(packageId);
 // Durable captured and chosen media; when IndexedDB is unavailable, it stays session media.
 const capturedMediaRepository = await openIndexedDbMediaRepository().catch(() => null);
+// Kept sessions outlive a reload and a closed browser; without IndexedDB they last as long as the page.
+const keptSessions = await openIndexedDbKeptSessionStore().catch(() => memoryKeptSessionStore());
 const app = developmentPreview
   ? createApp((await import("./DevelopmentPreview.vue")).default, {
       capturedMediaRepository,
+      keptSessions,
       packageHost: packageId === null ? null : host,
     })
   : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
@@ -41,7 +45,8 @@ const app = developmentPreview
           // An image the script saves a reference to stays in this browser for later runs.
           capturedMedia: { repository: capturedMediaRepository },
           // Export and import of saved data cover every script this browser has played.
-          savedData: browserSavedData(browserStorage(), capturedMediaRepository),
+          savedData: browserSavedData(browserStorage(), capturedMediaRepository, keptSessions),
+          keptSessions,
           // The script's storage scope identifies it; development packages and the demo have no release version.
           debugPackage: { id: host.storageScope, version: null },
         });

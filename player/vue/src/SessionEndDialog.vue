@@ -11,11 +11,10 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import { Textarea } from "@/components/ui/textarea";
 
 // The pop-up an ordinary end of the session opens (PLAYER-UI "Session end and failure"). Only Close, which takes focus,
-// and Escape close it, not a click beside it, and leave the conversation to read, with Play again on the end line. The
+// and Escape close it, not a click beside it; the host then shows the start page, whose Start takes focus. The
 // review is a placeholder until TeaseScript has its website: a rating and a text the player can fill in, but nothing is
 // sent or stored.
 const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ returnFocus: [] }>();
 
 const rating = ref(0);
 const review = ref("");
@@ -25,10 +24,9 @@ function focusClose(event: Event) {
   event.preventDefault();
   (closeButton.value?.$el as HTMLElement | undefined)?.focus();
 }
-// Opened without a trigger, the dialog returns focus to the end line, where Play again stays.
-function returnFocus(event: Event) {
+// Opened without a trigger, the dialog has nowhere to return focus; the start page that follows takes it.
+function keepFocus(event: Event) {
   event.preventDefault();
-  emit("returnFocus");
 }
 </script>
 
@@ -40,7 +38,7 @@ function returnFocus(event: Event) {
       data-session-end-dialog
       @interact-outside.prevent
       @open-auto-focus="focusClose"
-      @close-auto-focus="returnFocus"
+      @close-auto-focus="keepFocus"
     >
       <DialogHeader>
         <DialogTitle>The end</DialogTitle>
