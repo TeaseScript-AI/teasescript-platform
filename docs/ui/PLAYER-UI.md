@@ -246,8 +246,9 @@ appears in the top controls when the sidebar is hidden and in the tools framewor
 The title pill shows the `title` and `author` of the package's `main.tease` header: "BuzzQuiz by NIFOC99", the title
 only, or "by NIFOC99", with the author in quieter text; without either it is absent, with no fallback. A pill the bar
 cuts off shows the full title and author in the bar's tooltip on hover, keyboard focus, or a tap; otherwise it is plain
-text. In the [debug room](../DEBUGGER.md#debug-room) a bug before the title marks the pill, named by the bar's tooltip
-"Debug session". Which identity a multi-script package or the active script should show remains open.
+text. In the [debug room](../DEBUGGER.md#debug-room) an outlined bug before the title marks the pill, filled red inside
+while Debug runs, named by the bar's tooltip "Debug session · Debug on" or "Debug session · Debug off".
+Which identity a multi-script package or the active script should show remains open.
 
 The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
 title-bar A/B setting chooses the presentation:
@@ -277,8 +278,8 @@ available in every build to every user. It currently offers:
 Apart from the Debug menu, these are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
 storage when the host frame denies it. Account settings may later take over or synchronize them. The Debug menu is not
-stored: every load starts with it off, so a tester who opens another script never debugs it by accident; the
-development preview's `?dev` starts it on.
+stored: every load in the normal room starts with it off, so a tester who opens another script never debugs it by
+accident, and every load in the debug room with it on; the development preview's `?dev` starts it on.
 
 Player Settings also contains a **Saved data** section, on every Player page whatever script it shows. Saved data
 belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script this browser

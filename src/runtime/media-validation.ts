@@ -379,8 +379,9 @@ function validPoints(value: unknown, observedSessionTimeMs: unknown): boolean {
 }
 
 /**
- * Every issued media ID has exactly one active or settled record, handles refer only to issued IDs, and queued cue
- * blocks and cue-block frames belong to their media's own blocks. Only one video is active.
+ * Each issued media ID has at most one active or settled record, every handle and every queued or running cue block has
+ * the record of its media, and cue blocks and cue-block frames belong to their media's own blocks. Only one video is
+ * active.
  */
 export function validateMediaState(
   value: Record<string, unknown>,
@@ -433,11 +434,12 @@ export function validateMediaState(
     }
   }
   if (activeVideos > 1) errors.push("Runtime has more than one active Stage video.");
-  if (records.size !== nextMediaId - 1 || [...records.keys()].some((id) => id >= nextMediaId)) {
-    errors.push("Runtime media do not match the issued media IDs.");
+  // Settled media that nothing reaches anymore are dropped, so issued IDs may have no record.
+  if ([...records.keys()].some((id) => id >= nextMediaId)) {
+    errors.push("Runtime media IDs must be issued IDs below nextMediaId.");
   }
   for (const id of handleIds) {
-    if (!records.has(id)) errors.push("Runtime media handle refers to unissued media.");
+    if (!records.has(id)) errors.push("Runtime media handle refers to media without a record.");
   }
   const ownsHandler = (media: Record<string, unknown> | undefined, functionId: unknown): boolean =>
     media !== undefined &&

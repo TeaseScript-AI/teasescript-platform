@@ -18,6 +18,8 @@ const props = defineProps<{
   author: string;
   /** Whether the debug room is shown (DEBUGGER.md "Debug room"), which a bug before the title marks in its pill. */
   debugRoom?: boolean;
+  /** Whether Debug is on, which fills the debug room's bug. */
+  debugOn?: boolean;
   fullscreen: boolean;
   fullscreenSupported: boolean;
   fullscreenError: string;
@@ -125,12 +127,12 @@ onBeforeUnmount(cancelHide);
     <h1 class="player-top-bar-title">
       <Tooltip v-if="truncated" :open="fullTitleOpen" @update:open="changeFullTitle">
         <TooltipTrigger as-child>
-          <button type="button" data-player-title-full @pointerdown.capture="pressFullTitle" @click="tapFullTitle"><DebugRoomMark v-if="debugRoom" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
+          <button type="button" data-player-title-full @pointerdown.capture="pressFullTitle" @click="tapFullTitle"><DebugRoomMark v-if="debugRoom" :on="debugOn" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
         </TooltipTrigger>
         <!-- A long title wraps within the screen, also one without spaces. -->
         <TooltipContent :collision-padding="8" class="max-w-(--reka-tooltip-content-available-width) wrap-anywhere" data-player-title-tooltip>{{ fullTitle }}</TooltipContent>
       </Tooltip>
-      <span v-else-if="title || author || debugRoom"><DebugRoomMark v-if="debugRoom" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></span>
+      <span v-else-if="title || author || debugRoom"><DebugRoomMark v-if="debugRoom" :on="debugOn" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></span>
     </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
       <slot name="notifications" />
