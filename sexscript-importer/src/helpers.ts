@@ -391,17 +391,39 @@ function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrState
   };
 }
 
-/** The positions `from` and `to` of a Groovy range index as `first` and `last`, a negative one counted from the end. */
+/**
+ * The part a Groovy range index `from..to`, or `from..<to` when `exclusive`, covers: the positions from `low` up to but
+ * not including `high`, and whether it `runsBack`. Like Groovy's subListBorders, a negative end counts from
+ * the end first; the range runs backwards where `from` then comes after `to`, and leaves out its `to` end when
+ * exclusive.
+ */
 const positions = (): IrStatement[] => [
   letS("first", v("from")),
   ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
   letS("last", v("to")),
   ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
+  letS("runsBack", bin(">", v("first"), v("last"))),
+  letS("low", v("first")),
+  letS("high", bin("+", v("last"), lit(1))),
+  ifS(v("exclusive"), [set(v("high"), v("last"))]),
+  ifS(v("runsBack"), [
+    set(v("low"), v("last")),
+    ifS(v("exclusive"), [set(v("low"), bin("+", v("last"), lit(1)))]),
+    set(v("high"), bin("+", v("first"), lit(1))),
+  ]),
 ];
-const fn = (name: string, parameters: string[], body: IrStatement[]): IrStatement => ({
+const fn = (
+  name: string,
+  parameters: string[],
+  body: IrStatement[],
+  defaults: Record<string, IrExpression> = {},
+): IrStatement => ({
   kind: "function",
   name,
-  parameters: parameters.map((parameter) => ({ name: parameter, defaultValue: null })),
+  parameters: parameters.map((parameter) => ({
+    name: parameter,
+    defaultValue: defaults[parameter] ?? null,
+  })),
   body,
   span: null,
 });
@@ -1249,25 +1271,30 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Groovy `value[from..to]`: the elements of a list, or the characters of a text, from `from` through `to`, a negative
-  // position counting from the end, in reverse order where `from` comes after `to`.
+  // Groovy `value[from..to]` and `value[from..<to]`: the elements of a list, or the characters of a text, that the range
+  // covers (positions), in reverse order where it runs backwards.
   slice: {
     name: "sexscriptLegacySlice",
     build: () => {
       const walk = (step: IrStatement): IrStatement => ({
         kind: "while",
-        condition: bin("!=", v("position"), bin("+", v("last"), v("step"))),
+        condition: bin("!=", v("position"), v("stop")),
         body: [step, set(v("position"), v("step"), "+=")],
         span: null,
       });
       return fn(
         "sexscriptLegacySlice",
-        ["value", "from", "to"],
+        ["value", "from", "to", "exclusive"],
         [
           ...positions(),
+          letS("position", v("low")),
+          letS("stop", v("high")),
           letS("step", lit(1)),
-          ifS(bin(">", v("first"), v("last")), [set(v("step"), lit(-1))]),
-          letS("position", v("first")),
+          ifS(v("runsBack"), [
+            set(v("position"), bin("-", v("high"), lit(1))),
+            set(v("stop"), bin("-", v("low"), lit(1))),
+            set(v("step"), lit(-1)),
+          ]),
           letS("part", v("value")),
           ifS(
             { kind: "typeTest", value: v("value"), type: "string" },
@@ -1296,23 +1323,25 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           // Through `value`, the part keeps an open type, as Groovy's did.
           ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("part")], named: {} }),
         ],
+        { exclusive: lit(false) },
       );
     },
   },
-  // Groovy `list[from..to] = values`: the list with those elements replaced by the values, a list or one value.
+  // Groovy `list[from..to] = values`: the list with the elements the range covers (positions) replaced by the values, a
+  // list or one value, in their own order also where the range runs backwards.
   spliced: {
     name: "sexscriptLegacySpliced",
     build: () =>
       fn(
         "sexscriptLegacySpliced",
-        ["value", "from", "to", "values"],
+        ["value", "from", "to", "values", "exclusive"],
         [
           ...positions(),
           letS("items", {
             kind: "methodCall",
             target: v("value"),
             name: "take",
-            arguments: [v("first")],
+            arguments: [v("low")],
           }),
           ifS(
             { kind: "typeTest", value: v("values"), type: "list" },
@@ -1341,7 +1370,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
                   kind: "methodCall",
                   target: v("value"),
                   name: "takeLast",
-                  arguments: [bin("-", bin("-", prop(v("value"), "length"), v("last")), lit(1))],
+                  arguments: [bin("-", prop(v("value"), "length"), v("high"))],
                 },
               ],
             },
@@ -1349,6 +1378,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           },
           ret(v("items")),
         ],
+        { exclusive: lit(false) },
       ),
   },
   // Groovy `text - part`: the text without the first occurrence of the part.

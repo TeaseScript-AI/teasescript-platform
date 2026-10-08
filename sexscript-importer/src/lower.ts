@@ -5555,7 +5555,13 @@ function lowerAssignment(
         kind: "assign",
         target: target.target,
         operator: "=",
-        value: helperCall("spliced", [target.target, range.from, rangeLast(range), value]),
+        value: helperCall("spliced", [
+          target.target,
+          range.from,
+          range.to,
+          value,
+          ...exclusive(range),
+        ]),
         span,
       },
     ];
@@ -9833,7 +9839,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       const range = lowerExpression(indexNode, context);
       if (range?.kind !== "range") return null;
       context.syntheticHelpers.add("slice");
-      return helperCall("slice", [target, range.from, rangeLast(range)]);
+      return helperCall("slice", [target, range.from, range.to, ...exclusive(range)]);
     };
     if (
       targetNode !== null &&
@@ -11284,12 +11290,20 @@ function textRange(
     return undefined;
   const first = constantValue(fromNode);
   const last = constantValue(toNode);
+  // A range that runs backwards, also one counted from the end, and one with a computed negative end read through the
+  // slice helper.
+  const backFrom = fromEnd(fromNode);
+  const backTo = fromEnd(toNode);
+  const negated = (node: AstNode): boolean => node.kind === "unaryMinus" && fromEnd(node) === null;
   if (
-    typeof first === "number" &&
-    typeof last === "number" &&
-    first >= 0 &&
-    last >= 0 &&
-    last < first
+    (typeof first === "number" &&
+      typeof last === "number" &&
+      first >= 0 &&
+      last >= 0 &&
+      last < first) ||
+    (backFrom !== null && (backTo === null || backFrom < backTo)) ||
+    negated(fromNode) ||
+    negated(toNode)
   )
     return undefined;
   const bound = (node: AstNode, offset: number): IrExpression | null => {
@@ -15349,12 +15363,9 @@ function noteUnintendedMarkup(node: AstNode | undefined, context: LowerContext):
   }
 }
 
-/** The last position of a range index: its end, or the one before it where the range leaves the end out. */
-function rangeLast(range: Extract<IrExpression, { kind: "range" }>): IrExpression {
-  if (range.inclusive) return range.to;
-  return range.to.kind === "literal" && typeof range.to.value === "number"
-    ? { kind: "literal", value: range.to.value - 1 }
-    : { kind: "binary", operator: "-", left: range.to, right: { kind: "literal", value: 1 } };
+/** The last argument of a slice helper for a range that leaves out its `to` end, `..<`: none for `..`. */
+function exclusive(range: Extract<IrExpression, { kind: "range" }>): IrExpression[] {
+  return range.inclusive ? [] : [{ kind: "literal", value: true }];
 }
 
 /** The legacy names of the setInfos() arguments, in order. */

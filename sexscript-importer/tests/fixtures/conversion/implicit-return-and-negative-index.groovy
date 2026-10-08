@@ -20,12 +20,15 @@ lastPick = pick
 def ratings = ["soft", "hard", "none"]
 def limit = getSelectedValue("Which limit?", ["Back", "Soft", "Hard"])
 show("Limit " + ratings[limit - 1])
-// A range index takes a part of a list, also counted from the end or backwards, and a write to a range replaces it.
+// A range index takes a part of a list, also counted from the end, backwards, or without its end (`..<`), and a write to
+// a range replaces it.
 def deck = ["a", "b", "c", "d", "e"]
 def top = deck[0..1]
 def backwards = deck[-1..0]
+def between = deck[3..<1]
 deck[1..2] = ["x"]
-show("Top " + top.join(",") + ", back " + backwards.join(",") + ", deck " + deck.join(","))
+deck[1..<1] = ["y"]
+show("Top " + top.join(",") + ", back " + backwards.join(",") + ", between " + between.join(",") + ", deck " + deck.join(","))
 // A character of a text that only the converted types prove text, as a function's result, reads through a helper.
 def nextShot = { -> return "C7" }
 def shot = ""

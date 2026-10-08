@@ -24,7 +24,7 @@ function sexscriptLegacyTextAt(text, position) {
   }
   return text.substring(at, at + 1)
 }
-function sexscriptLegacySlice(value, from, to) {
+function sexscriptLegacySlice(value, from, to, exclusive = false) {
   let first = from
   if first < 0 {
     first += value.length
@@ -33,22 +33,38 @@ function sexscriptLegacySlice(value, from, to) {
   if last < 0 {
     last += value.length
   }
+  let runsBack = first > last
+  let low = first
+  let high = last + 1
+  if exclusive {
+    high = last
+  }
+  if runsBack {
+    low = last
+    if exclusive {
+      low = last + 1
+    }
+    high = first + 1
+  }
+  let position = low
+  let stop = high
   let step = 1
-  if first > last {
+  if runsBack {
+    position = high - 1
+    stop = low - 1
     step = -1
   }
-  let position = first
   let part = value
   if value is string {
     let text = ""
-    while position != last + step {
+    while position != stop {
       text += value.substring(position, position + 1)
       position += step
     }
     part = text
   } else {
     let items = []
-    while position != last + step {
+    while position != stop {
       items.add(value[position])
       position += step
     }
@@ -56,7 +72,7 @@ function sexscriptLegacySlice(value, from, to) {
   }
   return sexscriptLegacyValue(part)
 }
-function sexscriptLegacySpliced(value, from, to, values) {
+function sexscriptLegacySpliced(value, from, to, values, exclusive = false) {
   let first = from
   if first < 0 {
     first += value.length
@@ -65,13 +81,26 @@ function sexscriptLegacySpliced(value, from, to, values) {
   if last < 0 {
     last += value.length
   }
-  let items = value.take(first)
+  let runsBack = first > last
+  let low = first
+  let high = last + 1
+  if exclusive {
+    high = last
+  }
+  if runsBack {
+    low = last
+    if exclusive {
+      low = last + 1
+    }
+    high = first + 1
+  }
+  let items = value.take(low)
   if values is list {
     items.addAll(values)
   } else {
     items.add(values)
   }
-  items.addAll(value.takeLast(value.length - last - 1))
+  items.addAll(value.takeLast(value.length - high))
   return items
 }
 function sexscriptLegacyRepeatList(items, times) {
@@ -126,14 +155,18 @@ let limit = choose 0: "Back",
   2: "Hard"
 // NOTE SX_NEGATIVE_INDEX line 22: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
 say "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}"
-// A range index takes a part of a list, also counted from the end or backwards, and a write to a range replaces it.
+// A range index takes a part of a list, also counted from the end, backwards, or without its end (`..<`), and a write to
+// a range replaces it.
 let deck = ["a", "b", "c", "d", "e"]
 let top = sexscriptLegacySlice(deck, 0, 1)
 let backwards = sexscriptLegacySlice(deck, -1, 0)
+let between = sexscriptLegacySlice(deck, 3, 1, true)
 deck = sexscriptLegacySpliced(deck, 1, 2, ["x"])
-// NOTE SX_LIST_JOIN line 28: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-// NOTE SX_LIST_JOIN line 28: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say "Top ${top.join(",")}, back ${backwards.join(",")}, deck ${deck.join(",")}"
+deck = sexscriptLegacySpliced(deck, 1, 1, ["y"], true)
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Top ${top.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}"
 // A character of a text that only the converted types prove text, as a function's result, reads through a helper.
 function nextShot {
   return "C7"
