@@ -1,4 +1,4 @@
-import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
 import { normalizeOpaqueColor } from "./color.js";
 import {
@@ -579,6 +579,7 @@ class SemanticValidator {
           "askDate",
           "askTime",
           "askDateTime",
+          "askBoolean",
           "askForm",
           "askBooleans",
           "choose",
@@ -1897,8 +1898,7 @@ class SemanticValidator {
           if (
             this.#builtins.has(expression.name) ||
             expression.name === "takePhoto" ||
-            expression.name === "askImage" ||
-            expression.name === "askBooleans"
+            expression.name === "askImage"
           ) {
             this.#report(
               semanticCode.functionValue,
@@ -2028,8 +2028,6 @@ class SemanticValidator {
             }
           } else if (isAskImageCall(expression)) {
             this.#validateAskImageArguments(expression);
-          } else if (isAskBooleansCall(expression)) {
-            this.#validateAskBooleansArguments(expression);
           } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
@@ -2468,40 +2466,6 @@ class SemanticValidator {
         );
       }
     }
-  }
-
-  /** `askBooleans(message, texts:, defaults:, cancel:)`: the message may come first without a name. */
-  #validateAskBooleansArguments(expression: Extract<Expression, { kind: "callExpression" }>): void {
-    const named = new Set<string>();
-    for (const [index, argument] of expression.arguments.entries()) {
-      const name = argument.kind === "positionalArgument" ? "message" : argument.name.name;
-      if (argument.kind === "positionalArgument" && index > 0)
-        this.#report(
-          semanticCode.argumentCount,
-          'askBooleans() takes only its message without a name, first, such as askBooleans("Choose", texts: ["A"], defaults: [true]).',
-          argument.span,
-        );
-      else if (named.has(name))
-        this.#report(
-          semanticCode.argumentCount,
-          `askBooleans() takes one ${name}.`,
-          argument.kind === "namedArgument" ? argument.name.span : argument.span,
-        );
-      else if (!["message", "texts", "defaults", "cancel"].includes(name))
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          `askBooleans() has no argument '${name}'. It takes a message, texts:, defaults:, and cancel:.`,
-          argument.kind === "namedArgument" ? argument.name.span : argument.span,
-        );
-      named.add(name);
-    }
-    for (const required of ["texts", "defaults"])
-      if (!named.has(required))
-        this.#report(
-          semanticCode.argumentCount,
-          `askBooleans() needs ${required}:, such as askBooleans("Choose", texts: ["A", "B"], defaults: [true, false]).`,
-          expression.span,
-        );
   }
 
   #validateDistinctNamedArguments(
@@ -3081,8 +3045,7 @@ function findFirstInteraction(
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
       current.kind === "sayExpression" ||
-      (current.kind === "callExpression" &&
-        (isTakePhotoCall(current) || isAskImageCall(current) || isAskBooleansCall(current)))
+      (current.kind === "callExpression" && (isTakePhotoCall(current) || isAskImageCall(current)))
     )
       return current;
     const children = expressionChildren(current);
@@ -3169,7 +3132,8 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "interactionExpression" ||
+    // `askBooleans` returns a list of booleans.
+    (expression.kind === "interactionExpression" && expression.interactionKind !== "booleans") ||
     expression.kind === "showButtonExpression"
   );
 }

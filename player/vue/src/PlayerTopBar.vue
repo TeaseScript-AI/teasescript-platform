@@ -244,7 +244,7 @@ onBeforeUnmount(cancelHide);
   max-inline-size: 100%;
   block-size: var(--player-top-control-size);
   padding-inline: 12px;
-  border-radius: 9999px;
+  border-radius: var(--player-top-control-radius);
 }
 .player-top-bar-title-text {
   min-inline-size: 0;

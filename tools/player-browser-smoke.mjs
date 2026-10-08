@@ -161,7 +161,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1739,6 +1739,95 @@ async function titleBarScenario(cdp, origin) {
   assertEqual(await value(cdp, title), "by Author fixture", "Author only, in the preview");
   await open("package=house");
   assertEqual(await value(cdp, title), "The house", "Title only");
+
+  // The title takes the display controls' corners. The sidebar toggle is flat like the menu's tools while the sidebar is
+  // open, and raised like the display controls in the title bar while it is hidden.
+  const look = (selector) =>
+    `(() => { const style = getComputedStyle(document.querySelector(${JSON.stringify(selector)})); return [style.borderRadius, style.borderTopWidth, style.borderTopStyle, style.boxShadow, style.backgroundColor].join(" | "); })()`;
+  const radius = (selector) =>
+    `getComputedStyle(document.querySelector(${JSON.stringify(selector)})).borderRadius`;
+  assertEqual(
+    await value(cdp, radius(".player-top-bar-title > :is(span, button)")),
+    await value(cdp, radius(".player-top-bar-actions")),
+    "The title's corners differ from the display controls'",
+  );
+  assertEqual(
+    await value(cdp, look('[data-tools-surface] [data-sidebar="trigger"]')),
+    await value(
+      cdp,
+      look('[data-launcher] [data-sidebar="menu-button"]:not([data-active="true"])'),
+    ),
+    "The open sidebar's toggle looks different from the menu's tools",
+  );
+  await physicalClick(cdp, '[data-tools-surface] [data-sidebar="trigger"]');
+  await waitFor(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`);
+  assertEqual(
+    await value(cdp, look('[data-player-top-bar] [data-sidebar="trigger"]')),
+    await value(cdp, look(".player-top-bar-actions")),
+    "The title bar's sidebar toggle looks different from the display controls",
+  );
+  await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  await waitFor(cdp, `!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`);
+  // A dialog's X takes a click anywhere within 16px of its centre, at least 32px across.
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-player-settings] [data-slot="dialog-close"]')`,
+  );
+  await delay(300);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const close = document.querySelector('[data-player-settings] [data-slot="dialog-close"]'); const rect = close.getBoundingClientRect(); const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2]; return [[-16, 0], [16, 0], [0, -16], [0, 16]].every(([dx, dy]) => close.contains(document.elementFromPoint(x + dx, y + dy))); })()`,
+    ),
+    true,
+    "The dialog's X has a small target",
+  );
+  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+  await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  // An open tool is flat too, with only the selected fill; hovering it deepens that fill to the pressed tone rather
+  // than lightening it into a closed tool's hover.
+  await open("package=house&room=debug");
+  const tool = '[data-launcher] button[aria-label="Debug"]';
+  await physicalClick(cdp, tool);
+  await waitFor(cdp, `document.querySelector(${JSON.stringify(tool)})?.dataset.active === "true"`);
+  // A fill as the menu resolves a theme role.
+  const tone = (role) =>
+    `(() => { const probe = document.createElement("span"); probe.style.backgroundColor = "var(${role})"; document.querySelector("[data-launcher]").append(probe); const color = getComputedStyle(probe).backgroundColor; probe.remove(); return color; })()`;
+  const fill = `getComputedStyle(document.querySelector(${JSON.stringify(tool)})).backgroundColor`;
+  const selected = await value(cdp, tone("--theme-surface-selected"));
+  await waitFor(
+    cdp,
+    `${fill} === ${JSON.stringify(selected)}`,
+    5_000,
+    "The open tool lost its selected fill",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(document.querySelector(${JSON.stringify(tool)})).boxShadow`),
+    await value(
+      cdp,
+      `getComputedStyle(document.querySelector("[data-settings-trigger]")).boxShadow`,
+    ),
+    "The open tool has a marker besides its fill",
+  );
+  // Its hover tone is the pressed tone, where a closed tool's is the lighter hover tone. The headless browser has no
+  // hover, so the tones are read from the variables the shared button hover uses.
+  const hoverTone = (selector) =>
+    `getComputedStyle(document.querySelector(${JSON.stringify(selector)})).getPropertyValue("--button-hover").trim()`;
+  assertEqual(
+    await value(cdp, hoverTone(tool)),
+    await value(
+      cdp,
+      `getComputedStyle(document.querySelector("[data-launcher]")).getPropertyValue("--component-pressed").trim()`,
+    ),
+    "Hovering the open tool does not deepen its fill",
+  );
+  assertEqual(
+    (await value(cdp, hoverTone(tool))) ===
+      (await value(cdp, hoverTone("[data-settings-trigger]"))),
+    false,
+    "The open tool hovers like a closed one",
+  );
 
   const full = "A title too long for the title bar of a narrow screen by Author fixture";
   // The bar's tooltip, read once: its content also holds a copy for assistive technology.

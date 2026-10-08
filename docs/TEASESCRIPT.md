@@ -82,8 +82,7 @@ The current compiler implements the compact interaction forms in this section, a
 asks as the same interactions, through explicit versioned interaction instructions and the canonical resumable runtime.
 The broader parenthesized V30 APIs and their advanced parameters remain deferred, except `askImage(...)`, which is
 implemented in its V30 call form (`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)),
-and `askForm`, which is an ask in both forms, with `askBooleans(...)` on the same form
-([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
+and `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `choose(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
@@ -111,6 +110,8 @@ let moment = askDateTime "When are you free?"
 
 let name = askText("Your name?", default: "Ada")
 let more = askInteger as mistress ("How many?", default: 3) + 1
+
+let ok = askBoolean as mistress "Ready?", yesText: "Sure!", noText: "No, thanks"
 ```
 
 The basic asks also take their arguments in parentheses, with the same meaning; the `)` ends the ask inside a larger
@@ -122,10 +123,13 @@ speaker says it in the chat, as by `say`, once, right before the field opens. `h
 only; in a text or number field it shows only while the field is empty, so a default usually hides it
 ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
 optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
-it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
+it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers). `askBoolean` says its question the
+same way, then shows two buttons: `yesText:` (default "Yes") returns `true` and `noText:` (default "No") returns
+`false` ([boolean input](specifications/accepted-syntaxes-v30.md#boolean-input)).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askDate`, `askTime`, and
+`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askBoolean` returns
+`boolean`; `askDate`, `askTime`, and
 `askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
 optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).

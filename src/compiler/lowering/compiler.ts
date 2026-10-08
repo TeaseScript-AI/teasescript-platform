@@ -53,7 +53,7 @@ import type {
   TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
+import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralParts, storedDuration } from "../../duration.js";
@@ -65,6 +65,7 @@ import {
   askOperands,
   expressionChildren as instructionEmissionChildren,
   mediaHandlerBlocks,
+  namedAskArguments,
   mediaOperands,
   showButtonOptions,
   tagQueryOperands,
@@ -1332,9 +1333,6 @@ export class InstructionCompiler {
     if (isAskImageCall(expression) && expression.kind === "callExpression") {
       return yield* compileChild(this.#lowerAskImageTask(expression));
     }
-    if (isAskBooleansCall(expression) && expression.kind === "callExpression") {
-      return yield* compileChild(this.#lowerAskBooleansTask(expression));
-    }
     if (isTakePhotoCall(expression)) {
       // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
       const tagsArgument =
@@ -1689,19 +1687,16 @@ export class InstructionCompiler {
   }
 
   /**
-   * A basic ask says its question, then opens its field; `choose` opens its buttons. The question, the hint, and the
-   * default are evaluated once, in that written order, before the question is said, so a default that asks itself
-   * comes first. The question is said by the requesting speaker, captured before any operand.
+   * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
+   * then opens its two buttons. The question, the hint, and the default are evaluated once, in that written order,
+   * before the question is said, so a default that asks itself comes first. The question is said by the requesting
+   * speaker, captured before any operand.
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
-    if (expression.interactionKind === "form")
+    if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
       return yield* compileChild(this.#lowerFormTask(expression));
-    const values =
-      expression.interactionKind === "choice"
-        ? expression.options.map((option) => option.expression)
-        : [];
     const expectedResult =
-      expression.interactionKind === "choice"
+      expression.interactionKind === "choice" || expression.interactionKind === "boolean"
         ? ("choice" as const)
         : expression.interactionKind === "number" || expression.interactionKind === "integer"
           ? ("number" as const)
@@ -1741,7 +1736,13 @@ export class InstructionCompiler {
         expression.span,
       );
     }
+    if (expression.interactionKind === "boolean")
+      return yield* compileChild(this.#lowerAskBooleanTask(expression));
 
+    const values =
+      expression.interactionKind === "choice"
+        ? expression.options.map((option) => option.expression)
+        : [];
     const speakerTemporary = this.#prepareInteractionSpeaker(
       expression.speaker?.name ?? null,
       expression.asSpan ?? expression.commandSpan,
@@ -1868,23 +1869,105 @@ export class InstructionCompiler {
   }
 
   /**
-   * `askForm`: after the requesting speaker, the question and the named arguments are evaluated once, in written order,
-   * into one object that the form reads when it opens. Like a basic ask, it then says its question, read from that
-   * object, and the form opens with the shape the type check found.
+   * `askForm` and `askBooleans`: after the requesting speaker, the question and the named arguments are evaluated once,
+   * in written order, into one object that the form reads when it opens. Like a basic ask, it then says its question,
+   * read from that object, and the form opens with the shape the type check found, or as a list of toggles for
+   * `askBooleans`.
    */
   *#lowerFormTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
+    const { speakerTemporary, requestTemporary } = yield* compileChild(
+      this.#prepareAskRequestTask(expression),
+    );
+    const lowered = this.#emitPreparedResultInteraction(
+      "form",
+      "form",
+      speakerTemporary,
+      {
+        kind: "form",
+        requestTemporary,
+        shape:
+          expression.interactionKind === "booleans"
+            ? { kind: "booleanList" }
+            : (this.formShapes.get(expression) ?? {
+                kind: "object",
+                numericKinds: [],
+                answers: [],
+              }),
+        accessibleName: { kind: "localizedDefault", key: "answer" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
+    return lowered;
+  }
+
+  /**
+   * `askBoolean` with an operand only known at runtime, or with its question named `message:`: like a form, its
+   * arguments are evaluated in written order into one object, from which it says its question. Its two buttons,
+   * `yesText:` (default "Yes") returning `true` and `noText:` (default "No") returning `false`, then open as a `choose`
+   * of two choice objects.
+   */
+  *#lowerAskBooleanTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
+    const span = copySpan(expression.span);
+    const { speakerTemporary, requestTemporary } = yield* compileChild(
+      this.#prepareAskRequestTask(expression),
+    );
+    const written = new Set(expression.formArguments.map((argument) => argument.name.name));
+    const request: ExpressionPlan = { kind: "temporary", temporaryId: requestTemporary, span };
+    const button = (name: string, value: boolean): ExpressionPlan => ({
+      kind: "object",
+      properties: [
+        {
+          name: "text",
+          value: written.has(name)
+            ? { kind: "property", object: request, name, span }
+            : { kind: "literal", value: ASK_BOOLEAN_TEXTS[name]!, span },
+          span,
+        },
+        { name: "value", value: { kind: "literal", value, span }, span },
+      ],
+      span,
+    });
+    const optionsTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: optionsTemporary,
+      value: { kind: "list", elements: [button("yesText", true), button("noText", false)], span },
+      expectBoolean: false,
+      span,
+    });
+    this.#emitTemporaryCleanup([requestTemporary], expression.span);
+    const lowered = this.#emitPreparedResultInteraction(
+      "choice",
+      "choice",
+      speakerTemporary,
+      {
+        kind: "choice",
+        optionsTemporary,
+        values: [null, null],
+        accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, optionsTemporary], expression.span);
+    return lowered;
+  }
+
+  /**
+   * The requesting speaker, then the question, as `message`, and the named arguments of `askForm`, `askBoolean`, or
+   * `askBooleans`, evaluated once, in written order, into one object; then the question, read from that object, said by
+   * that speaker.
+   */
+  *#prepareAskRequestTask(
+    expression: InteractionExpression,
+  ): CompileTask<{ readonly speakerTemporary: number; readonly requestTemporary: number }> {
     const speaker = expression.speaker?.name ?? null;
     const speakerSpan = expression.asSpan ?? expression.commandSpan;
     const speakerTemporary = this.#prepareInteractionSpeaker(speaker, speakerSpan);
-    const sayTemporaries =
-      expression.question === null ? null : this.#prepareQuestionSpeaker(speaker, speakerSpan);
-    const named = [
-      ...(expression.question === null ? [] : [{ name: "message", value: expression.question }]),
-      ...expression.formArguments.map((argument) => ({
-        name: argument.name.name,
-        value: argument.value,
-      })),
-    ];
+    const named = namedAskArguments(expression);
+    const sayTemporaries = named.some((argument) => argument.name === "message")
+      ? this.#prepareQuestionSpeaker(speaker, speakerSpan)
+      : null;
     const values = yield* compileChild(
       this.#lowerInteractionPayloadsTask(
         named.map((argument) => argument.value),
@@ -1946,112 +2029,7 @@ export class InstructionCompiler {
         expression.span,
       );
     }
-    const lowered = this.#emitPreparedResultInteraction(
-      "form",
-      "form",
-      speakerTemporary,
-      {
-        kind: "form",
-        requestTemporary,
-        shape: this.formShapes.get(expression) ?? { kind: "object", numericKinds: [], answers: [] },
-        accessibleName: { kind: "localizedDefault", key: "answer" },
-      },
-      expression.span,
-    );
-    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
-    return lowered;
-  }
-
-  /**
-   * `askBooleans(...)`: a form of one toggle per text that returns their states as a list. Like `askImage(...)`, its
-   * written arguments are evaluated once, in source order, into one object, from which it says its message as the
-   * question; the form reads its texts, defaults, and cancel button when it opens.
-   */
-  *#lowerAskBooleansTask(
-    expression: Extract<Expression, { kind: "callExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
-    const asksQuestion = expression.arguments.some(
-      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
-    );
-    const sayTemporaries = asksQuestion
-      ? this.#prepareQuestionSpeaker(null, expression.span)
-      : null;
-    const values = yield* compileChild(
-      this.#lowerInteractionPayloadsTask(
-        expression.arguments.map((argument) => argument.value),
-        speakerTemporary,
-      ),
-    );
-    const requestTemporary = this.#allocateTemporary();
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: requestTemporary,
-      value: {
-        kind: "object",
-        properties: expression.arguments.map((argument, index) => ({
-          name: argument.kind === "namedArgument" ? argument.name.name : "message",
-          value: values[index]!.plan,
-          span: copySpan(argument.span),
-        })),
-        span: copySpan(expression.span),
-      },
-      expectBoolean: false,
-      span: copySpan(expression.span),
-    });
-    this.#emitTemporaryCleanup(
-      values.flatMap((value) => value.temporaryIds),
-      expression.span,
-    );
-    if (sayTemporaries !== null) {
-      const question: ExpressionPlan = {
-        kind: "property",
-        object: {
-          kind: "temporary",
-          temporaryId: requestTemporary,
-          span: copySpan(expression.span),
-        },
-        name: "message",
-        span: copySpan(expression.span),
-      };
-      const textTemporary = this.#allocateTemporary();
-      this.instructions.push({
-        kind: "prepareSayText",
-        value: question,
-        destinationTemporary: textTemporary,
-        field: true,
-        span: copySpan(expression.span),
-      });
-      this.instructions.push({
-        kind: "say",
-        presentation: null,
-        speaker: null,
-        value: question,
-        ...sayTemporaries,
-        textTemporary,
-        skipPolicy: null,
-        pacing: "smart",
-        span: copySpan(expression.span),
-      });
-      this.#emitTemporaryCleanup(
-        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
-        expression.span,
-      );
-    }
-    const lowered = this.#emitPreparedResultInteraction(
-      "form",
-      "form",
-      speakerTemporary,
-      {
-        kind: "form",
-        requestTemporary,
-        shape: { kind: "booleanList" },
-        accessibleName: { kind: "localizedDefault", key: "answer" },
-      },
-      expression.span,
-    );
-    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
-    return lowered;
+    return { speakerTemporary, requestTemporary };
   }
 
   /**
@@ -2681,7 +2659,6 @@ export class InstructionCompiler {
       if (
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
-        isAskBooleansCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -2822,9 +2799,13 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
     : undefined;
 }
 
+/** The texts of the `askBoolean` buttons without `yesText:` or `noText:` (V30 §20). */
+const ASK_BOOLEAN_TEXTS: Readonly<Record<string, string>> = { yesText: "Yes", noText: "No" };
+
 /**
- * `askInteger` runs as a `number` interaction whose UI only accepts whole numbers, and `askDate`, `askTime`, and
- * `askDateTime` as a `temporal` interaction whose UI says what it asks for.
+ * `askInteger` runs as a `number` interaction whose UI only accepts whole numbers, `askDate`, `askTime`, and
+ * `askDateTime` as a `temporal` interaction whose UI says what it asks for, `askBoolean` as a `choice` of two buttons,
+ * and `askBooleans` as a `form`.
  */
 function planInteractionKind(expression: InteractionExpression): InteractionKind {
   switch (expression.interactionKind) {
@@ -2834,6 +2815,10 @@ function planInteractionKind(expression: InteractionExpression): InteractionKind
     case "time":
     case "datetime":
       return "temporal";
+    case "boolean":
+      return "choice";
+    case "booleans":
+      return "form";
     default:
       return expression.interactionKind;
   }
@@ -2842,7 +2827,29 @@ function planInteractionKind(expression: InteractionExpression): InteractionKind
 /** The UI of an interaction whose hint, values, and default answer are all known at compile time. */
 function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
   // A form reads its fields when it opens.
-  if (expression.interactionKind === "form") return undefined;
+  if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
+    return undefined;
+  if (expression.interactionKind === "boolean") {
+    // A question written as `message:` is said from the prepared arguments.
+    if (expression.formArguments.some((argument) => argument.name.name === "message"))
+      return undefined;
+    const options: InteractionChoiceOption[] = [];
+    for (const [name, value] of [
+      ["yesText", true],
+      ["noText", false],
+    ] as const) {
+      const written = expression.formArguments.find((argument) => argument.name.name === name);
+      const text =
+        written === undefined ? ASK_BOOLEAN_TEXTS[name]! : staticVisibleText(written.value);
+      if (text === undefined) return undefined;
+      options.push({ text, value });
+    }
+    return {
+      kind: "choice",
+      options,
+      accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+    };
+  }
   if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.defaultValue === null ? null : staticInteractionPrefill(expression);
@@ -3000,8 +3007,6 @@ function assembleExpression(
         throw new TypeError("takePhoto() reached pure expression assembly.");
       if (isAskImageCall(expression))
         throw new TypeError("askImage() reached pure expression assembly.");
-      if (isAskBooleansCall(expression))
-        throw new TypeError("askBooleans() reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

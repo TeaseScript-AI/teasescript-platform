@@ -584,8 +584,8 @@ export interface ReturnStatement {
 
 export interface ExpressionStatement {
   readonly kind: "expressionStatement";
-  /** A call, or `findImages(…)`, which reads like one. */
-  readonly expression: CallExpression | TagQueryExpression;
+  /** A call, or `findImages(…)` or `askBooleans`, which read like one. */
+  readonly expression: CallExpression | TagQueryExpression | InteractionExpression;
   readonly span: SourceSpan;
 }
 
@@ -629,8 +629,18 @@ export interface TypeTestExpression {
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
+  /** `boolean` is `askBoolean` and `booleans` is `askBooleans`. */
   readonly interactionKind:
-    "text" | "number" | "integer" | "date" | "time" | "datetime" | "choice" | "form";
+    | "text"
+    | "number"
+    | "integer"
+    | "date"
+    | "time"
+    | "datetime"
+    | "boolean"
+    | "choice"
+    | "form"
+    | "booleans";
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
@@ -641,12 +651,15 @@ export interface InteractionExpression {
   /** The `default:` answer that prefills the field of a basic ask. */
   readonly defaultValue: Expression | null;
   readonly options: readonly InteractionChoiceOption[];
-  /** The named arguments of `askForm`, such as `fields:` and `submit:`, in written order; empty for other asks. */
+  /**
+   * The named arguments of `askForm`, `askBoolean`, and `askBooleans`, such as `fields:` and `yesText:`, in written
+   * order; empty for other asks.
+   */
   readonly formArguments: readonly FormArgument[];
   readonly span: SourceSpan;
 }
 
-/** One named argument of `askForm`, such as `fields: { ... }`. */
+/** One named argument of `askForm`, `askBoolean`, or `askBooleans`, such as `fields: { ... }`. */
 export interface FormArgument {
   readonly name: Identifier;
   readonly value: Expression;

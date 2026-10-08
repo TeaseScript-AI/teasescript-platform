@@ -277,7 +277,11 @@
    menu and panels own the visible surfaces, so the shell itself must not paint
    a second full-width background while the dock changes size. */
 .player-sidebar [data-sidebar="sidebar"] { background: transparent; }
-.player-sidebar [data-sidebar="trigger"] { border-radius: var(--player-top-control-radius); }
+/* The sidebar's own controls take the title bar's corners. In the open sidebar they are flat, with a fill only on hover
+   or for the open tool; only the toggle in the title bar, while the sidebar is hidden, has the bar's raised material. */
+.player-sidebar :is([data-sidebar="trigger"], .player-control-square, [data-show-tools]) {
+  border-radius: var(--player-top-control-radius);
+}
 
 .player-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
   box-shadow: 6px 0 14px -6px var(--theme-structural-shadow, rgb(0 0 0 / 18%));
@@ -315,10 +319,11 @@
 
 [data-panel-drag]:active { background: var(--component-pressed); }
 
-/* Keep open tools distinguishable from a transient pointer hover. */
+/* An open tool keeps the selected fill, and hovering it deepens the fill rather than lightening it into a closed tool's
+   hover. */
 [data-launcher] [data-sidebar="menu-button"][data-active="true"] {
   --button-rest: var(--theme-surface-selected, var(--component-pressed));
-  box-shadow: inset 3px 0 var(--border-strong);
+  --button-hover: var(--component-pressed);
 }
 
 .panel-settings-trigger { position: relative; }
@@ -427,6 +432,7 @@ html:fullscreen { background: var(--background); }
 [data-launcher] [data-sidebar="menu-button"] {
   height: var(--player-control-size);
   padding: var(--player-control-padding);
+  border-radius: var(--player-top-control-radius);
 }
 .player-drawer-header {
   min-height: var(--player-header-size);
@@ -438,6 +444,7 @@ html:fullscreen { background: var(--background); }
 }
 .tool-panel-header :is(.panel-settings-trigger, [data-panel-pin]) {
   height: var(--player-top-control-size);
+  border-radius: var(--player-top-control-radius);
 }
 .tool-panel-header [data-panel-pin] { width: var(--player-top-control-size); min-width: var(--player-top-control-size); }
 
