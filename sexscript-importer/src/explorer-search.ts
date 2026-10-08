@@ -461,17 +461,30 @@ export interface Part {
 }
 
 /**
- * A session chain toward a stored value: the sessions it started, the closest value it reached, the route it replays
- * (where the session it comes from ended, its inputs, and its work per unit of progress), how many routes it measured,
- * and its last switches between routes, with why.
+ * A session chain toward a stored value: the sessions it started, the closest value it reached, the route it replays,
+ * the routes it replayed (that one too, the least work per unit of progress first), and its last switches between
+ * routes, with why.
  */
 export interface ChainReport {
   key: string;
   sessions: number;
   closest: string;
-  route: { at: string; inputs: number; workPerUnit: number } | null;
-  routesMeasured: number;
+  route: RouteReport | null;
+  routes: RouteReport[];
   switches: { sessions: number; from: string | null; to: string; reason: string }[];
+}
+
+/**
+ * A route of a session chain: its first inputs and where its session ended, how many inputs its replay takes, the
+ * sessions that replayed it and those of them that brought the value no closer, and its runtime operations per unit of
+ * progress: over those sessions, or the session it comes from before any; null when none brought the value closer.
+ */
+export interface RouteReport {
+  at: string;
+  inputs: number;
+  sessions: number;
+  failures: number;
+  workPerUnit: number | null;
 }
 
 /** The closest an explored state, or a storage one left, came to a part of what a missed way needs. */
@@ -1167,8 +1180,6 @@ interface Chain {
   sessions: number;
   /** Sessions this chain started. */
   started: number;
-  /** Passes without a closer value since the last session it started. */
-  stale: number;
   /** An attempt of this chain is still queued. */
   queued: boolean;
   /** The storages measured so far, and the closest of them. */
@@ -1176,20 +1187,26 @@ interface Chain {
   closest: { left: Left; distance: number; value: string } | null;
   readonly matches: (key: string) => boolean;
   /**
-   * Routes: the sessions seen to bring the stored value closer, by the state they ended at, with the work and progress
-   * of that session and, once replayed, the measured work and progress of the replays. The chosen one, and the switches.
+   * Routes: the sessions seen to bring the stored value closer, by their inputs (a hash of them as JSON), with the work
+   * and progress of the first such session and, once replayed, the measured work and progress of the replays. The
+   * chosen one; those replayed since the last closer value; the exploration turns taken; and the switches.
    */
-  readonly routes: Map<number, Route>;
-  route: number | null;
+  readonly routes: Map<string, Route>;
+  route: string | null;
+  readonly tried: Set<string>;
+  turns: number;
   readonly switches: { sessions: number; from: number | null; to: number; reason: string }[];
 }
 
-/** A session seen to bring a chain's stored value closer, replayed as a route. */
+/** A session seen to bring a chain's stored value closer, replayed as a route: the path to `node`. */
 interface Route {
+  readonly node: number;
   readonly work: number;
   readonly progress: number;
   tries: number;
+  /** Replays in a row that brought the value no closer. */
   fails: number;
+  failures: number;
   workSum: number;
   progressSum: number;
 }
@@ -1227,16 +1244,29 @@ function chainReports(
   return [...(target?.chains ?? [])]
     .filter(([, chain]) => chain.started > 0)
     .map(([key, chain]) => {
-      const route = chain.route === null ? undefined : chain.routes.get(chain.route);
+      const report = (route: Route): RouteReport => {
+        const cost = routeCostOf(route);
+        return {
+          ...routeOf(route.node),
+          sessions: route.tries,
+          failures: route.failures,
+          workPerUnit: Number.isFinite(cost) ? Math.round(cost) : null,
+        };
+      };
+      // The route the chain repeats: the usable one with the least work per unit of progress, not one an exploration
+      // turn replayed last.
+      const [route] = [...chain.routes.values()]
+        .filter((known) => known.fails < 2)
+        .sort((left, right) => routeCostOf(left) - routeCostOf(right));
       return {
         key: key.replaceAll(KEY_PLACEHOLDER, "*"),
         sessions: chain.started,
         closest: chain.value,
-        route:
-          chain.route === null || route === undefined
-            ? null
-            : { ...routeOf(chain.route), workPerUnit: Math.round(routeCostOf(route)) },
-        routesMeasured: [...chain.routes.values()].filter((known) => known.tries > 0).length,
+        route: route === undefined ? null : report(route),
+        routes: [...chain.routes.values()]
+          .filter((known) => known.tries > 0)
+          .sort((left, right) => routeCostOf(left) - routeCostOf(right))
+          .map(report),
         switches: chain.switches
           .slice(-5)
           .map((change) => ({
@@ -1347,9 +1377,9 @@ interface Attempt {
   readonly start: Start | null;
   readonly inputs: readonly ExplorerInput[];
   readonly chain?: string;
-  /** A chain's attempt: the goal it measures, and the route it replays (the state its session ended at), if any. */
+  /** A chain's attempt: the goal it measures, and the route it replays, if any (see {@link Chain.routes}). */
   readonly goal?: Goal;
-  readonly route?: number;
+  readonly route?: string;
   /** With forward time, an attempt that continues later: like a clock attempt, its states take no first place. */
   readonly later?: true;
 }
@@ -2220,7 +2250,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const startSession = (
     start: Start,
     lead: Lead | null,
-  ): { node: Node; runtime: Runtime | null } => {
+  ): { node: Node; runtime: Runtime | null; first: Step } => {
     starts.push(start);
     const first = session.start(start, chosenStart(start));
     const node = transition(null, null, first, starts.length - 1, lead);
@@ -2228,7 +2258,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     // A session that ends in its first step keeps no snapshot; its time steps read the state it ended in.
     if (later && first.snapshot.status !== "waiting")
       startSnapshots.set(starts.length - 1, first.snapshot);
-    return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null };
+    return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null, first };
   };
 
   /** Variables' values in a state, by name: the innermost binding, numbers and booleans as numbers. */
@@ -2444,8 +2474,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         : { remaining: attempt.later === true ? 0 : ATTEMPT_EXPANSIONS, target: attempt.target };
     let node: Node;
     let runtime: Runtime | null;
+    // The last step the attempt took: in a new session, its start's at least, which can store already.
+    let reached: Step | null = null;
     if (attempt.start !== null) {
-      ({ node, runtime } = startSession(attempt.start, lead));
+      ({ node, runtime, first: reached } = startSession(attempt.start, lead));
       directedTransitions += 1;
     } else {
       node = nodes[attempt.from ?? 0]!;
@@ -2453,7 +2485,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (runtime?.view().status !== "waiting") runtime = null;
     }
     const allowance = { skipped: 0, forced: 0 };
-    let reached: Step | null = null;
     for (let index = 0; index < attempt.inputs.length;) {
       if (runtime === null || outOfBudget()) break;
       let input = attempt.inputs[index]!;
@@ -2481,8 +2512,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         chainDistance(target, chain, attempt.goal, storageOf(reached.snapshot)).distance;
       route.tries += 1;
       route.workSum += session.operations - work;
-      if (Number.isFinite(gain) && gain > 0) route.progressSum += gain;
-      else route.fails += 1;
+      if (Number.isFinite(gain) && gain > 0) {
+        route.progressSum += gain;
+        route.fails = 0;
+      } else {
+        route.fails += 1;
+        route.failures += 1;
+      }
     }
     chainStep(attempt.target, target, attempt.goal, true);
   };
@@ -2532,25 +2568,35 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const routeCost = routeCostOf;
 
   /**
-   * The route a chain's next session replays: the one with the least work per unit of progress, except every
-   * {@link ROUTE_EXPLORE_EVERY}th session, which replays another usable route in turn, to measure it again.
+   * The route a chain's next session replays. After a closer value: the one with the least work per unit of progress,
+   * except every {@link ROUTE_EXPLORE_EVERY}th session, which replays another usable route, each in turn in the order
+   * they were found. After a session that came no closer (`stale`): the usable route with the least work per unit of
+   * progress not replayed since the last closer value; none when every one was. A route stays usable until two replays
+   * in a row bring the value no closer.
    */
-  const chooseRoute = (chain: Chain): { route: number; reason: string } | null => {
-    const usable = [...chain.routes]
-      .filter(([, route]) => route.fails < 2)
-      .sort(
-        ([leftId, left], [rightId, right]) =>
-          routeCost(left) - routeCost(right) || leftId - rightId,
-      );
-    if (usable.length === 0) return null;
-    if (usable.length > 1 && chain.started % ROUTE_EXPLORE_EVERY === ROUTE_EXPLORE_EVERY - 1) {
-      const turn = Math.floor(chain.started / ROUTE_EXPLORE_EVERY) % (usable.length - 1);
-      return { route: usable[1 + turn]![0], reason: "another route, measured again" };
+  const chooseRoute = (chain: Chain, stale: boolean): { route: string; reason: string } | null => {
+    const usable = [...chain.routes].filter(
+      ([id, route]) => route.fails < 2 && !(stale && chain.tried.has(id)),
+    );
+    const [cheapest] = [...usable].sort(
+      ([, left], [, right]) => routeCost(left) - routeCost(right),
+    );
+    if (cheapest === undefined) return null;
+    if (stale)
+      return {
+        route: cheapest[0],
+        reason: "no closer value: the cheapest route not replayed since the last closer one",
+      };
+    const others = usable.filter(([id]) => id !== cheapest[0]);
+    if (others.length > 0 && chain.started % ROUTE_EXPLORE_EVERY === ROUTE_EXPLORE_EVERY - 1) {
+      const [route] = others[chain.turns % others.length]!;
+      chain.turns += 1;
+      return { route, reason: "another route, measured again" };
     }
     return {
-      route: usable[0]![0],
+      route: cheapest[0],
       reason:
-        chain.route === null
+        cheapest[1].tries === 0
           ? "least work per unit of progress seen"
           : "least work per unit of progress measured",
     };
@@ -2560,8 +2606,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * One step of a session chain toward a stored value: from the closest storage an explored play state left, a
    * session that replays the witness path when that storage satisfies the condition, or else a route that brought the
    * value closer before, to get closer still: the one with the least work per unit of progress, now and then another
-   * (see {@link chooseRoute}). Stops when sessions stop getting closer. `repeat`: right after a session of the chain,
-   * whose next one then goes first.
+   * (see {@link chooseRoute}); the storage's own session when no route is known. After a session that came no closer,
+   * the other routes in turn; then the chain waits until play leaves a closer storage. `repeat`: right after a session
+   * of the chain, whose next one then goes first.
    */
   const chainStep = (code: number, target: Target, goal: Goal, repeat = false): boolean => {
     if (goal.source.kind !== "storage" || settled(target)) return false;
@@ -2573,20 +2620,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         value: "",
         sessions: 0,
         started: 0,
-        stale: 0,
         queued: false,
         scanned: 0,
         closest: null,
         matches: keyMatcher(key),
         routes: new Map(),
         route: null,
+        tried: new Set(),
+        turns: 0,
         switches: [],
       };
       target.chains.set(key, chain);
     }
     const found = chain;
-    const usable = [...found.routes.values()].filter((route) => route.fails < 2).length;
-    if (found.queued || found.stale >= Math.max(2, usable)) return false;
+    if (found.queued) return false;
     // Only the storages found since the last pass are measured.
     for (; found.scanned < left.length; found.scanned += 1) {
       const entry = left[found.scanned]!;
@@ -2599,23 +2646,30 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           (measured.distance === closest.distance && entry.sessions < closest.left.sessions))
       )
         found.closest = { left: entry, ...measured };
-      // A session that brought the value closer is a route: from its start's storage to the storage it left.
-      if (measured.distance === Infinity || found.routes.has(entry.node)) continue;
+      // A session that brought the value closer is a route: its inputs, from its start's storage to the storage it
+      // left. Sessions with the same inputs are one route, whose replays measure it.
+      if (measured.distance === Infinity) continue;
       const start = starts[nodes[entry.node]!.start]!;
       const progress =
         chainDistance(target, found, goal, start.storage).distance - measured.distance;
       if (!Number.isFinite(progress) || progress <= 0) continue;
-      found.routes.set(entry.node, {
+      const inputs = pathTo(nodes, nodes[entry.node]!).slice(0, MAX_ROUTE_INPUTS);
+      const id = createHash("sha1").update(JSON.stringify(inputs)).digest("base64");
+      if (found.routes.has(id)) continue;
+      found.routes.set(id, {
+        node: entry.node,
         work: costOf[entry.node] ?? 0,
         progress,
         tries: 0,
         fails: 0,
+        failures: 0,
         workSum: 0,
         progressSum: 0,
       });
+      // The most efficient routes are kept, and the chosen one.
       if (found.routes.size > MAX_ROUTES) {
         const [worst] = [...found.routes]
-          .filter(([, route]) => route.tries === 0)
+          .filter(([known]) => known !== found.route)
           .sort(([, a], [, b]) => routeCost(b) - routeCost(a));
         if (worst !== undefined) found.routes.delete(worst[0]);
       }
@@ -2627,7 +2681,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return false;
     }
     // With forward time, the next session follows the rhythm of the one that left the storage: as long after it.
-    const fromBest = (inputs: readonly ExplorerInput[], route?: number): Attempt => ({
+    const fromBest = (inputs: readonly ExplorerInput[], route?: string): Attempt => ({
       target: code,
       from: null,
       start: later
@@ -2645,26 +2699,27 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     });
     const queue = repeat ? repeatAttempts : chainAttempts;
     // A session of a route from the closest storage; the storage's own session when no route is known.
-    const replay = (): void => {
-      const choice = chooseRoute(found);
-      if (choice !== null && choice.route !== found.route) {
+    const replay = (choice: { route: string; reason: string } | null): void => {
+      const route = choice === null ? undefined : found.routes.get(choice.route)!;
+      if (choice !== null && route !== undefined && choice.route !== found.route) {
+        const from = found.route === null ? undefined : found.routes.get(found.route);
         found.switches.push({
           sessions: best.left.sessions + 1,
-          from: found.route,
-          to: choice.route,
+          from: from?.node ?? null,
+          to: route.node,
           reason: choice.reason,
         });
         found.route = choice.route;
       }
+      if (choice !== null) found.tried.add(choice.route);
       found.started += 1;
       found.queued = true;
-      queue.push(fromBest(pathTo(nodes, nodes[choice?.route ?? best.left.node]!), choice?.route));
+      queue.push(fromBest(pathTo(nodes, nodes[route?.node ?? best.left.node]!), choice?.route));
     };
     // A storage closer than the chain's best so far (not its first measure) is progress.
     if (best.distance < found.best && Number.isFinite(found.best)) progressed("closer");
     if (best.distance === 0) {
       if (found.best === 0) {
-        found.stale = 2;
         target.note = `needs ${need}; a session from storage that has it did not reach the condition`;
         return false;
       }
@@ -2678,29 +2733,26 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       queue.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
       return true;
     }
-    if (best.distance < found.best && found.started < MAX_CHAIN) {
+    const noted = () => {
+      target.note = `needs ${need}; best reached: ${found.value} after ${found.sessions} session${found.sessions === 1 ? "" : "s"}`;
+      return false;
+    };
+    if (found.started >= MAX_CHAIN) return noted();
+    if (best.distance < found.best) {
       Object.assign(found, {
         best: best.distance,
         value: best.value,
         sessions: best.left.sessions,
-        stale: 0,
       });
-      replay();
+      found.tried.clear();
+      replay(chooseRoute(found, false));
       return true;
     }
-    // No closer storage: another usable route from the same one, while there is one.
-    found.stale += 1;
-    if (
-      found.route !== null &&
-      found.started < MAX_CHAIN &&
-      found.stale < Math.max(2, usable) &&
-      chooseRoute(found) !== null
-    ) {
-      replay();
-      return true;
-    }
-    target.note = `needs ${need}; best reached: ${found.value} after ${found.sessions} session${found.sessions === 1 ? "" : "s"}`;
-    return false;
+    // No closer storage: another usable route from the same one, while one was not replayed since.
+    const choice = chooseRoute(found, true);
+    if (choice === null) return noted();
+    replay(choice);
+    return true;
   };
 
   /** With realignment: the guard of each earlier condition of an `else if` chain, one for all the conditions after it. */
@@ -3449,8 +3501,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
 
   storageMaps.clear();
-  /** A route as its first inputs read and where its session ended, and how many inputs its replay takes. */
+  /**
+   * A route as its first inputs read and where its session ended, and how many inputs its replay takes; once per route,
+   * as targets share them.
+   */
+  const described = new Map<number, { at: string; inputs: number }>();
   const routeOf = (node: number): { at: string; inputs: number } => {
+    const known = described.get(node);
+    if (known !== undefined) return known;
     const path = pathTo(nodes, nodes[node]!);
     const label = (input: ExplorerInput): string =>
       input.kind === "option" || input.kind === "button"
@@ -3462,10 +3520,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const span = at === null ? null : compactSpan(instructions[at]?.span);
     const end =
       at === null ? "the session's end" : `${files[at]}${span === null ? "" : `:${span.line}`}`;
-    return {
-      at: `${path.slice(0, 3).map(label).join(" → ")}${path.length > 3 ? " → …" : ""} to ${end}`,
+    const route = {
+      at: `${path.length === 0 ? "no input" : path.slice(0, 3).map(label).join(" → ")}${path.length > 3 ? " → …" : ""} to ${end}`,
       inputs: Math.min(path.length, MAX_ROUTE_INPUTS),
     };
+    described.set(node, route);
+    return route;
   };
   const coverage = lineCoverage(
     plan,

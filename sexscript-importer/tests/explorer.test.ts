@@ -850,40 +850,77 @@ test(
 );
 
 test(
-  "a chain toward a stored count repeats the route with the least work per unit of progress, session after session, measures the others now and then, and reports its route",
+  "a chain toward a stored count repeats the route with the least work per unit of progress, session after session, measures the others now and then, tries another when one stops helping, and reports its routes",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    // The long way adds two visits after eighty presses; the short way adds one after one press: less work per visit.
-    const source =
+    const run = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const result = explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 3000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+      });
+      const way = [...result.directed.ways, ...result.coverage.unvisitedBranches].find(
+        (entry) =>
+          (typeof entry.condition === "string" ? entry.condition : entry.condition?.text) ===
+          "visits >= 40",
+      );
+      return { way, chain: way?.chains?.[0] };
+    };
+    // The long way adds two visits after twenty presses; the short way adds one after one press: less work per visit.
+    const twoWays = run(
       'let visits = load "fixture.visits", default: 0\n' +
-      'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
-      'if pick == "long" {\n  for step in 1..=80 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\n' +
-      'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
-      'if visits >= 40 {\n  say "Regular."\n}\nexit\n';
-    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
-    assert.ok(isRecord(plan));
-    const result = explore(engine, plan, {
-      seed: 1,
-      budgetMs: Infinity,
-      budgetOps: 3000,
-      maxStates: 100_000,
-      sources: new Map([["main.tease", source]]),
-      diagnostics: [],
-    });
-    const way = result.directed.ways.find((entry) => entry.condition === "visits >= 40");
-    assert.equal(way?.reach, "play");
-    const [chain] = way?.chains ?? [];
-    assert.equal(chain?.key, "fixture.visits");
-    assert.ok((chain?.sessions ?? 0) >= 30);
-    // The route repeated is the short way, two inputs; the long way was measured too.
-    assert.deepEqual(chain?.route && [chain.route.at.startsWith("Short way"), chain.route.inputs], [
-      true,
-      2,
-    ]);
-    assert.ok((chain?.routesMeasured ?? 0) >= 2);
-    assert.ok(chain?.switches.some((change) => change.reason === "another route, measured again"));
+        'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
+        'if pick == "long" {\n  for step in 1..=20 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\n' +
+        'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
+        'if visits >= 40 {\n  say "Regular."\n}\nexit\n',
+    );
+    assert.equal(twoWays.way?.reach, "play");
+    assert.equal(twoWays.chain?.key, "fixture.visits");
+    assert.ok((twoWays.chain?.sessions ?? 0) >= 30);
+    // The route repeated is the short way, two inputs; the long way was replayed too, as another route.
+    assert.deepEqual(
+      twoWays.chain?.route && [
+        twoWays.chain.route.at.startsWith("Short way"),
+        twoWays.chain.route.inputs,
+      ],
+      [true, 2],
+    );
+    assert.ok(
+      twoWays.chain?.routes.some((route) => route.at.startsWith("Long way") && route.sessions > 0),
+    );
+    assert.ok(
+      twoWays.chain?.switches.some((change) => change.reason === "another route, measured again"),
+    );
+    // The cheap way stops adding at fifteen; the other way, fifteen presses for two, still adds: once the cheap way brings
+    // the count no closer, the other way is replayed, and the chain goes on with it.
+    const cheapStops = run(
+      'let visits = load "fixture.visits", default: 0\nif visits >= 40 {\n  say "Regular."\n  exit\n}\n' +
+        'let pick = choose cheap: "Cheap", other: "Other", leave: "Leave"\n' +
+        'if pick == "cheap" {\n  showButton "Go"\n  if visits < 15 {\n    save visits + 1 as "fixture.visits"\n  }\n}\n' +
+        'if pick == "other" {\n  for step in 1..=15 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\nexit\n',
+    );
+    assert.equal(cheapStops.way?.reach, "play");
+    assert.ok(cheapStops.chain?.route?.at.startsWith("Other"));
+    assert.ok(
+      cheapStops.chain?.routes.some((route) => route.at.startsWith("Cheap") && route.failures > 0),
+    );
+    // A session that counts without any input is a route of no inputs, measured like any other.
+    const noInputs = run(
+      'let visits = load "fixture.visits", default: 0\nsave visits + 1 as "fixture.visits"\n' +
+        'if visits >= 40 {\n  say "Regular."\n}\nexit\n',
+    );
+    assert.equal(noInputs.way?.reach, "play");
+    assert.deepEqual(
+      noInputs.chain?.route && [noInputs.chain.route.inputs, noInputs.chain.route.sessions > 0],
+      [0, true],
+    );
   },
 );
 

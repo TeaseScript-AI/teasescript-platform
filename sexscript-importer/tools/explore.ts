@@ -874,7 +874,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
 
 /**
  * The session chains toward stored values with the most sessions: the route each repeats (its work per unit of
- * progress), how many routes it measured, and its last switch between routes, with why.
+ * progress), the other routes it replayed, and its last switch between routes, with why.
  */
 function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): string[] {
   const chains = ways
@@ -888,19 +888,37 @@ function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): stri
     "- Session chains (the most sessions first):",
     ...chains.map(({ chain, at }) => {
       const route = fields(chain.route);
+      const others = records(chain.routes).filter((other) => text(other.at) !== text(route.at));
       const last = records(chain.switches).at(-1);
       return (
         `  - \`${at}\` \`${text(chain.key)}\`: ${count(chain.sessions)} sessions, closest ${text(chain.closest)}; ` +
         (chain.route === null || chain.route === undefined
-          ? "no route measured"
-          : `route ${text(route.at)} (${count(route.inputs)} inputs, ${count(route.workPerUnit)} operations per unit)`) +
-        `; ${count(chain.routesMeasured)} routes measured` +
+          ? "no session from a storage that has the key brought it closer"
+          : `route ${routeText(route)}`) +
+        (others.length === 0
+          ? ""
+          : `; also replayed: ${others.map((other) => routeText(other)).join("; ")}`) +
         (last === undefined
           ? ""
           : `; last switch at session ${count(last.sessions)}: ${text(last.reason)}`)
       );
     }),
   ];
+}
+
+/** A chain's route: where it goes, its inputs, and its work per unit of progress over its replays. */
+function routeText(route: Readonly<Record<string, unknown>>): string {
+  const cost =
+    typeof route.workPerUnit === "number"
+      ? `${count(route.workPerUnit)} operations per unit`
+      : "no measured progress";
+  const replays = count(route.sessions);
+  return (
+    `${text(route.at)} (${count(route.inputs)} inputs, ${cost}` +
+    (replays === 0
+      ? " in the session it comes from)"
+      : ` over ${replays} replays, ${count(route.failures)} no closer)`)
+  );
 }
 
 /** Ways still missed, those with the most code behind them first: what each needs, and why play did not get there. */
