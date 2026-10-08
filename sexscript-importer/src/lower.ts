@@ -563,8 +563,8 @@ export interface MapUses {
   /** Maps that stay objects and that `clear()` empties, so that every field may hold null. */
   clearedRecords: Set<string>;
   /**
-   * Variables the code tests for null itself: compared with `== null` or `!= null`, or read with `?.`, where null and
-   * an empty list behave differently. Groovy truth treats them alike.
+   * Variables the code tests for null itself: compared with `== null` or `!= null`, read with `?.`, or switched on with
+   * a `case null`, where null and an empty list behave differently. Groovy truth treats them alike.
    */
   nullTested: Set<string>;
   /**
@@ -574,6 +574,11 @@ export interface MapUses {
   shownEarly: Set<string>;
   /** Numbers that start as null and that nothing tests for null, which start at 0 (owner decision 2026-10-05). */
   zeroStartNumbers: Set<string>;
+  /**
+   * Texts and flags that start as null and that nothing tests for null or passes on, which start with the empty text or
+   * false (owner decision 2026-10-08).
+   */
+  emptyStarts: Map<string, "" | false>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -682,6 +687,74 @@ function mapAnalysisBody(file: ParsedGroovyFile): AstNode | null {
     : { ...rawBody, statements: [...parts.statements, ...parts.members, ...parts.entryStatements] };
 }
 
+/** Legacy API calls that only show their arguments or ask the player with them. */
+const SHOWING_API_CALLS = new Set([
+  "show",
+  "showButton",
+  "showPopup",
+  "getBoolean",
+  "getBooleans",
+  "getFloat",
+  "getInteger",
+  "getSelectedValue",
+  "getString",
+]);
+
+/**
+ * The variables whose value the code passes on: copies it into another variable or a collection, passes it to a
+ * function or a method, returns it, or sets it to null again. A legacy API call that only shows the value or asks the
+ * player with it does not pass it on.
+ */
+function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment): Set<string> {
+  const passed = new Set<string>();
+  const pass = (value: AstNode | null): void => {
+    // A choice or a conversion passes on the value it gives; `value ?: other` gives `value` only when it is set.
+    if (value?.kind === "ternary")
+      for (const branch of [value.true, value.false]) pass(asNode(branch));
+    if (value?.kind === "elvis") pass(asNode(value.false));
+    if (value?.kind === "cast") pass(asNode(value.expression));
+    const key = value?.kind === "variable" ? bindingKey(value, keys) : null;
+    if (key !== null) passed.add(key);
+  };
+  // The expressions a block ends with, which a closure or method gives as its result.
+  const passResult = (statement: AstNode | null): void => {
+    if (statement?.kind === "expressionStatement") pass(asNode(statement.expression));
+    if (statement?.kind === "block") passResult(nodeArray(statement.statements).at(-1) ?? null);
+    if (statement?.kind === "if") {
+      passResult(asNode(statement.then));
+      passResult(asNode(statement.else));
+    }
+  };
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    if (assigns) {
+      const right = asNode(node.right);
+      pass(right);
+      // A variable set to null again holds null after its start.
+      const key =
+        node.kind === "binary" && isNullConstant(right ?? undefined)
+          ? bindingKey(asNode(node.left), keys)
+          : null;
+      if (key !== null) passed.add(key);
+    }
+    if (node.kind === "binary" && node.operator === "<<") pass(asNode(node.right));
+    if (node.kind === "return") pass(asNode(node.value));
+    if (node.kind === "list") for (const item of nodeArray(node.items)) pass(item);
+    if (node.kind === "map") for (const entry of nodeArray(node.entries)) pass(asNode(entry.value));
+    if (node.kind === "closure") passResult(asNode(node.body));
+    if (node.kind === "methodCall") {
+      const name = constantString(node.method) ?? "";
+      const shows =
+        node.implicitThis === true &&
+        types.localFunctions?.has(name) !== true &&
+        SHOWING_API_CALLS.has(name);
+      if (!shows) for (const argument of nodeArray(asNode(node.arguments)?.items)) pass(argument);
+    }
+  });
+  return passed;
+}
+
 function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const dictionaries = new Set<string>();
   for (const { body, types, keys } of bodies)
@@ -698,11 +771,14 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     nullTested: new Set(),
     shownEarly: new Set(),
     zeroStartNumbers: new Set(),
+    emptyStarts: new Map(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
   for (const body of bodies) collectEarlyDisplays(body, uses.shownEarly);
   for (const { body, types, keys } of bodies) {
+    const passed = passedOnValues(body, keys, types);
+    const values = assignedValues(body, keys);
     walkAst(body, (node) => {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
       const key = right === null ? null : bindingKey(asNode(node.left), keys);
@@ -723,6 +799,30 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         (type & NUMBER) !== 0
       )
         uses.zeroStartNumbers.add(key);
+      // A text or a flag that starts as null, as a placeholder, and that the script uses only where it is: Groovy truth
+      // treats null like the empty text and false.
+      else if (
+        key !== null &&
+        (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
+        !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
+        !uses.nullTested.has(key) &&
+        !passed.has(key) &&
+        // Every value set later is one of a known type, never null; an input the player answers gives a value.
+        (values.get(key) ?? []).every(
+          (value) =>
+            // The start itself; a null set later passes the variable on (passedOnValues).
+            isNullConstant(value) ||
+            (inferType(value, types) & NULL) === 0 ||
+            (value.kind === "methodCall" &&
+              value.implicitThis === true &&
+              /^get[A-Z]/u.test(constantString(value.method) ?? "") &&
+              types.localFunctions?.has(constantString(value.method) ?? "") !== true),
+        )
+      ) {
+        if (onlyOf(type, STRING | NULL) && (type & STRING) !== 0) uses.emptyStarts.set(key, "");
+        else if (onlyOf(type, BOOLEAN | NULL) && (type & BOOLEAN) !== 0)
+          uses.emptyStarts.set(key, false);
+      }
     });
   }
   for (const [name, keys] of removed) {
@@ -888,6 +988,13 @@ function collectMapUses(
     }
     if ((node.kind === "property" || node.kind === "methodCall") && node.safe === true) {
       const tested = keyOf(node.object);
+      if (tested !== null) uses.nullTested.add(tested);
+    }
+    if (
+      node.kind === "switch" &&
+      nodeArray(node.cases).some((item) => isNullConstant(asNode(item.expression) ?? undefined))
+    ) {
+      const tested = keyOf(node.expression);
       if (tested !== null) uses.nullTested.add(tested);
     }
     const assigns =
@@ -1370,10 +1477,13 @@ export function lowerParsedFile(
       const name = bindingName(key);
       if (type !== 0) listElements.set(name, (listElements.get(name) ?? 0) | type);
     }
-    // A number that starts at 0 instead of null holds no null.
+    // A number that starts at 0, or a text or flag that starts empty, instead of null holds no null.
     const variables = new Map(context.types.variables);
     const bindingTypes = new Map(context.types.bindingTypes ?? []);
-    for (const key of context.mapUses.zeroStartNumbers) {
+    for (const key of [
+      ...context.mapUses.zeroStartNumbers,
+      ...context.mapUses.emptyStarts.keys(),
+    ]) {
       const name = bindingName(key);
       const type = variables.get(name);
       if (type !== undefined) variables.set(name, type & ~NULL);
@@ -4128,6 +4238,19 @@ function lowerDeclaration(
         span,
       );
     return [{ kind: "let", name, value: { kind: "literal", value: 0 }, span }];
+  }
+  // A text or flag that starts as null on the same conditions, and that nothing passes on, starts empty.
+  const empty = startsNull && key !== null ? context.mapUses.emptyStarts.get(key) : undefined;
+  if (empty !== undefined) {
+    if (context.mapUses.shownEarly.has(key!))
+      addDiagnostic(
+        context,
+        "SX_NULL_START_EMPTY",
+        "warning",
+        `Groovy showed ${name} as null until its first value; it starts as ${empty === "" ? "the empty text" : "false"} here, so a text shown before then says ${empty === "" ? "nothing" : "false"}.`,
+        span,
+      );
+    return [{ kind: "let", name, value: { kind: "literal", value: empty }, span }];
   }
   const optionalType = startsNull ? nullableValueType(name, context) : null;
   if (

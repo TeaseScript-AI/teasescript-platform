@@ -35,8 +35,8 @@ if rounds == 0 {
 } else {
   say "Many rounds"
 }
-let labelValue: string? = null
-if labelValue == null or labelValue == "" {
+let labelValue = ""
+if labelValue == "" {
   labelValue = "pet"
 }
 say "Mood ${mood}, bonus ${bonus}, ${labelValue}"

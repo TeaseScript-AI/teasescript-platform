@@ -1,0 +1,39 @@
+// A text or a flag declared as null whose later values all have one type starts empty: no code compares it with null
+// or passes it on, and Groovy truth treats null like the empty text and false.
+let name = ""
+function ask {
+  name = askText "Your name?"
+}
+let finished = false
+if name == "" {
+  ask()
+}
+say "Finished?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  finished = true
+}
+if not finished {
+  say "Keep going, ${name}"
+}
+// A text that a function can show before its first value showed null in Groovy; it shows nothing now.
+// NOTE SX_NULL_START_EMPTY line 10: Groovy showed mood as null until its first value; it starts as the empty text here, so a text shown before then says nothing.
+let mood = ""
+function report {
+  say "Mood: ${mood}"
+}
+report()
+mood = "calm"
+report()
+// A text whose value the code passes on, or that a switch matches against null, keeps its null start.
+let toy: string? = null
+toy = "paddle"
+let chosen: string? = toy
+let room: string? = null
+room = "hall"
+if room == null {
+  say "Nowhere"
+} else {
+  say "In the ${room}"
+}
+say "Using the ${chosen}"
+exit
