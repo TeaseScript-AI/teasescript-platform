@@ -27,7 +27,8 @@ branches. Exact UI and source mapping remain presentation/tooling work. Value pr
 ## Player Debug
 
 The Standard Player's Debug panel is the first Debugger slice. Player Settings' **Debug menu** switch offers it in the
-tools menu; the switch is not stored, so every load starts with it off (the development preview's `?dev` starts it on).
+tools menu; the switch is not stored, so every load starts with it off (the development preview's `?dev` starts it on,
+unless `debug=off`). Debug runs in the [debug room](#debug-room): turning the menu on in the normal room goes on there.
 Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
 Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
 auto-skip, ends a jump at its next yield, and drops the value trace with its history. The time controls stand above the
@@ -98,6 +99,32 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   - The first applied edit marks the session **Edited while debugging** (with the scene time of the first edit and
     the number of edits) in the Player's own session data, which a debug export carries.
 
+### Debug room
+
+Debugging stays apart from normal play. Each script with storage has a normal room, its own saved data and the session
+the Player keeps for it ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), and a debug room with a
+session, saved values, and photos of its own, kept in the IndexedDB database `teasescript-debug-rooms`
+(`player/kept-sessions.ts`). A plain URL opens the normal room; `room=debug` opens the debug room, made from a copy of
+the script's own saved values and photos as they are now when there is none yet. The development preview opens the
+debug room while it starts with the Debug menu on, and with `room=debug`.
+
+- **Debug on in the normal room** goes on in the debug room at once. A normal session that runs or waits goes on there
+  as a copy, with a copy of the script's own saved data and photos as they are now; the normal session stays where it
+  is and keeps counting, and its saves until then stay the script's own. When that copy would overwrite a debug
+  session, a warning asks first: "Overwrite the debug session?", "A copy of your normal session replaces the debug
+  session and what it saved. Your normal session stays as it is.", with **Cancel** and **Overwrite**. Without a
+  running normal session, Debug on opens the debug room's start page. The address then gets `room=debug`, so a reload
+  stays in the debug room. **Debug off** in the debug room only makes the script read `debugMode` as `false`.
+- **Its start page** names its session: **Continue debug session** or **Start debug session**. Once the debug room
+  has something to delete, a session or saved values, it also offers **Reload session**, a new debug session from the
+  debug room's saved data as they are, and **Reset session**, one with its saved data and photos deleted, under "Reload
+  deletes the debug session and keeps what it saved. Reset deletes both."
+- **The title bar** marks the debug room with a bug before the title in its pill, which the bar's tooltip names "Debug
+  session"; the normal room has no mark.
+- The Debug panel's Storage tab, an export of saved data, and an import treat the rooms apart: the tab shows the debug
+  room's values, an export takes the script's own, and an import in the debug room replaces the script's own without
+  ending the debug session.
+
 ### Rewind
 
 While the Debug features run, Debug's rewind (`player/debug-history.ts`) keeps a **point** for every interaction the
@@ -149,7 +176,7 @@ The technical report, always included, locates the failure without runtime value
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
-`version: 4`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+`version: 5`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
 covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
@@ -157,7 +184,8 @@ and `rewindCount`, or `null`), both of which `inspect` prints; the selection and
 and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
-`applyExternalStorageEdit` with the edit, and `updateInteraction` with the form edit, each with its plain arguments, outcome, emitted event range, resulting
+`applyExternalStorageEdit` with the edit, `updateInteraction` with the form edit, and `setDebugMode` with whether Debug
+is on, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name and the status the call started from, the random outcomes chosen during it, and the
 [random draw](RUNTIME.md#controlled-randomness) it stands paused at, or `null`. A call that paused stays one record
 while the Player resolves its draws: each resolution adds its events to it, and a chosen one also its outcome; calls

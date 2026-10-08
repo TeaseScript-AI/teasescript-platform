@@ -133,6 +133,7 @@ async function main() {
       await packageScenario(cdp, origin);
       await titleBarScenario(cdp, origin);
       await keptSessionScenario(cdp, origin, profile);
+      await debugRoomScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -159,7 +160,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1462,6 +1463,97 @@ async function keptSessionScenario(cdp, origin, profile) {
   );
 }
 
+// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with its own start page, which offers Reload session
+// and Reset session once there is something to delete; Debug on during a normal session goes on there with a copy,
+// after a warning when it overwrites a debug session, while the normal session stays as it was.
+async function debugRoomScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-start]";
+  const control = `document.querySelector('${start}')?.textContent.trim()`;
+  const runs = `[...document.querySelectorAll('.transcript-entry')].flatMap((entry) => entry.textContent.match(/Run \\d+\\./g) ?? []).join()`;
+  const anew = `[...document.querySelectorAll('[data-debug-reload], [data-debug-reset]')].map((button) => button.textContent.trim()).join()`;
+  // A visit that keeps this browser's kept sessions and debug rooms.
+  const visit = async (query) => {
+    await cdp.call("Page.navigate", { url: `${origin}/player/?package=debug-room${query}` });
+    await waitFor(
+      cdp,
+      `document.readyState === 'complete' && !!document.querySelector('${start}')`,
+    );
+  };
+  // Keeping is asynchronous browser storage; a reload waits until the debug room keeps a session at its button.
+  const reloadOnceKept = async () => {
+    const deadline = Date.now() + 8_000;
+    while (
+      !(await evaluate(
+        cdp,
+        `return new Promise((resolve) => {
+          const request = indexedDB.open('teasescript-debug-rooms');
+          request.onsuccess = () => {
+            const sessions = request.result.transaction('sessions').objectStore('sessions').getAll();
+            sessions.onsuccess = () => { request.result.close(); resolve(sessions.result.some((session) => session.snapshotJson.includes('"Next"'))); };
+            sessions.onerror = () => resolve(false);
+          };
+          request.onerror = () => resolve(false);
+        })`,
+      ))
+    ) {
+      if (Date.now() > deadline) throw new Error("The debug session was not kept");
+      await delay(50);
+    }
+    await cdp.call("Page.reload");
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+  };
+
+  await navigate(cdp, `${origin}/player/?package=debug-room&room=debug`);
+  await waitFor(cdp, `${control} === 'Start debug session'`);
+  assertEqual(
+    await value(cdp, `[!!document.querySelector('[data-debug-room-indicator]'), ${anew}].join()`),
+    "true,",
+    "A new debug room shows its bug and nothing to delete",
+  );
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `${runs} === 'Run 1.'`);
+  await reloadOnceKept();
+  await waitFor(cdp, `${control} === 'Continue debug session'`);
+  assertEqual(
+    await value(cdp, anew),
+    "Reload session,Reset session",
+    "A debug room with a session offers Reload session and Reset session",
+  );
+  await physicalClick(cdp, "[data-debug-reload]");
+  await waitFor(cdp, `${runs} === 'Run 2.'`, 8_000, "Reload session did not keep the saved data");
+  await reloadOnceKept();
+  await waitFor(cdp, `!!document.querySelector('[data-debug-reset]')`);
+  await physicalClick(cdp, "[data-debug-reset]");
+  await waitFor(cdp, `${runs} === 'Run 1.'`, 8_000, "Reset session did not delete the saved data");
+
+  // Debug on during a normal session overwrites the debug session after a warning, and goes on with a copy.
+  await visit("");
+  await waitFor(cdp, `${control} === 'Start'`);
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `${runs} === 'Run 1.'`);
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await physicalClick(cdp, '[data-player-setting="debug-menu"]');
+  await waitFor(cdp, `!!document.querySelector('[data-confirm-dialog="debug-session-overwrite"]')`);
+  await physicalClick(cdp, "[data-confirm-action]");
+  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+  await waitFor(
+    cdp,
+    `new URLSearchParams(location.search).get('room') === 'debug' && !!document.querySelector('[data-debug-room-indicator]') && ${runs} === 'Run 1.'`,
+    8_000,
+    "Debug on did not go on with the copy in the debug room",
+  );
+  await visit("");
+  await waitFor(cdp, `${control} === 'Continue'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${runs} === 'Run 1.' && !document.querySelector('[data-debug-room-indicator]')`,
+    8_000,
+    "The normal session did not stay as it was",
+  );
+}
+
 async function titleBarScenario(cdp, origin) {
   const title = `document.querySelector('.player-top-bar-title').textContent`;
   const open = async (query) => {
@@ -2693,7 +2785,7 @@ function quadrantColors(element) {
 }
 
 async function cameraScenario(cdp, origin) {
-  const url = `${origin}/player/?dev&scenario=camera`;
+  const url = `${origin}/player/?dev&debug=off&scenario=camera`;
   const start = async () => {
     await navigate(cdp, url);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -2839,7 +2931,7 @@ function assertTestCard(colors, message) {
 }
 
 async function viewfinderScenario(cdp, origin) {
-  const url = `${origin}/player/?dev&scenario=viewfinder`;
+  const url = `${origin}/player/?dev&debug=off&scenario=viewfinder`;
   const start = async () => {
     await navigate(cdp, url);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -5081,13 +5173,15 @@ async function heldPressScenario(cdp, origin) {
   await steady("a form toggle");
 }
 
-// Each visit starts without the session the Player keeps for a script (PLAYER-UI "Session start and user activation"), so
-// scenarios stay independent of the order they run in; `keptSessionScenario` reloads to keep it.
+// Each visit starts without the session the Player keeps for a script (PLAYER-UI "Session start and user activation") and
+// without a debug room (DEBUGGER.md "Debug room"), so scenarios stay independent of the order they run in;
+// `keptSessionScenario` and `debugRoomScenario` reload to keep them.
 async function navigate(cdp, url) {
-  await cdp.call("IndexedDB.deleteDatabase", {
-    securityOrigin: new URL(url).origin,
-    databaseName: "teasescript-kept-sessions",
-  });
+  for (const databaseName of ["teasescript-kept-sessions", "teasescript-debug-rooms"])
+    await cdp.call("IndexedDB.deleteDatabase", {
+      securityOrigin: new URL(url).origin,
+      databaseName,
+    });
   const response = await cdp.call("Page.navigate", { url });
   if (response?.result?.errorText) throw new Error(response.result.errorText);
   await waitFor(cdp, `document.readyState === 'complete'`);

@@ -68,6 +68,8 @@ export function usePlayerDebug(
       rewind.value = features?.rewind ?? null;
       if (enabled) autoSkip = false;
       player.setDebugTracing(enabled);
+      // The script reads it as `debugMode`; on in the normal room, play goes on in the debug room (DEBUGGER.md "Debug room").
+      player.setDebugMode(enabled);
     },
     { immediate: true, flush: "sync" },
   );
