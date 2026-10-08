@@ -629,14 +629,16 @@ const BOOLEAN_TEXT =
   'loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.';
 
 /**
- * A missing text reads as the empty text (owner decision 2026-10-07): every read of a key that only text is read from
- * and saved under, and a legacy text read of a computed key, gets `default: ""`, also where the script tests it for
- * null, and those tests test for the empty text instead, `x == null` as `x == ""`, of the read itself or of a variable,
- * parameter, or function result that it reaches, also through copies; where that holds values of another type too, the
- * test takes both, `x == null or x == ""`, through a helper for a function's result, which then runs once. A null that
- * the script saves under the key, or sets, passes, or returns as a text that holds no other values, is the empty text
- * too. A variable is the binding its name resolves to (Scope), or a global's in every file. A stored empty text so
- * counts as missing.
+ * A missing text reads as the empty text (owner decision 2026-10-07) while its value stays in the read itself or in its
+ * own variable (owner decision R1, 2026-10-08): such a read of a key that only text is read from and saved under, and
+ * a legacy text read of a computed key, gets `default: ""`, and the null tests of the read or of its variable test for
+ * the empty text instead, `x == null` as `x == ""`, or both, `x == null or x == ""`, where the variable holds values of
+ * another type too; a null the script sets to the variable is the empty text too. A list's item takes the empty value
+ * of its type (R2), so putting the value into a list keeps it there. A read whose value the script copies, into
+ * another variable, a dict, or an object, passes to a script function, or returns, itself or through its variable,
+ * keeps legacy null: its key is declared `string?` (withDeclaredKeys), and no test elsewhere changes. A null
+ * that the script saves under a key that no read keeps null of is the empty text. A variable is the binding its name
+ * resolves to (Scope), or a global's in every file. A stored empty text so counts as missing.
  */
 function withEmptyText(
   programs: readonly MigrationProgram[],
@@ -648,6 +650,12 @@ function withEmptyText(
     const key = literalKey(value.key);
     return key === null ? value.read === "string" : textKeys.has(key);
   };
+  // A text read, also one of a mixed key that the text helper reads (withTypedTextReads), as the read itself.
+  const readOf = (value: IrExpression): IrExpression | null => {
+    if (textRead(value)) return value;
+    const only = value.kind === "template" && value.parts.length === 1 ? value.parts[0]! : null;
+    return only !== null && "value" in only && only.value.kind === "load" ? only.value : null;
+  };
   const declaredGlobal = new Set(
     programs.flatMap((program) =>
       program.statements.flatMap((statement) =>
@@ -657,141 +665,24 @@ function withEmptyText(
   );
   const global = (binding: string): string | null =>
     binding.startsWith(":") && declaredGlobal.has(binding.slice(1)) ? binding.slice(1) : null;
-  // Lists that text reads are written into, whose items are text, by binding; a global's by name.
-  const textLists = programs.map(() => new Set<string>());
-  const globalTextLists = new Set<string>();
-  programs.forEach((program, index) => {
-    const visit = (items: readonly IrStatement[], scope: Scope): void => {
-      for (const item of items) {
-        if (item.kind === "let") scope.declare(item.name, item.span);
-        if (
-          item.kind === "assign" &&
-          item.target.kind === "index" &&
-          item.target.target.kind === "variable" &&
-          textRead(item.value)
-        ) {
-          const binding = scope.resolve(item.target.target.name);
-          textLists[index]!.add(binding);
-          if (global(binding) !== null) globalTextLists.add(global(binding)!);
-        }
-        if (item.kind === "function") visit(item.body, scope.inner(item));
-        else
-          withNestedBlocks(item, (body) => {
-            visit(body, scope.inner(item));
-            return body;
-          });
-      }
-    };
-    visit(program.statements, Scope.file());
-  });
-  const text = (index: number, value: IrExpression, scope: Scope): boolean => {
-    if (textRead(value)) return true;
-    if (value.kind === "index" && value.target.kind === "variable") {
-      const binding = scope.resolve(value.target.name);
-      return textLists[index]!.has(binding) || globalTextLists.has(global(binding) ?? "");
-    }
-    return (
-      value.kind === "template" &&
-      value.parts.length === 1 &&
-      "value" in value.parts[0]! &&
-      value.parts[0].value.kind === "load"
-    );
-  };
-  // The values each binding takes, by program: a variable's, a parameter's from each call and its default, and a
-  // function's result's (`return:name`) from each return.
-  type Flow = { binding: string; value: IrExpression; scope: Scope };
-  const flows = programs.map((): Flow[] => []);
-  const functions = programs.map(
-    () => new Map<string, Extract<IrStatement, { kind: "function" }>>(),
-  );
-  const receivers = programs.map(() => new Set<string>());
   const assigned = (item: IrStatement, scope: Scope): string | null =>
     item.kind === "let"
       ? scope.declare(item.name, item.span)
       : item.kind === "assign" && item.operator === "=" && item.target.kind === "variable"
         ? scope.resolve(item.target.name)
         : null;
-  programs.forEach((program, index) => {
-    const flow = flows[index]!;
-    const calls: Array<[Extract<IrExpression, { kind: "call" }>, Scope]> = [];
-    const callsIn = (scope: Scope) => {
-      const collect = (value: IrExpression): IrExpression => {
-        if (value.kind === "call" && value.local === true) calls.push([value, scope]);
-        return mapChildren(value, collect);
-      };
-      return collect;
-    };
-    const visit = (items: readonly IrStatement[], scope: Scope): void => {
-      for (const item of items) {
-        if (item.kind === "function") {
-          functions[index]!.set(item.name, item);
-          const inner = scope.inner(item);
-          for (const parameter of item.parameters) {
-            if (parameter.defaultValue === null) continue;
-            callsIn(inner)(parameter.defaultValue);
-            flow.push({
-              binding: `${item.name}:${parameter.name}`,
-              value: parameter.defaultValue,
-              scope: inner,
-            });
-          }
-          visit(item.body, inner);
-          continue;
-        }
-        mapOwnExpressions(item, callsIn(scope));
-        const binding = assigned(item, scope);
-        if (binding !== null && (item.kind === "let" || item.kind === "assign")) {
-          flow.push({ binding, value: item.value, scope });
-          if (text(index, item.value, scope)) receivers[index]!.add(binding);
-        }
-        if (item.kind === "return" && item.value !== null && scope.fn !== null)
-          flow.push({ binding: `return:${scope.fn}`, value: item.value, scope });
-        withNestedBlocks(item, (body) => {
-          visit(body, scope.inner(item));
-          return body;
-        });
-      }
-    };
-    visit(program.statements, Scope.file());
-    for (const [call, scope] of calls) {
-      const callee = functions[index]!.get(call.name);
-      call.positional.forEach((argument, position) => {
-        const parameter = callee?.parameters[position];
-        if (parameter !== undefined)
-          flow.push({ binding: `${call.name}:${parameter.name}`, value: argument, scope });
-      });
-    }
-  });
-  // The globals that text is read into, and those that such a text reaches, in any file.
-  const globals = new Set(
-    receivers.flatMap((bindings) => [...bindings].flatMap((binding) => global(binding) ?? [])),
-  );
-  const globalsReached = new Set<string>();
-  const reached = programs.map(() => new Set<string>());
-  // Whether a binding holds a text read: its own, a global's, or one that reaches it.
-  const holdsRead = (index: number, binding: string): boolean =>
-    receivers[index]!.has(binding) ||
-    reached[index]!.has(binding) ||
-    globals.has(global(binding) ?? "") ||
-    globalsReached.has(global(binding) ?? "");
-  const holds = (index: number, value: IrExpression, scope: Scope): boolean =>
-    text(index, value, scope) ||
-    (value.kind === "variable" && holdsRead(index, scope.resolve(value.name))) ||
-    (value.kind === "call" && value.local === true && holdsRead(index, `return:${value.name}`));
-  for (let changed = true; changed;) {
-    changed = false;
-    flows.forEach((flow, index) => {
-      for (const { binding, value, scope } of flow)
-        if (!holdsRead(index, binding) && holds(index, value, scope)) {
-          reached[index]!.add(binding);
-          const name = global(binding);
-          if (name !== null) globalsReached.add(name);
-          changed = true;
-        }
-    });
-  }
-  // What each binding takes besides text: `null`, the types of other values the importer knows here, or `unknown`,
-  // also through the text it copies; a global's, from every file.
+
+  // Where the reads' values go. A variable that a text read is set to is its receiver; a read or a variable whose value
+  // is copied, passed to a script function, or returned is passed on. A global's by name, from every file.
+  const receivers = programs.map(() => new Set<string>());
+  const globalReceivers = new Set<string>();
+  const passed = programs.map(() => new Set<string>());
+  const passedGlobals = new Set<string>();
+  const passedReads = new Set<IrExpression>();
+  // The receiver of each read set to a variable.
+  const readTargets = new Map<IrExpression, { index: number; binding: string }>();
+  // What each receiver takes besides text reads: `null`, `nullable` (a copy of another receiver), the types of other
+  // values the importer knows here, or `unknown`.
   const others = programs.map(() => new Map<string, Set<string>>());
   const globalOthers = new Map<string, Set<string>>();
   const othersOf = (index: number, binding: string): Set<string> => {
@@ -801,60 +692,129 @@ function withEmptyText(
     map.set(name ?? binding, types);
     return types;
   };
-  flows.forEach((flow, index) => {
-    for (const { binding, value, scope } of flow) {
-      if (holds(index, value, scope)) continue;
-      othersOf(index, binding).add(
-        isNullLiteral(value)
-          ? "null"
+  const isReceiver = (index: number, binding: string): boolean =>
+    receivers[index]!.has(binding) || globalReceivers.has(global(binding) ?? "");
+  type Flow = { index: number; binding: string; value: IrExpression; scope: Scope };
+  const flows: Flow[] = [];
+  programs.forEach((program, index) => {
+    const pass = (binding: string): void => {
+      const name = global(binding);
+      if (name !== null) passedGlobals.add(name);
+      else passed[index]!.add(binding);
+    };
+    const visit = (value: IrExpression, scope: Scope, passes: boolean): IrExpression => {
+      if (passes) {
+        const read = readOf(value);
+        if (read !== null) passedReads.add(read);
+        if (value.kind === "variable") pass(scope.resolve(value.name));
+      }
+      // The open-value helper gives its argument itself.
+      const itself = value.kind === "call" && value.name === helperName("value") && passes;
+      // A list's items take their type's empty value instead (R2), so a value put into a list is no copy here.
+      const copies =
+        itself ||
+        value.kind === "object" ||
+        (value.kind === "call" && value.local === true) ||
+        (value.kind === "methodCall" && COPYING_METHODS.has(value.name));
+      if (value.kind === "methodCall") {
+        visit(value.target, scope, false);
+        for (const argument of value.arguments) visit(argument, scope, copies);
+        return value;
+      }
+      return mapChildren(value, (child) => visit(child, scope, copies));
+    };
+    const block = (items: readonly IrStatement[], scope: Scope): void => {
+      for (const item of items) {
+        if (item.kind === "function") {
+          const inner = scope.inner(item);
+          for (const parameter of item.parameters)
+            if (parameter.defaultValue !== null) visit(parameter.defaultValue, inner, true);
+          block(item.body, inner);
+          continue;
+        }
+        if (item.kind === "let" || (item.kind === "assign" && item.operator === "=")) {
+          if (item.kind === "assign") visit(item.target, scope, false);
+          const read = readOf(item.value);
+          const target =
+            item.kind === "let"
+              ? null
+              : item.target.kind === "variable"
+                ? item.target.name
+                : undefined;
+          if (target === undefined && item.kind === "assign") {
+            // Set into a dict or an object, the value is copied; into a list, the item takes the empty value (R2).
+            visit(item.value, scope, item.target.kind !== "index" || item.target.dict === true);
+          } else {
+            const source = item.value.kind === "variable" ? scope.resolve(item.value.name) : null;
+            const resolved = target === null || target === undefined ? null : scope.resolve(target);
+            // A copy of a variable into another passes it on; set to itself, it stays.
+            visit(item.value, scope, read === null && (source === null || source !== resolved));
+            const binding = assigned(item, scope)!;
+            if (read !== null) {
+              receivers[index]!.add(binding);
+              if (global(binding) !== null) globalReceivers.add(global(binding)!);
+              readTargets.set(read, { index, binding });
+            } else flows.push({ index, binding, value: item.value, scope });
+          }
+        } else if (item.kind === "return") {
+          if (item.value !== null) visit(item.value, scope, true);
+        } else mapOwnValues(item, (value) => visit(value, scope, false));
+        withNestedBlocks(item, (body) => {
+          block(body, scope.inner(item));
+          return body;
+        });
+      }
+    };
+    block(program.statements, Scope.file());
+  });
+  // The values set to receivers that are no text reads.
+  for (const { index, binding, value, scope } of flows) {
+    if (!isReceiver(index, binding)) continue;
+    const source = value.kind === "variable" ? scope.resolve(value.name) : null;
+    othersOf(index, binding).add(
+      isNullLiteral(value)
+        ? "null"
+        : source !== null && isReceiver(index, source)
+          ? "nullable"
           : value.kind === "load"
             ? "unknown"
             : (valueType(value) ?? "unknown"),
-      );
-    }
-  });
-  for (let changed = true; changed;) {
-    changed = false;
-    flows.forEach((flow, index) => {
-      for (const { binding, value, scope } of flow) {
-        const source =
-          value.kind === "variable"
-            ? scope.resolve(value.name)
-            : value.kind === "call" && value.local === true
-              ? `return:${value.name}`
-              : null;
-        if (source === null || !holdsRead(index, source)) continue;
-        const types = othersOf(index, binding);
-        for (const type of othersOf(index, source))
-          if (!types.has(type)) {
-            types.add(type);
-            changed = true;
-          }
-      }
-    });
+    );
   }
+  // A receiver whose value stays in it: no read set to it, nor it, is passed on.
+  const own = (index: number, binding: string): boolean =>
+    isReceiver(index, binding) &&
+    !passed[index]!.has(binding) &&
+    !passedGlobals.has(global(binding) ?? "");
+  const local = (read: IrExpression): boolean => {
+    if (passedReads.has(read)) return false;
+    const target = readTargets.get(read);
+    return target === undefined || own(target.index, target.binding);
+  };
+  // Keys that a read keeps null of, under which a saved null stays null.
+  const nullKeys = new Set<string>();
+  for (const read of [...passedReads, ...readTargets.keys()]) {
+    const key = read.kind === "load" ? literalKey(read.key) : null;
+    if (key !== null && !local(read) && read.kind === "load" && read.defaultValue === undefined)
+      nullKeys.add(key);
+  }
+
   return programs.map((program, index) => {
     const diagnostics = [...program.diagnostics];
     const note = (code: string, message: string, span: IrStatement["span"]): void => {
       diagnostics.push({ code, severity: "info", message, span });
     };
-    const isReceiver = (binding: string): boolean =>
-      receivers[index]!.has(binding) || globals.has(global(binding) ?? "");
-    // A text that holds values of another type too, whose null tests take both.
+    // An own variable that holds values of another type too, or null from elsewhere, whose null tests take both.
     const mixed = (binding: string): boolean =>
       [...othersOf(index, binding)].some((type) => type !== "string" && type !== "null");
-    // A null set to a text is the empty text, unless it holds values of another type too and is no read's own.
-    const emptied = (binding: string): boolean =>
-      isReceiver(binding) || (holdsRead(index, binding) && !mixed(binding));
     const typeOf = (binding: string): { type?: string; open?: true } => {
       const given = [...othersOf(index, binding)].filter(
-        (type) => type !== "string" && !(type === "null" && emptied(binding)),
+        (type) => type !== "string" && type !== "null",
       );
       if (given.length === 0) return {};
       if (given.includes("unknown")) return { open: true };
-      const held = unionType(["string", ...given.filter((type) => type !== "null")])!;
-      if (!given.includes("null")) return { type: held };
-      return { type: optional(held) };
+      const held = unionType(["string", ...given.filter((type) => type !== "nullable")])!;
+      return given.includes("nullable") ? { type: optional(held) } : { type: held };
     };
     const nullSet = (span: IrStatement["span"]): IrExpression => {
       note(
@@ -868,7 +828,7 @@ function withEmptyText(
     const rewriteIn = (scope: Scope, span: IrStatement["span"]) => {
       const rewrite = (value: IrExpression): IrExpression => {
         const next = mapChildren(value, rewrite);
-        if (next.kind === "load" && textRead(next)) {
+        if (next.kind === "load" && textRead(value) && local(value)) {
           const { open: _open, ...load } = next;
           if (load.defaultValue !== undefined) return load;
           note(
@@ -878,40 +838,19 @@ function withEmptyText(
           );
           return { ...load, defaultValue: EMPTY };
         }
-        // A null passed to a text parameter is the empty text.
-        if (next.kind === "call" && next.local === true) {
-          const callee = functions[index]!.get(next.name);
-          const positional = next.positional.map((argument, position) => {
-            const parameter = callee?.parameters[position];
-            return parameter !== undefined &&
-              isNullLiteral(argument) &&
-              emptied(`${next.name}:${parameter.name}`)
-              ? nullSet(span)
-              : argument;
-          });
-          if (positional.some((argument, position) => argument !== next.positional[position]))
-            return { ...next, positional };
-        }
         if (next.kind !== "binary" || (next.operator !== "==" && next.operator !== "!="))
           return next;
-        const side = isNullLiteral(next.right)
-          ? next.left
-          : isNullLiteral(next.left)
-            ? next.right
+        const tested = isNullLiteral(value.kind === "binary" ? value.right : EMPTY)
+          ? "left"
+          : isNullLiteral(value.kind === "binary" ? value.left : EMPTY)
+            ? "right"
             : null;
-        const binding =
-          side === null
-            ? null
-            : side.kind === "variable"
-              ? scope.resolve(side.name)
-              : side.kind === "call" && side.local === true
-                ? `return:${side.name}`
-                : null;
-        if (
-          side === null ||
-          (!text(index, side, scope) && (binding === null || !holdsRead(index, binding)))
-        )
-          return next;
+        if (tested === null || value.kind !== "binary") return next;
+        const original = value[tested];
+        const side = next[tested];
+        const read = readOf(original);
+        const binding = side.kind === "variable" ? scope.resolve(side.name) : null;
+        if (read !== null ? !local(read) : binding === null || !own(index, binding)) return next;
         note(
           "SX_LOAD_TEXT_NULL_TEST",
           "Legacy tested this text for null, which a missing text was; it tests for the empty text now.",
@@ -924,13 +863,6 @@ function withEmptyText(
           right: EMPTY,
         };
         if (binding === null || !mixed(binding)) return empty;
-        if (side.kind === "call") {
-          // A result is tested once, as legacy called the function once.
-          const missing = helperCall("missingText", [side]);
-          return next.operator === "=="
-            ? missing
-            : { kind: "unary", operator: "not", value: missing };
-        }
         return {
           kind: "binary",
           operator: next.operator === "==" ? "or" : "and",
@@ -945,48 +877,32 @@ function withEmptyText(
         const span = item.span;
         if (item.kind === "function") {
           const inner = scope.inner(item);
-          const parameters = item.parameters.map((parameter) => {
-            if (parameter.defaultValue === null) return parameter;
-            const binding = `${item.name}:${parameter.name}`;
-            const defaultValue =
-              isNullLiteral(parameter.defaultValue) && emptied(binding)
-                ? nullSet(span)
-                : rewriteIn(inner, span)(parameter.defaultValue);
-            // A text parameter that calls pass values of other types to holds them all, which its default's type
-            // alone would not.
-            const given = othersOf(index, binding);
-            if (parameter.type !== undefined || !holdsRead(index, binding) || emptied(binding))
-              return { ...parameter, defaultValue };
-            if (given.has("unknown"))
-              return { ...parameter, defaultValue: helperCall("value", [defaultValue]) };
-            const type = unionType([
-              "string",
-              ...[...given].filter((member) => member !== "null"),
-            ])!;
-            return { ...parameter, defaultValue, type: given.has("null") ? optional(type) : type };
-          });
+          const parameters = item.parameters.map((parameter) =>
+            parameter.defaultValue === null
+              ? parameter
+              : { ...parameter, defaultValue: rewriteIn(inner, span)(parameter.defaultValue) },
+          );
           return [{ ...item, parameters, body: block(item.body, inner) }];
         }
         const nested = withNestedBlocks(item, (body) => block(body, scope.inner(item)));
         let next = mapOwnValues(nested, rewriteIn(scope, span));
         const key = next.kind === "save" ? literalKey(next.key) : null;
-        if (next.kind === "save" && key !== null && textKeys.has(key) && isNullLiteral(next.value))
-          return [{ ...next, value: EMPTY }];
         if (
-          next.kind === "return" &&
-          next.value !== null &&
-          isNullLiteral(next.value) &&
-          scope.fn !== null &&
-          emptied(`return:${scope.fn}`)
+          next.kind === "save" &&
+          key !== null &&
+          textKeys.has(key) &&
+          !nullKeys.has(key) &&
+          isNullLiteral(next.value)
         )
-          return [{ ...next, value: nullSet(span) }];
+          return [{ ...next, value: EMPTY }];
         const binding = assigned(next, scope);
         if (binding === null || (next.kind !== "let" && next.kind !== "assign")) return [next];
-        // Null set to a variable that text is read into is the empty text, which its tests test for.
-        if (isNullLiteral(next.value) && emptied(binding))
+        // Null set to an own variable of a text read is the empty text, which its tests test for.
+        if (isNullLiteral(next.value) && own(index, binding))
           return [{ ...next, value: nullSet(span) }];
-        if (next.kind === "assign" && holds(index, next.value, scope)) widened.add(binding);
-        if (next.kind !== "let" || !holds(index, next.value, scope) || next.type !== undefined)
+        const read = readOf(item.kind === "let" || item.kind === "assign" ? item.value : EMPTY);
+        if (next.kind === "assign" && read !== null) widened.add(binding);
+        if (next.kind !== "let" || read === null || !own(index, binding) || next.type !== undefined)
           return [next];
         const held = typeOf(binding);
         if (held.type !== undefined) return [{ ...next, type: held.type }];
@@ -1010,8 +926,8 @@ function withEmptyText(
         ];
       });
     const statements = block(program.statements, Scope.file());
-    // A variable that text is read into after another value started it holds both; one that holds only text, whose
-    // null tests test for the empty text now, holds no null.
+    // A variable that text is read into after another value started it holds both; an own variable of a text read,
+    // whose null tests test for the empty text now, holds no null.
     const widen = (items: IrStatement[], scope: Scope): IrStatement[] =>
       items.map((item) => {
         if (item.kind === "function") {
@@ -1021,8 +937,8 @@ function withEmptyText(
         const next = withNestedBlocks(item, (body) => widen(body, scope.inner(item)));
         if (next.kind !== "let") return next;
         const binding = scope.declare(next.name, next.span);
-        const reads = widened.has(binding) || holds(index, next.value, scope);
-        if (next.type === "string?" && reads && emptied(binding))
+        const reads = widened.has(binding) || readOf(next.value) !== null;
+        if (next.type === "string?" && reads && own(index, binding) && !mixed(binding))
           return { ...next, type: "string" };
         if (next.type !== undefined) {
           // A declared type that text is read into later takes text too.
@@ -1038,6 +954,9 @@ function withEmptyText(
     return { ...program, statements: widen(statements, Scope.file()), diagnostics };
   });
 }
+
+/** Methods that put their arguments into a dict, which copies them; a list's items take the empty value instead (R2). */
+const COPYING_METHODS = new Set(["put", "set"]);
 
 /**
  * The variables in scope at a point of a walk over a file: each `let`, parameter, and loop variable is a binding of its
@@ -1455,7 +1374,7 @@ function withUsedHelpers(
       ),
     ),
   );
-  for (const helper of ["value", "text", "booleanText", "missingText", "castText"] as const) {
+  for (const helper of ["value", "text", "booleanText", "castText"] as const) {
     const name = helperName(helper);
     const defines = (program: MigrationProgram, global = false): boolean =>
       program.statements.some(

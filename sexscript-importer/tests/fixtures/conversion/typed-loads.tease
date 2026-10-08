@@ -81,9 +81,9 @@ let sexscriptLegacyKey2 = keyOf()
 let counted = sexscriptLegacyLoadInteger(sexscriptLegacyKey2, load(sexscriptLegacyKey2, default: 1 + 1))
 say "${counted} ${sexscriptLegacyKey1}"
 // A default that reads a variable the code between declares stays where it is, after that declaration.
-let picture = load "game.picture", default: ""
-let saved = load "game.savedPicture", default: ""
-if picture == "" {
+let picture: string? = load "game.picture", default: ""
+let saved: string? = load "game.savedPicture", default: null
+if picture == null or picture == "" {
   picture = saved
 }
 say "Picture ${picture}"

@@ -15,9 +15,8 @@ if (level == null) {
 }
 show("Level " + level)
 if (load("game.seen") == null) save("game.seen", true)
-// A copy of the text, or a parameter it is passed to, tests for the empty text too, and one that holds values of
-// another type as well tests for both; the text that loadString read of a key the package saves numbers under keeps
-// its null.
+// A text that the script copies, or passes to a script function, keeps legacy null, and so do the tests of the copy
+// and of the parameter; the text that loadString read of a key the package saves numbers under keeps its null.
 def stored = loadString("game.stored")
 def copy = stored
 if (copy == null) show("Nothing stored.")
@@ -92,8 +91,8 @@ if (picks[0] == null) show("No pick.")
 def counts = [1, 2]
 counts[1] = load("game.count" + slot)
 show("Count " + (counts[1] + 1))
-// A text that a function returns tests for the empty text where the script tests the call for null, also in a
-// parameter's default, and a copy that the script sets to null holds the empty text.
+// A text that a function returns keeps legacy null, and so do the tests of the call, of a parameter's default, and of a
+// copy that the script sets to null.
 def readNote = { -> return loadString("game.note") }
 if (readNote() == null) show("No note.")
 def noted = { note, missing = (note == null) -> return missing }
@@ -101,7 +100,7 @@ show("Missing " + noted(loadString("game.note")))
 def noteCopy = readNote()
 noteCopy = null
 if (noteCopy == null) show("Cleared.")
-// A result that may be a value the importer cannot tell too tests for both, calling the function once.
+// So does a returned text whose function may give a value the importer cannot tell too.
 def oldHints = load("game.oldHints")
 def readHint = { -> if (getBoolean("A hint?")) return loadString("game.hint"); return oldHints }
 if (readHint() == null) show("No hint.")
@@ -119,10 +118,10 @@ if (loadBoolean("game.choice")) show("Chosen " + choiceText)
 def hints = ["first"]
 hints.add(load("game.hint" + slot))
 show("Hints " + hints.size())
-// A parameter that a text holding values of another type too is passed to tests for both.
+// A parameter that a text is passed to tests for legacy null.
 def describe = { what -> if (what == null) show("Nothing to wear.") }
 describe(outfit)
-// A text parameter whose default holds values of another type too, and that a call passes null to, holds them all.
+// A text that is a parameter's default is passed on, and keeps legacy null beside the variable's other values.
 def mixedNote = loadString("game.mixedNote")
 mixedNote = 2
 def checkNote = { item = mixedNote -> return item == "" }
