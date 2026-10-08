@@ -3012,7 +3012,9 @@ class Parser {
     }
     if (
       expression.kind !== "callExpression" &&
-      !(expression.kind === "tagQueryExpression" && expression.select === "list")
+      !(expression.kind === "tagQueryExpression" && expression.select === "list") &&
+      // `askBooleans(...)` was a call, which a statement may discard the answer of.
+      !(expression.kind === "interactionExpression" && expression.interactionKind === "booleans")
     ) {
       if (expression.kind === "identifier") {
         this.#reportSpan(

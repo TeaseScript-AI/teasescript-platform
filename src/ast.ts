@@ -584,8 +584,8 @@ export interface ReturnStatement {
 
 export interface ExpressionStatement {
   readonly kind: "expressionStatement";
-  /** A call, or `findImages(…)`, which reads like one. */
-  readonly expression: CallExpression | TagQueryExpression;
+  /** A call, or `findImages(…)` or `askBooleans`, which read like one. */
+  readonly expression: CallExpression | TagQueryExpression | InteractionExpression;
   readonly span: SourceSpan;
 }
 

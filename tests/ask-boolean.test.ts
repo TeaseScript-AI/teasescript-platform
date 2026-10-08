@@ -157,3 +157,28 @@ test("a for loop goes through the answers of askBooleans in both forms", () => {
     );
   }
 });
+
+test("askBooleans may stand alone as a statement in both forms, and its answers are dropped", () => {
+  for (const ask of [
+    'askBooleans("Choose", texts: ["A", "B"], defaults: [true, false])',
+    'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]',
+  ]) {
+    const session = createPlayerRuntimeSession(`${ask}\nsay "done", instant\nexit`);
+    const restored = restorePlayerRuntimeSession(
+      JSON.parse(JSON.stringify(createPlayerRuntimeRestorePoint(session))),
+    );
+    const direct = submitPlayerRuntimeForm(session);
+    const resumed = submitPlayerRuntimeForm(restored);
+    assert.equal(resumed?.session.state.status, "halted", ask);
+    assert.deepEqual(
+      playerRuntimeSnapshot(resumed!.session),
+      playerRuntimeSnapshot(direct!.session),
+      ask,
+    );
+    assert.deepEqual(
+      resumed!.session.transcriptEntries.map((entry) => entry.text),
+      ["Choose", "✓ A, ✗ B", "done"],
+      ask,
+    );
+  }
+});
