@@ -2303,7 +2303,10 @@ function lowerHelperMethod(
     integerArrays: new Set(),
     textVariables: new Set(),
     walkedEntries: new Map(),
-    changingPaths: new Set(),
+    changingPaths: new Set([
+      ...changingVariables(body, new Map()),
+      ...records.map((parameter) => parameter.name),
+    ]),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -5862,7 +5865,7 @@ function lowerCallStatement(
     call?.name === "eachFileRecurse"
       ? call.arguments.length === 1
         ? ("all" as const)
-        : call.arguments.length === 2 && isFilesOnly(call.arguments[0]!)
+        : call.arguments.length === 2 && isFilesOnly(call.arguments[0]!, context)
           ? ("files" as const)
           : undefined
       : call?.name === "eachFile" && call.arguments.length === 1
@@ -16644,7 +16647,10 @@ function isFileConstructor(node: AstNode): boolean {
 const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"]);
 
 /** Groovy's `FileType.FILES`, also written `groovy.io.FileType.FILES`, which walks only through files. */
-function isFilesOnly(node: AstNode): boolean {
+function isFilesOnly(node: AstNode, context: LowerContext): boolean {
+  // A script variable named FileType, `def FileType = [FILES: null]`, is no enum.
+  if (context.assignedValues.has("FileType") || context.constantInitializers.has("FileType"))
+    return false;
   const name = (value: AstNode | null): string | null => {
     if (value?.kind === "variable") return variableName(value);
     if (value?.kind === "classExpression") return text(value.type) ?? null;
@@ -16658,11 +16664,26 @@ function isFilesOnly(node: AstNode): boolean {
 }
 
 /**
- * Bindings whose value a path cannot be read from at conversion time: those a compound assignment or `++` changes in
- * place, by binding key, and parameters and loop variables, which get values from outside, by name.
+ * Bindings whose value a path cannot be read from at conversion time, by binding key: those a compound assignment or
+ * `++` changes in place, and parameters and loop variables, which get values from outside.
  */
 function changingVariables(body: AstNode, keys: BindingKeys): Set<string> {
   const changing = new Set<string>();
+  // The keys of the reads of a parameter or loop variable in its own body, apart from a nested closure's own.
+  const bound = (scope: AstNode, name: string): void => {
+    const visit = (node: AstNode): void => {
+      if (node !== scope && node.kind === "closure") {
+        const own = (groovyParameters(node.parameters) ?? []).map((parameter) => parameter.name);
+        if (own.includes(name) || (name === "it" && node.parameterSpecified !== true)) return;
+      }
+      if (node.kind === "variable" && variableName(node) === name) {
+        const key = bindingKey(node, keys);
+        if (key !== null) changing.add(key);
+      }
+      for (const child of nodeChildren(node)) visit(child);
+    };
+    visit(scope);
+  };
   walkAst(body, (node) => {
     const operator = node.kind === "binary" ? text(node.operator) : null;
     const updated =
@@ -16675,10 +16696,10 @@ function changingVariables(body: AstNode, keys: BindingKeys): Set<string> {
         : null;
     if (updated !== null) changing.add(updated);
     if (node.kind === "closure") {
-      for (const parameter of groovyParameters(node.parameters) ?? []) changing.add(parameter.name);
-      if (node.parameterSpecified !== true) changing.add("it");
+      for (const parameter of groovyParameters(node.parameters) ?? []) bound(node, parameter.name);
+      if (node.parameterSpecified !== true) bound(node, "it");
     }
-    if (node.kind === "for" && typeof node.variable === "string") changing.add(node.variable);
+    if (node.kind === "for" && typeof node.variable === "string") bound(node, node.variable);
   });
   return changing;
 }
@@ -17064,8 +17085,7 @@ function resolvedPath(
   const variable = variableName(node);
   if (node.kind === "variable" && variable !== null) {
     const key = bindingKey(node, context.bindings) ?? variable;
-    if (seen.has(key) || context.changingPaths.has(key) || context.changingPaths.has(variable))
-      return null;
+    if (seen.has(key) || context.changingPaths.has(key)) return null;
     const assigned = context.assignedValues.get(key) ?? [];
     const initializer = context.constantInitializers.get(variable);
     const values = assigned.length > 0 ? assigned : initializer === undefined ? [] : [initializer];
@@ -17178,7 +17198,8 @@ function listedFolderWalk(
       : context.actualFiles.filter((file) => file.toLowerCase().startsWith(folder.toLowerCase()));
   const actualFolder = below[0]?.slice(0, folder.length) ?? folder;
   if (below.some((file) => !file.startsWith(actualFolder))) return undefined;
-  // The walk's entries in the order Groovy visited them: by name within a folder, and a folder before what it holds.
+  // The walk's entries with a folder before what it holds, as Groovy visited them, and by name within a folder, where
+  // Groovy followed the file system's order.
   const walked: Array<{ path: string; folder: boolean }> = [];
   const visit = (prefix: string): void => {
     const children = new Map<string, boolean>();
