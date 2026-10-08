@@ -80,6 +80,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const info = status(260, 56);
   const warning = status(60, 64);
   const error = status(25, 72);
+  // The debug room's bug while Debug runs: one red, the same in both modes, between the error reds (owner, #512).
+  const debugMark = tonalColor(25, 72, 53);
   const base = {
     "surface-canvas": surface(tones.canvas),
     "surface-chrome": surface(tones.chrome, dark ? 0.85 : 0.75),
@@ -108,6 +110,7 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "status-warning-soft": warning.soft,
     "status-error": error.solid,
     "status-error-soft": error.soft,
+    "debug-mark": debugMark,
   };
   const roles = {
     ...base,
@@ -168,6 +171,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     inspect(`status-${level}`, `status-${level}-soft`, textTarget);
     inspect("text-primary", `status-${level}-soft`, textTarget);
   }
+  // The bug's fill, a mark in the title pill's chrome.
+  inspect("debug-mark", "surface-chrome", 3);
   inspect("text-disabled", "surface-disabled", null);
   const effects = {
     "overlay-shadow": { color: black, alpha: 0.65 },

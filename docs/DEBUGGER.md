@@ -27,8 +27,9 @@ branches. Exact UI and source mapping remain presentation/tooling work. Value pr
 ## Player Debug
 
 The Standard Player's Debug panel is the first Debugger slice. Player Settings' **Debug menu** switch offers it in the
-tools menu; the switch is not stored, so every load starts with it off (the development preview's `?dev` starts it on,
-unless `debug=off`). Debug runs in the [debug room](#debug-room): turning the menu on in the normal room goes on there.
+tools menu; the switch is not stored, so every load starts with it off in the normal room (the development preview's
+`?dev` starts it on, unless `debug=off`) and on in the debug room. Debug runs in the [debug room](#debug-room): turning
+the menu on in the normal room goes on there.
 Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
 Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
 auto-skip, ends a jump at its next yield, and drops the value trace with its history. The time controls stand above the
@@ -119,8 +120,9 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
   has something to delete, a session or saved values, it also offers **Reload session**, a new debug session from the
   debug room's saved data as they are, and **Reset session**, one with its saved data and photos deleted, under "Reload
   deletes the debug session and keeps what it saved. Reset deletes both."
-- **The title bar** marks the debug room with a bug before the title in its pill, which the bar's tooltip names "Debug
-  session"; the normal room has no mark.
+- **The title bar** marks the debug room with an outlined bug before the title in its pill, filled red inside while
+  Debug runs, which the bar's tooltip names "Debug session · Debug on" or "Debug session · Debug off"; the normal room
+  has no mark.
 - The Debug panel's Storage tab, an export of saved data, and an import treat the rooms apart: the tab shows the debug
   room's values, an export takes the script's own, and an import in the debug room replaces the script's own without
   ending the debug session.

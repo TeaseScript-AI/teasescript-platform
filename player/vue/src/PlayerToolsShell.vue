@@ -939,8 +939,8 @@ async function updateSidebarVisibility(open: boolean) {
                         <Switch v-model="debugMenu" data-player-setting="debug-menu" />
                       </label>
                       <p class="text-muted-foreground">
-                        Adds the Debug panel to the tools menu until the page is reloaded. It shows how the script
-                        runs and may reveal what comes next.
+                        Adds the Debug panel to the tools menu. It shows how the script runs and may reveal what
+                        comes next.
                       </p>
                       <template v-if="debugExport">
                         <Button
