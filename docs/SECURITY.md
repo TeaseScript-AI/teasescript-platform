@@ -19,9 +19,11 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   trap failures, cycles, unsupported prototypes, non-finite numbers, and sparse or otherwise non-canonical arrays before
   detailed use. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype`
   properties, and density checks require own indexes. Compiler-owned plans use complete inspect-only validation without
-  this defensive copy. Defensive capture is correctness/robustness behavior, not by itself a TeaseScript content-capacity
-  or security policy, and already validated internal representations do not need external-data capture merely because
-  they share a capture or validation helper.
+  this defensive copy. A runtime session restores its own tagged export without capture or validation only when the
+  export's keyed tag proves that the engine wrote it in this process for the same plan ([Runtime
+  sessions](RUNTIME.md#runtime-sessions)). Defensive capture is correctness/robustness behavior, not by itself a
+  TeaseScript content-capacity or security policy, and already validated internal representations do not need
+  external-data capture merely because they share a capture or validation helper.
 - A resource-based security rejection requires a concrete current cross-principal or protected-resource boundary,
   reachable influence across that boundary, and the consequence being prevented. Self-only local misuse is not
   sufficient. Generic work, node, size, or traversal-depth counters may be useful diagnostics, but they do not reject

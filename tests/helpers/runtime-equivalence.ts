@@ -5,6 +5,7 @@ import {
   compileSource,
   createCheckpoint,
   createRuntimeSession,
+  createTaggedRuntimeSession,
   deserializeCheckpoint,
   deserializeRuntimeSession,
   executeInstruction,
@@ -30,6 +31,7 @@ import {
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 import { interruptFrame } from "../../src/runtime/activations.js";
 import { executionRunnable } from "../../src/runtime/operations/observe-time.js";
+import { withValidationTestStatistics } from "../../src/validation-testing.js";
 
 const DEFAULT_EQUIVALENCE_SEED = 0x1234_5678;
 const DEFAULT_INSTRUCTION_GUARD = 2_000;
@@ -213,13 +215,39 @@ export function assertRuntimeResumeEquivalent(
       checkpointJson,
       `${context}: session checkpoint`,
     );
+    const checkedJson = JSON.stringify(stepper.exportSnapshot());
     assert.equal(
       JSON.stringify(stepper.exportTrustedSnapshot()),
-      JSON.stringify(stepper.exportSnapshot()),
+      checkedJson,
       `${context}: the trusted export differs from the checked one`,
     );
-    // The session continues from a restored copy of this boundary, or from a fork of itself.
-    stepper = boundary % 2 === 0 ? deserializeRuntimeSession(checkpointJson) : stepper.fork();
+    const tagged = stepper.exportTaggedSnapshot();
+    assert.equal(
+      tagged.json,
+      checkedJson,
+      `${context}: the tagged export differs from the checked one`,
+    );
+    const taggedRestore = withValidationTestStatistics((statistics) => {
+      const restoredSession = createTaggedRuntimeSession(stepper.plan, tagged);
+      assert.equal(
+        statistics().counts.externalCaptureVisits ?? 0,
+        0,
+        `${context}: the tagged restore captured its snapshot`,
+      );
+      return restoredSession;
+    });
+    assert.equal(
+      JSON.stringify(taggedRestore.exportTrustedSnapshot()),
+      checkedJson,
+      `${context}: the tagged restore's state differs`,
+    );
+    // The session continues from a restored copy of this boundary, a fork of itself, or a tagged restore.
+    stepper =
+      boundary % 3 === 0
+        ? deserializeRuntimeSession(checkpointJson)
+        : boundary % 3 === 1
+          ? stepper.fork()
+          : taggedRestore;
     const restored = deserializeCheckpoint(checkpointJson);
 
     const restoredPlanValidation = validateInstructionPlan(restored.plan);

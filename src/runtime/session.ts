@@ -9,6 +9,7 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   restoreCheckpoint,
+  serializeValidatedRuntimeJson,
   type RuntimeCheckpoint,
 } from "./checkpoint.js";
 import {
@@ -69,8 +70,9 @@ import {
   type StageProjection,
 } from "./media-projection.js";
 import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
-import { captureExecutableData } from "./operations/support.js";
+import { captureExecutableData, RuntimeDataError } from "./operations/support.js";
 import { copyPlainData } from "./plain-data.js";
+import { hasSnapshotTag, snapshotTag } from "./snapshot-tag.js";
 import type { PresentationSettings } from "../temporal.js";
 import type { SourceSpan } from "../source.js";
 import {
@@ -141,6 +143,15 @@ export interface RuntimeSessionView {
   readonly randomDraw: RandomDrawView | null;
   /** How many chosen random outcomes the state's history accepted. */
   readonly forcedRandomChoices: number;
+}
+
+/**
+ * A snapshot as its JSON and a tag that proves that this engine wrote the JSON in this process for one plan
+ * (`RuntimeSession.exportTaggedSnapshot`). A host keeps both strings as they are.
+ */
+export interface TaggedRuntimeSnapshot {
+  readonly json: string;
+  readonly tag: string;
 }
 
 /** One active call, as a debugger shows it, without its variables or arguments. */
@@ -523,6 +534,18 @@ export class RuntimeSession {
     return this.#read((state) => copyPlainData(state, "export"));
   }
 
+  /**
+   * The JSON of the snapshot `exportSnapshot()` returns, written without capture and validation, and a tag that proves
+   * that this engine wrote it in this process for this session's plan. `createTaggedRuntimeSession` restores it without
+   * capture and validation while its tag holds.
+   */
+  public exportTaggedSnapshot(): TaggedRuntimeSnapshot {
+    return this.#read((state) => {
+      const json = serializeValidatedRuntimeJson(state);
+      return Object.freeze({ json, tag: snapshotTag(this.#plan, json) });
+    });
+  }
+
   /** A self-contained checkpoint of the plan and a freshly captured and validated snapshot. */
   public exportCheckpoint(): RuntimeCheckpoint {
     return this.#read((state) => createCheckpoint(this.#plan, state));
@@ -750,6 +773,66 @@ export function createRuntimeSession(
   const capabilities = sessionCapabilities(options) ?? {};
   const randomControl = sessionRandomControl(options);
   const captured = captureExecutableData(plan, snapshot);
+  return new RuntimeSession(
+    CREATE,
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    sessionRandomPolicy(captured.plan, randomControl, capabilities),
+  );
+}
+
+/**
+ * A session that runs the JSON of a tagged snapshot. When the tag proves that a session of this same plan object
+ * exported the JSON in this process, the session runs it without capture and validation; otherwise the JSON is captured
+ * and completely validated as external data, as `createRuntimeSession` does. Either way the state is the one that
+ * `createRuntimeSession(plan, JSON.parse(json))` gives.
+ */
+export function createTaggedRuntimeSession(
+  plan: InstructionPlan,
+  tagged: TaggedRuntimeSnapshot,
+  options: RuntimeSessionOptions = {},
+): RuntimeSession {
+  const capabilities = sessionCapabilities(options) ?? {};
+  const randomControl = sessionRandomControl(options);
+  const capturedPlan = captureOrReuseInstructionPlan(plan);
+  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
+    throw new RuntimeDataError(
+      "TSR100",
+      capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
+    );
+  }
+  const validPlan = capturedPlan.plan;
+  // A host's tagged snapshot is external data: each part is read once, and only text is used.
+  const given = typeof tagged === "object" && tagged !== null;
+  const json: unknown = given ? tagged.json : undefined;
+  const tag: unknown = given ? tagged.tag : undefined;
+  if (typeof json !== "string") {
+    throw new RuntimeDataError(
+      "TSR101",
+      "A tagged runtime snapshot must give its JSON as a string.",
+    );
+  }
+  if (typeof tag === "string" && hasSnapshotTag(validPlan, json, tag)) {
+    // EVIDENCE: invariant: the tag proves that a session of this plan wrote this JSON of its validated state.
+    const state = JSON.parse(json) as RuntimeSnapshot;
+    return new RuntimeSession(
+      CREATE,
+      validPlan,
+      withFrozenTemporalCaptures(state),
+      capabilities,
+      sessionRandomPolicy(validPlan, randomControl, capabilities),
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RuntimeDataError("TSR101", `Runtime snapshot JSON is invalid: ${message}`);
+  }
+  // EVIDENCE: invariant: captureExecutableData captures and completely validates `parsed` as external data.
+  const captured = captureExecutableData(validPlan, parsed as RuntimeSnapshot);
   return new RuntimeSession(
     CREATE,
     captured.plan,
