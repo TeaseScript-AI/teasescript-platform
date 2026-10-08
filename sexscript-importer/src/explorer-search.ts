@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { totalmem } from "node:os";
 import { constants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
@@ -1157,6 +1158,11 @@ interface Watch {
   } | null;
 }
 
+/** A storage's identity: a hash of its entries as JSON, so that the storages kept do not hold their JSON twice. */
+function storageKey(entries: readonly StorageEntry[]): string {
+  return createHash("sha1").update(JSON.stringify(entries)).digest("base64");
+}
+
 /** How the comparisons of a condition combine to take a way: all needed, any one enough, both, or one comparison. */
 function combination(condition: unknown, wanted: boolean): "all" | "any" | "mixed" | "one" {
   const value = record(condition);
@@ -1290,7 +1296,7 @@ interface Witness {
 interface Left {
   readonly node: number;
   readonly entries: readonly StorageEntry[];
-  /** The storage as JSON, which tells storages apart. */
+  /** A hash of the storage as JSON ({@link storageKey}), which tells storages apart. */
   readonly key: string;
   readonly sessions: number;
 }
@@ -1710,7 +1716,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const seedCells = new Set<string>();
   const cellsOfLeft = new Map<number, readonly string[]>();
   /** Storage that started a next session without a target. */
-  const startedFrom = new Set<string>([JSON.stringify([])]);
+  const startedFrom = new Set<string>([storageKey([])]);
   /**
    * With forward time: the storages next sessions started from, with the first state of the one a minute later and
    * its wall clock, to start more in windows sessions read later; and how many comparisons sessions had read then.
@@ -1960,7 +1966,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    */
   const remember = (snapshot: Data, node: Node): void => {
     const entries = storageOf(snapshot);
-    const key = JSON.stringify(entries);
+    const key = storageKey(entries);
     const known = leftKeys.get(key);
     if (known === undefined) {
       leftKeys.set(key, left.length);
@@ -2593,7 +2599,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       )
         break;
       const entry = left[completedLeft[nextFromCompleted]!]!;
-      const key = JSON.stringify(entry.entries);
+      const key = entry.key;
       if (startedFrom.has(key)) continue;
       startedFrom.add(key);
       completedVisits += 1;
