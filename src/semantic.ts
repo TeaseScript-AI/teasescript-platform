@@ -3132,7 +3132,8 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "interactionExpression" ||
+    // `askBooleans` returns a list of booleans.
+    (expression.kind === "interactionExpression" && expression.interactionKind !== "booleans") ||
     expression.kind === "showButtonExpression"
   );
 }

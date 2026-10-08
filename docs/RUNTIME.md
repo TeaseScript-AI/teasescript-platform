@@ -98,10 +98,10 @@ The compact compiler fully lowers these forms into the versioned plan. Static co
 A basic ask's question is an ordinary prepared `say` that the compiler places before its interaction: after the requesting speaker, `prepareSaySpeaker` and `prepareSayContextualSpeaker` capture the same speaker, `prepareSayText` with `field: true` captures the question, then the `default:` and `hint:` operands are evaluated in written order, the `say` runs, and the interaction opens. The question's `say` follows ordinary pacing, staging, and checkpoint rules, and the interaction that follows consumes its pacing gate. A pending field, a refused answer, an interrupt, or a restore never says the question again; a question known as static text with a static field becomes a literal `say` before a static interaction.
 
 `askBoolean` lowers to a `choice` of two buttons, `{ text: yesText, value: true }` and `{ text: noText, value: false }`,
-with `"Yes"` and `"No"` as the default texts. With static texts and a static question written first, or none, it is a
-literal `say` before a static choice. Otherwise, also with a question named `message:`, like a [form](#forms) it
-evaluates its question and named arguments once, in written order, into one request temporary, says the question from
-it, and prepares the two choice objects from it.
+with `"Yes"` and `"No"` as the default texts. With static texts and a static positional question, or none, it is a
+static choice, after a literal `say` of the question when there is one. Otherwise, also with a question named
+`message:`, like a [form](#forms) it evaluates its question and named arguments once, in written order, into one
+request temporary, says the question from it, and prepares the two choice objects from it.
 
 Result-bearing text, number, choice, and valued button instructions require the destination temporary to be absent
 when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,

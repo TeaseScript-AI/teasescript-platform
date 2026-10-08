@@ -8,6 +8,7 @@ import {
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
@@ -136,4 +137,23 @@ test("askBoolean evaluates runtime operands once, in written order, and keeps it
   assert.deepEqual(playerRuntimeSnapshot(resumed), playerRuntimeSnapshot(direct));
   assert.deepEqual(resumed.transcriptEntries, direct.transcriptEntries);
   assert.equal(resumed.transcriptEntries.at(-1)?.text, "false");
+});
+
+test("a for loop goes through the answers of askBooleans in both forms", () => {
+  for (const ask of [
+    'askBooleans("Choose", texts: ["A", "B"], defaults: [true, false])',
+    'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]',
+  ]) {
+    const session = createPlayerRuntimeSession(
+      `for value in ${ask} {\n    say "\${value}", instant\n}\nexit`,
+    );
+    const result = submitPlayerRuntimeForm(session);
+    assert.equal(result?.outcome.kind, "completed", ask);
+    assert.equal(result!.session.state.status, "halted", ask);
+    assert.deepEqual(
+      result!.session.transcriptEntries.slice(-2).map((entry) => entry.text),
+      ["true", "false"],
+      ask,
+    );
+  }
 });
