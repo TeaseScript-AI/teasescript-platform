@@ -802,9 +802,13 @@ function withEmptyText(
         for (const name of setNames(statement)) nonNull.delete(scope.resolve(name));
       };
       for (const item of items) {
-        // A loop's body may run again after it sets a variable.
-        if (item.kind === "while" || item.kind === "repeat" || item.kind === "for") forget(item);
-        nonNullHere = new Set(nonNull);
+        // A loop's body may run again after it sets a variable, or calls script code that may.
+        if (item.kind === "while" || item.kind === "repeat" || item.kind === "for") {
+          forget(item);
+          if (callsScript(item)) nonNull.clear();
+        }
+        // A statement that calls script code more than once may set a variable between its calls.
+        nonNullHere = ownCalls(item) > 1 ? new Set() : new Set(nonNull);
         const callsBefore = calls.length;
         if (item.kind === "function") {
           functions[index]!.set(item.name, item);
@@ -853,7 +857,10 @@ function withEmptyText(
           if (item.value !== null) visit(item.value, scope, true);
         } else mapOwnValues(item, (value) => visit(value, scope, false));
         if (item.kind === "if") {
-          const facts = nullTested(item.condition, scope);
+          // A condition that calls script code may set a variable after testing it, or before its branches.
+          const calling = ownCalls(item) > 0;
+          if (calling) nonNull.clear();
+          const facts = calling ? { then: [], else: [] } : nullTested(item.condition, scope);
           block(item.then, scope.inner(item), new Set([...nonNull, ...facts.then]));
           block(item.else, scope.inner(item), new Set([...nonNull, ...facts.else]));
         } else
@@ -1194,6 +1201,27 @@ function routedRead(value: IrExpression): Extract<IrExpression, { kind: "load" }
   return inner?.kind === "load" && inner.read === "string" && literalKey(inner.key) !== null
     ? inner
     : null;
+}
+
+/** How many calls of script functions the values that a statement evaluates itself make. */
+function ownCalls(statement: IrStatement): number {
+  let count = 0;
+  const visit = (value: IrExpression): IrExpression => {
+    if (value.kind === "call" && value.local === true) count += 1;
+    return mapChildren(value, visit);
+  };
+  mapOwnValues(statement, visit);
+  return count;
+}
+
+/** Whether a statement, or a statement in it, calls a script function. */
+function callsScript(statement: IrStatement): boolean {
+  let found = ownCalls(statement) > 0;
+  withNestedBlocks(statement, (body) => {
+    found ||= body.some(callsScript);
+    return body;
+  });
+  return found;
 }
 
 /** The names of the variables that a statement, or a statement in it, sets with `=` or declares. */

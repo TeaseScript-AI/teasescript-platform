@@ -164,6 +164,12 @@ if (plainHint != null) {
     clearPlain()
     showPlain(plainHint)
 }
+def againHint = loadString("game.againHint")
+def clearAgain = { againHint = null; return true }
+def showAgain = { againShown = "none" -> show("Again " + (againShown == null)) }
+if (againHint != null) {
+    if (clearAgain()) showAgain(againHint)
+}
 // A stored text that an Elvis copies into a variable of another type gives that variable both types and null.
 def flagged = true
 flagged = loadString("game.flagged") ?: flagged
