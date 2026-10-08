@@ -927,13 +927,13 @@ class Cells {
    */
   readonly #sources = new Map<string, number>();
   readonly #buckets: Map<string, number>[] = [];
-  /** The slot values seen, as `source,bucket,...` lists in source order, by ID; and each one's list. */
+  /** The slot values seen, as `source, bucket, ...` lists in source order: their IDs by a hash of the list, and each one's list. */
   readonly #values = new Map<string, number>();
-  readonly #vectors: Int32Array[] = [];
+  readonly #vectors: (Uint16Array | Int32Array)[] = [];
   readonly #cells = new Map<string, number>();
   /** Changes of a value's bucket seen (`source:from:to`), and the pairs of slot values compared for them. */
   readonly #transitions = new Set<string>();
-  readonly #pairs = new Set<string>();
+  readonly #pairs = new Set<number>();
 
   constructor(slots: readonly Slot[]) {
     this.slots = slots;
@@ -1011,16 +1011,22 @@ class Cells {
       }
       for (const slot of slots) put(slot, `${slot}:${key}`, entry.value);
     }
-    const vector = Int32Array.from([...found].sort(([left], [right]) => left - right).flat());
-    const text = vector.join(",");
+    const sorted = [...found].sort(([left], [right]) => left - right).flat();
+    // Kept small, as a run keeps one per distinct set of slot values: by a hash, in 16 bits when the numbers fit.
+    const vector = sorted.every((number) => number < 0x10000)
+      ? Uint16Array.from(sorted)
+      : Int32Array.from(sorted);
+    const text = createHash("sha1").update(sorted.join(",")).digest("base64");
     let values = this.#values.get(text);
     if (values === undefined) {
       values = this.#vectors.length;
       this.#values.set(text, values);
       this.#vectors.push(vector);
     }
-    if (from !== null && from !== values && !this.#pairs.has(`${from}>${values}`)) {
-      this.#pairs.add(`${from}>${values}`);
+    // A pair of value IDs as one number: IDs stay far below 2^26.
+    const pair = from === null ? 0 : from * 0x4000000 + values;
+    if (from !== null && from !== values && !this.#pairs.has(pair)) {
+      this.#pairs.add(pair);
       for (const change of changes(this.#vectors[from]!, vector)) {
         if (this.#transitions.has(change)) continue;
         this.#transitions.add(change);
@@ -1086,7 +1092,7 @@ function numberBucket(constants: readonly number[], value: number): string {
 }
 
 /** The changes of a bucket between two slot value lists (`source, bucket, ...` in source order), as `source:from:to`. */
-function changes(from: Int32Array, to: Int32Array): string[] {
+function changes(from: Uint16Array | Int32Array, to: Uint16Array | Int32Array): string[] {
   const found: string[] = [];
   let left = 0;
   let right = 0;
@@ -1707,6 +1713,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** Each distinct storage a play state left, in the order found, and the ones of completed sessions. */
   const left: Left[] = [];
   const leftKeys = new Map<string, number>();
+  /** The stored entries of the kept storages, each one object however many storages hold it. */
+  const keptEntries = new Map<string, StorageEntry>();
   const completedKeys = new Set<string>();
   const completedLeft: number[] = [];
   let nextFromCompleted = 0;
@@ -1965,10 +1973,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * completes with a storage an earlier state already left (saved before its last prompt) still counts as completed.
    */
   const remember = (snapshot: Data, node: Node): void => {
-    const entries = storageOf(snapshot);
-    const key = storageKey(entries);
+    const found = storageOf(snapshot);
+    const key = storageKey(found);
     const known = leftKeys.get(key);
     if (known === undefined) {
+      // Storages differ in a few entries: each kept storage shares the entries it has in common with the others.
+      const entries = found.map((entry) => {
+        const id = `${entry.key}\u0000${JSON.stringify(entry.value)}`;
+        const shared = keptEntries.get(id);
+        if (shared !== undefined) return shared;
+        keptEntries.set(id, entry);
+        return entry;
+      });
       leftKeys.set(key, left.length);
       left.push({ node: node.id, entries, key, sessions: starts[node.start]!.session });
       if (node.status === "completed") {
@@ -2495,6 +2511,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
   /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
   const analyze = (): boolean => {
+    storageMaps.clear();
     let scheduled = false;
     instructions.forEach((instruction, index) => {
       if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
@@ -3219,6 +3236,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
   }
 
+  storageMaps.clear();
   const coverage = lineCoverage(
     plan,
     instructions,
@@ -3656,8 +3674,11 @@ function measureGuard(entries: readonly StorageEntry[], guard: Guard): number {
   return holds === true ? Math.max(1, distance) : distance;
 }
 
-/** The values of a storage by key, made once per storage, which many guards and chains measure. */
-const storageMaps = new WeakMap<readonly StorageEntry[], ReadonlyMap<string, unknown>>();
+/**
+ * The values of a storage by key, made once per analysis pass, in which many chains and guards measure the same
+ * storages; kept no longer, or the storages a run keeps would hold all their values twice.
+ */
+const storageMaps = new Map<readonly StorageEntry[], ReadonlyMap<string, unknown>>();
 function storageMap(entries: readonly StorageEntry[]): ReadonlyMap<string, unknown> {
   let found = storageMaps.get(entries);
   if (found === undefined) {

@@ -527,7 +527,10 @@ the units in N rounds: the first with the budgets, each later one with twice the
 not exhausted yet. Directed attempts and session chains start over in each run; what they reached comes back with the
 corpus.
 
-The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`.
+The defaults suit a shared machine: one worker, and two at most (one unit per process); run it under `nice`. A run's
+memory is mostly the snapshot store (up to its limit) and what it keeps per state, a few KB; `explore` lets V8 grow
+its heap by a fifth at a time (`--heap-growing-percent=20`, where this Node has the flag) instead of up to four times
+what a collection keeps, which otherwise left more than a third of a long run's memory unused.
 
 To compare a change to the explorer with the explorer before it (a gate), explore the same units with the same work
 budget and seeds with both, and compare the reports:
