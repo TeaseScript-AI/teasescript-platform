@@ -103,38 +103,38 @@ const HELP = Object.freeze({
   askText: Object.freeze({
     command: "askText" as const,
     summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional default answer prefills the field; submitting it unchanged returns it.",
-    syntax: "askText [as speaker] [hint | hint, default: answer | default: answer]",
+      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
+    syntax: "askText [as speaker] [hint | hint, prefill: answer | prefill: answer]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
-      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional default number prefills the field.",
-    syntax: "askNumber [as speaker] [hint | hint, default: number | default: number]",
+      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional prefill number fills the field at first.",
+    syntax: "askNumber [as speaker] [hint | hint, prefill: number | prefill: number]",
   }),
   askInteger: Object.freeze({
     command: "askInteger" as const,
     summary:
-      "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional default whole number prefills the field.",
-    syntax: "askInteger [as speaker] [hint | hint, default: integer | default: integer]",
+      "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional prefill whole number fills the field at first.",
+    syntax: "askInteger [as speaker] [hint | hint, prefill: integer | prefill: integer]",
   }),
   askDate: Object.freeze({
     command: "askDate" as const,
     summary:
-      "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional default date prefills the control.",
-    syntax: "askDate [as speaker] [hint | hint, default: date | default: date]",
+      "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
+    syntax: "askDate [as speaker] [hint | hint, prefill: date | prefill: date]",
   }),
   askTime: Object.freeze({
     command: "askTime" as const,
     summary:
-      "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional default time prefills the control.",
-    syntax: "askTime [as speaker] [hint | hint, default: time | default: time]",
+      "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
+    syntax: "askTime [as speaker] [hint | hint, prefill: time | prefill: time]",
   }),
   askDateTime: Object.freeze({
     command: "askDateTime" as const,
     summary:
-      "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional default prefills the control.",
-    syntax: "askDateTime [as speaker] [hint | hint, default: datetime | default: datetime]",
+      "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
+    syntax: "askDateTime [as speaker] [hint | hint, prefill: datetime | prefill: datetime]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -578,7 +578,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
     case "askDate":
     case "askTime":
     case "askDateTime":
-      return Object.freeze(["speaker", "hint", "default"]);
+      return Object.freeze(["speaker", "hint", "prefill"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
     case "say":
@@ -663,7 +663,7 @@ function activeParameterFor(
 /** The signature parameter of a named compact option, such as `timeout:` of `showButton`. */
 function namedOptionParameter(command: CompactCommand, name: string): number | null {
   if (command === "showButton") return name === "background" ? 2 : name === "timeout" ? 3 : null;
-  return name === "default" ? 2 : null;
+  return name === "prefill" ? 2 : null;
 }
 
 function lineStarts(source: string): readonly number[] {

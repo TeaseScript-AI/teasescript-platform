@@ -1982,27 +1982,27 @@ Rules:
 
 ## 20. Input functions
 **Status:** Accepted (parenthesized basic asks implemented, and their text is the question: Owner decisions on #627,
-2026-10-05)
+2026-10-05; an ask's starting answer is `prefill:`: Owner decision on #512, 2026-10-08)
 
 `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` are implemented in this parenthesized
 form with the arguments of their compact form
 ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional question,
-an optional `default:`, and an optional `hint:`. Both forms mean the same: `askText()` is `askText`, and
-`askText as mistress ("Name?", default: "Ada")` is `askText as mistress "Name?", default: "Ada"`. The speaker clause
+an optional `prefill:`, and an optional `hint:`. Both forms mean the same: `askText()` is `askText`, and
+`askText as mistress ("Name?", prefill: "Ada")` is `askText as mistress "Name?", prefill: "Ada"`. The speaker clause
 comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
 other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
 
 The question is said in the chat by the asking speaker, as by `say`, right before the field opens; `hint:` is help
 text shown in the field only
 ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). In a text or number
-field the hint shows only while the field is empty, so a default usually hides it; a date or time control shows the
-hint beside it, also with a default:
+field the hint shows only while the field is empty, so a prefill usually hides it; a date or time control shows the
+hint beside it, also with a prefill:
 
 ```text
-let name = askText "What is your name?", default: "Slave", hint: "Type your name"
+let name = askText "What is your name?", prefill: "Slave", hint: "Type your name"
 ```
 
-The question, `default:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
+The question, `prefill:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
 the two options may be written in either order.
 The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
 accepts what a field text accepts, so a list is an error. Without a question nothing is said. In the head of `if`,
@@ -2059,7 +2059,7 @@ Supported options:
 - `allowAutocorrect`: `boolean`
 - `allowSpellcheck`: `boolean`
 - `scope`: `"input"` or `"teasePlayer"`
-- `default`: `string`; see [Default answers](#default-answers)
+- `prefill`: `string`; see [Prefilled answers](#prefilled-answers)
 
 Rules:
 
@@ -2084,7 +2084,7 @@ let amount = askNumber("Enter a number")
 let values = askNumbers(
     message: "Enter the values",
     texts: ["Minimum", "Maximum", "Multiplier"],
-    defaults: [1.5, 10, 2.5]
+    prefill: [1.5, 10, 2.5]
 )
 ```
 
@@ -2092,7 +2092,7 @@ let values = askNumbers(
 
 - `message`: `string`
 - `texts`: `string[]`
-- `defaults`: `number[]`
+- `prefill`: `number[]`
 
 It only completes when every field contains a valid number and returns `number[]`.
 
@@ -2103,7 +2103,7 @@ let count = askInteger("Enter a whole number")
 ```
 
 `askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
-`askInteger [as speaker] [question] [, default: integer] [, hint: text]` is implemented as the whole-number counterpart
+`askInteger [as speaker] [question] [, prefill: integer] [, hint: text]` is implemented as the whole-number counterpart
 of `askNumber` ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an
 optional sign and digits within the safe integer range.
 
@@ -2113,7 +2113,7 @@ optional sign and digits within the safe integer range.
 let values = askIntegers(
     message: "Enter the values",
     texts: ["Minimum", "Maximum", "Repetitions"],
-    defaults: [1, 10, 3]
+    prefill: [1, 10, 3]
 )
 ```
 
@@ -2121,7 +2121,7 @@ let values = askIntegers(
 
 - `message`: `string`
 - `texts`: `string[]`
-- `defaults`: `integer[]`
+- `prefill`: `integer[]`
 
 It only completes when every field contains a valid whole number and returns `integer[]`.
 
@@ -2151,8 +2151,8 @@ let answer = askBoolean(
 `noText:`, by default `"No"`, returns `false`; the player's answer is the chosen button's text. As for a basic ask, the
 compact and parenthesized forms mean the same, `as speaker` comes before the arguments, and the question, which may
 instead be named `message:`, is said once by the asking speaker before the buttons open. The question and the button
-texts are evaluated once, in written order, and accept what a field text accepts. Its `default:`
-([Default answers](#default-answers)) is not implemented yet.
+texts are evaluated once, in written order, and accept what a field text accepts. Its `prefill:`
+([Prefilled answers](#prefilled-answers)) is not implemented yet.
 
 ### Multiple boolean choices
 
@@ -2160,7 +2160,7 @@ texts are evaluated once, in written order, and accept what a field text accepts
 let selected = askBooleans(
     message: "Choose all that apply",
     texts: ["A", "B", "C"],
-    defaults: [true, false, false]
+    prefill: [true, false, false]
 )
 ```
 
@@ -2168,14 +2168,14 @@ let selected = askBooleans(
 
 - `message`: `string`
 - `texts`: `string[]`
-- `defaults`: `boolean[]`
+- `prefill`: `boolean[]`
 
 It returns `boolean[]`. It is a [form](#forms) of one toggle per text, in order, that returns the toggles' states in the
 same order, so texts may repeat; the lists must have the same non-zero length. With `cancel:` it returns `boolean[]?`,
 `null` only when cancelled. The message, as the form's question, may also come first without a name, and the form is
 implemented with `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)). Like `askForm`, it has a compact form that means the
 same, and `as speaker` comes before the arguments:
-`let toys = askBooleans as mistress "Which toys?", texts: names, defaults: saved`. `askBoolean(...)` stays a separate
+`let toys = askBooleans as mistress "Which toys?", texts: names, prefill: saved`. `askBoolean(...)` stays a separate
 two-button question that completes when either button is chosen.
 
 ### Forms
@@ -2238,7 +2238,7 @@ Rules:
 - A typed field (`integer`, `number`, `text`, or a date or time) opens in the composer with its value, which Enter keeps
   and typing replaces, and its answer is read as the matching ask reads it. A typed field is required. With
   `optional: true` it may be submitted without a value and returns `null`; a toggle or cycle cannot be optional. A start
-  that is `null` or blank text gives no value, as an ask's empty default prefills nothing.
+  that is `null` or blank text gives no value, as an ask's empty prefill prefills nothing.
 - `min:` and `max:` bound an `integer` or `number` field inclusively. They only validate: an answer outside them is
   refused and stays in the composer; nothing is clamped. A start outside them, or `min:` above `max:`, is an error.
 - A field's `hint:` is the composer's help while that field is edited.
@@ -2344,27 +2344,27 @@ askDateTime(...)  // datetime
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
-The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, default: value] [, hint: text]` are
+The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, prefill: value] [, hint: text]` are
 implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
 control submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone
 skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and
-date-and-time controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is
-shown and edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text
+date-and-time controls cover the years 0001 through 9999, as the browser's native controls do; a prefill in year 0000 is
+shown and edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, prefills, and text
 answers.
 
-### Default answers
+### Prefilled answers
 
-Every single-field input accepts an optional named `default:` answer that prefills its field:
+Every single-field input accepts an optional named `prefill:` answer, a starting answer that the player still confirms:
 
 ```text
-let name = askText("What is your name?", default: "Ada")
-let minutes = askNumber("Corner time?", default: cornerBase + playerLevel)
-let count = askInteger("How many?", default: 10)
-let answer = askBoolean("Continue?", default: true)
-let day = askDate("Which date?", default: getDate())
+let name = askText("What is your name?", prefill: "Ada")
+let minutes = askNumber("Corner time?", prefill: cornerBase + playerLevel)
+let count = askInteger("How many?", prefill: 10)
+let answer = askBoolean("Continue?", prefill: true)
+let day = askDate("Which date?", prefill: getDate())
 ```
 
-| Function | `default:` value |
+| Function | `prefill:` value |
 |---|---|
 | `askText(...)`, `askTyping(...)` | `string` with a non-whitespace character |
 | `askNumber(...)` | `number` or `integer` |
@@ -2374,25 +2374,28 @@ let day = askDate("Which date?", default: getDate())
 
 Rules:
 
-- The input opens with the default as its editable answer, and the player still submits explicitly. A submitted
-  default is an ordinary answer: its result, validation, and transcript text are those of the same answer entered by
+- The input opens with the prefill as its editable answer, and the player still submits explicitly. A submitted
+  prefill is an ordinary answer: its result, validation, and transcript text are those of the same answer entered by
   hand.
-- Clearing the field never falls back to the default; a blank answer is rejected and asked again.
-- The default must be an answer the input accepts. There is no implicit conversion except `integer` to `number`: write
-  `default: "${count}"` to offer a number as text. A non-whole `askInteger` default is an error, never rounded.
-- A default that is `null` or blank text (empty or only whitespace) when the input opens prefills nothing: the field
-  starts empty, as without `default:`. A prefill can therefore come from a value that may not exist yet, such as
-  `askText "Your name?", default: load("name", default: "")` on a first play. A default known at compile time to be
-  `null` or blank, such as `default: ""` or `default: null`, is a compile error; remove `default:` to start with an
+- Clearing the field never falls back to the prefill; a blank answer is rejected and asked again.
+- The prefill must be an answer the input accepts. There is no implicit conversion except `integer` to `number`: write
+  `prefill: "${count}"` to offer a number as text. A non-whole `askInteger` prefill is an error, never rounded.
+- A prefill that is `null` or blank text (empty or only whitespace) when the input opens prefills nothing: the field
+  starts empty, as without `prefill:`. A prefill can therefore come from a value that may not exist yet, such as
+  `askText "Your name?", prefill: load("name", default: "")` on a first play. A prefill known at compile time to be
+  `null` or blank, such as `prefill: ""` or `prefill: null`, is a compile error; remove `prefill:` to start with an
   empty field.
-- The compiler rejects a default that it knows is invalid, and its error names the fix. Any other default is checked
+- The compiler rejects a prefill that it knows is invalid, and its error names the fix. Any other prefill is checked
   when the input opens; an invalid one is a runtime error, and the input does not open.
 - `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
-- Restoring a checkpoint shows the original default again; edits the player had not submitted are dropped.
+- Restoring a checkpoint shows the original prefill again; edits the player had not submitted are dropped.
 - `choose` has no preselected option: a choice is an explicit decision, and a choice button completes when activated.
   An author can style the preferred option instead, for example with `background:`. File, folder, image, video, and
-  audio pickers have no prefill because a browser cannot preset a file input. Multi-field inputs keep their
-  `defaults:` lists.
+  audio pickers have no prefill because a browser cannot preset a file input. Multi-field inputs take a `prefill:` list.
+- An ask's earlier `default:`, or `defaults:` of a multi-field input, is a compile error that names the fix, such as
+  `askText has no 'default:'; use 'prefill:'.` (Owner decision on #512, 2026-10-08.) `default:` stays where its value
+  becomes the result without the player: `load`, `dict.get`, the conversions such as `toNumber`, parameter defaults,
+  and a `global`'s start value.
 
 ### File input
 
@@ -3189,9 +3192,10 @@ load("a", default: 0) + 1
 ```
 
 The operands of `save` and of a compact `load` are full expressions. `as` ends the value of `save`. A `, default:`
-belongs to the nearest construct before it that takes one, also inside a bounded `load`: a compact `load`, the default
-answer of an ask, or a labelled option of a compact `choose`. Group the inner construct, or use a parenthesized ask,
-to give the fallback to `load`, as in `load(askText("Key?"), default: "none")` or
+belongs to the nearest construct before it that takes one, also inside a bounded `load`: a compact `load`, or a
+labelled option of a compact `choose`; after a compact ask it is the ask's earlier name of `prefill:`, an error
+([Prefilled answers](#prefilled-answers)). Group the inner construct, or use a parenthesized ask, to give the fallback
+to `load`, as in `load(askText("Key?"), default: "none")` or
 `load((choose a: "x", b: "y"), default: "z")`; without the inner parentheses, the choice gets a third option labelled
 `default`. Inside `()`, `[]`, and object literals, where a line
 break does not end an expression, the comma may also start the next line. Group a compact `load`, as in

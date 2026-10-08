@@ -1688,9 +1688,9 @@ export class InstructionCompiler {
 
   /**
    * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
-   * then opens its two buttons. The question, the hint, and the default are evaluated once, in that written order,
-   * before the question is said, so a default that asks itself comes first. The question is said by the requesting
-   * speaker, captured before any operand.
+   * then opens its two buttons. The question and the options are evaluated once, in written order, before the question
+   * is said, so a prefill that asks itself comes first. The question is said by the requesting speaker, captured before
+   * any operand.
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
@@ -1981,7 +1981,11 @@ export class InstructionCompiler {
       value: {
         kind: "object",
         properties: named.map((argument, index) => ({
-          name: argument.name,
+          // The request of `askBooleans` keeps its earlier name for the `prefill:` list.
+          name:
+            expression.interactionKind === "booleans" && argument.name === "prefill"
+              ? "defaults"
+              : argument.name,
           value: values[index]!.plan,
           span: copySpan(argument.value.span),
         })),
@@ -2768,15 +2772,15 @@ function authoredChoiceValue(
 }
 
 /**
- * The prefill text of a literal default answer, or `undefined` when the default is evaluated at runtime, where
+ * The prefill text of a literal `prefill:` answer, or `undefined` when the prefill is evaluated at runtime, where
  * arithmetic, also inside an interpolation, keeps its ordinary runtime errors. Semantic validation has already rejected
  * literals of the wrong type.
  */
 function staticInteractionPrefill(expression: InteractionExpression): string | undefined {
   const kind = expression.interactionKind;
-  // A date or time default is a value that the field shows as ISO text when it opens.
+  // A date or time prefill is a value that the field shows as ISO text when it opens.
   if (kind === "date" || kind === "time" || kind === "datetime") return undefined;
-  let literal = expression.defaultValue!;
+  let literal = expression.prefill!;
   let negative = false;
   while (
     literal.kind === "parenthesizedExpression" ||
@@ -2824,7 +2828,7 @@ function planInteractionKind(expression: InteractionExpression): InteractionKind
   }
 }
 
-/** The UI of an interaction whose hint, values, and default answer are all known at compile time. */
+/** The UI of an interaction whose hint, values, and prefill are all known at compile time. */
 function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
   // A form reads its fields when it opens.
   if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
@@ -2852,7 +2856,7 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
   }
   if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
-    const prefill = expression.defaultValue === null ? null : staticInteractionPrefill(expression);
+    const prefill = expression.prefill === null ? null : staticInteractionPrefill(expression);
     if (hint === undefined || prefill === undefined) return undefined;
     return expression.interactionKind === "text"
       ? {

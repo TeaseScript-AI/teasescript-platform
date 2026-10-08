@@ -68,7 +68,7 @@ const SCENARIOS = [
   {
     name: "a computed default answer in a loop",
     source:
-      'for minutes in [10, 20] {\n    let answer = askNumber "Minutes?", default: minutes * 2\n    say "Answered ${answer}"\n}\nexit',
+      'for minutes in [10, 20] {\n    let answer = askNumber "Minutes?", prefill: minutes * 2\n    say "Answered ${answer}"\n}\nexit',
     // Each run asks its question again.
     said: ["Minutes?", "Answered 20", "Minutes?", "Answered 40"],
   },

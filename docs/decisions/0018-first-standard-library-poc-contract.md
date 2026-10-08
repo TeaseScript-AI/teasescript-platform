@@ -160,11 +160,11 @@ after completion; `askInteger` below is the whole-number counterpart.
 ### `askInteger`
 
 Owner-approved extension (2026-10-04, #539): `askInteger` copies the compact `askNumber` forms, including `as speaker`,
-the question, `default:`, and `hint:`, and returns `integer`.
+the question, `prefill:`, and `hint:`, and returns `integer`.
 
 ```tease
 let count = askInteger "How many repetitions?"
-let count = askInteger as mistress "How many?", default: 10
+let count = askInteger as mistress "How many?", prefill: 10
 ```
 
 An answer is whole-number notation only: an optional sign, then digits, with surrounding whitespace removed and within
@@ -177,49 +177,50 @@ interaction whose UI only accepts whole numbers, so completion, prefill, checkpo
 ### `askDate`, `askTime`, and `askDateTime`
 
 Owner-approved extension (2026-10-04, #532): `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
-forms, including `as speaker`, the question, `default:`, and `hint:`, and return `date`, `time`, and `datetime`.
+forms, including `as speaker`, the question, `prefill:`, and `hint:`, and return `date`, `time`, and `datetime`.
 
 ```tease
 let day = askDate "Which day?"
-let start = askTime as mistress "What time?", default: toTime("20:00")
+let start = askTime as mistress "What time?", prefill: toTime("20:00")
 ```
 
 The Player shows the browser's date, time, or date-and-time control, which submits strict ISO text
 ([V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)); surrounding whitespace is
 removed. A local time that the player's zone skips is a valid answer, because local values have no zone. Any other
 text is rejected with "That is wrong. I asked for a date." (a time, a date and time). The transcript shows the answer
-in the player's presentation, as `say` shows the value. A default of the asked kind prefills the control with its ISO
-text; text must be converted first, as in `default: toDate("2026-10-04")`.
+in the player's presentation, as `say` shows the value. A prefill of the asked kind fills the control with its ISO
+text; text must be converted first, as in `prefill: toDate("2026-10-04")`.
 
-### Default answers
+### Prefilled answers
 
-Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `default:` answer after the
-question or without one. It follows the general
-[default-answer rules](../specifications/accepted-syntaxes-v30.md#default-answers): an editable prefill that the player
+Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `prefill:` answer after the
+question or without one; it was named `default:` until the owner decision of 2026-10-08 (#512), and that earlier name
+is a compile error that names the fix. It follows the general
+[prefill rules](../specifications/accepted-syntaxes-v30.md#prefilled-answers): an editable prefill that the player
 still submits, never a fallback for a cleared field.
 
 ```tease
-let name = askText "Your name?", default: "Ada"
-let minutes = askNumber as mistress "Corner time?", default: cornerBase + playerLevel
-let name = askText default: player.name
+let name = askText "Your name?", prefill: "Ada"
+let minutes = askNumber as mistress "Corner time?", prefill: cornerBase + playerLevel
+let name = askText prefill: player.name
 ```
 
-The default is evaluated once, after the question and in written order with `hint:`. Its prefill text is captured with
+The prefill is evaluated once, after the question and in written order with `hint:`. Its prefill text is captured with
 the active interaction and survives checkpoint save/restore without re-evaluating author expressions. An `askNumber`
-default prefills the shortest number text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0`,
+prefill fills in the shortest number text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0`,
 so submitting it unchanged returns that number.
 
-Inside an object literal or call arguments, `default:` and `hint:` bind to the nearest compact ask:
-`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: askText("Name?"), default: "Ada" }`
-or `{ answer: (askText "Name?"), default: "Ada" }` for an object property named `default`.
+Inside an object literal or call arguments, `prefill:` and `hint:` bind to the nearest compact ask:
+`{ answer: askText "Name?", prefill: "Ada" }` prefills the field. Write `{ answer: askText("Name?"), prefill: "Ada" }`
+or `{ answer: (askText "Name?"), prefill: "Ada" }` for an object property named `prefill`.
 
 ### Parenthesized basic asks
 
 Owner decision (2026-10-05, #627): `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` also
 take their compact arguments inside parentheses, as V30 §20 writes them. Both forms give the same interaction:
-`askText()` is `askText`, and `askText as mistress ("Type here", default: "Ada")` is
-`askText as mistress "Type here", default: "Ada"`. The speaker clause stays before the parentheses, and the `)` ends the
-ask inside a larger expression. The parentheses accept only the optional question, `default:`, and `hint:`.
+`askText()` is `askText`, and `askText as mistress ("Type here", prefill: "Ada")` is
+`askText as mistress "Type here", prefill: "Ada"`. The speaker clause stays before the parentheses, and the `)` ends the
+ask inside a larger expression. The parentheses accept only the optional question, `prefill:`, and `hint:`.
 
 ### Ask questions and hints
 
@@ -228,13 +229,13 @@ text and not a transcript question: one ask is one complete author action. Its t
 requesting speaker says in the chat before the field opens; `hint:` is help shown in the field only.
 
 ```tease
-let name = askText as mistress "What is your name?", default: "Ada", hint: "Type your name"
-let count = askInteger("How many?", default: 3)
+let name = askText as mistress "What is your name?", prefill: "Ada", hint: "Type your name"
+let count = askInteger("How many?", prefill: 3)
 let day = askDate hint: "Pick a day"
 ```
 
-- The requesting speaker is captured first, then the question, `default:`, and `hint:` are evaluated once, the options
-  in the order they are written. A default that asks itself therefore asks first. Then the question is said and the
+- The requesting speaker is captured first, then the question, `prefill:`, and `hint:` are evaluated once, the options
+  in the order they are written. A prefill that asks itself therefore asks first. Then the question is said and the
   field opens. The question and the field have the same speaker; a nested ask without `as` uses the default speaker,
   as before.
 - The question is said as by `say`, with its markup, interpolation, and pacing: it waits behind earlier paced output,
@@ -248,8 +249,8 @@ let day = askDate hint: "Pick a day"
   question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
 - `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
   hint shows none while the control keeps its accessible name. In a text or number field the hint shows only while the
-  field is empty, so a default usually hides it; a date or time control shows it beside the control, also with a
-  default. Examples write `default:` first. Neither the question nor the hint becomes the
+  field is empty, so a prefill usually hides it; a date or time control shows it beside the control, also with a
+  prefill. Examples write `prefill:` first. Neither the question nor the hint becomes the
   accessible name.
 
 ### `choose`
@@ -325,7 +326,7 @@ does not provide replacement transcript text.
 Owner-approved extension (2026-10-04, #531): a named `timeout:` sets the
 [V30 timeout](../specifications/accepted-syntaxes-v30.md#21-blocking-button), and `showButton` used as a value returns
 the elapsed waiting time as a `duration`; as a statement its result is ignored. `background:` and `timeout:` follow
-the button text in either order, at most once each, and evaluate in source order. As for `default:`, they bind to the
+the button text in either order, at most once each, and evaluate in source order. As for `prefill:`, they bind to the
 nearest `showButton` inside an object literal or call arguments. The timeout is evaluated once, before the button
 appears; the button captures its start and timeout in scene time, and checkpoint save/restore re-evaluates nothing.
 

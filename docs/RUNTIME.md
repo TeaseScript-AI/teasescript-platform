@@ -95,7 +95,7 @@ continuation.
 
 The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option values into one prepared list, next to the value written before each option's `:` (or `null`) in the plan, rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action: it expands each list or set option into one button per element, in order, gives every button its value (the written value, a choice object's `value`, or else the option itself), and rejects a choice without buttons or with more buttons than the option-count limit. Buttons may share a value. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
-A basic ask's question is an ordinary prepared `say` that the compiler places before its interaction: after the requesting speaker, `prepareSaySpeaker` and `prepareSayContextualSpeaker` capture the same speaker, `prepareSayText` with `field: true` captures the question, then the `default:` and `hint:` operands are evaluated in written order, the `say` runs, and the interaction opens. The question's `say` follows ordinary pacing, staging, and checkpoint rules, and the interaction that follows consumes its pacing gate. A pending field, a refused answer, an interrupt, or a restore never says the question again; a question known as static text with a static field becomes a literal `say` before a static interaction.
+A basic ask's question is an ordinary prepared `say` that the compiler places before its interaction: after the requesting speaker, `prepareSaySpeaker` and `prepareSayContextualSpeaker` capture the same speaker, `prepareSayText` with `field: true` captures the question, then the `prefill:` and `hint:` operands are evaluated in written order, the `say` runs, and the interaction opens. The question's `say` follows ordinary pacing, staging, and checkpoint rules, and the interaction that follows consumes its pacing gate. A pending field, a refused answer, an interrupt, or a restore never says the question again; a question known as static text with a static field becomes a literal `say` before a static interaction.
 
 `askBoolean` lowers to a `choice` of two buttons, `{ text: yesText, value: true }` and `{ text: noText, value: false }`,
 with `"Yes"` and `"No"` as the default texts. With static texts and a static positional question, or none, it is a
@@ -125,7 +125,7 @@ Completion semantics are:
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
 - `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
 - `askInteger` is a `number` interaction whose UI carries `integer: true`: it accepts one line with only an optional sign and digits within the safe integer range, rejects anything else with "That is wrong. I asked for a whole number.", and requires a whole-number prefill;
-- `askDate`, `askTime`, and `askDateTime` are a `temporal` interaction whose UI carries `temporalKind` (`date`, `time`, or `datetime`): the answer is trimmed strict ISO text ([V30 §35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)), a local time that the player's zone skips is valid, and anything else is rejected with "That is wrong. I asked for a date." (a time, a date and time). The result is the `date`, `time`, or `datetime` value; the transcript shows it in the presentation in force at completion, as `say` would, and a default answer prefills its ISO text;
+- `askDate`, `askTime`, and `askDateTime` are a `temporal` interaction whose UI carries `temporalKind` (`date`, `time`, or `datetime`): the answer is trimmed strict ISO text ([V30 §35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)), a local time that the player's zone skips is valid, and anything else is rejected with "That is wrong. I asked for a date." (a time, a date and time). The result is the `date`, `time`, or `datetime` value; the transcript shows it in the presentation in force at completion, as `say` would, and a prefill fills in its ISO text;
 - `askImage(...)` is an `image` interaction whose answer is an image the trusted host stored; see
   [Image input](#image-input);
 - a form is a `form` interaction whose fields the player edits before submitting; see [Forms](#forms);
@@ -1286,12 +1286,11 @@ technical playground has no camera and answers a pending capture as `unconfigure
 A form is the `form` interaction of [V30 §20](specifications/accepted-syntaxes-v30.md#forms): one pending action whose
 fields the player edits until submitting. It is always prepared: after the requesting speaker, `askForm` evaluates its
 question and named arguments once, in written order, into one request temporary (`message`, `fields`, an object or
-dict, and optional `hint`, `submit`, and `outro`; for `askBooleans`, `texts` and `defaults`), says the question from it
-like a basic ask, and opens the form. `askBooleans`, an ask in both forms like `askForm`, lowers the same way with its
-`message`, `texts`, `defaults`, and `cancel` as the request and the `booleanList` shape; plan validation rejects an
-unlowered `askBooleans` call. The prepared
-UI carries the result `shape`: `object` with the `numericKinds` of named fields, `dict` with one `numericKind` or `null`,
-or `booleanList`. A runtime number does not record whether it is an `integer` or a `number`, so the compiler supplies the
+dict, and optional `hint`, `submit`, and `outro`), says the question from it like a basic ask, and opens the form.
+`askBooleans`, an ask in both forms like `askForm`, lowers the same way with its `message`, `texts`, `defaults` (its
+`prefill:` list), and `cancel` as the request and the `booleanList` shape; plan validation rejects an unlowered
+`askBooleans` call. The prepared UI carries the result `shape`: `object` with the `numericKinds` of named fields, `dict`
+with one `numericKind` or `null`, or `booleanList`. A runtime number does not record whether it is an `integer` or a `number`, so the compiler supplies the
 kind for a field whose number gives its kind; a field without one needs `type:`. The shape also carries the answer type
 the compiler gave each named field (`answers`), or every dict field (`answer`, `null` for any), as a type plan; when the
 form opens, each field's possible answers (a toggle's states, each cycle option, a value of a typed field's kind, and

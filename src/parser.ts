@@ -201,7 +201,7 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askBooleans", "booleans"],
 ]);
 /** The named arguments of each basic ask and of `askForm`, in the order the message suggests them. */
-const ASK_OPTIONS: readonly string[] = ["default", "hint"];
+const ASK_OPTIONS: readonly string[] = ["prefill", "hint"];
 const FORM_OPTIONS: readonly string[] = [
   "fields",
   "hint",
@@ -216,8 +216,16 @@ const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], r
   new Map([
     ["form", FORM_OPTIONS],
     ["boolean", ["yesText", "noText", "message"]],
-    ["booleans", ["texts", "defaults", "cancel", "message"]],
+    ["booleans", ["texts", "prefill", "cancel", "message"]],
   ]);
+/**
+ * The earlier name of an ask's `prefill:`, which is a compile error that names the fix (owner decision on #512,
+ * 2026-10-08): `default:`, or `defaults:` for `askBooleans`.
+ */
+function removedPrefillName(kind: InteractionExpression["interactionKind"]): string | null {
+  if (kind === "booleans") return "defaults";
+  return kind === "choice" || kind === "form" || kind === "boolean" ? null : "default";
+}
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 /** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
 const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([
@@ -1732,8 +1740,8 @@ class Parser {
 
   /**
    * `load(<key>[, default: <value>])`, or the compact `load <key>[, default: <value>]`, whose operands are full
-   * expressions, so `(load "k") == null` needs parentheses. Like the default answer of an ask, the compact `, default:`
-   * binds to the nearest `load` before it. The default is evaluated only when the key is absent.
+   * expressions, so `(load "k") == null` needs parentheses. Like the prefill of an ask, the compact `, default:` binds to
+   * the nearest `load` before it. The default is evaluated only when the key is absent.
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
@@ -1791,7 +1799,7 @@ class Parser {
     if (defaultOffset === -1) {
       this.#advance();
       defaultValue = yield* parseChild(this.#parseOr());
-    } else if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
+    } else if (defaultOffset !== null && this.#atNamedDefault(defaultOffset)) {
       for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
       defaultValue = yield* parseChild(this.#parseColonValueTask(false));
       if (defaultValue === null) {
@@ -2290,7 +2298,7 @@ class Parser {
   }
 
   /**
-   * `global function ...`, or `global name[: Type] = value[, default: start]`. Like the default answer of an ask, a
+   * `global function ...`, or `global name[: Type] = value[, default: start]`. Like the prefill of an ask, a
    * `, default:` belongs to the nearest construct before it that takes one, so `global level = load "level", default: 1`
    * gives the fallback to `load`.
    */
@@ -2330,7 +2338,7 @@ class Parser {
       return null;
     }
     const defaultOffset = this.#offsetAfterComma();
-    if (defaultOffset === null || !this.#atInteractionDefault(defaultOffset))
+    if (defaultOffset === null || !this.#atNamedDefault(defaultOffset))
       return Object.freeze({
         kind: "globalStatement",
         name,
@@ -3675,11 +3683,14 @@ class Parser {
 
     if (interactionKind !== "choice") {
       const names = NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS;
+      // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
+      const removed = removedPrefillName(interactionKind);
+      const recognized = removed === null ? names : [...names, removed];
       const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
         !this.#atStorageDelimiter() &&
-        this.#askOptionAt(0, names) === null
+        this.#askOptionAt(0, recognized) === null
           ? yield* parseChild(this.#parseOr())
           : null;
       // The named options follow in any order, each after a comma, or first without a question.
@@ -3687,14 +3698,14 @@ class Parser {
       let end = question?.span ?? speaker?.span ?? command.span;
       let offset = question === null ? 0 : this.#offsetAfterComma();
       for (;;) {
-        if (offset === null && this.#askOptionAt(0, names) !== null) {
+        if (offset === null && this.#askOptionAt(0, recognized) !== null) {
           this.#reportInsertion(
             parserDiagnosticCode.expectedDelimiter,
             `Expected ',' before '${this.#peek().lexeme}:'.`,
           );
           offset = 0;
         }
-        const option = offset === null ? null : this.#askOptionAt(offset, names);
+        const option = offset === null ? null : this.#askOptionAt(offset, recognized);
         if (option === null) {
           // A form names every argument, as do askBoolean and askBooleans, so another `name:` after a comma is a
           // misspelled one.
@@ -3714,29 +3725,33 @@ class Parser {
           break;
         }
         for (let skipped = 0; skipped < offset!; skipped += 1) this.#advance();
-        const name = this.#advance();
+        const name = this.#renamedAskOption(
+          command,
+          interactionKind,
+          this.#identifier(this.#advance()),
+        );
         this.#advance();
         const value = yield* parseChild(this.#parseColonValueTask(false));
         if (value === null) {
           this.#reportInsertion(
             parserDiagnosticCode.expectedInteractionText,
-            option === "default"
-              ? "Expected a default answer after 'default:'."
-              : option === "hint"
+            name.name === "prefill"
+              ? "Expected a prefill value after 'prefill:'."
+              : name.name === "hint"
                 ? "Expected hint text after 'hint:'."
-                : `Expected a value after '${option}:'.`,
+                : `Expected a value after '${name.name}:'.`,
           );
           if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
             this.#recoveredAtStatementBoundary = true;
           break;
         }
-        if (named.some((argument) => argument.name.name === option)) {
+        if (named.some((argument) => argument.name.name === name.name)) {
           this.#reportSpan(
             parserDiagnosticCode.unsupportedInteractionForm,
-            `Duplicate ${command.lexeme} option '${option}'.`,
+            `Duplicate ${command.lexeme} option '${name.name}'.`,
             name.span,
           );
-        } else named.push(Object.freeze({ name: this.#identifier(name), value }));
+        } else named.push(Object.freeze({ name, value }));
         end = value.span;
         offset = this.#offsetAfterComma();
       }
@@ -3789,7 +3804,7 @@ class Parser {
         break;
       }
       let separatorSpan: SourceSpan | null = null;
-      // As for a default answer, inside delimiters a comma on the next line continues the options.
+      // As for a prefill, inside delimiters a comma on the next line continues the options.
       const commaOffset = this.#offsetAfterComma();
       if (commaOffset !== null) {
         while (this.#check(TokenKind.Newline)) this.#advance();
@@ -3854,7 +3869,7 @@ class Parser {
       speaker,
       question: null,
       hint: null,
-      defaultValue: null,
+      prefill: null,
       options: Object.freeze(options),
       formArguments: Object.freeze([]),
       span: spanFrom(command.span, end),
@@ -3862,7 +3877,7 @@ class Parser {
   }
 
   /**
-   * `askText [as speaker] ([question][, hint: text][, default: value])` and the other basic asks: the parentheses hold
+   * `askText [as speaker] ([question][, hint: text][, prefill: value])` and the other basic asks: the parentheses hold
    * the arguments of the compact form, so `)` ends the ask and both forms give the same interaction.
    */
   *#parseBoundedAsk(
@@ -3871,9 +3886,22 @@ class Parser {
     asSpan: SourceSpan | null,
     speaker: Identifier | null,
   ): ParseTask<InteractionExpression | null> {
-    const call = yield* parseChild(
+    const written = yield* parseChild(
       this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
     );
+    const call: CallExpression = Object.freeze({
+      ...written,
+      arguments: Object.freeze(
+        written.arguments.map((argument) =>
+          argument.kind === "namedArgument"
+            ? Object.freeze({
+                ...argument,
+                name: this.#renamedAskOption(command, interactionKind, argument.name),
+              })
+            : argument,
+        ),
+      ),
+    });
     const parts = this.#boundedArguments(
       command,
       call,
@@ -3918,7 +3946,25 @@ class Parser {
     );
   }
 
-  /** The named option of an ask among `names`, such as `hint:` or `default:`, at `offset` tokens ahead, or `null`. */
+  /**
+   * `name`, or for the earlier name of the ask's prefill, such as `default:`, the error that names the fix and `prefill`
+   * at its place, so that the ask is checked as the author meant it.
+   */
+  #renamedAskOption(
+    command: Token,
+    interactionKind: InteractionExpression["interactionKind"],
+    name: Identifier,
+  ): Identifier {
+    if (name.name !== removedPrefillName(interactionKind)) return name;
+    this.#reportSpan(
+      parserDiagnosticCode.unsupportedInteractionForm,
+      `${command.lexeme} has no '${name.name}:'; use 'prefill:'.`,
+      name.span,
+    );
+    return Object.freeze({ ...name, name: "prefill" });
+  }
+
+  /** The named option of an ask among `names`, such as `hint:` or `prefill:`, at `offset` tokens ahead, or `null`. */
   #askOptionAt(offset: number, names: readonly string[]): string | null {
     const token = this.#peek(offset);
     if (token.kind !== TokenKind.Identifier || this.#peek(offset + 1).kind !== TokenKind.Colon)
@@ -3928,8 +3974,8 @@ class Parser {
 
   /**
    * A basic ask, `askForm`, `askBoolean`, or `askBooleans` from its question and named options in written order. A basic
-   * ask keeps `hint:` and `default:`; the others keep every option, and a form needs `fields:`, or `texts:` and
-   * `defaults:` for `askBooleans`.
+   * ask keeps `hint:` and `prefill:`; the others keep every option, and a form needs `fields:`, or `texts:` and
+   * `prefill:` for `askBooleans`.
    */
   #askExpression(
     command: Token,
@@ -3948,11 +3994,11 @@ class Parser {
         "askForm needs its fields, as in 'fields: { enabled: false }'.",
         command.span,
       );
-    for (const required of interactionKind === "booleans" ? ["texts", "defaults"] : [])
+    for (const required of interactionKind === "booleans" ? ["texts", "prefill"] : [])
       if (!has(required))
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
-          `askBooleans needs ${required}:, as in 'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]'.`,
+          `askBooleans needs ${required}:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
           command.span,
         );
     if (question !== null && has("message"))
@@ -3973,15 +4019,15 @@ class Parser {
       speaker,
       question,
       hint: option("hint"),
-      defaultValue: option("default"),
+      prefill: option("prefill"),
       options: Object.freeze([]),
       formArguments: Object.freeze(keepsArguments ? [...named] : []),
       span,
     });
   }
 
-  /** `default:` at `offset` tokens ahead, the named default answer of `askText` or `askNumber`. */
-  #atInteractionDefault(offset: number): boolean {
+  /** `default:` at `offset` tokens ahead, the named fallback of `load` or the session-start value of a `global`. */
+  #atNamedDefault(offset: number): boolean {
     const token = this.#peek(offset);
     return (
       token.kind === TokenKind.Identifier &&

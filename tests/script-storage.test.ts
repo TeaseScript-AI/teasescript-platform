@@ -977,21 +977,28 @@ test("load takes its fallback as ', default:', and the earlier form names the fi
   assert.equal(missing.program.statements.length, 2);
 });
 
-test("a ', default:' belongs to the nearest load or ask before it", () => {
+test("a ', default:' belongs to the nearest load before it, and is an error after a compact ask", () => {
   const initializer = (source: string) => {
     const [statement] = parse(source).program.statements;
     assert.ok(statement?.kind === "letStatement");
     return statement.initializer;
   };
 
-  const askKey = initializer('let v = load askText "Key?", default: "x"');
-  assert.ok(askKey.kind === "loadExpression" && askKey.defaultValue === null);
-  assert.ok(askKey.key.kind === "interactionExpression" && askKey.key.defaultValue !== null);
+  // An ask's starting answer is its `prefill:`; its earlier `default:` is an error that names the fix, also in a load
+  // key, where grouping gives the fallback to load.
+  assert.deepEqual(
+    parse('let v = load askText "Key?", default: "x"').diagnostics.map(
+      (diagnostic) => diagnostic.message,
+    ),
+    ["askText has no 'default:'; use 'prefill:'."],
+  );
+  const askKey = initializer('let v = load((askText "Key?"), default: "x")');
+  assert.ok(askKey.kind === "loadExpression" && askKey.defaultValue !== null);
 
-  const loadDefault = initializer('let v = askText "Name?", default: load "name", default: "Ada"');
+  const loadDefault = initializer('let v = askText "Name?", prefill: load "name", default: "Ada"');
   assert.ok(loadDefault.kind === "interactionExpression");
-  assert.ok(loadDefault.defaultValue?.kind === "loadExpression");
-  assert.equal(loadDefault.defaultValue.defaultValue?.kind, "stringLiteral");
+  assert.ok(loadDefault.prefill?.kind === "loadExpression");
+  assert.equal(loadDefault.prefill.defaultValue?.kind, "stringLiteral");
 
   const list = initializer('let v = [load "a", default: 1, 2]');
   assert.ok(list.kind === "listLiteral" && list.elements.length === 2);
@@ -1050,7 +1057,7 @@ test("compact interactions parse in every storage operand position", () => {
   const positions: readonly (readonly [(value: string) => string, boolean])[] = [
     [(value) => `save ${value} as "k"`, false],
     [(value) => `save [${value}] as "k"`, false],
-    // A `, default:` after an ungrouped interaction would belong to the interaction, so these keys are grouped.
+    // A `, default:` after an ungrouped interaction would be a choice label or an ask's error, so these keys are grouped.
     [(value) => `let v = load((${value}), default: "d")`, true],
     [(value) => `let v = load "k", default: ${value}`, false],
     [(value) => `save load "k", default: ${value} as "k"`, false],
