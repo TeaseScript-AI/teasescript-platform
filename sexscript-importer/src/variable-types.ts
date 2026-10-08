@@ -2370,8 +2370,8 @@ function isMixed(type: TeaseType): boolean {
 const textIndexes = new WeakSet<IrExpression>();
 
 /**
- * Groovy truth of a value of a scalar type, or a list: not null, and not 0, "", false, or empty. A boolean that cannot be
- * null is the test itself.
+ * Groovy truth of a value of a scalar type, or a list: not null, and not 0, "", false, or empty. A boolean is compared
+ * with `true`, which stays right where a later step widens its variable's type.
  */
 function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
   const scalarType = nonNull(type);
@@ -2382,7 +2382,7 @@ function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
       left: { kind: "property", target: value, name: "length" },
       right: { kind: "literal", value: 0 },
     };
-  if (type.kind === "scalar" && type.name === "boolean") return value;
+
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
     operator,

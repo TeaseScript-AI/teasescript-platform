@@ -1,4 +1,5 @@
 import { withCounterLoops } from "./counter-loops.ts";
+import { withSwitchLadders } from "./switch-ladders.ts";
 import {
   constantString,
   groovyParameters,
@@ -1633,7 +1634,7 @@ export function lowerParsedFile(
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
   let texts = withFillableLoads(
-    withParsedLoads(withCounterLoops(typedStatements), context.syntheticHelpers),
+    withParsedLoads(withSwitchLadders(withCounterLoops(typedStatements)), context.syntheticHelpers),
     shared,
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
@@ -1835,7 +1836,11 @@ function lowerHelperCompilationUnit(
         withElapsedDurations(
           withFillableLoads(
             withParsedLoads(
-              withCounterLoops(withEnforcedTypes([...fieldStatements, ...statements], baseContext)),
+              withSwitchLadders(
+                withCounterLoops(
+                  withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+                ),
+              ),
               baseContext.syntheticHelpers,
             ),
             true,
