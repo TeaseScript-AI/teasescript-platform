@@ -221,7 +221,8 @@ size therefore scales ordinary text, headings, and authored size spans together 
 | narrow composer text | composer keeps the shared reading size; Send remains `14px` |
 | timer time/value | tabular numerals; size follows timer diameter, with smaller text for visible times of one hour or more. Mystery typography does not expose duration; exact type proportions remain provisional |
 | Player action button label | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3` |
-| global controls | shared derived top-control size and rounding; the title is a truncating pill and display controls share a translucent group |
+| global controls | shared derived top-control size and corner radius (`--player-top-control-radius`), also for the truncating title pill and the sidebar's own controls, tool icons, and panel-header controls; display controls share a translucent group |
+| dialog close (X) | a `32px` button with a `20px` icon, centred `24px` from the dialog's top and right edges; its click target reaches `4px` further on each side (`40px`) |
 | tool panel | per-tool width presets capped by available allocation; see the global geometry table |
 | tool-panel header | shared chrome spacing/control sizes; a title, reordering grip, Panel settings, and pin control. Panel settings uses a compact trigger when its full label does not fit |
 | integrated composer shell (POC tuning candidate) | `42px` high for one line at the current reading size, `24px` corner radius, `2px` vertical padding, and `8px`/`4px` start/end padding |
@@ -241,7 +242,8 @@ The Player's top controls overlay the stage without reserving a separate title r
 the title pill and individual control groups use shared translucent media-control material. The title truncates when
 space is constrained; a bar narrower than `200px` hides the title visually while keeping it for assistive technology.
 Display controls include the light/dark toggle and the rightmost fullscreen control. Tools access
-appears in the top controls when the sidebar is hidden and in the tools framework while it is open.
+appears in the top controls when the sidebar is hidden, with the display controls' raised material, and in the tools
+framework while it is open, flat like the menu's tools.
 
 The title pill shows the `title` and `author` of the package's `main.tease` header: "BuzzQuiz by NIFOC99", the title
 only, or "by NIFOC99", with the author in quieter text; without either it is absent, with no fallback. A pill the bar
@@ -356,8 +358,9 @@ are selected; unpinning makes it the temporary panel. Pin state and visual order
 
 Each tool has at most one panel instance. No tool is selected automatically merely because the menu exists, and closing
 all panels leaves the menu available. Selecting an open tool can close its panel; double-clicking its menu entry toggles
-pinning. The header provides the title, Panel settings, pin control, and reordering grip. Panel settings offers width
-presets and Move left/right; pointer/touch dragging provides another way to reorder panels.
+pinning. The menu's tools are flat, with a fill on hover; an open tool keeps the selected fill. The header provides the
+title, Panel settings, pin control, and reordering grip. Panel settings offers width presets and Move left/right;
+pointer/touch dragging provides another way to reorder panels.
 
 A tool mounts when first visited and retains its body state and scroll position until the Player unmounts. Closing,
 replacing, hiding, reordering, or moving it between dock and drawer does not reset that retained body. This does not
