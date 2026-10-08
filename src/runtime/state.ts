@@ -117,7 +117,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 58;
+export const RUNTIME_SNAPSHOT_VERSION = 59;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -447,7 +447,10 @@ export interface RuntimeSnapshot {
   readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
   /** Whether a host provider persists script storage, so `save` and `delete` wait for its acknowledgement. */
   readonly scriptStoragePersistent: boolean;
-  /** Finished or stopped media, retained so their handles stay readable. Active media are background actions. */
+  /**
+   * Finished or stopped media that a handle or a queued or running cue block still reaches; a public operation drops the
+   * others before it returns. Active media are background actions.
+   */
   readonly settledMedia: RuntimeMediaSnapshot[];
   nextMediaId: number;
   /** The default camera's view, or `null` before the first `showCamera`. */
@@ -3564,21 +3567,20 @@ function emptyIdentityIds(): RuntimeIdentityIds {
 /**
  * Every value a state holds where a script can reach it: the bindings of each scope and of the globals, speaker
  * properties, for-loop sources, temporaries, and each call frame's saved temporaries and supplied arguments. Validation
- * finds the runtime identities a state refers to through them, and message collection the messages it still reaches.
+ * finds the runtime identities a state refers to through them, and record collection the records it still reaches.
  */
-function identityRootValues(
+function* identityRootValues(
   frames: unknown,
   speakers: unknown,
   loopFrames: unknown,
   temporaries: unknown,
   callFrames: unknown,
-): unknown[] {
-  const values: unknown[] = [];
+): Generator<unknown, void, undefined> {
   if (Array.isArray(frames)) {
     for (const frame of frames) {
       if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) continue;
       for (const binding of frame.bindings) {
-        if (isPlainRecord(binding)) values.push(binding.value);
+        if (isPlainRecord(binding)) yield binding.value;
       }
     }
   }
@@ -3586,18 +3588,18 @@ function identityRootValues(
     for (const speaker of speakers) {
       if (!isPlainRecord(speaker) || !Array.isArray(speaker.properties)) continue;
       for (const property of speaker.properties) {
-        if (isPlainRecord(property)) values.push(property.value);
+        if (isPlainRecord(property)) yield property.value;
       }
     }
   }
   if (Array.isArray(loopFrames)) {
     for (const loop of loopFrames) {
-      if (isPlainRecord(loop) && loop.kind === "for") values.push(loop.source);
+      if (isPlainRecord(loop) && loop.kind === "for") yield loop.source;
     }
   }
   if (Array.isArray(temporaries)) {
     for (const temporary of temporaries) {
-      if (isPlainRecord(temporary)) values.push(temporary.value);
+      if (isPlainRecord(temporary)) yield temporary.value;
     }
   }
   if (Array.isArray(callFrames)) {
@@ -3605,43 +3607,138 @@ function identityRootValues(
       if (!isPlainRecord(frame)) continue;
       if (Array.isArray(frame.callerTemporaries)) {
         for (const temporary of frame.callerTemporaries) {
-          if (isPlainRecord(temporary)) values.push(temporary.value);
+          if (isPlainRecord(temporary)) yield temporary.value;
         }
       }
       if (Array.isArray(frame.arguments)) {
         for (const argument of frame.arguments) {
           if (isPlainRecord(argument) && argument.supplied === true) {
-            values.push(argument.value);
+            yield argument.value;
           }
         }
       }
     }
   }
-  return values;
 }
 
 /**
- * Drops the live records of messages that no message handle in `snapshot` reaches anymore. A public operation does it
- * before it returns, when every value of the state is in one of its roots; no handle to such a message can appear again.
+ * Drops the live records of messages and the settled media records that nothing in `snapshot` reaches anymore. A public
+ * operation does it before it returns, when every value of the state is in one of its roots; no handle to such a
+ * message or media can appear again, so where an operation boundary falls does not change the state. A settled media
+ * record stays while a handle reaches it, or a queued or running cue block of the media, which sees its own handle.
  */
-export function dropUnreachableMessages(snapshot: RuntimeSnapshot): void {
-  if (snapshot.liveMessages.length === 0) return;
-  const handleIds = emptyIdentityIds();
-  for (const value of identityRootValues(
-    [...snapshot.frames, ...snapshot.retainedScopes, { bindings: snapshot.globals }],
+export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
+  if (snapshot.liveMessages.length === 0 && snapshot.settledMedia.length === 0) return;
+  // The records not reached yet. Once every record is reached nothing is dropped, so the search stops there.
+  const messages = new Set(snapshot.liveMessages.map((message) => message.messageId));
+  const media = new Set(snapshot.settledMedia.map((record) => record.mediaId));
+  reachRecords(collectionRoots(snapshot), messages, media);
+  if (messages.size > 0) {
+    let kept = 0;
+    for (const message of snapshot.liveMessages) {
+      if (!messages.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+    }
+    snapshot.liveMessages.length = kept;
+  }
+  if (media.size > 0) {
+    let kept = 0;
+    for (const record of snapshot.settledMedia) {
+      if (!media.has(record.mediaId)) snapshot.settledMedia[kept++] = record;
+    }
+    snapshot.settledMedia.length = kept;
+  }
+}
+
+/**
+ * The values `identityRootValues` gives for `snapshot`, scope by scope without copying its scope lists, and then the
+ * handle each queued or running media cue block binds when it runs.
+ */
+function* collectionRoots(snapshot: RuntimeSnapshot): Generator<unknown, void, undefined> {
+  yield* identityRootValues(snapshot.frames, null, null, null, null);
+  yield* identityRootValues(snapshot.retainedScopes, null, null, null, null);
+  yield* identityRootValues([{ bindings: snapshot.globals }], null, null, null, null);
+  yield* identityRootValues(
+    null,
     snapshot.speakers,
     snapshot.loopFrames,
     snapshot.temporaries,
     snapshot.callFrames,
-  ))
-    collectSpeakerReferenceIds(value, new Set(), handleIds);
-  const reached = handleIds.message;
-  if (reached.size === snapshot.liveMessages.length) return;
-  let kept = 0;
-  for (const message of snapshot.liveMessages) {
-    if (reached.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+  );
+  for (const invocation of snapshot.pendingTimerHandlers) {
+    if ("mediaId" in invocation) yield { kind: "mediaHandle", mediaId: invocation.mediaId };
   }
-  snapshot.liveMessages.length = kept;
+  for (const frame of snapshot.callFrames) {
+    if (
+      frame.kind === "function" &&
+      frame.timerInterruption !== null &&
+      "mediaId" in frame.timerInterruption
+    )
+      yield { kind: "mediaHandle", mediaId: frame.timerInterruption.mediaId };
+  }
+}
+
+/**
+ * Removes from `messages` and `media` the IDs that handles in `roots` name, looking into lists, sets, objects, and dicts,
+ * and stops as soon as both are empty. Each round takes the next root and moves every walk taken so far on by one value,
+ * so the work done is bounded by how far the walk must go to reach the last record, not by values after it.
+ */
+function reachRecords(roots: Iterator<unknown>, messages: Set<number>, media: Set<number>): void {
+  /** A container's values, from `next` on; `field` reads each value from a property or entry record. */
+  interface Cursor {
+    readonly values: readonly unknown[];
+    readonly field: boolean;
+    next: number;
+  }
+  let walks: Cursor[][] = [];
+  let taking = true;
+  while (messages.size > 0 || media.size > 0) {
+    if (taking) {
+      const root = roots.next();
+      if (root.done === true) taking = false;
+      else {
+        recordValidationTestWork("recordReachVisits");
+        walks.push([{ values: [root.value], field: false, next: 0 }]);
+      }
+    }
+    if (walks.length === 0 && !taking) return;
+    const continuing: Cursor[][] = [];
+    for (const walk of walks) {
+      if (messages.size === 0 && media.size === 0) return;
+      recordValidationTestWork("recordReachVisits");
+      const cursor = walk.at(-1)!;
+      const item = cursor.values[cursor.next];
+      cursor.next += 1;
+      if (cursor.next >= cursor.values.length) walk.pop();
+      const value = cursor.field ? (isPlainRecord(item) ? item.value : undefined) : item;
+      if (isPlainRecord(value)) {
+        if (value.kind === "mediaHandle" && typeof value.mediaId === "number") {
+          media.delete(value.mediaId);
+        } else if (value.kind === "messageHandle" && typeof value.messageId === "number") {
+          messages.delete(value.messageId);
+        } else if (
+          (value.kind === "list" || value.kind === "set") &&
+          Array.isArray(value.items) &&
+          value.items.length > 0
+        ) {
+          walk.push({ values: value.items, field: false, next: 0 });
+        } else if (
+          value.kind === "object" &&
+          Array.isArray(value.properties) &&
+          value.properties.length > 0
+        ) {
+          walk.push({ values: value.properties, field: true, next: 0 });
+        } else if (
+          value.kind === "dict" &&
+          Array.isArray(value.entries) &&
+          value.entries.length > 0
+        ) {
+          walk.push({ values: value.entries, field: true, next: 0 });
+        }
+      }
+      if (walk.length > 0) continuing.push(walk);
+    }
+    walks = continuing;
+  }
 }
 
 /**
