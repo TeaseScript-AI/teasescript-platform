@@ -215,13 +215,14 @@ function pickSite(
   if (!flow.staysHere(list, items, sayAt + 1, index, frames, own.has(list), body)) return null;
   if (text !== null && !flow.staysHere(text, items, sayAt + 1, at, frames, own.has(text), body))
     return null;
-  // A declaration here may not be needed by other statements once it goes.
+  // A declaration here may not be needed by other statements in its scope, the rest of its block, once it goes.
   if (
     start.kind === "let" &&
-    flow.mentions(list) !== mentionCount(items.slice(index, at + 1), list)
+    mentionCount(items.slice(index), list) !== mentionCount(items.slice(index, at + 1), list)
   )
     return null;
-  if (text !== null && pickStatement.kind === "let" && flow.mentions(text) !== 2) return null;
+  if (text !== null && pickStatement.kind === "let" && mentionCount(items.slice(at), text) !== 2)
+    return null;
   return { list, text, items: value.items, pick, pickAt: at, sayAt, say };
 }
 
@@ -236,7 +237,6 @@ class Flow {
   private readonly fileLevel = new Map<string, Extract<IrStatement, { kind: "let" }>>();
   private readonly setterCache = new Map<string, ReadonlySet<string>>();
   private readonly readerCache = new Map<string, ReadonlySet<string>>();
-  private readonly mentionCache = new Map<string, number>();
   private readonly escapeCache = new Map<string, boolean>();
 
   constructor(statements: readonly IrStatement[], shared: boolean) {
@@ -252,12 +252,6 @@ class Flow {
   private(name: string): boolean {
     const own = this.fileLevel.get(name);
     return own === undefined || (!this.shared && own.global !== true);
-  }
-
-  mentions(name: string): number {
-    if (!this.mentionCache.has(name))
-      this.mentionCache.set(name, mentionCount(this.statements, name));
-    return this.mentionCache.get(name)!;
   }
 
   /** The functions that may set the variable, themselves or through a function they call. */
@@ -340,7 +334,8 @@ class Flow {
 
   /**
    * Where the value the variable holds from `from` on in `items` goes: read (`read`), replaced on every path (`dead`),
-   * or out of its function or the file's top level (`end`).
+   * or out of its function or the file's top level (`end`). A `goto` ends its path: the converter's gotos enter a file
+   * from its top, which sets the file's variables anew (ADR 0022 §3).
    */
   private reachesEnd(
     name: string,
@@ -362,8 +357,8 @@ class Flow {
         if (exposes(item)) return "read";
         if (kills(item, name)) return returned ? "end" : "dead";
         const leaving = leavingKinds(item);
-        if ([...leaving].some((kind) => kind !== "return")) return "read";
-        if (leaving.size > 0) returned = true;
+        if ([...leaving].some((kind) => kind === "break" || kind === "continue")) return "read";
+        if (leaving.has("return")) returned = true;
       }
       if (level === 0) return "end";
       const frame = frames[level - 1]!;
