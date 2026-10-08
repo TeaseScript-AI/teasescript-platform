@@ -6,8 +6,9 @@ import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 
 // The debug room's mark before the title in the title pill (DEBUGGER.md "Debug room"), named by the bar's tooltip: an
-// outlined bug, filled with the theme's error red while Debug is on, which stays red whatever the accent. It takes the
-// pointer for its own tooltip, so hovering it does not also open the cut-off title's.
+// outlined bug, whose body and head are filled with the theme's error red while Debug is on, which stays red whatever the
+// accent; its lines keep the text colour. It takes the pointer for its own tooltip, so hovering it does not also open the
+// cut-off title's.
 const props = defineProps<{ on?: boolean }>();
 const label = computed(() => (props.on ? "Debug session · Debug on" : "Debug session · Debug off"));
 </script>
@@ -23,7 +24,9 @@ const label = computed(() => (props.on ? "Debug session · Debug on" : "Debug se
         :data-debug-on="on || undefined"
         @pointermove.stop
       >
-        <Bug class="size-4" aria-hidden="true" />
+        <!-- The fill lies under the outline, so the bug's lines, its middle line too, stay on top of it. -->
+        <Bug v-if="on" class="debug-room-fill size-4" aria-hidden="true" data-debug-room-fill />
+        <Bug class="debug-room-outline size-4" aria-hidden="true" />
       </span>
     </TooltipTrigger>
     <TooltipContent>{{ label }}</TooltipContent>
@@ -32,13 +35,27 @@ const label = computed(() => (props.on ? "Debug session · Debug on" : "Debug se
 
 <style scoped>
 .debug-room-mark {
+  position: relative;
   display: inline-flex;
   flex-shrink: 0;
   margin-inline-end: 6px;
   pointer-events: auto;
 }
-.debug-room-mark[data-debug-on] svg {
-  color: var(--theme-status-error, CanvasText);
-  fill: currentColor;
+/* Both are positioned, so the outline, which comes later, paints over the fill. */
+.debug-room-outline {
+  position: relative;
+}
+.debug-room-fill {
+  position: absolute;
+  inset: 0;
+  stroke: none;
+}
+.debug-room-fill :deep(path) {
+  fill: none;
+}
+/* Lucide's bug draws its body second and its head last. */
+.debug-room-fill :deep(path:nth-child(2)),
+.debug-room-fill :deep(path:nth-child(11)) {
+  fill: var(--theme-status-error, CanvasText);
 }
 </style>

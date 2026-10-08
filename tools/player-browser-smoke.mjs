@@ -1463,10 +1463,10 @@ async function keptSessionScenario(cdp, origin, profile) {
   );
 }
 
-// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with Debug on, its bug filled, and its own start page,
-// which offers Reload session and Reset session once there is something to delete; Debug off leaves the bug outlined.
-// Debug on during a normal session goes on there with a copy, after a warning when it overwrites a debug session, while
-// the normal session stays as it was.
+// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with Debug on, its bug filled inside, and its own
+// start page, which offers Reload session and Reset session once there is something to delete; Debug off leaves the bug
+// outlined. Debug on during a normal session goes on there with a copy, after a warning when it overwrites a debug
+// session, while the normal session stays as it was.
 async function debugRoomScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const start = "[data-session-start]";
@@ -1506,6 +1506,10 @@ async function debugRoomScenario(cdp, origin) {
   };
 
   const bug = `document.querySelector('[data-debug-room-indicator]')`;
+  // The fill layer under the outline, filled exactly in the bug's body and head, and whether the outline's lines keep the
+  // text colour.
+  const filled = `[...(${bug}.querySelectorAll('[data-debug-room-fill] path') ?? [])].filter((path) => getComputedStyle(path).fill !== 'none').map((path) => path.getAttribute('d').slice(0, 6)).join(' ')`;
+  const outline = `(() => { const style = getComputedStyle(${bug}.querySelector('svg:not([data-debug-room-fill])')); return style.stroke === style.color && style.fill === 'none'; })()`;
   await navigate(cdp, `${origin}/player/?package=debug-room&room=debug`);
   await waitFor(cdp, `${control} === 'Start debug session'`);
   assertEqual(
@@ -1514,16 +1518,16 @@ async function debugRoomScenario(cdp, origin) {
     "A new debug room starts with Debug on and nothing to delete",
   );
   assertEqual(
-    await value(cdp, `getComputedStyle(${bug}.querySelector('svg')).fill !== 'none'`),
-    true,
-    "The bug is filled while Debug is on",
+    await value(cdp, `[${filled}, ${outline}].join()`),
+    "M14 7a M9 7.1,true",
+    "The bug's inside is filled while Debug is on, and its lines keep the text colour",
   );
   await physicalClick(cdp, "[data-settings-trigger]");
   await physicalClick(cdp, '[data-player-setting="debug-menu"]');
   await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
   await waitFor(
     cdp,
-    `${bug}?.getAttribute('aria-label') === 'Debug session · Debug off' && getComputedStyle(${bug}.querySelector('svg')).fill === 'none' && !document.querySelector('[data-player-settings]')`,
+    `${bug}?.getAttribute('aria-label') === 'Debug session · Debug off' && !${bug}.querySelector('[data-debug-room-fill]') && ${outline} && !document.querySelector('[data-player-settings]')`,
     8_000,
     "Debug off did not leave the bug outlined",
   );

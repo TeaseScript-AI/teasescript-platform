@@ -120,9 +120,9 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
   has something to delete, a session or saved values, it also offers **Reload session**, a new debug session from the
   debug room's saved data as they are, and **Reset session**, one with its saved data and photos deleted, under "Reload
   deletes the debug session and keeps what it saved. Reset deletes both."
-- **The title bar** marks the debug room with a bug before the title in its pill, filled red while Debug runs and
-  outlined while it does not, which the bar's tooltip names "Debug session · Debug on" or "Debug session · Debug off";
-  the normal room has no mark.
+- **The title bar** marks the debug room with an outlined bug before the title in its pill, filled red inside while
+  Debug runs, which the bar's tooltip names "Debug session · Debug on" or "Debug session · Debug off"; the normal room
+  has no mark.
 - The Debug panel's Storage tab, an export of saved data, and an import treat the rooms apart: the tab shows the debug
   room's values, an export takes the script's own, and an import in the debug room replaces the script's own without
   ending the debug session.
