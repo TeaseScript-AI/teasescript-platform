@@ -269,6 +269,8 @@ function names(value: IrExpression): Set<string> {
 }
 
 const WHOLE_BUILT_INS = ["toInteger", "floor", "ceil", "round"];
+/** Calls that only read their arguments. */
+const STEADY_CALLS = [...WHOLE_BUILT_INS, "sexscriptLegacyItemAt"];
 
 /**
  * Whether a value is a whole number: a whole literal, a list's or text's length, a whole number built-in, arithmetic
@@ -309,8 +311,8 @@ function isWhole(
 }
 
 /**
- * Whether reading a bound has no effect and gives what the variables in it hold: variables, literals, lengths,
- * arithmetic, and whole number built-ins, so not a random draw.
+ * Whether reading a bound has no effect and gives what the variables in it hold: variables, literals, their members,
+ * items, and lengths, arithmetic, whole number built-ins, and the legacy item read, so not a random draw.
  */
 function isSteadyBound(value: IrExpression): boolean {
   switch (value.kind) {
@@ -318,7 +320,9 @@ function isSteadyBound(value: IrExpression): boolean {
     case "variable":
       return true;
     case "property":
-      return value.name === "length" && isSteadyBound(value.target);
+      return isSteadyBound(value.target);
+    case "index":
+      return isSteadyBound(value.target) && isSteadyBound(value.index);
     case "unary":
       return isSteadyBound(value.value);
     case "binary":
@@ -326,7 +330,7 @@ function isSteadyBound(value: IrExpression): boolean {
     case "call":
       return (
         value.local !== true &&
-        WHOLE_BUILT_INS.includes(value.name) &&
+        STEADY_CALLS.includes(value.name) &&
         Object.keys(value.named).length === 0 &&
         value.positional.every(isSteadyBound)
       );
@@ -369,6 +373,13 @@ function assignedValues(file: readonly IrStatement[], name: string): IrExpressio
 }
 
 /** Methods that change the length of the list they are called on. */
+/** The variable a member or item read starts from: `cards` for `cards[i].length`; null for another value. */
+function rootName(value: IrExpression): string | null {
+  if (value.kind === "variable") return value.name;
+  if (value.kind === "property" || value.kind === "index") return rootName(value.target);
+  return null;
+}
+
 const RESIZING_METHODS = new Set([
   "add",
   "addAll",
@@ -384,7 +395,8 @@ const RESIZING_METHODS = new Set([
 
 /**
  * Whether the loop body keeps the bound's value: it sets none of its variables, changes the length of no list it reads
- * the length of, and calls no script function, which could, where a variable of the bound is no function's own.
+ * the length of, changes nothing in a value it reads a member or an item of, and calls no script function, which could,
+ * where a variable of the bound is no function's own. Values copy (ADR 0014), so nothing else changes them.
  */
 function keepsBound(
   bound: IrExpression,
@@ -402,20 +414,51 @@ function keepsBound(
     return mapChildren(value, findLengths);
   };
   findLengths(bound);
+  // The variables whose members or items the bound reads, `cards[i].length` or `sizes[n]`.
+  const held = new Set<string>();
+  const findHeld = (value: IrExpression): IrExpression => {
+    const read =
+      value.kind === "call" && value.name === "sexscriptLegacyItemAt"
+        ? value.positional[0]
+        : (value.kind === "property" &&
+              !(value.name === "length" && value.target.kind === "variable")) ||
+            value.kind === "index"
+          ? value
+          : undefined;
+    const root = read === undefined ? null : rootName(read);
+    if (root !== null) held.add(root);
+    return mapChildren(value, findHeld);
+  };
+  findHeld(bound);
   const visit = (value: IrExpression): IrExpression => {
     if (value.kind === "call" && value.local === true) calls = true;
     if (value.kind === "methodCall" && value.target.kind === "variable") {
       if (lengths.has(value.target.name) && RESIZING_METHODS.has(value.name)) kept = false;
     }
-    // A list passed to anything may be changed there.
+    if (value.kind === "methodCall") {
+      const root = rootName(value.target);
+      if (root !== null && held.has(root)) kept = false;
+    }
+    // A list passed to anything but a read may be changed there.
+    const reads =
+      value.kind === "call" && value.local !== true && STEADY_CALLS.includes(value.name);
     const args =
-      value.kind === "call" ? value.positional : value.kind === "methodCall" ? value.arguments : [];
+      value.kind === "call" && !reads
+        ? value.positional
+        : value.kind === "methodCall"
+          ? value.arguments
+          : [];
     for (const argument of args)
-      if (argument.kind === "variable" && lengths.has(argument.name)) kept = false;
+      if (argument.kind === "variable" && (lengths.has(argument.name) || held.has(argument.name)))
+        kept = false;
     return mapChildren(value, visit);
   };
   const statements = (items: readonly IrStatement[]): void => {
     for (const item of items) {
+      if (item.kind === "assign" && item.target.kind !== "variable") {
+        const root = rootName(item.target);
+        if (root !== null && held.has(root)) kept = false;
+      }
       mapOwnExpressions(item, visit);
       withNestedBlocks(item, (nested) => {
         statements(nested);

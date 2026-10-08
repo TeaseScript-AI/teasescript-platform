@@ -43,4 +43,16 @@ while swat < 20 + randomInteger(0..50) {
   playAudio "swat.wav"
   swat += 1
 }
+// Baccarat: a bound read from an item of a list goes through a range where nothing in the loop changes that list.
+function drawTable(cards) {
+  let total = 0
+  for i in 0..cards.length {
+    for j in 0..cards[i].length {
+      // NOTE SX_PLUS_OPERAND_TYPE line 33: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+      total += cards[i][j]
+    }
+  }
+  return total
+}
+say "Total ${drawTable([[1, 2], [3]])}"
 exit

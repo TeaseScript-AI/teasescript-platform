@@ -25,3 +25,13 @@ show("Swats " + swats)
 for(def swat=0;swat<20+getRandom(50);swat++) {
     playSound("swat.wav")
 }
+// Baccarat: a bound read from an item of a list goes through a range where nothing in the loop changes that list.
+def drawTable = { cards ->
+    def total = 0
+    for(def i = 0;i<cards.size;i++)
+        for(def j = 0;j<cards[i].size;j++) {
+            total = total + cards[i][j]
+        }
+    return total
+}
+show("Total " + drawTable([[1, 2], [3]]))
