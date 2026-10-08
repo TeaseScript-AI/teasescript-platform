@@ -555,6 +555,12 @@ last table shows progress without new lines: for each way both sides missed with
 `best`), the closest any seed of each side came, with how many ways came closer or went further and the top examples,
 such as "needs `visits >= 20`: 3 → 12".
 
+To gate a change aimed at one class of problem on the units of that class (plus a few controls, at a larger budget),
+`tools/explore-tags.ts <unit-dir>...` tags units from their compiled plans: `clock-saves` (saves a value read from the
+clock), `session-counters` (saves a stored key from its own load), `random` (100 or more random draw sites per thousand
+lines), `typed-asks` (compares a typed answer with a constant), and `large` (5,000 or more coverable lines);
+`--class <tag>` prints the folders of the units with that tag. Run the full gate as well before a push.
+
 Known limits:
 
 - Content behind a long automatic chain (a loop of waits with nothing else to do, past a hundred waits) waits longer:
