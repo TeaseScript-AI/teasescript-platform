@@ -718,7 +718,7 @@ function readState(page: Page): Promise<PlayerState> {
       instruction === undefined
         ? null
         : (session?.plan.files.find(
-            (file) => instruction >= file.startInstruction && instruction <= file.endInstruction,
+            (file) => instruction >= file.startInstruction && instruction < file.endInstruction,
           )?.path ?? null);
     const action = view?.foregroundAction ?? null;
     const site =
