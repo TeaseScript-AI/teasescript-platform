@@ -758,9 +758,12 @@ action (ADR 0016 identity, request event, creation time) holding a media record;
 keeps only the records that something can still read: a handle in the roots that snapshot validation checks for runtime
 identities ([Message handles](#message-handles)), or a queued or running cue block of the media, which sees its own
 handle. Before it returns, every public operation drops the other records, as it does for messages; no handle to such
-media can appear again, so where an operation boundary falls does not change the state. `nextMediaId` issues IDs. A
-media settlement publishes `actionCompleted` and, like a timer settlement, is not retained as `lastSettlement`. At most
-one video is active; a new video, `showImage`, or `hideImage` stops it.
+media can appear again, so where an operation boundary falls does not change the state. The search walks the roots side
+by side and stops once it has reached every record, so its work grows with how far it must walk in root order to reach
+the last kept record, not with the values after it: a record whose only handle comes after many unrelated roots, or lies
+deep in a large value, costs that walk on every operation, as message records do. `nextMediaId` issues IDs. A media
+settlement publishes `actionCompleted` and, like a timer settlement, is not retained as `lastSettlement`. At most one
+video is active; a new video, `showImage`, or `hideImage` stops it.
 
 **Waiting and load.** A play first waits in a foreground `mediaPlayback` action: an async play until the Player's load
 report, a blocking play until the media finishes, stops, or fails. The wait settles through runtime work, never

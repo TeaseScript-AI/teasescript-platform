@@ -3567,21 +3567,20 @@ function emptyIdentityIds(): RuntimeIdentityIds {
 /**
  * Every value a state holds where a script can reach it: the bindings of each scope and of the globals, speaker
  * properties, for-loop sources, temporaries, and each call frame's saved temporaries and supplied arguments. Validation
- * finds the runtime identities a state refers to through them, and message collection the messages it still reaches.
+ * finds the runtime identities a state refers to through them, and record collection the records it still reaches.
  */
-function identityRootValues(
+function* identityRootValues(
   frames: unknown,
   speakers: unknown,
   loopFrames: unknown,
   temporaries: unknown,
   callFrames: unknown,
-): unknown[] {
-  const values: unknown[] = [];
+): Generator<unknown, void, undefined> {
   if (Array.isArray(frames)) {
     for (const frame of frames) {
       if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) continue;
       for (const binding of frame.bindings) {
-        if (isPlainRecord(binding)) values.push(binding.value);
+        if (isPlainRecord(binding)) yield binding.value;
       }
     }
   }
@@ -3589,18 +3588,18 @@ function identityRootValues(
     for (const speaker of speakers) {
       if (!isPlainRecord(speaker) || !Array.isArray(speaker.properties)) continue;
       for (const property of speaker.properties) {
-        if (isPlainRecord(property)) values.push(property.value);
+        if (isPlainRecord(property)) yield property.value;
       }
     }
   }
   if (Array.isArray(loopFrames)) {
     for (const loop of loopFrames) {
-      if (isPlainRecord(loop) && loop.kind === "for") values.push(loop.source);
+      if (isPlainRecord(loop) && loop.kind === "for") yield loop.source;
     }
   }
   if (Array.isArray(temporaries)) {
     for (const temporary of temporaries) {
-      if (isPlainRecord(temporary)) values.push(temporary.value);
+      if (isPlainRecord(temporary)) yield temporary.value;
     }
   }
   if (Array.isArray(callFrames)) {
@@ -3608,19 +3607,18 @@ function identityRootValues(
       if (!isPlainRecord(frame)) continue;
       if (Array.isArray(frame.callerTemporaries)) {
         for (const temporary of frame.callerTemporaries) {
-          if (isPlainRecord(temporary)) values.push(temporary.value);
+          if (isPlainRecord(temporary)) yield temporary.value;
         }
       }
       if (Array.isArray(frame.arguments)) {
         for (const argument of frame.arguments) {
           if (isPlainRecord(argument) && argument.supplied === true) {
-            values.push(argument.value);
+            yield argument.value;
           }
         }
       }
     }
   }
-  return values;
 }
 
 /**
@@ -3671,20 +3669,31 @@ export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
 
 /**
  * Removes from `messages` and `media` the IDs that handles in `roots` name, looking into lists, sets, objects, and dicts,
- * until both are empty. The roots are walked side by side, one value of each in turn, so a handle near the top of one
- * root is reached without walking a large unrelated value of another first.
+ * and stops as soon as both are empty. Each round takes the next root and moves every walk taken so far on by one value,
+ * so the work done is bounded by how far the walk must go to reach the last record, not by values after it.
  */
-function reachRecords(roots: readonly unknown[], messages: Set<number>, media: Set<number>): void {
+function reachRecords(roots: Iterator<unknown>, messages: Set<number>, media: Set<number>): void {
   /** A container's values, from `next` on; `field` reads each value from a property or entry record. */
   interface Cursor {
     readonly values: readonly unknown[];
     readonly field: boolean;
     next: number;
   }
-  let walks: Cursor[][] = roots.map((root) => [{ values: [root], field: false, next: 0 }]);
-  while (walks.length > 0 && (messages.size > 0 || media.size > 0)) {
+  let walks: Cursor[][] = [];
+  let taking = true;
+  while (messages.size > 0 || media.size > 0) {
+    if (taking) {
+      const root = roots.next();
+      if (root.done === true) taking = false;
+      else {
+        recordValidationTestWork("recordReachVisits");
+        walks.push([{ values: [root.value], field: false, next: 0 }]);
+      }
+    }
+    if (walks.length === 0 && !taking) return;
     const continuing: Cursor[][] = [];
     for (const walk of walks) {
+      if (messages.size === 0 && media.size === 0) return;
       recordValidationTestWork("recordReachVisits");
       const cursor = walk.at(-1)!;
       const item = cursor.values[cursor.next];

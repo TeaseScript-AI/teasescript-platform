@@ -32,6 +32,7 @@ import {
   type RuntimeSession,
   type RuntimeSessionResult,
   type RuntimeSnapshot,
+  type FreshRuntimeOptions,
   type TaggedRuntimeSnapshot,
 } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
@@ -417,16 +418,10 @@ test("an ordinary session step captures and validates only its new input", () =>
 });
 
 test("a kept settled media handle does not make a session step walk unrelated values", () => {
-  // Diagnostic scale evidence, not a capacity contract: the host's large value comes before the script's global list.
-  const work = (width: number) => {
-    const plan = compileValidPlan(
-      'global keeper: list = []\nkeeper.add(playAudio async "a.mp3")\nkeeper[0].stop()\nwait 1000\nexit',
-    );
-    const payload = {
-      kind: "list" as const,
-      items: Array.from({ length: width }, (_, index) => index),
-    };
-    const session = createFreshRuntimeSession(plan, { ...IMMEDIATE, globals: { payload } });
+  // Diagnostic scale evidence, not a capacity contract: the work of one step must not grow with the size of a large
+  // value walked beside the handle, nor with the number of values after the variable that holds the handle.
+  const work = (source: string, globals: NonNullable<FreshRuntimeOptions["globals"]>) => {
+    const session = createFreshRuntimeSession(compileValidPlan(source), { ...IMMEDIATE, globals });
     session.run();
     session.reportMediaLoad(1, { kind: "loaded", durationMs: 1_000 });
     session.run();
@@ -437,9 +432,18 @@ test("a kept settled media handle does not make a session step walk unrelated va
       return statistics().counts;
     });
   };
-  const narrow = work(4);
+  const inList =
+    'global keeper: list = []\nkeeper.add(playAudio async "a.mp3")\nkeeper[0].stop()\nwait 1000\nexit';
+  const payload = (width: number) => ({
+    payload: { kind: "list" as const, items: Array.from({ length: width }, (_, index) => index) },
+  });
+  const narrow = work(inList, payload(4));
   assert.ok((narrow.recordReachVisits ?? 0) > 0);
-  assert.deepEqual(work(2_000), narrow);
+  assert.deepEqual(work(inList, payload(2_000)), narrow);
+  const inVariable = 'let keeper = playAudio async "a.mp3"\nkeeper.stop()\nwait 1000\nexit';
+  const separate = (count: number) =>
+    Object.fromEntries(Array.from({ length: count }, (_, index) => [`value${index}`, index]));
+  assert.deepEqual(work(inVariable, separate(2_000)), work(inVariable, separate(4)));
 });
 
 test("an operation that throws ends its session, and argument errors leave it usable", () => {
