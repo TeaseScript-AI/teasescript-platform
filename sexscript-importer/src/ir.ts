@@ -188,7 +188,8 @@ export type IrStatement =
       /** `prompt` marks the importer's test that a legacy input's question is not null before it is shown. */
       guard?: "prompt";
     })
-  | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
+  /** `wholeBound` marks a `<` or `<=` condition whose right side variable typing proves a whole number, never null. */
+  | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[]; wholeBound?: true })
   | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
   /**
    * `dict` marks a loop over the keys of a dict (#536); `valueVariable` names each key's value too,

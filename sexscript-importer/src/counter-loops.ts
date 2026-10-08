@@ -182,7 +182,8 @@ function counterLoop(
   const body = withoutSteps(loop.body.slice(0, -1), counter);
   if (body === null || setsName(body, counter) || hasBlockAction(body)) return null;
   // The bound is read once: whole, free of effects, and kept by the loop.
-  if (!isWhole(to, file) || !keepsBound(to, body, locals) || names(to).has(counter)) return null;
+  if (loop.wholeBound !== true && !isWhole(to, file)) return null;
+  if (!keepsBound(to, body, locals) || names(to).has(counter)) return null;
   return { counter, from, to, inclusive: condition.operator === "<=", body };
 }
 

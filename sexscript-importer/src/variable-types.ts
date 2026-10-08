@@ -578,6 +578,14 @@ export function enforceVariableTypes(
             indexes,
           );
         case "while":
+          return withIntegerIndexes(
+            {
+              ...statement,
+              body: rewrite(statement.body),
+              ...(wholeBounds.has(statement) ? { wholeBound: true as const } : {}),
+            },
+            indexes,
+          );
         case "repeat":
         case "for":
           return withIntegerIndexes({ ...statement, body: rewrite(statement.body) }, indexes);
@@ -1230,9 +1238,18 @@ function analyse(
         return;
       }
       case "while":
-      case "repeat":
+      case "repeat": {
+        const bound =
+          item.kind === "while" &&
+          item.condition.kind === "binary" &&
+          (item.condition.operator === "<" || item.condition.operator === "<=")
+            ? typeOf(item.condition.right, scope)
+            : null;
+        if (bound?.kind === "scalar" && bound.name === "integer") wholeBounds.add(item);
+        else wholeBounds.delete(item);
         block(item.body, scope);
         return;
+      }
       case "for": {
         const inner = new Scope(scope);
         const variable = binding(item, item.variable, null, UNKNOWN);
@@ -2333,6 +2350,8 @@ function forEachExpression(value: IrExpression, visit: (expression: IrExpression
 /** The legacy truth helper (helpers.ts). */
 const TRUTH_HELPER = "sexscriptLegacyTruth";
 const COMPARE_HELPER = "sexscriptLegacyCompare";
+/** `while` loops whose `<` or `<=` bound typing proves a whole number, never null. */
+const wholeBounds = new WeakSet<IrStatement>();
 const ORDER_OPERATORS = new Set(["<", "<=", ">", ">="]);
 /** Orderings of two sides that typing proves to be numbers, or texts, which read as the plain comparison. */
 const plainCompares = new WeakSet<IrExpression>();
