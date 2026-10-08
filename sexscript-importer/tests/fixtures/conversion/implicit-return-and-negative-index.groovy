@@ -34,6 +34,10 @@ def deal = { -> return ["a", "b", "c"] }
 def hand = deal()
 def pairs = hand[0..1] * 2
 show("Pairs " + pairs.join(","))
+// A part whose type only the running script knows, such as an element of a parameter, is repeated or multiplied there.
+def top = { piles -> piles[0] }
+def twice = top([["x", "y"]]) * 2
+show("Twice " + twice.join(","))
 // A character of a text that only the converted types prove text reads through a helper: type inference reads the
 // `shot` of both blocks as one variable, of unknown type.
 if (getBoolean("Replay?")) {

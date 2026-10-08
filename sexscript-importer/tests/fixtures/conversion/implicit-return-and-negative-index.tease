@@ -121,6 +121,15 @@ function sexscriptLegacyRepeatList(items, times) {
   }
   return result
 }
+function sexscriptLegacyTimes(value, count) {
+  if value is string {
+    return sexscriptLegacyValue(value.repeat(toInteger(count)))
+  }
+  if value is list {
+    return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, toInteger(count)))
+  }
+  return sexscriptLegacyValue(value * count)
+}
 let scores = [3, 5, 8]
 say "Last ${scores.last}, second last ${scores[scores.length - 2]}"
 function twice(x) {
@@ -167,7 +176,7 @@ say "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}"
 // A range index takes a part of a list, also counted from the end, backwards, or without its end (`..<`), and a write to
 // a range replaces it.
 let deck = ["a", "b", "c", "d", "e"]
-let top = sexscriptLegacySlice(deck, 0, 1)
+let topValue = sexscriptLegacySlice(deck, 0, 1)
 let backwards = sexscriptLegacySlice(deck, -1, 0)
 let between = sexscriptLegacySlice(deck, 3, 1, true)
 deck = sexscriptLegacySpliced(deck, 1, 2, ["x"])
@@ -175,7 +184,7 @@ deck = sexscriptLegacySpliced(deck, 1, 1, ["y"], true)
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say "Top ${top.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}"
+say "Top ${topValue.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}"
 // A part of a list that a function returns is a list too, which `*` repeats.
 function deal {
   return ["a", "b", "c"]
@@ -184,11 +193,18 @@ let hand = deal()
 let pairs = sexscriptLegacyRepeatList(sexscriptLegacySlice(hand, 0, 1), 2)
 // NOTE SX_LIST_JOIN line 36: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 say "Pairs ${pairs.join(",")}"
+// A part whose type only the running script knows, such as an element of a parameter, is repeated or multiplied there.
+function top(piles) {
+  return piles[0]
+}
+let twiceValue = sexscriptLegacyTimes(top([["x", "y"]]), 2)
+// NOTE SX_LIST_JOIN line 40: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Twice ${twiceValue.join(",")}"
 // A character of a text that only the converted types prove text reads through a helper: type inference reads the
 // `shot` of both blocks as one variable, of unknown type.
 say "Replay?"
 if (choose yes: "Yes", no: "No") == "yes" {
-  // NOTE SX_LOAD_OPEN_NULL line 40: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+  // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
   let shot = load "game.shot", default: sexscriptLegacyValue(null)
   say "Saved ${shot}"
 }
