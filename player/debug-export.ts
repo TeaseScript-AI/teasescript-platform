@@ -453,7 +453,7 @@ function parsePackage(value: unknown): DebugPackage {
   };
 }
 
-function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | null {
+export function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | null {
   if (value === null) return null;
   const edited = record(value, "$.editedWhileDebugging");
   exactly(edited, "$.editedWhileDebugging", ["firstEditSceneTimeMs", "editCount"]);
@@ -466,7 +466,7 @@ function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | 
   };
 }
 
-function parseRewoundWhileDebugging(value: unknown): DebugRewoundWhileDebugging | null {
+export function parseRewoundWhileDebugging(value: unknown): DebugRewoundWhileDebugging | null {
   if (value === null) return null;
   const rewound = record(value, "$.rewoundWhileDebugging");
   exactly(rewound, "$.rewoundWhileDebugging", ["restoredSceneTimeMs", "rewindCount"]);

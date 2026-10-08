@@ -1,0 +1,11 @@
+---
+title: "Kept session fixture"
+author: "Author fixture"
+---
+let visits = load("visits", default: 0)
+visits += 1
+save visits as "visits"
+say "This is visit ${visits}."
+let points = choose 1: "One point", 3: "Three points"
+say "You chose ${points}."
+exit

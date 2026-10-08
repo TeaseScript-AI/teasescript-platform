@@ -46,8 +46,7 @@ interface StorageHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
-  readonly canPlayAgain: Readonly<Ref<boolean>>;
-  playAgain(): Promise<void>;
+  toStartPage(): Promise<void>;
   debugRecording(): { readonly operations: readonly { readonly kind: string }[] } | null;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): void;
@@ -968,8 +967,8 @@ test("Play again starts from the values the previous run saved and deleted", asy
     ].join("\n"),
   );
   assert.equal(await playOut(), "1 old");
-  assert.equal(host.canPlayAgain.value, true);
-  await host.playAgain();
+  await host.toStartPage();
+  await host.activate();
   assert.equal(await playOut(), "2 none");
   assert.deepEqual([...stored], [["runs", 2]]);
 });

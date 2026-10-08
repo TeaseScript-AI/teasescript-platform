@@ -1,0 +1,4 @@
+let picture: string = askImage("Choose a picture")
+showImage picture
+showButton "Done"
+exit

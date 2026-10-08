@@ -4,14 +4,19 @@ import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 
-withDefaults(defineProps<{ initialStageSize?: number }>(), { initialStageSize: 60 });
+// On the start page only the top bar and the overlay show. The Stage and conversation stay mounted and laid out, hidden
+// rather than removed from the layout, so their panels keep their measured sizes for the session that follows.
+withDefaults(defineProps<{ initialStageSize?: number; startPage?: boolean }>(), {
+  initialStageSize: 60,
+  startPage: false,
+});
 const hitAreaMargins = { fine: 0, coarse: 0 };
 </script>
 
 <template>
   <div class="player-composition relative flex min-h-0 min-w-0 flex-1">
     <slot name="topbar" />
-    <SplitterGroup direction="vertical" class="min-h-0 min-w-0 flex-1">
+    <SplitterGroup direction="vertical" class="min-h-0 min-w-0 flex-1" :class="{ invisible: startPage }">
       <SplitterPanel :default-size="initialStageSize" :min-size="20" class="flex min-h-0 flex-col">
         <slot name="stage" />
       </SplitterPanel>
@@ -28,7 +33,7 @@ const hitAreaMargins = { fine: 0, coarse: 0 };
         <slot />
       </SplitterPanel>
     </SplitterGroup>
-    <slot name="right-rail" />
+    <div class="contents" :class="{ invisible: startPage }"><slot name="right-rail" /></div>
     <slot name="overlay" />
   </div>
 </template>

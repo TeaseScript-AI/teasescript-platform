@@ -186,6 +186,26 @@ export class CapturedMediaStore {
     }
   }
 
+  /** Of `references`, the session media no save stored durably, to keep with a session elsewhere. */
+  sessionRecords(references: Iterable<string>): CapturedMediaRecord[] {
+    const records: CapturedMediaRecord[] = [];
+    for (const reference of references) {
+      const record = this.#records.get(reference);
+      if (record !== undefined && !this.#durable.has(reference)) records.push(record);
+    }
+    return records;
+  }
+
+  /**
+   * Holds a capture a kept session uses as session media again, so a save stores it like a new capture. `stored` is
+   * external data, checked here; anything else, or a reference this store already holds, is ignored.
+   */
+  restoreSessionMedia(reference: string, stored: StoredCapturedMedia | null): void {
+    if (this.#records.has(reference)) return;
+    const record = validRecord(stored, this.#namespace, reference);
+    if (record !== null) this.#records.set(reference, record);
+  }
+
   /** The record, reading it from storage when needed. */
   async read(reference: string): Promise<CapturedMediaRecord | null> {
     return this.#records.get(reference) ?? this.#load(reference);
