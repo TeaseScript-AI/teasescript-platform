@@ -3,7 +3,13 @@ import type { SourceSpan } from "./ast.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { usedNames } from "./message-handles.ts";
 import { effectBefore, withNestedBlocks } from "./repeated-text.ts";
-import { mapChildren, mapOwnExpressions as mapOwnValues } from "./variable-types.ts";
+import {
+  annotation,
+  functionResultTypes,
+  mapChildren,
+  mapOwnExpressions as mapOwnValues,
+  type TeaseType,
+} from "./variable-types.ts";
 
 /**
  * A storage key written as one literal keeps one type for the whole script, and a `load` of it without `default:` may
@@ -800,19 +806,24 @@ function withEmptyText(
     };
     block(program.statements, Scope.file());
   });
-  // The values set to receivers that are no text reads.
-  for (const { index, binding, value, scope } of flows) {
+  // The values set to receivers that are no text reads: a script function's or a generated helper's result has the
+  // type its returns give, and a text method gives text.
+  let results: Map<string, TeaseType> | null = null;
+  const resultTypes = (): ReadonlyMap<string, TeaseType> =>
+    (results ??= functionResultTypes(programs.flatMap((program) => program.statements)));
+  const kindsOf = (index: number, value: IrExpression, scope: Scope, tested: boolean): string[] => {
+    if (isNullLiteral(value)) return ["null"];
+    // A copy of another receiver holds text, and its null where no null test rules that out.
+    if (value.kind === "variable" && isReceiver(index, scope.resolve(value.name)))
+      return [tested ? "string" : "nullable"];
+    if (value.kind === "variable" || value.kind === "load") return ["unknown"];
+    // A result that may be null, such as a null-keeping helper's, stays open: what it is given decides.
+    return [knownType(value, resultTypes) ?? "unknown"];
+  };
+  for (const { index, binding, value, scope, item } of flows) {
     if (!isReceiver(index, binding)) continue;
-    const source = value.kind === "variable" ? scope.resolve(value.name) : null;
-    othersOf(index, binding).add(
-      isNullLiteral(value)
-        ? "null"
-        : source !== null && isReceiver(index, source)
-          ? "nullable"
-          : value.kind === "load"
-            ? "unknown"
-            : (valueType(value) ?? "unknown"),
-    );
+    for (const kind of kindsOf(index, value, scope, testedCopies.has(item)))
+      othersOf(index, binding).add(kind);
   }
   // A receiver whose value stays in it: no read set to it, nor it, is passed on.
   const own = (index: number, binding: string): boolean =>
@@ -1080,6 +1091,24 @@ function withEmptyText(
   });
 }
 
+/** Text methods that give text. */
+const TEXT_METHODS = new Set(["lowercase", "uppercase", "trim", "substring"]);
+
+/**
+ * The type of a value that the importer knows here (valueType), or that a text method, a script function, or a generated
+ * helper gives, by the type its returns give (`results`, computed once a value needs it); null where it is not known or
+ * may be null.
+ */
+function knownType(
+  value: IrExpression,
+  results: () => ReadonlyMap<string, TeaseType>,
+): string | null {
+  if (value.kind === "methodCall" && TEXT_METHODS.has(value.name)) return "string";
+  if (value.kind !== "call") return valueType(value);
+  const result = results().get(value.name);
+  return result === undefined || result.kind === "optional" ? null : annotation(result);
+}
+
 /** The read of a stored text (storedText): `"${load k}"`, or `"${sexscriptLegacyCastText(load k)}"`. */
 function routedRead(value: IrExpression): Extract<IrExpression, { kind: "load" }> | null {
   const only = value.kind === "template" && value.parts.length === 1 ? value.parts[0]! : null;
@@ -1251,7 +1280,10 @@ function withDeclaredKeys(
     return name;
   };
   // The variables that the reads start, with the other values the script gives them in their file.
-  const others = programs.map((program) => otherValueTypes(program.statements));
+  let results: Map<string, TeaseType> | null = null;
+  const resultTypes = (): ReadonlyMap<string, TeaseType> =>
+    (results ??= functionResultTypes(programs.flatMap((program) => program.statements)));
+  const others = programs.map((program) => otherValueTypes(program.statements, resultTypes));
   const keyedLet = (item: IrStatement): string | null =>
     item.kind === "let" && item.value.kind === "load" ? literalKey(item.value.key) : null;
   // A key's one declared type takes the other values that the script gives the variables reading it too.
@@ -1439,7 +1471,10 @@ function withDeclaredKeys(
  * The types of the values the statements give each variable besides storage reads, by binding (Scope): `null`, a type
  * the importer knows here, also of a copied variable that the script never sets again, or `unknown`.
  */
-function otherValueTypes(statements: readonly IrStatement[]): Map<string, Set<string>> {
+function otherValueTypes(
+  statements: readonly IrStatement[],
+  results: () => ReadonlyMap<string, TeaseType>,
+): Map<string, Set<string>> {
   const types = new Map<string, Set<string>>();
   // The type of each variable that the script never sets again: its annotation, its value's, or a read's default.
   const started = new Map<string, string>();
@@ -1454,7 +1489,7 @@ function otherValueTypes(statements: readonly IrStatement[]): Map<string, Set<st
     if (value.kind === "load") return;
     const set = types.get(binding) ?? new Set<string>();
     const copied = value.kind === "variable" ? started.get(scope.resolve(value.name)) : undefined;
-    set.add(isNullLiteral(value) ? "null" : (copied ?? valueType(value) ?? "unknown"));
+    set.add(isNullLiteral(value) ? "null" : (copied ?? knownType(value, results) ?? "unknown"));
     types.set(binding, set);
   };
   const block = (items: readonly IrStatement[], scope: Scope): void => {

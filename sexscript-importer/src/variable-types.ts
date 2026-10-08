@@ -1771,7 +1771,7 @@ export function isAssignable(target: TeaseType, source: TeaseType): boolean {
 }
 
 /** The annotation that declares `type`, or null when TeaseScript cannot write it (V30 §12). */
-function annotation(type: TeaseType): string | null {
+export function annotation(type: TeaseType): string | null {
   const value = nonNull(type);
   const writable =
     value.kind === "scalar" ||

@@ -255,6 +255,16 @@ let choiceText = load "game.choice", default: ""
 if sexscriptLegacyBooleanText(load("game.choice", default: "")) == true {
   say "Chosen ${choiceText}"
 }
+// A text variable that also takes a script function's text, or a text method's, holds only text.
+function defaultNick {
+  return "Pet"
+}
+let nickname = load "game.nickname", default: ""
+if nickname == "" {
+  nickname = defaultNick()
+}
+nickname = nickname.trim()
+say "Nick ${nickname}"
 // A computed key's read that a list of a known type takes as a new item reads the items' empty value where missing.
 let hints = ["first"]
 hints.add(load("game.hint${slot}", default: ""))
@@ -288,7 +298,7 @@ function described(value: string? = "none") {
 }
 let savedDescription: string? = load "game.description", default: null
 say "No description ${described(savedDescription)}"
-// NOTE SX_LOAD_STRING_TEXT line 138: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+// NOTE SX_LOAD_STRING_TEXT line 144: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
 let scoreText: string? = sexscriptLegacyText(load("game.scoreText", default: sexscriptLegacyValue(null)))
 let scoreCopy: string? = scoreText
 say "Score ${scoreCopy == null}"
@@ -297,7 +307,7 @@ function saveScore {
 }
 // An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
 let profile = { name: "Guest" }
-// NOTE SX_SHARED_MAP_WRITE line 144: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 150: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 profile.name = load "game.profileName", default: ""
 say "Profile ${profile.name}"
 // A list of one function is apart from a list of the same name in another.
@@ -346,8 +356,8 @@ say "Laps ${laps}"
 let shelves = [["old"]]
 shelves[0][0] = load "game.shelf${slot}", default: ""
 shelves[0].add(load("game.extra${slot}", default: ""))
-// NOTE SX_INDEX_PAST_END line 173: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-// NOTE SX_INDEX_PAST_END line 173: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 179: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 179: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
   say "Empty shelf."
 }

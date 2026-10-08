@@ -114,6 +114,12 @@ work()
 save("game.choice", "true")
 def choiceText = loadString("game.choice")
 if (loadBoolean("game.choice")) show("Chosen " + choiceText)
+// A text variable that also takes a script function's text, or a text method's, holds only text.
+def defaultNick = { -> "Pet" }
+def nickname = loadString("game.nickname")
+if (nickname == null) nickname = defaultNick()
+nickname = nickname.trim()
+show("Nick " + nickname)
 // A computed key's read that a list of a known type takes as a new item reads the items' empty value where missing.
 def hints = ["first"]
 hints.add(load("game.hint" + slot))

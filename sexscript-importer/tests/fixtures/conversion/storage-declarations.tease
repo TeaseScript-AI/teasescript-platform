@@ -64,12 +64,12 @@ while value == null {
 // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Value ${value + 1}"
 // A variable that the script also gives a value of a type the importer cannot tell holds the read open to it.
-function fill {
-  return askText "Fill?", default: "text"
+function fill(answer) {
+  return answer
 }
 let savedFilled: boolean? = load "game.filled", default: null
 let filled = sexscriptLegacyValue(savedFilled)
-filled = fill()
+filled = fill(askText("Fill?", default: "text"))
 save true as "game.filled"
 say "Filled ${filled == null}"
 // A read of a key whose type nothing tells, which a list of a known type takes as a new item, reads the items' empty

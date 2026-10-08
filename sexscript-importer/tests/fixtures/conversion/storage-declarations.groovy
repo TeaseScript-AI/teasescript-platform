@@ -23,9 +23,9 @@ def value = load("game.count")
 while (value == null) value = getInteger("A number?", 1)
 show("Value " + (value + 1))
 // A variable that the script also gives a value of a type the importer cannot tell holds the read open to it.
-def fill = { -> getString("Fill?", "text") }
+def fill = { answer -> answer }
 def filled = load("game.filled")
-filled = fill()
+filled = fill(getString("Fill?", "text"))
 save("game.filled", true)
 show("Filled " + (filled == null))
 // A read of a key whose type nothing tells, which a list of a known type takes as a new item, reads the items' empty
