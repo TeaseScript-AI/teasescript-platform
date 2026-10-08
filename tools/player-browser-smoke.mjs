@@ -1463,9 +1463,10 @@ async function keptSessionScenario(cdp, origin, profile) {
   );
 }
 
-// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with its own start page, which offers Reload session
-// and Reset session once there is something to delete; Debug on during a normal session goes on there with a copy,
-// after a warning when it overwrites a debug session, while the normal session stays as it was.
+// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with Debug on, its bug filled, and its own start page,
+// which offers Reload session and Reset session once there is something to delete; Debug off leaves the bug outlined.
+// Debug on during a normal session goes on there with a copy, after a warning when it overwrites a debug session, while
+// the normal session stays as it was.
 async function debugRoomScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const start = "[data-session-start]";
@@ -1504,12 +1505,27 @@ async function debugRoomScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('${start}')`);
   };
 
+  const bug = `document.querySelector('[data-debug-room-indicator]')`;
   await navigate(cdp, `${origin}/player/?package=debug-room&room=debug`);
   await waitFor(cdp, `${control} === 'Start debug session'`);
   assertEqual(
-    await value(cdp, `[!!document.querySelector('[data-debug-room-indicator]'), ${anew}].join()`),
-    "true,",
-    "A new debug room shows its bug and nothing to delete",
+    await value(cdp, `[${bug}?.getAttribute('aria-label'), ${anew}].join()`),
+    "Debug session · Debug on,",
+    "A new debug room starts with Debug on and nothing to delete",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(${bug}.querySelector('svg')).fill !== 'none'`),
+    true,
+    "The bug is filled while Debug is on",
+  );
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await physicalClick(cdp, '[data-player-setting="debug-menu"]');
+  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+  await waitFor(
+    cdp,
+    `${bug}?.getAttribute('aria-label') === 'Debug session · Debug off' && getComputedStyle(${bug}.querySelector('svg')).fill === 'none' && !document.querySelector('[data-player-settings]')`,
+    8_000,
+    "Debug off did not leave the bug outlined",
   );
   await physicalClick(cdp, start);
   await waitFor(cdp, `${runs} === 'Run 1.'`);

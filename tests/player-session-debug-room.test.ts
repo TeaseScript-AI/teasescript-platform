@@ -30,7 +30,7 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 // The debug room (DEBUGGER.md "Debug room") through the real Vue session host: Debug on during a normal session goes on
 // with a copy in the debug room while the normal session stays as it was; a page opened in the debug room makes it from
-// a copy of the script's own saved data; Reload session and Reset session start it anew.
+// a copy of the script's own saved data and starts with Debug on; Reload session and Reset session start it anew.
 interface RoomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
@@ -60,6 +60,10 @@ let usePlayerSession: (options: {
   room?: "normal" | "debug";
   capturedMedia?: { readonly repository: CapturedMediaRepository | null };
 }) => RoomHost;
+let usePlayerDebug: (
+  player: RoomHost,
+  initial: { readonly menu: boolean; readonly autoSkip: boolean },
+) => { readonly menu: Ref<boolean>; readonly on: Readonly<Ref<boolean>> };
 
 before(async () => {
   const server = await createServer({
@@ -74,9 +78,15 @@ before(async () => {
     const module: Record<string, unknown> = await server.ssrLoadModule(
       "/player/vue/src/usePlayerSession.ts",
     );
+    const debug: Record<string, unknown> = await server.ssrLoadModule(
+      "/player/vue/src/usePlayerDebug.ts",
+    );
     assert.equal(typeof module.usePlayerSession, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+    assert.equal(typeof debug.usePlayerDebug, "function");
+    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
     usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+    // EVIDENCE: validation: as above.
+    usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
   } finally {
     await server.close();
   }
@@ -310,6 +320,49 @@ test("a page opened in the debug room makes it from a copy of the script's own s
   assert.deepEqual(await rooms.media.listReferences("test"), [reference]);
   // Something to delete: the copied saved data.
   assert.equal(host.rooms.debugHasData.value, true);
+});
+
+test("a page opened in the debug room starts with Debug on, which the script reads; the normal room starts with it off", async (context) => {
+  stubBrowser(context);
+  const rooms = memoryKeptRoomStore();
+  const host = mountHost(context, {
+    own: savedData([]),
+    kept: memoryKeptSessionStore(),
+    rooms,
+    room: "debug",
+  });
+  // The Player's own Debug feature, which the host starts as it starts without `?dev`.
+  const scope = effectScope();
+  const debug = scope.run(() => usePlayerDebug(host, { menu: false, autoSkip: false }))!;
+  context.after(() => scope.stop());
+  assert.equal(debug.menu.value, true);
+  assert.equal(debug.on.value, true);
+  await prepare(context, host, SCRIPT);
+  await host.activate();
+  await settle(context);
+  await press(context, host);
+  // Settings' Debug menu still turns it off.
+  debug.menu.value = false;
+  await settle(context);
+  assert.equal(debug.on.value, false);
+  await press(context, host);
+  assert.deepEqual(await rooms.values("test").load(), [
+    { key: "on", value: true },
+    { key: "off", value: false },
+  ]);
+
+  const normal = mountHost(context, {
+    own: savedData([]),
+    kept: memoryKeptSessionStore(),
+    rooms: memoryKeptRoomStore(),
+  });
+  const normalScope = effectScope();
+  const normalDebug = normalScope.run(() =>
+    usePlayerDebug(normal, { menu: false, autoSkip: false }),
+  )!;
+  context.after(() => normalScope.stop());
+  assert.equal(normalDebug.menu.value, false);
+  assert.equal(normal.rooms.current.value, "normal");
 });
 
 test("Reload session keeps the debug room's saved data; Reset session deletes them and its photos", async (context) => {

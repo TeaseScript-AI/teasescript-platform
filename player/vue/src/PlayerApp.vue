@@ -60,7 +60,10 @@ const props = withDefaults(
     tools?: readonly PlayerTool[];
     /** Why the script cannot start; shown instead of Start. */
     failure?: ScriptFailure | null;
-    /** How Debug starts: the Debug menu, and auto-skip once Debug runs. Both are off unless the host asks (`?dev`). */
+    /**
+     * How Debug starts: the Debug menu, and auto-skip once Debug runs. Both are off unless the host asks (`?dev`); the
+     * debug room starts with the menu on.
+     */
     debug?: { readonly menu: boolean; readonly autoSkip: boolean };
   }>(),
   {
@@ -421,6 +424,7 @@ async function toggleFullscreen() {
             :title="title"
             :author="author"
             :debug-room="player.rooms.current.value === 'debug'"
+            :debug-on="debug.on.value"
             :fullscreen="fullscreen"
             :fullscreen-supported="fullscreenSupported"
             :fullscreen-error="fullscreenError"

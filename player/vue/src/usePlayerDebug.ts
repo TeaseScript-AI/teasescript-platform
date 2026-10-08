@@ -13,8 +13,9 @@ import type { PlayerSessionHost } from "./usePlayerSession";
 
 /**
  * The Player's Debug feature (DEBUGGER.md "Player Debug"). Settings' **Debug menu** switch offers the Debug panel; it is
- * not stored, so every load starts with it off unless the host starts it on (`?dev`). The panel's own **Debug** switch,
- * on whenever the menu is turned on, pauses the features without leaving the panel.
+ * not stored, so every load starts with it off in the normal room, unless the host starts it on (`?dev`), and on in the
+ * debug room. The panel's own **Debug** switch, on whenever the menu is turned on, pauses the features without leaving
+ * the panel.
  *
  * The Debug log lives while the menu is on. Time controls, countdowns, the value trace, and rewind's history live only
  * while both switches are on: turning either off stops auto-skip, ends a jump at its next yield, and drops the trace and
@@ -28,7 +29,7 @@ export function usePlayerDebug(
   player: PlayerSessionHost,
   initial: { readonly menu: boolean; readonly autoSkip: boolean },
 ) {
-  const menu = ref(initial.menu);
+  const menu = ref(initial.menu || player.rooms.current.value === "debug");
   const active = ref(true);
   watch(
     menu,
@@ -128,6 +129,8 @@ export function usePlayerDebug(
     menu,
     /** The panel's Debug switch: whether the Debug features run while the menu is on. */
     active,
+    /** Whether Debug is on: the menu and the panel's Debug switch, which the script reads as `debugMode`. */
+    on: computed(() => menu.value && active.value),
     /** The Debug log while the menu is on, else `null`. */
     log: computed(() => log.value),
     /** Time controls while the Debug features run, else `null`. */
