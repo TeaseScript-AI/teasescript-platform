@@ -149,3 +149,12 @@ show("Mood " + mood)
 int laps = 0
 laps = loadInteger("game.laps")
 show("Laps " + laps)
+// An item of a list in a list that the script tests for null keeps the null of a computed key's read, as do items added.
+def shelves = [["old"]]
+shelves[0][0] = load("game.shelf" + slot)
+shelves[0].add(load("game.extra" + slot))
+if (shelves[0][0] == null || shelves[0][1] == null) show("Empty shelf.")
+// A text parameter that a call passes a value of a type the importer cannot tell to holds it open.
+def anyValue = load("game.any" + slot)
+def checkAny = { item = loadString("game.anyText") -> return item == "" }
+show("Any " + checkAny(anyValue))

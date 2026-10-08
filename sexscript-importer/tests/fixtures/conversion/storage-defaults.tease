@@ -311,4 +311,19 @@ say "Mood ${mood}"
 let laps = 0
 laps = toInteger(sexscriptLegacyLoadInteger("game.laps", 0))
 say "Laps ${laps}"
+// An item of a list in a list that the script tests for null keeps the null of a computed key's read, as do items added.
+let shelves: string?[][] = [["old"]]
+shelves[0][0] = load "game.shelf${slot}", default: null
+shelves[0].add(load("game.extra${slot}", default: null))
+// NOTE SX_INDEX_PAST_END line 156: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 156: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
+  say "Empty shelf."
+}
+// A text parameter that a call passes a value of a type the importer cannot tell to holds it open.
+let anyValue = load "game.any${slot}", default: null
+function checkAny(item = sexscriptLegacyValue(load("game.anyText", default: ""))) {
+  return item == ""
+}
+say "Any ${checkAny(anyValue)}"
 exit

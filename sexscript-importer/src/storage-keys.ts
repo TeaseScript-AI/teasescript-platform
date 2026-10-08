@@ -215,6 +215,21 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
     const declared = new Map<string, string>();
     const itemTested = new Set<string>();
     const itemAt = helperName("itemAt");
+    // The variable a place is in and how many items deep: `values[0][1]` is two items into `values`.
+    type Place = { binding: string; depth: number };
+    const placeOf = (value: IrExpression, scope: Scope): Place | null => {
+      let depth = 0;
+      let current = value;
+      for (;;) {
+        if (current.kind === "index") current = current.target;
+        else if (current.kind === "call" && current.name === itemAt && current.positional[0])
+          current = current.positional[0];
+        else break;
+        depth += 1;
+      }
+      return current.kind === "variable" ? { binding: scope.resolve(current.name), depth } : null;
+    };
+    const placeKey = ({ binding, depth }: Place): string => `${binding}#${depth}`;
     const collect = (items: readonly IrStatement[], scope: Scope): void => {
       for (const item of items) {
         if (item.kind === "function") {
@@ -227,14 +242,8 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               [value.left, value.right],
               [value.right, value.left],
             ] as const) {
-              const list =
-                side.kind === "index"
-                  ? side.target
-                  : side.kind === "call" && side.name === itemAt
-                    ? side.positional[0]
-                    : undefined;
-              if (isNullLiteral(other) && list?.kind === "variable")
-                itemTested.add(scope.resolve(list.name));
+              const place = isNullLiteral(other) ? placeOf(side, scope) : null;
+              if (place !== null && place.depth > 0) itemTested.add(placeKey(place));
             }
           }
           return mapChildren(value, visit);
@@ -253,33 +262,37 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
     };
     collect(program.statements, Scope.file());
     const nullable = (type: string): boolean => /\?$|\bnull\b/u.test(type);
-    // Variables a read that keeps its null makes optional, and lists whose items it makes optional.
+    // Variables a read that keeps its null makes optional, and lists whose innermost items it makes optional.
     const optionals = new Set<string>();
     const optionalItems = new Set<string>();
     const itemType = (type: string | null): string | null =>
       type?.endsWith("[]") === true ? type.slice(0, -2) : null;
-    const typeOf = (value: IrExpression, scope: Scope): string | null =>
-      value.kind === "variable"
-        ? (declared.get(scope.resolve(value.name)) ?? null)
-        : value.kind === "index"
-          ? itemType(typeOf(value.target, scope))
-          : null;
+    // The type of a place `depth` items deeper than `value`, a variable or an item of one.
+    const typeOf = (value: IrExpression, scope: Scope, depth = 0): string | null => {
+      if (value.kind === "index") return typeOf(value.target, scope, depth + 1);
+      if (value.kind !== "variable") return null;
+      let type: string | null = declared.get(scope.resolve(value.name)) ?? null;
+      for (let level = 0; level < depth; level += 1) type = itemType(type);
+      return type;
+    };
+    // An item place whose null the script tests, and whose items are the list's innermost, can be optional.
+    const optionalPlace = (place: Place | null, type: string): string | null => {
+      if (place === null || !itemTested.has(placeKey(place)) || type.includes(" | ")) return null;
+      const whole = declared.get(place.binding) ?? "";
+      return whole === `${type}${"[]".repeat(place.depth)}` ? place.binding : null;
+    };
     // The type of a place a read goes to: a variable, or an item of a list, also of a list in a list.
     const typed = (
       target: IrExpression,
       scope: Scope,
-    ): { type: string; binding?: string; list?: string; item?: true } | null => {
+    ): { type: string; binding?: string; place?: Place | null; item?: true } | null => {
       if (target.kind === "variable") {
         const binding = scope.resolve(target.name);
         const type = declared.get(binding);
         return type === undefined ? null : { type, binding };
       }
-      if (target.kind !== "index") return null;
-      const type = itemType(typeOf(target.target, scope));
-      if (type === null) return null;
-      return target.target.kind === "variable"
-        ? { type, list: scope.resolve(target.target.name), item: true }
-        : { type, item: true };
+      const type = target.kind === "index" ? typeOf(target, scope) : null;
+      return type === null ? null : { type, place: placeOf(target, scope), item: true };
     };
     const strip = (value: IrExpression): IrExpression => {
       const next = mapChildren(value, strip);
@@ -314,12 +327,8 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               const { fill, ...load } = read;
               const empty = emptyValue(target.type);
               if ("item" in target) {
-                if (
-                  target.list !== undefined &&
-                  itemTested.has(target.list) &&
-                  !target.type.includes(" | ")
-                )
-                  optionalItems.add(target.list);
+                const list = optionalPlace(target.place ?? null, target.type);
+                if (list !== null) optionalItems.add(list);
                 else if (empty !== null)
                   next = { ...next, value: { ...load, defaultValue: empty } };
               } else if (fill === true && empty !== null)
@@ -335,7 +344,7 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
             next.expression.kind === "methodCall" &&
             next.expression.name === "add" &&
             next.expression.arguments.length === 1 &&
-            next.expression.target.kind === "variable"
+            (next.expression.target.kind === "variable" || next.expression.target.kind === "index")
               ? next.expression
               : null;
           const taken = added?.arguments[0];
@@ -347,12 +356,12 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               ? taken.defaultValue === undefined
               : taken.defaultValue !== undefined && isOpenNull(taken.defaultValue))
           ) {
-            const target = typed(added.target, scope);
-            const list = target?.binding;
-            const type = itemType(target?.type ?? null);
-            if (list !== undefined && type !== null) {
+            const type = typeOf(added.target, scope, 1);
+            const place = placeOf(added.target, scope);
+            if (type !== null && place !== null) {
               const empty = emptyValue(type);
-              if (itemTested.has(list) && !type.includes(" | ")) optionalItems.add(list);
+              const list = optionalPlace({ ...place, depth: place.depth + 1 }, type);
+              if (list !== null) optionalItems.add(list);
               else if (!nullable(type) && empty !== null) {
                 const { fill: _fill, ...load } = taken;
                 const defaultValue =
@@ -383,8 +392,11 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
         const binding = scope.declare(next.name, next.span);
         const type = next.type ?? valueType(next.value);
         if (type === null) return next;
-        if (optionalItems.has(binding) && type.endsWith("[]") && !nullable(type.slice(0, -2)))
-          return { ...next, type: `${type.slice(0, -2)}?[]` };
+        if (optionalItems.has(binding)) {
+          const levels = type.match(/(?:\[\])+$/u)?.[0] ?? "";
+          const item = type.slice(0, type.length - levels.length);
+          if (levels !== "" && !nullable(item)) return { ...next, type: `${item}?${levels}` };
+        }
         return !optionals.has(binding) || nullable(type) ? next : { ...next, type: optional(type) };
       });
     return { ...program, statements: optionalize(statements, Scope.file()) };
@@ -443,11 +455,11 @@ function textVariables(statements: readonly IrStatement[]): Set<string> {
 
 /**
  * Which of the package's programs become output files (`published`), and which of them is main.tease (`main`), whose
- * global functions reach every file.
+ * global functions reach every file; none where each file is converted to stand on its own.
  */
 export interface PackageLayout {
   published: readonly boolean[];
-  main: number;
+  main: number | null;
 }
 
 /**
@@ -458,7 +470,7 @@ export interface PackageLayout {
 export function withStorageDefaults(
   programs: readonly MigrationProgram[],
   shared: boolean,
-  layout: PackageLayout = { published: programs.map(() => true), main: 0 },
+  layout: PackageLayout = { published: programs.map(() => true), main: null },
 ): MigrationProgram[] {
   const saved = new Map<string, Set<string>>();
   const defaulted = new Map<string, Set<string>>();
@@ -954,15 +966,10 @@ function withEmptyText(
               isNullLiteral(parameter.defaultValue) && emptied(binding)
                 ? nullSet(span)
                 : rewriteIn(inner, span)(parameter.defaultValue);
-            // A text parameter that a call passes null to, and values of other types, holds them all, which its
-            // default's type alone would not.
+            // A text parameter that calls pass values of other types to holds them all, which its default's type
+            // alone would not.
             const given = othersOf(index, binding);
-            if (
-              parameter.type !== undefined ||
-              !holdsRead(index, binding) ||
-              emptied(binding) ||
-              !given.has("null")
-            )
+            if (parameter.type !== undefined || !holdsRead(index, binding) || emptied(binding))
               return { ...parameter, defaultValue };
             if (given.has("unknown"))
               return { ...parameter, defaultValue: helperCall("value", [defaultValue]) };
@@ -970,7 +977,7 @@ function withEmptyText(
               "string",
               ...[...given].filter((member) => member !== "null"),
             ])!;
-            return { ...parameter, defaultValue, type: optional(type) };
+            return { ...parameter, defaultValue, type: given.has("null") ? optional(type) : type };
           });
           return [{ ...item, parameters, body: block(item.body, inner) }];
         }
@@ -1133,12 +1140,12 @@ function withDeclaredKeys(
   const declared = new Set<string>();
   const letRead = new Set<string>();
   const filledIn = new Set<string>();
-  // The keys that published files read.
-  const publishedReads = new Set<string>();
+  // The keys that each file reads.
+  const fileReads = programs.map(() => new Set<string>());
   programs.forEach((program, index) => {
     const reads = (value: IrExpression): IrExpression => {
       const key = value.kind === "load" ? literalKey(value.key) : null;
-      if (key !== null && published[index] === true) publishedReads.add(key);
+      if (key !== null) fileReads[index]!.add(key);
       if (key !== null && value.kind === "load" && value.defaultValue === undefined) {
         nullRead.add(key);
         if (value.open === true) filledIn.add(key);
@@ -1208,10 +1215,12 @@ function withDeclaredKeys(
     visit(program.statements, Scope.file());
   });
   const done = new Set<string>();
+  // The keys each file declares itself.
+  const fileDeclares = programs.map(() => new Set<string>());
   const declaredPrograms = programs.map((program, index) => {
     const taken = new Set(packageNames);
     // Keys this file declares at a `let`, then keys it declares by moving a read.
-    const atLet = new Set<string>();
+    const atLet = fileDeclares[index]!;
     const declare = (items: IrStatement[], scope: Scope): IrStatement[] =>
       items.map((item) => {
         const next = withNestedBlocks(item, (body) => declare(body, scope.inner(item)));
@@ -1268,6 +1277,7 @@ function withDeclaredKeys(
           ) {
             const name = fresh(key, taken);
             lifted.add(key);
+            atLet.add(key);
             if (published[index] === true) done.add(key);
             moved = { kind: "let", name, value, type: optional(type), span: next.span };
             return { kind: "variable", name };
@@ -1280,49 +1290,54 @@ function withDeclaredKeys(
     return { ...program, statements: lift(declare(program.statements, Scope.file())) };
   });
   // A key that no published file could declare, as its reads sit only in loops, after effects, or where a condition
-  // may skip them, is declared at the top of main.tease, by a read in a function that nothing calls.
-  const keyTypes: IrStatement[] = [];
-  const mainNames = new Set(packageNames);
-  for (const [key, type] of types) {
-    if (done.has(key) || !publishedReads.has(key)) continue;
-    keyTypes.push({
+  // may skip them, is declared at the top of main.tease, by a read in a function that nothing calls; where each file
+  // stands on its own, at the top of each file that reads a key it does not declare.
+  const undeclared = (index: number): string[] =>
+    [...types.keys()].filter((key) =>
+      layout.main === null
+        ? fileReads[index]!.has(key) && !fileDeclares[index]!.has(key)
+        : index === layout.main &&
+          !done.has(key) &&
+          programs.some((_, other) => published[other] === true && fileReads[other]!.has(key)),
+    );
+  const withMain = declaredPrograms.map((program, index): MigrationProgram => {
+    const keys = undeclared(index);
+    if (keys.length === 0) return program;
+    const names = new Set(packageNames);
+    const keyTypes: IrStatement[] = keys.map((key) => ({
       kind: "let",
-      name: fresh(key, mainNames),
+      name: fresh(key, names),
       value: { kind: "load", key: { kind: "literal", value: key } },
-      type: optional(type),
+      type: optional(types.get(key)!),
       span: null,
-    });
-  }
-  let holder = "sexscriptLegacyKeyTypes";
-  for (let suffix = 2; mainNames.has(holder); suffix += 1)
-    holder = `sexscriptLegacyKeyTypes${suffix}`;
-  // The declaring reads sit in a function that nothing calls, so they never run.
-  const atMain: IrStatement[] = [
-    {
-      kind: "comment",
-      text: `// NOTE SX_LOAD_KEY_DECLARED: ${MAIN_DECLARED}`,
-      trailing: false,
-      span: null,
-    },
-    { kind: "function", name: holder, parameters: [], body: keyTypes, global: true, span: null },
-  ];
-  const withMain = declaredPrograms.map((program, index) =>
-    index !== layout.main || keyTypes.length === 0
-      ? program
-      : {
-          ...program,
-          statements: [...atMain, ...program.statements],
-          diagnostics: [
-            ...program.diagnostics,
-            ...keyTypes.map(() => ({
-              code: "SX_LOAD_KEY_DECLARED",
-              severity: "info" as const,
-              message: MAIN_DECLARED,
-              span: null,
-            })),
-          ],
-        },
-  );
+    }));
+    let holder = "sexscriptLegacyKeyTypes";
+    for (let suffix = 2; names.has(holder); suffix += 1)
+      holder = `sexscriptLegacyKeyTypes${suffix}`;
+    const declaring: IrStatement[] = [
+      {
+        kind: "comment",
+        text: `// NOTE SX_LOAD_KEY_DECLARED: ${MAIN_DECLARED}`,
+        trailing: false,
+        span: null,
+      },
+      // The declaring reads sit in a function that nothing calls, so they never run.
+      { kind: "function", name: holder, parameters: [], body: keyTypes, global: true, span: null },
+    ];
+    return {
+      ...program,
+      statements: [...declaring, ...program.statements],
+      diagnostics: [
+        ...program.diagnostics,
+        ...keys.map(() => ({
+          code: "SX_LOAD_KEY_DECLARED",
+          severity: "info" as const,
+          message: MAIN_DECLARED,
+          span: null,
+        })),
+      ],
+    };
+  });
   if (open.size === 0) return withMain.map(withoutOpenMarks);
   return withMain.map((program) => {
     const diagnostics = [...program.diagnostics];

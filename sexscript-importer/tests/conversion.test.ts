@@ -1135,6 +1135,48 @@ test(
   },
 );
 
+// Files converted to stand on their own each declare the storage keys they read where no read of theirs can, also when
+// a helper class is converted with them.
+test(
+  "declares a standalone file's storage key types in that file",
+  {
+    skip:
+      parserUnavailable ||
+      ("reason" in compilerResult ? compilerResult.reason : false) ||
+      ("reason" in runnerResult ? runnerResult.reason : false),
+  },
+  async () => {
+    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-standalone-"));
+    try {
+      const helper = path.join(directory, "Helper.groovy");
+      const main = path.join(directory, "main.groovy");
+      writeFileSync(
+        helper,
+        'class Helper {\n  def static done = { main -> main.show("done") }\n}\n',
+      );
+      // `and` may skip the read, so it cannot move before its statement to declare the key.
+      writeFileSync(
+        main,
+        'if (false && loadBoolean("k") == null) save("ran", true)\nsave("done", true)\n',
+      );
+      const files = await Promise.all([helper, main].map((file) => parseGroovySource(file)));
+      const source = emitTease(lowerSelfContainedPackage(files)[1]!);
+      assert.deepEqual(
+        compilerResult.compiler(source).diagnostics.filter(({ severity }) => severity === "error"),
+        [],
+      );
+      const run = runnerResult.runner(source, {});
+      assert.deepEqual(
+        { status: run.status, failure: run.failure },
+        { status: "halted", failure: null },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // Text with line breaks is written as a block string with the same value (V30 §8), also with interpolations and in a
 // nested block; text the block form would change or hide stays single-line.
 test(
