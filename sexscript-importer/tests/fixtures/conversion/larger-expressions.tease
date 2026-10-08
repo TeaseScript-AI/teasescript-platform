@@ -165,6 +165,5 @@ word = ""
 if elvisValue2 != "" and elvisValue2 != "" {
   word = elvisValue2
 }
-// NOTE SX_LENGTH_RECEIVER line 52: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 say "Word ${word.length}"
 exit

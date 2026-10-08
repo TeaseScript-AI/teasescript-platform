@@ -166,7 +166,6 @@ function pickPage {
 }
 let page = 9
 page = pickPage()
-// NOTE SX_PLUS_OPERAND_TYPE line 98: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Page ${page + 1}"
 // A local that a null test rules out in a branch holds no null there.
 function joinNames {
@@ -187,7 +186,6 @@ function joinNames {
   return all
 }
 let joined = joinNames()
-// NOTE SX_LENGTH_RECEIVER line 112: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 say "Names ${joined.length}"
 // A function with a `return null` may give null where its other results have no known type.
 let implement: string? = "nothing"

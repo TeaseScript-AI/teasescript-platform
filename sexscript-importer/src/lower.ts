@@ -5558,16 +5558,15 @@ function lowerAssignment(
   ) {
     context.syntheticHelpers.add("spliced");
     const range = target.index;
-    // Groovy computed the values before the range, so values with an effect come first where the range computes.
+    // Groovy computed the values before the range, so they come first unless the range is constant or neither has an
+    // effect.
     const rangeNode = targetNode.kind === "binary" ? asNode(targetNode.right) : null;
-    const settled = (end: unknown): boolean => {
-      const node = asNode(end);
-      return node === null || isRepeatableExpression(node) || negativeConstantIndex(node) !== null;
-    };
-    const first =
-      !isPure(right, context) && !(settled(rangeNode?.from) && settled(rangeNode?.to))
-        ? freshName("values", context)
-        : null;
+    const ends = [asNode(rangeNode?.from), asNode(rangeNode?.to)];
+    const constant = ends.every(
+      (end) => end === null || end.kind === "constant" || negativeConstantIndex(end) !== null,
+    );
+    const pure = [right, ...ends].every((item) => item === null || isPure(item, context));
+    const first = constant || pure ? null : freshName("values", context);
     return [
       ...(first === null ? [] : [{ kind: "let" as const, name: first, value, span }]),
       {
@@ -11309,22 +11308,18 @@ function textRange(
     return undefined;
   const first = constantValue(fromNode);
   const last = constantValue(toNode);
-  // A range that runs backwards, also one counted from the end, and one with a computed negative end read through the
-  // slice helper.
+  // `substring` takes a part that runs forwards whatever the text's length: both ends whole positions from the start,
+  // or both from the end, in order, or from a position to the last character (`n..-1`), which Groovy read forwards or
+  // failed on. Another range, also one with a computed end, reads through the slice helper.
   const backFrom = fromEnd(fromNode);
   const backTo = fromEnd(toNode);
-  const negated = (node: AstNode): boolean => node.kind === "unaryMinus" && fromEnd(node) === null;
-  if (
-    (typeof first === "number" &&
-      typeof last === "number" &&
-      first >= 0 &&
-      last >= 0 &&
-      last < first) ||
-    (backFrom !== null && (backTo === null || backFrom < backTo)) ||
-    negated(fromNode) ||
-    negated(toNode)
-  )
-    return undefined;
+  const fromStart = (value: unknown): value is number =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0;
+  const forwards =
+    (fromStart(first) && fromStart(last) && first <= last) ||
+    (fromStart(first) && backTo === 1 && range.inclusive === true) ||
+    (backFrom !== null && backTo !== null && backFrom >= backTo);
+  if (!forwards) return undefined;
   const bound = (node: AstNode, offset: number): IrExpression | null => {
     const back = fromEnd(node);
     if (back !== null)

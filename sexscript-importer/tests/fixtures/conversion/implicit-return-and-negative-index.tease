@@ -46,6 +46,18 @@ function sexscriptLegacySlice(value, from, to, exclusive = false) {
     }
     high = first + 1
   }
+  if not (from is integer and to is integer) {
+    runsBack = false
+    low = first
+    high = last
+    if first > last {
+      low = last
+      high = first
+    }
+    if not exclusive {
+      high += 1
+    }
+  }
   let position = low
   let stop = high
   let step = 1
@@ -73,11 +85,11 @@ function sexscriptLegacySlice(value, from, to, exclusive = false) {
   return sexscriptLegacyValue(part)
 }
 function sexscriptLegacySpliced(value, from, to, values, exclusive = false) {
-  let first = toInteger(from)
+  let first = from
   if first < 0 {
     first += value.length
   }
-  let last = toInteger(to)
+  let last = to
   if last < 0 {
     last += value.length
   }
@@ -170,13 +182,28 @@ deck = sexscriptLegacySpliced(deck, 1, 1, ["y"], true)
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 say "Top ${top.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}"
-// A character of a text that only the converted types prove text, as a function's result, reads through a helper.
-function nextShot {
-  return "C7"
+// A part of a list that a function returns is a list too, which `*` repeats.
+function deal {
+  return ["a", "b", "c"]
 }
-let shot = ""
-shot = nextShot()
-say "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}"
+let hand = deal()
+let pairs = sexscriptLegacyRepeatList(sexscriptLegacySlice(hand, 0, 1), 2)
+// NOTE SX_LIST_JOIN line 36: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Pairs ${pairs.join(",")}"
+// A character of a text that only the converted types prove text reads through a helper: type inference reads the
+// `shot` of both blocks as one variable, of unknown type.
+say "Replay?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  // NOTE SX_LOAD_OPEN_NULL line 40: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+  let shot = load "game.shot", default: sexscriptLegacyValue(null)
+  say "Saved ${shot}"
+}
+say "Shoot?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  let shot = ""
+  shot = askText "Your shot (A1 to G7):"
+  say "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}"
+}
 // A list repeated by a count that may be missing is repeated as a number.
 let rounds = sexscriptLegacyLoadInteger("game.rounds", 2)
 let marks = sexscriptLegacyRepeatList([null], toInteger(rounds))

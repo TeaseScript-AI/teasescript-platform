@@ -393,25 +393,58 @@ function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrState
 
 /**
  * The part a Groovy range index `from..to`, or `from..<to` when `exclusive`, covers: the positions from `low` up to but
- * not including `high`, and whether it `runsBack`. Like Groovy's subListBorders, a negative end counts from
- * the end first, after a fraction is dropped toward zero; the range runs backwards where `from` then comes after `to`,
- * and leaves out its `to` end when exclusive.
+ * not including `high`, and whether it `runsBack`. Like Groovy's subListBorders, a negative end counts from the end
+ * first; the range runs backwards where `from` then comes after `to`, and leaves out its `to` end when exclusive. A
+ * read (`fractions`) drops a fraction of an end toward zero, and a fractional end makes Groovy's NumberRange, which
+ * reads its part forwards and leaves out its higher end when exclusive; a write keeps the fraction, which stops the
+ * script where Groovy failed too.
  */
-const positions = (): IrStatement[] => [
-  letS("first", { kind: "call", name: "toInteger", positional: [v("from")], named: {} }),
-  ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
-  letS("last", { kind: "call", name: "toInteger", positional: [v("to")], named: {} }),
-  ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
-  letS("runsBack", bin(">", v("first"), v("last"))),
-  letS("low", v("first")),
-  letS("high", bin("+", v("last"), lit(1))),
-  ifS(v("exclusive"), [set(v("high"), v("last"))]),
-  ifS(v("runsBack"), [
-    set(v("low"), v("last")),
-    ifS(v("exclusive"), [set(v("low"), bin("+", v("last"), lit(1)))]),
-    set(v("high"), bin("+", v("first"), lit(1))),
-  ]),
-];
+const positions = (fractions: boolean): IrStatement[] => {
+  const whole = (name: string): IrExpression =>
+    fractions ? { kind: "call", name: "toInteger", positional: [v(name)], named: {} } : v(name);
+  return [
+    letS("first", whole("from")),
+    ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
+    letS("last", whole("to")),
+    ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
+    letS("runsBack", bin(">", v("first"), v("last"))),
+    letS("low", v("first")),
+    letS("high", bin("+", v("last"), lit(1))),
+    ifS(v("exclusive"), [set(v("high"), v("last"))]),
+    ifS(v("runsBack"), [
+      set(v("low"), v("last")),
+      ifS(v("exclusive"), [set(v("low"), bin("+", v("last"), lit(1)))]),
+      set(v("high"), bin("+", v("first"), lit(1))),
+    ]),
+    ...(fractions
+      ? [
+          ifS(
+            {
+              kind: "unary",
+              operator: "not",
+              value: bin(
+                "and",
+                { kind: "typeTest", value: v("from"), type: "integer" },
+                { kind: "typeTest", value: v("to"), type: "integer" },
+              ),
+            },
+            [
+              set(v("runsBack"), lit(false)),
+              set(v("low"), v("first")),
+              set(v("high"), v("last")),
+              ifS(bin(">", v("first"), v("last")), [
+                set(v("low"), v("last")),
+                set(v("high"), v("first")),
+              ]),
+              ifS({ kind: "unary", operator: "not", value: v("exclusive") }, [
+                set(v("high"), bin("+", v("high"), lit(1))),
+              ]),
+            ],
+          ),
+        ]
+      : []),
+  ];
+};
 const fn = (
   name: string,
   parameters: string[],
@@ -1286,7 +1319,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacySlice",
         ["value", "from", "to", "exclusive"],
         [
-          ...positions(),
+          ...positions(true),
           letS("position", v("low")),
           letS("stop", v("high")),
           letS("step", lit(1)),
@@ -1336,7 +1369,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacySpliced",
         ["value", "from", "to", "values", "exclusive"],
         [
-          ...positions(),
+          ...positions(false),
           // A part that reaches past the end replaces the elements up to the end.
           ifS(bin(">", v("high"), prop(v("value"), "length")), [
             set(v("high"), prop(v("value"), "length")),

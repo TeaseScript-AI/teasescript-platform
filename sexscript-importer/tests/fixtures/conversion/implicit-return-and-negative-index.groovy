@@ -29,11 +29,22 @@ def between = deck[3..<1]
 deck[1..2] = ["x"]
 deck[1..<1] = ["y"]
 show("Top " + top.join(",") + ", back " + backwards.join(",") + ", between " + between.join(",") + ", deck " + deck.join(","))
-// A character of a text that only the converted types prove text, as a function's result, reads through a helper.
-def nextShot = { -> return "C7" }
-def shot = ""
-shot = nextShot()
-show("Column " + shot[0] + ", row " + shot[1])
+// A part of a list that a function returns is a list too, which `*` repeats.
+def deal = { -> return ["a", "b", "c"] }
+def hand = deal()
+def pairs = hand[0..1] * 2
+show("Pairs " + pairs.join(","))
+// A character of a text that only the converted types prove text reads through a helper: type inference reads the
+// `shot` of both blocks as one variable, of unknown type.
+if (getBoolean("Replay?")) {
+	def shot = load("game.shot")
+	show("Saved ${shot}")
+}
+if (getBoolean("Shoot?")) {
+	def shot = ""
+	shot = getString("Your shot (A1 to G7):", "")
+	show("Column " + shot[0] + ", row " + shot[1])
+}
 // A list repeated by a count that may be missing is repeated as a number.
 def rounds = loadInteger("game.rounds")
 if (rounds == null) rounds = 2
