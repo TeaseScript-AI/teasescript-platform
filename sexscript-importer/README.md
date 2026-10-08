@@ -301,14 +301,14 @@ conditions need (below). The explorer never makes up a stored value.
 
 With `--until-stalled`, a run has no work budget: it goes on while it makes progress and stops on its own, with a
 time cap (two hours unless `--budget-seconds` is given) and no state limit unless `--max-states` is given. Progress is
-a step that runs new code, takes a condition way no step took, or comes closer to a comparison a missed way needs (a
+a step that runs new code, takes a condition way no step took, or comes closer to a comparison a way play has not taken needs (a
 variable's closest state, or a stored value's session chain, below). The run stops when it made no progress for a
 window of operations: 20,000 plus 20 per coverable line, or three times the longest stretch without progress that
 progress still ended, whichever is more, so a small script finishes soon and a run that found something after a long
 stretch keeps looking as long again. New cells (below) are counted but do not hold a run up: cells of counters keep
-coming long after anything else does. Directed search looks again every quarter window. `search.audit` says how the
-run ended: `complete` (nothing left to try, and no line of unknown reach), `stalled` (no progress for the window, or
-nothing left to try with lines of unknown reach), `spiral` (a stall in which one place took at least half of the
+coming long after anything else does. Directed search looks again every quarter window, and the window starts after
+a corpus replay. `search.audit` says how the run ended: `complete` (nothing left to try, and no line or missed way of
+unknown reach), `stalled` (no progress for the window, or nothing left to try with code of unknown reach), `spiral` (a stall in which one place took at least half of the
 expansions since the last progress: the place and its prompt, a problem of the explorer), or `capped` (a cap came
 first); with the window at the end, the last progress, the longest stretch without progress, and the progress by
 kind. The summary has a line for it, and the missed ways the run was working toward (below) say what it would need.

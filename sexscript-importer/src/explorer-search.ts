@@ -2150,7 +2150,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         )
           continue;
         const away = distance(Number(value), entry.operator, entry.constant);
-        if (entry.closest !== null && away < entry.closest.distance) progressed("closer");
+        // Coming closer counts as progress only toward a way play has not taken yet.
+        if (
+          entry.closest !== null &&
+          away < entry.closest.distance &&
+          !settled(targets.get(entry.target))
+        )
+          progressed("closer");
         if (entry.closest === null || away < entry.closest.distance)
           entry.closest = {
             value,
@@ -2435,6 +2441,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       inputs,
       chain: key,
     });
+    // A storage closer than the chain's best so far (not its first measure) is progress.
+    if (best.distance < chain.best && Number.isFinite(chain.best)) progressed("closer");
     if (best.distance === 0) {
       if (chain.best === 0) {
         chain.stale = 2;
@@ -2452,7 +2460,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return true;
     }
     if (best.distance < chain.best && chain.started < MAX_CHAIN) {
-      if (Number.isFinite(chain.best)) progressed("closer");
       Object.assign(chain, {
         best: best.distance,
         value: best.value,
@@ -2824,7 +2831,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ? "operations"
       : performance.now() - started >= options.budgetMs
         ? "budget"
-        : session.operations - progressAt >= window()
+        : !replaying && session.operations - progressAt >= window()
           ? "stalled"
           : null;
   const outOfBudget = () => spent() !== null;
@@ -3002,6 +3009,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   if (later && firstStep.snapshot.status !== "waiting") startSnapshots.set(0, firstStep.snapshot);
   const replayed = options.corpus === undefined ? null : replayCorpus(options.corpus, firstStep);
   replaying = false;
+  // Until stalled, the stall window starts after the corpus: its replay comes before any directed target is watched.
+  if (replayed !== null) progressAt = session.operations;
   replayWork = replayed === null ? 0 : session.operations;
   guide();
   for (const id of replayedOpen) {
@@ -3244,7 +3253,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             ? "spiral"
             : "stalled"
           : stoppedBy === "exhausted"
-            ? (coverage.reach.unknown ?? 0) === 0
+            ? (coverage.reach.unknown ?? 0) === 0 &&
+              coverage.unvisitedBranches.every((branch) => branch.reach !== "unknown")
               ? "complete"
               : "stalled"
             : "capped",

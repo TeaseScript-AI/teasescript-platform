@@ -794,6 +794,17 @@ test(
     const capped = run(`${loop}  if count >= 1000000 {\n    say "Done."\n  }\n}\n`, 25_000);
     assert.equal(capped.audit?.result, "capped");
     assert.ok((capped.audit?.progress.closer ?? 0) > 1000);
+    // Once play takes a way, coming closer to its other comparison is no progress; the way still missed is flat.
+    const reached = run(
+      `${loop}  if count >= 1000000 or count >= 100 {\n    say "Hundred."\n  }\n  if count < 0 {\n    say "Never."\n  }\n}\n`,
+      100_000,
+    );
+    assert.equal(reached.audit?.result, "spiral");
+    // A way on the line of its condition stays unknown when nothing is left to try: not complete.
+    const hidden = run(
+      'let n = askInteger "Number?", default: 0\nif n * n == 1522756 { say "Hit." }\nexit\n',
+    );
+    assert.deepEqual([hidden.stoppedBy, hidden.audit?.result], ["exhausted", "stalled"]);
   },
 );
 
