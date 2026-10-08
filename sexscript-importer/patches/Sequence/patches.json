@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "chosen-action",
+      "layer": "source",
+      "category": "b",
+      "reason": "currentChoices holds the action names offered in a round, and then the position of the chosen action, which the rest of the round reads. A TeaseScript variable keeps one type, so the position goes into its own variable, chosenAction, which starts at 0 for a choice that names no action (the list itself then, which the lookups that follow could not use).",
+      "diff": "chosen-action.diff"
+    }
+  ]
+}
