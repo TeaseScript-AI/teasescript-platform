@@ -10837,23 +10837,30 @@ function laterReadDefault(
 ): number {
   const read = typedReadAssignment(statements[index]!, context);
   if (read === null) return -1;
-  // Whether code could see the variable: names it, or calls script code that could. A script function is looked into,
-  // also the functions it calls.
+  // Whether code could see the variable: names it, or calls script code that could. A script function that the code
+  // calls or names, so that something may call it, is looked into, also the functions it reaches; a closure called
+  // through a local or a parameter of the function, or through `.call()`, may be any code.
   const looked = new Set<string>();
-  const sees = (node: AstNode): boolean => {
+  const lookInto = (name: string): boolean => {
+    if (looked.has(name)) return false;
+    looked.add(name);
+    const closure = context.functions.get(name)!.closure;
+    return sees(closure, closureLocals(closure));
+  };
+  const sees = (node: AstNode, locals: ReadonlySet<string>): boolean => {
     let found = false;
     walkAst(node, (child) => {
-      if (child.kind === "variable" && variableName(child) === read.name) found = true;
-      else if (child.kind === "methodCall" && callParts(child)?.inherited === true) {
-        if (legacyApiCall(child, context) !== null) return;
-        const name = callParts(child)!.name;
-        const closure = context.functions.get(name)?.closure;
-        if (name === read.name || closure === undefined) found = true;
-        else if (!looked.has(name)) {
-          looked.add(name);
-          found ||= sees(closure);
-        }
-      }
+      const name = child.kind === "variable" ? variableName(child) : null;
+      if (name === read.name) found = true;
+      else if (name !== null && !locals.has(name) && context.functions.has(name))
+        found ||= lookInto(name);
+      const call = child.kind === "methodCall" ? callParts(child) : null;
+      if (call === null) return;
+      if (!call.inherited) found ||= CLOSURE_CALLS.has(call.name);
+      else if (call.name === read.name || locals.has(call.name)) found = true;
+      else if (legacyApiCall(child, context) !== null) return;
+      else if (context.functions.has(call.name)) found ||= lookInto(call.name);
+      else found = true;
     });
     return found;
   };
@@ -10863,7 +10870,20 @@ function laterReadDefault(
     walkAst(statement, (child) => {
       if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
     });
-    return found || sees(statement);
+    return found || sees(statement, new Set());
+  };
+  // Script code may change what the default reads, so the default moves past it only when it is a constant, or a
+  // variable that only its declaration sets, to one.
+  const constant = (value: AstNode, depth = 0): boolean => {
+    if (value.kind === "constant") return true;
+    const name = value.kind === "variable" ? variableName(value) : null;
+    const initializer = name === null ? undefined : context.constantInitializers.get(name);
+    return (
+      initializer !== undefined &&
+      depth < 4 &&
+      bindingKey(value, context.bindings) === name &&
+      constant(initializer, depth + 1)
+    );
   };
   for (let later = index + 1; later < statements.length; later += 1) {
     if (consumed.has(later)) continue;
@@ -10890,11 +10910,34 @@ function laterReadDefault(
         });
         return found;
       };
+      if (looked.size > 0 && !constant(found.fallback)) return -1;
       return statements.slice(index + 1, later).some(sets) ? -1 : later;
     }
     if (interferes(statement)) return -1;
   }
   return -1;
+}
+
+/** Methods that run a closure that a value holds. */
+const CLOSURE_CALLS = new Set(["call", "doCall", "callWithArgs"]);
+
+/** The names that a closure, or a closure in it, declares or binds: parameters, `it`, locals, and loop variables. */
+function closureLocals(closure: AstNode): Set<string> {
+  const names = new Set<string>();
+  walkAst(closure, (node) => {
+    if (node.kind === "closure") {
+      for (const parameter of groovyParameters(node.parameters) ?? []) names.add(parameter.name);
+      if (node.parameterSpecified !== true) names.add("it");
+    }
+    if (node.kind === "for" && typeof node.variable === "string") names.add(node.variable);
+    if (node.kind !== "declaration") return;
+    const left = asNode(node.left);
+    for (const target of left?.kind === "arguments" ? nodeArray(left.items) : [left]) {
+      const name = variableName(target);
+      if (name !== null) names.add(name);
+    }
+  });
+  return names;
 }
 
 /** `x = loadInteger(k)` and the other typed storage and online reads, as the variable and the read; else null. */

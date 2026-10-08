@@ -48,8 +48,9 @@ if (tempo == null) tempo = 0.5
 def keyed = loadString("training.key." + suffix)
 if (suffix == null) suffix = "a"
 show("Settings ${shocks} ${tempo} ${suffix} ${keyed}")
-// A script function called between that does not use the variable lets its default move up too; one that may use it,
-// also through another function, keeps the test.
+// A script function called between that does not use the variable lets its default move up too, where the default is
+// a constant; one that may use the variable, also through another function, or change what the default reads, keeps
+// the test.
 def chime = { show("Ready") }
 def tellLaps = { show("Laps ${laps}") }
 def tellBoth = { tellLaps() }
@@ -60,6 +61,12 @@ tellBoth()
 if (rounds == null) rounds = 4
 if (laps == null) laps = 2
 show("Rounds ${rounds} ${laps}")
+pace = 1
+def quicken = { pace = 3 }
+def speed = loadInteger("training.speed")
+quicken()
+if (speed == null) speed = pace
+show("Speed ${speed}")
 // loadBoolean() read a stored value as text, true only for "true"; where the package saves a number under a key of the
 // same form, the read keeps that rule.
 def chosen = [false, false]
