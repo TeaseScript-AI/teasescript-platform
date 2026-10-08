@@ -255,10 +255,13 @@ interface LowerContext {
   integerArrays: ReadonlySet<string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
-  /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
-  imagePaths: Set<string>;
-  /** Loop variables that hold the package path of a subfolder of a walked folder (listedFolderWalk). */
-  listedFolders: Set<string>;
+  /**
+   * The reads of a folder walk's loop variable, by node and by source position, with whether it holds the package
+   * path of a file or of a subfolder (imageFolderWalk, listedFolderWalk).
+   */
+  walkedEntries: Map<AstNode | string, "file" | "folder">;
+  /** Variables that a path cannot be read from at conversion time: updated in place, parameters, loop variables. */
+  changingPaths: ReadonlySet<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -1437,8 +1440,8 @@ export function lowerParsedFile(
     integerVariables: new Set(),
     integerArrays: new Set(),
     textVariables: new Set(),
-    imagePaths: new Set(),
-    listedFolders: new Set(),
+    walkedEntries: new Map(),
+    changingPaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -1531,6 +1534,7 @@ export function lowerParsedFile(
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
     context.constantInitializers = declarationInitializers(body, context.types);
+    context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
     context.integerArrays = integerArrays(body, context.bindings);
     context.textVariables = textVariables(body, context.bindings);
@@ -2298,8 +2302,8 @@ function lowerHelperMethod(
     integerVariables: new Set(),
     integerArrays: new Set(),
     textVariables: new Set(),
-    imagePaths: new Set(),
-    listedFolders: new Set(),
+    walkedEntries: new Map(),
+    changingPaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -16641,7 +16645,42 @@ const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFil
 
 /** Groovy's `FileType.FILES`, also written `groovy.io.FileType.FILES`, which walks only through files. */
 function isFilesOnly(node: AstNode): boolean {
-  return node.kind === "property" && constantString(node.property) === "FILES";
+  const name = (value: AstNode | null): string | null => {
+    if (value?.kind === "variable") return variableName(value);
+    if (value?.kind === "classExpression") return text(value.type) ?? null;
+    if (value?.kind !== "property") return null;
+    const owner = name(asNode(value.object));
+    const property = constantString(value.property);
+    return owner === null || property === null ? null : `${owner}.${property}`;
+  };
+  const written = name(node);
+  return written === "FileType.FILES" || written === "groovy.io.FileType.FILES";
+}
+
+/**
+ * Bindings whose value a path cannot be read from at conversion time: those a compound assignment or `++` changes in
+ * place, by binding key, and parameters and loop variables, which get values from outside, by name.
+ */
+function changingVariables(body: AstNode, keys: BindingKeys): Set<string> {
+  const changing = new Set<string>();
+  walkAst(body, (node) => {
+    const operator = node.kind === "binary" ? text(node.operator) : null;
+    const updated =
+      (operator !== null &&
+        operator.endsWith("=") &&
+        !["=", "==", "!=", "<=", ">=", "==="].includes(operator)) ||
+      node.kind === "postfix" ||
+      node.kind === "prefix"
+        ? (bindingKey(asNode(node.kind === "binary" ? node.left : node.value), keys) ?? null)
+        : null;
+    if (updated !== null) changing.add(updated);
+    if (node.kind === "closure") {
+      for (const parameter of groovyParameters(node.parameters) ?? []) changing.add(parameter.name);
+      if (node.parameterSpecified !== true) changing.add("it");
+    }
+    if (node.kind === "for" && typeof node.variable === "string") changing.add(node.variable);
+  });
+  return changing;
 }
 
 /**
@@ -16958,8 +16997,7 @@ function imageFolderWalk(
   const images = imageFolderListing(receiver, node, context);
   if (images === undefined || images === null) return images === null ? [] : undefined;
   const variable = closure.parameterSpecified === true ? parameters[0]!.name : "it";
-  const known = context.imagePaths.has(variable);
-  context.imagePaths.add(variable);
+  const forget = walkVariable(body, variable, "file", context);
   try {
     if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
     const loopBody = lowerBlock(body, context);
@@ -16973,8 +17011,42 @@ function imageFolderWalk(
       },
     ];
   } finally {
-    if (!known) context.imagePaths.delete(variable);
+    forget();
   }
+}
+
+/**
+ * Marks the reads of a walk's loop variable in its closure, apart from those of a nested closure that names a parameter
+ * the same, such as an inner `.each { it }`, as the package path of a file or a subfolder; returns the undoing.
+ */
+function walkVariable(
+  body: AstNode,
+  variable: string,
+  kind: "file" | "folder",
+  context: LowerContext,
+): () => void {
+  const marked: Array<AstNode | string> = [];
+  const visit = (node: AstNode): void => {
+    if (node.kind === "closure") {
+      const own = (groovyParameters(node.parameters) ?? []).map((parameter) => parameter.name);
+      if (own.includes(variable) || (variable === "it" && node.parameterSpecified !== true)) return;
+    }
+    if (node.kind === "variable" && variableName(node) === variable) {
+      marked.push(node);
+      const id = bindingSpanId(node);
+      if (id !== null) marked.push(id);
+    }
+    for (const child of nodeChildren(node)) visit(child);
+  };
+  visit(body);
+  const earlier = marked.map((item) => [item, context.walkedEntries.get(item)] as const);
+  for (const item of marked) context.walkedEntries.set(item, kind);
+  return () => {
+    for (const [item, kindBefore] of earlier) {
+      if (kindBefore === undefined) context.walkedEntries.delete(item);
+      else context.walkedEntries.set(item, kindBefore);
+    }
+  };
 }
 
 /**
@@ -16992,7 +17064,8 @@ function resolvedPath(
   const variable = variableName(node);
   if (node.kind === "variable" && variable !== null) {
     const key = bindingKey(node, context.bindings) ?? variable;
-    if (seen.has(key)) return null;
+    if (seen.has(key) || context.changingPaths.has(key) || context.changingPaths.has(variable))
+      return null;
     const assigned = context.assignedValues.get(key) ?? [];
     const initializer = context.constantInitializers.get(variable);
     const values = assigned.length > 0 ? assigned : initializer === undefined ? [] : [initializer];
@@ -17039,8 +17112,15 @@ function walkedFolder(receiver: AstNode, context: LowerContext): string | null {
     return path === undefined ? null : resolvedPath(path, context);
   });
   if (texts.length === 0 || texts.some((text) => text === null || text !== texts[0])) return null;
-  const folder = texts[0]!.replaceAll("\\", "/").replace(/^(?:\.?\/)+/u, "");
-  return folder.endsWith("/") ? folder : `${folder}/`;
+  // The folder's path parts, without `.`, empty parts, and a `..` with the part before it.
+  const parts: string[] = [];
+  for (const part of texts[0]!.replaceAll("\\", "/").split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (parts.pop() === undefined) return null;
+    } else parts.push(part);
+  }
+  return parts.length === 0 ? null : `${parts.join("/")}/`;
 }
 
 /** The members of a File that a closure asks of its parameter. */
@@ -17089,34 +17169,50 @@ function listedFolderWalk(
   );
   const returns = closureReturns(body);
   if (returns.some(({ insideLoop, value }) => insideLoop || value !== null)) return undefined;
-  const prefix = folder.toLowerCase();
-  const below = context.actualFiles
-    .filter((file) => file.toLowerCase().startsWith(prefix))
-    .map((file) => file.slice(prefix.length));
-  const files = below.filter((rest) => recursive !== null || !rest.includes("/"));
-  const folders =
-    recursive === "files"
-      ? []
-      : [
-          ...new Set(
-            below.flatMap((rest) => {
-              const parts = rest.split("/").slice(0, -1);
-              return recursive === null
-                ? parts.slice(0, 1)
-                : parts.map((_, index) => parts.slice(0, index + 1).join("/"));
-            }),
-          ),
-        ].sort();
+  // The package's files below the folder, written as the script writes it, or else in another letter case, as the
+  // legacy player's file systems ignored case.
+  const exact = context.actualFiles.filter((file) => file.startsWith(folder));
+  const below =
+    exact.length > 0
+      ? exact
+      : context.actualFiles.filter((file) => file.toLowerCase().startsWith(folder.toLowerCase()));
+  const actualFolder = below[0]?.slice(0, folder.length) ?? folder;
+  if (below.some((file) => !file.startsWith(actualFolder))) return undefined;
+  // The walk's entries in the order Groovy visited them: by name within a folder, and a folder before what it holds.
+  const walked: Array<{ path: string; folder: boolean }> = [];
+  const visit = (prefix: string): void => {
+    const children = new Map<string, boolean>();
+    for (const file of below) {
+      const rest = file.slice(actualFolder.length);
+      if (!rest.startsWith(prefix)) continue;
+      const tail = rest.slice(prefix.length);
+      const name = tail.split("/")[0]!;
+      children.set(name, (children.get(name) ?? false) || tail.includes("/"));
+    }
+    for (const name of [...children.keys()].sort()) {
+      const path = `${prefix}${name}`;
+      if (!children.get(name)) walked.push({ path, folder: false });
+      else {
+        if (recursive !== "files") walked.push({ path, folder: true });
+        if (recursive !== null) visit(`${path}/`);
+      }
+    }
+  };
+  visit("");
+  const files = walked.filter((entry) => !entry.folder);
+  const folders = walked.filter((entry) => entry.folder);
   if (tellsKinds && files.length > 0 && folders.length > 0) return undefined;
   // A walk that tells files from subfolders goes through the kind the folder holds.
-  const listsFolders = tellsKinds ? folders.length > 0 : false;
+  const listsFolders = tellsKinds && folders.length > 0;
   // A walk through the images the package holds in one folder finds them by the folder's tag (imageFolderWalk).
   if (root === "images" && recursive === null && !listsFolders && files.length > 0)
     return undefined;
-  const entries = tellsKinds ? (listsFolders ? folders : files) : [...files, ...folders];
+  const entries = (tellsKinds ? (listsFolders ? folders : files) : walked).map(
+    (entry) => entry.path,
+  );
   // The package holds the images and sounds folders' files at its root; other folders keep their names.
   const packagePath = (rest: string): string =>
-    root === "videos" ? `${folder}${rest}` : `${folder.slice(root.length + 1)}${rest}`;
+    root === "videos" ? `${actualFolder}${rest}` : `${actualFolder.slice(root.length + 1)}${rest}`;
   const listed = folder.replace(/\/$/u, "");
   addDiagnostic(
     context,
@@ -17127,9 +17223,7 @@ function listedFolderWalk(
       : `The legacy script went through the ${listsFolders ? "subfolders" : "files"} of ${listed}; this goes through the package's ${listsFolders ? "subfolders" : "files"} there, as listed at conversion time.`,
     node.span,
   );
-  const variables = listsFolders ? context.listedFolders : context.imagePaths;
-  const known = variables.has(variable);
-  variables.add(variable);
+  const forget = walkVariable(body, variable, listsFolders ? "folder" : "file", context);
   try {
     if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
     const loopBody = lowerBlock(body, context);
@@ -17150,7 +17244,7 @@ function listedFolderWalk(
       },
     ];
   } finally {
-    if (!known) variables.delete(variable);
+    forget();
   }
 }
 
@@ -17164,9 +17258,12 @@ function listedImageMember(
   context: LowerContext,
 ): IrExpression | undefined {
   const variable = variableName(receiver);
-  if (variable === null) return undefined;
-  const folder = context.listedFolders.has(variable);
-  if (!folder && !context.imagePaths.has(variable)) return undefined;
+  const id = bindingSpanId(receiver);
+  const kind =
+    context.walkedEntries.get(receiver) ??
+    (id === null ? undefined : context.walkedEntries.get(id));
+  if (variable === null || kind === undefined) return undefined;
+  const folder = kind === "folder";
   const path: IrExpression = { kind: "variable", name: variable };
   if (member === "name" || member === "getName") return useHelper(context, "fileName", [path]);
   if (["path", "getPath", "absolutePath", "getAbsolutePath", "toString"].includes(member))

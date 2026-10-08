@@ -339,6 +339,9 @@ test(
           "def videos = []",
           'def dh = new File(getDataFolder() + "videos/random/")',
           "dh.eachFile { videos << it.name }",
+          "def deep = []",
+          'new File("sounds/./Deep/").eachFileRecurse { f -> deep << f.name }',
+          'save("deep", deep.join(","))',
           'save("tracks", tracks.join(","))',
           'save("decks", decks.join(","))',
           'save("videos", videos.size())',
@@ -351,6 +354,8 @@ test(
         "sounds/Beats/c.mp3",
         "images/Decks/Red/1.png",
         "images/Decks/Blue/1.png",
+        "sounds/Deep/a.mp3",
+        "sounds/Deep/Sub/b.mp3",
       ];
       const media = files
         .filter((file) => file.startsWith("images/"))
@@ -375,7 +380,9 @@ test(
         { status: result.status, failure: result.failure },
         { status: "halted", failure: null },
       );
+      // A recursive walk visits a folder before what it holds, as Groovy's eachFileRecurse did.
       assert.deepEqual(Object.fromEntries(storage), {
+        deep: "Sub,b.mp3,a.mp3",
         tracks: "Beats/a.mp3,Beats/c.mp3",
         decks: "Blue,Red",
         videos: 0,
