@@ -83,6 +83,8 @@ const CLOSER_EXPANSIONS = 40;
  * states in the first place. Above it, play goes first again until it has caught up.
  */
 const DIRECTED_SHARE = 1 / 3;
+/** The share of all runtime operations next visits may take to start, apart from directed work's. */
+const NEXT_SHARE = 1 / 3;
 /** Expansions between two passes of directed search over the conditions left one way, or a tenth of the budget. */
 const ANALYZE_EVERY = 50;
 /** Directed attempts per condition way, apart from session chains. */
@@ -1255,6 +1257,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * operations measure its cost, which differs a lot between packages and steps.
    */
   let directedWork = 0;
+  /** Runtime operations next visits took to start, within {@link NEXT_SHARE}. */
+  let nextWork = 0;
   /** Runtime operations of the corpus replay, which are no part of this run's work. */
   let replayWork = 0;
   let attemptCount = 0;
@@ -1290,6 +1294,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
 
   const withinShare = () => directedWork <= (session.operations - replayWork) * DIRECTED_SHARE;
+  const withinNextShare = () => nextWork <= (session.operations - replayWork) * NEXT_SHARE;
   const active = (lead: Lead | null): lead is Lead =>
     lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
   /**
@@ -1931,7 +1936,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     });
     // A few next sessions from what completed sessions stored, as the player's next visit.
     for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
-      if (startedFrom.size > MAX_NEXT_SESSIONS || !withinShare()) break;
+      if (startedFrom.size > MAX_NEXT_SESSIONS || !withinNextShare()) break;
       const entry = left[completedLeft[nextFromCompleted]!]!;
       const key = JSON.stringify(entry.entries);
       if (startedFrom.has(key)) continue;
@@ -1964,7 +1969,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           },
           null,
         );
-      directedWork += session.operations - work;
+      nextWork += session.operations - work;
       scheduled = true;
     }
     // Comparisons sessions read since: the storages next sessions started from get their windows too.
@@ -1972,13 +1977,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (later && learned > learnedAtOrigins) {
       learnedAtOrigins = learned;
       for (const { key, entry, snapshot, now, begun } of sessionOrigins) {
-        if (!withinShare()) break;
+        if (!withinNextShare()) break;
         const work = session.operations;
         const steps = sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
         for (const gap of steps)
           startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
         timeStepsTaken.sessions += steps.length;
-        directedWork += session.operations - work;
+        nextWork += session.operations - work;
         scheduled = scheduled || steps.length > 0;
       }
     }
