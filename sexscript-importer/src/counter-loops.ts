@@ -182,7 +182,7 @@ function counterLoop(
   const body = withoutSteps(loop.body.slice(0, -1), counter);
   if (body === null || setsName(body, counter) || hasBlockAction(body)) return null;
   // The bound is read once: whole, free of effects, and kept by the loop.
-  if (loop.wholeBound !== true && !isWhole(to, file)) return null;
+  if (!isSteadyBound(to) || (loop.wholeBound !== true && !isWhole(to, file))) return null;
   if (!keepsBound(to, body, locals) || names(to).has(counter)) return null;
   return { counter, from, to, inclusive: condition.operator === "<=", body };
 }
@@ -268,6 +268,8 @@ function names(value: IrExpression): Set<string> {
   return found;
 }
 
+const WHOLE_BUILT_INS = ["toInteger", "floor", "ceil", "round"];
+
 /**
  * Whether a value is a whole number: a whole literal, a list's or text's length, a whole number built-in, arithmetic
  * that keeps whole numbers, or a variable that the file only ever sets to such values.
@@ -285,7 +287,7 @@ function isWhole(
     case "property":
       return value.name === "length";
     case "call":
-      return ["toInteger", "floor", "ceil", "round"].includes(value.name);
+      return WHOLE_BUILT_INS.includes(value.name);
     case "unary":
       return value.operator === "-" && isWhole(value.value, file, seen);
     case "binary":
@@ -301,6 +303,33 @@ function isWhole(
       const next = new Set([...seen, value.name]);
       return values.every((assigned) => isWhole(assigned, file, next));
     }
+    default:
+      return false;
+  }
+}
+
+/**
+ * Whether reading a bound has no effect and gives what the variables in it hold: variables, literals, lengths,
+ * arithmetic, and whole number built-ins, so not a random draw.
+ */
+function isSteadyBound(value: IrExpression): boolean {
+  switch (value.kind) {
+    case "literal":
+    case "variable":
+      return true;
+    case "property":
+      return value.name === "length" && isSteadyBound(value.target);
+    case "unary":
+      return isSteadyBound(value.value);
+    case "binary":
+      return isSteadyBound(value.left) && isSteadyBound(value.right);
+    case "call":
+      return (
+        value.local !== true &&
+        WHOLE_BUILT_INS.includes(value.name) &&
+        Object.keys(value.named).length === 0 &&
+        value.positional.every(isSteadyBound)
+      );
     default:
       return false;
   }

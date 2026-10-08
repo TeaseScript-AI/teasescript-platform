@@ -21,3 +21,7 @@ show("Against " + opponent)
 // teachertrouble: a bound known before the script runs draws natively.
 def swats = getRandom(20-10+1)+10
 show("Swats " + swats)
+// dontjuge: a bound drawn anew on every pass keeps the loop a while.
+for(def swat=0;swat<20+getRandom(50);swat++) {
+    playSound("swat.wav")
+}

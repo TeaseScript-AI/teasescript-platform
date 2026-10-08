@@ -37,4 +37,10 @@ say "Against ${opponent}"
 // teachertrouble: a bound known before the script runs draws natively.
 let swats = randomInteger(0..20 - 10 + 1) + 10
 say "Swats ${swats}"
+// dontjuge: a bound drawn anew on every pass keeps the loop a while.
+let swat = 0
+while swat < 20 + randomInteger(0..50) {
+  playAudio "swat.wav"
+  swat += 1
+}
 exit
