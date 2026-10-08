@@ -53,11 +53,9 @@ for s in 1..=2 {
 }
 let questions = ["Ready?", "Sure?"]
 say "Question 1"
-let q = 1
-while q <= 2 {
+for q in 1..=2 {
   say "Question ${q}: ${questions[q - 1]}"
   wait 5
-  q += 1
 }
 function countdown {
   say "Get set"
@@ -86,12 +84,10 @@ for p in 1..=2 {
 }
 let title = "One"
 say "Chapter ${title}: 0"
-let c = 1
-while c <= 2 {
+for c in 1..=2 {
   title = "Two"
   say "Chapter ${title}: ${c}"
   wait 5
-  c += 1
 }
 let words = ["First", "Second", "Third"]
 say "Word ${words[0]} count 0"

@@ -1,8 +1,9 @@
-function sexscriptLegacyMissingText(value) {
-  return value == null or value == ""
-}
 function sexscriptLegacyBooleanText(value) {
   return "${value}".lowercase() == "true"
+}
+// NOTE SX_LOAD_KEY_DECLARED: Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.
+global function sexscriptLegacyKeyTypes {
+  let savedAnyText: string? = load "game.anyText", default: null
 }
 function sexscriptLegacyValue(value) {
   return value
@@ -53,20 +54,20 @@ let savedSeen: boolean? = load "game.seen", default: null
 if savedSeen == null {
   save true as "game.seen"
 }
-// A copy of the text, or a parameter it is passed to, tests for the empty text too, and one that holds values of
-// another type as well tests for both; the text that loadString read of a key the package saves numbers under keeps
-// its null.
-let stored = load "game.stored", default: ""
+// A text that the script copies, or passes to a script function, keeps legacy null, and so do the tests of the copy
+// and of the parameter; the text that loadString read of a key the package saves numbers under keeps its null.
+let stored: string? = load "game.stored", default: null
 let copy = stored
-if copy == "" {
+if copy == null {
   say "Nothing stored."
 }
 function check(value) {
-  if value == null or value == "" {
+  if value == null {
     say "Nothing given."
   }
 }
-check(load("game.given", default: ""))
+let savedGiven: string? = load "game.given", default: null
+check(savedGiven)
 check(3)
 if load("game.mode", default: "") == "" {
   say "No mode."
@@ -75,7 +76,7 @@ if load("game.mode", default: "") == "" {
 function resetMode {
   delete "game.mode"
 }
-// NOTE SX_LOAD_STRING_TEXT line 30: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+// NOTE SX_LOAD_STRING_TEXT line 29: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
 let version: string = "${load("game.version", default: sexscriptLegacyValue(""))}"
 if version == "" {
   say "No version."
@@ -85,7 +86,7 @@ function upgrade {
 }
 // A list of lists the saves give a key reads as an empty list.
 let grid = load "game.grid", default: []
-// NOTE SX_LENGTH_RECEIVER line 35: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+// NOTE SX_LENGTH_RECEIVER line 34: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 say "Rows: ${grid.length}"
 function reset2 {
   save [[0]] as "game.grid"
@@ -100,13 +101,13 @@ function restart {
 }
 // A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
 // it into text, or into true only for "true".
-// NOTE SX_LOAD_STRING_TEXT line 45: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.
+// NOTE SX_LOAD_STRING_TEXT line 44: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
 let pick = "${load("game.pick", default: sexscriptLegacyValue(""))}"
 say "Pick ${pick}"
 function roll {
   save randomInteger(0..6) as "game.pick"
 }
-// NOTE SX_LOAD_BOOLEAN_TEXT line 48: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
+// NOTE SX_LOAD_BOOLEAN_TEXT line 47: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
 let savedVolume: integer? = load "game.volume", default: null
 if sexscriptLegacyBooleanText(savedVolume) == true {
   say "Loud."
@@ -127,22 +128,20 @@ if dompic == "" {
 function pickOutfit {
   return { set: "first" }
 }
-// NOTE SX_LOAD_OPEN_NULL line 56: Legacy read null for a missing text, the empty text here; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.
-let outfit = sexscriptLegacyValue(load("game.outfit", default: ""))
-if outfit == null or outfit == "" {
+let savedOutfit: string? = load "game.outfit", default: null
+let outfit = sexscriptLegacyValue(savedOutfit)
+if outfit == null {
   outfit = pickOutfit()
 }
 // A legacy text read of a computed key is text too.
 let names = ["a", "b"]
-let n = 0
-while n < 2 {
+for n in 0..2 {
   names[n] = load "game.name${n}", default: ""
-  n += 1
 }
 say names.join(", ")
 // A flag read of a key that a text variable is saved under too reads as the flag's text.
 let answer = load "game.answer", default: ""
-// NOTE SX_LOAD_BOOLEAN_TEXT line 64: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
+// NOTE SX_LOAD_BOOLEAN_TEXT line 63: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
 if sexscriptLegacyBooleanText(load("game.flag", default: "")) == true {
   say "Flagged."
 }
@@ -168,7 +167,7 @@ if saved == null {
   say "Empty slot."
 }
 let counted: integer | string | null = 0
-// NOTE SX_LOAD_KEEPS_VALUE line 75: Groovy stored null in 'counted' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+// NOTE SX_LOAD_KEEPS_VALUE line 74: Groovy stored null in 'counted' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
 counted = load "game.count${slot}", default: counted
 // A read of a computed key into a variable of a known type reads that type's empty value where the script uses it up,
 // and makes the variable optional where it keeps its null; an item of a list of a known type reads the item type's
@@ -180,9 +179,9 @@ if owned == true {
   say "Owned."
 }
 let bonus = 0
-// NOTE SX_LOAD_KEEPS_VALUE line 84: Groovy stored null in 'bonus' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+// NOTE SX_LOAD_KEEPS_VALUE line 83: Groovy stored null in 'bonus' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
 bonus = load "game.bonus${slot}", default: bonus
-// NOTE SX_PLUS_OPERAND_TYPE line 85: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+// NOTE SX_PLUS_OPERAND_TYPE line 84: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Bonus ${bonus + 1}"
 let best: integer? = 0
 best = load "game.best${slot}", default: null
@@ -191,42 +190,44 @@ if best == null {
 }
 let picks = ["a", "b"]
 picks[0] = load "game.pick${slot}", default: ""
-// NOTE SX_INDEX_PAST_END line 91: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 90: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(picks, 0) == null {
   say "No pick."
 }
 let counts = [1, 2]
 counts[1] = load "game.count${slot}", default: 0
-// NOTE SX_PLUS_OPERAND_TYPE line 94: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+// NOTE SX_PLUS_OPERAND_TYPE line 93: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Count ${counts[1] + 1}"
-// A text that a function returns tests for the empty text where the script tests the call for null, also in a
-// parameter's default, and a copy that the script sets to null holds the empty text.
+// A text that a function returns keeps legacy null, and so do the tests of the call, of a parameter's default, and of a
+// copy that the script sets to null.
 function readNote {
-  return load "game.note", default: ""
+  let savedNote: string? = load "game.note", default: null
+  return savedNote
 }
-if readNote() == "" {
+if readNote() == null {
   say "No note."
 }
-function noted(note, missing = note == "") {
+function noted(note, missing = note == null) {
   return missing
 }
-say "Missing ${noted(load("game.note", default: ""))}"
+say "Missing ${noted(load("game.note", default: null))}"
 let noteCopy = readNote()
-noteCopy = ""
-if noteCopy == "" {
+noteCopy = null
+if noteCopy == null {
   say "Cleared."
 }
-// A result that may be a value the importer cannot tell too tests for both, calling the function once.
-// NOTE SX_LOAD_OPEN_NULL line 105: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+// So does a returned text whose function may give a value the importer cannot tell too.
+// NOTE SX_LOAD_OPEN_NULL line 104: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let oldHints = load "game.oldHints", default: sexscriptLegacyValue(null)
 function readHint {
   say "A hint?"
   if (choose yes: "Yes", no: "No") == "yes" {
-    return load "game.hint", default: ""
+    let savedHint: string? = load "game.hint", default: null
+    return savedHint
   }
   return oldHints
 }
-if sexscriptLegacyMissingText(readHint()) {
+if readHint() == null {
   say "No hint."
 }
 // A variable is apart from another of the same name in another block.
@@ -248,28 +249,124 @@ work()
 // A flag read of a key that the package saves text under, and reads as text too, reads the flag from the text.
 save "true" as "game.choice"
 let choiceText = load "game.choice", default: ""
-// NOTE SX_LOAD_BOOLEAN_TEXT line 117: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
+// NOTE SX_LOAD_BOOLEAN_TEXT line 116: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
 if sexscriptLegacyBooleanText(load("game.choice", default: "")) == true {
   say "Chosen ${choiceText}"
 }
+// A text variable that also takes a script function's text, or a text method's, holds only text.
+function defaultNick {
+  return "Pet"
+}
+let nickname = load "game.nickname", default: ""
+if nickname == "" {
+  nickname = defaultNick()
+}
+nickname = nickname.trim()
+say "Nick ${nickname}"
 // A computed key's read that a list of a known type takes as a new item reads the items' empty value where missing.
 let hints = ["first"]
 hints.add(load("game.hint${slot}", default: ""))
 say "Hints ${hints.length}"
-// A parameter that a text holding values of another type too is passed to tests for both.
+// A parameter that a text is passed to tests for legacy null.
 function describe(what) {
-  if what == null or what == "" {
+  if what == null {
     say "Nothing to wear."
   }
 }
 describe(outfit)
-// A text parameter whose default holds values of another type too, and that a call passes null to, holds them all.
-let mixedNote: string | integer = load "game.mixedNote", default: ""
+// A text that is a parameter's default is passed on, and keeps legacy null beside the variable's other values.
+let mixedNote: string | integer | null = load "game.mixedNote", default: null
 mixedNote = 2
-function checkNote(item: string | integer | null = mixedNote) {
+function checkNote(item = mixedNote) {
   return item == ""
 }
 say "Note ${checkNote()} ${checkNote(null)}"
+// A variable that such a text is copied into holds its null too, where no null test rules it out.
+let firstPic: string? = load "game.firstPic", default: null
+let shownPic: string? = "none"
+say "Show the first?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  shownPic = firstPic
+}
+say "Picture ${shownPic}"
+// So does a parameter with a default of its own that a call passes such a text to, and a stored text of a key the
+// package saves numbers under too, read through the text helper.
+function described(value: string? = "none") {
+  return value == null
+}
+let savedDescription: string? = load "game.description", default: null
+say "No description ${described(savedDescription)}"
+// NOTE SX_LOAD_STRING_TEXT line 144: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+let scoreText: string? = sexscriptLegacyText(load("game.scoreText", default: sexscriptLegacyValue(null)))
+let scoreCopy: string? = scoreText
+say "Score ${scoreCopy == null}"
+function saveScore {
+  save 10 as "game.scoreText"
+}
+// A parameter that a call passes such a text to only under a null test holds no null, unless the script set the text
+// again, or called script code that may, before the call; a template the script wrote around a read keeps its text,
+// also where it is copied.
+function measure(measured = "fallback") {
+  // NOTE SX_LENGTH_RECEIVER line 151: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  say "Size ${measured.length}"
+}
+let measuredText: string? = load "game.measured", default: null
+if measuredText != null {
+  measure(measuredText)
+}
+function recheck(checked: string? = "fallback") {
+  say "Checked ${checked == null}"
+}
+let checkedText: string? = load "game.checked", default: null
+if checkedText != null {
+  checkedText = null
+  recheck(checkedText)
+}
+let plainHint: string? = load "game.plainHint", default: null
+function clearPlain {
+  plainHint = null
+}
+function showPlain(shown: string? = "none") {
+  say "Plain ${shown == null}"
+}
+if plainHint != null {
+  clearPlain()
+  showPlain(plainHint)
+}
+let againHint: string? = load "game.againHint", default: null
+function clearAgain {
+  againHint = null
+  return true
+}
+function showAgain(againShown: string? = "none") {
+  say "Again ${againShown == null}"
+}
+if againHint != null {
+  if clearAgain() {
+    showAgain(againHint)
+  }
+}
+// A stored text that an Elvis copies into a variable of another type gives that variable both types and null.
+let flagged: boolean | string | null = true
+// NOTE SX_LOAD_STRING_TEXT line 175: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
+// NOTE SX_LOAD_OPEN_NULL line 175: Legacy read null for a missing text, which this read keeps; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.
+let conditional = sexscriptLegacyValue(sexscriptLegacyText(load("game.flagged", default: sexscriptLegacyValue(null))))
+if conditional == null or conditional == "" {
+  conditional = flagged
+}
+flagged = conditional
+// NOTE SX_LOAD_BOOLEAN_TEXT line 176: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
+// NOTE SX_LOAD_OPEN_NULL line 176: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+say "Flagged ${flagged} ${sexscriptLegacyBooleanText(load("game.flagged", default: sexscriptLegacyValue(null)))}"
+// NOTE SX_LOAD_OPEN_NULL line 177: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let written = "${load("game.written", default: sexscriptLegacyValue(null))}"
+let writtenCopy = written
+say "Written ${writtenCopy}"
+// An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
+let profile = { name: "Guest" }
+// NOTE SX_SHARED_MAP_WRITE line 182: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+profile.name = load "game.profileName", default: ""
+say "Profile ${profile.name}"
 // A list of one function is apart from a list of the same name in another.
 function firstItem {
   let items = ["a"]
@@ -310,20 +407,20 @@ function setMood {
 say "Mood ${mood}"
 // A whole number that a number read is set to reads 0 where missing, where Groovy's int failed on null.
 let laps = 0
-laps = toInteger(sexscriptLegacyLoadInteger("game.laps", 0))
+laps = toInteger(load("game.laps", default: 0))
 say "Laps ${laps}"
 // An item of a list in a list reads the item type's empty value too, as does an item that add() appends.
 let shelves = [["old"]]
 shelves[0][0] = load "game.shelf${slot}", default: ""
 shelves[0].add(load("game.extra${slot}", default: ""))
-// NOTE SX_INDEX_PAST_END line 157: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-// NOTE SX_INDEX_PAST_END line 157: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 211: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 211: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
   say "Empty shelf."
 }
 // A text parameter that a call passes a value of a type the importer cannot tell to holds it open.
 let anyValue = load "game.any${slot}", default: null
-function checkAny(item = sexscriptLegacyValue(load("game.anyText", default: ""))) {
+function checkAny(item = load("game.anyText", default: null)) {
   return item == ""
 }
 say "Any ${checkAny(anyValue)}"

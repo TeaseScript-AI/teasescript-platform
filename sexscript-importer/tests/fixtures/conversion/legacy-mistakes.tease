@@ -28,17 +28,13 @@ if amPm == "A" {
   amPm = "P"
 }
 // A labelled continue leaves the outer loop.
-let i = 0
-while i < 2 {
-  let j = 0
-  while j < 2 {
+for i in 0..2 {
+  for j in 0..2 {
     // TODO SX_LABELLED_JUMP line 17: continue outer leaves an outer labelled loop; TeaseScript continue affects only the innermost loop. Restructure the loops, for example with a flag.
     if j == 0 {
       // | if (j == 0) continue outer
     }
-    j += 1
   }
-  i += 1
 }
 // A stored value read without using it, or text computed and dropped, had no effect.
 // NOTE SX_DISCARDED_VALUE line 21: Groovy computed this value and discarded it, so the statement had no effect and is dropped. A comparison (==) here is often a mistake for an assignment (=).

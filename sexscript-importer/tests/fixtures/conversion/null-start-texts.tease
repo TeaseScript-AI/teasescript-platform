@@ -1,0 +1,64 @@
+function sexscriptLegacyCastText(value): string? {
+  if value == null {
+    return null
+  }
+  return toString(value)
+}
+// A text or a flag declared as null, or without a value, whose later values all have one type starts empty: no code
+// compares it with null or passes it on, and Groovy truth treats null like the empty text and false.
+let name = ""
+function ask {
+  name = askText "Your name?"
+}
+let finished = false
+if name == "" {
+  ask()
+}
+say "Finished?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  finished = true
+}
+if not finished {
+  say "Keep going, ${name}"
+}
+// A text that a function can show before its first value showed null in Groovy; it shows nothing now.
+// NOTE SX_NULL_START_EMPTY line 10: Groovy showed mood as null until its first value; it starts as the empty text here, so a text shown before then says nothing.
+let mood = ""
+function report {
+  say "Mood: ${mood}"
+}
+report()
+mood = "calm"
+report()
+// A text whose value the code passes on, or that a switch matches against null, keeps its null start.
+let toy: string? = null
+toy = "paddle"
+let chosen: string? = toy
+let room: string? = null
+room = "hall"
+if room == null {
+  say "Nowhere"
+} else {
+  say "In the ${room}"
+}
+say "Using the ${chosen}"
+// So does one that the code compares with a value that may be empty, or that a parameter takes as its default, and one
+// that a String cast copies, which keeps null as Groovy's did.
+let nick: string? = null
+let copied: string? = sexscriptLegacyCastText(nick)
+nick = "Kim"
+if copied == nick {
+  say "Same nick"
+}
+let answer: string? = null
+if answer == "" {
+  say "No answer"
+}
+answer = askText "Answer?"
+let hint: string? = null
+function remind(text = hint) {
+  say "Hint: ${text}"
+}
+hint = "Look up"
+remind()
+exit

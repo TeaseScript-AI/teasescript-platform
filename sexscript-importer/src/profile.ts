@@ -325,7 +325,16 @@ function ownedItems(
           variable: key,
           collection: v(answers),
           dict: true,
-          body: [save(v(key), { kind: "index", target: v(answers), index: v(key), dict: true })],
+          // The answers' keys are the fields', which come from the keys asked.
+          body: [
+            {
+              kind: "save",
+              key: v(key),
+              value: { kind: "index", target: v(answers), index: v(key), dict: true },
+              keys: [...keys],
+              span: null,
+            },
+          ],
           span: null,
         },
       ],

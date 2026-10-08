@@ -23,9 +23,9 @@ def value = load("game.count")
 while (value == null) value = getInteger("A number?", 1)
 show("Value " + (value + 1))
 // A variable that the script also gives a value of a type the importer cannot tell holds the read open to it.
-def fill = { -> getString("Fill?", "text") }
+def fill = { answer -> answer }
 def filled = load("game.filled")
-filled = fill()
+filled = fill(getString("Fill?", "text"))
 save("game.filled", true)
 show("Filled " + (filled == null))
 // A read of a key whose type nothing tells, which a list of a known type takes as a new item, reads the items' empty
@@ -37,3 +37,15 @@ show("Tags " + tags.size())
 def labels = ["first"]
 labels[0] = load("game.label")
 show("Label " + labels[0])
+// A whole-number read that arithmetic turns into a fraction saves a number, so its key holds numbers.
+if (loadInteger("game.points") == null) save("game.points", 80)
+def points = loadInteger("game.points")
+if (getBoolean("Halve the distance to 90?")) points = 90 + (points - 90) / 2
+save("game.points", 7 + points)
+// A value of unknown type that such a variable gets too may be of any type, so the key the result is saved under stays
+// open, and its text read reads whatever is stored.
+def echo = { n -> n }
+def score = loadInteger("game.points")
+score = echo(1.5)
+save("game.score", 7 + score)
+show("Score " + loadString("game.score"))

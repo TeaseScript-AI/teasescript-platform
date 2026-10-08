@@ -15,9 +15,8 @@ if (level == null) {
 }
 show("Level " + level)
 if (load("game.seen") == null) save("game.seen", true)
-// A copy of the text, or a parameter it is passed to, tests for the empty text too, and one that holds values of
-// another type as well tests for both; the text that loadString read of a key the package saves numbers under keeps
-// its null.
+// A text that the script copies, or passes to a script function, keeps legacy null, and so do the tests of the copy
+// and of the parameter; the text that loadString read of a key the package saves numbers under keeps its null.
 def stored = loadString("game.stored")
 def copy = stored
 if (copy == null) show("Nothing stored.")
@@ -92,8 +91,8 @@ if (picks[0] == null) show("No pick.")
 def counts = [1, 2]
 counts[1] = load("game.count" + slot)
 show("Count " + (counts[1] + 1))
-// A text that a function returns tests for the empty text where the script tests the call for null, also in a
-// parameter's default, and a copy that the script sets to null holds the empty text.
+// A text that a function returns keeps legacy null, and so do the tests of the call, of a parameter's default, and of a
+// copy that the script sets to null.
 def readNote = { -> return loadString("game.note") }
 if (readNote() == null) show("No note.")
 def noted = { note, missing = (note == null) -> return missing }
@@ -101,7 +100,7 @@ show("Missing " + noted(loadString("game.note")))
 def noteCopy = readNote()
 noteCopy = null
 if (noteCopy == null) show("Cleared.")
-// A result that may be a value the importer cannot tell too tests for both, calling the function once.
+// So does a returned text whose function may give a value the importer cannot tell too.
 def oldHints = load("game.oldHints")
 def readHint = { -> if (getBoolean("A hint?")) return loadString("game.hint"); return oldHints }
 if (readHint() == null) show("No hint.")
@@ -115,18 +114,73 @@ work()
 save("game.choice", "true")
 def choiceText = loadString("game.choice")
 if (loadBoolean("game.choice")) show("Chosen " + choiceText)
+// A text variable that also takes a script function's text, or a text method's, holds only text.
+def defaultNick = { -> "Pet" }
+def nickname = loadString("game.nickname")
+if (nickname == null) nickname = defaultNick()
+nickname = nickname.trim()
+show("Nick " + nickname)
 // A computed key's read that a list of a known type takes as a new item reads the items' empty value where missing.
 def hints = ["first"]
 hints.add(load("game.hint" + slot))
 show("Hints " + hints.size())
-// A parameter that a text holding values of another type too is passed to tests for both.
+// A parameter that a text is passed to tests for legacy null.
 def describe = { what -> if (what == null) show("Nothing to wear.") }
 describe(outfit)
-// A text parameter whose default holds values of another type too, and that a call passes null to, holds them all.
+// A text that is a parameter's default is passed on, and keeps legacy null beside the variable's other values.
 def mixedNote = loadString("game.mixedNote")
 mixedNote = 2
 def checkNote = { item = mixedNote -> return item == "" }
 show("Note " + checkNote() + " " + checkNote(null))
+// A variable that such a text is copied into holds its null too, where no null test rules it out.
+def firstPic = loadString("game.firstPic")
+def shownPic = "none"
+if (getBoolean("Show the first?")) shownPic = firstPic
+show("Picture " + shownPic)
+// So does a parameter with a default of its own that a call passes such a text to, and a stored text of a key the
+// package saves numbers under too, read through the text helper.
+def described = { value = "none" -> value == null }
+show("No description " + described(loadString("game.description")))
+def scoreText = loadString("game.scoreText")
+def scoreCopy = scoreText
+show("Score " + (scoreCopy == null))
+def saveScore = { save("game.scoreText", 10) }
+// A parameter that a call passes such a text to only under a null test holds no null, unless the script set the text
+// again, or called script code that may, before the call; a template the script wrote around a read keeps its text,
+// also where it is copied.
+def measure = { measured = "fallback" -> show("Size " + measured.length()) }
+def measuredText = loadString("game.measured")
+if (measuredText != null) measure(measuredText)
+def recheck = { checked = "fallback" -> show("Checked " + (checked == null)) }
+def checkedText = loadString("game.checked")
+if (checkedText != null) {
+    checkedText = null
+    recheck(checkedText)
+}
+def plainHint = loadString("game.plainHint")
+def clearPlain = { plainHint = null }
+def showPlain = { shown = "none" -> show("Plain " + (shown == null)) }
+if (plainHint != null) {
+    clearPlain()
+    showPlain(plainHint)
+}
+def againHint = loadString("game.againHint")
+def clearAgain = { againHint = null; return true }
+def showAgain = { againShown = "none" -> show("Again " + (againShown == null)) }
+if (againHint != null) {
+    if (clearAgain()) showAgain(againHint)
+}
+// A stored text that an Elvis copies into a variable of another type gives that variable both types and null.
+def flagged = true
+flagged = loadString("game.flagged") ?: flagged
+show("Flagged " + flagged + " " + loadBoolean("game.flagged"))
+def written = "${load('game.written')}"
+def writtenCopy = written
+show("Written " + writtenCopy)
+// An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
+def profile = [name: "Guest"]
+profile.name = loadString("game.profileName")
+show("Profile " + profile.name)
 // A list of one function is apart from a list of the same name in another.
 def firstItem = { -> def items = ["a"]; items[0] = loadString("game.item"); return items[0] }
 def emptyItem = { -> def items = [""]; def v = items[0]; return v == null }

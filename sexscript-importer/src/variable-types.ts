@@ -490,34 +490,40 @@ export function enforceVariableTypes(
           ) {
             const rest = statement.value.parts.slice(1);
             const [only] = rest;
-            return {
-              ...statement,
-              operator: "+=",
-              value:
-                rest.length === 1 && only !== undefined && "text" in only
-                  ? { kind: "literal", value: only.text }
-                  : { kind: "template", parts: rest },
-            };
+            return withIntegerIndexes(
+              {
+                ...statement,
+                operator: "+=",
+                value:
+                  rest.length === 1 && only !== undefined && "text" in only
+                    ? { kind: "literal", value: only.text }
+                    : { kind: "template", parts: rest },
+              },
+              indexes,
+            );
           }
           if (textAppends.has(statement)) {
             // Groovy `text += value` appended the value's text.
             result.textAppended.push(statement);
-            return {
-              ...statement,
-              operator: "=",
-              value: {
-                kind: "template",
-                parts: [
-                  { value: statement.target },
-                  ...(statement.value.kind === "template"
-                    ? statement.value.parts
-                    : statement.value.kind === "literal" &&
-                        typeof statement.value.value === "string"
-                      ? [{ text: statement.value.value }]
-                      : [{ value: statement.value }]),
-                ],
+            return withIntegerIndexes(
+              {
+                ...statement,
+                operator: "=",
+                value: {
+                  kind: "template",
+                  parts: [
+                    { value: statement.target },
+                    ...(statement.value.kind === "template"
+                      ? statement.value.parts
+                      : statement.value.kind === "literal" &&
+                          typeof statement.value.value === "string"
+                        ? [{ text: statement.value.value }]
+                        : [{ value: statement.value }]),
+                  ],
+                },
               },
-            };
+              indexes,
+            );
           }
           const appended = appends.get(statement);
           if (appended !== undefined) {
@@ -572,6 +578,14 @@ export function enforceVariableTypes(
             indexes,
           );
         case "while":
+          return withIntegerIndexes(
+            {
+              ...statement,
+              body: rewrite(statement.body),
+              ...(wholeBounds.has(statement) ? { wholeBound: true as const } : {}),
+            },
+            indexes,
+          );
         case "repeat":
         case "for":
           return withIntegerIndexes({ ...statement, body: rewrite(statement.body) }, indexes);
@@ -586,6 +600,7 @@ export function enforceVariableTypes(
           const type = saved.get(statement);
           const valueType = type === undefined ? null : annotation(nonNull(type));
           if (statementConflicts.has(statement)) return statement;
+          if (type === OPEN_SAVE) return withIntegerIndexes({ ...statement, open: true }, indexes);
           return withIntegerIndexes(
             valueType === null ? statement : { ...statement, valueType },
             indexes,
@@ -698,6 +713,9 @@ function analyse(
   // variable read from storage has no type of its own here, so its save has the type its other values share.
   const assignedTypes = new Map<Binding, TeaseType[]>();
   const savedVariables = new Map<IrStatement, Binding>();
+  const savedScopes = new Map<IrStatement & { kind: "save" }, Scope>();
+  // The variables that get a value of a type the analysis cannot tell somewhere.
+  const unknownAssigned = new Set<Binding>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
@@ -778,6 +796,7 @@ function analyse(
   const store = (target: Binding, value: TeaseType, statement: IrStatement): void => {
     if (nonNull(value).kind !== "unknown")
       assignedTypes.set(target, [...(assignedTypes.get(target) ?? []), nonNull(value)]);
+    else unknownAssigned.add(target);
     if (
       target.fixed === undefined &&
       target.initial.kind === "null" &&
@@ -937,18 +956,90 @@ function analyse(
           : child.kind === "methodCall" && child.name === "removeAt" && child.arguments.length === 1
             ? child.arguments[0]!
             : null;
-      if (position !== null && isNumber(typeOf(position, scope))) analysis.indexes.add(child);
-      // The truth helper on a variable whose type is now known is written as a plain test, which narrows it.
+      if (position !== null && isNumber(typeOf(position, scope))) {
+        analysis.indexes.add(child);
+        numberPositions.add(child);
+      }
+      // An element of a list that holds several types, used where one type is needed, `pair[1] * 2` or
+      // `pair[1].lowercase()`, is read open: Groovy chose the operation by the value it held.
+      const operands =
+        child.kind === "binary" && OPEN_OPERATORS.has(child.operator)
+          ? [child.left, child.right]
+          : child.kind === "methodCall"
+            ? [child.target]
+            : child.kind === "unary" && child.operator === "-"
+              ? [child.value]
+              : [];
+      for (const operand of operands) {
+        if (operand.kind !== "index" || operand.dict === true || !isMixed(typeOf(operand, scope)))
+          continue;
+        openElements.add(operand);
+        analysis.indexes.add(operand);
+        // Text and a list repeat by a whole count, `pair[0] * 2`, which the repetition helper does at runtime.
+        const count =
+          child.kind === "binary" && child.operator === "*"
+            ? nonNull(typeOf(child.right, scope))
+            : null;
+        if (
+          child.kind === "binary" &&
+          operand === child.left &&
+          count?.kind === "scalar" &&
+          count.name === "integer"
+        ) {
+          openTimes.add(child);
+          analysis.indexes.add(child);
+        }
+      }
+      // Groovy `text[i]` on a variable typing proves text, which the lowering could not tell, is its character there.
+      if (child.kind === "index" && child.dict !== true && child.index.kind !== "range") {
+        const target = nonNull(typeOf(child.target, scope));
+        if (target.kind === "scalar" && target.name === "string") {
+          textIndexes.add(child);
+          analysis.indexes.add(child);
+        } else textIndexes.delete(child);
+      }
+      // The truth helper on a value whose type is now known is written as a plain test, which narrows a variable. A
+      // value that may be null is tested twice, which only a variable may be.
       const tested =
         child.kind === "call" && child.name === TRUTH_HELPER && child.positional.length === 1
           ? child.positional[0]!
           : null;
-      if (tested?.kind === "variable") {
-        const known = nonNull(typeOf(tested, scope));
-        if (known.kind === "scalar" && known.name !== "duration") {
-          plainTruths.set(child, typeOf(tested, scope));
+      if (tested !== null) {
+        const type = typeOf(tested, scope);
+        const known = nonNull(type);
+        const plain =
+          (tested.kind === "variable" || type.kind !== "optional") &&
+          ((known.kind === "scalar" && known.name !== "duration") ||
+            (known.kind === "list" && type.kind !== "optional"));
+        if (plain) {
+          plainTruths.set(child, type);
           analysis.indexes.add(child);
         } else plainTruths.delete(child);
+      }
+      // Groovy's null-aware ordering of two sides that typing proves to be numbers, or texts, never null, is the plain
+      // comparison: `sexscriptLegacyCompare(a, b) < 0` is `a < b`.
+      const compared =
+        child.kind === "binary" &&
+        ORDER_OPERATORS.has(child.operator) &&
+        child.left.kind === "call" &&
+        child.left.name === COMPARE_HELPER &&
+        child.left.positional.length === 2 &&
+        child.right.kind === "literal" &&
+        child.right.value === 0
+          ? child.left.positional
+          : null;
+      if (compared !== null) {
+        const [left, right] = compared.map((side) => typeOf(side, scope));
+        const plain = (type: TeaseType): string | null =>
+          type.kind === "scalar" && ["integer", "number", "string"].includes(type.name)
+            ? type.name === "string"
+              ? "string"
+              : "number"
+            : null;
+        if (plain(left!) !== null && plain(left!) === plain(right!)) {
+          plainCompares.add(child);
+          analysis.indexes.add(child);
+        } else plainCompares.delete(child);
       }
     });
   };
@@ -1147,9 +1238,18 @@ function analyse(
         return;
       }
       case "while":
-      case "repeat":
+      case "repeat": {
+        const bound =
+          item.kind === "while" &&
+          item.condition.kind === "binary" &&
+          (item.condition.operator === "<" || item.condition.operator === "<=")
+            ? typeOf(item.condition.right, scope)
+            : null;
+        if (bound?.kind === "scalar" && bound.name === "integer") wholeBounds.add(item);
+        else wholeBounds.delete(item);
         block(item.body, scope);
         return;
+      }
       case "for": {
         const inner = new Scope(scope);
         const variable = binding(item, item.variable, null, UNKNOWN);
@@ -1185,6 +1285,7 @@ function analyse(
           analysis.saved.set(item, typeOf(item.value, scope));
           const saved = item.value.kind === "variable" ? scope.resolve(item.value.name) : undefined;
           if (saved !== undefined) savedVariables.set(item, saved);
+          else savedScopes.set(item, scope);
         }
         return;
       default:
@@ -1251,10 +1352,50 @@ function analyse(
     analysis.returned.set(item.name, returns);
     returns = null;
   }
+  // A variable that a whole-number or number read starts and that also gets a value of unknown type.
+  const openRead = (found: Binding): boolean => {
+    const start = found.declaration?.value;
+    return (
+      start?.kind === "load" &&
+      (start.integer === true || start.number === true) &&
+      unknownAssigned.has(found)
+    );
+  };
   for (const [item, variable] of savedVariables) {
     const known = assignedTypes.get(variable);
-    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind === "unknown" && known !== undefined)
-      analysis.saved.set(item, sharedValueType(known));
+    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind !== "unknown") continue;
+    if (openRead(variable)) analysis.saved.set(item, OPEN_SAVE);
+    else if (known !== undefined) analysis.saved.set(item, sharedValueType(known));
+  }
+  // A saved value computed from a variable that a whole-number or number read starts, `7 + points`, takes the type of
+  // that read with the variable's later values: Groovy's `90 + (points - 90) / 2` made a number of a whole-number read.
+  // Another variable without a type of its own, such as a parameter, stays unknown; one that a read starts and that also
+  // gets a value of unknown type makes the save open.
+  for (const [item, scope] of savedScopes) {
+    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind !== "unknown") continue;
+    let open = false;
+    const type = expressionType(
+      item.value,
+      (name) => {
+        const found = scope.resolve(name);
+        if (found === undefined) return UNKNOWN;
+        const own = bindingType(found);
+        if (own !== undefined && nonNull(own).kind !== "unknown")
+          return scope.rulesOutNull(found) ? nonNull(own) : own;
+        const start = found.declaration?.value;
+        if (openRead(found)) {
+          open = true;
+          return UNKNOWN;
+        }
+        if (start?.kind !== "load" || (start.integer !== true && start.number !== true))
+          return UNKNOWN;
+        const read = scalar(start.number === true ? "number" : "integer");
+        return sharedValueType([read, ...(assignedTypes.get(found) ?? [])]);
+      },
+      (name) => results.get(name),
+    );
+    if (nonNull(type).kind !== "unknown") analysis.saved.set(item, type);
+    else if (open) analysis.saved.set(item, OPEN_SAVE);
   }
   return analysis;
 }
@@ -1678,7 +1819,7 @@ export function isAssignable(target: TeaseType, source: TeaseType): boolean {
 }
 
 /** The annotation that declares `type`, or null when TeaseScript cannot write it (V30 §12). */
-function annotation(type: TeaseType): string | null {
+export function annotation(type: TeaseType): string | null {
   const value = nonNull(type);
   const writable =
     value.kind === "scalar" ||
@@ -2208,13 +2349,59 @@ function forEachExpression(value: IrExpression, visit: (expression: IrExpression
 /** Truncates the recorded list positions inside a statement's own expressions with `toInteger`. */
 /** The legacy truth helper (helpers.ts). */
 const TRUTH_HELPER = "sexscriptLegacyTruth";
+const COMPARE_HELPER = "sexscriptLegacyCompare";
+/** `while` loops whose `<` or `<=` bound typing proves a whole number, never null. */
+const wholeBounds = new WeakSet<IrStatement>();
+const ORDER_OPERATORS = new Set(["<", "<=", ">", ">="]);
+/** Orderings of two sides that typing proves to be numbers, or texts, which read as the plain comparison. */
+const plainCompares = new WeakSet<IrExpression>();
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
+/** Operators that need one type on each side, where an element of several types is read open (findIndexes). */
+/**
+ * The saved type of a value that a number read starts and a value of unknown type may change (analyse): unknown, and
+ * the save keeps the key's type open (`open`).
+ */
+const OPEN_SAVE: TeaseType = { kind: "unknown" };
+const OPEN_OPERATORS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">="]);
+/** Elements of lists of several types that an operation reads open, through sexscriptLegacyValue (findIndexes). */
+const openElements = new WeakSet<IrExpression>();
+/** Products of such an element and a whole count, which repeat text or a list (findIndexes). */
+const openTimes = new WeakSet<IrExpression>();
+/** Indexes whose position may hold a fraction, which a whole-number conversion cuts (findIndexes). */
+const numberPositions = new WeakSet<IrExpression>();
 
-/** Groovy truth of a variable of a scalar type: not null, and not 0, "", or false. */
+/** Whether a type is a union of text and another scalar type, which an operation cannot take as it is. */
+function isMixed(type: TeaseType): boolean {
+  const value = nonNull(type);
+  if (value.kind !== "union") return false;
+  const scalars = value.members.flatMap((member) =>
+    member.kind === "scalar" ? [member.name] : [],
+  );
+  return scalars.includes("string") && scalars.some((name) => name !== "string");
+}
+
+/**
+ * Indexes of a value typing proves text. A position that may hold a fraction stays as it is: Groovy found no `getAt`
+ * of a text for it and failed, as the converted read does.
+ */
+const textIndexes = new WeakSet<IrExpression>();
+
+/**
+ * Groovy truth of a value of a scalar type, or a list: not null, and not 0, "", false, or empty. A boolean is compared
+ * with `true`, which stays right where a later step widens its variable's type.
+ */
 function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
   const scalarType = nonNull(type);
+  if (scalarType.kind === "list")
+    return {
+      kind: "binary",
+      operator: ">",
+      left: { kind: "property", target: value, name: "length" },
+      right: { kind: "literal", value: 0 },
+    };
+
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
     operator,
@@ -2275,7 +2462,25 @@ function withIntegerIndexes<T extends IrStatement>(
     const truthType = plainTruths.get(value);
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);
-    if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
+    if (plainCompares.has(value) && copy.kind === "binary" && copy.left.kind === "call")
+      return { ...copy, left: copy.left.positional[0]!, right: copy.left.positional[1]! };
+    if (copy.kind === "index" && textIndexes.has(value))
+      return helperCall("textAt", [copy.target, copy.index]);
+    if (copy.kind === "binary" && openTimes.has(value)) {
+      // The element itself, without the open read the repetition helper does too.
+      const element =
+        copy.left.kind === "call" && copy.left.name === "sexscriptLegacyValue"
+          ? copy.left.positional[0]!
+          : copy.left;
+      return helperCall("times", [element, copy.right]);
+    }
+    if (copy.kind === "index") {
+      const read =
+        openElements.has(value) && !numberPositions.has(value)
+          ? copy
+          : { ...copy, index: truncated(copy.index) };
+      return openElements.has(value) ? helperCall("value", [read]) : read;
+    }
     if (copy.kind === "range") {
       const name = copy.count === true ? "toInteger" : copy.inclusive ? "floor" : "ceil";
       return { ...copy, to: { kind: "call", name, positional: [copy.to], named: {} } };

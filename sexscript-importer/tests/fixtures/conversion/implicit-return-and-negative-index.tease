@@ -1,3 +1,6 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
     return listValue[listValue.length + position]
@@ -6,6 +9,122 @@ function sexscriptLegacyItemAt(listValue, position) {
     return null
   }
   return listValue[position]
+}
+function sexscriptLegacyTextAt(text, position) {
+  let at = position
+  if at < 0 {
+    at += text.length
+  }
+  return text.substring(at, at + 1)
+}
+function sexscriptLegacySlice(value, from, to, exclusive = false) {
+  let start = from
+  let finish = to
+  if not (from is integer and to is integer) and from > to {
+    start = to
+    finish = from
+  }
+  let first = toInteger(start)
+  if first < 0 {
+    first += value.length
+  }
+  let last = toInteger(finish)
+  if last < 0 {
+    last += value.length
+  }
+  let runsBack = first > last
+  let low = first
+  let high = last + 1
+  if exclusive {
+    high = last
+  }
+  if runsBack {
+    low = last
+    if exclusive {
+      low = last + 1
+    }
+    high = first + 1
+  }
+  let position = low
+  let stop = high
+  let step = 1
+  if runsBack {
+    position = high - 1
+    stop = low - 1
+    step = -1
+  }
+  let part = value
+  if value is string {
+    let text = ""
+    while position != stop {
+      text += value.substring(position, position + 1)
+      position += step
+    }
+    part = text
+  } else {
+    let items = []
+    while position != stop {
+      items.add(value[position])
+      position += step
+    }
+    part = items
+  }
+  return sexscriptLegacyValue(part)
+}
+function sexscriptLegacySpliced(value, from, to, values, exclusive = false) {
+  let first = from
+  if first < 0 {
+    first += value.length
+  }
+  let last = to
+  if last < 0 {
+    last += value.length
+  }
+  let runsBack = first > last
+  let low = first
+  let high = last + 1
+  if exclusive {
+    high = last
+  }
+  if runsBack {
+    low = last
+    if exclusive {
+      low = last + 1
+    }
+    high = first + 1
+  }
+  if high > value.length and high is integer {
+    high = value.length
+  }
+  let items = value.take(low)
+  if values is list {
+    items.addAll(values)
+  } else {
+    items.add(values)
+  }
+  items.addAll(value.takeLast(value.length - high))
+  return items
+}
+function sexscriptLegacyRepeatList(items, times) {
+  let result = []
+  let roundValue = 0
+  while roundValue < times {
+    result += items
+    roundValue += 1
+  }
+  return result
+}
+function sexscriptLegacyTimes(value, count) {
+  if count is number {
+    let whole = toInteger(count)
+    if value is string {
+      return sexscriptLegacyValue(value.repeat(whole))
+    }
+    if value is list and (whole >= 0 or value.length == 0) {
+      return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, whole))
+    }
+  }
+  return sexscriptLegacyValue(value * count)
 }
 let scores = [3, 5, 8]
 say "Last ${scores.last}, second last ${scores[scores.length - 2]}"
@@ -50,4 +169,49 @@ let limit = choose 0: "Back",
   2: "Hard"
 // NOTE SX_NEGATIVE_INDEX line 22: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
 say "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}"
+// A range index takes a part of a list, also counted from the end, backwards, or without its end (`..<`), and a write to
+// a range replaces it.
+let deck = ["a", "b", "c", "d", "e"]
+let topValue = sexscriptLegacySlice(deck, 0, 1)
+let backwards = sexscriptLegacySlice(deck, -1, 0)
+let between = sexscriptLegacySlice(deck, 3, 1, true)
+deck = sexscriptLegacySpliced(deck, 1, 2, ["x"])
+deck = sexscriptLegacySpliced(deck, 1, 1, ["y"], true)
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Top ${topValue.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}"
+// A part of a list that a function returns is a list too, which `*` repeats.
+function deal {
+  return ["a", "b", "c"]
+}
+let hand = deal()
+let pairs = sexscriptLegacyRepeatList(sexscriptLegacySlice(hand, 0, 1), 2)
+// NOTE SX_LIST_JOIN line 36: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Pairs ${pairs.join(",")}"
+// A part whose type only the running script knows, such as an element of a parameter, is repeated or multiplied there.
+function top(piles) {
+  return piles[0]
+}
+let twiceValue = sexscriptLegacyTimes(top([["x", "y"]]), 2)
+// NOTE SX_LIST_JOIN line 40: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Twice ${twiceValue.join(",")}"
+// A character of a text that only the converted types prove text reads through a helper: type inference reads the
+// `shot` of both blocks as one variable, of unknown type.
+say "Replay?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+  let shot = load "game.shot", default: sexscriptLegacyValue(null)
+  say "Saved ${shot}"
+}
+say "Shoot?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  let shot = ""
+  shot = askText "Your shot (A1 to G7):"
+  say "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}"
+}
+// A list repeated by a count that may be missing is repeated as a number.
+let rounds = load "game.rounds", default: 2
+let marks = sexscriptLegacyRepeatList([null], toInteger(rounds))
+say "Marks ${marks.length}"
 exit

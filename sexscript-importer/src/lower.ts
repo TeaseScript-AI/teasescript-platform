@@ -1,3 +1,5 @@
+import { withCounterLoops } from "./counter-loops.ts";
+import { withSwitchLadders } from "./switch-ladders.ts";
 import {
   constantString,
   groovyParameters,
@@ -90,6 +92,8 @@ interface ClosureInfo {
   implicitParameter: boolean;
   minArgs: number;
   maxArgs: number;
+  /** Declared in a block of the script, such as an `if` body, and lifted to the top as a script function. */
+  nested?: boolean;
 }
 
 export interface HelperFunctionInfo {
@@ -253,8 +257,18 @@ interface LowerContext {
   integerArrays: ReadonlySet<string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
-  /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
-  imagePaths: Set<string>;
+  /**
+   * The reads of a folder walk's loop variable, by node and by source position, with whether it holds the package
+   * path of a file or of a subfolder (imageFolderWalk, listedFolderWalk).
+   */
+  walkedEntries: Map<AstNode | string, "file" | "folder">;
+  /** Variables that a path cannot be read from at conversion time: updated in place, parameters, loop variables. */
+  changingPaths: ReadonlySet<string>;
+  /**
+   * The binding keys and assigned values a path is read with (resolvedPath), where they differ from `bindings` and
+   * `assignedValues`: a helper method keeps those by name, its paths by binding.
+   */
+  pathBindings?: { keys: BindingKeys; values: ReadonlyMap<string, readonly AstNode[]> };
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -563,8 +577,8 @@ export interface MapUses {
   /** Maps that stay objects and that `clear()` empties, so that every field may hold null. */
   clearedRecords: Set<string>;
   /**
-   * Variables the code tests for null itself: compared with `== null` or `!= null`, or read with `?.`, where null and
-   * an empty list behave differently. Groovy truth treats them alike.
+   * Variables the code tests for null itself: compared with `== null` or `!= null`, read with `?.`, or switched on with
+   * a `case null`, where null and an empty list behave differently. Groovy truth treats them alike.
    */
   nullTested: Set<string>;
   /**
@@ -574,6 +588,11 @@ export interface MapUses {
   shownEarly: Set<string>;
   /** Numbers that start as null and that nothing tests for null, which start at 0 (owner decision 2026-10-05). */
   zeroStartNumbers: Set<string>;
+  /**
+   * Texts and flags that start as null and that nothing tests for null or passes on, which start with the empty text or
+   * false (owner decision 2026-10-08).
+   */
+  emptyStarts: Map<string, "" | false>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -682,6 +701,118 @@ function mapAnalysisBody(file: ParsedGroovyFile): AstNode | null {
     : { ...rawBody, statements: [...parts.statements, ...parts.members, ...parts.entryStatements] };
 }
 
+/** Legacy API calls that only show their arguments or ask the player with them. */
+const SHOWING_API_CALLS = new Set([
+  "show",
+  "showButton",
+  "showPopup",
+  "getBoolean",
+  "getBooleans",
+  "getFloat",
+  "getInteger",
+  "getSelectedValue",
+  "getString",
+]);
+
+/**
+ * The variables whose value the code passes on or tells from an empty one: copies it into another variable or a
+ * collection, passes it to a function or a method, also as a parameter's default, returns it, compares it with a value
+ * that may be empty (`== ""`, `== other`), switches on it with such a case, or sets it to null again. A legacy API call
+ * that only shows the value or asks the player with it does not pass it on, and neither does a comparison with a text
+ * that is not empty, a number, or true, where null and the empty value give the same result.
+ */
+function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment): Set<string> {
+  const passed = new Set<string>();
+  const pass = (value: AstNode | null): void => {
+    // A choice or a conversion passes on the value it gives; `value ?: other` gives `value` only when it is set.
+    if (value?.kind === "ternary")
+      for (const branch of [value.true, value.false]) pass(asNode(branch));
+    if (value?.kind === "elvis") pass(asNode(value.false));
+    if (value?.kind === "cast") pass(asNode(value.value));
+    const key = value?.kind === "variable" ? bindingKey(value, keys) : null;
+    if (key !== null) passed.add(key);
+  };
+  // The expressions a block ends with, which a closure or method gives as its result.
+  const passResult = (statement: AstNode | null): void => {
+    if (statement?.kind === "expressionStatement") pass(asNode(statement.expression));
+    if (statement?.kind === "block") passResult(nodeArray(statement.statements).at(-1) ?? null);
+    if (statement?.kind === "if") {
+      passResult(asNode(statement.then));
+      passResult(asNode(statement.else));
+    }
+  };
+  // A constant that equals neither null nor the empty text or false.
+  const distinct = (node: AstNode | null): boolean => {
+    const value = node?.kind === "constant" ? node.value : undefined;
+    return (
+      (typeof value === "string" && value !== "") || typeof value === "number" || value === true
+    );
+  };
+  walkAst(body, (node) => {
+    if (
+      node.kind === "binary" &&
+      ["==", "!=", "in", "<", ">", "<=", ">=", "<=>"].includes(String(node.operator))
+    ) {
+      // An ordering puts null before any value, also a number, which the empty text is not.
+      const ordering = !["==", "!=", "in"].includes(String(node.operator));
+      const apart = (side: AstNode | null): boolean =>
+        ordering
+          ? side?.kind === "constant" && typeof side.value === "string" && side.value !== ""
+          : distinct(side);
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (!apart(right)) pass(left);
+      if (!apart(left)) pass(right);
+    }
+    // `value.equals(other)` and its kin tell null from an empty value as `==` does.
+    if (
+      node.kind === "methodCall" &&
+      ["equals", "equalsIgnoreCase", "compareTo", "compareToIgnoreCase"].includes(
+        constantString(node.method) ?? "",
+      ) &&
+      !nodeArray(asNode(node.arguments)?.items).every((argument) => distinct(argument))
+    )
+      pass(asNode(node.object));
+    if (
+      node.kind === "switch" &&
+      !nodeArray(node.cases).every((item) => distinct(asNode(item.expression)))
+    )
+      pass(asNode(node.expression));
+    if (node.kind === "closure")
+      for (const parameter of groovyParameters(node.parameters) ?? [])
+        if (parameter.defaultValue !== null)
+          walkAst(parameter.defaultValue, (child) => {
+            if (child.kind === "variable") pass(child);
+          });
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    if (assigns) {
+      const right = asNode(node.right);
+      pass(right);
+      // A variable set to null again holds null after its start.
+      const key =
+        node.kind === "binary" && isNullConstant(right ?? undefined)
+          ? bindingKey(asNode(node.left), keys)
+          : null;
+      if (key !== null) passed.add(key);
+    }
+    if (node.kind === "binary" && node.operator === "<<") pass(asNode(node.right));
+    if (node.kind === "return") pass(asNode(node.value));
+    if (node.kind === "list") for (const item of nodeArray(node.items)) pass(item);
+    if (node.kind === "map") for (const entry of nodeArray(node.entries)) pass(asNode(entry.value));
+    if (node.kind === "closure") passResult(asNode(node.body));
+    if (node.kind === "methodCall") {
+      const name = constantString(node.method) ?? "";
+      const shows =
+        node.implicitThis === true &&
+        types.localFunctions?.has(name) !== true &&
+        SHOWING_API_CALLS.has(name);
+      if (!shows) for (const argument of nodeArray(asNode(node.arguments)?.items)) pass(argument);
+    }
+  });
+  return passed;
+}
+
 function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const dictionaries = new Set<string>();
   for (const { body, types, keys } of bodies)
@@ -698,11 +829,31 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     nullTested: new Set(),
     shownEarly: new Set(),
     zeroStartNumbers: new Set(),
+    emptyStarts: new Map(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
   for (const body of bodies) collectEarlyDisplays(body, uses.shownEarly);
-  for (const { body, types, keys } of bodies) {
+  // The names each body reads, as variables or as properties such as a module's `owner.field`: a variable of the
+  // script that another body reads may pass its value on there.
+  const namesRead = bodies.map(({ body }) => {
+    const names = new Set<string>();
+    walkAst(body, (node) => {
+      const name =
+        node.kind === "variable"
+          ? variableName(node)
+          : node.kind === "property"
+            ? constantString(node.property)
+            : null;
+      if (name !== null) names.add(name);
+    });
+    return names;
+  });
+  for (const [index, { body, types, keys }] of bodies.entries()) {
+    const passed = passedOnValues(body, keys, types);
+    const readElsewhere = (key: string): boolean =>
+      !key.includes("@") && namesRead.some((names, other) => other !== index && names.has(key));
+    const values = assignedValues(body, keys);
     walkAst(body, (node) => {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
       const key = right === null ? null : bindingKey(asNode(node.left), keys);
@@ -723,6 +874,33 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         (type & NUMBER) !== 0
       )
         uses.zeroStartNumbers.add(key);
+      // A text or a flag that starts as null, as a placeholder, and that the script uses only where it is: Groovy truth
+      // treats null like the empty text and false.
+      else if (
+        key !== null &&
+        (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
+        !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
+        !uses.nullTested.has(key) &&
+        !passed.has(key) &&
+        !readElsewhere(key) &&
+        // Every value set later is one of a known type, never null; an input the player answers gives a value.
+        (values.get(key) ?? []).every(
+          (value) =>
+            // The start itself, also a declaration without a value; a null set later passes the variable on
+            // (passedOnValues).
+            isNullConstant(value) ||
+            isEmptyGroovyExpression(value) ||
+            (inferType(value, types) & NULL) === 0 ||
+            (value.kind === "methodCall" &&
+              value.implicitThis === true &&
+              /^get[A-Z]/u.test(constantString(value.method) ?? "") &&
+              types.localFunctions?.has(constantString(value.method) ?? "") !== true),
+        )
+      ) {
+        if (onlyOf(type, STRING | NULL) && (type & STRING) !== 0) uses.emptyStarts.set(key, "");
+        else if (onlyOf(type, BOOLEAN | NULL) && (type & BOOLEAN) !== 0)
+          uses.emptyStarts.set(key, false);
+      }
     });
   }
   for (const [name, keys] of removed) {
@@ -888,6 +1066,13 @@ function collectMapUses(
     }
     if ((node.kind === "property" || node.kind === "methodCall") && node.safe === true) {
       const tested = keyOf(node.object);
+      if (tested !== null) uses.nullTested.add(tested);
+    }
+    if (
+      node.kind === "switch" &&
+      nodeArray(node.cases).some((item) => isNullConstant(asNode(item.expression) ?? undefined))
+    ) {
+      const tested = keyOf(node.expression);
       if (tested !== null) uses.nullTested.add(tested);
     }
     const assigns =
@@ -1262,7 +1447,8 @@ export function lowerParsedFile(
     integerVariables: new Set(),
     integerArrays: new Set(),
     textVariables: new Set(),
-    imagePaths: new Set(),
+    walkedEntries: new Map(),
+    changingPaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -1355,6 +1541,7 @@ export function lowerParsedFile(
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
     context.constantInitializers = declarationInitializers(body, context.types);
+    context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
     context.integerArrays = integerArrays(body, context.bindings);
     context.textVariables = textVariables(body, context.bindings);
@@ -1370,10 +1557,13 @@ export function lowerParsedFile(
       const name = bindingName(key);
       if (type !== 0) listElements.set(name, (listElements.get(name) ?? 0) | type);
     }
-    // A number that starts at 0 instead of null holds no null.
+    // A number that starts at 0, or a text or flag that starts empty, instead of null holds no null.
     const variables = new Map(context.types.variables);
     const bindingTypes = new Map(context.types.bindingTypes ?? []);
-    for (const key of context.mapUses.zeroStartNumbers) {
+    for (const key of [
+      ...context.mapUses.zeroStartNumbers,
+      ...context.mapUses.emptyStarts.keys(),
+    ]) {
       const name = bindingName(key);
       const type = variables.get(name);
       if (type !== undefined) variables.set(name, type & ~NULL);
@@ -1424,13 +1614,16 @@ export function lowerParsedFile(
     context,
     stripsTags,
   );
-  // The truth helper goes where variable typing wrote all its tests plainly.
-  if (context.syntheticHelpers.has("truth")) {
+  // The truth and ordering helpers go where variable typing wrote all their tests plainly.
+  for (const [helper, name] of [
+    ["truth", "sexscriptLegacyTruth"],
+    ["compare", "sexscriptLegacyCompare"],
+  ] as const) {
+    if (!context.syntheticHelpers.has(helper)) continue;
     const others = helperStatements(
-      new Set([...context.syntheticHelpers].filter((name) => name !== "truth")),
+      new Set([...context.syntheticHelpers].filter((other) => other !== helper)),
     );
-    if (!callsFunction([typedStatements, others], "sexscriptLegacyTruth"))
-      context.syntheticHelpers.delete("truth");
+    if (!callsFunction([typedStatements, others], name)) context.syntheticHelpers.delete(helper);
   }
   // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
   // kept as a duration, empty texts dropped,
@@ -1440,7 +1633,10 @@ export function lowerParsedFile(
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withFillableLoads(withParsedLoads(typedStatements, context.syntheticHelpers), shared);
+  let texts = withFillableLoads(
+    withParsedLoads(withSwitchLadders(withCounterLoops(typedStatements)), context.syntheticHelpers),
+    shared,
+  );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -1640,7 +1836,11 @@ function lowerHelperCompilationUnit(
         withElapsedDurations(
           withFillableLoads(
             withParsedLoads(
-              withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+              withSwitchLadders(
+                withCounterLoops(
+                  withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+                ),
+              ),
               baseContext.syntheticHelpers,
             ),
             true,
@@ -1840,6 +2040,13 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   const result = enforceVariableTypes(statements, helperResults);
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
+  if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
+    context.syntheticHelpers.add("textAt");
+  // An element read open, or repeated, through a helper (variable typing).
+  if (callsFunction([result.statements], "sexscriptLegacyValue"))
+    context.syntheticHelpers.add("value");
+  if (callsFunction([result.statements], "sexscriptLegacyTimes"))
+    context.syntheticHelpers.add("times");
   // A list or text append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(
     [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),
@@ -2062,6 +2269,8 @@ function lowerHelperMethod(
     );
     return null;
   }
+  // The method's own scopes for reading paths: a closure's parameter is apart from a local of its name.
+  const pathKeys = bindingKeys(body, `helper:${name}`);
   const context: LowerContext = {
     diagnostics: baseContext.diagnostics,
     metadata: baseContext.metadata,
@@ -2117,7 +2326,12 @@ function lowerHelperMethod(
     integerVariables: new Set(),
     integerArrays: new Set(),
     textVariables: new Set(),
-    imagePaths: new Set(),
+    walkedEntries: new Map(),
+    changingPaths: new Set([
+      ...changingVariables(body, pathKeys),
+      ...records.map((parameter) => parameter.name),
+    ]),
+    pathBindings: { keys: pathKeys, values: assignedValues(body, pathKeys) },
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -4127,6 +4341,19 @@ function lowerDeclaration(
       );
     return [{ kind: "let", name, value: { kind: "literal", value: 0 }, span }];
   }
+  // A text or flag that starts as null on the same conditions, and that nothing passes on, starts empty.
+  const empty = startsNull && key !== null ? context.mapUses.emptyStarts.get(key) : undefined;
+  if (empty !== undefined) {
+    if (context.mapUses.shownEarly.has(key!))
+      addDiagnostic(
+        context,
+        "SX_NULL_START_EMPTY",
+        "warning",
+        `Groovy showed ${name} as null until its first value; it starts as ${empty === "" ? "the empty text" : "false"} here, so a text shown before then says ${empty === "" ? "nothing" : "false"}.`,
+        span,
+      );
+    return [{ kind: "let", name, value: { kind: "literal", value: empty }, span }];
+  }
   const optionalType = startsNull ? nullableValueType(name, context) : null;
   if (
     value.kind === "object" &&
@@ -4267,7 +4494,7 @@ function lowerClosureDeclaration(
         context,
         closure,
         "SX_CLOSURE_DISCOVERY",
-        `Closure ${name} was not discovered during the prepass.`,
+        `Closure ${name} is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.`,
       ),
     ];
   }
@@ -4373,18 +4600,22 @@ function lowerClosureDeclaration(
         context,
       );
     const ownDiagnostics = context.diagnostics.slice(firstDiagnostic);
-    return [
-      {
-        kind: "function",
-        name,
-        parameters,
-        body: lowered,
-        span,
-        ...(ownDiagnostics.some((diagnostic) => diagnostic.severity === "error")
-          ? { ownDiagnostics }
-          : {}),
-      },
-    ];
+    const declaration: IrStatement = {
+      kind: "function",
+      name,
+      parameters,
+      body: lowered,
+      span,
+      ...(ownDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+        ? { ownDiagnostics }
+        : {}),
+    };
+    // A closure of a block of the script moves to the top, before the first statement that uses it.
+    if (info.nested === true) {
+      context.closureFunctions.push(declaration);
+      return [];
+    }
+    return [declaration];
   } finally {
     context.functionDepth -= 1;
     context.currentFunction = outerFunction;
@@ -5415,6 +5646,38 @@ function lowerAssignment(
       ),
     ];
   }
+  // Groovy `list[a..b] = values` replaced those elements by the values; the list becomes a new one without them.
+  if (
+    operator === "=" &&
+    target.kind === "index" &&
+    target.dict !== true &&
+    target.index.kind === "range" &&
+    target.target.kind === "variable"
+  ) {
+    context.syntheticHelpers.add("spliced");
+    const range = target.index;
+    // Groovy computed the values before the list and the range, so they come first unless neither has an effect.
+    const rangeNode = targetNode.kind === "binary" ? asNode(targetNode.right) : null;
+    const ends = [asNode(rangeNode?.from), asNode(rangeNode?.to)];
+    const pure = [right, ...ends].every((item) => item === null || isPure(item, context));
+    const first = pure ? null : freshName("values", context);
+    return [
+      ...(first === null ? [] : [{ kind: "let" as const, name: first, value, span }]),
+      {
+        kind: "assign",
+        target: target.target,
+        operator: "=",
+        value: helperCall("spliced", [
+          target.target,
+          range.from,
+          range.to,
+          first === null ? value : { kind: "variable", name: first },
+          ...exclusive(range),
+        ]),
+        span,
+      },
+    ];
+  }
   const grown =
     operator === "=" ? growingListWrite(targetNode, right, target, value, span, context) : null;
   if (grown !== null) return grown;
@@ -5620,16 +5883,29 @@ function lowerCallStatement(
       { kind: "exit", span },
     ];
   }
-  // Going through the files of an images folder goes through the folder's images (imageFolderWalk).
-  if (
-    call?.name === "eachFile" &&
-    receiver !== null &&
-    context.media !== null &&
-    call.arguments.length === 1 &&
-    call.arguments[0]!.kind === "closure"
-  ) {
-    const walk = imageFolderWalk(node, receiver, call.arguments[0]!, span, context);
-    if (walk !== undefined) return walk;
+  // Going through the files of a package folder goes through the package's files there (listedFolderWalk), and through
+  // an images folder through the folder's images (imageFolderWalk).
+  const walkClosure = call?.arguments.at(-1);
+  const recursive =
+    call?.name === "eachFileRecurse"
+      ? call.arguments.length === 1
+        ? ("all" as const)
+        : call.arguments.length === 2 && isFilesOnly(call.arguments[0]!, context)
+          ? ("files" as const)
+          : undefined
+      : call?.name === "eachFile" && call.arguments.length === 1
+        ? null
+        : undefined;
+  if (receiver !== null && walkClosure?.kind === "closure" && recursive !== undefined) {
+    const listed =
+      context.files === null
+        ? undefined
+        : listedFolderWalk(node, receiver, walkClosure, recursive, span, context);
+    if (listed !== undefined) return listed;
+    if (recursive === null && context.media !== null) {
+      const walk = imageFolderWalk(node, receiver, walkClosure, span, context);
+      if (walk !== undefined) return walk;
+    }
   }
   // Looking through the player's pictures on the computer becomes asking for a photo (owner decision).
   if (
@@ -9499,8 +9775,8 @@ function isSingleValueType(type: number): boolean {
 
 /**
  * A dict key (#536): text. A number key becomes text, with a note where the dict also has text keys, since Groovy
- * kept 1 and "1" apart; on a dict with number keys, a key of unknown type becomes text too. A key that may be null is
- * reported.
+ * kept 1 and "1" apart; on a dict with number keys, a key of unknown type becomes text too. A key that may be null
+ * becomes text as well: null is "null", a key no dict of the script holds, so a null key finds nothing, as in Groovy.
  */
 function dictKey(
   keyNode: AstNode,
@@ -9518,18 +9794,10 @@ function dictKey(
     return { kind: "literal", value: String(literal) };
   }
   const keyType = inferType(keyNode, context.types);
-  if ((keyType & NULL) !== 0 && keyType !== UNKNOWN) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_DICT_KEY",
-      "This map key may be null; dict keys are text (#536).",
-    );
-  }
   const key = lowerExpression(keyNode, context);
   if (key === null) return null;
   if (onlyOf(keyType, STRING) || (keyType === UNKNOWN && !numberKeys)) return key;
-  noteDictKeyText(node, context);
+  if (!onlyOf(keyType, STRING | NULL)) noteDictKeyText(node, context);
   return templateOrLiteral([{ value: key }]);
 }
 
@@ -9603,9 +9871,14 @@ function repetition(node: AstNode, context: LowerContext): IrExpression | null |
   const left = inferType(leftNode, context.types);
   const text = onlyOf(left, STRING) && left !== 0;
   const list = onlyOf(left, LIST) && left !== 0;
-  // Groovy repeated text only by a number, so a text repeated by a count of unknown type takes it as a number.
+  // Groovy repeated text and lists only by a number, so a count of unknown type, or one that may be null, is taken as
+  // a number.
   const count = inferType(rightNode, context.types);
-  if ((!text && !list) || !(onlyOf(count, NUMBER) || (text && count === UNKNOWN)) || count === 0)
+  if (
+    (!text && !list) ||
+    !(onlyOf(count, NUMBER | NULL) || count === UNKNOWN) ||
+    ((count & NUMBER) === 0 && count !== UNKNOWN)
+  )
     return undefined;
   const value = lowerExpression(leftNode, context);
   const times = lowerExpression(rightNode, context);
@@ -9629,6 +9902,24 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "*") {
     const repeated = repetition(node, context);
     if (repeated !== undefined) return repeated;
+    // A part or a result whose type the importer cannot tell may be text or a list, which Groovy repeated; a count that
+    // may hold a fraction, which a repetition rarely takes, multiplies a number.
+    const leftNode = asNode(node.left);
+    const rightNode = asNode(node.right);
+    if (
+      leftNode !== null &&
+      rightNode !== null &&
+      leftNode.kind !== "variable" &&
+      leftNode.kind !== "constant" &&
+      inferType(leftNode, context.types) === UNKNOWN &&
+      (inferType(rightNode, context.types) & NUMBER) !== 0 &&
+      !mayBeFractional(rightNode, context)
+    ) {
+      const value = lowerExpression(leftNode, context);
+      const count = lowerExpression(rightNode, context);
+      if (value === null || count === null) return null;
+      return useHelper(context, "times", [value, count]);
+    }
   }
   if (operator === "instanceof") {
     const test = instanceTest(node, context);
@@ -9678,7 +9969,13 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       return key === null ? null : { kind: "index", target, index: key, dict: true };
     }
     const negativeIndex = negativeConstantIndex(indexNode);
-    // Groovy `text[a..b]` is the text from a through b, also counted from the end; TeaseScript text takes `substring`.
+    // Groovy `value[a..b]` is the part of a list or text from a through b, also counted from the end or backwards.
+    const slice = (): IrExpression | null => {
+      const range = lowerExpression(indexNode, context);
+      if (range?.kind !== "range") return null;
+      context.syntheticHelpers.add("slice");
+      return helperCall("slice", [target, range.from, range.to, ...exclusive(range)]);
+    };
     if (
       targetNode !== null &&
       indexNode.kind === "range" &&
@@ -9688,6 +9985,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     ) {
       const range = textRange(targetNode, target, indexNode, context);
       if (range !== undefined) return range;
+    }
+    if (indexNode.kind === "range" && !context.writeTargets.has(node)) {
+      const part = slice();
+      if (part !== null) return part;
     }
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
     if (
@@ -10552,7 +10853,30 @@ function laterReadDefault(
   for (let later = index + 1; later < statements.length; later += 1) {
     if (consumed.has(later)) continue;
     const statement = statements[later]!;
-    if (nullDefault(statement)?.name === read.name) return later;
+    const found = nullDefault(statement);
+    if (found?.name === read.name) {
+      // The default moves up to the read, before the code between, which must not declare or set what it reads.
+      const reads = new Set<string>();
+      walkAst(found.fallback, (child) => {
+        const name = child.kind === "variable" ? variableName(child) : null;
+        if (name !== null) reads.add(name);
+      });
+      const sets = (between: AstNode): boolean => {
+        let found = false;
+        walkAst(between, (child) => {
+          const assigns =
+            child.kind === "declaration" ||
+            (child.kind === "binary" &&
+              typeof child.operator === "string" &&
+              /=$/u.test(child.operator) &&
+              !["==", "!=", "<=", ">="].includes(child.operator));
+          const name = assigns ? variableName(child.left) : null;
+          if (name !== null && reads.has(name)) found = true;
+        });
+        return found;
+      };
+      return statements.slice(index + 1, later).some(sets) ? -1 : later;
+    }
     if (interferes(statement)) return -1;
   }
   return -1;
@@ -11101,14 +11425,21 @@ function textRange(
     return undefined;
   const first = constantValue(fromNode);
   const last = constantValue(toNode);
-  if (
-    typeof first === "number" &&
-    typeof last === "number" &&
-    first >= 0 &&
-    last >= 0 &&
-    last < first
-  )
-    return undefined;
+  // `substring` takes a part that runs forwards whatever the text's length: both ends whole positions from the start,
+  // or both from the end, in order, or from a position to the last character (`n..-1`), which Groovy read forwards or
+  // failed on. Another range, also one with a computed end, reads through the slice helper.
+  const backFrom = fromEnd(fromNode);
+  const backTo = fromEnd(toNode);
+  const fromStart = (value: unknown): value is number =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0;
+  const inclusive = range.inclusive === true;
+  const back = (value: number | null): value is number => value !== null && Number.isInteger(value);
+  // An exclusive range with equal ends is empty, also past the end, where `substring` fails.
+  const forwards =
+    (fromStart(first) && fromStart(last) && (first < last || (first === last && inclusive))) ||
+    (fromStart(first) && backTo === 1 && inclusive) ||
+    (back(backFrom) && back(backTo) && (backFrom > backTo || (backFrom === backTo && inclusive)));
+  if (!forwards) return undefined;
   const bound = (node: AstNode, offset: number): IrExpression | null => {
     const back = fromEnd(node);
     if (back !== null)
@@ -11224,8 +11555,16 @@ function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
     case "BigDecimal":
       return { kind: "call", name: "toNumber", positional: [value], named: {} };
     case "String":
-    case "java.lang.String":
-      return { kind: "call", name: "toString", positional: [value], named: {} };
+    case "java.lang.String": {
+      // Groovy's cast keeps text as it is and null as null; a known list or object keeps a plain `toString`, which
+      // the compiler checks, as its text has no faithful form yet.
+      const type = inferType(valueNode!, context.types);
+      if (onlyOf(type, STRING) && type !== 0) return value;
+      const collection = type !== UNKNOWN && (type & (LIST | OBJECT)) !== 0;
+      return (type & NULL) !== 0 && !collection
+        ? useHelper(context, "castText", [value])
+        : { kind: "call", name: "toString", positional: [value], named: {} };
+    }
     case "Boolean":
     case "boolean":
       return { kind: "call", name: "toBoolean", positional: [value], named: {} };
@@ -13710,7 +14049,9 @@ function imageFolderPaths(receiver: AstNode, context: LowerContext): AstNode[] |
   );
   return paths.length > 0 &&
     paths.length === constructors.length &&
-    paths.every((path) => /^\/?images\//iu.test(staticPath(path).text))
+    paths.every((path) =>
+      /^\/?images\//iu.test(resolvedPath(path, context) ?? staticPath(path).text),
+    )
     ? paths
     : null;
 }
@@ -13748,9 +14089,9 @@ function imageFolderListing(
 ): IrExpression | null | undefined {
   const paths = imageFolderPaths(receiver, context);
   if (paths === null) return undefined;
-  const fixed = isFileConstructor(receiver) ? staticPath(paths[0]!) : null;
+  const fixed = isFileConstructor(receiver) ? resolvedPath(paths[0]!, context) : null;
   let tag: IrExpression;
-  if (fixed?.complete === true) tag = { kind: "literal", value: pathTag(fixed.text) };
+  if (fixed !== null) tag = { kind: "literal", value: pathTag(fixed) };
   else {
     // A variable holds the path itself (fileTests).
     const path = lowerExpression(isFileConstructor(receiver) ? paths[0]! : receiver, context);
@@ -14439,12 +14780,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_RANDOM_ARITY",
           "getRandom() must have one argument.",
         );
-      // Only a positive integer bound is certain to give randomInteger() a non-empty range.
+      // Only a positive integer bound is certain to give randomInteger() a non-empty range: a literal, or a value known
+      // before the script runs, such as a constant or arithmetic on numbers, without a division's fraction.
+      const bound = staticNumber(call.arguments[0] ?? null, context);
       if (
-        args[0]!.kind === "literal" &&
-        typeof args[0]!.value === "number" &&
-        Number.isInteger(args[0]!.value) &&
-        args[0]!.value > 0
+        bound !== undefined &&
+        Number.isInteger(bound) &&
+        bound > 0 &&
+        !JSON.stringify(args[0]).includes('"operator":"/"')
       ) {
         return {
           kind: "call",
@@ -15164,6 +15507,11 @@ function noteUnintendedMarkup(node: AstNode | undefined, context: LowerContext):
       node.span,
     );
   }
+}
+
+/** The last argument of a slice helper for a range that leaves out its `to` end, `..<`: none for `..`. */
+function exclusive(range: Extract<IrExpression, { kind: "range" }>): IrExpression[] {
+  return range.inclusive ? [] : [{ kind: "literal", value: true }];
 }
 
 /** The legacy names of the setInfos() arguments, in order. */
@@ -16133,13 +16481,7 @@ function moduleLoaderDirectory(closure: AstNode): string | null {
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
   const result = new Map<string, ClosureInfo>();
-  for (const statement of nodeArray(body.statements)) {
-    const expression =
-      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-    if (expression?.kind !== "declaration") continue;
-    const name = variableName(expression.left);
-    const closure = asNode(expression.right);
-    if (name === null || closure?.kind !== "closure") continue;
+  const add = (name: string, closure: AstNode, nested: boolean): void => {
     const implicitParameter = closure.parameterSpecified !== true;
     const parameters = groovyParameters(closure.parameters) ?? [];
     const minArgs = implicitParameter
@@ -16149,8 +16491,101 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
       implicitParameter,
       minArgs,
       maxArgs: implicitParameter ? 0 : parameters.length,
+      ...(nested ? { nested } : {}),
     });
+  };
+  for (const statement of nodeArray(body.statements)) {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    if (expression?.kind !== "declaration") continue;
+    const name = variableName(expression.left);
+    const closure = asNode(expression.right);
+    if (name === null || closure?.kind !== "closure") continue;
+    add(name, closure, false);
   }
+  // A closure declared in a block of the script, such as an `if` body, becomes a script function at the top too, where
+  // TeaseScript declares functions, when that keeps what each name refers to: nothing else declares or binds its name,
+  // every use of the name follows the declaration in its block, and the closure reads no variable that a block or loop
+  // around it declares, apart from other closures lifted so.
+  const declarations = new Map<string, number>();
+  const bound = new Set<string>();
+  walkAst(body, (node) => {
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    if (name !== null) declarations.set(name, (declarations.get(name) ?? 0) + 1);
+    if (node.kind === "for" && typeof node.variable === "string") bound.add(node.variable);
+    if (node.kind === "closure") {
+      for (const parameter of groovyParameters(node.parameters) ?? []) bound.add(parameter.name);
+      if (node.parameterSpecified !== true) bound.add("it");
+    }
+  });
+  type Placed = { node: AstNode; blocks: readonly AstNode[] };
+  const uses = new Map<string, Placed[]>();
+  // The scopes, blocks and loops, that declare each variable of a block of the script.
+  const blockLocals = new Map<string, AstNode[]>();
+  const local = (name: string, scope: AstNode): void => {
+    blockLocals.set(name, [...(blockLocals.get(name) ?? []), scope]);
+  };
+  const nested: Array<{ name: string; closure: AstNode; at: Placed }> = [];
+  const place = (node: AstNode, blocks: readonly AstNode[], script: boolean): void => {
+    const inner = node.kind === "block" || node.kind === "for" ? [...blocks, node] : blocks;
+    const name =
+      node.kind === "variable"
+        ? variableName(node)
+        : node.kind === "methodCall" && node.implicitThis === true
+          ? constantString(node.method)
+          : null;
+    if (name !== null) uses.set(name, [...(uses.get(name) ?? []), { node, blocks: inner }]);
+    // The script's own blocks, outside closures and apart from its top level; a loop's variable belongs to its loop.
+    const nestedHere = script && blocks.length > 1;
+    if (script && node.kind === "for" && typeof node.variable === "string")
+      local(node.variable, node);
+    if (nestedHere && node.kind === "declaration") {
+      const declared = variableName(node.left);
+      const closure = asNode(node.right);
+      if (declared !== null) local(declared, blocks.at(-1)!);
+      if (declared !== null && closure?.kind === "closure")
+        nested.push({ name: declared, closure, at: { node, blocks: inner } });
+    }
+    for (const child of nodeChildren(node)) place(child, inner, script && node.kind !== "closure");
+  };
+  place(body, [], true);
+  const after = (node: AstNode, start: AstNode): boolean => {
+    const a = node.span;
+    const b = start.span;
+    if (a === null || a === undefined || b === null || b === undefined) return false;
+    return a.line > b.line || (a.line === b.line && a.column >= b.column);
+  };
+  let lifted = nested.filter(({ name, at }) => {
+    const block = at.blocks.at(-1);
+    return (
+      declarations.get(name) === 1 &&
+      !bound.has(name) &&
+      !result.has(name) &&
+      block !== undefined &&
+      (uses.get(name) ?? []).every((use) => use.blocks.includes(block) && after(use.node, at.node))
+    );
+  });
+  for (let changed = true; changed;) {
+    const names = new Set(lifted.map(({ name }) => name));
+    const kept = lifted.filter(({ closure, at }) => {
+      let reads = false;
+      walkAst(closure, (node) => {
+        // Calling a closure of such a block reads it too.
+        const read =
+          node.kind === "variable"
+            ? variableName(node)
+            : node.kind === "methodCall" && node.implicitThis === true
+              ? constantString(node.method)
+              : null;
+        const scopes = read === null || names.has(read) ? [] : (blockLocals.get(read) ?? []);
+        if (scopes.some((scope) => at.blocks.includes(scope))) reads = true;
+      });
+      return !reads;
+    });
+    changed = kept.length !== lifted.length;
+    lifted = kept;
+  }
+  for (const { name, closure } of lifted) add(name, closure, true);
 
   walkAst(body, (node) => {
     if (node.kind !== "methodCall" || node.implicitThis !== true) return;
@@ -16229,6 +16664,74 @@ function isFileConstructor(node: AstNode): boolean {
 
 /** Members that go through the files of a folder with a closure. */
 const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"]);
+
+/** Groovy's `FileType.FILES`, also written `groovy.io.FileType.FILES`, which walks only through files. */
+function isFilesOnly(node: AstNode, context: LowerContext): boolean {
+  const name = (value: AstNode | null): string | null => {
+    if (value?.kind === "variable") return variableName(value);
+    if (value?.kind === "classExpression") return text(value.type) ?? null;
+    if (value?.kind !== "property") return null;
+    const owner = name(asNode(value.object));
+    const property = constantString(value.property);
+    return owner === null || property === null ? null : `${owner}.${property}`;
+  };
+  const written = name(node);
+  // Groovy resolves the qualified name to the enum, also where a variable is named `groovy`.
+  if (written === "groovy.io.FileType.FILES") return true;
+  if (written !== "FileType.FILES") return false;
+  // A variable or parameter named FileType, `def FileType = [FILES: null]`, is no enum.
+  const owner = asNode(node.object);
+  if (owner?.kind !== "variable") return true;
+  const key = bindingKey(owner, context.pathBindings?.keys ?? context.bindings) ?? "FileType";
+  return !(
+    key !== "FileType" ||
+    context.assignedValues.has("FileType") ||
+    context.pathBindings?.values.has("FileType") === true ||
+    context.constantInitializers.has("FileType") ||
+    context.changingPaths.has("FileType")
+  );
+}
+
+/**
+ * Bindings whose value a path cannot be read from at conversion time, by binding key: those a compound assignment or
+ * `++` changes in place, and parameters and loop variables, which get values from outside.
+ */
+function changingVariables(body: AstNode, keys: BindingKeys): Set<string> {
+  const changing = new Set<string>();
+  // The keys of the reads of a parameter or loop variable in its own body, apart from a nested closure's own.
+  const bound = (scope: AstNode, name: string): void => {
+    const visit = (node: AstNode): void => {
+      if (node !== scope && node.kind === "closure") {
+        const own = (groovyParameters(node.parameters) ?? []).map((parameter) => parameter.name);
+        if (own.includes(name) || (name === "it" && node.parameterSpecified !== true)) return;
+      }
+      if (node.kind === "variable" && variableName(node) === name) {
+        const key = bindingKey(node, keys);
+        if (key !== null) changing.add(key);
+      }
+      for (const child of nodeChildren(node)) visit(child);
+    };
+    visit(scope);
+  };
+  walkAst(body, (node) => {
+    const operator = node.kind === "binary" ? text(node.operator) : null;
+    const updated =
+      (operator !== null &&
+        operator.endsWith("=") &&
+        !["=", "==", "!=", "<=", ">=", "==="].includes(operator)) ||
+      node.kind === "postfix" ||
+      node.kind === "prefix"
+        ? (bindingKey(asNode(node.kind === "binary" ? node.left : node.value), keys) ?? null)
+        : null;
+    if (updated !== null) changing.add(updated);
+    if (node.kind === "closure") {
+      for (const parameter of groovyParameters(node.parameters) ?? []) bound(node, parameter.name);
+      if (node.parameterSpecified !== true) bound(node, "it");
+    }
+    if (node.kind === "for" && typeof node.variable === "string") bound(node, node.variable);
+  });
+  return changing;
+}
 
 /**
  * The `new File(path)` values whose only use is `.exists()`, `.listFiles()`, or a walk through the folder's files
@@ -16544,8 +17047,7 @@ function imageFolderWalk(
   const images = imageFolderListing(receiver, node, context);
   if (images === undefined || images === null) return images === null ? [] : undefined;
   const variable = closure.parameterSpecified === true ? parameters[0]!.name : "it";
-  const known = context.imagePaths.has(variable);
-  context.imagePaths.add(variable);
+  const forget = walkVariable(body, variable, "file", context);
   try {
     if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
     const loopBody = lowerBlock(body, context);
@@ -16559,7 +17061,241 @@ function imageFolderWalk(
       },
     ];
   } finally {
-    if (!known) context.imagePaths.delete(variable);
+    forget();
+  }
+}
+
+/**
+ * Marks the reads of a walk's loop variable in its closure, apart from those of a nested closure that names a parameter
+ * the same, such as an inner `.each { it }`, as the package path of a file or a subfolder; returns the undoing.
+ */
+function walkVariable(
+  body: AstNode,
+  variable: string,
+  kind: "file" | "folder",
+  context: LowerContext,
+): () => void {
+  const marked: Array<AstNode | string> = [];
+  const visit = (node: AstNode): void => {
+    if (node.kind === "closure") {
+      const own = (groovyParameters(node.parameters) ?? []).map((parameter) => parameter.name);
+      if (own.includes(variable) || (variable === "it" && node.parameterSpecified !== true)) return;
+    }
+    if (node.kind === "variable" && variableName(node) === variable) {
+      marked.push(node);
+      const id = bindingSpanId(node);
+      if (id !== null) marked.push(id);
+    }
+    for (const child of nodeChildren(node)) visit(child);
+  };
+  visit(body);
+  const earlier = marked.map((item) => [item, context.walkedEntries.get(item)] as const);
+  for (const item of marked) context.walkedEntries.set(item, kind);
+  return () => {
+    for (const [item, kindBefore] of earlier) {
+      if (kindBefore === undefined) context.walkedEntries.delete(item);
+      else context.walkedEntries.set(item, kindBefore);
+    }
+  };
+}
+
+/**
+ * The text of a path that a script fixes before it runs, with `getDataFolder()` as the package root and a variable
+ * that only ever holds one such path read as that path; null for a computed path.
+ */
+function resolvedPath(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): string | null {
+  const literal = constantString(node);
+  if (literal !== null) return literal;
+  if (isDataFolder(node)) return "";
+  const variable = variableName(node);
+  if (node.kind === "variable" && variable !== null) {
+    const keys = context.pathBindings?.keys ?? context.bindings;
+    const key = bindingKey(node, keys) ?? variable;
+    if (seen.has(key) || context.changingPaths.has(key)) return null;
+    const assigned = (context.pathBindings?.values ?? context.assignedValues).get(key) ?? [];
+    const initializer = context.constantInitializers.get(variable);
+    const values = assigned.length > 0 ? assigned : initializer === undefined ? [] : [initializer];
+    const texts = values.map((value) => resolvedPath(value, context, new Set([...seen, key])));
+    return texts.length > 0 && texts.every((text) => text !== null && text === texts[0])
+      ? texts[0]!
+      : null;
+  }
+  if (node.kind === "gstring") {
+    const strings = Array.isArray(node.strings) ? node.strings : [];
+    const values = nodeArray(node.values);
+    let text = "";
+    for (let index = 0; index < strings.length; index += 1) {
+      const piece: unknown = strings[index];
+      if (typeof piece === "string") text += piece;
+      const value = values[index];
+      if (value === undefined) continue;
+      const part = resolvedPath(value, context, seen);
+      if (part === null) return null;
+      text += part;
+    }
+    return text;
+  }
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    const start = left === null ? null : resolvedPath(left, context, seen);
+    const rest = right === null ? null : resolvedPath(right, context, seen);
+    return start === null || rest === null ? null : start + rest;
+  }
+  return null;
+}
+
+/** The package folder a walk goes through, `sounds/Deck/`, from the path its File names; null for a computed one. */
+function walkedFolder(receiver: AstNode, context: LowerContext): string | null {
+  const variable = variableName(receiver);
+  const constructors = isFileConstructor(receiver)
+    ? [receiver]
+    : variable !== null && context.fileVariables.has(variable)
+      ? [...context.filePathOwners].flatMap(([value, owner]) => (owner === variable ? [value] : []))
+      : [];
+  const texts = constructors.map((value) => {
+    const path = nodeArray(asNode(value.arguments)?.items)[0];
+    return path === undefined ? null : resolvedPath(path, context);
+  });
+  if (texts.length === 0 || texts.some((text) => text === null || text !== texts[0])) return null;
+  // The folder's path parts, without `.`, empty parts, and a `..` with the part before it.
+  const parts: string[] = [];
+  for (const part of texts[0]!.replaceAll("\\", "/").split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (parts.pop() === undefined) return null;
+    } else parts.push(part);
+  }
+  return parts.length === 0 ? null : `${parts.join("/")}/`;
+}
+
+/** The members of a File that a closure asks of its parameter. */
+function askedMembers(body: AstNode, variable: string): Set<string> {
+  const members = new Set<string>();
+  walkAst(body, (node) => {
+    const member =
+      node.kind === "property"
+        ? constantString(node.property)
+        : node.kind === "methodCall"
+          ? constantString(node.method)
+          : null;
+    if (member !== null && variableName(node.object) === variable) members.add(member);
+  });
+  return members;
+}
+
+const LISTED_MEDIA_FOLDERS = new Set(["images", "sounds", "videos"]);
+
+/**
+ * A walk through a package folder of images, sounds, or videos whose path the script fixes, as a loop over the
+ * package's files or subfolders there, listed at conversion time: `eachFile`, which also visited subfolders, and
+ * `eachFileRecurse`, also only through files (`FileType.FILES`). A walk through the images of one folder stays with
+ * the folder's tag (imageFolderWalk); the list serves sounds and videos, subfolders, a walk through every level, and a
+ * folder the package does not hold, which a note names. Undefined for a computed folder, another folder, or a closure
+ * that tells files from subfolders where the folder holds both.
+ */
+function listedFolderWalk(
+  node: AstNode,
+  receiver: AstNode,
+  closure: AstNode,
+  recursive: "all" | "files" | null,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | undefined {
+  const body = asNode(closure.body);
+  const parameters = groovyParameters(closure.parameters);
+  if (body?.kind !== "block" || parameters === null || parameters.length > 1) return undefined;
+  const folder = walkedFolder(receiver, context);
+  const root = folder?.split("/")[0]?.toLowerCase();
+  if (folder === null || root === undefined || !LISTED_MEDIA_FOLDERS.has(root)) return undefined;
+  const variable = closure.parameterSpecified === true ? parameters[0]!.name : "it";
+  const asked = askedMembers(body, variable);
+  const tellsKinds = ["isFile", "file", "isDirectory", "directory"].some((member) =>
+    asked.has(member),
+  );
+  const returns = closureReturns(body);
+  if (returns.some(({ insideLoop, value }) => insideLoop || value !== null)) return undefined;
+  // The package's files below the folder, written as the script writes it, or else in another letter case, as the
+  // legacy player's file systems ignored case.
+  const exact = context.actualFiles.filter((file) => file.startsWith(folder));
+  const below =
+    exact.length > 0
+      ? exact
+      : context.actualFiles.filter((file) => file.toLowerCase().startsWith(folder.toLowerCase()));
+  const actualFolder = below[0]?.slice(0, folder.length) ?? folder;
+  if (below.some((file) => !file.startsWith(actualFolder))) return undefined;
+  // The walk's entries with a folder before what it holds, as Groovy visited them, and by name within a folder, where
+  // Groovy followed the file system's order.
+  const walked: Array<{ path: string; folder: boolean }> = [];
+  const visit = (prefix: string): void => {
+    const children = new Map<string, boolean>();
+    for (const file of below) {
+      const rest = file.slice(actualFolder.length);
+      if (!rest.startsWith(prefix)) continue;
+      const tail = rest.slice(prefix.length);
+      const name = tail.split("/")[0]!;
+      children.set(name, (children.get(name) ?? false) || tail.includes("/"));
+    }
+    for (const name of [...children.keys()].sort()) {
+      const path = `${prefix}${name}`;
+      if (!children.get(name)) walked.push({ path, folder: false });
+      else {
+        if (recursive !== "files") walked.push({ path, folder: true });
+        if (recursive !== null) visit(`${path}/`);
+      }
+    }
+  };
+  visit("");
+  const files = walked.filter((entry) => !entry.folder);
+  const folders = walked.filter((entry) => entry.folder);
+  if (tellsKinds && files.length > 0 && folders.length > 0) return undefined;
+  // A walk that tells files from subfolders goes through the kind the folder holds.
+  const listsFolders = tellsKinds && folders.length > 0;
+  // A walk through the images the package holds in one folder finds them by the folder's tag (imageFolderWalk).
+  if (root === "images" && recursive === null && !listsFolders && files.length > 0)
+    return undefined;
+  const entries = (tellsKinds ? (listsFolders ? folders : files) : walked).map(
+    (entry) => entry.path,
+  );
+  // The package holds the images and sounds folders' files at its root; other folders keep their names.
+  const packagePath = (rest: string): string =>
+    root === "videos" ? `${actualFolder}${rest}` : `${actualFolder.slice(root.length + 1)}${rest}`;
+  const listed = folder.replace(/\/$/u, "");
+  addDiagnostic(
+    context,
+    "SX_FOLDER_FILES",
+    "warning",
+    entries.length === 0
+      ? `The legacy script went through the ${listsFolders ? "subfolders" : "files"} of ${listed}, which the package does not hold, so this goes through none.`
+      : `The legacy script went through the ${listsFolders ? "subfolders" : "files"} of ${listed}; this goes through the package's ${listsFolders ? "subfolders" : "files"} there, as listed at conversion time.`,
+    node.span,
+  );
+  const forget = walkVariable(body, variable, listsFolders ? "folder" : "file", context);
+  try {
+    if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
+    const loopBody = lowerBlock(body, context);
+    return [
+      {
+        kind: "for",
+        variable,
+        collection: {
+          kind: "list",
+          items: entries.map((entry): IrExpression => ({
+            kind: "literal",
+            value: packagePath(entry),
+          })),
+          lines: true,
+        },
+        body: returns.length > 0 ? withoutFinalContinue(returnsAsContinue(loopBody)) : loopBody,
+        span,
+      },
+    ];
+  } finally {
+    forget();
   }
 }
 
@@ -16573,13 +17309,18 @@ function listedImageMember(
   context: LowerContext,
 ): IrExpression | undefined {
   const variable = variableName(receiver);
-  if (variable === null || !context.imagePaths.has(variable)) return undefined;
+  const id = bindingSpanId(receiver);
+  const kind =
+    context.walkedEntries.get(receiver) ??
+    (id === null ? undefined : context.walkedEntries.get(id));
+  if (variable === null || kind === undefined) return undefined;
+  const folder = kind === "folder";
   const path: IrExpression = { kind: "variable", name: variable };
   if (member === "name" || member === "getName") return useHelper(context, "fileName", [path]);
   if (["path", "getPath", "absolutePath", "getAbsolutePath", "toString"].includes(member))
     return path;
-  if (member === "isFile" || member === "file") return { kind: "literal", value: true };
-  if (member === "isDirectory" || member === "directory") return { kind: "literal", value: false };
+  if (member === "isFile" || member === "file") return { kind: "literal", value: !folder };
+  if (member === "isDirectory" || member === "directory") return { kind: "literal", value: folder };
   return undefined;
 }
 

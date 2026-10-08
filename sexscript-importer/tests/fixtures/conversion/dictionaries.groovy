@@ -99,3 +99,9 @@ if (remembered) show("Remembered " + remembered[slot])
 owned.each { entry -> show("${entry.key}: ${entry.value}") }
 // A value that the loop body sets again is a variable of its own, apart from the key.
 owned.each { name, count -> if (count > 2) count = 2 }
+// ToyExpanded toys: a key that a stored read may leave null is text, so a stored toy finds its entry.
+def getStateToy = { String s -> loadString("toy.state.${s}-toy") }
+def wornToys = [:]
+wornToys[GAG] = [name: "ball gag"]
+def stateToy = getStateToy("gagged")
+if (stateToy) show("Remove your " + wornToys[stateToy].name)

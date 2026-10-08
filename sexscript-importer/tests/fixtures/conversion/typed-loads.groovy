@@ -33,3 +33,8 @@ def keyOf = { return "game.points" }
 def counted = loadInteger(keyOf())
 if (counted == null) counted = 1 + 1
 show("" + counted + " " + sexscriptLegacyKey1)
+// A default that reads a variable the code between declares stays where it is, after that declaration.
+def picture = loadString("game.picture")
+def saved = loadString("game.savedPicture")
+if (picture == null) picture = saved
+show("Picture " + picture)

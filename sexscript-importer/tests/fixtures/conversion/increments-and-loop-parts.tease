@@ -33,17 +33,13 @@ let index = slot(7)
 tally[index] += 1
 say "Tally ${tally[3]} ${tally[0]}, score ${stats.score}"
 // A later loop in a nested block may declare the counter of an earlier loop again.
-let i = 0
-while i < 2 {
+for i in 0..2 {
   say "Warm up ${i}"
-  i += 1
 }
 say "Again?"
 if (choose yes: "Yes", no: "No") == "yes" {
-  i = 0
-  while i < 3 {
+  for i in 0..3 {
     say "Again ${i}"
-    i += 1
   }
 }
 // A prefix increment inside an expression changes the variable before the statement; for (;;) loops until a break.

@@ -188,11 +188,15 @@ export type HelperName =
   | "booleanText"
   | "button"
   | "value"
-  | "missingText"
   | "loadInteger"
   | "loadFloat"
   | "textMinus"
+  | "textAt"
+  | "slice"
+  | "spliced"
   | "repeatList"
+  | "times"
+  | "castText"
   | "compare"
   | "replaceChars"
   | "askInteger"
@@ -245,7 +249,14 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
-  if (needed.has("loadInteger") || needed.has("loadFloat")) needed.add("value");
+  if (needed.has("times")) needed.add("repeatList");
+  if (
+    needed.has("loadInteger") ||
+    needed.has("loadFloat") ||
+    needed.has("slice") ||
+    needed.has("times")
+  )
+    needed.add("value");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -266,7 +277,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "random",
   "loadFirstTrue",
   "value",
-  "missingText",
   "loadInteger",
   "loadFloat",
   "button",
@@ -302,7 +312,12 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMinus",
   "booleanText",
   "textMinus",
+  "textAt",
+  "slice",
+  "spliced",
   "repeatList",
+  "times",
+  "castText",
   "compare",
   "replaceChars",
   "askInteger",
@@ -384,10 +399,66 @@ function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrState
   };
 }
 
-const fn = (name: string, parameters: string[], body: IrStatement[]): IrStatement => ({
+/**
+ * The part a Groovy range index `from..to`, or `from..<to` when `exclusive`, covers: the positions from `low` up to but
+ * not including `high`, and whether it `runsBack`. Like Groovy's subListBorders, a negative end counts from the end
+ * first; the range runs backwards where `from` then comes after `to`, and leaves out its `to` end when exclusive. A
+ * read (`fractions`) drops a fraction of an end toward zero, and a fractional end makes Groovy's NumberRange, whose
+ * ends come in order of their values first; a write keeps the fraction, which stops the script where Groovy failed too.
+ */
+const positions = (fractions: boolean): IrStatement[] => {
+  const whole = (name: string): IrExpression =>
+    fractions ? { kind: "call", name: "toInteger", positional: [v(name)], named: {} } : v(name);
+  return [
+    ...(fractions
+      ? [
+          letS("start", v("from")),
+          letS("finish", v("to")),
+          ifS(
+            bin(
+              "and",
+              {
+                kind: "unary",
+                operator: "not",
+                value: bin(
+                  "and",
+                  { kind: "typeTest", value: v("from"), type: "integer" },
+                  { kind: "typeTest", value: v("to"), type: "integer" },
+                ),
+              },
+              bin(">", v("from"), v("to")),
+            ),
+            [set(v("start"), v("to")), set(v("finish"), v("from"))],
+          ),
+        ]
+      : []),
+    letS("first", whole(fractions ? "start" : "from")),
+    ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
+    letS("last", whole(fractions ? "finish" : "to")),
+    ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
+    letS("runsBack", bin(">", v("first"), v("last"))),
+    letS("low", v("first")),
+    letS("high", bin("+", v("last"), lit(1))),
+    ifS(v("exclusive"), [set(v("high"), v("last"))]),
+    ifS(v("runsBack"), [
+      set(v("low"), v("last")),
+      ifS(v("exclusive"), [set(v("low"), bin("+", v("last"), lit(1)))]),
+      set(v("high"), bin("+", v("first"), lit(1))),
+    ]),
+  ];
+};
+const fn = (
+  name: string,
+  parameters: string[],
+  body: IrStatement[],
+  defaults: Record<string, IrExpression> = {},
+): IrStatement => ({
   kind: "function",
   name,
-  parameters: parameters.map((parameter) => ({ name: parameter, defaultValue: null })),
+  parameters: parameters.map((parameter) => ({
+    name: parameter,
+    defaultValue: defaults[parameter] ?? null,
+  })),
   body,
   span: null,
 });
@@ -1120,17 +1191,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     name: "sexscriptLegacyValue",
     build: () => fn("sexscriptLegacyValue", ["value"], [ret(v("value"))]),
   },
-  // A text that legacy tested for null, missing, which a missing text read now gives as the empty text; the value may
-  // hold null from elsewhere too, so both count, and a call that gives it runs once.
-  missingText: {
-    name: "sexscriptLegacyMissingText",
-    build: () =>
-      fn(
-        "sexscriptLegacyMissingText",
-        ["value"],
-        [ret(bin("or", bin("==", v("value"), lit(null)), bin("==", v("value"), lit(""))))],
-      ),
-  },
   // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping its fraction toward
   // zero, and read null for a missing key, which the script could replace with a value of its own (`whenMissing`). The
   // parsed value passes through `value`, so that its type stays open, as a storage read's does.
@@ -1174,6 +1234,19 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [ifS(bin("==", v("value"), lit(null)), [ret(lit(null))]), ret(template(v("value")))],
       ),
   },
+  // Groovy `(String) value`: null stays null, and another value becomes its text.
+  castText: {
+    name: "sexscriptLegacyCastText",
+    build: () =>
+      fn(
+        "sexscriptLegacyCastText",
+        ["value"],
+        [
+          ifS(bin("==", v("value"), lit(null)), [ret(lit(null))]),
+          ret({ kind: "call", name: "toString", positional: [v("value")], named: {} }),
+        ],
+      ),
+  },
   // Groovy truth: false for null, false, zero, empty text, and an empty list, set, dict, or map.
   truth: {
     name: "sexscriptLegacyTruth",
@@ -1214,6 +1287,144 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
         ],
+      ),
+  },
+  // Groovy `text[position]`: the one character there as text, a negative position counting from the end.
+  textAt: {
+    name: "sexscriptLegacyTextAt",
+    build: () =>
+      fn(
+        "sexscriptLegacyTextAt",
+        ["text", "position"],
+        [
+          letS("at", v("position")),
+          ifS(bin("<", v("at"), lit(0)), [set(v("at"), prop(v("text"), "length"), "+=")]),
+          ret({
+            kind: "methodCall",
+            target: v("text"),
+            name: "substring",
+            arguments: [v("at"), bin("+", v("at"), lit(1))],
+          }),
+        ],
+      ),
+  },
+  // Groovy `value[from..to]` and `value[from..<to]`: the elements of a list, or the characters of a text, that the range
+  // covers (positions), in reverse order where it runs backwards.
+  slice: {
+    name: "sexscriptLegacySlice",
+    build: () => {
+      const walk = (step: IrStatement): IrStatement => ({
+        kind: "while",
+        condition: bin("!=", v("position"), v("stop")),
+        body: [step, set(v("position"), v("step"), "+=")],
+        span: null,
+      });
+      return fn(
+        "sexscriptLegacySlice",
+        ["value", "from", "to", "exclusive"],
+        [
+          ...positions(true),
+          letS("position", v("low")),
+          letS("stop", v("high")),
+          letS("step", lit(1)),
+          ifS(v("runsBack"), [
+            set(v("position"), bin("-", v("high"), lit(1))),
+            set(v("stop"), bin("-", v("low"), lit(1))),
+            set(v("step"), lit(-1)),
+          ]),
+          letS("part", v("value")),
+          ifS(
+            { kind: "typeTest", value: v("value"), type: "string" },
+            [
+              letS("text", lit("")),
+              walk(
+                set(
+                  v("text"),
+                  {
+                    kind: "methodCall",
+                    target: v("value"),
+                    name: "substring",
+                    arguments: [v("position"), bin("+", v("position"), lit(1))],
+                  },
+                  "+=",
+                ),
+              ),
+              set(v("part"), v("text")),
+            ],
+            [
+              letS("items", { kind: "list", items: [] }),
+              walk(add("items", at(v("value"), v("position")))),
+              set(v("part"), v("items")),
+            ],
+          ),
+          // Through `value`, the part keeps an open type, as Groovy's did.
+          ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("part")], named: {} }),
+        ],
+        { exclusive: lit(false) },
+      );
+    },
+  },
+  // Groovy `list[from..to] = values`: the list with the elements the range covers (positions) replaced by the values, a
+  // list or one value, in their own order also where the range runs backwards.
+  spliced: {
+    name: "sexscriptLegacySpliced",
+    build: () =>
+      fn(
+        "sexscriptLegacySpliced",
+        ["value", "from", "to", "values", "exclusive"],
+        [
+          ...positions(false),
+          // A part that reaches past the end replaces the elements up to the end; a fractional end stays, to fail.
+          ifS(
+            bin("and", bin(">", v("high"), prop(v("value"), "length")), {
+              kind: "typeTest",
+              value: v("high"),
+              type: "integer",
+            }),
+            [set(v("high"), prop(v("value"), "length"))],
+          ),
+          letS("items", {
+            kind: "methodCall",
+            target: v("value"),
+            name: "take",
+            arguments: [v("low")],
+          }),
+          ifS(
+            { kind: "typeTest", value: v("values"), type: "list" },
+            [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "methodCall",
+                  target: v("items"),
+                  name: "addAll",
+                  arguments: [v("values")],
+                },
+                span: null,
+              },
+            ],
+            [add("items", v("values"))],
+          ),
+          {
+            kind: "expression",
+            expression: {
+              kind: "methodCall",
+              target: v("items"),
+              name: "addAll",
+              arguments: [
+                {
+                  kind: "methodCall",
+                  target: v("value"),
+                  name: "takeLast",
+                  arguments: [bin("-", prop(v("value"), "length"), v("high"))],
+                },
+              ],
+            },
+            span: null,
+          },
+          ret(v("items")),
+        ],
+        { exclusive: lit(false) },
       ),
   },
   // Groovy `text - part`: the text without the first occurrence of the part.
@@ -1323,6 +1534,53 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret(v("result")),
         ],
       ),
+  },
+  // Groovy `value * count` for a value whose type only the running script knows: text and a list repeat by the count
+  // cut to whole times, which text checks and a list allows below 0 only when empty, and a number multiplies; another
+  // count fails at `*`, as Groovy failed.
+  times: {
+    name: "sexscriptLegacyTimes",
+    build: () => {
+      const value = (expression: IrExpression): IrStatement =>
+        ret({ kind: "call", name: "sexscriptLegacyValue", positional: [expression], named: {} });
+      return fn(
+        "sexscriptLegacyTimes",
+        ["value", "count"],
+        [
+          ifS({ kind: "typeTest", value: v("count"), type: "number" }, [
+            letS("whole", { kind: "call", name: "toInteger", positional: [v("count")], named: {} }),
+            ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+              value({
+                kind: "methodCall",
+                target: v("value"),
+                name: "repeat",
+                arguments: [v("whole")],
+              }),
+            ]),
+            ifS(
+              bin(
+                "and",
+                { kind: "typeTest", value: v("value"), type: "list" },
+                bin(
+                  "or",
+                  bin(">=", v("whole"), lit(0)),
+                  bin("==", prop(v("value"), "length"), lit(0)),
+                ),
+              ),
+              [
+                value({
+                  kind: "call",
+                  name: "sexscriptLegacyRepeatList",
+                  positional: [v("value"), v("whole")],
+                  named: {},
+                }),
+              ],
+            ),
+          ]),
+          value(bin("*", v("value"), v("count"))),
+        ],
+      );
+    },
   },
   // The items a Groovy loop visited: none of null, the characters of text, the elements of anything else.
   items: {

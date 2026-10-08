@@ -178,4 +178,16 @@ for name, count in owned {
     count = 2
   }
 }
+// ToyExpanded toys: a key that a stored read may leave null is text, so a stored toy finds its entry.
+function getStateToy(s) {
+  return load "toy.state.${s}-toy", default: null
+}
+let wornToys = dict{}
+// NOTE SX_SHARED_MAP_WRITE line 105: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+wornToys[GAG] = { name: "ball gag" }
+let stateToy = getStateToy("gagged")
+// NOTE SX_DICT_MISSING_KEY line 107: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+if stateToy != null and stateToy != "" {
+  say "Remove your ${wornToys["${stateToy}"].name}"
+}
 exit

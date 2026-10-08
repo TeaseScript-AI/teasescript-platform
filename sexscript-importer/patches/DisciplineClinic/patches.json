@@ -104,6 +104,13 @@
       "category": "b",
       "reason": "spank() sets numTempoChangeStrokes to spanks + 2, and callers pass halves and other fractions of numSpanks (numSpanks / 2, numSpanks * 1.25), so the count can be a fraction, as Groovy kept it; it starts as 0.0 so that it holds a number.",
       "diff": "tempo-change-fraction.diff"
+    },
+    {
+      "id": "offense-level-back",
+      "layer": "source",
+      "category": "b",
+      "reason": "Choosing Back in the offense level menu gives 0, and the clinic-offense test read offenseArray[-1] before the loop ended: the last offense of the category, which could wrongly show the clinic's refusal, and an error where the category has no offenses, such as the one for offenses not in the list, which failed in Groovy too. The test now runs only for a chosen offense, as resetOffense already did, so Back leaves the menu.",
+      "diff": "offense-level-back.diff"
     }
   ]
 }

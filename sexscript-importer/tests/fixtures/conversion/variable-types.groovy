@@ -40,6 +40,9 @@ show(names[position])
 def offenses = [["late", 2], ["rude", 4]]
 def single = [["missed", 1]]
 show("First: " + offenses[0][0] + ", then " + single[0][0])
+// An element of such a list in a sum or a text method is read open, as Groovy chose the operation by its value.
+def total = offenses[0][1] * 2 + offenses[1][1]
+show("Total ${total} for " + offenses[1][0].toUpperCase())
 // A list that starts with a null element takes text later.
 def toys = [null]
 toys[0] = "rope"

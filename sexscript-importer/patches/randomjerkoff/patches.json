@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "The information record is kept in the legacy online storage. setInformation(id, information, key, value) wrote into the caller's map, which Groovy shares by reference; TeaseScript copies records and cannot index one by a key, so the calls become direct writes. The record starts with maxPoints 1000, the value the first start sets, so its comparisons see a number, and firstStart, which nothing reads, is saved as yyyy-MM-dd text instead of a Date. The maxPoints comparison also tests the copied value for null again, since TeaseScript does not carry the field's null test to the copy; it is always true there.",
       "diff": "information-record.diff"
+    },
+    {
+      "id": "package-images",
+      "layer": "source",
+      "category": "b",
+      "reason": "retrieveFiles walked the image folder that getImagePath gives: the player's own folder when configured, else the working folder's images/randomjerkoff. A package cannot reach a folder of the player's computer, so the walk goes through the package's images/randomjerkoff, which holds the script's images, and each pick is shown by its package path instead of the path arithmetic on the legacy folder. The pick itself, getRandom(list.size()-1), is kept as written.",
+      "diff": "package-images.diff"
     }
   ]
 }

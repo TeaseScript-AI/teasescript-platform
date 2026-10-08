@@ -326,7 +326,12 @@ export function emitExpression(expression: IrExpression): string {
         const rows = laidOut(expression.items.map((item) => () => emitExpression(item)));
         if (rows !== null) return `${prefix}[${rows}]`;
       }
-      return `${prefix}[${expression.items.map(emitExpression).join(", ")}]`;
+      const single = `${prefix}[${expression.items.map(emitExpression).join(", ")}]`;
+      if (expression.lines === true && single.length > 80) {
+        const lines = laidOut(expression.items.map((item) => () => emitExpression(item)));
+        if (lines !== null) return `${prefix}[${lines}]`;
+      }
+      return single;
     }
     case "object": {
       const prefix = expression.dict === true ? "dict" : "";

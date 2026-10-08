@@ -680,7 +680,8 @@ function readState(page: Page): Promise<PlayerState> {
         files: Array<{ path: string; startInstruction: number; endInstruction: number }>;
         instructions: Array<{ kind: string; span?: { sl: number } }>;
       };
-      snapshot: {
+      // The published runtime state (#685): the session view with the Stage and its active media.
+      state: {
         status: string;
         failure: {
           code: string;
@@ -695,12 +696,11 @@ function readState(page: Page): Promise<PlayerState> {
           deadlineMs?: number;
         } | null;
         currentSessionTimeMs: number;
-        nextEventSequence: number;
-        frames: Array<{ file: number }> | { file: number };
-        stageImage: unknown;
-        settledMedia: Array<{ source: string; loaded: boolean }>;
-        backgroundActions: Array<{ media?: { source: string; loaded: boolean } }>;
+        nextInstruction: number;
+        stage: { image: string | null };
+        media: Array<{ source: string; loaded: boolean }>;
       };
+      events: Array<{ sequence: number }>;
       transcriptEntries: Array<{ text?: string }>;
     };
     type MountedRoot = {
@@ -713,14 +713,14 @@ function readState(page: Page): Promise<PlayerState> {
     const app = document.querySelector("#app") as (Element & { _vnode?: MountedRoot }) | null;
     const root = app?._vnode;
     const session = root?.component?.subTree?.component?.props?.player?.session?.value ?? null;
-    const snapshot = session?.snapshot;
+    const view = session?.state;
     const fileOf = (instruction: number | undefined) =>
       instruction === undefined
         ? null
         : (session?.plan.files.find(
-            (file) => instruction >= file.startInstruction && instruction <= file.endInstruction,
+            (file) => instruction >= file.startInstruction && instruction < file.endInstruction,
           )?.path ?? null);
-    const action = snapshot?.foregroundAction ?? null;
+    const action = view?.foregroundAction ?? null;
     const site =
       action?.kind !== "interaction" || action.owningInstruction === undefined
         ? null
@@ -729,29 +729,20 @@ function readState(page: Page): Promise<PlayerState> {
       "[data-composer-input]",
     );
     const stage = document.querySelector<HTMLImageElement>(".stage-media");
-    const stageImage = typeof snapshot?.stageImage === "string" ? snapshot.stageImage : null;
-    const media = [
-      ...(snapshot?.settledMedia ?? []),
-      ...(snapshot?.backgroundActions ?? []).flatMap((item) =>
-        item.media === undefined ? [] : [item.media],
-      ),
-    ].map((item) => ({ source: item.source, loaded: item.loaded }));
-    const frames = snapshot?.frames;
-    const frame = Array.isArray(frames) ? frames.at(-1) : frames;
-    const frameFile = frame === undefined ? null : (session?.plan.files[frame.file]?.path ?? null);
+    const stageImage = view?.stage.image ?? null;
+    const media = (view?.media ?? []).map((item) => ({ source: item.source, loaded: item.loaded }));
+    const frameFile = fileOf(view?.nextInstruction);
     return {
-      status: snapshot?.status ?? null,
+      status: view?.status ?? null,
       failure:
-        snapshot?.failure == null
+        view?.failure == null
           ? null
           : {
-              code: snapshot.failure.code,
-              message: snapshot.failure.message,
-              path: snapshot.failure.path ?? null,
+              code: view.failure.code,
+              message: view.failure.message,
+              path: view.failure.path ?? null,
               line:
-                snapshot.failure.span?.start === undefined
-                  ? null
-                  : snapshot.failure.span.start.line + 1,
+                view.failure.span?.start === undefined ? null : view.failure.span.start.line + 1,
             },
       foreground:
         action === null
@@ -761,8 +752,8 @@ function readState(page: Page): Promise<PlayerState> {
             : action.kind,
       site,
       delayMs:
-        action?.kind === "delay" && action.deadlineMs !== undefined && snapshot !== undefined
-          ? action.deadlineMs - snapshot.currentSessionTimeMs
+        action?.kind === "delay" && action.deadlineMs !== undefined && view !== undefined
+          ? action.deadlineMs - view.currentSessionTimeMs
           : null,
       options: [...document.querySelectorAll("[data-foreground-controls] button")].map(
         (button) => button.textContent?.trim() ?? "",
@@ -781,7 +772,7 @@ function readState(page: Page): Promise<PlayerState> {
       stageShown: stage !== null && stage.complete && stage.naturalWidth > 0,
       media,
       progress:
-        (snapshot?.nextEventSequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
+        (session?.events.at(-1)?.sequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
       lastText: (session?.transcriptEntries.at(-1)?.text ?? "").slice(0, 200),
       recentText: (session?.transcriptEntries.slice(-3) ?? [])
         .map((entry) => entry.text ?? "")

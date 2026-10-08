@@ -41,6 +41,8 @@ export interface TypeEnvironment {
   functionPassThrough?: ReadonlyMap<string, readonly number[]>;
   /** Set while the list elements are not inferred yet, so an element read adds no type (inferVariableTypes). */
   elementsPending?: true;
+  /** Set while the results of local functions are not inferred yet, so a call adds no type (inferVariableTypes). */
+  resultsPending?: true;
   /**
    * Types of the variables a closure declares (its parameters and `def` locals), by binding key, apart from script
    * variables of the same name; `variables` holds the union of every binding of a name.
@@ -234,10 +236,19 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
   if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
   if (operator === "[") {
-    // A text read by a position or a range is text.
+    // A text read by a position or a range is text, as the lowering reads a text that may be null.
     const target = inferType(asNode(node.left), environment);
-    if (onlyOf(target, STRING) && target !== 0) return STRING;
+    if (onlyOf(target, STRING | NULL) && (target & STRING) !== 0) return STRING;
+    // A list read by a range is the list of those elements; a receiver whose type is pending adds none yet.
+    if (asNode(node.right)?.kind === "range")
+      return target === 0
+        ? 0
+        : onlyOf(target, LIST | NULL) && (target & LIST) !== 0
+          ? LIST
+          : UNKNOWN;
     if (environment.elementsPending === true) return 0;
+    // A variable of unknown type, such as a parameter, may hold another list than one of its name elsewhere.
+    if (target === UNKNOWN) return UNKNOWN;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
     return element === undefined || element === 0 ? UNKNOWN : element;
@@ -325,7 +336,8 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
   const receiver = variableName(node.object);
   if (node.implicitThis === true && environment.localFunctions?.has(name) === true) {
     const passed = environment.functionPassThrough?.get(name);
-    if (passed === undefined) return environment.functionResults?.get(name) ?? UNKNOWN;
+    if (passed === undefined)
+      return environment.functionResults?.get(name) ?? (environment.resultsPending ? 0 : UNKNOWN);
     const items: unknown = asNode(node.arguments)?.items;
     const args = Array.isArray(items) ? items.filter(isAstNode) : [];
     return passed.reduce(
@@ -500,6 +512,7 @@ export function inferVariableTypes(
     functionResults,
     functionPassThrough: passThrough,
     elementsPending: true,
+    resultsPending: true,
     ...scoped,
   };
   const settle = (): void => {
@@ -551,20 +564,22 @@ export function inferVariableTypes(
       functionResults,
       functionPassThrough: passThrough,
       listElements,
+      resultsPending: true,
       ...scoped,
     };
     settle();
   }
-  if (!settled) {
-    environment = {
-      variables: types,
-      localFunctions,
-      functionResults,
-      functionPassThrough: passThrough,
-      ...scoped,
-    };
-    settle();
-  }
+  // A function whose results stay unknown gives an unknown value to the variables its calls set.
+  for (const [name, type] of functionResults) if (type === 0) functionResults.set(name, UNKNOWN);
+  environment = {
+    variables: types,
+    localFunctions,
+    functionResults,
+    functionPassThrough: passThrough,
+    ...(settled ? { listElements: environment.listElements } : {}),
+    ...scoped,
+  };
+  settle();
   for (const [key, type] of types) if (type === 0) types.set(key, UNKNOWN);
   for (const [name, type] of functionResults) if (type === 0) functionResults.set(name, UNKNOWN);
   const listElements = inferListElements(body, environment);
@@ -696,7 +711,10 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
     const left = asNode(node.left);
     const value = asNode(node.right);
     if (left?.kind === "binary" && left.operator === "[" && value !== null) {
-      add(variableName(left.left), inferType(value, environment));
+      // `list[a..b] = values` puts the elements of a list of values in place of that part.
+      if (asNode(left.right)?.kind === "range" && (inferType(value, environment) & LIST) !== 0)
+        appendList(variableName(left.left), value);
+      else add(variableName(left.left), inferType(value, environment));
       return;
     }
     const name = variableName(left);

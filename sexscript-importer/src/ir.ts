@@ -125,9 +125,18 @@ export type IrStatement =
     })
   /**
    * `valueType` is the type of the saved value where the importer knows it and the key is one literal, written as an
-   * annotation, from which the package decides the key's type (storage-keys.ts).
+   * annotation, from which the package decides the key's type (storage-keys.ts). `open` marks a value of no known type
+   * that may be a number or another value, which keeps the key's type open. `keys` lists the literal keys that a
+   * computed key can be, where the importer generated it.
    */
-  | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression; valueType?: string })
+  | (IrBase & {
+      kind: "save";
+      key: IrExpression;
+      value: IrExpression;
+      valueType?: string;
+      open?: true;
+      keys?: string[];
+    })
   | (IrBase & { kind: "delete"; key: IrExpression })
   | (IrBase & {
       kind: "function";
@@ -179,7 +188,8 @@ export type IrStatement =
       /** `prompt` marks the importer's test that a legacy input's question is not null before it is shown. */
       guard?: "prompt";
     })
-  | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
+  /** `wholeBound` marks a `<` or `<=` condition whose right side variable typing proves a whole number, never null. */
+  | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[]; wholeBound?: true })
   | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
   /**
    * `dict` marks a loop over the keys of a dict (#536); `valueVariable` names each key's value too,
@@ -238,8 +248,8 @@ export type IrExpression =
   /** `decimal` writes a whole number as a decimal (`1.0`), which TeaseScript types as a number rather than an integer. */
   | { kind: "literal"; value: string | number | boolean | null; action?: true; decimal?: true }
   | { kind: "variable"; name: string }
-  /** `set` marks a set literal `set[...]` (V30 §16). */
-  | { kind: "list"; items: IrExpression[]; set?: true }
+  /** `set` marks a set literal `set[...]` (V30 §16); `lines` writes a long list with an item on each line. */
+  | { kind: "list"; items: IrExpression[]; set?: true; lines?: true }
   /**
    * An object literal, or with `dict` a dict literal `dict{ ... }` (#536). A property with `key` has a key that is
    * computed or not a name, written `[key]: value` or `"key": value`; `name` is unused then.
