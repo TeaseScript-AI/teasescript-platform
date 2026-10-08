@@ -14779,12 +14779,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_RANDOM_ARITY",
           "getRandom() must have one argument.",
         );
-      // Only a positive integer bound is certain to give randomInteger() a non-empty range.
+      // Only a positive integer bound is certain to give randomInteger() a non-empty range: a literal, or a value known
+      // before the script runs, such as a constant or arithmetic on numbers, without a division's fraction.
+      const bound = staticNumber(call.arguments[0] ?? null, context);
       if (
-        args[0]!.kind === "literal" &&
-        typeof args[0]!.value === "number" &&
-        Number.isInteger(args[0]!.value) &&
-        args[0]!.value > 0
+        bound !== undefined &&
+        Number.isInteger(bound) &&
+        bound > 0 &&
+        !JSON.stringify(args[0]).includes('"operator":"/"')
       ) {
         return {
           kind: "call",

@@ -37,6 +37,9 @@ show(spell(word))
 def positions = [" ", "otk"]
 def pick = getRandom(positions.size()) + 1
 if (positions[pick] == "otk") show("Over my knee")
+// A bound known before the script runs, as in teachertrouble, draws natively.
+def swats = getRandom(20-10+1) + 10
+show("Swats " + swats)
 // Java replaceAll() with a regular expression that text operations express.
 def serial = "ab12-x|[y]"
 show(serial.replaceAll("[^0-9]", "") + " " + serial.replaceAll("\\[|\\]", "") + " " + serial.replaceAll("\\|", "/"))
