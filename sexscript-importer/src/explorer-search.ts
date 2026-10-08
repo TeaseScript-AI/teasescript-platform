@@ -4109,7 +4109,12 @@ function lineCoverage(
           trend:
             watch.closer && watch.operations * 4 > session.operations * 3 ? "improving" : "flat",
         };
-      else if (chain !== undefined && Number.isFinite(chain.best))
+      // A stored value measures a part only as the constant's type: a timestamp is no distance from `true`.
+      else if (
+        chain !== undefined &&
+        Number.isFinite(chain.best) &&
+        (typeof comparison?.shown !== "boolean" || /= (true|false)$/u.test(chain.value))
+      )
         closest = { needs, value: chain.value, distance: chain.best, session: chain.sessions };
       const status =
         closest === undefined ? "unmeasured" : closest.distance === 0 ? "met" : "unmet";

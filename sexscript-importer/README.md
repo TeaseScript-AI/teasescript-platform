@@ -549,8 +549,11 @@ or trap the base found is missing. A net change can hide a loss elsewhere, so th
 condition ways each side visited and the other did not, per seed, and the lines consistently lost or gained (visited by
 one side in at least two thirds of the seeds and by the other in none), with their files and ranges and the search
 figures that help explain them (states, sessions, time steps, quit visits, traps, open states, the top hotspot). A
-`--favourite` unit with consistently lost lines is marked `EXPLAIN`. Lines are counted from compiling each unit, as the
-explorer counts them.
+`--favourite` unit with consistently lost lines is marked `EXPLAIN`; lines first-ever reached (by a candidate seed and by
+no base seed) are counted and listed too. Lines are counted from compiling each unit, as the explorer counts them. A
+last table shows progress without new lines: for each way both sides missed with a measured part (the target report's
+`best`), the closest any seed of each side came, with how many ways came closer or went further and the top examples,
+such as "needs `visits >= 20`: 3 → 12".
 
 Known limits:
 

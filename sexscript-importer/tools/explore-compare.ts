@@ -13,7 +13,8 @@
  * 1 pp below the base's lowest, when a seed the base exhausted is not exhausted by the candidate with at least the same
  * coverage, or when a crash or trap the base found (code or kind and place) is missing from all the candidate's seeds.
  * A unit named with `--favourite` that has consistently lost lines is marked `EXPLAIN`: the losses need an explanation
- * before the change passes. Lines are counted as the explorer counts them, from compiling the unit's folder (its
+ * before the change passes. Lines first-ever reached (by a candidate seed, by no base seed) are counted and listed, and a
+ * last table compares, for the ways both sides missed, the closest any seed came to a measured part of each. Lines are counted as the explorer counts them, from compiling the unit's folder (its
  * `dir`), so the repository build is needed (`npm run build:typescript` in the repository root). Writes Markdown.
  */
 import { readdir, readFile } from "node:fs/promises";
@@ -47,6 +48,8 @@ interface Run {
   readonly unvisited: ReadonlyMap<string, readonly string[]>;
   /** Condition ways missed at a condition play reached, as `file:line:instruction:way`. */
   readonly missedWays: ReadonlySet<string>;
+  /** For a missed way with a measured part, the closest a state came to it (`best` of the target report), by way. */
+  readonly closest: ReadonlyMap<string, { needs: string; value: string; distance: number }>;
 }
 
 /** The runs of one side, by unit and seed folder (`""` for a folder of reports). */
@@ -138,6 +141,24 @@ function parseRun(value: unknown): Run | null {
         (branch) =>
           `${text(branch.path)}:${count(branch.line)}:${count(branch.instruction)}:${text(branch.missed)}`,
       ),
+    ),
+    closest: new Map(
+      records(coverage.unvisitedBranches)
+        .filter((branch) => isRecord(branch.best))
+        .map((branch) => {
+          const best = fields(branch.best);
+          return [
+            `${text(branch.path)}:${count(branch.line)}:${text(branch.missed)}`,
+            {
+              needs: text(best.needs),
+              value:
+                typeof best.value === "number"
+                  ? String(Number(best.value.toPrecision(6)))
+                  : String(best.value),
+              distance: count(best.distance),
+            },
+          ];
+        }),
     ),
   };
 }
@@ -331,17 +352,17 @@ async function lineTable(
     "## Gained and lost lines",
     "",
     "Per seed means. Consistently: visited by one side in at least two thirds of the seeds and by the other in none.",
-    "`EXPLAIN`: a favourite unit with consistently lost lines.",
+    "First-ever: visited by a candidate seed and by no base seed. `EXPLAIN`: a favourite unit with consistently lost lines.",
     "",
-    "| Unit | Net Δ pp | Gained lines | Lost lines | Ways +/− | Consistently lost | Consistently gained | Top consistently lost | Note |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Unit | Net Δ pp | Gained lines | Lost lines | Ways +/− | Consistently lost | Consistently gained | First-ever | Top consistently lost | Note |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   const details: string[] = [];
   for (const unit of units(base, candidate)) {
     const runs = pairs(base, candidate, unit);
     if (runs.length === 0) continue;
     if (runs.some((run) => run.base.contentHash !== run.candidate.contentHash)) {
-      out.push(`| ${unit} | the unit's files differ between the sides | | | | | | | |`);
+      out.push(`| ${unit} | the unit's files differ between the sides | | | | | | | | |`);
       continue;
     }
     const lines = await coverableLines(engine, scan, runs[0]!.base.dir);
@@ -380,7 +401,9 @@ async function lineTable(
     const consistentlyGained = [...seen]
       .filter(([, [b, c]]) => c >= need && b === 0)
       .map(([key]) => key);
+    const firstEver = [...seen].filter(([, [b, c]]) => c >= 1 && b === 0).map(([key]) => key);
     const lostRanges = rangesOf(consistentlyLost, lines);
+    const firstRanges = rangesOf(firstEver, lines);
     const describe = (count: number, ranges: number) =>
       lostRanges
         .slice(0, count)
@@ -391,7 +414,7 @@ async function lineTable(
     out.push(
       `| ${unit} | ${fixed(delta)} | ${fixed(mean(gained))} | ${fixed(mean(lost))} | ` +
         `+${fixed(mean(ways.map((way) => way[0])))} −${fixed(mean(ways.map((way) => way[1])))} | ` +
-        `${consistentlyLost.length} | ${consistentlyGained.length} | ${describe(2, 2)} | ` +
+        `${consistentlyLost.length} | ${consistentlyGained.length} | ${firstEver.length} | ${describe(2, 2)} | ` +
         `${favourites.has(unit) && consistentlyLost.length > 0 ? "EXPLAIN" : ""} |`,
     );
     const figure = (label: string, of: (run: Run) => number) =>
@@ -407,8 +430,75 @@ async function lineTable(
         figure("traps", (run) => run.traps.length),
         figure("open", (run) => run.open),
       ].join(", ")}; top hotspot ${top(runs[0]!.base)} → ${top(runs[0]!.candidate)}` +
-        (lostRanges.length > 0 ? `. Consistently lost: ${describe(4, 4)}` : ""),
+        (lostRanges.length > 0 ? `. Consistently lost: ${describe(4, 4)}` : "") +
+        (firstRanges.length > 0
+          ? `. First-ever: ${firstRanges
+              .slice(0, 4)
+              .map((file) => `${file.file} ${file.count} (${file.ranges.slice(0, 4).join(", ")})`)
+              .join("; ")}`
+          : ""),
     );
   }
-  return [...out, "", ...details];
+  return [...out, "", ...details, ...progressTable(base, candidate)];
+}
+
+/**
+ * Progress toward ways both sides missed: for each way with a measured part (the target report's `best`), the closest
+ * any seed of a side came, compared. A step can bring a deep way much closer without reaching a new line.
+ */
+function progressTable(base: Side, candidate: Side): string[] {
+  const out = [
+    "",
+    "## Progress toward missed ways",
+    "",
+    "The closest any seed came to each way both sides missed with a measured part; closer is progress without a new line.",
+    "",
+    "| Unit | Ways measured | Closer | Further | Top closer | Top further |",
+    "| --- | --- | --- | --- | --- | --- |",
+  ];
+  const closestOf = (runs: readonly Run[]) => {
+    const found = new Map<string, { needs: string; value: string; distance: number }>();
+    for (const run of runs)
+      for (const [way, closest] of run.closest) {
+        const known = found.get(way);
+        if (known === undefined || closest.distance < known.distance) found.set(way, closest);
+      }
+    return found;
+  };
+  for (const unit of units(base, candidate)) {
+    const runs = pairs(base, candidate, unit);
+    if (runs.length === 0) continue;
+    const before = closestOf(runs.map((run) => run.base));
+    const after = closestOf(runs.map((run) => run.candidate));
+    const both = [...before.keys()].filter((way) => after.has(way));
+    if (both.length === 0) continue;
+    const changes = both.map((way) => ({
+      way,
+      base: before.get(way)!,
+      candidate: after.get(way)!,
+    }));
+    const closer = changes
+      .filter((change) => change.candidate.distance < change.base.distance)
+      .sort(
+        (left, right) =>
+          right.base.distance -
+          right.candidate.distance -
+          (left.base.distance - left.candidate.distance),
+      );
+    const further = changes
+      .filter((change) => change.candidate.distance > change.base.distance)
+      .sort(
+        (left, right) =>
+          right.candidate.distance -
+          right.base.distance -
+          (left.candidate.distance - left.base.distance),
+      );
+    const example = (change: (typeof changes)[number]) =>
+      `\`${change.way.split(":").slice(0, 2).join(":")}\` needs \`${change.base.needs}\`: ${change.base.value} → ${change.candidate.value}`;
+    out.push(
+      `| ${unit} | ${both.length} | ${closer.length} | ${further.length} | ${closer.slice(0, 2).map(example).join("; ")} | ` +
+        `${further.slice(0, 2).map(example).join("; ")} |`,
+    );
+  }
+  return out;
 }
