@@ -1785,6 +1785,49 @@ async function titleBarScenario(cdp, origin) {
   );
   await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
   await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  // An open tool is flat too, with only the selected fill; hovering it deepens that fill to the pressed tone rather
+  // than lightening it into a closed tool's hover.
+  await open("package=house&room=debug");
+  const tool = '[data-launcher] button[aria-label="Debug"]';
+  await physicalClick(cdp, tool);
+  await waitFor(cdp, `document.querySelector(${JSON.stringify(tool)})?.dataset.active === "true"`);
+  // A fill as the menu resolves a theme role.
+  const tone = (role) =>
+    `(() => { const probe = document.createElement("span"); probe.style.backgroundColor = "var(${role})"; document.querySelector("[data-launcher]").append(probe); const color = getComputedStyle(probe).backgroundColor; probe.remove(); return color; })()`;
+  const fill = `getComputedStyle(document.querySelector(${JSON.stringify(tool)})).backgroundColor`;
+  const selected = await value(cdp, tone("--theme-surface-selected"));
+  await waitFor(
+    cdp,
+    `${fill} === ${JSON.stringify(selected)}`,
+    5_000,
+    "The open tool lost its selected fill",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(document.querySelector(${JSON.stringify(tool)})).boxShadow`),
+    await value(
+      cdp,
+      `getComputedStyle(document.querySelector("[data-settings-trigger]")).boxShadow`,
+    ),
+    "The open tool has a marker besides its fill",
+  );
+  // Its hover tone is the pressed tone, where a closed tool's is the lighter hover tone. The headless browser has no
+  // hover, so the tones are read from the variables the shared button hover uses.
+  const hoverTone = (selector) =>
+    `getComputedStyle(document.querySelector(${JSON.stringify(selector)})).getPropertyValue("--button-hover").trim()`;
+  assertEqual(
+    await value(cdp, hoverTone(tool)),
+    await value(
+      cdp,
+      `getComputedStyle(document.querySelector("[data-launcher]")).getPropertyValue("--component-pressed").trim()`,
+    ),
+    "Hovering the open tool does not deepen its fill",
+  );
+  assertEqual(
+    (await value(cdp, hoverTone(tool))) ===
+      (await value(cdp, hoverTone("[data-settings-trigger]"))),
+    false,
+    "The open tool hovers like a closed one",
+  );
 
   const full = "A title too long for the title bar of a narrow screen by Author fixture";
   // The bar's tooltip, read once: its content also holds a copy for assistive technology.
