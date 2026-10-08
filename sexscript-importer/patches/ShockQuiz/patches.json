@@ -6,6 +6,27 @@
       "category": "b",
       "reason": "loadConfig cleared the pain level and shock time lists and added each stored setting, null for a missing one, then took the defaults where any was null. The lists shared their default lists after resetDefault, so clearing them cleared the defaults too, and a list of whole numbers cannot hold the null of a missing setting. The settings are read into new lists that keep only stored values, and a list that misses one takes its defaults, as the null test meant.",
       "diff": "settings-ranges.diff"
+    },
+    {
+      "id": "settings-defaults",
+      "layer": "source",
+      "category": "b",
+      "reason": "loadConfig read the stored rounds, questions per round, and answer time, then called getEstimFileNames and read the sound file names before it took the defaults of the missing ones. The script call between keeps the converter from joining each default to its read, so the whole-number variables took 0 for a missing setting and the quiz divided by zero. The three defaults move directly after their reads, which nothing between used, so a missing setting takes its default as before.",
+      "diff": "settings-defaults.diff"
+    },
+    {
+      "id": "question-files",
+      "layer": "source",
+      "category": "b",
+      "reason": "getQuestions listed the files of the scripts/BuzzQuiz folder and read each one's lines, a folder of data files whose computed paths the conversion cannot follow, so the quiz had no questions. The five question files are listed by name and read below SCRIPTSDIR, which the conversion reads at conversion time. Java's split dropped the empty fields after a line's last answer, which TeaseScript's split keeps; a loop drops them explicitly, which changes nothing in Groovy.",
+      "diff": "question-files.diff"
+    },
+    {
+      "id": "estim-files",
+      "layer": "source",
+      "category": "b",
+      "reason": "getEstimFileNames went through the package's sounds/ShockYourself folder with File.traverse, which the conversion does not follow, and took each file name's part before its number through regular expressions, so the quiz had no estim sounds. The folder is walked with eachFile, keeping only its files as traverse did, which the conversion lists at conversion time, and the trailing number is cut off character by character, which gives the same names.",
+      "diff": "estim-files.diff"
     }
   ]
 }
