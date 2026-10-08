@@ -36,6 +36,27 @@ function sexscriptLegacyListMinus(items, removed) {
   }
   return kept
 }
+function sexscriptLegacyRepeatList(items, times) {
+  let result = []
+  let roundValue = 0
+  while roundValue < times {
+    result += items
+    roundValue += 1
+  }
+  return result
+}
+function sexscriptLegacyTimes(value, count) {
+  if count is number {
+    let wholeValue = toInteger(count)
+    if value is string {
+      return sexscriptLegacyValue(value.repeat(wholeValue))
+    }
+    if value is list and (wholeValue >= 0 or value.length == 0) {
+      return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, wholeValue))
+    }
+  }
+  return sexscriptLegacyValue(value * count)
+}
 // A variable that starts with a whole number and later holds fractions widens to a number by itself (#504 option B).
 let tempo: number = 1
 tempo = 0.75
@@ -85,12 +106,16 @@ let offenses: (string | integer)[][] = [
 ]
 let single: (string | integer)[][] = [["missed", 1]]
 say "First: ${offenses[0][0]}, then ${single[0][0]}"
+// An element of such a list in a sum or a text method is read open, as Groovy chose the operation by its value.
+// NOTE SX_PLUS_OPERAND_TYPE line 44: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+let total = sexscriptLegacyTimes(offenses[0][1], 2) + sexscriptLegacyValue(offenses[1][1])
+say "Total ${total} for ${sexscriptLegacyValue(offenses[1][0]).uppercase()}"
 // A list that starts with a null element takes text later.
 let toys = [null]
 toys[0] = "rope"
 say toys[0]
 // A list of text that later holds lists of text keeps both in a union of its elements.
-// NOTE SX_UNION_TYPE line 48: Groovy gave the list 'words' elements of several types; TeaseScript declares it '(string | string[])[]' (ADR 0021 §3), so a use of an element that needs one of these types must keep it in a variable and test it first, as in: if item is string { ... }
+// NOTE SX_UNION_TYPE line 51: Groovy gave the list 'words' elements of several types; TeaseScript declares it '(string | string[])[]' (ADR 0021 §3), so a use of an element that needs one of these types must keep it in a variable and test it first, as in: if item is string { ... }
 let words: (string | string[])[] = ["Rub", "Caress"]
 say "More?"
 if (choose yes: "Yes", no: "No") == "yes" {
@@ -135,7 +160,7 @@ if (choose yes: "Yes", no: "No") == "yes" {
   picks = null
 }
 say "Cleared ${picks == null}"
-// NOTE SX_UNION_TYPE line 79: Groovy let 'stamp' hold values of several types; TeaseScript declares it 'integer | datetime' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if stamp is integer { ... }
+// NOTE SX_UNION_TYPE line 82: Groovy let 'stamp' hold values of several types; TeaseScript declares it 'integer | datetime' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if stamp is integer { ... }
 let stamp: integer | datetime = 0
 stamp = getDateTime()
 say "Stamped"
@@ -195,7 +220,7 @@ function pickOwned(keys) {
       keys = sexscriptLegacyListMinus(keys, [key])
     }
   }
-  // NOTE SX_LENGTH_RECEIVER line 117: Groovy isEmpty() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  // NOTE SX_LENGTH_RECEIVER line 120: Groovy isEmpty() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
   if keys.length == 0 {
     return null
   }
@@ -215,7 +240,7 @@ let share = 1.0
 let tally = 0.0
 function scale(factor) {
   share = factor * 2
-  // NOTE SX_PLUS_OPERAND_TYPE line 127: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  // NOTE SX_PLUS_OPERAND_TYPE line 130: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
   tally = factor + 1
 }
 scale(0.25)

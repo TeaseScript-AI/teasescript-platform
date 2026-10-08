@@ -490,34 +490,40 @@ export function enforceVariableTypes(
           ) {
             const rest = statement.value.parts.slice(1);
             const [only] = rest;
-            return {
-              ...statement,
-              operator: "+=",
-              value:
-                rest.length === 1 && only !== undefined && "text" in only
-                  ? { kind: "literal", value: only.text }
-                  : { kind: "template", parts: rest },
-            };
+            return withIntegerIndexes(
+              {
+                ...statement,
+                operator: "+=",
+                value:
+                  rest.length === 1 && only !== undefined && "text" in only
+                    ? { kind: "literal", value: only.text }
+                    : { kind: "template", parts: rest },
+              },
+              indexes,
+            );
           }
           if (textAppends.has(statement)) {
             // Groovy `text += value` appended the value's text.
             result.textAppended.push(statement);
-            return {
-              ...statement,
-              operator: "=",
-              value: {
-                kind: "template",
-                parts: [
-                  { value: statement.target },
-                  ...(statement.value.kind === "template"
-                    ? statement.value.parts
-                    : statement.value.kind === "literal" &&
-                        typeof statement.value.value === "string"
-                      ? [{ text: statement.value.value }]
-                      : [{ value: statement.value }]),
-                ],
+            return withIntegerIndexes(
+              {
+                ...statement,
+                operator: "=",
+                value: {
+                  kind: "template",
+                  parts: [
+                    { value: statement.target },
+                    ...(statement.value.kind === "template"
+                      ? statement.value.parts
+                      : statement.value.kind === "literal" &&
+                          typeof statement.value.value === "string"
+                        ? [{ text: statement.value.value }]
+                        : [{ value: statement.value }]),
+                  ],
+                },
               },
-            };
+              indexes,
+            );
           }
           const appended = appends.get(statement);
           if (appended !== undefined) {
@@ -939,6 +945,25 @@ function analyse(
             ? child.arguments[0]!
             : null;
       if (position !== null && isNumber(typeOf(position, scope))) analysis.indexes.add(child);
+      // An element of a list that holds several types, used where one type is needed, `pair[1] * 2` or
+      // `pair[1].lowercase()`, is read open: Groovy chose the operation by the value it held.
+      const operands =
+        child.kind === "binary" && OPEN_OPERATORS.has(child.operator)
+          ? [child.left, child.right]
+          : child.kind === "methodCall"
+            ? [child.target]
+            : child.kind === "unary" && child.operator === "-"
+              ? [child.value]
+              : [];
+      for (const operand of operands) {
+        if (operand.kind !== "index" || operand.dict === true || !isMixed(typeOf(operand, scope)))
+          continue;
+        openElements.add(operand);
+        if (!analysis.indexes.has(operand)) {
+          openOnly.add(operand);
+          analysis.indexes.add(operand);
+        }
+      }
       // Groovy `text[i]` on a variable typing proves text, which the lowering could not tell, is its character there.
       if (child.kind === "index" && child.dict !== true && child.index.kind !== "range") {
         const target = nonNull(typeOf(child.target, scope));
@@ -2240,6 +2265,23 @@ const TRUTH_HELPER = "sexscriptLegacyTruth";
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
+/** Operators that need one type on each side, where an element of several types is read open (findIndexes). */
+const OPEN_OPERATORS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">="]);
+/** Elements of lists of several types that an operation reads open, through sexscriptLegacyValue (findIndexes). */
+const openElements = new WeakSet<IrExpression>();
+/** Those of them whose position needs no whole-number conversion. */
+const openOnly = new WeakSet<IrExpression>();
+
+/** Whether a type is a union of text and another scalar type, which an operation cannot take as it is. */
+function isMixed(type: TeaseType): boolean {
+  const value = nonNull(type);
+  if (value.kind !== "union") return false;
+  const scalars = value.members.flatMap((member) =>
+    member.kind === "scalar" ? [member.name] : [],
+  );
+  return scalars.includes("string") && scalars.some((name) => name !== "string");
+}
+
 /**
  * Indexes of a value typing proves text. A position that may hold a fraction stays as it is: Groovy found no `getAt`
  * of a text for it and failed, as the converted read does.
@@ -2311,7 +2353,10 @@ function withIntegerIndexes<T extends IrStatement>(
       return plainTruth(copy.positional[0]!, truthType);
     if (copy.kind === "index" && textIndexes.has(value))
       return helperCall("textAt", [copy.target, copy.index]);
-    if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
+    if (copy.kind === "index") {
+      const read = openOnly.has(value) ? copy : { ...copy, index: truncated(copy.index) };
+      return openElements.has(value) ? helperCall("value", [read]) : read;
+    }
     if (copy.kind === "range") {
       const name = copy.count === true ? "toInteger" : copy.inclusive ? "floor" : "ceil";
       return { ...copy, to: { kind: "call", name, positional: [copy.to], named: {} } };
