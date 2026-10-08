@@ -433,11 +433,12 @@ export function validateMediaState(
     }
   }
   if (activeVideos > 1) errors.push("Runtime has more than one active Stage video.");
-  if (records.size !== nextMediaId - 1 || [...records.keys()].some((id) => id >= nextMediaId)) {
-    errors.push("Runtime media do not match the issued media IDs.");
+  // Settled media that nothing reaches anymore are dropped, so issued IDs may have no record.
+  if ([...records.keys()].some((id) => id >= nextMediaId)) {
+    errors.push("Runtime media IDs must be issued IDs below nextMediaId.");
   }
   for (const id of handleIds) {
-    if (!records.has(id)) errors.push("Runtime media handle refers to unissued media.");
+    if (!records.has(id)) errors.push("Runtime media handle refers to media without a record.");
   }
   const ownsHandler = (media: Record<string, unknown> | undefined, functionId: unknown): boolean =>
     media !== undefined &&

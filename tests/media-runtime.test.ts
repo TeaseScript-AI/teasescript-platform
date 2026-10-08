@@ -187,6 +187,19 @@ class Session {
     );
   }
 
+  /** How a media settled, from its `actionCompleted` event; settled media that nothing reaches keep no record. */
+  mediaSettlement(mediaId: number) {
+    for (const event of this.events) {
+      if (
+        event.kind === "actionCompleted" &&
+        event.settlement.actionKind === "media" &&
+        event.settlement.mediaId === mediaId
+      )
+        return event.settlement;
+    }
+    return undefined;
+  }
+
   media(mediaId: number) {
     return (
       this.snapshot.backgroundActions.find(
@@ -227,7 +240,7 @@ test("blocking audio waits for load and natural completion; async audio continue
   blocking.at(2_000, [1, 2_000]);
   assert.deepEqual(blocking.said(), ["after bell"]);
   assert.equal(blocking.snapshot.status, "halted");
-  assert.equal(blocking.media(1)?.state, "finished");
+  assert.equal(blocking.mediaSettlement(1)?.settlementKind, "finished");
 
   const background = new Session(
     'let music = playAudio async "music.mp3"\nsay "started ${music.duration} ${music.state}"\nexit',
@@ -459,8 +472,9 @@ test("a duration repeat can end mid-pass and finishes after the reached cues", (
   );
   session.load(1, 1_000).at(0, [1, 0]).at(3_000, [1, 3_000]);
   assert.deepEqual(session.said(), ["half", "half", "half", "finish", "done"]);
-  assert.equal(session.media(1)?.elapsedMs, 2_500);
-  assert.equal(session.media(1)?.state, "finished");
+  // Playback started at scene time 0, so it settles at its 2.5 s budget.
+  assert.equal(session.mediaSettlement(1)?.settlementKind, "finished");
+  assert.equal(session.mediaSettlement(1)?.completedAtMs, 2_500);
 });
 
 test("the Stage image persists; a video covers it and stops when replaced", () => {
@@ -492,7 +506,7 @@ test("the Stage image persists; a video covers it and stops when replaced", () =
     image: "images/bed.jpg",
     videoMediaId: null,
   });
-  assert.equal(session.media(2)?.state, "stopped");
+  assert.equal(session.mediaSettlement(2)?.settlementKind, "stopped");
   assert.deepEqual(
     session.warnings().map((warning) => warning.slice(0, 6)),
     ["TSW011"],
@@ -523,7 +537,7 @@ test("a cue block may control its own media inside a function and interrupts a b
   session.load(1, 60_000).at(0, [1, 0]);
   session.load(2, 60_000).at(1_000, [1, 1_000], [2, 1_000]).at(2_000, [1, 2_000], [2, 2_000]);
   assert.deepEqual(session.said(), ["quiet", "after video 0.25"]);
-  assert.equal(session.media(2)?.state, "stopped");
+  assert.equal(session.mediaSettlement(2)?.settlementKind, "stopped");
 });
 
 test("main-story media waits for message pacing, but not inside interrupt blocks", () => {
@@ -1087,7 +1101,6 @@ test("reporting the projected terminal progress ends fractional ranges, also aft
       session.load(1, 5_000);
       session.at(1, [1, terminal(session)]);
       assert.deepEqual(session.said(), ["done"], `${endAt} ${repeat}`);
-      assert.equal(session.media(1)?.points.length, 1, "settled media keeps one sample");
     }
     const controlled = new Session(
       [
@@ -1103,6 +1116,7 @@ test("reporting the projected terminal progress ends fractional ranges, also aft
     controlled.load(1, 5_000).at(1_000, [1, 0.25]);
     controlled.at(2_000, [1, terminal(controlled)]);
     assert.equal(controlled.media(1)?.state, "finished", endAt);
+    assert.equal(controlled.media(1)?.points.length, 1, "settled media keeps one sample");
   }
 });
 
@@ -1250,12 +1264,12 @@ test("fractional controls, budget ends, and terminal playheads agree with the ar
   assert.deepEqual(late.said(), fine.said());
   // A repeat duration ending inside the last pass never carries the position past the range.
   const budget = new Session(
-    'playAudio(file: "a", repeat: 7.7 ms, endAt: 1.1 ms)\nsay "done"\nexit',
+    'let m = playAudio(file: "a", async: true, repeat: 7.7 ms, endAt: 1.1 ms)\nwait 1\nexit',
   );
   budget.load(1, 100);
   const [projected] = mediaPlaybackProjection(budget.snapshot);
   budget.at(10, [1, projected!.terminalProgressMs!]);
-  assert.deepEqual(budget.said(), ["done"]);
+  assert.equal(budget.media(1)?.state, "finished");
   assert.ok(budget.media(1)!.positionMs <= 1.1);
   // Reported playback at the terminal progress projects the end of the last pass.
   const terminal = new Session(
@@ -1818,4 +1832,106 @@ test("catch-up across 10^12 silent repeat passes finishes within the bound with 
   assert.equal(budget.media(1)?.state, "finished");
   assert.equal(budget.media(1)?.elapsedMs, 1_000_000_000_250);
   assert.equal(budget.said().length, 1);
+});
+
+test("settled media stay readable through every handle and cue block that still reaches them", () => {
+  const source = [
+    "let kept = []",
+    "let table = dict{}",
+    "function scene {",
+    '  let local = playAudio async "local.mp3"',
+    "  timer async 3 s {",
+    '    say "timer ${local.state}"',
+    "  }",
+    "  local.stop()",
+    "}",
+    "function short {",
+    '  let tune = playAudio async "tune.mp3" {',
+    "    finish {",
+    '      say "own ${tune.state}"',
+    "    }",
+    "  }",
+    "}",
+    "scene()",
+    "short()",
+    'kept.add(playAudio async "listed.mp3")',
+    "kept[0].stop()",
+    'table["keyed"] = playAudio async "keyed.mp3"',
+    'table["keyed"].stop()',
+    'playAudio async "unnamed.mp3" {',
+    "  finish {",
+    "    wait 1",
+    '    say "late finish"',
+    "  }",
+    "}",
+    "wait 4",
+    'say "${kept[0].state} ${table["keyed"].duration} ${kept[0].remaining}"',
+    "exit",
+  ].join("\n");
+  const { boundaries, events } = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
+  const said = events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  assert.deepEqual(said, ["own finished", "late finish", "timer stopped", "stopped 1 s 0 s"]);
+  // The list and the dict keep theirs; the rest went once their timer or cue block no longer needed them.
+  assert.deepEqual(
+    boundaries.at(-1)?.settledMedia.map((media) => media.mediaId),
+    [3, 4],
+  );
+});
+
+test("a long play and settle loop keeps settledMedia and the snapshot bounded", () => {
+  const session = new Session(
+    [
+      "let count = 0",
+      "while count < 200 {",
+      '  let clip = playAudio async "clip.mp3"',
+      "  clip.stop()",
+      "  count += 1",
+      "}",
+      'say "played ${count}"',
+      "exit",
+    ].join("\n"),
+  );
+  const sizes: number[] = [];
+  for (let mediaId = 1; mediaId <= 200; mediaId += 1) {
+    session.load(mediaId, 1_000);
+    assert.equal(session.snapshot.settledMedia.length, 0, `after media ${mediaId}`);
+    sizes.push(JSON.stringify(session.snapshot).length);
+  }
+  assert.deepEqual(session.said(), ["played 200"]);
+  // A load report for a dropped clip is ignored, as for any settled media, not refused as unknown.
+  assert.deepEqual(
+    reportMediaLoad(session.plan, session.snapshot, 1, { kind: "loaded", durationMs: 1_000 })
+      .outcome,
+    { kind: "ignored" },
+  );
+  // Without collection each settled clip would add its record; the state grows by less than one record.
+  const record = JSON.stringify(
+    new Session('let clip = playAudio async "clip.mp3"\nclip.stop()\nwait 1\nexit')
+      .load(1, 1_000)
+      .snapshot.settledMedia.at(0),
+  ).length;
+  assert.ok(sizes.at(-2)! - sizes[10]! < record);
+});
+
+test("restore requires a record for every media handle, and the next operation drops the others", () => {
+  const session = new Session(
+    'let m: media | integer = playAudio async "a.mp3"\nm.stop()\nwait 1\nm = 0\nwait 1\nexit',
+  ).load(1, 1_000);
+  // The handle in `m` keeps the stopped media's record.
+  assert.equal(session.snapshot.settledMedia.length, 1);
+  const record = JSON.stringify(session.snapshot.settledMedia[0]);
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape.
+  const unrecorded = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+  unrecorded.settledMedia.length = 0;
+  assert.equal(validateRuntimeSnapshot(unrecorded, session.plan).valid, false);
+  // Once `m = 0` ran, the operation drops the record. A state that still holds it, as an earlier revision kept every
+  // record, is valid, and its next operation drops it.
+  session.at(1_000);
+  assert.equal(session.snapshot.settledMedia.length, 0);
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape.
+  const kept = JSON.parse(JSON.stringify(session.snapshot)) as RuntimeSnapshot;
+  // EVIDENCE: fixture: the record the state held before its handle was overwritten.
+  kept.settledMedia.push(JSON.parse(record) as RuntimeSnapshot["settledMedia"][number]);
+  assert.equal(validateRuntimeSnapshot(kept, session.plan).valid, true);
+  assert.deepEqual(observeTime(session.plan, kept, 1_500).snapshot.settledMedia, []);
 });

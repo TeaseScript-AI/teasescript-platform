@@ -117,7 +117,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 58;
+export const RUNTIME_SNAPSHOT_VERSION = 59;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -447,7 +447,10 @@ export interface RuntimeSnapshot {
   readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
   /** Whether a host provider persists script storage, so `save` and `delete` wait for its acknowledgement. */
   readonly scriptStoragePersistent: boolean;
-  /** Finished or stopped media, retained so their handles stay readable. Active media are background actions. */
+  /**
+   * Finished or stopped media that a handle or a queued or running cue block still reaches; a public operation drops the
+   * others before it returns. Active media are background actions.
+   */
   readonly settledMedia: RuntimeMediaSnapshot[];
   nextMediaId: number;
   /** The default camera's view, or `null` before the first `showCamera`. */
@@ -3621,27 +3624,60 @@ function identityRootValues(
 }
 
 /**
- * Drops the live records of messages that no message handle in `snapshot` reaches anymore. A public operation does it
- * before it returns, when every value of the state is in one of its roots; no handle to such a message can appear again.
+ * Drops the live records of messages and the settled media records that nothing in `snapshot` reaches anymore. A public
+ * operation does it before it returns, when every value of the state is in one of its roots; no handle to such a
+ * message or media can appear again, so where an operation boundary falls does not change the state. A settled media
+ * record stays while a handle reaches it, or a queued or running cue block of the media, which sees its own handle.
  */
-export function dropUnreachableMessages(snapshot: RuntimeSnapshot): void {
-  if (snapshot.liveMessages.length === 0) return;
+export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
+  if (snapshot.liveMessages.length === 0 && snapshot.settledMedia.length === 0) return;
   const handleIds = emptyIdentityIds();
-  for (const value of identityRootValues(
+  for (const invocation of snapshot.pendingTimerHandlers) {
+    if ("mediaId" in invocation) handleIds.media.add(invocation.mediaId);
+  }
+  for (const frame of snapshot.callFrames) {
+    if (
+      frame.kind === "function" &&
+      frame.timerInterruption !== null &&
+      "mediaId" in frame.timerInterruption
+    )
+      handleIds.media.add(frame.timerInterruption.mediaId);
+  }
+  const roots = identityRootValues(
     [...snapshot.frames, ...snapshot.retainedScopes, { bindings: snapshot.globals }],
     snapshot.speakers,
     snapshot.loopFrames,
     snapshot.temporaries,
     snapshot.callFrames,
-  ))
-    collectSpeakerReferenceIds(value, new Set(), handleIds);
-  const reached = handleIds.message;
-  if (reached.size === snapshot.liveMessages.length) return;
+  );
+  // Handles are usually the values of variables themselves. When those reach every record, nothing is dropped, and the
+  // values inside lists and other containers, which may be large, need not be walked.
+  for (const value of roots) {
+    if (isPlainRecord(value) && value.kind === "mediaHandle" && typeof value.mediaId === "number")
+      handleIds.media.add(value.mediaId);
+    if (
+      isPlainRecord(value) &&
+      value.kind === "messageHandle" &&
+      typeof value.messageId === "number"
+    )
+      handleIds.message.add(value.messageId);
+  }
+  if (
+    snapshot.liveMessages.every((message) => handleIds.message.has(message.messageId)) &&
+    snapshot.settledMedia.every((media) => handleIds.media.has(media.mediaId))
+  )
+    return;
+  for (const value of roots) collectSpeakerReferenceIds(value, new Set(), handleIds);
   let kept = 0;
   for (const message of snapshot.liveMessages) {
-    if (reached.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+    if (handleIds.message.has(message.messageId)) snapshot.liveMessages[kept++] = message;
   }
   snapshot.liveMessages.length = kept;
+  kept = 0;
+  for (const media of snapshot.settledMedia) {
+    if (handleIds.media.has(media.mediaId)) snapshot.settledMedia[kept++] = media;
+  }
+  snapshot.settledMedia.length = kept;
 }
 
 /**
