@@ -2615,9 +2615,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         inputs.push({ kind: "later", afterMs: gap });
         timeStepsTaken.steps += 1;
       }
-    for (const input of node.left ?? [])
-      if (!inputs.some((offered) => JSON.stringify(offered) === JSON.stringify(input)))
+    if (node.left !== undefined) {
+      const offered = new Set(inputs.map((input) => JSON.stringify(input)));
+      for (const input of node.left) {
+        const key = JSON.stringify(input);
+        if (offered.has(key)) continue;
+        offered.add(key);
         inputs.push(input);
+      }
+    }
     if (inputs.length === 0) {
       node.status = "stuck";
       store.drop(node.id);
