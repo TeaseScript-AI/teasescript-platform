@@ -1,0 +1,11 @@
+--- a/scripts/Farkel.groovy
++++ b/scripts/Farkel.groovy
+@@ -2922,7 +2922,7 @@
+ 							wait(10)
+ 							show("Stroke your self to the edge, and get ready to cum!")
+ 							showButton("Edging, Mistress "+mistress+"!")	
+-							setImageVictory(5+choice+(getRandom(2)+1))
++							setImageVictory("5"+choice+(getRandom(2)+1))
+ 							if(orgasmAllowed){
+ 								show("Cum for me!")
+ 								showButton("Came, Mistress "+mistress+"!")

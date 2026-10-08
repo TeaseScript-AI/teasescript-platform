@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "victory-picture-name",
+      "layer": "source",
+      "category": "b",
+      "reason": "The picture the player picks to see is a letter (a, b, p, bo, f) kept in choice, which held the menu's number before; Groovy's 5 + choice + n joined them into a name such as 5a2, which the package's victory5a2.jpg pictures carry. The sum starts with the text \"5\", which gives the same name and lets the converter see the joining.",
+      "diff": "victory-picture-name.diff"
+    }
+  ]
+}
