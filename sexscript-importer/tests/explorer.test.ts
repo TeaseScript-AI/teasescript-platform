@@ -1387,5 +1387,26 @@ test(
     assert.equal(holdsAt(soon!, model, visited, EPOCH_MS), true);
     const gap = flipGap(soon!, model, visited, EPOCH_MS)!;
     assert.ok(gap >= 2 * 3_600_000 && gap <= 2 * 3_600_000 + 120_000, String(gap));
+    // A creator's own comparison helper of two values: the moment they are equal, which sampling by minutes would miss,
+    // is where the two values meet.
+    const deadline = EPOCH_MS / 1000 + 4321;
+    const ordered = engine.compileProject(
+      [
+        {
+          path: "main.tease",
+          source:
+            "function orderOf(a, b) {\n  if a < b {\n    return -1\n  }\n  if a > b {\n    return 1\n  }\n  return 0\n}\n" +
+            `showButton "Wait"\nif orderOf(getTimestamp().toSeconds(), ${deadline}) == 0 {\n  say "Now."\n}\nexit\n`,
+        },
+      ],
+      { builtins: [] },
+    ).plan;
+    assert.ok(isRecord(ordered));
+    const orderedModel = clockModel(
+      ordered,
+      Array.isArray(ordered.instructions) ? ordered.instructions.filter(isRecord) : [],
+    );
+    const [equal] = [...orderedModel.comparisons.values()][0]!;
+    assert.equal(flipGap(equal!, orderedModel, timeContext({}), EPOCH_MS), 4_321_000);
   },
 );

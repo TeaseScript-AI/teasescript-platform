@@ -1114,7 +1114,8 @@ export function flipGap(
     for (const near of [at, at + 1000, at + MINUTE])
       if (near > now && near <= now + HORIZON) meetings.push(Math.ceil(near));
   }
-  const met = meetings.sort((left, right) => left - right).find(flipped);
+  // Each moment once: many pairs can meet at the same one.
+  const met = [...new Set(meetings)].sort((left, right) => left - right).find(flipped);
   if (met !== undefined) return met - now;
   // Otherwise the first doubling of a minute (up to the horizon) at which the outcome is the other one, narrowed.
   let low = 0;
