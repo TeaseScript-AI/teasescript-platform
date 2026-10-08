@@ -22,15 +22,13 @@ fill()
 say lines.join(", ")
 // A list that starts empty and is filled by position grows at its end.
 let rounds = []
-let i = 0
-while i < 3 {
+for i in 0..3 {
   // NOTE SX_LIST_GROWTH line 16: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
   if i < rounds.length {
     rounds[i] = i * 2
   } else {
     rounds.add(i * 2)
   }
-  i += 1
 }
 say "Rounds ${rounds.length}"
 // A function nothing calls never ran in Groovy, so what it cannot convert does not block the script.

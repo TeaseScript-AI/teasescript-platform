@@ -135,10 +135,8 @@ if outfit == null {
 }
 // A legacy text read of a computed key is text too.
 let names = ["a", "b"]
-let n = 0
-while n < 2 {
+for n in 0..2 {
   names[n] = load "game.name${n}", default: ""
-  n += 1
 }
 say names.join(", ")
 // A flag read of a key that a text variable is saved under too reads as the flag's text.

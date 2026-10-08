@@ -611,7 +611,7 @@ test("keeps getSelectedValue options that cannot be a list explicit", () => {
   );
 });
 
-test("lowers simple C-style for loops through an equivalent while loop", () => {
+test("lowers a simple C-style for loop through a range", () => {
   const source = file([
     {
       kind: "for",
@@ -640,11 +640,11 @@ test("lowers simple C-style for loops through an equivalent while loop", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["let i = 0", "while i < 3 {", "  say i", "  i += 1", "}", "exit", ""].join("\n"),
+    ["for i in 0..3 {", "  say i", "}", "exit", ""].join("\n"),
   );
 });
 
-test("runs the update step of a C-style for loop before continue", () => {
+test("runs the update step of a C-style for loop that counts down before continue", () => {
   const skipOne: AstNode = {
     kind: "if",
     span,
@@ -666,10 +666,10 @@ test("runs the update step of a C-style for loop before continue", () => {
             span,
             multipleAssignment: false,
             left: variable("i"),
-            right: constant(0),
+            right: constant(3),
           },
-          { kind: "binary", span, operator: "<", left: variable("i"), right: constant(3) },
-          { kind: "postfix", span, operator: "++", value: variable("i") },
+          { kind: "binary", span, operator: ">", left: variable("i"), right: constant(0) },
+          { kind: "postfix", span, operator: "--", value: variable("i") },
         ],
       },
       body: {
@@ -685,14 +685,14 @@ test("runs the update step of a C-style for loop before continue", () => {
   assert.equal(
     emitTease(program),
     [
-      "let i = 0",
-      "while i < 3 {",
+      "let i = 3",
+      "while i > 0 {",
       "  if i == 1 {",
-      "    i += 1",
+      "    i -= 1",
       "    continue",
       "  }",
       "  say i",
-      "  i += 1",
+      "  i -= 1",
       "}",
       "exit",
       "",

@@ -116,18 +116,14 @@ if sexscriptLegacyItemAt(hand, 2) != null {
 }
 // A list that only ever starts empty grows at its end, also by a computed position.
 let shoe = []
-let d = 0
-while d < 2 {
-  let c = 0
-  while c < 2 {
+for d in 0..2 {
+  for c in 0..2 {
     // NOTE SX_LIST_PADDING line 31: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it with 0, which Groovy truth treats like null, since nothing compares its elements with null.
     while shoe.length <= d * 2 + c {
       shoe.add(0)
     }
     shoe[d * 2 + c] = c
-    c += 1
   }
-  d += 1
 }
 say "Shoe ${shoe.length}"
 // A division of values not proven numbers sets a number.

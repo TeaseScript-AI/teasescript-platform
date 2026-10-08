@@ -1,3 +1,4 @@
+import { withCounterLoops } from "./counter-loops.ts";
 import {
   constantString,
   groovyParameters,
@@ -1631,7 +1632,10 @@ export function lowerParsedFile(
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withFillableLoads(withParsedLoads(typedStatements, context.syntheticHelpers), shared);
+  let texts = withFillableLoads(
+    withParsedLoads(withCounterLoops(typedStatements), context.syntheticHelpers),
+    shared,
+  );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -1831,7 +1835,7 @@ function lowerHelperCompilationUnit(
         withElapsedDurations(
           withFillableLoads(
             withParsedLoads(
-              withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+              withCounterLoops(withEnforcedTypes([...fieldStatements, ...statements], baseContext)),
               baseContext.syntheticHelpers,
             ),
             true,

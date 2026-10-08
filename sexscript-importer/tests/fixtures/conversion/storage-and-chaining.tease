@@ -115,11 +115,9 @@ say "Settings ${shocks} ${tempo} ${suffix} ${keyed}"
 // loadBoolean() read a stored value as text, true only for "true"; where the package saves a number under a key of the
 // same form, the read keeps that rule.
 let chosen = [false, false]
-let p = 0
-while p < 2 {
+for p in 0..2 {
   // NOTE SX_LOAD_BOOLEAN_TEXT line 54: loadBoolean() read the stored value as text, true only for "true", and the package saves a number or a text under this key, so the value is read the same way; a missing value, null in Groovy, reads as false.
   chosen[p] = sexscriptLegacyBooleanText(load("training.punishment${p}.chosen", default: null))
-  p += 1
 }
 save 0 as "training.punishment${1}.chosen"
 say "Chosen ${chosen[0]}"
