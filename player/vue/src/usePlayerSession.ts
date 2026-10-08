@@ -1261,26 +1261,38 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * unless there is one, and shows its Start or Continue.
    */
   function copyToDebugRoom(): Promise<void> {
+    // The switch excludes Start and Continue: a prepared one, also one waiting for the camera, is retired at once, none
+    // runs meanwhile, and the debug room's own is prepared once its saved data are in use.
+    if (!sessionLive.value) endSession();
+    importing.value = true;
     roomChange = roomChange.then(async () => {
-      if (normalStorage === undefined || room.value !== "normal" || !debugMode || disposed) return;
-      const scope = normalStorage.scope;
-      const live = sessionLive.value;
-      // The normal room keeps its session as it is now, which a later visit continues.
-      if (live) await keepSession();
-      const making = live || debugRoom.value === null;
-      const replacing = live && debugRoom.value !== null;
-      room.value = "debug";
-      kept = { plan: false, count: 0, last: null };
-      keptActionId = null;
-      await switchStorage(async () => {
-        if (replacing) await debugRooms.discard(scope).catch(() => {});
-        const durable = making ? await createDebugRoom(scope, false) : new Set<string>();
-        return enterDebugRoom(scope, making ? { session: live } : debugRoom.value!, durable);
-      });
-      await loadScriptStorage();
-      if (live) applyDebugMode();
-      // The start page shows the debug room's Start or Continue; a session that began meanwhile runs in the debug room.
-      else if (session.value === null) await prepareKept();
+      try {
+        if (normalStorage === undefined || room.value !== "normal" || !debugMode || disposed)
+          return;
+        const scope = normalStorage.scope;
+        const live = sessionLive.value;
+        // The normal room keeps its session as it is now, which a later visit continues.
+        if (live) await keepSession();
+        const making = live || debugRoom.value === null;
+        const replacing = live && debugRoom.value !== null;
+        room.value = "debug";
+        kept = { plan: false, count: 0, last: null };
+        keptActionId = null;
+        await switchStorage(async () => {
+          if (replacing) await debugRooms.discard(scope).catch(() => {});
+          const durable = making ? await createDebugRoom(scope, false) : new Set<string>();
+          return enterDebugRoom(scope, making ? { session: live } : debugRoom.value!, durable);
+        });
+        await loadScriptStorage();
+        if (live) applyDebugMode();
+        else {
+          // A normal session that ended meanwhile stays in the normal room.
+          endSession();
+          await prepareKept();
+        }
+      } finally {
+        importing.value = false;
+      }
     });
     return roomChange;
   }
@@ -1603,7 +1615,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     rooms: {
       /** The room shown. */
       current: computed(() => room.value),
-      debugExists: computed(() => debugRoom.value !== null),
+      /** Whether the debug room keeps a session, which Debug on during a normal session would overwrite. */
+      debugSessionExists: computed(() => debugRoom.value?.session === true),
       /** Whether the debug room is shown and has something to delete: a kept session or saved values. */
       debugHasData: computed(
         () =>

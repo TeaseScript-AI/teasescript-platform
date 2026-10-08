@@ -207,7 +207,7 @@ const overwritingDebugSession = ref(false);
 const overwriteOpening = ref(0);
 function setDebugMenu(on: boolean) {
   const rooms = props.player.rooms;
-  if (on && rooms.copies.value && rooms.debugExists.value) {
+  if (on && rooms.copies.value && rooms.debugSessionExists.value) {
     overwriteOpening.value += 1;
     overwritingDebugSession.value = true;
   } else debug.menu.value = on;

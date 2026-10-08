@@ -220,6 +220,49 @@ test("Debug on during a normal session goes on with a copy in the debug room, an
   assert.equal(restored.state.debugMode, false);
 });
 
+test("while Debug on switches to the debug room, Start waits, and then starts with the debug room's saved data", async (context) => {
+  stubBrowser(context);
+  const plan = compilePlayerProject(
+    'let value = load("value", default: "none")\nsay value, instant\nshowButton "Next"\nexit',
+  ).plan!;
+  const memory = memoryKeptRoomStore();
+  await memory.create("test", [{ key: "value", value: "DEBUG" }], []);
+  // The debug room's saved data load slowly, as under storage contention.
+  let release = () => {};
+  const loaded = new Promise<void>((resolve) => (release = resolve));
+  const rooms: KeptRoomStore = {
+    ...memory,
+    values: (scope) => ({
+      ...memory.values(scope),
+      load: async () => {
+        await loaded;
+        return memory.values(scope).load();
+      },
+    }),
+  };
+  const host = mountHost(context, {
+    own: savedData([{ key: "value", value: "NORMAL" }]),
+    kept: memoryKeptSessionStore(),
+    rooms,
+  });
+  await prepare(context, host, plan);
+  assert.equal(host.activation.value, "start");
+
+  host.setDebugMode(true);
+  assert.equal(host.activation.value, null);
+  await host.activate();
+  await settle(context);
+  assert.equal(host.session.value, null);
+
+  release();
+  await settle(context);
+  assert.equal(host.rooms.current.value, "debug");
+  assert.equal(host.activation.value, "start");
+  await host.activate();
+  await settle(context);
+  assert.deepEqual(said(host.session.value), ["DEBUG"]);
+});
+
 test("Debug on during a normal session replaces an earlier debug room with the copy", async (context) => {
   stubBrowser(context);
   const own = savedData([{ key: "best", value: 3 }]);

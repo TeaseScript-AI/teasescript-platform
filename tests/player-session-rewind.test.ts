@@ -618,6 +618,8 @@ test("turning the Debug switch off while an adoption fails reinstates the sessio
   const scope = effectScope();
   const debug = scope.run(() => usePlayerDebug(host, { menu: true, autoSkip: false }))!;
   context.after(() => scope.stop());
+  // Debug on goes on in the debug room first; Start waits for it.
+  await settle(context);
   await start(context, host);
   await choose(context, host, "One");
   const tip = playerRuntimeSnapshot(host.session.value!);
