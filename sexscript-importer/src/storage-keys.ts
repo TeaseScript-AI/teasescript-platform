@@ -210,35 +210,15 @@ function telling(value: IrExpression): boolean {
  */
 function withTypedComputedReads(programs: readonly MigrationProgram[]): MigrationProgram[] {
   return programs.map((program) => {
-    const locals = functionLocals(program.statements);
-    const resolve = (fn: string | null, name: string): string =>
-      fn !== null && locals.get(fn)?.has(name) === true ? `${fn}:${name}` : `:${name}`;
-    // Each binding's declared type: its annotation, or the type of the value it starts with.
+    // Each binding's declared type: its annotation, or the type of the value it starts with; and the lists whose items
+    // the script compares with null, also through the helper that reads past the end.
     const declared = new Map<string, string>();
-    const collect = (items: readonly IrStatement[], fn: string | null): void => {
-      for (const item of items) {
-        if (item.kind === "function") {
-          collect(item.body, item.name);
-          continue;
-        }
-        if (item.kind === "let") {
-          const type = item.type ?? (item.value.kind === "load" ? null : valueType(item.value));
-          if (type !== null) declared.set(resolve(fn, item.name), type);
-        }
-        withNestedBlocks(item, (body) => {
-          collect(body, fn);
-          return body;
-        });
-      }
-    };
-    collect(program.statements, null);
-    // Lists whose items the script compares with null, also through the helper that reads past the end.
     const itemTested = new Set<string>();
     const itemAt = helperName("itemAt");
-    const tests = (items: readonly IrStatement[], fn: string | null): void => {
+    const collect = (items: readonly IrStatement[], scope: Scope): void => {
       for (const item of items) {
         if (item.kind === "function") {
-          tests(item.body, item.name);
+          collect(item.body, scope.inner(item));
           continue;
         }
         const visit = (value: IrExpression): IrExpression => {
@@ -254,38 +234,52 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
                     ? side.positional[0]
                     : undefined;
               if (isNullLiteral(other) && list?.kind === "variable")
-                itemTested.add(resolve(fn, list.name));
+                itemTested.add(scope.resolve(list.name));
             }
           }
           return mapChildren(value, visit);
         };
         mapOwnExpressions(item, visit);
+        if (item.kind === "let") {
+          const type = item.type ?? (item.value.kind === "load" ? null : valueType(item.value));
+          const binding = scope.declare(item.name, item.span);
+          if (type !== null) declared.set(binding, type);
+        }
         withNestedBlocks(item, (body) => {
-          tests(body, fn);
+          collect(body, scope.inner(item));
           return body;
         });
       }
     };
-    tests(program.statements, null);
+    collect(program.statements, Scope.file());
     const nullable = (type: string): boolean => /\?$|\bnull\b/u.test(type);
     // Variables a read that keeps its null makes optional, and lists whose items it makes optional.
     const optionals = new Set<string>();
     const optionalItems = new Set<string>();
+    const itemType = (type: string | null): string | null =>
+      type?.endsWith("[]") === true ? type.slice(0, -2) : null;
+    const typeOf = (value: IrExpression, scope: Scope): string | null =>
+      value.kind === "variable"
+        ? (declared.get(scope.resolve(value.name)) ?? null)
+        : value.kind === "index"
+          ? itemType(typeOf(value.target, scope))
+          : null;
+    // The type of a place a read goes to: a variable, or an item of a list, also of a list in a list.
     const typed = (
       target: IrExpression,
-      fn: string | null,
-    ): { type: string; binding?: string; list?: string } | null => {
+      scope: Scope,
+    ): { type: string; binding?: string; list?: string; item?: true } | null => {
       if (target.kind === "variable") {
-        const binding = resolve(fn, target.name);
+        const binding = scope.resolve(target.name);
         const type = declared.get(binding);
         return type === undefined ? null : { type, binding };
       }
-      if (target.kind === "index" && target.target.kind === "variable") {
-        const list = resolve(fn, target.target.name);
-        const type = declared.get(list);
-        return type?.endsWith("[]") === true ? { type: type.slice(0, -2), list } : null;
-      }
-      return null;
+      if (target.kind !== "index") return null;
+      const type = itemType(typeOf(target.target, scope));
+      if (type === null) return null;
+      return target.target.kind === "variable"
+        ? { type, list: scope.resolve(target.target.name), item: true }
+        : { type, item: true };
     };
     const strip = (value: IrExpression): IrExpression => {
       const next = mapChildren(value, strip);
@@ -295,11 +289,12 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
     };
     // Statements whose open-null read now reads the empty value of a list's items, whose notes say so.
     const itemDefaults = new Set<IrStatement>();
-    const block = (items: IrStatement[], fn: string | null): IrStatement[] =>
+    const block = (items: IrStatement[], scope: Scope): IrStatement[] =>
       withItemNotes(
         items.map((item) => {
-          if (item.kind === "function") return { ...item, body: block(item.body, item.name) };
-          let next = withNestedBlocks(item, (body) => block(body, fn));
+          if (item.kind === "function")
+            return { ...item, body: block(item.body, scope.inner(item)) };
+          let next = withNestedBlocks(item, (body) => block(body, scope.inner(item)));
           let itemDefault = false;
           const read =
             (next.kind === "let" || (next.kind === "assign" && next.operator === "=")) &&
@@ -314,12 +309,16 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
                 ? next.type === undefined
                   ? null
                   : { type: next.type }
-                : typed(next.target, fn);
+                : typed(next.target, scope);
             if (target !== null && !nullable(target.type)) {
               const { fill, ...load } = read;
               const empty = emptyValue(target.type);
-              if (target.list !== undefined) {
-                if (itemTested.has(target.list) && !target.type.includes(" | "))
+              if ("item" in target) {
+                if (
+                  target.list !== undefined &&
+                  itemTested.has(target.list) &&
+                  !target.type.includes(" | ")
+                )
                   optionalItems.add(target.list);
                 else if (empty !== null)
                   next = { ...next, value: { ...load, defaultValue: empty } };
@@ -348,10 +347,10 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               ? taken.defaultValue === undefined
               : taken.defaultValue !== undefined && isOpenNull(taken.defaultValue))
           ) {
-            const target = typed(added.target, fn);
+            const target = typed(added.target, scope);
             const list = target?.binding;
-            if (target !== null && list !== undefined && target.type.endsWith("[]")) {
-              const type = target.type.slice(0, -2);
+            const type = itemType(target?.type ?? null);
+            if (list !== undefined && type !== null) {
               const empty = emptyValue(type);
               if (itemTested.has(list) && !type.includes(" | ")) optionalItems.add(list);
               else if (!nullable(type) && empty !== null) {
@@ -366,27 +365,29 @@ function withTypedComputedReads(programs: readonly MigrationProgram[]): Migratio
               }
             }
           }
+          if (next.kind === "let") scope.declare(next.name, next.span);
           const result = mapOwnExpressions(next, strip);
           if (itemDefault) itemDefaults.add(result);
           return result;
         }),
         itemDefaults,
       );
-    const statements = block(program.statements, null);
+    const statements = block(program.statements, Scope.file());
     if (optionals.size === 0 && optionalItems.size === 0) return { ...program, statements };
-    const optionalize = (items: IrStatement[], fn: string | null): IrStatement[] =>
+    const optionalize = (items: IrStatement[], scope: Scope): IrStatement[] =>
       items.map((item) => {
-        if (item.kind === "function") return { ...item, body: optionalize(item.body, item.name) };
-        const next = withNestedBlocks(item, (body) => optionalize(body, fn));
+        if (item.kind === "function")
+          return { ...item, body: optionalize(item.body, scope.inner(item)) };
+        const next = withNestedBlocks(item, (body) => optionalize(body, scope.inner(item)));
         if (next.kind !== "let") return next;
-        const binding = resolve(fn, next.name);
+        const binding = scope.declare(next.name, next.span);
         const type = next.type ?? valueType(next.value);
         if (type === null) return next;
         if (optionalItems.has(binding) && type.endsWith("[]") && !nullable(type.slice(0, -2)))
           return { ...next, type: `${type.slice(0, -2)}?[]` };
         return !optionals.has(binding) || nullable(type) ? next : { ...next, type: optional(type) };
       });
-    return { ...program, statements: optionalize(statements, null) };
+    return { ...program, statements: optionalize(statements, Scope.file()) };
   });
 }
 
@@ -649,38 +650,55 @@ function withEmptyText(
     const key = literalKey(value.key);
     return key === null ? value.read === "string" : textKeys.has(key);
   };
-  // Lists that text reads are written into, by name, whose elements are text.
-  const textLists = new Set<string>();
-  const findLists = (items: readonly IrStatement[]): void => {
-    for (const item of items) {
-      if (
-        item.kind === "assign" &&
-        item.target.kind === "index" &&
-        item.target.target.kind === "variable" &&
-        textRead(item.value)
-      )
-        textLists.add(item.target.target.name);
-      withNestedBlocks(item, (body) => {
-        findLists(body);
-        return body;
-      });
+  const declaredGlobal = new Set(
+    programs.flatMap((program) =>
+      program.statements.flatMap((statement) =>
+        statement.kind === "let" && statement.global === true ? [statement.name] : [],
+      ),
+    ),
+  );
+  const global = (binding: string): string | null =>
+    binding.startsWith(":") && declaredGlobal.has(binding.slice(1)) ? binding.slice(1) : null;
+  // Lists that text reads are written into, whose items are text, by binding; a global's by name.
+  const textLists = programs.map(() => new Set<string>());
+  const globalTextLists = new Set<string>();
+  programs.forEach((program, index) => {
+    const visit = (items: readonly IrStatement[], scope: Scope): void => {
+      for (const item of items) {
+        if (item.kind === "let") scope.declare(item.name, item.span);
+        if (
+          item.kind === "assign" &&
+          item.target.kind === "index" &&
+          item.target.target.kind === "variable" &&
+          textRead(item.value)
+        ) {
+          const binding = scope.resolve(item.target.target.name);
+          textLists[index]!.add(binding);
+          if (global(binding) !== null) globalTextLists.add(global(binding)!);
+        }
+        if (item.kind === "function") visit(item.body, scope.inner(item));
+        else
+          withNestedBlocks(item, (body) => {
+            visit(body, scope.inner(item));
+            return body;
+          });
+      }
+    };
+    visit(program.statements, Scope.file());
+  });
+  const text = (index: number, value: IrExpression, scope: Scope): boolean => {
+    if (textRead(value)) return true;
+    if (value.kind === "index" && value.target.kind === "variable") {
+      const binding = scope.resolve(value.target.name);
+      return textLists[index]!.has(binding) || globalTextLists.has(global(binding) ?? "");
     }
-  };
-  for (const program of programs) findLists(program.statements);
-  const text = (value: IrExpression): boolean =>
-    textRead(value) ||
-    (value.kind === "index" &&
-      value.target.kind === "variable" &&
-      textLists.has(value.target.name)) ||
-    (value.kind === "template" &&
+    return (
+      value.kind === "template" &&
       value.parts.length === 1 &&
       "value" in value.parts[0]! &&
-      value.parts[0].value.kind === "load");
-  const textual = (value: IrExpression): boolean =>
-    text(value) ||
-    value.kind === "template" ||
-    (value.kind === "literal" && typeof value.value === "string") ||
-    (value.kind === "input" && value.input === "askText");
+      value.parts[0].value.kind === "load"
+    );
+  };
   // The values each binding takes, by program: a variable's, a parameter's from each call and its default, and a
   // function's result's (`return:name`) from each return.
   type Flow = { binding: string; value: IrExpression; scope: Scope };
@@ -689,13 +707,6 @@ function withEmptyText(
     () => new Map<string, Extract<IrStatement, { kind: "function" }>>(),
   );
   const receivers = programs.map(() => new Set<string>());
-  const declaredGlobal = new Set(
-    programs.flatMap((program) =>
-      program.statements.flatMap((statement) =>
-        statement.kind === "let" && statement.global === true ? [statement.name] : [],
-      ),
-    ),
-  );
   const assigned = (item: IrStatement, scope: Scope): string | null =>
     item.kind === "let"
       ? scope.declare(item.name, item.span)
@@ -733,7 +744,7 @@ function withEmptyText(
         const binding = assigned(item, scope);
         if (binding !== null && (item.kind === "let" || item.kind === "assign")) {
           flow.push({ binding, value: item.value, scope });
-          if (text(item.value)) receivers[index]!.add(binding);
+          if (text(index, item.value, scope)) receivers[index]!.add(binding);
         }
         if (item.kind === "return" && item.value !== null && scope.fn !== null)
           flow.push({ binding: `return:${scope.fn}`, value: item.value, scope });
@@ -753,31 +764,34 @@ function withEmptyText(
       });
     }
   });
-  const global = (binding: string): string | null =>
-    binding.startsWith(":") && declaredGlobal.has(binding.slice(1)) ? binding.slice(1) : null;
+  // The globals that text is read into, and those that such a text reaches, in any file.
   const globals = new Set(
     receivers.flatMap((bindings) => [...bindings].flatMap((binding) => global(binding) ?? [])),
   );
+  const globalsReached = new Set<string>();
   const reached = programs.map(() => new Set<string>());
   // Whether a binding holds a text read: its own, a global's, or one that reaches it.
   const holdsRead = (index: number, binding: string): boolean =>
     receivers[index]!.has(binding) ||
     reached[index]!.has(binding) ||
-    globals.has(global(binding) ?? "");
+    globals.has(global(binding) ?? "") ||
+    globalsReached.has(global(binding) ?? "");
   const holds = (index: number, value: IrExpression, scope: Scope): boolean =>
-    text(value) ||
+    text(index, value, scope) ||
     (value.kind === "variable" && holdsRead(index, scope.resolve(value.name))) ||
     (value.kind === "call" && value.local === true && holdsRead(index, `return:${value.name}`));
-  flows.forEach((flow, index) => {
-    for (let changed = true; changed;) {
-      changed = false;
+  for (let changed = true; changed;) {
+    changed = false;
+    flows.forEach((flow, index) => {
       for (const { binding, value, scope } of flow)
         if (!holdsRead(index, binding) && holds(index, value, scope)) {
           reached[index]!.add(binding);
+          const name = global(binding);
+          if (name !== null) globalsReached.add(name);
           changed = true;
         }
-    }
-  });
+    });
+  }
   // What each binding takes besides text: `null`, the types of other values the importer knows here, or `unknown`,
   // also through the text it copies; a global's, from every file.
   const others = programs.map(() => new Map<string, Set<string>>());
@@ -895,7 +909,10 @@ function withEmptyText(
               : side.kind === "call" && side.local === true
                 ? `return:${side.name}`
                 : null;
-        if (side === null || (!text(side) && (binding === null || !holdsRead(index, binding))))
+        if (
+          side === null ||
+          (!text(index, side, scope) && (binding === null || !holdsRead(index, binding)))
+        )
           return next;
         note(
           "SX_LOAD_TEXT_NULL_TEST",
@@ -932,11 +949,28 @@ function withEmptyText(
           const inner = scope.inner(item);
           const parameters = item.parameters.map((parameter) => {
             if (parameter.defaultValue === null) return parameter;
+            const binding = `${item.name}:${parameter.name}`;
             const defaultValue =
-              isNullLiteral(parameter.defaultValue) && emptied(`${item.name}:${parameter.name}`)
+              isNullLiteral(parameter.defaultValue) && emptied(binding)
                 ? nullSet(span)
                 : rewriteIn(inner, span)(parameter.defaultValue);
-            return { ...parameter, defaultValue };
+            // A text parameter that a call passes null to, and values of other types, holds them all, which its
+            // default's type alone would not.
+            const given = othersOf(index, binding);
+            if (
+              parameter.type !== undefined ||
+              !holdsRead(index, binding) ||
+              emptied(binding) ||
+              !given.has("null")
+            )
+              return { ...parameter, defaultValue };
+            if (given.has("unknown"))
+              return { ...parameter, defaultValue: helperCall("value", [defaultValue]) };
+            const type = unionType([
+              "string",
+              ...[...given].filter((member) => member !== "null"),
+            ])!;
+            return { ...parameter, defaultValue, type: optional(type) };
           });
           return [{ ...item, parameters, body: block(item.body, inner) }];
         }
@@ -1067,29 +1101,6 @@ class Scope {
   }
 }
 
-/** Each function's own variables and parameters, by the function's name. */
-function functionLocals(statements: readonly IrStatement[]): Map<string, Set<string>> {
-  const locals = new Map<string, Set<string>>();
-  const visit = (items: readonly IrStatement[], names: Set<string> | null): void => {
-    for (const item of items) {
-      if (item.kind === "function") {
-        const own = new Set(item.parameters.map((parameter) => parameter.name));
-        locals.set(item.name, own);
-        visit(item.body, own);
-        continue;
-      }
-      if (item.kind === "let" && names !== null) names.add(item.name);
-      if (item.kind === "for" && names !== null) names.add(item.variable);
-      withNestedBlocks(item, (body) => {
-        visit(body, names);
-        return body;
-      });
-    }
-  };
-  visit(statements, null);
-  return locals;
-}
-
 const OPEN_TEXT =
   "Legacy read null for a missing text, the empty text here; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.";
 
@@ -1108,9 +1119,9 @@ function isNullLiteral(value: IrExpression): boolean {
  * before it and no `and` or `or` may skip it, moves into one just before that statement, so that each file declares
  * the keys it reads itself and compiles on its own (`let savedLevel: integer? = load "game.level", default: null`). A
  * key that no published file can declare so, as its reads sit only in loops, after effects, or where a condition may
- * skip them, is declared once at the top of main.tease, by a read whose value nothing uses. A key whose type nothing
- * tells, or whose variable the script fills in later, which the compiler cannot prove, keeps its null of an open type
- * instead, `default: sexscriptLegacyValue(null)`, which needs no declaration.
+ * skip them, is declared once at the top of main.tease, by a read in a function that nothing calls. A key whose type
+ * nothing tells, or whose variable the script fills in later, which the compiler cannot prove, keeps its null of an open
+ * type instead, `default: sexscriptLegacyValue(null)`, which needs no declaration.
  */
 function withDeclaredKeys(
   programs: readonly MigrationProgram[],
@@ -1178,36 +1189,52 @@ function withDeclaredKeys(
     item.kind === "let" && item.value.kind === "load" ? literalKey(item.value.key) : null;
   // A key's one declared type takes the other values that the script gives the variables reading it too.
   programs.forEach((program, index) => {
-    const visit = (items: readonly IrStatement[]): void => {
+    const visit = (items: readonly IrStatement[], scope: Scope): void => {
       for (const item of items) {
         const key = keyedLet(item);
         const type = key === null ? undefined : types.get(key);
-        if (item.kind === "let" && key !== null && type !== undefined) {
-          const given = [...(others[index]!.get(item.name) ?? [])];
-          if (!given.includes("unknown"))
+        if (item.kind === "let") {
+          const binding = scope.declare(item.name, item.span);
+          const given = [...(others[index]!.get(binding) ?? [])];
+          if (key !== null && type !== undefined && !given.includes("unknown"))
             types.set(key, unionType([type, ...given.filter((member) => member !== "null")])!);
         }
         withNestedBlocks(item, (body) => {
-          visit(body);
+          visit(body, scope.inner(item));
           return body;
         });
       }
     };
-    visit(program.statements);
+    visit(program.statements, Scope.file());
   });
   const done = new Set<string>();
   const declaredPrograms = programs.map((program, index) => {
     const taken = new Set(packageNames);
     // Keys this file declares at a `let`, then keys it declares by moving a read.
     const atLet = new Set<string>();
-    const declare = (items: IrStatement[]): IrStatement[] =>
+    const declare = (items: IrStatement[], scope: Scope): IrStatement[] =>
       items.map((item) => {
-        const next = withNestedBlocks(item, declare);
+        const next = withNestedBlocks(item, (body) => declare(body, scope.inner(item)));
+        if (next.kind !== "let") return next;
+        const binding = scope.declare(next.name, next.span);
         const key = keyedLet(next);
         const type = key === null ? undefined : types.get(key);
-        if (key === null || type === undefined || next.kind !== "let") return next;
+        if (key === null) return next;
         // A variable that also takes a value of a type the importer cannot tell holds the read open to it.
-        const given = others[index]!.get(next.name) ?? new Set<string>();
+        const given = others[index]!.get(binding) ?? new Set<string>();
+        if (type === undefined) {
+          // A variable that a read of a key with a default starts, and that takes values of other types too, holds the
+          // read open to them, so that its declaration does not change the key's type.
+          const held = open.has(key) || next.type !== undefined ? null : declaredType(key);
+          const members = held?.split(" | ") ?? [];
+          const fits = (member: string): boolean =>
+            members.includes(member) || (member === "integer" && members.includes("number"));
+          if (held === null || [...given].every(fits)) return next;
+          const value = helperCall("value", [next.value]);
+          if (given.has("unknown")) return { ...next, value };
+          const union = unionType([held, ...[...given].filter((member) => member !== "null")])!;
+          return { ...next, value, type: given.has("null") ? optional(union) : union };
+        }
         if (given.has("unknown")) return { ...next, value: helperCall("value", [next.value]) };
         atLet.add(key);
         if (published[index] === true) done.add(key);
@@ -1250,51 +1277,49 @@ function withDeclaredKeys(
         const rewritten = mapOwnExpressions(next, take);
         return moved === null ? [next] : [moved, rewritten];
       });
-    return { ...program, statements: lift(declare(program.statements)) };
+    return { ...program, statements: lift(declare(program.statements, Scope.file())) };
   });
   // A key that no published file could declare, as its reads sit only in loops, after effects, or where a condition
-  // may skip them, is declared at the top of main.tease, by a read whose value nothing uses, which has no effect.
-  const atMain: IrStatement[] = [];
+  // may skip them, is declared at the top of main.tease, by a read in a function that nothing calls.
+  const keyTypes: IrStatement[] = [];
   const mainNames = new Set(packageNames);
   for (const [key, type] of types) {
     if (done.has(key) || !publishedReads.has(key)) continue;
-    const name = fresh(key, mainNames);
-    atMain.push(
-      {
-        kind: "comment",
-        text: `// NOTE SX_LOAD_KEY_DECLARED: ${MAIN_DECLARED}`,
-        trailing: false,
-        span: null,
-      },
-      {
-        kind: "let",
-        name,
-        value: { kind: "load", key: { kind: "literal", value: key } },
-        type: optional(type),
-        span: null,
-      },
-    );
+    keyTypes.push({
+      kind: "let",
+      name: fresh(key, mainNames),
+      value: { kind: "load", key: { kind: "literal", value: key } },
+      type: optional(type),
+      span: null,
+    });
   }
+  let holder = "sexscriptLegacyKeyTypes";
+  for (let suffix = 2; mainNames.has(holder); suffix += 1)
+    holder = `sexscriptLegacyKeyTypes${suffix}`;
+  // The declaring reads sit in a function that nothing calls, so they never run.
+  const atMain: IrStatement[] = [
+    {
+      kind: "comment",
+      text: `// NOTE SX_LOAD_KEY_DECLARED: ${MAIN_DECLARED}`,
+      trailing: false,
+      span: null,
+    },
+    { kind: "function", name: holder, parameters: [], body: keyTypes, global: true, span: null },
+  ];
   const withMain = declaredPrograms.map((program, index) =>
-    index !== layout.main || atMain.length === 0
+    index !== layout.main || keyTypes.length === 0
       ? program
       : {
           ...program,
           statements: [...atMain, ...program.statements],
           diagnostics: [
             ...program.diagnostics,
-            ...atMain.flatMap((statement) =>
-              statement.kind === "let"
-                ? [
-                    {
-                      code: "SX_LOAD_KEY_DECLARED",
-                      severity: "info" as const,
-                      message: MAIN_DECLARED,
-                      span: null,
-                    },
-                  ]
-                : [],
-            ),
+            ...keyTypes.map(() => ({
+              code: "SX_LOAD_KEY_DECLARED",
+              severity: "info" as const,
+              message: MAIN_DECLARED,
+              span: null,
+            })),
           ],
         },
   );
@@ -1336,34 +1361,34 @@ function withDeclaredKeys(
 }
 
 /**
- * The types of the values the statements give each variable besides storage reads, by name: `null`, a type the
- * importer knows here, or `unknown`.
+ * The types of the values the statements give each variable besides storage reads, by binding (Scope): `null`, a type
+ * the importer knows here, or `unknown`.
  */
 function otherValueTypes(statements: readonly IrStatement[]): Map<string, Set<string>> {
   const types = new Map<string, Set<string>>();
-  const add = (name: string, value: IrExpression): void => {
+  const add = (binding: string, value: IrExpression): void => {
     if (value.kind === "load") return;
-    const set = types.get(name) ?? new Set<string>();
+    const set = types.get(binding) ?? new Set<string>();
     set.add(isNullLiteral(value) ? "null" : (valueType(value) ?? "unknown"));
-    types.set(name, set);
+    types.set(binding, set);
   };
-  const block = (items: readonly IrStatement[]): void => {
+  const block = (items: readonly IrStatement[], scope: Scope): void => {
     for (const item of items) {
-      if (item.kind === "let") add(item.name, item.value);
+      if (item.kind === "let") add(scope.declare(item.name, item.span), item.value);
       if (item.kind === "assign" && item.operator === "=" && item.target.kind === "variable")
-        add(item.target.name, item.value);
+        add(scope.resolve(item.target.name), item.value);
       withNestedBlocks(item, (body) => {
-        block(body);
+        block(body, scope.inner(item));
         return body;
       });
     }
   };
-  block(statements);
+  block(statements, Scope.file());
   return types;
 }
 
 const MAIN_DECLARED =
-  "Declares the type of a storage key whose reads keep null where none of them could declare it; nothing uses the value read here.";
+  "Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.";
 const FILLED_IN =
   "Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.";
 const UNDECLARED =

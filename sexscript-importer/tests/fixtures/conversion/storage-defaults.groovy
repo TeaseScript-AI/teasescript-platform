@@ -121,3 +121,31 @@ show("Hints " + hints.size())
 // A parameter that a text holding values of another type too is passed to tests for both.
 def describe = { what -> if (what == null) show("Nothing to wear.") }
 describe(outfit)
+// A text parameter whose default holds values of another type too, and that a call passes null to, holds them all.
+def mixedNote = loadString("game.mixedNote")
+mixedNote = 2
+def checkNote = { item = mixedNote -> return item == "" }
+show("Note " + checkNote() + " " + checkNote(null))
+// A list of one function is apart from a list of the same name in another.
+def firstItem = { -> def items = ["a"]; items[0] = loadString("game.item"); return items[0] }
+def emptyItem = { -> def items = [""]; def v = items[0]; return v == null }
+show("Item " + firstItem() + " " + emptyItem())
+// A computed key's read into an item of a list in a list reads the item's empty value where missing, and a list of
+// one block is apart from a list of the same name in another.
+def grids = [["old"]]
+grids[0][0] = load("game.grid" + slot)
+show("Grid " + grids[0][0])
+def fillLists = { ->
+    if (getBoolean("Words?")) { def values = ["old"]; values[0] = load("game.word" + slot); show("Word " + values[0]) }
+    if (getBoolean("Numbers?")) { def values = [1]; show("Number " + values[0]) }
+}
+fillLists()
+// A variable that a read with a default starts, and that takes values of other types too, holds the read open to them.
+def mood = load("game.mood")
+mood = "calm"
+def setMood = { save("game.mood", true) }
+show("Mood " + mood)
+// A whole number that a number read is set to reads 0 where missing, where Groovy's int failed on null.
+int laps = 0
+laps = loadInteger("game.laps")
+show("Laps " + laps)

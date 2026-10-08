@@ -262,4 +262,53 @@ function describe(what) {
   }
 }
 describe(outfit)
+// A text parameter whose default holds values of another type too, and that a call passes null to, holds them all.
+let mixedNote: string | integer = load "game.mixedNote", default: ""
+mixedNote = 2
+function checkNote(item: string | integer | null = mixedNote) {
+  return item == ""
+}
+say "Note ${checkNote()} ${checkNote(null)}"
+// A list of one function is apart from a list of the same name in another.
+function firstItem {
+  let items = ["a"]
+  items[0] = load "game.item", default: ""
+  return items[0]
+}
+function emptyItem {
+  let items = [""]
+  let v = items[0]
+  return v == null
+}
+say "Item ${firstItem()} ${emptyItem()}"
+// A computed key's read into an item of a list in a list reads the item's empty value where missing, and a list of
+// one block is apart from a list of the same name in another.
+let grids = [["old"]]
+grids[0][0] = load "game.grid${slot}", default: ""
+say "Grid ${grids[0][0]}"
+function fillLists {
+  say "Words?"
+  if (choose yes: "Yes", no: "No") == "yes" {
+    let values = ["old"]
+    values[0] = load "game.word${slot}", default: ""
+    say "Word ${values[0]}"
+  }
+  say "Numbers?"
+  if (choose yes: "Yes", no: "No") == "yes" {
+    let values = [1]
+    say "Number ${values[0]}"
+  }
+}
+fillLists()
+// A variable that a read with a default starts, and that takes values of other types too, holds the read open to them.
+let mood: boolean | string = sexscriptLegacyValue(load("game.mood", default: false))
+mood = "calm"
+function setMood {
+  save true as "game.mood"
+}
+say "Mood ${mood}"
+// A whole number that a number read is set to reads 0 where missing, where Groovy's int failed on null.
+let laps = 0
+laps = toInteger(sexscriptLegacyLoadInteger("game.laps", 0))
+say "Laps ${laps}"
 exit

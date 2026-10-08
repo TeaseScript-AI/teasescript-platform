@@ -66,7 +66,7 @@ save 4 as "x.count"
 let stored: integer = sexscriptLegacyLoadInteger("x.count", 0)
 // Another storage read may hold a fraction, which Groovy truncated.
 save 2.5 as "x.ratio"
-let ratio = toInteger(sexscriptLegacyLoadFloat("x.ratio"))
+let ratio = toInteger(sexscriptLegacyLoadFloat("x.ratio", 0))
 say "Ratio ${ratio}"
 // A number that starts as null, and that nothing compares with null, starts at 0.
 let later: number = 0

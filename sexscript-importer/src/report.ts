@@ -646,27 +646,19 @@ function diagnosticsByPath(
   return byPath;
 }
 
-/**
- * A top-level read of main.tease that declares a storage key's type and keeps its null, `let saved: integer? = load
- * "k", default: null` (SX_LOAD_KEY_DECLARED).
- */
-const KEY_DECLARATION = /^let \w+: [^=]+ = load "[^"\\$]*", default: null$/u;
-
 /** A stand-in for a file that has no runnable conversion: reaching it ends the run as `blocked`. */
 function stub(path: string, source = ""): string {
-  return `${globalDeclarations(source, path === MAIN)}${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
+  return `${globalDeclarations(source)}${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
 }
 
 /**
  * The declarations of a file that other files see: speakers (V30 §37), globals, and global functions (V30 §11), such
- * as the generated helpers of main.tease, and with `keys`, main.tease's declarations of storage key types that no read
- * of the other files could declare (#690); the files that run still need them when the file becomes a stub.
+ * as the generated helpers of main.tease; the files that run still need them when the file becomes a stub.
  */
-function globalDeclarations(source: string, keys: boolean): string {
+function globalDeclarations(source: string): string {
   const lines = source.split("\n");
   const kept: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
-    if (keys && KEY_DECLARATION.test(lines[index]!)) kept.push(lines[index]!);
     if (!/^(?:global|speaker) /u.test(lines[index]!)) continue;
     kept.push(lines[index]!);
     // The declaration continues on indented and blank lines, up to a closing delimiter at the start of a line.

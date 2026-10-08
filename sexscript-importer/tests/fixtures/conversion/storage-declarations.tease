@@ -1,10 +1,11 @@
 function sexscriptLegacyValue(valueValue) {
   return valueValue
 }
-// NOTE SX_LOAD_KEY_DECLARED: Declares the type of a storage key whose reads keep null where none of them could declare it; nothing uses the value read here.
-let savedMarked: integer? = load "game.marked", default: null
-// NOTE SX_LOAD_KEY_DECLARED: Declares the type of a storage key whose reads keep null where none of them could declare it; nothing uses the value read here.
-let savedWho: integer? = load "game.who", default: null
+// NOTE SX_LOAD_KEY_DECLARED: Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.
+global function sexscriptLegacyKeyTypes {
+  let savedMarked: integer? = load "game.marked", default: null
+  let savedWho: integer? = load "game.who", default: null
+}
 // A read that keeps its null declares its key's type at the variable it starts, with the other values the script gives
 // that variable.
 let payload: boolean | integer[] | string | null = load "game.payload", default: null
