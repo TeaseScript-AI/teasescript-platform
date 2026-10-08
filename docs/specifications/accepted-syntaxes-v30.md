@@ -2005,7 +2005,9 @@ let name = askText "What is your name?", default: "Slave", hint: "Type your name
 The question, `default:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
 the two options may be written in either order.
 The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
-accepts what a field text accepts, so a list is an error. Without a question nothing is said.
+accepts what a field text accepts, so a list is an error. Without a question nothing is said. In the head of `if`,
+`while`, `repeat`, `for`, or `switch`, the `{` of the block ends a compact ask or `choose`, so `if askBoolean { ... }`
+asks without a question.
 
 ### Text input
 
@@ -2125,8 +2127,14 @@ It only completes when every field contains a valid whole number and returns `in
 
 ### Boolean input
 
+**Status:** Accepted; implemented in both forms (compact form: Owner decision on #512, 2026-10-08).
+
 ```text
 let answer = askBoolean("Continue?")
+if askBoolean "Ready?" {
+    say "Then we begin."
+}
+let ok = askBoolean as mistress "Ready?", yesText: "Sure!", noText: "No, thanks"
 ```
 
 Custom boolean labels:
@@ -2139,7 +2147,12 @@ let answer = askBoolean(
 )
 ```
 
-`askBoolean(...)` returns `boolean`.
+`askBoolean(...)` returns `boolean`. It shows two buttons: `yesText:`, by default `"Yes"`, returns `true`, and
+`noText:`, by default `"No"`, returns `false`; the player's answer is the chosen button's text. As for a basic ask, the
+compact and parenthesized forms mean the same, `as speaker` comes before the arguments, and the question, which may
+instead be named `message:`, is said once by the asking speaker before the buttons open. The question and the button
+texts are evaluated once, in written order, and accept what a field text accepts. Its `default:`
+([Default answers](#default-answers)) is not implemented yet.
 
 ### Multiple boolean choices
 
@@ -2160,8 +2173,10 @@ let selected = askBooleans(
 It returns `boolean[]`. It is a [form](#forms) of one toggle per text, in order, that returns the toggles' states in the
 same order, so texts may repeat; the lists must have the same non-zero length. With `cancel:` it returns `boolean[]?`,
 `null` only when cancelled. The message, as the form's question, may also come first without a name, and the form is
-implemented with `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)). `askBoolean(...)` stays a separate two-button question
-that completes when either button is chosen.
+implemented with `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)). Like `askForm`, it has a compact form that means the
+same, and `as speaker` comes before the arguments:
+`let toys = askBooleans as mistress "Which toys?", texts: names, defaults: saved`. `askBoolean(...)` stays a separate
+two-button question that completes when either button is chosen.
 
 ### Forms
 
