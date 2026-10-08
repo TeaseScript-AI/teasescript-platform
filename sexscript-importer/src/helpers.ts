@@ -570,7 +570,7 @@ function removeDeviceButton(device: IrExpression): IrStatement[] {
 
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
   // Legacy background sounds overlapped and playBackgroundSound(null) stopped them all; TeaseScript stops async
-  // media through its handle, so the handles are collected.
+  // media through its handle, so the handles of the sounds still playing are collected.
   backgroundSounds: {
     name: "sexscriptBackgroundSounds",
     build: () => letS("sexscriptBackgroundSounds", { kind: "list", items: [] }),
@@ -605,7 +605,21 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             handle: "sound",
             span: null,
           },
-          add("sexscriptBackgroundSounds", v("sound")),
+          // Only a sound still playing or paused needs a stop later; a finished or stopped one is dropped, so a long
+          // session keeps no handle of a sound that has ended.
+          letS("playing", { kind: "list", items: [] }),
+          forS("kept", v("sexscriptBackgroundSounds"), [
+            ifS(
+              bin(
+                "or",
+                bin("==", prop(v("kept"), "state"), lit("running")),
+                bin("==", prop(v("kept"), "state"), lit("paused")),
+              ),
+              [add("playing", v("kept"))],
+            ),
+          ]),
+          add("playing", v("sound")),
+          set(v("sexscriptBackgroundSounds"), v("playing")),
         ],
       ),
   },

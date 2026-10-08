@@ -19,7 +19,14 @@ function sexscriptLegacyPlayBackgroundSound(file, passes) {
     return
   }
   let sound = playAudio(file: file, async: true, repeat: passes times)
-  sexscriptBackgroundSounds.add(sound)
+  let playing = []
+  for kept in sexscriptBackgroundSounds {
+    if kept.state == "running" or kept.state == "paused" {
+      playing.add(kept)
+    }
+  }
+  playing.add(sound)
+  sexscriptBackgroundSounds = playing
 }
 global function sexscriptLegacyStopBackgroundSounds {
   for sound in sexscriptBackgroundSounds {
