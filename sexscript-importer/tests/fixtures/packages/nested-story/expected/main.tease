@@ -1,3 +1,7 @@
+---
+title: "nested-story"
+---
+
 // NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.
 global function sexscriptLegacyValue(value) {
   return value

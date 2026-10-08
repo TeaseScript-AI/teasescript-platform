@@ -618,8 +618,9 @@ function entryMenu(
 
 /**
  * The title and author of a generated main.tease, which the Player shows for the package: those of the one script it
- * goes to; for a menu, the offered title that every offered script's title starts with, and the authors that every
- * offered script names. Without such a value, the header leaves it out.
+ * goes to; for a menu, the offered title that every offered script's title starts with, else the name of the package's
+ * folder, as the catalog lists it, and the authors that every offered script names. Without such a value, the header
+ * leaves it out.
  */
 function entryMetadata(
   choices: readonly string[],
@@ -652,10 +653,15 @@ function entryMetadata(
     names.every((other) => other.some((candidate) => lower(candidate) === lower(name))),
   );
   const author = shared.length === 0 ? null : shared.join(", ");
-  if (title === null && author === null) return null;
+  // The package's folder holds its legacy scripts folder, or is the scripts' common folder itself.
+  const folders = scripts.root.split("/").filter(Boolean);
+  const folder =
+    folders.at(-1)?.toLowerCase() === "scripts" ? folders.at(-2) : (folders.at(-1) ?? undefined);
+  const named = title ?? (choices.length > 1 ? (folder ?? null) : null);
+  if (named === null && author === null) return null;
   return {
     apiVersion: null,
-    title,
+    title: named,
     summary: null,
     author,
     status: null,
