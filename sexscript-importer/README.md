@@ -327,8 +327,8 @@ with constants: each variable and stored key (also through the data flow, each k
 comparison reads, or its length, bucketed as unset, `null`, `true` or `false`, a compared text or other text, or a
 number's or duration's place among its compared constants (below, at, between, or above them). A step that shows such
 a value, or a change of one, for the first time counts as reaching new instructions, and among the other states those
-of the cells expanded least go first, before the loop key; within a cell, the states queued when it was expanded least,
-the ones that waited longest. A cell groups states coarsely: a condition that computes
+of the cells expanded least go first, before the loop key, and of those the states last queued when their cell was
+expanded least, the ones that waited longest. A cell groups states coarsely: a condition that computes
 with a value (`n + 1 == 3`) can still tell states of one cell apart. A loop that keeps making states no condition
 tells apart, such as a counter no condition reads, so no longer takes most of the search; the report's `search.cells`
 counts the slots, cells, values, and changes found. Waiting states keep their tagged snapshots (below): the JSON's

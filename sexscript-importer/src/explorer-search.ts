@@ -852,7 +852,8 @@ class CellFrontier {
       this.#groups.set(key, id);
       this.#entries.push({ cell, group, states: new Frontier(), queued: null });
     }
-    // Within a cell, the states queued when it was expanded least go first: the ones that waited longest.
+    // A state's age is its cell's expansions when it was queued, last: the states queued when their cell was expanded
+    // least, the ones that waited longest, go first, before the tier, within a cell and between cells expanded as often.
     this.#entries[id]!.states.push(node, [this.#expansions(cell), ...rank.slice(GROUP + 1)]);
     this.#size += 1;
     this.#queue(id);
