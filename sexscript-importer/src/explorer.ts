@@ -1372,7 +1372,7 @@ function idFamily(holder: unknown, key: string): string | undefined {
  * read. The loop key also leaves out every time (`…Ms`), the random state, and settled handles: a heuristic that
  * makes the iterations of a loop that waits, or picks at random, look alike.
  */
-export function stateKeys(snapshot: Data): { state: string; loop: string } {
+export function stateKeys(snapshot: Data): { readonly state: string; readonly loop: string } {
   const ids = new Map<string, Set<number>>();
   const collect = (value: unknown, holder: unknown, key: string): void => {
     if (Array.isArray(value)) for (const item of value) collect(item, value, "");
@@ -1408,7 +1408,15 @@ export function stateKeys(snapshot: Data): { state: string; loop: string } {
         }),
       )
       .digest("base64");
-  return { state: key(false), loop: key(true) };
+  // The loop key only for a state not seen before: a known state's is known.
+  let loop: string | null = null;
+  return {
+    state: key(false),
+    get loop() {
+      loop ??= key(true);
+      return loop;
+    },
+  };
 }
 
 /** A runtime failure as a report shows it, with one-based lines and columns. */

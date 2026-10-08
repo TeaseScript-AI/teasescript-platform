@@ -3,7 +3,8 @@
  * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
- * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
+ * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]
+ *          [--workers 1|2]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
  *          [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>
@@ -105,6 +106,7 @@ async function main(args: string[]): Promise<void> {
       "budget-seconds": { type: "string" },
       "budget-ops": { type: "string" },
       "max-states": { type: "string", default: "20000" },
+      "store-mb": { type: "string" },
       seed: { type: "string", default: "1" },
       workers: { type: "string", default: "1" },
       out: { type: "string" },
@@ -146,6 +148,7 @@ async function main(args: string[]): Promise<void> {
         : null
       : Number(values["budget-seconds"]);
   const maxStates = Number(values["max-states"]);
+  const storeMb = values["store-mb"] === undefined ? null : Number(values["store-mb"]);
   const seed = Number(values.seed);
   const workers = Number(values.workers);
   const rounds = Number(values.rounds);
@@ -160,6 +163,7 @@ async function main(args: string[]): Promise<void> {
         !Number.isSafeInteger(budgetOps * 2 ** (rounds - 1)))) ||
     !Number.isSafeInteger(maxStates) ||
     maxStates < 1 ||
+    (storeMb !== null && !(Number.isSafeInteger(storeMb) && storeMb >= 1)) ||
     !Number.isSafeInteger(seed) ||
     (workers !== 1 && workers !== 2) ||
     !Number.isSafeInteger(rounds) ||
@@ -167,7 +171,8 @@ async function main(args: string[]): Promise<void> {
     (rounds > 1 && values.corpus === undefined)
   ) {
     process.stderr.write(
-      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
+      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]\n" +
+        "         [--workers 1|2]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
         "         [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>\n" +
@@ -202,6 +207,7 @@ async function main(args: string[]): Promise<void> {
         {
           ...budgets,
           maxStates,
+          storeMb,
           seed,
           corpus,
           strategies: {
@@ -244,6 +250,8 @@ interface RunSettings {
   budgetSeconds: number | null;
   budgetOps: number | null;
   maxStates: number;
+  /** The snapshot store's limit in MiB, or null for the default. */
+  storeMb: number | null;
   seed: number;
   /** The corpus folder, or null without one. */
   corpus: string | null;
@@ -268,7 +276,7 @@ async function exploreUnits(
   out: string,
   workers: number,
 ): Promise<number> {
-  const { budgetSeconds, budgetOps, maxStates, seed, corpus, strategies } = settings;
+  const { budgetSeconds, budgetOps, maxStates, storeMb, seed, corpus, strategies } = settings;
   if (workers === 2 && dirs.length > 1) {
     const flags = [
       "--max-states",
@@ -281,6 +289,7 @@ async function exploreUnits(
     ];
     if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
     if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
+    if (storeMb !== null) flags.push("--store-mb", String(storeMb));
     if (corpus !== null) flags.push("--corpus", corpus);
     for (const [name, on] of Object.entries(strategies)) {
       const flag = name.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
@@ -420,6 +429,7 @@ async function exploreUnit(
       budgetMs: settings.budgetSeconds === null ? Infinity : settings.budgetSeconds * 1000,
       ...(settings.budgetOps === null ? {} : { budgetOps: settings.budgetOps }),
       maxStates: settings.maxStates,
+      ...(settings.storeMb === null ? {} : { storeBytes: settings.storeMb * 1024 ** 2 }),
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
       ...(settings.corpus === null ? {} : { corpus: stored?.entries ?? [] }),

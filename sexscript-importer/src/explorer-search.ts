@@ -1,4 +1,5 @@
-import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { totalmem } from "node:os";
+import { constants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
 import {
   comparedSlots,
@@ -121,7 +122,10 @@ const MAX_NEXT_SESSIONS = 10;
 /** With quit-anywhere next visits: next sessions started from the storage of states a session did not complete. */
 const MAX_QUIT_SESSIONS = 20;
 /** Compressed snapshots kept for going on from explored states; older ones are replayed when needed. */
-const STORE_BYTES = 256 * 1024 * 1024;
+const STORE_BYTES = Math.min(4 * 1024 ** 3, Math.max(256 * 1024 ** 2, Math.floor(totalmem() / 8)));
+/** The stored snapshots whose bytes, up to {@link DICTIONARY_BYTES}, make the dictionary the later ones are packed with. */
+const DICTIONARY_SNAPSHOTS = 8;
+const DICTIONARY_BYTES = 64 * 1024;
 
 /** Wall clocks tried for a condition that reads the clock: times of day, weekdays, and later dates. */
 const CLOCK_VARIANTS = [-11.5, -6, 6, 11.5, 24, 48, 72, 24 * 8, 24 * 40, 24 * 400].map(
@@ -274,6 +278,8 @@ export interface ExploreOptions {
    * the values of the keys conditions compare and their changes in its session. Off by default.
    */
   readonly quitAnywhere?: boolean;
+  /** The snapshot store's limit in bytes; an eighth of the memory by default, from 256 MiB to 4 GiB. */
+  readonly storeBytes?: number;
 }
 
 /**
@@ -471,7 +477,8 @@ export interface ExploreResult {
      */
     expansionsByPrompt: PromptShare[];
     /** The compressed snapshot store: its largest size, the snapshots it dropped, and the replays that made up for them. */
-    store: { peakBytes: number; evicted: number; replays: number };
+    /** The snapshot store: its limit, its peak, the snapshots dropped above the limit, and the states replayed. */
+    store: { limitBytes: number; peakBytes: number; evicted: number; replays: number };
     /** With cells: the compared slots, and the cells, slot values, and changes of a slot's value found. */
     cells?: { slots: number; cells: number; values: number; transitions: number };
     /**
@@ -528,46 +535,95 @@ export interface ExploreResult {
 }
 
 /**
- * The snapshots of waiting states as deflated JSON, so that directed search can go on from any explored state. Above
- * {@link STORE_BYTES} the oldest ones that are not pinned are dropped; a state without one is replayed.
+ * The snapshots of waiting states, so that directed search can go on from any explored state: the exact bytes a snapshot
+ * is written as (its JSON now; the engine's exported bytes with their MAC once restores can take them), packed with zstd
+ * level 1 and, after the first few, a dictionary made of the first ones' bytes. Above its limit (an eighth of the
+ * memory by default, from 256 MiB to 4 GiB) the oldest ones that are not pinned are dropped; a state without one is
+ * replayed.
  */
 class SnapshotStore {
   peakBytes = 0;
   evicted = 0;
-  readonly #entries = new Map<number, Uint8Array>();
+  readonly limitBytes: number;
+  readonly #entries = new Map<number, { data: Uint8Array; dictionary: boolean }>();
   readonly #pinned = new Set<number>();
+  readonly #first: Uint8Array[] = [];
+  #dictionary: Buffer | null = null;
   #bytes = 0;
 
+  constructor(limitBytes = STORE_BYTES) {
+    this.limitBytes = limitBytes;
+  }
+
   put(id: number, snapshot: Data, pinned = false): void {
-    // zlib's result, like a pooled Buffer copy, shares a larger memory block that one kept entry would keep alive;
-    // a plain copy has a block of its own size.
-    const data = new Uint8Array(deflateRawSync(JSON.stringify(snapshot), { level: 1 }));
-    this.#entries.set(id, data);
+    this.putBytes(id, snapshotBytes(snapshot), pinned);
+  }
+
+  get(id: number): Data | null {
+    const bytes = this.getBytes(id);
+    return bytes === null ? null : snapshotFrom(bytes);
+  }
+
+  /** Keeps a snapshot's exact bytes, which {@link getBytes} gives back as they were. */
+  putBytes(id: number, bytes: Uint8Array, pinned = false): void {
+    if (this.#dictionary === null && this.#first.length < DICTIONARY_SNAPSHOTS) {
+      this.#first.push(bytes);
+      if (this.#first.length === DICTIONARY_SNAPSHOTS) {
+        this.#dictionary = Buffer.from(Buffer.concat(this.#first).subarray(0, DICTIONARY_BYTES));
+        this.#first.length = 0;
+      }
+    }
+    const dictionary = this.#dictionary !== null;
+    // zstd's result shares a larger pooled block that one kept entry would keep alive; a plain copy has its own size.
+    const data = new Uint8Array(
+      zstdCompressSync(bytes, {
+        params: { [constants.ZSTD_c_compressionLevel]: 1 },
+        ...(this.#dictionary === null ? {} : { dictionary: this.#dictionary }),
+      }),
+    );
+    const known = this.#entries.get(id);
+    if (known !== undefined) this.#bytes -= known.data.length;
+    this.#entries.set(id, { data, dictionary });
     this.#bytes += data.length;
     if (pinned) this.#pinned.add(id);
     this.peakBytes = Math.max(this.peakBytes, this.#bytes);
     for (const [key, value] of this.#entries) {
-      if (this.#bytes <= STORE_BYTES) break;
+      if (this.#bytes <= this.limitBytes) break;
       if (this.#pinned.has(key) || key === id) continue;
       this.#entries.delete(key);
-      this.#bytes -= value.length;
+      this.#bytes -= value.data.length;
       this.evicted += 1;
     }
   }
 
-  get(id: number): Data | null {
-    const data = this.#entries.get(id);
-    if (data === undefined) return null;
-    const value: unknown = JSON.parse(inflateRawSync(data).toString("utf8"));
-    return isRecord(value) ? value : null;
+  getBytes(id: number): Uint8Array | null {
+    const entry = this.#entries.get(id);
+    if (entry === undefined) return null;
+    return zstdDecompressSync(
+      entry.data,
+      entry.dictionary && this.#dictionary !== null ? { dictionary: this.#dictionary } : {},
+    );
   }
 
   drop(id: number): void {
-    const data = this.#entries.get(id);
-    if (data === undefined || this.#pinned.has(id)) return;
+    const entry = this.#entries.get(id);
+    if (entry === undefined || this.#pinned.has(id)) return;
     this.#entries.delete(id);
-    this.#bytes -= data.length;
+    this.#bytes -= entry.data.length;
   }
+}
+
+/**
+ * The exact bytes the store keeps of a snapshot: its JSON. A restore that checks the engine's own exported bytes (with
+ * their MAC) would keep those instead, and {@link snapshotFrom} would hand them back.
+ */
+function snapshotBytes(snapshot: Data): Uint8Array {
+  return Buffer.from(JSON.stringify(snapshot), "utf8");
+}
+
+function snapshotFrom(bytes: Uint8Array): Data | null {
+  const value: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+  return isRecord(value) ? value : null;
 }
 
 /** A binary heap of open states by rank: lower comes first, compared element by element. */
@@ -1180,7 +1236,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     map.update((index) => members.has(index));
     guidance.lead = { remaining: CLOSER_EXPANSIONS, target: GUIDED };
   };
-  const store = new SnapshotStore();
+  const store = new SnapshotStore(options.storeBytes);
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
   const loopSeen = new Map<string, number>();
@@ -2999,7 +3055,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             kind: hotspotKind(expansions, productive, inputs.size),
           };
         }),
-      store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
+      store: {
+        limitBytes: store.limitBytes,
+        peakBytes: store.peakBytes,
+        evicted: store.evicted,
+        replays,
+      },
       bySession,
       ...(cells === null ? {} : { cells: cells.stats }),
       ...(map === null

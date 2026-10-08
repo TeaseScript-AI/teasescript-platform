@@ -270,7 +270,7 @@ them at the top.
 
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
-node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
+node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--store-mb N] [--seed 1] [--workers 1|2] \
   [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
   [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] [--[no-]random-choices] \
   [--[no-]quit-anywhere] <unit-dir>... --out <dir>
@@ -315,7 +315,9 @@ of the cells expanded least go first, before the loop key. A cell groups states 
 with a value (`n + 1 == 3`) can still tell states of one cell apart. A loop that keeps making states no condition
 tells apart, such as a counter no condition reads, so no longer takes most of the search; the report's `search.cells`
 counts the slots, cells, values, and changes found. Waiting states keep their snapshots
-as compressed JSON (up to 256 MB; a state whose snapshot was dropped is replayed from an ancestor). The search stops
+as their exact JSON bytes packed with zstd level 1, after the first eight with a dictionary made of those (up to an
+eighth of the memory, from 256 MiB to 4 GiB, or `--store-mb N`; a state whose snapshot was dropped is replayed from an
+ancestor; `search.store` has the limit, the peak, and the drops). The search stops
 when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
 `--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic
 answers, the corpus replay's included), checked before each step: a step that started finishes, so a run can go over N
