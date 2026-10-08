@@ -16,11 +16,11 @@
  * given.
  *
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
- * lead), and compared answers (typed asks are also answered with what the code compares the answer with) are on by
- * default (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers` switch them off). `--realign`
- * lets replays go on past inputs that no longer fit, `--conjunctive` steers toward a way that needs all parts of its condition by their summed distance, and
- * `--guidance` puts states nearer to code not reached yet first (see `src/explorer-search.ts`); `--no-…` switches each
- * off.
+ * lead), compared answers (typed asks are also answered with what the code compares the answer with), and realignment
+ * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too) are on by default
+ * (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`, `--no-realign` switch them off).
+ * `--conjunctive` steers toward a way that needs all parts of its condition by their summed distance, and `--guidance`
+ * puts states nearer to code not reached yet first (see `src/explorer-search.ts`); `--no-…` switches each off.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -98,7 +98,7 @@ async function main(args: string[]): Promise<void> {
       cells: { type: "boolean", default: true },
       later: { type: "boolean", default: true },
       "compared-answers": { type: "boolean", default: true },
-      realign: { type: "boolean", default: false },
+      realign: { type: "boolean", default: true },
       "progress-leads": { type: "boolean", default: true },
       conjunctive: { type: "boolean", default: false },
       guidance: { type: "boolean", default: false },

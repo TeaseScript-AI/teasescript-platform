@@ -419,8 +419,8 @@ the search's own steps, each session from the storage the one before it left, wh
 sessions left, and the states; an input is applied to a state once. The search then goes on with the rest of the
 budget, and states the replay went on from, which an earlier run expanded, come after all others. An entry is `stale`
 from the first input that no longer fits the pending action (another option or button label, another kind of ask,
-another deadline) or that the runtime rejects; it is replayed up to there. With `--realign`, a replay of a corpus entry
-or of a directed attempt's path goes on instead: with the input that fits there (the option or button with the same
+another deadline) or that the runtime rejects; it is replayed up to there. With realignment (on by default, off with
+`--no-realign`), a replay of a corpus entry or of a directed attempt's path goes on instead: with the input that fits there (the option or button with the same
 label, the wait there is), with a later input of the path that fits (skipping up to 8), or with the only button there
 is (up to 8), and the report's `corpus.realigned` counts the entries that needed it; the path a report keeps is the
 inputs actually applied. The goals of a condition after `else` then also include the earlier conditions of its chain
