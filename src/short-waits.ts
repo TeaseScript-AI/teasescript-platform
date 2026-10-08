@@ -1,4 +1,4 @@
-import type { Expression, Program, SayStatement, Statement, WaitStatement } from "./ast.js";
+import type { Program, SayStatement, Statement, WaitStatement } from "./ast.js";
 import { calculateSmartPacingDurationMs, DEFAULT_CHAT_PACING_SETTINGS } from "./chat-pacing.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { DURATION_UNIT_MILLISECONDS, durationParts, isExactDuration } from "./duration.js";
@@ -11,8 +11,9 @@ const SHORT_WAIT_CODE = "TSV060";
 /**
  * A warning for every `wait` of known duration that directly follows a `say` with default pacing in the same block and
  * is shorter than the message's reading time at the default reading speed. The wait runs alongside the message's pacing
- * (RUNTIME.md "`instant`, `0`, and `wait`"), so it adds no time unless the player skips the message. The reading time
- * counts an interpolated value, or text the compiler cannot know, as empty, so it is the shortest the message can have.
+ * (RUNTIME.md "`instant`, `0`, and `wait`"), so it adds no time unless the player skips the message. The reading time is
+ * the shortest the message can have: that of its text when the compiler knows all of it, and otherwise the base delay
+ * alone, as a value the compiler cannot know may change which markup the text holds and so hide any of the rest.
  * Unreachable waits are left to their own warning.
  */
 export function shortWaitWarnings(
@@ -53,10 +54,14 @@ function shortWait(say: SayStatement, wait: WaitStatement): Diagnostic | null {
   const waitMs = knownWaitMs(wait);
   // `wait 0` never adds time.
   if (waitMs === undefined || waitMs === 0) return null;
-  const readingMs = calculateSmartPacingDurationMs(
-    parseMessageMarkup(shortestText(say.value)).visibleText,
-    DEFAULT_CHAT_PACING_SETTINGS,
-  );
+  const text = staticVisibleText(say.value);
+  const readingMs =
+    text === undefined
+      ? DEFAULT_CHAT_PACING_SETTINGS.baseDelayMs
+      : calculateSmartPacingDurationMs(
+          parseMessageMarkup(text).visibleText,
+          DEFAULT_CHAT_PACING_SETTINGS,
+        );
   if (waitMs >= readingMs) return null;
   return createDiagnostic(
     DiagnosticSeverity.Warning,
@@ -74,14 +79,6 @@ function knownWaitMs(wait: WaitStatement): number | undefined {
   if (known === undefined || wait.unit !== null) return undefined;
   const parts = durationParts(known);
   return isExactDuration(parts) && parts.milliseconds >= 0 ? parts.milliseconds : undefined;
-}
-
-/** The authored text of a message with each interpolated value empty; text the compiler cannot know is empty. */
-function shortestText(value: Expression): string {
-  let literal = value;
-  while (literal.kind === "parenthesizedExpression") literal = literal.expression;
-  if (literal.kind !== "stringLiteral") return staticVisibleText(value) ?? "";
-  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
 }
 
 /** Milliseconds as seconds, to the millisecond. */

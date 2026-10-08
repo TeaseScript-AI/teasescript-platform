@@ -3435,16 +3435,16 @@ A `wait` runs alongside the pacing of the message before it, so the script goes 
 ([`RUNTIME.md`](../RUNTIME.md#instant-0-and-wait)). Warning `TSV060` (owner decision, 2026-10-08), on the `wait`, marks
 one that therefore adds no time unless the player skips the message: a `wait` of a known non-zero duration that is the
 next statement after a `say` without its own pacing (`instant` or seconds), in the same block, and is shorter than the
-message's reading time at the default reading speed. That reading time is the default smart pacing of the message's
-visible text with every interpolated value, and any text the compiler cannot know, empty, so it is the shortest the
-message can take. Comments and blank lines are no statements. Not checked are a `wait` after another statement or a
-label, after a `say` that ends a branch or loop body, after a message used as a value, and one whose duration is not
-known:
+message's reading time at the default reading speed. That reading time is the shortest the message can take: the default
+smart pacing of its visible text when the compiler knows all of the text, and otherwise the base delay alone, as a value
+the compiler cannot know may change which markup the text holds and so hide any of the rest. Comments and blank lines
+are no statements. Not checked are a `wait` after another statement or a label, after a `say` that ends a branch or loop
+body, after a message used as a value, and one whose duration is not known:
 
 ```text
 for i in 1..=10 {
     say ".${i}."
-    wait 0.5 s      // TSV060: the message takes at least 1.8 s to read
+    wait 0.5 s      // TSV060: the message takes at least 1.5 s to read
 }
 ```
 

@@ -83,9 +83,11 @@ class Session {
       readonly pacing?: boolean;
       readonly seed?: number;
       readonly initialSessionTimeMs?: number;
+      /** The compiler warnings `source` is expected to have. */
+      readonly warnings?: readonly string[];
     } = {},
   ) {
-    this.plan = plan(source);
+    this.plan = plan(source, {}, options.warnings);
     const settings = {
       seed: options.seed ?? 0x1234_5678,
       initialSessionTimeMs: options.initialSessionTimeMs ?? 0,
@@ -1013,14 +1015,18 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
   // Scene-time replay makes the complete result independent of observation cadence, not only the output.
-  const scripts = [
-    ...cases.map(([source]) => source),
-    'say "a"\nwait 2\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
+  // The last sets its timer up while the message's pacing still runs, which the wait before it cannot outlast (TSV060).
+  const scripts: [string, string[]][] = [
+    ...cases.map(([source]): [string, string[]] => [source, []]),
+    [
+      'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
+      ["TSV060"],
+    ],
   ];
-  for (const source of scripts) {
-    const onTime = new Session(source, { pacing: true });
+  for (const [source, warnings] of scripts) {
+    const onTime = new Session(source, { pacing: true, warnings });
     for (let nowMs = 250; nowMs <= 12_000; nowMs += 250) onTime.at(nowMs);
-    const late = new Session(source, { pacing: true }).at(12_000);
+    const late = new Session(source, { pacing: true, warnings }).at(12_000);
     assert.deepEqual(late.events, onTime.events, `events: ${source}`);
     assert.deepEqual(late.snapshot, onTime.snapshot, `snapshot: ${source}`);
   }
