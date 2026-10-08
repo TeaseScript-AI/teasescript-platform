@@ -247,6 +247,8 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
           ? LIST
           : UNKNOWN;
     if (environment.elementsPending === true) return 0;
+    // A variable of unknown type, such as a parameter, may hold another list than one of its name elsewhere.
+    if (target === UNKNOWN) return UNKNOWN;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
     return element === undefined || element === 0 ? UNKNOWN : element;
