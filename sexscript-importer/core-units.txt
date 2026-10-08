@@ -35,4 +35,4 @@ PunishmentChooser     # SX_DECIMAL_ROUNDING, SX_LOAD_BOOLEAN_TEXT
 joiSession            # SX_PACKAGE_TEXT_CLOSE, SX_CHARACTER_TEXT
 courtroom             # SX_CHARACTER_CODE
 guillotine            # the datetime type
-BanjoGameHub          # isolated TSR025 (its report takes about 110 s)
+BanjoGameHub          # isolated TSR025 runtime failure
