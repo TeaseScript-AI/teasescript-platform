@@ -42,6 +42,8 @@ interface RandomHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
+  start(next: PlayerRuntimeSession, paused?: boolean): void;
+  prepareInput(): true | Promise<boolean>;
 }
 interface DebugRandom {
   readonly enabled: Ref<boolean>;
@@ -280,6 +282,52 @@ test("Least tried resolves a paused draw with the outcome its site took least, t
   assert.notEqual(taken, then, "the second takes the outcome not taken yet");
 });
 
+test("a picker answer counts before the draws it lets run, so they decide from it in order", async (context) => {
+  const plan = compiled(
+    'for turn in 1..=2 {\n    let hit = chance(50)\n    say "${hit}", instant\n}\nshowButton "Next"\nexit',
+  );
+  const { host, random } = await mount(context, plan);
+  await host.activate();
+  await settle(context);
+  const site = random.draw.value!.site;
+  random.setNext(site, "untried");
+  assert.equal(random.resolve({ kind: "boolean", value: false }), true);
+  assert.deepEqual(said(host), ["false", "true"], "the next draw takes the outcome not taken yet");
+  assert.deepEqual(random.tried(site).history, ["false", "true"], "in the order taken");
+  assert.equal(random.resolve("natural"), false, "no draw waits");
+  assert.deepEqual(
+    random.tried(site).history,
+    ["false", "true"],
+    "a refused answer counts nothing",
+  );
+});
+
+test("a restored state waits at its draw for the picker only once input adopts it", async (context) => {
+  const plan = compiled(
+    'let hit = chance(50)\nsay "Hit: ${hit}", instant\nlet again = chance(50)\nsay "Again: ${again}", instant\nshowButton "Next"\nexit',
+  );
+  const { host, random } = await mount(context, plan);
+  await host.activate();
+  await settle(context);
+  const atDraw = host.session.value!;
+  // Shown for inspection, as Debug's rewind shows a state it restored: no picker, so the inspection controls work.
+  const asked = () => random.draw.value?.drawId ?? null;
+  host.start(atDraw, true);
+  assert.equal(asked(), null);
+  assert.equal(await host.prepareInput(), true);
+  assert.equal(asked(), atDraw.state.randomDraw!.drawId);
+  assert.equal(random.resolve({ kind: "boolean", value: true }), true);
+  assert.deepEqual(said(host), ["Hit: true"]);
+  // Adopted after Choose outcomes was turned off, it goes on naturally.
+  host.start(host.session.value!, true);
+  random.enabled.value = false;
+  await settle(context);
+  assert.notEqual(host.session.value?.state.randomDraw, null, "an inspected state stays as it was");
+  assert.equal(await host.prepareInput(), true);
+  assert.equal(host.session.value?.state.randomDraw, null);
+  assert.equal(said(host).length, 2);
+});
+
 test("turning Choose outcomes off goes on from a paused draw with its natural outcome", async (context) => {
   const plan = compiled(
     'let hit = chance(50)\nsay "Hit: ${hit}", instant\nshowButton "Next"\nexit',
@@ -350,6 +398,16 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
   assert.equal(draw.segments.find((segment) => segment.text === "let")?.kind, "keyword");
   // The function is lines 3–8; the 7 lines around line 4 begin at line 1, which stays shown.
   assert.deepEqual(code.enclosing, { kind: "function", from: 1, to: 8 });
+  // Source nested deeper than a recursive walk could follow still gets its code.
+  const depth = 4096;
+  const nested = `let value = ${"[".repeat(depth)}chance(50)${"]".repeat(depth)}\nshowButton "Done"\nexit`;
+  const deep = presentation.randomDrawCode(nested, listRandomSites(compiled(nested))[0]!)!;
+  assert.equal(
+    deep.lines[0]!.segments.filter((segment) => segment.mark)
+      .map((segment) => segment.text)
+      .join(""),
+    "chance(50)",
+  );
   // A file the lexer has problems with shows as plain text.
   const broken = presentation.randomDrawCode(`${source}\n"unterminated`, site)!;
   assert.ok(broken.lines.every((line) => line.segments.every((segment) => segment.kind === null)));

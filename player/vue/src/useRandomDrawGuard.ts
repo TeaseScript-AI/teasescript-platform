@@ -1,4 +1,5 @@
 import { useEventListener } from "@vueuse/core";
+import { SIDEBAR_KEYBOARD_SHORTCUT } from "@/components/ui/sidebar/utils";
 
 // While the random draw picker asks (DEBUGGER.md "Random draws"), the page stays visible and readable, but only these
 // controls take input: the picker itself with the large view of its code and the dimmed page behind it, the display
@@ -31,9 +32,15 @@ export function useRandomDrawGuard(active: () => boolean) {
   const guard = (event: Event) => {
     if (!active() || !(event.target instanceof Element)) return;
     const target = event.target;
-    if (target.closest(USABLE) !== null && target.closest(UNUSABLE) === null) return;
+    // The page's own shortcut for the tools sidebar waits too, from wherever it is pressed.
+    const shortcut =
+      event instanceof KeyboardEvent &&
+      event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
+      (event.metaKey || event.ctrlKey);
+    if (!shortcut && target.closest(USABLE) !== null && target.closest(UNUSABLE) === null) return;
     // Keys go to the page for scrolling; only a control's keys act.
     if (
+      !shortcut &&
       event instanceof KeyboardEvent &&
       (NAVIGATION_KEYS.has(event.key) || target.closest(CONTROLS) === null)
     )

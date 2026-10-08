@@ -1031,7 +1031,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     applyRandomControl(next);
     session.value = next;
     clock.rebase();
-    if (!paused) applyDebugMode();
+    if (!paused) {
+      applyDebugMode();
+      settleUncontrolledDraw();
+    }
     // The session that runs is the one a reload continues in its room.
     if (!paused) keepSessionLater();
   }
@@ -1275,6 +1278,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (current.state.status === "halted" || current.state.status === "failed") return;
     setPlayerRuntimeRandomControl(current, randomControl);
   }
+  // A session that runs again while paused at a draw nobody decides any more, such as a restored state adopted after
+  // Debug's control ended, goes on naturally.
+  function settleUncontrolledDraw() {
+    const draw = session.value?.state.randomDraw;
+    if (randomControl === null && draw != null) resolveRandomDraw(draw.drawId, "natural");
+  }
   /**
    * Resolves the random draw the session is paused at, naturally or with a chosen outcome; the session's clock goes on
    * from the time it paused at. `null` when the session is not paused at that draw.
@@ -1504,6 +1513,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     inspecting.value = false;
     clock.rebase();
     applyDebugMode();
+    settleUncontrolledDraw();
     return true;
   }
   /**
@@ -1664,8 +1674,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     jumpedRevision: computed(() => jumpedRevision.value),
     setDebugMode,
     setRandomControl,
-    /** The random draw the session is paused at, or `null`. */
-    randomDraw: computed(() => session.value?.state.randomDraw ?? null),
+    /**
+     * The random draw the session is paused at, or `null`; a restored state Debug's rewind shows waits at its draw only
+     * once input adopts it.
+     */
+    randomDraw: computed(() =>
+      inspecting.value ? null : (session.value?.state.randomDraw ?? null),
+    ),
     resolveRandomDraw,
     /**
      * The normal room and the debug room (DEBUGGER.md "Debug room"). `reloadDebug` and `resetDebug` start a new debug

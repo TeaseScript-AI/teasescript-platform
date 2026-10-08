@@ -306,20 +306,31 @@ function enclosingRange(
   const contains = (span: SourceSpan) =>
     (span.start.line < line || (span.start.line === line && span.start.column <= column)) &&
     (span.end.line > line || (span.end.line === line && span.end.column > column));
-  // The functions around the draw, outermost first.
-  const functions: SourceSpan[] = [];
-  const visit = (node: unknown): void => {
-    if (typeof node !== "object" || node === null) return;
-    if (Array.isArray(node)) return node.forEach(visit);
+  // The innermost function around the draw: the one that starts last. The tree is walked with a list rather than by
+  // recursion, as valid source may nest deeper than the call stack reaches.
+  let found: SourceSpan | undefined;
+  const pending: unknown[] = [parsed.program.statements];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (typeof node !== "object" || node === null) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) pending.push(item);
+      continue;
+    }
     // EVIDENCE: the parser's syntax tree holds plain nodes, arrays, and values, and a node's `span` is its SourceSpan.
     const record = node as { readonly kind?: unknown; readonly span?: SourceSpan };
-    if (record.span !== undefined && !contains(record.span)) return;
-    if (record.kind === "functionDeclaration" && record.span !== undefined)
-      functions.push(record.span);
-    for (const [key, value] of Object.entries(record)) if (key !== "span") visit(value);
-  };
-  visit(parsed.program.statements);
-  const found = functions.at(-1);
+    if (record.span !== undefined && !contains(record.span)) continue;
+    if (
+      record.kind === "functionDeclaration" &&
+      record.span !== undefined &&
+      (found === undefined ||
+        record.span.start.line > found.start.line ||
+        (record.span.start.line === found.start.line &&
+          record.span.start.column > found.start.column))
+    )
+      found = record.span;
+    for (const [key, value] of Object.entries(record)) if (key !== "span") pending.push(value);
+  }
   if (found !== undefined)
     return { kind: "function", from: found.start.line + 1, to: found.end.line + 1 };
   const statement = parsed.program.statements.find((candidate) => contains(candidate.span));

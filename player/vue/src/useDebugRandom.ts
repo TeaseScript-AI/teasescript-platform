@@ -39,18 +39,29 @@ export function useDebugRandom(player: PlayerSessionHost) {
   >();
   const historyRevision = ref(0);
 
-  function record(draw: RandomDrawView, outcome: RandomOutcome) {
+  /** Records that the draw's site took `outcome`; the returned function takes the record back. */
+  function record(draw: RandomDrawView, outcome: RandomOutcome): () => void {
     let site = history.get(draw.site);
     if (site === undefined)
       history.set(draw.site, (site = { counts: new Map(), labels: [], dropped: 0 }));
+    const taken = site;
     const key = outcomeKey(outcome);
-    site.counts.set(key, (site.counts.get(key) ?? 0) + 1);
-    site.labels.push(randomOutcomeLabel(draw, outcome));
-    if (site.labels.length > KEPT_OUTCOMES) {
-      site.labels.shift();
-      site.dropped += 1;
-    }
+    taken.counts.set(key, (taken.counts.get(key) ?? 0) + 1);
+    taken.labels.push(randomOutcomeLabel(draw, outcome));
+    const dropped = taken.labels.length > KEPT_OUTCOMES ? taken.labels.shift() : undefined;
+    if (dropped !== undefined) taken.dropped += 1;
     historyRevision.value += 1;
+    return () => {
+      const count = taken.counts.get(key)! - 1;
+      if (count === 0) taken.counts.delete(key);
+      else taken.counts.set(key, count);
+      taken.labels.pop();
+      if (dropped !== undefined) {
+        taken.labels.unshift(dropped);
+        taken.dropped -= 1;
+      }
+      historyRevision.value += 1;
+    };
   }
 
   /**
@@ -106,11 +117,13 @@ export function useDebugRandom(player: PlayerSessionHost) {
   function resolve(outcome: RandomOutcome | "natural"): boolean {
     const current = draw.value;
     if (current === null) return false;
-    const result = player.resolveRandomDraw(current.drawId, outcome);
-    if (result?.kind !== "resolved") return false;
+    // Recorded first: the session goes on at once, and the draws it meets next decide from it.
     const resolved = outcome === "natural" ? current.natural : outcome;
-    if (resolved.kind !== "failure") record(current, resolved);
-    return true;
+    const undo = resolved.kind === "failure" ? null : record(current, resolved);
+    const result = player.resolveRandomDraw(current.drawId, outcome);
+    if (result?.kind === "resolved") return true;
+    undo?.();
+    return false;
   }
   /** Resolves the paused draw once as Prefer untried would: Least tried. */
   function resolveLeastTried(): boolean {

@@ -1670,6 +1670,23 @@ async function randomPickerScenario(cdp, origin) {
     "8",
     "The grip did not add a line",
   );
+  // The tools sidebar's shortcut waits too, also from a control in the picker.
+  const sidebar = `document.querySelector('#player-shell').dataset.sidebarVisible`;
+  const shown = await value(cdp, sidebar);
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "b",
+      code: "KeyB",
+      windowsVirtualKeyCode: 66,
+      modifiers: 2,
+    });
+  await delay(200);
+  assertEqual(
+    await value(cdp, `${sidebar} + ' ' + ${picker("chance")}`),
+    `${shown} true`,
+    "Ctrl+B changed the sidebar while the picker asked",
+  );
 
   await physicalClick(cdp, "[data-random-draw-outcome]");
   await waitFor(

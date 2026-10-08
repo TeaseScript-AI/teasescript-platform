@@ -138,8 +138,10 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   draw's site is set to go on by itself; its collapsed explanation reads "The script pauses at every random draw so you
   can choose its outcome, unless that draw's Next time is set to Random or Prefer untried." While a draw waits, the
   session's clock stands, media keep their position without playing, load reports and auto-skip wait, and a time skip
-  waits for the outcome; time spent at a draw is no scene time. Turning the switch, Debug, or the Debug menu off goes
-  on from a waiting draw with its natural outcome, and so does **Continue** of a kept session that stood at one.
+  waits for the outcome; time spent at a draw is no scene time. Turning the switch, Debug, or the Debug menu off goes on
+  from a waiting draw with its natural outcome, and so does **Continue** of a kept session that stood at one. A state
+  [Rewind](#rewind) restores at a draw shows no picker while it is inspected; once input adopts it, the picker asks, or
+  without Choose outcomes it goes on naturally.
 - **The picker**, "Random draw", names the draw's file as a breadcrumb that starts with the package's name, or the
   script's title when the host names no package, and collapses its middle parts into an ellipsis when it does not fit.
   It answers the draw with one click:
@@ -170,8 +172,9 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   it.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
   (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
-  controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The
-  tools menu, Settings, the panel's switches and buttons, the Storage tab's controls, and the chat wait for the outcome.
+  controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools
+  menu, the sidebar's `Ctrl/Meta+B`, Settings, the panel's switches and buttons, the Storage tab's controls, and the
+  chat wait for the outcome.
 - The switch, the Next time settings, and the sites' outcomes last as long as the Debug features run, and nothing
   stores them. A chosen outcome is a host input that the [debug export](#debug-export)'s replay data records.
 
