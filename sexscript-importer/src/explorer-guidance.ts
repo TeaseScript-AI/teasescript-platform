@@ -89,7 +89,8 @@ export class TreasureMap {
    */
   regions(unreached: (index: number) => boolean): number[][] {
     const count = this.#instructions;
-    const parent = Int32Array.from({ length: count }, (_, index) => index);
+    // Shared places join too: a function's unreached returns with the unreached code its calls go on with.
+    const parent = Int32Array.from({ length: this.#before.length }, (_, index) => index);
     const root = (index: number): number => {
       let at = index;
       while (parent[at] !== at) {
@@ -98,10 +99,15 @@ export class TreasureMap {
       }
       return at;
     };
-    for (let index = 0; index < count; index += 1) {
-      if (!unreached(index)) continue;
+    // A shared place joins only when an unreached return or `end` leads to it.
+    const shared = this.#before
+      .slice(count)
+      .map((befores) => befores.some((before) => unreached(before)));
+    const live = (place: number) => (place < count ? unreached(place) : shared[place - count]!);
+    for (let index = 0; index < this.#before.length; index += 1) {
+      if (!live(index)) continue;
       for (const before of this.#before[index]!)
-        if (before < count && unreached(before)) parent[root(before)] = root(index);
+        if (live(before)) parent[root(before)] = root(index);
     }
     const members = new Map<number, number[]>();
     for (let index = 0; index < count; index += 1) {

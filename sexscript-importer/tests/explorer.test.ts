@@ -1029,6 +1029,12 @@ test(
     // Code behind a condition the plan knows is false is not on the way to anything.
     map.update((at) => at === never);
     assert.equal(map.distances[first], FAR);
+    // A function's unreached code and the unreached code its call goes on with make one region, through its return.
+    const call = index("callFunction");
+    const back = Number(instructions[call]!.returnInstruction);
+    const unreached = new Set([deep, deep + 1, back]);
+    const regions = map.regions((at) => unreached.has(at));
+    assert.deepEqual(regions, [[deep, deep + 1, back].sort((left, right) => left - right)]);
   },
 );
 
