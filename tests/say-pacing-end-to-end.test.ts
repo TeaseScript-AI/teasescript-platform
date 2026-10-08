@@ -122,6 +122,8 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
       'say "four"',
       "exit",
     ].join("\n"),
+    {},
+    ["TSV060"],
   );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;

@@ -341,7 +341,7 @@ wait 1
 say as mistress "Two"
 ```
 
-the actual separation is the longer of the remaining `say` gate and the explicit one-second wait. The durations are not automatically added.
+the actual separation is the longer of the remaining `say` gate and the explicit one-second wait. The durations are not automatically added, so a `wait` shorter than the gate adds no time unless the player skips the message; the compiler warns about one it can measure ([V30 §27](specifications/accepted-syntaxes-v30.md#27-timers), `TSV060`).
 
 #### Media pacing barrier
 

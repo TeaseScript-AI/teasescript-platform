@@ -63,7 +63,7 @@ say "The other one is mine. You don't need to know how long."
 
 hold.pause()
 say "I've paused your clock. You hold still anyway."
-wait 3
+wait 4
 hold.resume()
 hold.remaining -= 20 s
 say "Twenty seconds less. Don't thank me yet."
