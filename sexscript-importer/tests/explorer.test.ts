@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { isRecord } from "../src/ast.ts";
 import {
+  branchDistance,
   clockDifferences,
   comparedWith,
   conditionDistance,
@@ -656,7 +657,7 @@ test(
         "time taken against a bound from the clock",
         "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
           'showButton "Check"\nlet took = getTimestamp().toSeconds() - start\ntook = took * 2\nlet bound = limit()\n' +
-          'if took <= bound {\n  say "Hit."\n}\nexit\n',
+          'if took <= bound and took >= 0 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
       [
@@ -925,7 +926,7 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const conditionOf = (text: string) => {
-      const source = `let a = 0\nlet b = 0\nlet c = 0\nif ${text} {\n  say "Hit."\n}\nexit\n`;
+      const source = `let a = 0\nlet b = 0\nlet c = 0\nlet half = 0\nlet name = ""\nif ${text} {\n  say "Hit."\n}\nexit\n`;
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       const instructions = Array.isArray(plan.instructions)
@@ -933,9 +934,11 @@ test(
         : [];
       return instructions.find((instruction) => instruction.kind === "jumpIfFalse")!.condition;
     };
-    const values = new Map<string, number>([
+    const values = new Map<string, number | string>([
       ["a", 3],
       ["b", 10],
+      ["half", 0.5],
+      ["name", "foobar"],
     ]);
     const read = (subject: unknown) =>
       isRecord(subject) && subject.kind === "identifier"
@@ -953,6 +956,13 @@ test(
     assert.equal(conjunctive(conditionOf("a == 3 or b == 10"), false), true);
     assert.equal(conjunctive(conditionOf("a == 3 or b == 10"), true), false);
     assert.deepEqual(measure("a == 3 or b == 10", false), { unsatisfied: 2, sum: 2 });
+    // An atom counts as it holds: a fraction above 0, a text that contains another.
+    assert.deepEqual(measure('half > 0 and name.contains("foo")'), { unsatisfied: 0, sum: 0 });
+    assert.deepEqual(measure('name.contains("foo")', false), { unsatisfied: 1, sum: 1 });
+    // Fewer atoms unsatisfied come first, however far the one left is.
+    assert.ok(
+      branchDistance({ unsatisfied: 1, sum: 2e9 }) < branchDistance({ unsatisfied: 2, sum: 1 }),
+    );
   },
 );
 
@@ -989,5 +999,30 @@ test(
     // Code behind a condition the plan knows is false is not on the way to anything.
     map.update((at) => at === never);
     assert.equal(map.distances[first], FAR);
+  },
+);
+
+test(
+  "with conjunctive steering and guidance, the fixture is explored as fully as without",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const { source, plan, diagnostics } = await fixture(engine);
+    const run = (steering: boolean) =>
+      explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 5000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics,
+        later: true,
+        conjunctive: steering,
+        guidance: steering,
+      });
+    const plain = run(false);
+    const steered = run(true);
+    assert.equal(steered.search.stoppedBy, "exhausted");
+    assert.equal(steered.coverage.visitedLines, plain.coverage.visitedLines);
   },
 );

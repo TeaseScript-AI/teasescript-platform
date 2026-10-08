@@ -1227,7 +1227,10 @@ export interface Constants {
 export interface ClockDifference extends Constants {
   readonly from: number;
   readonly at: number;
-  /** The conditions that compare it: they time what happens between the reads, not when the player comes back. */
+  /**
+   * The conditions that compare it with constants or values not from the clock: they time what happens between the
+   * reads, not when the player comes back.
+   */
   readonly conditions: number[];
 }
 
@@ -1262,6 +1265,8 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
   const held = new Map<string, ClockDifference>();
   /** The variables whose difference was updated from itself since (`took = took / 1000`): in other units. */
   const transformed = new Set<string>();
+  /** Conditions that also compare a difference with a value from the clock: not only how long the player took. */
+  const unmeasured = new Set<number>();
   const add = (difference: ClockDifference, constant: unknown, condition: number) => {
     if (!difference.conditions.includes(condition)) difference.conditions.push(condition);
     const duration = record(constant);
@@ -1338,8 +1343,13 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
       else if (left.kind === "duration") compared(value.right, value.left);
       else if (left.kind !== "literal" && right.kind !== "literal") {
         // Against a value that does not come from the clock (`took <= limit`), only how long the player took varies.
-        if (!flow.flowOf(value.right).clock) compared(value.left, undefined);
-        if (!flow.flowOf(value.left).clock) compared(value.right, undefined);
+        for (const [subject, other] of [
+          [value.left, value.right],
+          [value.right, value.left],
+        ] as const) {
+          if (!flow.flowOf(other).clock) compared(subject, undefined);
+          else if ([...namesIn(subject)].some((name) => held.has(name))) unmeasured.add(index);
+        }
       }
     };
     walk(condition);
@@ -1351,7 +1361,7 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
       at,
       numbers,
       durations,
-      conditions,
+      conditions: conditions.filter((condition) => !unmeasured.has(condition)),
     }));
 }
 
@@ -1433,6 +1443,17 @@ export function conditionDistance(
       ? parts[0]!
       : parts[1]!;
   }
+  // A text test (`name.contains("shirt")`) holds as the text method says.
+  if (value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "")) {
+    const text = read(record(value.callee).object);
+    const argument = list(value.arguments)
+      .map((entry) => literalText(entry.value))
+      .find((item) => item !== null);
+    if (typeof text !== "string" || argument === undefined || argument === null) return none;
+    return textTest(calleeName(value) ?? "", text, argument) === wanted
+      ? none
+      : { unsatisfied: 1, sum: 1 };
+  }
   const [atom] = atomsFor(condition, wanted);
   if (atom === undefined) return none;
   const actual = read(atom.subject);
@@ -1440,16 +1461,64 @@ export function conditionDistance(
   const holds = atom.wanted ? atom.operator : negate(atom.operator);
   const numeric = typeof actual === "boolean" ? Number(actual) : actual;
   const constant = typeof atom.constant === "boolean" ? Number(atom.constant) : atom.constant;
+  // Whether it holds, then how far it is when it does not: at least something, also past what a number can tell.
+  const satisfied = compares(numeric, holds, constant);
+  if (satisfied === undefined || satisfied) return none;
   const away =
     typeof numeric === "number" && typeof constant === "number"
       ? distance(numeric, holds, constant)
-      : holds === "==" || holds === "!="
-        ? (holds === "==") === (numeric === constant)
-          ? 0
-          : 1
-        : Infinity;
-  if (!Number.isFinite(away)) return none;
-  return away === 0 ? none : { unsatisfied: 1, sum: away };
+      : 1;
+  return { unsatisfied: 1, sum: Number.isFinite(away) && away > 0 ? Math.min(away, FAR_AWAY) : 1 };
+}
+
+/** The distance an atom that does not hold counts at most, so that sums stay exact enough to compare. */
+const FAR_AWAY = 1e12;
+
+/** Whether `left operator right` holds for numbers, or texts, booleans, and null compared for equality or order. */
+function compares(left: AtomValue, operator: string, right: AtomValue): boolean | undefined {
+  if (left === undefined || right === undefined) return undefined;
+  if (operator === "==") return left === right;
+  if (operator === "!=") return left !== right;
+  const both =
+    (typeof left === "number" && typeof right === "number") ||
+    (typeof left === "string" && typeof right === "string");
+  if (!both) return undefined;
+  switch (operator) {
+    case "<":
+      return left < right;
+    case "<=":
+      return left <= right;
+    case ">":
+      return left > right;
+    case ">=":
+      return left >= right;
+    default:
+      return undefined;
+  }
+}
+
+/** What a text method that tests a text (`contains`, `startsWith`, ...) gives for `text` and its argument. */
+function textTest(method: string, text: string, argument: string): boolean {
+  switch (method) {
+    case "contains":
+      return text.includes(argument);
+    case "startsWith":
+      return text.startsWith(argument);
+    case "endsWith":
+      return text.endsWith(argument);
+    case "equalsIgnoreCase":
+      return text.toLowerCase() === argument.toLowerCase();
+    default:
+      return text === argument;
+  }
+}
+
+/**
+ * A branch distance as one number that orders as the pair does: fewer atoms unsatisfied first, then a smaller sum
+ * (which only adds a fraction below one).
+ */
+export function branchDistance(found: ConditionDistance): number {
+  return found.unsatisfied + found.sum / (1 + found.sum);
 }
 
 /** How far a variable's value is from making `value operator constant` true: 0 when it holds. */

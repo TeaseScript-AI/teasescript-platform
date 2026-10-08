@@ -3,6 +3,7 @@ import { isRecord } from "./ast.ts";
 import {
   comparedSlots,
   clockDifferences,
+  branchDistance,
   comparedWith,
   conditionDistance,
   conjunctive,
@@ -15,7 +16,6 @@ import {
   callsClock,
   unreachableInstructions,
   type AtomValue,
-  type ConditionDistance,
   type Goal,
   type LoadAlias,
   type PlanDiagnostic,
@@ -931,11 +931,6 @@ type DistanceTarget =
       readonly wanted: boolean;
     };
 
-/** A branch distance as one number: fewer atoms unsatisfied first, then less distance. */
-function branchDistance(found: ConditionDistance): number {
-  return found.unsatisfied * 1e9 + found.sum;
-}
-
 /** A plain value as a condition's atom reads it; undefined for another. */
 function atomScalar(value: unknown): AtomValue {
   return typeof value === "string" ||
@@ -1030,7 +1025,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   // With guidance, the map of the plan, measured again from what play has not reached at each analysis.
   const map = options.guidance === true ? new TreasureMap(plan, instructions, allConstants) : null;
   const dead = map === null ? null : unreachableInstructions(plan, instructions, allConstants);
-  const guide = () => map?.update((index) => session.visited[index] === 0 && dead?.[index] === 0);
+  /** Measures the map again; when that moved any distance, every queued state takes its place again. */
+  const guide = () => {
+    if (map?.update((index) => session.visited[index] === 0 && dead?.[index] === 0) !== true)
+      return;
+    const queued: number[] = [];
+    for (let id = frontier.pop(); id !== undefined; id = frontier.pop()) queued.push(id);
+    for (const id of queued) if (nodes[id]!.status === "open") frontier.push(id, order(nodes[id]!));
+  };
   const store = new SnapshotStore();
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
@@ -1688,8 +1690,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     for (; chain.scanned < left.length; chain.scanned += 1) {
       const entry = left[chain.scanned]!;
       const measured = storageDistance(entry.entries, chain.matches, goal);
-      if (whole && measured.distance < Infinity)
-        measured.distance += conditionDistance(
+      // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
+      for (const guard of target.guards) measured.distance += guardDistance(entry.entries, guard);
+      // With the parts on other keys: fewer parts unsatisfied first, then the nearer in sum.
+      if (whole && measured.distance < Infinity) {
+        const parts = conditionDistance(
           condition,
           target.way === 0,
           atomReader(
@@ -1697,9 +1702,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             new Map(entry.entries.map((stored) => [stored.key, stored.value])),
             chain.matches,
           ),
-        ).sum;
-      // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
-      for (const guard of target.guards) measured.distance += guardDistance(entry.entries, guard);
+        );
+        measured.distance = branchDistance({
+          unsatisfied: parts.unsatisfied + (measured.distance > 0 ? 1 : 0),
+          sum: parts.sum + measured.distance,
+        });
+      }
       const closest = chain.closest;
       if (
         measured.distance < Infinity &&
@@ -2241,16 +2249,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     const node = nodes[frontier.pop()!]!;
     if (node.status !== "open") continue;
-    // With guidance, a state queued before the map was measured again goes back when its place is now behind another.
-    if (map !== null && frontier.size > 0) {
-      const own = order(node);
-      const next = frontier.pop()!;
-      frontier.push(next, order(nodes[next]!));
-      if (before(order(nodes[next]!), own)) {
-        frontier.push(node.id, own);
-        continue;
-      }
-    }
     // A lead that was spent, or whose target was reached, gives its states back their own place.
     if (node.lead !== null && !leads(node) && frontier.size > 0) {
       const own = order(node);

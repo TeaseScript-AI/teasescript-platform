@@ -368,7 +368,7 @@ async function exploreUnit(
     stored?.exhausted === true &&
     stored.contentHash === unit.contentHash &&
     stored.seed === settings.seed &&
-    stored.strategies === JSON.stringify(settings.strategies)
+    stored.strategies === strategiesKey(settings.strategies)
   )
     return null;
   const header: ReportHeader = {
@@ -413,15 +413,23 @@ interface StoredCorpus {
   entries: CorpusEntry[];
 }
 
-const LEGACY_STRATEGIES = JSON.stringify({
-  cells: false,
-  later: false,
-  comparedAnswers: false,
-  realign: false,
-  progressLeads: false,
-  conjunctive: false,
-  guidance: false,
-});
+/** The search strategies a corpus records, in one order. */
+const STRATEGIES = [
+  "cells",
+  "later",
+  "comparedAnswers",
+  "realign",
+  "progressLeads",
+  "conjunctive",
+  "guidance",
+] as const;
+
+/** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
+function strategiesKey(strategies: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify(
+    Object.fromEntries(STRATEGIES.map((name) => [name, strategies[name] === true])),
+  );
+}
 
 function corpusFile(corpus: string, dir: string): string {
   return path.join(corpus, `${path.basename(dir)}.json`);
@@ -458,7 +466,7 @@ async function readCorpus(file: string): Promise<StoredCorpus | null> {
     seed: count(stored.seed),
     exhausted: stored.exhausted === true,
     // A corpus from before strategies were recorded had them all off.
-    strategies: isRecord(stored.strategies) ? JSON.stringify(stored.strategies) : LEGACY_STRATEGIES,
+    strategies: strategiesKey(isRecord(stored.strategies) ? stored.strategies : {}),
     entries,
   };
 }
