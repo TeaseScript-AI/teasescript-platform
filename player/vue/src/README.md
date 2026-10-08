@@ -82,7 +82,8 @@ specification.
   scrolling content; menu handles share existing right padding. Dotted grips move entire panels.
 - `PlayerTopBar.vue` owns control placement and translucent material. Fullscreen is rightmost; the title, with the author after it,
   truncates inside a pill without clipping its shadow and then shows in full in the bar's tooltip. `hostedScript.ts` reads both
-  from the `main.tease` header. Sidebar and display controls share `--player-top-control-radius`.
+  from the `main.tease` header. The title, the sidebar's own controls and tool icons, the panel-header controls, and display
+  controls share `--player-top-control-radius`; in the open sidebar its toggle is flat like the menu's tools.
 - `PlayerComposition.vue` uses Reka Splitter, also underlying shadcn-vue Resizable, for pointer/keyboard allocation
   between stage and conversation, which it hides, still laid out, on the start page. Starting ratio and minimum sizes
   remain visual trials.
