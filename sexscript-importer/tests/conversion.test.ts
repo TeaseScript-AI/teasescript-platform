@@ -345,6 +345,11 @@ test(
           'save("tracks", tracks.join(","))',
           'save("decks", decks.join(","))',
           'save("videos", videos.size())',
+          // A variable named FileType does not change the qualified enum.
+          "def FileType = [FILES: null]",
+          "def flat = 0",
+          'new File("sounds/Beats").eachFileRecurse(groovy.io.FileType.FILES) { flat++ }',
+          'save("flat", flat)',
           "",
         ].join("\n"),
       );
@@ -386,6 +391,7 @@ test(
         tracks: "Beats/a.mp3,Beats/c.mp3",
         decks: "Blue,Red",
         videos: 0,
+        flat: 3,
       });
     } finally {
       rmSync(directory, { recursive: true, force: true });

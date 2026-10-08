@@ -262,6 +262,11 @@ interface LowerContext {
   walkedEntries: Map<AstNode | string, "file" | "folder">;
   /** Variables that a path cannot be read from at conversion time: updated in place, parameters, loop variables. */
   changingPaths: ReadonlySet<string>;
+  /**
+   * The binding keys and assigned values a path is read with (resolvedPath), where they differ from `bindings` and
+   * `assignedValues`: a helper method keeps those by name, its paths by binding.
+   */
+  pathBindings?: { keys: BindingKeys; values: ReadonlyMap<string, readonly AstNode[]> };
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -2026,8 +2031,10 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
     context.syntheticHelpers.add("textAt");
   // An element read open, or repeated, through a helper (variable typing).
-  if (callsFunction([result.statements], "sexscriptLegacyValue")) context.syntheticHelpers.add("value");
-  if (callsFunction([result.statements], "sexscriptLegacyTimes")) context.syntheticHelpers.add("times");
+  if (callsFunction([result.statements], "sexscriptLegacyValue"))
+    context.syntheticHelpers.add("value");
+  if (callsFunction([result.statements], "sexscriptLegacyTimes"))
+    context.syntheticHelpers.add("times");
   // A list or text append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(
     [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),
@@ -2250,6 +2257,8 @@ function lowerHelperMethod(
     );
     return null;
   }
+  // The method's own scopes for reading paths: a closure's parameter is apart from a local of its name.
+  const pathKeys = bindingKeys(body, `helper:${name}`);
   const context: LowerContext = {
     diagnostics: baseContext.diagnostics,
     metadata: baseContext.metadata,
@@ -2307,9 +2316,10 @@ function lowerHelperMethod(
     textVariables: new Set(),
     walkedEntries: new Map(),
     changingPaths: new Set([
-      ...changingVariables(body, new Map()),
+      ...changingVariables(body, pathKeys),
       ...records.map((parameter) => parameter.name),
     ]),
+    pathBindings: { keys: pathKeys, values: assignedValues(body, pathKeys) },
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -16651,9 +16661,21 @@ const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFil
 
 /** Groovy's `FileType.FILES`, also written `groovy.io.FileType.FILES`, which walks only through files. */
 function isFilesOnly(node: AstNode, context: LowerContext): boolean {
-  // A script variable named FileType, `def FileType = [FILES: null]`, is no enum.
-  if (context.assignedValues.has("FileType") || context.constantInitializers.has("FileType"))
-    return false;
+  // A variable or parameter that the selector's root names, `def FileType = [FILES: null]`, is no enum.
+  let root: AstNode | null = node;
+  while (root?.kind === "property") root = asNode(root.object);
+  const rootName = root?.kind === "variable" ? variableName(root) : null;
+  if (rootName !== null) {
+    const key = bindingKey(root, context.pathBindings?.keys ?? context.bindings) ?? rootName;
+    if (
+      key !== rootName ||
+      context.assignedValues.has(rootName) ||
+      context.pathBindings?.values.has(rootName) === true ||
+      context.constantInitializers.has(rootName) ||
+      context.changingPaths.has(rootName)
+    )
+      return false;
+  }
   const name = (value: AstNode | null): string | null => {
     if (value?.kind === "variable") return variableName(value);
     if (value?.kind === "classExpression") return text(value.type) ?? null;
@@ -17087,9 +17109,10 @@ function resolvedPath(
   if (isDataFolder(node)) return "";
   const variable = variableName(node);
   if (node.kind === "variable" && variable !== null) {
-    const key = bindingKey(node, context.bindings) ?? variable;
+    const keys = context.pathBindings?.keys ?? context.bindings;
+    const key = bindingKey(node, keys) ?? variable;
     if (seen.has(key) || context.changingPaths.has(key)) return null;
-    const assigned = context.assignedValues.get(key) ?? [];
+    const assigned = (context.pathBindings?.values ?? context.assignedValues).get(key) ?? [];
     const initializer = context.constantInitializers.get(variable);
     const values = assigned.length > 0 ? assigned : initializer === undefined ? [] : [initializer];
     const texts = values.map((value) => resolvedPath(value, context, new Set([...seen, key])));
