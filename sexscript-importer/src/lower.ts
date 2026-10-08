@@ -10589,7 +10589,30 @@ function laterReadDefault(
   for (let later = index + 1; later < statements.length; later += 1) {
     if (consumed.has(later)) continue;
     const statement = statements[later]!;
-    if (nullDefault(statement)?.name === read.name) return later;
+    const found = nullDefault(statement);
+    if (found?.name === read.name) {
+      // The default moves up to the read, before the code between, which must not declare or set what it reads.
+      const reads = new Set<string>();
+      walkAst(found.fallback, (child) => {
+        const name = child.kind === "variable" ? variableName(child) : null;
+        if (name !== null) reads.add(name);
+      });
+      const sets = (between: AstNode): boolean => {
+        let found = false;
+        walkAst(between, (child) => {
+          const assigns =
+            child.kind === "declaration" ||
+            (child.kind === "binary" &&
+              typeof child.operator === "string" &&
+              /=$/u.test(child.operator) &&
+              !["==", "!=", "<=", ">="].includes(child.operator));
+          const name = assigns ? variableName(child.left) : null;
+          if (name !== null && reads.has(name)) found = true;
+        });
+        return found;
+      };
+      return statements.slice(index + 1, later).some(sets) ? -1 : later;
+    }
     if (interferes(statement)) return -1;
   }
   return -1;
