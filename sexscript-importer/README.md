@@ -127,7 +127,8 @@ HOST=127.0.0.1 PORT=4182 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/co
 HOST=127.0.0.1 PORT=4183 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/verified node dist/playground/server.js
 node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/external/catalog \
   --upstream http://127.0.0.1:4182 --verified-root sexscript-importer/external/verified \
-  --verified-upstream http://127.0.0.1:4183 --cert cert.pem --key key.pem --port 4443 [--http-port 4180]
+  --verified-upstream http://127.0.0.1:4183 --cert cert.pem --key key.pem --port 4443 [--http-port 4180] \
+  [--pins sexscript-importer/external/catalog-pins.json]
 # from sexscript-importer/:
 node tools/play-check.ts [--base https://host:4443] [--runs N] [--steps N] [--only id,id] external/converted external/play-checks
 node tools/verify-package.ts --checks external/play-checks --verified external/verified --manual "<note>" external/converted <id>
@@ -231,8 +232,10 @@ Script-specific fixes stay out of the converter (owner decision 2026-10-05). The
 The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
 page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and
 `/source/` itself, with the sources as UTF-8 plain text, and forwards the other GET requests to the playground server
-on loopback, or, for a package with a verified copy, to the one that offers the verified copies. A self-signed
-certificate works once its browser warning is accepted.
+on loopback, or, for a package with a verified copy, to the one that offers the verified copies; the package id
+`latest~<id>` reaches the latest conversion of such a package. With `--pins`, `/pins.json` keeps the page's pins in
+that file (GET, and PUT of a JSON array of package ids), so they outlive regenerations of the page, restarts, other
+origins, and browser storage. A self-signed certificate works once its browser warning is accepted.
 
 `play-check` plays each package in the real Player with Playwright (`PLAYWRIGHT_CORE` names the `playwright-core`
 folder), one browser at a time. A run presses buttons, picks choices, and types answers until the session halts,
@@ -250,21 +253,26 @@ package's current `.tease` files.
 `external/verified/<id>/` and adds a row to [`docs/VERIFIED.md`](docs/VERIFIED.md). It never replaces a verified copy.
 
 `catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
-`compileProject` with the package images. A summary table counts the packages that convert fully, compile, play to the
-end, stop during play, do not start, are not played in the Player, are blocked by unbuilt commands, are verified, or
-are owner-approved, and the explorer results. Each table row shows the `---` header of `main.tease`, or of the first script that a generated
-`main.tease` menu goes to: title (the Player link), author, keywords, and description. The status column takes, in
+`compileProject` with the package images. Under the time it was written, in the reader's time zone, a few counts:
+the packages listed, that convert fully, compile, and play to the end, then the other counts that are not zero, each
+explained in its tooltip. A filter under each of the title, author, keywords, and description columns narrows the
+rows on that column, the filters combined; a coverage range and a sort order (coverage, crashes, traps) use the
+explorer column. Each table row shows the `---` header of
+`main.tease`, or of the first script that a generated `main.tease` menu goes to: title (the Player link), author,
+keywords, and description. A package with a verified copy has two Player links instead, `Play (verified copy)` and
+`Play (latest conversion)`, and source links to both. The status column takes, in
 this order, the owner-approved list (the first column of the Markdown table in `--approved`), the verified copy, the
 Player check of the current files, or else the compiler and the report's smoke run. A `partly converted` mark counts
 unconverted code, and a grey `older conversion` mark shows the latest Player check of files the importer has converted
 again since, which the summary counts apart; click a status for details. The explorer column shows the latest [`explore`](#branch-explorer)
 report of the current files from the `--explorer` folders (`<unit>.json` or `<unit>/<unit>.json`), for a verified
-copy else of the unit's newer conversion, marked so, else the latest report of other files, marked stale: line coverage and the numbers of crashes and traps, with the first crash's code
+copy else of the unit's latest conversion, marked so, else the latest report of other files, marked stale: line coverage and the numbers of crashes and traps, with the first crash's code
 and `file:line`, the first trap, and the search in its details. A report's compact `catalog` block (`coveragePercent`,
 `crashes`, `traps`, `firstCrash`, `firstTrap`, and `reach`, the lines per reach label) counts before its full fields. The source column links the legacy Groovy and converted `.tease` files,
 which `catalog` hard-links under `source/` next to the page; earlier versions that the unit's `unit.json` lists under
-`earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites in `localStorage` and lists
-them at the top.
+`earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites and lists them at the
+top: on the server with `serve-catalog --pins`, else in `localStorage`; the server starts from the first browser's
+`localStorage` pins.
 
 ## Branch explorer
 

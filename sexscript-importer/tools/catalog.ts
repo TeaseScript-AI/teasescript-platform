@@ -12,9 +12,11 @@
  * build required). The status comes from, in this order: the owner-approved list (`--approved`, a Markdown table
  * whose first column names the package), the frozen verified copies (`--verified`, which replace the converted
  * package in the list), the Player checks of `play-check.ts` (`--play-checks`) for the package's current `.tease`
- * files, and otherwise the compiler and the importer's report in `.report.json`. The Explorer column shows the latest
- * report of `explore.ts` (`--explorer`, folders of `<unit>.json` or `<unit>/<unit>.json`) for the package's current
- * files, or for a verified copy of the unit's newer conversion, else its latest report of other files, marked stale.
+ * files, and otherwise the compiler and the importer's report in `.report.json`. A verified copy is offered beside
+ * the unit's latest conversion, which `serve-catalog.ts` serves under the package id `latest~<id>`. The Explorer column
+ * shows the latest report of `explore.ts` (`--explorer`, folders of `<unit>.json` or `<unit>/<unit>.json`) for the
+ * package's current files, or for a verified copy of the latest conversion, else its latest report of other files,
+ * marked stale.
  */
 import { createHash } from "node:crypto";
 import { copyFile, link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -34,8 +36,6 @@ export interface CatalogEntry {
   readonly origin: "converted" | "verified";
   /** Whether the title links to the Player; a unit marked as an unfinished stub is listed but not offered. */
   readonly playable: boolean;
-  /** The importer commit that converted the unit, from `.conversion.json`, when it records one. */
-  readonly converter: string | null;
   readonly status: Status;
   /** Set when the importer left parts unconverted. */
   readonly partial: Status | null;
@@ -47,6 +47,8 @@ export interface CatalogEntry {
   /** Legacy Groovy files, from the package's `scripts/` folder, and converted `.tease` files, by relative path. */
   readonly groovy: SourceFiles;
   readonly tease: SourceFiles;
+  /** For a verified copy, the unit's latest conversion, which the page offers to play and read as well. */
+  readonly latest: SourceFiles | null;
   /** Earlier versions of the tease that the importer keeps out of the package, from the unit's `unit.json`. */
   readonly earlier: readonly EarlierVersion[];
   readonly images: number;
@@ -231,15 +233,11 @@ export interface StatusSources {
   readonly approved?: ReadonlySet<string>;
 }
 
-/** When and with which importer the converted root was measured, from `.conversion-summary.json`. */
-export interface Measurement {
-  readonly importerCommit: string | null;
-  readonly measuredAt: string | null;
-}
-
 const MAIN = "main.tease";
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg"]);
 const PIN_STORAGE_KEY = "sexscript-catalog-pins";
+/** The package id prefix under which `serve-catalog.ts` offers the latest conversion of a package with a verified copy. */
+export const LATEST_PREFIX = "latest~";
 /** How the explorer's reach labels read in the Explorer details; see `Reach` in `src/explorer.ts`. */
 const REACH_LABELS: Readonly<Record<string, string>> = {
   play: "reached by play",
@@ -286,20 +284,13 @@ async function main(rawArgs: string[]): Promise<void> {
     ...(values.verified === undefined ? {} : { verified: path.resolve(values.verified) }),
     approved,
   });
-  const measurement = await readFile(path.join(root, ".conversion-summary.json"), "utf8").then(
-    (text) => {
-      // EVIDENCE: convert-corpus.ts writes .conversion-summary.json as one JSON object of counts.
-      const summary = JSON.parse(text) as Record<string, unknown>;
-      return {
-        importerCommit: typeof summary.importerCommit === "string" ? summary.importerCommit : null,
-        measuredAt: typeof summary.measuredAt === "string" ? summary.measuredAt : null,
-      };
-    },
-    () => ({ importerCommit: null, measuredAt: null }),
-  );
   await mkdir(path.dirname(output), { recursive: true });
   await writeSourceViews(entries, path.dirname(output));
-  await writeFile(output, renderCatalogPage(entries, { playerOrigin, measurement }), "utf8");
+  await writeFile(
+    output,
+    renderCatalogPage(entries, { playerOrigin, updatedAt: new Date().toISOString() }),
+    "utf8",
+  );
   const counts = new Map<string, number>();
   for (const entry of entries)
     counts.set(entry.status.kind, (counts.get(entry.status.kind) ?? 0) + 1);
@@ -499,14 +490,12 @@ async function readEntry(
   )
     .filter((report) => report !== null)
     .sort((left, right) => right.exploredAt.localeCompare(left.exploredAt));
-  // A verified copy is frozen, while the explorer explores the unit's current conversion: the one other current hash.
-  const conversionHash =
-    isVerified && explorerReports.some((report) => report.contentHash !== hash)
-      ? await tools.scan(path.join(convertedRoot, id)).then(
-          (conversionScan) => packageContentHash(conversionScan.sources),
-          () => null,
-        )
-      : null;
+  // A verified copy is frozen; the unit's latest conversion, which the explorer explores, is offered beside it.
+  const latestFolder = path.join(convertedRoot, id);
+  const latestSources = isVerified
+    ? ((await tools.scan(latestFolder).catch(() => null))?.sources ?? [])
+    : [];
+  const conversionHash = latestSources.length === 0 ? null : packageContentHash(latestSources);
   const explorerReport =
     explorerReports.find((report) => report.contentHash === hash) ??
     explorerReports.find((report) => report.contentHash === conversionHash) ??
@@ -563,7 +552,6 @@ async function readEntry(
     compiles: compilation.plan !== null,
     origin: isVerified ? "verified" : "converted",
     playable: status.kind !== "stub",
-    converter: typeof conversion?.converter === "string" ? conversion.converter : null,
     status,
     partial: partialConversion(report, sources.length, todos),
     older:
@@ -577,6 +565,10 @@ async function readEntry(
     groovy: { root: groovyRoot, paths: groovy },
     earlier,
     tease: { root: folder, paths: sources.map((file) => file.path).sort() },
+    latest:
+      latestSources.length === 0
+        ? null
+        : { root: latestFolder, paths: latestSources.map((file) => file.path).sort() },
     images: scan.images.length,
     audio: scan.media.filter((file) => AUDIO_EXTENSIONS.has(path.extname(file).toLowerCase()))
       .length,
@@ -937,8 +929,9 @@ export function earlierVersions(unit: unknown, legacyFolder: string): EarlierVer
 }
 
 /**
- * Hard-links each entry's Groovy and `.tease` files under `<folder>/source/<id>/{groovy,tease}/`, and the Groovy
- * files of its earlier versions under `<folder>/source/<id>/earlier/<n>/`.
+ * Hard-links each entry's Groovy and `.tease` files under `<folder>/source/<id>/{groovy,tease}/`, the `.tease` files
+ * of a verified copy's latest conversion under `<folder>/source/<id>/latest/`, and the Groovy files of its earlier
+ * versions under `<folder>/source/<id>/earlier/<n>/`.
  */
 export async function writeSourceViews(
   entries: readonly CatalogEntry[],
@@ -960,8 +953,9 @@ export async function writeSourceViews(
     for (const [kind, files] of [
       ["groovy", entry.groovy],
       ["tease", entry.tease],
+      ["latest", entry.latest],
     ] as const) {
-      if (files.root === null) continue;
+      if (files === null || files.root === null) continue;
       for (const relative of files.paths)
         await place(
           path.join(files.root, ...relative.split("/")),
@@ -978,65 +972,96 @@ export async function writeSourceViews(
 }
 
 /**
- * The page: a summary of the conversion, then one table with a row per package, each with a Pin button; pinned rows
- * are copied into a table at the top. A few lines of inline CSS; on a narrow screen the rows stack. Its only script
- * is the pinning.
+ * The page: when it was written, a few counts, then one table with a row per package, each with a Pin button; pinned
+ * rows are copied into a table at the top. A filter under each of the title, author, keywords, and description
+ * columns, a coverage range, and a sort order narrow and order the table. A few lines of inline CSS; on a narrow screen the rows stack. Its script shows the time in the reader's time
+ * zone, filters and sorts the rows, and keeps the pins: on the server that serves the page (`pins.json` of
+ * `serve-catalog.ts`), with `localStorage` as the fallback where the page is served without it.
  */
 export function renderCatalogPage(
   entries: readonly CatalogEntry[],
-  options: { readonly playerOrigin: string; readonly measurement: Measurement },
+  options: { readonly playerOrigin: string; readonly updatedAt: string },
 ): string {
   const count = (kind: Status["kind"]) =>
     entries.filter((entry) => entry.status.kind === kind).length;
-  const { importerCommit, measuredAt } = options.measurement;
-  // A unit converted again records its own importer commit; the others share the root's.
-  const commits = new Map<string, number>();
-  for (const entry of entries) {
-    const commit = entry.converter ?? importerCommit;
-    if (commit !== null) commits.set(commit, (commits.get(commit) ?? 0) + 1);
-  }
-  const commitText =
-    commits.size <= 1
-      ? [...commits.keys()].map((commit) => `importer commit ${escapeHtml(commit)}`)
-      : [
-          `importer commits ${[...commits]
-            .sort((left, right) => right[1] - left[1])
-            .map(([commit, units]) => `${escapeHtml(commit)} (${units} units)`)
-            .join(", ")}`,
-        ];
-  const measured = [
-    ...(measuredAt === null ? [] : [`Measured ${measuredAt.slice(0, 10)}`]),
-    ...commitText,
-  ].join(" with ");
   // Units whose current files the explorer explored; a stale report is counted apart.
   const explored = entries.flatMap((entry) =>
     entry.explored === null || entry.explored.of === "stale" ? [] : [entry.explored],
   );
-  const summary: Array<[string, number]> = [
-    ["Listed", entries.length],
-    ["Convert fully", entries.filter((entry) => entry.partial === null).length],
-    ["Compile", entries.filter((entry) => entry.compiles).length],
-    ["Play to the end", count("plays") + count("verified") + count("approved")],
+  // The first four counts always show; the others only when they count something. Each explains itself in a tooltip.
+  const summary: Array<[label: string, value: number, tooltip: string]> = [
+    ["Listed", entries.length, "Packages on this page."],
     [
-      "Played to the end on an older conversion",
-      entries.filter((entry) => entry.older?.kind === "plays").length,
+      "Convert fully",
+      entries.filter((entry) => entry.partial === null).length,
+      "Converted without migration errors or TODO markers.",
     ],
-    ["Stop during play", count("stops")],
-    ["Parked (step limit)", count("parked")],
-    ["Do not start", count("nostart")],
-    ["Do not compile", count("error")],
-    ["Not played in the Player", count("compiles") + count("unbuilt")],
-    ["Blocked by unbuilt commands", count("unbuilt")],
-    ["Verified", count("verified")],
-    ["Owner-approved", count("approved")],
-    ["Unfinished stubs", count("stub")],
-    ["Explored", explored.length],
-    ["Explorer found crashes", explored.filter(({ report }) => report.crashes > 0).length],
-    ["Explorer found traps", explored.filter(({ report }) => report.traps > 0).length],
-    ["Explorer result stale", entries.filter((entry) => entry.explored?.of === "stale").length],
+    ["Compile", entries.filter((entry) => entry.compiles).length, "The listed files compile."],
+    [
+      "Play to the end",
+      count("plays") + count("verified") + count("approved"),
+      "Automated play in the real Player ended normally on every path, for the listed files.",
+    ],
+    [
+      "Played on an older conversion",
+      entries.filter((entry) => entry.older?.kind === "plays").length,
+      "Played to the end in the Player on files that the importer has converted again since.",
+    ],
+    ["Stop during play", count("stops"), "Automated play in the Player stopped or did not end."],
+    [
+      "Parked (step limit)",
+      count("parked"),
+      "Played without errors until the step limit of the Player check.",
+    ],
+    ["Do not start", count("nostart"), "The session ends at Start without showing anything."],
+    ["Do not compile", count("error"), "The listed files do not compile, or lack main.tease."],
+    [
+      "Not played in the Player",
+      count("compiles") + count("unbuilt"),
+      "No Player check of the listed files; see the Explorer column.",
+    ],
+    [
+      "Blocked by unbuilt commands",
+      count("unbuilt"),
+      "Needs TeaseScript commands that are not built yet.",
+    ],
+    ["Verified", count("verified"), "Checked by hand and served as a frozen copy."],
+    ["Owner-approved", count("approved"), "Approved by the owner."],
+    ["Unfinished stubs", count("stub"), "The legacy package is not a finished tease."],
+    [
+      "Explored",
+      explored.length,
+      "Explored headlessly: every button, choice, and answer within a time budget.",
+    ],
+    [
+      "Explorer found crashes",
+      explored.filter(({ report }) => report.crashes > 0).length,
+      "Packages in which the explorer hit a runtime failure.",
+    ],
+    [
+      "Explorer found traps",
+      explored.filter(({ report }) => report.traps > 0).length,
+      "Packages with a loop that the player cannot leave.",
+    ],
+    [
+      "Explorer result stale",
+      entries.filter((entry) => entry.explored?.of === "stale").length,
+      "Explorer results of other files than the listed ones.",
+    ],
   ];
-  const head =
-    "<thead><tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th>Status</th><th>Explorer</th><th>Source</th></tr></thead>";
+  const counts = summary
+    .filter(([, value], index) => index < 4 || value > 0)
+    .map(
+      ([label, value, tooltip]) =>
+        `<div title="${escapeHtml(tooltip)}"><dt>${label}</dt><dd>${value}</dd></div>`,
+    )
+    .join("");
+  const updated = new Date(options.updatedAt);
+  const utc = `${updated.toISOString().slice(0, 10)} ${updated.toISOString().slice(11, 16)} UTC`;
+  const labels = `<tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th title="Click a status for details. A grey &quot;older conversion&quot; mark is a Player check of files converted again since.">Status</th><th title="The headless explorer: share of script lines reached, crashes (runtime failures), and traps (loops the player cannot leave). Click for details.">Explorer</th><th>Source</th></tr>`;
+  const filter = (name: string) =>
+    `<td><input type="search" data-filter="${name}" placeholder="Filter ${name}" aria-label="Filter ${name}"></td>`;
+  const filters = `<tr class="filters"><td></td>${["title", "author", "keywords", "description"].map(filter).join("")}<td></td><td></td><td></td></tr>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1045,18 +1070,27 @@ export function renderCatalogPage(
 <title>Converted SexScript teases</title>
 <style>
 body { margin: 2rem auto; padding: 0 1rem; max-width: 96rem; font: 15px/1.45 system-ui, sans-serif; color: #222; }
+h1 { margin-bottom: 0.2rem; }
+p.updated { margin: 0 0 1rem; font-size: 1.15em; font-weight: 600; color: #444; }
 table { width: 100%; border-collapse: collapse; }
 th { position: sticky; top: 0; background: #fff; text-align: left; border-bottom: 2px solid #ccc; }
+th[title] { cursor: help; }
 th, td { padding: 0.4rem 0.5rem; vertical-align: top; }
 td { border-bottom: 1px solid #eee; }
 td.description { min-width: 14rem; max-width: 26rem; }
 td.keywords { max-width: 12rem; font-size: 0.9em; }
 td.explorer { min-width: 11.5rem; }
 td.author, td.keywords, td.source, .meta { color: #666; }
-td.source { font-size: 0.9em; }
-dl.summary { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; margin: 0 0 0.3rem; }
+td.source, .play { font-size: 0.9em; }
+.play a { white-space: nowrap; }
+dl.summary { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; margin: 0 0 0.6rem; }
+dl.summary div { cursor: help; }
 dl.summary dt { color: #666; font-size: 0.9em; }
 dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; margin: 0 0 0.6rem; }
+tr.filters td { padding-top: 0; border-bottom: 2px solid #ccc; }
+tr.filters input { width: 100%; box-sizing: border-box; font-size: 0.9em; }
+.toolbar input[type="number"] { width: 4.5rem; }
 .status { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.3em; display: inline-block; max-width: 13rem; background: #eee; color: #333; }
 .status.plays { background: #ddf4dd; color: #1d5e1d; }
 .status.verified, .status.approved { background: #1d5e1d; color: #fff; }
@@ -1072,9 +1106,11 @@ details.earlier ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 td.status-cell details p, td.explorer details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
 button[data-pin] { font-size: 0.8em; }
 @media (max-width: 60rem) {
-  table.packages thead { display: none; }
+  table.packages thead tr:not(.filters), tr.filters td:empty { display: none; }
+  tr.filters td { border: 0; padding: 0.1rem 0; }
   table.packages, table.packages tbody, table.packages tr, table.packages td { display: block; }
   table.packages tr { border-bottom: 1px solid #ddd; padding: 0.5rem 0; }
+  table.packages tr[hidden] { display: none; }
   table.packages td { border: 0; padding: 0.1rem 0; max-width: none; }
   td.keywords:not(:empty)::before { content: "Keywords: "; }
   td.explorer:not(:empty)::before { content: "Explorer: "; }
@@ -1084,39 +1120,115 @@ button[data-pin] { font-size: 0.8em; }
 </head>
 <body>
 <h1>Converted SexScript teases</h1>
-<p>Legacy SexScript packages converted by the TeaseScript importer. Each title opens its package in the TeaseScript
-Player; click a status for its details.</p>
-<dl class="summary">${summary.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl>
-<p class="meta">${measured}${measured === "" ? "" : ". "}"Play to the end" means that automated play in the real
-Player, on several paths through buttons, choices, and typed answers, with waits skipped, ended normally every time.
-A grey "older conversion" mark shows the Player check of files that the importer has converted again since; the counts
-above take only checks of the current files. "Verified" packages also passed a manual check and are served as frozen copies.
-"Explorer" is the headless explorer:
-it tries every button, choice, and answer it can within a time budget, and shows the share of script lines it reached,
-crashes (runtime failures), and traps (loops the player cannot leave). For a verified package it may show the newer
-conversion; "stale" results explored other files than the listed ones. MIDI music does not play.</p>
+<p class="updated">Updated <time datetime="${escapeHtml(options.updatedAt)}" data-local>${utc}</time></p>
+<dl class="summary">${counts}</dl>
+<p class="meta">Click a title or a Play link to play the tease in the TeaseScript Player, and a status for its details.</p>
 <h2>Pinned</h2>
 <p id="pinned-none" class="meta">Nothing pinned yet. Use a Pin button to keep a tease here.</p>
 <table class="packages" hidden>
-${head}
+<thead>${labels}</thead>
 <tbody id="pinned"></tbody>
 </table>
 <h2>All packages</h2>
+<div class="toolbar">
+<span>Coverage <input type="number" id="coverage-min" min="0" max="100" placeholder="from" aria-label="Coverage from, in percent"> to <input type="number" id="coverage-max" min="0" max="100" placeholder="to" aria-label="Coverage up to, in percent"> %</span>
+<label>Sort <select id="sort">
+<option value="title">Title</option>
+<option value="coverage-asc">Coverage, lowest first</option>
+<option value="coverage-desc">Coverage, highest first</option>
+<option value="crashes">Crashes, most first</option>
+<option value="traps">Traps, most first</option>
+</select></label>
+<span id="shown" class="meta"></span>
+</div>
 <table class="packages">
-${head}
+<thead>${labels}${filters}</thead>
 <tbody id="all">
-${entries.map((entry) => renderRow(entry, options.playerOrigin)).join("\n")}
+${entries.map((entry, index) => renderRow(entry, index, options.playerOrigin)).join("\n")}
 </tbody>
 </table>
 <script>
-// Favourites: package ids in localStorage; pinned rows are copied into the table at the top.
+// The time the page was written, in the reader's time zone.
+for (const time of document.querySelectorAll("time[data-local]")) {
+  const date = new Date(time.dateTime);
+  const pad = (value) => String(value).padStart(2, "0");
+  time.textContent = date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + " " +
+    pad(date.getHours()) + ":" + pad(date.getMinutes());
+}
+
+// Column filters, coverage range, and sort order of the table of all packages; every word of every filter must
+// appear in its column; rows without a value sort last.
+const all = document.getElementById("all");
+const rows = [...all.children];
+const filters = [...document.querySelectorAll("input[data-filter]")];
+const coverageMin = document.getElementById("coverage-min");
+const coverageMax = document.getElementById("coverage-max");
+const sort = document.getElementById("sort");
+const number = (text) => (text === undefined || text === "" ? null : Number(text));
+function apply() {
+  const wanted = filters.flatMap((input) =>
+    input.value
+      .toLowerCase()
+      .split(/\\s+/)
+      .filter((word) => word !== "")
+      .map((word) => [input.dataset.filter, word]),
+  );
+  const low = number(coverageMin.value);
+  const high = number(coverageMax.value);
+  let shown = 0;
+  for (const row of rows) {
+    const coverage = number(row.dataset.coverage);
+    row.hidden = !(
+      wanted.every(([name, word]) => row.dataset[name].includes(word)) &&
+      (low === null || (coverage !== null && coverage >= low)) &&
+      (high === null || (coverage !== null && coverage <= high))
+    );
+    if (!row.hidden) shown++;
+  }
+  const order = sort.value;
+  const key = order.startsWith("coverage") ? "coverage" : order;
+  const sorted = [...rows].sort((left, right) => {
+    if (order !== "title") {
+      const a = number(left.dataset[key]);
+      const b = number(right.dataset[key]);
+      if (a !== b) {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return order === "coverage-asc" ? a - b : b - a;
+      }
+    }
+    return left.dataset.order - right.dataset.order;
+  });
+  all.append(...sorted);
+  document.getElementById("shown").textContent =
+    shown === rows.length ? "" : shown + " of " + rows.length + " shown";
+}
+for (const control of [...filters, coverageMin, coverageMax]) control.addEventListener("input", apply);
+sort.addEventListener("change", apply);
+
+// Favourites: package ids kept by the server that serves the page, so that they outlive regenerations of the page,
+// restarts, and this browser's storage; localStorage holds a copy, and is all there is where the server has no pins.
 const KEY = ${JSON.stringify(PIN_STORAGE_KEY)};
-const pins = new Set(JSON.parse(localStorage.getItem(KEY) || "[]"));
+let pins = new Set(JSON.parse(localStorage.getItem(KEY) || "[]"));
+let serverPins = false;
+function savePins() {
+  localStorage.setItem(KEY, JSON.stringify([...pins]));
+  if (serverPins)
+    fetch("pins.json", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([...pins]),
+    }).catch(() => {});
+}
 function render() {
   const list = document.getElementById("pinned");
   list.replaceChildren();
-  for (const row of document.querySelectorAll("#all > tr"))
-    if (pins.has(row.dataset.id)) list.append(row.cloneNode(true));
+  for (const row of rows)
+    if (pins.has(row.dataset.id)) {
+      const copy = row.cloneNode(true);
+      copy.hidden = false;
+      list.append(copy);
+    }
   document.getElementById("pinned-none").hidden = list.children.length > 0;
   list.closest("table").hidden = list.children.length === 0;
   for (const button of document.querySelectorAll("button[data-pin]"))
@@ -1127,19 +1239,36 @@ document.addEventListener("click", (event) => {
   if (button === null) return;
   const id = button.dataset.pin;
   if (!pins.delete(id)) pins.add(id);
-  localStorage.setItem(KEY, JSON.stringify([...pins]));
+  savePins();
   render();
 });
 render();
+// 200: the server's pins; 204: the server keeps pins but has none yet, so this browser's pins become them.
+fetch("pins.json", { cache: "no-store" })
+  .then(async (response) => {
+    if (response.status === 204) {
+      serverPins = true;
+      if (pins.size > 0) savePins();
+    } else if (response.ok) {
+      const stored = await response.json();
+      if (!Array.isArray(stored)) return;
+      serverPins = true;
+      pins = new Set(stored.filter((id) => typeof id === "string"));
+      localStorage.setItem(KEY, JSON.stringify([...pins]));
+      render();
+    }
+  })
+  .catch(() => {});
 </script>
 </body>
 </html>
 `;
 }
 
-function renderRow(entry: CatalogEntry, playerOrigin: string): string {
+function renderRow(entry: CatalogEntry, index: number, playerOrigin: string): string {
   const id = escapeHtml(entry.id);
-  const href = escapeHtml(`${playerOrigin}/player/?package=${encodeURIComponent(entry.id)}`);
+  const play = (packageId: string) =>
+    escapeHtml(`${playerOrigin}/player/?package=${encodeURIComponent(packageId)}`);
   const badge = (status: Status, className: string) =>
     `<details title="${escapeHtml(status.detail)}"><summary><span class="status ${className}">${escapeHtml(status.label)}</span></summary><p>${escapeHtml(status.detail)}</p></details>`;
   const statuses = [
@@ -1147,14 +1276,16 @@ function renderRow(entry: CatalogEntry, playerOrigin: string): string {
     ...(entry.partial === null ? [] : [badge(entry.partial, entry.partial.kind)]),
     ...(entry.older === null ? [] : [badge(entry.older, "older")]),
   ].join("");
+  // A verified copy is offered beside its latest conversion, each with a link that says which it plays.
+  const title =
+    entry.origin === "verified"
+      ? `<b>${escapeHtml(entry.title)}</b><br><span class="play"><a href="${play(entry.id)}">Play (verified copy)</a>${entry.latest === null ? "" : `<br><a href="${play(`${LATEST_PREFIX}${entry.id}`)}">Play (latest conversion)</a>`}</span>`
+      : entry.playable
+        ? `<a href="${play(entry.id)}"><b>${escapeHtml(entry.title)}</b></a>`
+        : `<b>${escapeHtml(entry.title)}</b>`;
   const cells = [
     ["pin", `<button type="button" data-pin="${id}">Pin</button>`],
-    [
-      "title",
-      entry.playable
-        ? `<a href="${href}"><b>${escapeHtml(entry.title)}</b></a>`
-        : `<b>${escapeHtml(entry.title)}</b>`,
-    ],
+    ["title", title],
     ["author", escapeHtml(entry.author ?? "")],
     ["keywords", entry.keywords.map(escapeHtml).join(", ")],
     ["description", escapeHtml(entry.description ?? "") + renderEarlier(entry)],
@@ -1162,7 +1293,26 @@ function renderRow(entry: CatalogEntry, playerOrigin: string): string {
     ["explorer", renderExplorer(entry)],
     ["source", renderSource(entry)],
   ];
-  return `<tr data-id="${id}">${cells.map(([name, html]) => `<td class="${name}">${html}</td>`).join("")}</tr>`;
+  // What the column filters match, and the explorer's numbers for the coverage range and the sort order.
+  const filtered: Array<[name: string, text: string]> = [
+    ["title", entry.title],
+    ["author", entry.author ?? ""],
+    ["keywords", entry.keywords.join(", ")],
+    ["description", entry.description ?? ""],
+  ];
+  const report = entry.explored?.report ?? null;
+  const data = [
+    `data-id="${id}"`,
+    `data-order="${index}"`,
+    ...filtered.map(([name, text]) => `data-${name}="${escapeHtml(text.toLowerCase())}"`),
+    ...(report === null || report.coverage === null
+      ? []
+      : [`data-coverage="${report.coverage.percent}"`]),
+    ...(report === null
+      ? []
+      : [`data-crashes="${report.crashes}"`, `data-traps="${report.traps}"`]),
+  ].join(" ");
+  return `<tr ${data}>${cells.map(([name, html]) => `<td class="${name}">${html}</td>`).join("")}</tr>`;
 }
 
 /** The explorer's line coverage, crashes, and traps; its details name the first crash and trap and the search. */
@@ -1181,9 +1331,7 @@ function renderExplorer(entry: CatalogEntry): string {
   const { coverage, endStates, firstCrash, firstTrap } = report;
   const detail = [
     ...(of === "stale" ? ["Stale: explored other files than the listed ones."] : []),
-    ...(of === "conversion"
-      ? ["Explored the unit's newer conversion, not the verified copy listed here."]
-      : []),
+    ...(of === "conversion" ? ["Explored the latest conversion, not the verified copy."] : []),
     `Explored ${report.exploredAt.slice(0, 10)}${report.explorer === null ? "" : ` with explorer ${report.explorer}`}${report.budgetSeconds === null ? "" : `, ${report.budgetSeconds} s budget`}${report.budgetOps === null ? "" : `, ${report.budgetOps} operations budget`}.`,
     ...(report.compiles ? [] : ["The unit did not compile, so it was not explored."]),
     ...(report.states === null
@@ -1232,7 +1380,7 @@ function renderExplorer(entry: CatalogEntry): string {
         : report.traps > 0
           ? "stops"
           : "plays";
-  const suffix = { listed: "", conversion: " (newer conversion)", stale: " (stale)" }[of];
+  const suffix = { listed: "", conversion: " (latest conversion)", stale: " (stale)" }[of];
   return `<details title="${escapeHtml(detail)}"><summary><span class="status ${kind}">${label}${suffix}</span></summary><p>${escapeHtml(detail)}</p></details>`;
 }
 
@@ -1252,7 +1400,10 @@ function renderEarlier(entry: CatalogEntry): string {
   return `<details class="earlier"><summary>Earlier versions (${entry.earlier.length})</summary><ul>${items.join("")}</ul></details>`;
 }
 
-/** Links to the package's Groovy and `.tease` files: directly for one of each, else in a `<details>` list. */
+/**
+ * Links to the package's Groovy and `.tease` files, and to a verified copy's latest conversion: directly for one file of
+ * each, else in a `<details>` list.
+ */
 function renderSource(entry: CatalogEntry): string {
   const url = (kind: string, relative: string) =>
     escapeHtml(
@@ -1262,20 +1413,29 @@ function renderSource(entry: CatalogEntry): string {
     ...(entry.images > 0 ? [`${entry.images} ${entry.images === 1 ? "image" : "images"}`] : []),
     ...(entry.audio > 0 ? [`${entry.audio} audio`] : []),
   ].join(", ");
-  const groovy = entry.groovy.paths;
-  const tease = entry.tease.paths;
-  if (groovy.length <= 1 && tease.length <= 1)
+  const verified = entry.origin === "verified";
+  const kinds: Array<[kind: string, label: string, files: readonly string[]]> = [
+    ["groovy", "Groovy", entry.groovy.paths],
+    ["tease", verified ? "TeaseScript (verified copy)" : "TeaseScript", entry.tease.paths],
+    ["latest", "TeaseScript (latest conversion)", entry.latest?.paths ?? []],
+  ];
+  if (kinds.every(([, , files]) => files.length <= 1))
     return (
-      [
-        ...groovy.map((file) => `<a href="${url("groovy", file)}">Groovy</a>`),
-        ...tease.map((file) => `<a href="${url("tease", file)}">TeaseScript</a>`),
-      ].join(" &middot; ") + (media === "" ? "" : `<br>${media}`)
+      kinds
+        .flatMap(([kind, label, files]) =>
+          files.map((file) => `<a href="${url(kind, file)}">${label}</a>`),
+        )
+        .join(" &middot; ") + (media === "" ? "" : `<br>${media}`)
     );
-  const list = (kind: string, label: string, files: readonly string[]) =>
-    files.length === 0
-      ? ""
-      : `<p>${label}: ${files.map((file) => `<a href="${url(kind, file)}">${escapeHtml(file)}</a>`).join(", ")}</p>`;
-  return `<details><summary>${groovy.length} Groovy, ${tease.length} TeaseScript</summary>${list("groovy", "Groovy", groovy)}${list("tease", "TeaseScript", tease)}</details>${media}`;
+  const latestCount = entry.latest === null ? "" : `, ${entry.latest.paths.length} latest`;
+  const lists = kinds
+    .filter(([, , files]) => files.length > 0)
+    .map(
+      ([kind, label, files]) =>
+        `<p>${label}: ${files.map((file) => `<a href="${url(kind, file)}">${escapeHtml(file)}</a>`).join(", ")}</p>`,
+    )
+    .join("");
+  return `<details><summary>${entry.groovy.paths.length} Groovy, ${entry.tease.paths.length} TeaseScript${latestCount}</summary>${lists}</details>${media}`;
 }
 
 function escapeHtml(text: string): string {
