@@ -1002,6 +1002,31 @@ function analyse(
           analysis.indexes.add(child);
         } else plainTruths.delete(child);
       }
+      // Groovy's null-aware ordering of two sides that typing proves to be numbers, or texts, never null, is the plain
+      // comparison: `sexscriptLegacyCompare(a, b) < 0` is `a < b`.
+      const compared =
+        child.kind === "binary" &&
+        ORDER_OPERATORS.has(child.operator) &&
+        child.left.kind === "call" &&
+        child.left.name === COMPARE_HELPER &&
+        child.left.positional.length === 2 &&
+        child.right.kind === "literal" &&
+        child.right.value === 0
+          ? child.left.positional
+          : null;
+      if (compared !== null) {
+        const [left, right] = compared.map((side) => typeOf(side, scope));
+        const plain = (type: TeaseType): string | null =>
+          type.kind === "scalar" && ["integer", "number", "string"].includes(type.name)
+            ? type.name === "string"
+              ? "string"
+              : "number"
+            : null;
+        if (plain(left!) !== null && plain(left!) === plain(right!)) {
+          plainCompares.add(child);
+          analysis.indexes.add(child);
+        } else plainCompares.delete(child);
+      }
     });
   };
 
@@ -2301,6 +2326,10 @@ function forEachExpression(value: IrExpression, visit: (expression: IrExpression
 /** Truncates the recorded list positions inside a statement's own expressions with `toInteger`. */
 /** The legacy truth helper (helpers.ts). */
 const TRUTH_HELPER = "sexscriptLegacyTruth";
+const COMPARE_HELPER = "sexscriptLegacyCompare";
+const ORDER_OPERATORS = new Set(["<", "<=", ">", ">="]);
+/** Orderings of two sides that typing proves to be numbers, or texts, which read as the plain comparison. */
+const plainCompares = new WeakSet<IrExpression>();
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
@@ -2397,6 +2426,8 @@ function withIntegerIndexes<T extends IrStatement>(
     const truthType = plainTruths.get(value);
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);
+    if (plainCompares.has(value) && copy.kind === "binary" && copy.left.kind === "call")
+      return { ...copy, left: copy.left.positional[0]!, right: copy.left.positional[1]! };
     if (copy.kind === "index" && textIndexes.has(value))
       return helperCall("textAt", [copy.target, copy.index]);
     if (copy.kind === "binary" && openTimes.has(value)) {

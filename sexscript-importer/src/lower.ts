@@ -1612,13 +1612,16 @@ export function lowerParsedFile(
     context,
     stripsTags,
   );
-  // The truth helper goes where variable typing wrote all its tests plainly.
-  if (context.syntheticHelpers.has("truth")) {
+  // The truth and ordering helpers go where variable typing wrote all their tests plainly.
+  for (const [helper, name] of [
+    ["truth", "sexscriptLegacyTruth"],
+    ["compare", "sexscriptLegacyCompare"],
+  ] as const) {
+    if (!context.syntheticHelpers.has(helper)) continue;
     const others = helperStatements(
-      new Set([...context.syntheticHelpers].filter((name) => name !== "truth")),
+      new Set([...context.syntheticHelpers].filter((other) => other !== helper)),
     );
-    if (!callsFunction([typedStatements, others], "sexscriptLegacyTruth"))
-      context.syntheticHelpers.delete("truth");
+    if (!callsFunction([typedStatements, others], name)) context.syntheticHelpers.delete(helper);
   }
   // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
   // kept as a duration, empty texts dropped,

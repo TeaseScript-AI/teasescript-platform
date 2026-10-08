@@ -1,22 +1,4 @@
 global function sexscriptLegacyValue(value) {
   return value
 }
-global function sexscriptLegacyCompare(left, right) {
-  if left == null {
-    if right == null {
-      return 0
-    }
-    return -1
-  }
-  if right == null {
-    return 1
-  }
-  if left < right {
-    return -1
-  }
-  if left > right {
-    return 1
-  }
-  return 0
-}
 goto "start.tease"
