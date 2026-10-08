@@ -273,7 +273,7 @@ them at the top.
 node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--seed 1] [--workers 1|2] \
   [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
   [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] [--[no-]random-choices] \
-  <unit-dir>... --out <dir>
+  [--[no-]quit-anywhere] <unit-dir>... --out <dir>
 node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --way N | --error)
 ```
 
@@ -404,6 +404,14 @@ session that much later. All these steps are play, and a path records them: its 
 start clock. A gap must be positive. Only a session that does not start after the clock where the state it continues
 stands, such as one of an old corpus entry, is a clock start. The report's `search.time` counts the conditions that
 read the clock, the places they were read after, and the time steps taken by states and sessions.
+With `--quit-anywhere`, a player can quit at any moment, and what the session saved so far stays: next visits also
+start from the storage of explored states a session did not complete, at most 20, within the next visits' share and
+once per storage, one per analysis pass. The first is the one with the most stored cells no next visit started from
+had: the values of the keys the script reads (those conditions compare, those loads read, and those a call gives a
+function that loads its parameter), and their changes in its session; such visits get the windows of the comparisons
+read so far once. They are play; a path records the earlier session up to its last input, and `--replay` says where the
+player quit. The report counts them as `search.quitVisits`. It is off by default: it reaches return flows that only a
+saved but uncompleted session leads to, at the cost of first-session depth on the units measured.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with

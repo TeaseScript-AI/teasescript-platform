@@ -1453,6 +1453,8 @@ export function replay(
   snapshot: Data;
   failure: ReturnType<typeof failureOf> | null;
   error: string | null;
+  /** How each earlier session ended: `halted` when it completed, else where the player quit (`waiting`). */
+  earlier: string[];
 } {
   const session = new Session(engine, plan, seed);
   // A path with chosen random outcomes replays them; its other draws stay natural, as without control.
@@ -1490,10 +1492,18 @@ export function replay(
     }
     return { step, steps, error };
   };
+  const ends: string[] = [];
   for (const earlier of path.earlier ?? []) {
     const done = run(earlier.wallClockMs ?? EPOCH_MS, earlier.inputs, false);
     if (done.error !== null)
-      return { steps: [], snapshot: done.step.snapshot, failure: null, error: done.error };
+      return {
+        steps: [],
+        snapshot: done.step.snapshot,
+        failure: null,
+        error: done.error,
+        earlier: ends,
+      };
+    ends.push(String(done.step.snapshot.status));
     storage = storageOf(done.step.snapshot);
   }
   const last = run(path.wallClockMs ?? EPOCH_MS, inputs, true);
@@ -1502,5 +1512,6 @@ export function replay(
     snapshot: last.step.snapshot,
     failure: last.step.snapshot.status === "failed" ? failureOf(last.step.snapshot) : null,
     error: last.error,
+    earlier: ends,
   };
 }

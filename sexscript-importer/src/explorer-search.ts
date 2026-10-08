@@ -11,6 +11,7 @@ import {
   DataFlow,
   distance,
   goalsFor,
+  KEY_PLACEHOLDER,
   keyMatcher,
   namesIn,
   callsClock,
@@ -117,6 +118,8 @@ const GUIDED = -1;
 const MAX_CHAIN = 100;
 /** Next sessions started from the storage of completed sessions without a target. */
 const MAX_NEXT_SESSIONS = 10;
+/** With quit-anywhere next visits: next sessions started from the storage of states a session did not complete. */
+const MAX_QUIT_SESSIONS = 20;
 /** Compressed snapshots kept for going on from explored states; older ones are replayed when needed. */
 const STORE_BYTES = 256 * 1024 * 1024;
 
@@ -264,6 +267,13 @@ export interface ExploreOptions {
    * chosen outcome is labelled "play (chosen random)" (`chosen`). Off by default.
    */
   readonly randomChoices?: boolean;
+  /**
+   * Quit-anywhere next visits: a player can quit at any moment, and what was saved so far stays, so next sessions also
+   * start from the storage of explored states a session did not complete (at most {@link MAX_QUIT_SESSIONS}, within the
+   * next visits' share, once per storage): first the one with the most stored cells no next visit started from had,
+   * the values of the keys conditions compare and their changes in its session. Off by default.
+   */
+  readonly quitAnywhere?: boolean;
 }
 
 /**
@@ -471,6 +481,8 @@ export interface ExploreResult {
     time?: { conditions: number; places: number; steps: number; sessions: number };
     /** With guidance: the regions of code not reached yet that the search was led toward, and those it reached. */
     guidance?: { regions: number; reached: number };
+    /** With quit-anywhere next visits: those started from the storage of a state a session did not complete. */
+    quitVisits?: number;
     /**
      * By session number (the first session first): the sessions started, and the explored states that completed one,
      * such as how often a long first session came to its end, which later sessions need.
@@ -1079,6 +1091,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
   const chooses = options.randomChoices === true;
+  const quitAnywhere = options.quitAnywhere === true;
   // Corpus paths with chosen random outcomes replay them also without random choices; other draws stay natural.
   session.randomChoices =
     chooses ||
@@ -1210,6 +1223,83 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   /** A plan that reads the clock gets a next day's session too. */
   const readsClock = later && instructions.some((instruction) => flow.flowOf(instruction).clock);
+  /**
+   * With quit-anywhere next visits: whether a stored key is one the script reads: one a condition compares, one a load
+   * reads (a template's computed parts any text), and one a call gives a function that loads its parameter.
+   */
+  const comparedKey = (() => {
+    if (!quitAnywhere) return () => false;
+    const keyOf = (expression: unknown): string | null => {
+      const node = record(expression);
+      if (node.kind === "literal") return typeof node.value === "string" ? node.value : null;
+      if (node.kind !== "template") return null;
+      return list(node.parts)
+        .map((part) =>
+          part.kind === "text" && typeof part.value === "string" ? part.value : KEY_PLACEHOLDER,
+        )
+        .join("");
+    };
+    const keys = new Set<string>();
+    const loadsParameter = new Map<number, Set<unknown>>();
+    for (const definition of list(plan.functions)) {
+      const parameters = new Set(list(definition.parameters).map((parameter) => parameter.name));
+      const end = Math.min(Number(definition.endInstruction), instructions.length);
+      for (let index = Number(definition.entryInstruction); index < end; index += 1)
+        visitNodes(instructions[index], (node) => {
+          const key = record(node.key);
+          if (
+            node.kind === "storageLoad" &&
+            key.kind === "identifier" &&
+            parameters.has(key.name)
+          ) {
+            const loaded = loadsParameter.get(Number(definition.id)) ?? new Set();
+            loadsParameter.set(Number(definition.id), loaded.add(key.name));
+          }
+        });
+    }
+    instructions.forEach((instruction) => {
+      if (instruction.kind === "jumpIfFalse" || instruction.kind === "loopStart")
+        for (const key of flow.flowOf(instruction.condition ?? instruction.expression).keys)
+          keys.add(key);
+      visitNodes(instruction, (node) => {
+        const key = node.kind === "storageLoad" ? keyOf(node.key) : null;
+        if (key !== null) keys.add(key);
+      });
+      const loaded = loadsParameter.get(Number(instruction.functionId));
+      if (instruction.kind === "callFunction" && loaded !== undefined)
+        for (const argument of list(instruction.arguments)) {
+          const key = loaded.has(argument.parameterName) ? keyOf(argument.value) : null;
+          if (key !== null) keys.add(key);
+        }
+    });
+    const matchers = [...keys].map(keyMatcher);
+    const known = new Map<string, boolean>();
+    return (key: string): boolean => {
+      let compared = known.get(key);
+      if (compared === undefined) {
+        compared = matchers.some((matches) => matches(key));
+        known.set(key, compared);
+      }
+      return compared;
+    };
+  })();
+  /** The stored cells of a storage a session left: the values of compared keys, and their changes from its start. */
+  const cellsOf = (entries: readonly StorageEntry[], before: readonly StorageEntry[]): string[] => {
+    const prior = new Map(before.map((entry) => [entry.key, JSON.stringify(entry.value)]));
+    const cells: string[] = [];
+    const present = new Set<string>();
+    for (const { key, value } of entries) {
+      present.add(key);
+      if (!comparedKey(key)) continue;
+      const now = JSON.stringify(value);
+      cells.push(`${key}=${now}`);
+      const was = prior.get(key) ?? "none";
+      if (was !== now) cells.push(`${key}:${was}>${now}`);
+    }
+    for (const [key, was] of prior)
+      if (!present.has(key) && comparedKey(key)) cells.push(`${key}:${was}>none`);
+    return cells;
+  };
   /**
    * With forward time: the clock comparisons of the plan, and where the player waits right before a step evaluates
    * one, by where the state waits (its pending action's instruction, or `start` for a session start), with those
@@ -1344,6 +1434,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const completedKeys = new Set<string>();
   const completedLeft: number[] = [];
   let nextFromCompleted = 0;
+  let quitVisits = 0;
+  /** With quit-anywhere next visits: the stored cells of the storages next visits started from. */
+  const seedCells = new Set<string>();
+  const cellsOfLeft = new Map<number, readonly string[]>();
   /** Storage that started a next session without a target. */
   const startedFrom = new Set<string>([JSON.stringify([])]);
   /**
@@ -2123,13 +2217,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       targets.set(code, target);
       scheduled = schedule(code, target) || scheduled;
     });
-    // A few next sessions from what completed sessions stored, as the player's next visit.
-    for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
-      if (startedFrom.size > MAX_NEXT_SESSIONS || !withinNextShare()) break;
-      const entry = left[completedLeft[nextFromCompleted]!]!;
-      const key = JSON.stringify(entry.entries);
-      if (startedFrom.has(key)) continue;
-      startedFrom.add(key);
+    /** A next visit from the storage a state left: a minute later, and in the windows of the comparisons read. */
+    const visitFrom = (entry: (typeof left)[number], key: string, completed: boolean): void => {
+      if (quitAnywhere)
+        for (const cell of cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage))
+          seedCells.add(cell);
       const work = session.operations;
       if (later) {
         // A minute later; then in the windows of the clock comparisons sessions read (`sessionGaps`), as its first
@@ -2138,7 +2230,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
         const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
         const now = wallEnd[first.node.id]!;
-        if (snapshot !== null) sessionOrigins.push({ key, entry, snapshot, now, begun });
+        // A quit visit gets the windows read so far once, not again as sessions read more.
+        if (snapshot !== null && completed)
+          sessionOrigins.push({ key, entry, snapshot, now, begun });
         const steps =
           snapshot === null
             ? []
@@ -2159,7 +2253,44 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           null,
         );
       nextWork += session.operations - work;
+    };
+    // A few next sessions from what completed sessions stored, as the player's next visit.
+    for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
+      // Quit visits have their own count.
+      if (startedFrom.size - quitVisits > MAX_NEXT_SESSIONS || !withinNextShare()) break;
+      const entry = left[completedLeft[nextFromCompleted]!]!;
+      const key = JSON.stringify(entry.entries);
+      if (startedFrom.has(key)) continue;
+      startedFrom.add(key);
+      visitFrom(entry, key, true);
       scheduled = true;
+    }
+    // With quit-anywhere next visits, one per pass from the storage of a state a session did not complete: the one with
+    // the most stored cells no next visit started from had.
+    if (quitAnywhere && quitVisits < MAX_QUIT_SESSIONS && withinNextShare()) {
+      let best: number | null = null;
+      let bestNew = 0;
+      left.forEach((entry, index) => {
+        if (startedFrom.has(JSON.stringify(entry.entries))) return;
+        let cells = cellsOfLeft.get(index);
+        if (cells === undefined) {
+          cells = cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage);
+          cellsOfLeft.set(index, cells);
+        }
+        const fresh = cells.filter((cell) => !seedCells.has(cell)).length;
+        if (fresh > bestNew) {
+          best = index;
+          bestNew = fresh;
+        }
+      });
+      if (best !== null) {
+        const entry = left[best]!;
+        const key = JSON.stringify(entry.entries);
+        startedFrom.add(key);
+        quitVisits += 1;
+        visitFrom(entry, key, false);
+        scheduled = true;
+      }
     }
     // Comparisons sessions read since: the storages next sessions started from get their windows too.
     const learned = [...clockAfter.values()].reduce((sum, after) => sum + after.size, 0);
@@ -2859,6 +2990,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ...(map === null
         ? {}
         : { guidance: { regions: guidance.tried.size, reached: guidance.reached } }),
+      ...(quitAnywhere ? { quitVisits } : {}),
       ...(times === null
         ? {}
         : {
@@ -2975,6 +3107,15 @@ function cover(
 }
 
 /** An input as one of the choices at a prompt: the input itself, apart from its label, which only explains it. */
+/** Each node of an expression or instruction, depth first. */
+function visitNodes(value: unknown, each: (node: Data) => void): void {
+  if (Array.isArray(value)) for (const item of value) visitNodes(item, each);
+  else if (isRecord(value)) {
+    each(value);
+    for (const [key, item] of Object.entries(value)) if (key !== "span") visitNodes(item, each);
+  }
+}
+
 function inputKey(input: ExplorerInput): string {
   const { label: _label, ...choice } = { label: undefined, ...input };
   return JSON.stringify(choice);

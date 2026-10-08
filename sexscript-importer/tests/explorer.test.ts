@@ -1410,3 +1410,54 @@ test(
     assert.equal(flipGap(equal!, orderedModel, timeContext({}), EPOCH_MS), 4_321_000);
   },
 );
+
+test(
+  "with quit-anywhere next visits, a player who quits after a save comes back with it: a return only such a visit reaches is play, and its path replays",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // The only way to complete removes the save again, and the stored value is read through a function of the script.
+    const source =
+      'function loadNumber(key) {\n  let value = load key, default: 0\n  return value\n}\nlet version = loadNumber("version")\n' +
+      'if version > 0 {\n  say "Welcome back."\n  exit\n}\nshowButton "Start"\nsave 1 as "version"\n' +
+      'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  delete "version"\n  exit\n}\n' +
+      'while true {\n  showButton "Again"\n}\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const run = (quitAnywhere: boolean) =>
+      explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        budgetOps: 3000,
+        maxStates: 2000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        later: true,
+        quitAnywhere,
+      });
+    const welcome = source.split("\n").findIndex((line) => line.includes("Welcome back.")) + 1;
+    const reached = (result: ReturnType<typeof run>) =>
+      !result.coverage.files[0]!.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return welcome >= from && welcome <= to;
+      });
+    assert.equal(reached(run(false)), false);
+    const quit = run(true);
+    assert.ok(reached(quit));
+    assert.equal(quit.coverage.reach.clock, 0);
+    assert.ok(quit.search.quitVisits! >= 1);
+    // The way back has its path: the earlier session up to where the player quit, which replays to the same text.
+    const way = quit.directed.ways.find(
+      (entry) => entry.line === welcome - 1 && entry.way === "true",
+    )!;
+    assert.equal(way.reach, "play");
+    assert.equal(way.repro.earlier?.length, 1);
+    const replayed = replay(engine, plan, 1, way.repro.inputs, {
+      ...(way.repro.earlier === undefined ? {} : { earlier: way.repro.earlier }),
+      ...(way.repro.wallClockMs === undefined ? {} : { wallClockMs: way.repro.wallClockMs }),
+    });
+    assert.deepEqual(replayed.earlier, ["waiting"]);
+    assert.ok(replayed.steps.some((step) => step.texts.includes("Welcome back.")));
+  },
+);

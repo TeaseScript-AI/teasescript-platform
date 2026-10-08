@@ -6,7 +6,7 @@
  * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
- *          [--[no-]random-choices] <unit-dir>... --out <dir>
+ *          [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -67,6 +67,7 @@ const STRATEGIES = [
   "conjunctive",
   "guidance",
   "randomChoices",
+  "quitAnywhere",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -124,6 +125,7 @@ async function main(args: string[]): Promise<void> {
       conjunctive: { type: "boolean", default: true },
       guidance: { type: "boolean", default: false },
       "random-choices": { type: "boolean", default: true },
+      "quit-anywhere": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -168,7 +170,7 @@ async function main(args: string[]): Promise<void> {
       "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--seed N] [--workers 1|2]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
-        "         [--[no-]random-choices] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -211,6 +213,7 @@ async function main(args: string[]): Promise<void> {
             conjunctive: values.conjunctive,
             guidance: values.guidance,
             randomChoices: values["random-choices"],
+            quitAnywhere: values["quit-anywhere"],
           },
         },
         out,
@@ -254,6 +257,7 @@ interface RunSettings {
     conjunctive: boolean;
     guidance: boolean;
     randomChoices: boolean;
+    quitAnywhere: boolean;
   };
 }
 
@@ -965,15 +969,17 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
+  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
+  // An earlier session that did not complete is one the player quit after its last input.
   earlier.forEach((session, index) =>
     process.stdout.write(
       `Session ${index + 1}${session.wallClockMs === undefined ? "" : ` at ${new Date(session.wallClockMs).toISOString()}`}: ` +
-        `${session.inputs.map(describeInput).join("; ") || "(no input)"}, then its storage starts the next\n`,
+        `${session.inputs.map(describeInput).join("; ") || "(no input)"}, then ` +
+        `${replayed.earlier[index] === "halted" ? "it ends" : `the player quits after input ${session.inputs.length}`}; its storage starts the next\n`,
     ),
   );
   if (wallClockMs !== EPOCH_MS)
     process.stdout.write(`The last session starts at ${new Date(wallClockMs).toISOString()}\n`);
-  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
   const { steps, failure } = replayed;
   for (const step of steps) {
     if (step.input !== null) process.stdout.write(`> ${describeInput(step.input)}\n`);
