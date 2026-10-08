@@ -307,6 +307,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly debugTrace?: RuntimeDebugContext;
   /** Whether the session starts in Debug, which the script reads as `debugMode`; `false` by default. */
   readonly debugMode?: boolean;
+  /** Which random draws the host decides or pauses at from Start (`docs/RUNTIME.md#controlled-randomness`). */
+  readonly randomControl?: RandomControlOptions;
 }
 
 /**
@@ -414,6 +416,8 @@ export function createPlayerRuntimeSession(
   debugTrace?.reset("start");
   const session = emptySession(runtime.plan, runtime, recorder, debugTrace);
   if (recorder !== null) session.engine.beginRecording(session, session.plan, recorder);
+  if (options.randomControl !== undefined)
+    session.engine.setRandomControl(session, options.randomControl);
   const operation = session.engine.call(session, "run", [{}], (current) =>
     current.run(traceOptions(debugTrace)),
   );
@@ -1488,12 +1492,13 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
 }
 
 /**
- * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, or a
- * `save`, `delete` or `takePhoto()` waits for the host.
+ * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a
+ * `save`, `delete` or `takePhoto()` waits for the host, or the session is paused at a random draw.
  */
 export function playerRuntimeAwaitsHost(state: PlayerRuntimeState): boolean {
   const pending = state.foregroundAction?.kind;
   return (
+    state.randomDraw !== null ||
     state.currentSessionTimeMs < state.observedSessionTimeMs ||
     pending === "storageWrite" ||
     pending === "capture"

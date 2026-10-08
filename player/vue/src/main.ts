@@ -67,6 +67,7 @@ const app = developmentPreview
             failure: failure.value,
             title: identity.value.title ?? "",
             author: identity.value.author ?? "",
+            packageName: host.name ?? "",
           });
       },
     });

@@ -36,6 +36,8 @@ import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
 import SessionEndDialog from "./SessionEndDialog.vue";
 import SessionErrorDialog from "./SessionErrorDialog.vue";
+import RandomDrawPicker from "./RandomDrawPicker.vue";
+import { useRandomDrawGuard } from "./useRandomDrawGuard";
 import RewindInspection from "./RewindInspection.vue";
 import { rewindFutureTranscript } from "../../debug-history.js";
 import { rewindRows } from "./rewindPresentation";
@@ -56,6 +58,8 @@ const props = withDefaults(
     /** The script's title and author for the title bar, each empty when unknown. */
     title?: string;
     author?: string;
+    /** The package's name from its host, empty when unknown. */
+    packageName?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
     /** Why the script cannot start; shown instead of Start. */
@@ -69,6 +73,7 @@ const props = withDefaults(
   {
     title: "",
     author: "",
+    packageName: "",
     tools: () => [],
     failure: null,
     debug: () => ({ menu: false, autoSkip: false }),
@@ -128,6 +133,22 @@ function toggleThemeMode() {
 const session = computed(() => props.player.session.value);
 // The Debug menu adds the Debug panel first in the tools menu.
 const debug = usePlayerDebug(props.player, props.debug);
+// The draw the session is paused at while Debug chooses random outcomes, with its site and source for the picker.
+const randomPicker = computed(() => {
+  const random = debug.random.value;
+  const draw = random?.draw.value ?? null;
+  if (random === null || draw === null) return null;
+  const site = random.sites.value.get(draw.site) ?? null;
+  return {
+    random,
+    draw,
+    site,
+    source: site === null ? null : props.player.scriptSource(site.path),
+    // The breadcrumb starts at the package, by its name, else by the script's title.
+    root: props.packageName || props.title || null,
+  };
+});
+useRandomDrawGuard(() => randomPicker.value !== null);
 // A debug export for a developer, from the error dialog, Settings, or the Debug panel (DEBUGGER.md "Debug export").
 const debugExport = useDebugExport(
   props.player,
@@ -404,6 +425,7 @@ async function toggleFullscreen() {
         v-model:tab="debug.tab.value"
         :explained="debug.explained.value"
         :time="debug.time.value"
+        :random="debug.random.value"
         :log="debug.log.value"
         :player="player"
         :stage-covered="stageCamera !== null"
@@ -538,6 +560,19 @@ async function toggleFullscreen() {
             @export="openDebugExport"
             @debug="void openFailureInDebug()"
             @return-focus="runtimeEnd?.focus()"
+          />
+          <RandomDrawPicker
+            v-if="randomPicker"
+            :key="randomPicker.draw.drawId"
+            :draw="randomPicker.draw"
+            :site="randomPicker.site"
+            :source="randomPicker.source"
+            :root="randomPicker.root"
+            :next="randomPicker.random.next(randomPicker.draw.site)"
+            :tried="randomPicker.random.tried(randomPicker.draw.site)"
+            @update:next="randomPicker.random.setNext(randomPicker.draw.site, $event)"
+            @resolve="randomPicker.random.resolve($event)"
+            @untried="randomPicker.random.resolveLeastTried()"
           />
           <PlayerToasts
             :notifications="notifications.notifications.value"

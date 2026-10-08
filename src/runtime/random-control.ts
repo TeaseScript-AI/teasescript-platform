@@ -147,6 +147,11 @@ export interface RandomSite {
   readonly path: string;
   readonly line: number;
   readonly column: number;
+  /**
+   * Where the draw's source ends, exclusive, counted from 1; a site with several kinds ends where its first one does.
+   */
+  readonly endLine: number;
+  readonly endColumn: number;
   /** The kinds of draw that can happen there, in `RANDOM_DRAW_KINDS` order. */
   readonly kinds: readonly RandomDrawKind[];
 }
@@ -248,14 +253,30 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
   );
   const found = new Map<
     string,
-    { file: number; path: string; line: number; column: number; kinds: Set<string> }
+    {
+      file: number;
+      path: string;
+      line: number;
+      column: number;
+      endLine: number;
+      endColumn: number;
+      kinds: Set<string>;
+    }
   >();
   const add = (file: number, span: PlanSourceLocation, kind: RandomDrawKind): void => {
     const path = plan.files[file]!.path;
     const id = siteId(path, span.sl, span.sc);
     let site = found.get(id);
     if (site === undefined) {
-      site = { file, path, line: span.sl + 1, column: span.sc + 1, kinds: new Set() };
+      site = {
+        file,
+        path,
+        line: span.sl + 1,
+        column: span.sc + 1,
+        endLine: span.el + 1,
+        endColumn: span.ec + 1,
+        kinds: new Set(),
+      };
       found.set(id, site);
     }
     site.kinds.add(kind);
@@ -299,6 +320,8 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
         path: site.path,
         line: site.line,
         column: site.column,
+        endLine: site.endLine,
+        endColumn: site.endColumn,
         kinds: Object.freeze(RANDOM_DRAW_KINDS.filter((kind) => site.kinds.has(kind))),
       }),
     );
