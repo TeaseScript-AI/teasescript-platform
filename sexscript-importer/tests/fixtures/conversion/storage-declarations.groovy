@@ -37,3 +37,8 @@ show("Tags " + tags.size())
 def labels = ["first"]
 labels[0] = load("game.label")
 show("Label " + labels[0])
+// A whole-number read that arithmetic turns into a fraction saves a number, so its key holds numbers.
+if (loadInteger("game.points") == null) save("game.points", 80)
+def points = loadInteger("game.points")
+if (getBoolean("Halve the distance to 90?")) points = 90 + (points - 90) / 2
+save("game.points", 7 + points)

@@ -698,6 +698,7 @@ function analyse(
   // variable read from storage has no type of its own here, so its save has the type its other values share.
   const assignedTypes = new Map<Binding, TeaseType[]>();
   const savedVariables = new Map<IrStatement, Binding>();
+  const savedScopes = new Map<IrStatement & { kind: "save" }, Scope>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
@@ -1193,6 +1194,7 @@ function analyse(
           analysis.saved.set(item, typeOf(item.value, scope));
           const saved = item.value.kind === "variable" ? scope.resolve(item.value.name) : undefined;
           if (saved !== undefined) savedVariables.set(item, saved);
+          else savedScopes.set(item, scope);
         }
         return;
       default:
@@ -1263,6 +1265,25 @@ function analyse(
     const known = assignedTypes.get(variable);
     if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind === "unknown" && known !== undefined)
       analysis.saved.set(item, sharedValueType(known));
+  }
+  // A saved value computed from such variables, `7 + points`, takes the types their other values share: Groovy's
+  // `90 + (points - 90) / 2` made a number of a whole-number read.
+  for (const [item, scope] of savedScopes) {
+    if (nonNull(analysis.saved.get(item) ?? UNKNOWN).kind !== "unknown") continue;
+    const type = expressionType(
+      item.value,
+      (name) => {
+        const found = scope.resolve(name);
+        if (found === undefined) return UNKNOWN;
+        const own = bindingType(found);
+        if (own !== undefined && nonNull(own).kind !== "unknown")
+          return scope.rulesOutNull(found) ? nonNull(own) : own;
+        const known = assignedTypes.get(found);
+        return known === undefined ? UNKNOWN : sharedValueType(known);
+      },
+      (name) => results.get(name),
+    );
+    if (nonNull(type).kind !== "unknown") analysis.saved.set(item, type);
   }
   return analysis;
 }

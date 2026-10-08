@@ -1,10 +1,17 @@
-function sexscriptLegacyValue(valueValue) {
-  return valueValue
-}
 // NOTE SX_LOAD_KEY_DECLARED: Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.
 global function sexscriptLegacyKeyTypes {
   let savedMarked: integer? = load "game.marked", default: null
   let savedWho: integer? = load "game.who", default: null
+}
+function sexscriptLegacyValue(valueValue) {
+  return valueValue
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let valueValue2 = load key, default: null
+  if valueValue2 == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(valueValue2))
 }
 // A read that keeps its null declares its key's type at the variable it starts, with the other values the script gives
 // that variable.
@@ -70,4 +77,15 @@ let labels = ["first"]
 // NOTE SX_LOAD_OPEN_NULL line 38: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps an open type, and a missing value is the empty value of the list's items, which cannot hold null.
 labels[0] = load "game.label", default: sexscriptLegacyValue("")
 say "Label ${labels[0]}"
+// A whole-number read that arithmetic turns into a fraction saves a number, so its key holds numbers.
+let savedPoints: number? = load "game.points", default: null
+if savedPoints == null {
+  save 80 as "game.points"
+}
+let points = sexscriptLegacyLoadInteger("game.points")
+say "Halve the distance to 90?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  points = 90 + (points - 90) / 2
+}
+save 7 + points as "game.points"
 exit
