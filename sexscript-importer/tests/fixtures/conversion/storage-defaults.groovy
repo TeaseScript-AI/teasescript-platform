@@ -131,6 +131,14 @@ def firstPic = loadString("game.firstPic")
 def shownPic = "none"
 if (getBoolean("Show the first?")) shownPic = firstPic
 show("Picture " + shownPic)
+// So does a parameter with a default of its own that a call passes such a text to, and a stored text of a key the
+// package saves numbers under too, read through the text helper.
+def described = { value = "none" -> value == null }
+show("No description " + described(loadString("game.description")))
+def scoreText = loadString("game.scoreText")
+def scoreCopy = scoreText
+show("Score " + (scoreCopy == null))
+def saveScore = { save("game.scoreText", 10) }
 // An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
 def profile = [name: "Guest"]
 profile.name = loadString("game.profileName")

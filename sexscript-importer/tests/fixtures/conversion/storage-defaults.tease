@@ -101,7 +101,7 @@ function restart {
 }
 // A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
 // it into text, or into true only for "true".
-// NOTE SX_LOAD_STRING_TEXT line 44: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.
+// NOTE SX_LOAD_STRING_TEXT line 44: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
 let pick = "${load("game.pick", default: sexscriptLegacyValue(""))}"
 say "Pick ${pick}"
 function roll {
@@ -281,9 +281,23 @@ if (choose yes: "Yes", no: "No") == "yes" {
   shownPic = firstPic
 }
 say "Picture ${shownPic}"
+// So does a parameter with a default of its own that a call passes such a text to, and a stored text of a key the
+// package saves numbers under too, read through the text helper.
+function described(value: string? = "none") {
+  return value == null
+}
+let savedDescription: string? = load "game.description", default: null
+say "No description ${described(savedDescription)}"
+// NOTE SX_LOAD_STRING_TEXT line 138: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+let scoreText: string? = sexscriptLegacyText(load("game.scoreText", default: sexscriptLegacyValue(null)))
+let scoreCopy: string? = scoreText
+say "Score ${scoreCopy == null}"
+function saveScore {
+  save 10 as "game.scoreText"
+}
 // An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
 let profile = { name: "Guest" }
-// NOTE SX_SHARED_MAP_WRITE line 136: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 144: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 profile.name = load "game.profileName", default: ""
 say "Profile ${profile.name}"
 // A list of one function is apart from a list of the same name in another.
@@ -332,8 +346,8 @@ say "Laps ${laps}"
 let shelves = [["old"]]
 shelves[0][0] = load "game.shelf${slot}", default: ""
 shelves[0].add(load("game.extra${slot}", default: ""))
-// NOTE SX_INDEX_PAST_END line 165: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-// NOTE SX_INDEX_PAST_END line 165: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 173: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 173: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
   say "Empty shelf."
 }

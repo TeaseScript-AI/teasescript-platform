@@ -102,6 +102,6 @@ function echo(n) {
 let score = sexscriptLegacyLoadInteger("game.points")
 score = echo(1.5)
 save 7 + score as "game.score"
-// NOTE SX_LOAD_STRING_TEXT line 51: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.
+// NOTE SX_LOAD_STRING_TEXT line 51: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
 say "Score ${sexscriptLegacyCastText(load("game.score", default: sexscriptLegacyValue("")))}"
 exit

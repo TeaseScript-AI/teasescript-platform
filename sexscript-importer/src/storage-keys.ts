@@ -598,7 +598,7 @@ function withTypedTextReads(
 
 /**
  * A text read of a key that values of another type are saved under too, as the stored value's text: a missing one is
- * the empty text (withEmptyText), or the value the script gave instead, through a default of an open type, which fits
+ * the empty text or null (withEmptyText), or the value the script gave instead, through a default of an open type, which fits
  * whatever the key's loads read: `"${load "k", default: sexscriptLegacyValue("")}"`. A key that may hold a list or a
  * dict reads through the text cast, which a template's choice of one item does not give:
  * `"${sexscriptLegacyCastText(load "k", default: sexscriptLegacyValue(""))}"`.
@@ -607,13 +607,12 @@ function storedText(
   load: Extract<IrExpression, { kind: "load" }>,
   collections: ReadonlySet<string>,
 ): IrExpression {
-  const { read: _read, fill: _fill, open: _open, ...bare } = load;
-  const fallback =
-    bare.defaultValue === undefined ||
-    (bare.defaultValue.kind === "literal" && bare.defaultValue.value === null)
-      ? { kind: "literal" as const, value: "" }
-      : bare.defaultValue;
-  const value: IrExpression = { ...bare, defaultValue: helperCall("value", [fallback]) };
+  const { read: _read, fill: _fill, open: _open, defaultValue, ...bare } = load;
+  // A missing value's text, the empty text or null, depends on where the value goes (withEmptyText).
+  const value: IrExpression =
+    defaultValue === undefined || isNullLiteral(defaultValue)
+      ? bare
+      : { ...bare, defaultValue: helperCall("value", [defaultValue]) };
   const key = literalKey(bare.key);
   return {
     kind: "template",
@@ -624,7 +623,7 @@ function storedText(
 }
 
 const STRING_TEXT =
-  "loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.";
+  "loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.";
 const BOOLEAN_TEXT =
   'loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.';
 
@@ -650,11 +649,10 @@ function withEmptyText(
     const key = literalKey(value.key);
     return key === null ? value.read === "string" : textKeys.has(key);
   };
-  // A text read, also one of a mixed key that the text helper reads (withTypedTextReads), as the read itself.
+  // A text read, also one of a mixed key that the stored text reads (withTypedTextReads), as the read itself.
   const readOf = (value: IrExpression): IrExpression | null => {
     if (textRead(value)) return value;
-    const only = value.kind === "template" && value.parts.length === 1 ? value.parts[0]! : null;
-    return only !== null && "value" in only && only.value.kind === "load" ? only.value : null;
+    return routedRead(value);
   };
   const declaredGlobal = new Set(
     programs.flatMap((program) =>
@@ -704,6 +702,15 @@ function withEmptyText(
   const flows: Flow[] = [];
   // Copies of a variable that a null test around them rules out null for, as the compiler narrows it there.
   const testedCopies = new Set<IrStatement>();
+  // Each file's script functions, and the calls of them with the scope they are in.
+  const functions = programs.map(
+    () => new Map<string, Extract<IrStatement, { kind: "function" }>>(),
+  );
+  const calls: Array<{
+    index: number;
+    call: Extract<IrExpression, { kind: "call" }>;
+    scope: Scope;
+  }> = [];
   // Lists that text reads are set into, whose items are text, by binding; a global's by name.
   const textLists = programs.map(() => new Set<string>());
   const globalTextLists = new Set<string>();
@@ -714,6 +721,7 @@ function withEmptyText(
       else passed[index]!.add(binding);
     };
     const visit = (value: IrExpression, scope: Scope, passes: boolean): IrExpression => {
+      if (value.kind === "call" && value.local === true) calls.push({ index, call: value, scope });
       if (passes) {
         const read = readOf(value);
         if (read !== null) passedReads.add(read);
@@ -733,6 +741,7 @@ function withEmptyText(
     ): void => {
       for (const item of items) {
         if (item.kind === "function") {
+          functions[index]!.set(item.name, item);
           const inner = scope.inner(item);
           for (const parameter of item.parameters)
             if (parameter.defaultValue !== null) visit(parameter.defaultValue, inner, true);
@@ -830,8 +839,25 @@ function withEmptyText(
   };
   for (const [read, { index, binding }] of readTargets)
     if (nullRead(read)) makeNullable(index, binding);
+  // A parameter that a call passes such a read or variable to holds its null too.
+  const nullValue = (index: number, value: IrExpression, scope: Scope): boolean => {
+    const read = readOf(value);
+    if (read !== null) return nullRead(read);
+    return value.kind === "variable" && isNullable(index, scope.resolve(value.name));
+  };
   for (let changed = true; changed;) {
     changed = false;
+    for (const { index, call, scope } of calls) {
+      const callee = functions[index]!.get(call.name);
+      call.positional.forEach((argument, position) => {
+        const parameter = callee?.parameters[position];
+        const binding = parameter === undefined ? null : `${call.name}:${parameter.name}`;
+        if (binding === null || isNullable(index, binding) || !nullValue(index, argument, scope))
+          return;
+        makeNullable(index, binding);
+        changed = true;
+      });
+    }
     for (const { index, binding, value, scope, item } of flows) {
       const source = value.kind === "variable" ? scope.resolve(value.name) : null;
       if (source === null || testedCopies.has(item)) continue;
@@ -884,6 +910,29 @@ function withEmptyText(
     const rewriteIn = (scope: Scope, span: IrStatement["span"]) => {
       const rewrite = (value: IrExpression): IrExpression => {
         const next = mapChildren(value, rewrite);
+        // A stored text reads the empty text where missing while its value stays local, and keeps null through the
+        // text helpers where it goes on.
+        const routed = routedRead(value);
+        if (routed !== null && routed.defaultValue === undefined && next.kind === "template") {
+          const part = next.parts[0]!;
+          const cast =
+            "value" in part &&
+            part.value.kind === "call" &&
+            part.value.name === helperName("castText");
+          const inner = routedRead(next)!;
+          if (local(routed)) {
+            const load = { ...inner, defaultValue: helperCall("value", [EMPTY]) };
+            return {
+              kind: "template",
+              parts: [{ value: cast ? helperCall("castText", [load]) : load }],
+            };
+          }
+          const load = {
+            ...inner,
+            defaultValue: helperCall("value", [{ kind: "literal", value: null }]),
+          };
+          return helperCall(cast ? "castText" : "text", [load]);
+        }
         if (next.kind === "load" && textRead(value) && local(value)) {
           const { open: _open, ...load } = next;
           if (load.defaultValue !== undefined) return load;
@@ -933,11 +982,17 @@ function withEmptyText(
         const span = item.span;
         if (item.kind === "function") {
           const inner = scope.inner(item);
-          const parameters = item.parameters.map((parameter) =>
-            parameter.defaultValue === null
-              ? parameter
-              : { ...parameter, defaultValue: rewriteIn(inner, span)(parameter.defaultValue) },
-          );
+          const parameters = item.parameters.map((parameter) => {
+            if (parameter.defaultValue === null) return parameter;
+            const defaultValue = rewriteIn(inner, span)(parameter.defaultValue);
+            // A parameter with a default of a known type that a call passes a kept null to holds null too.
+            const declared = parameter.type ?? valueType(parameter.defaultValue);
+            return declared !== null &&
+              !/\?$|\bnull\b/u.test(declared) &&
+              isNullable(index, `${item.name}:${parameter.name}`)
+              ? { ...parameter, defaultValue, type: optional(declared) }
+              : { ...parameter, defaultValue };
+          });
           return [{ ...item, parameters, body: block(item.body, inner) }];
         }
         const nested = withNestedBlocks(item, (body) => block(body, scope.inner(item)));
@@ -1023,6 +1078,14 @@ function withEmptyText(
       });
     return { ...program, statements: widen(statements, Scope.file()), diagnostics };
   });
+}
+
+/** The read of a stored text (storedText): `"${load k}"`, or `"${sexscriptLegacyCastText(load k)}"`. */
+function routedRead(value: IrExpression): Extract<IrExpression, { kind: "load" }> | null {
+  const only = value.kind === "template" && value.parts.length === 1 ? value.parts[0]! : null;
+  let inner = only !== null && "value" in only ? only.value : null;
+  if (inner?.kind === "call" && inner.name === helperName("castText")) inner = inner.positional[0]!;
+  return inner?.kind === "load" ? inner : null;
 }
 
 /** The variables that a condition rules out null for where it holds, and where it does not: `x != null and ...`. */
