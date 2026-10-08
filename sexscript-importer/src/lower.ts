@@ -10838,8 +10838,8 @@ function laterReadDefault(
   const read = typedReadAssignment(statements[index]!, context);
   if (read === null) return -1;
   // Whether code could see the variable: names it, or calls script code that could. A script function that the code
-  // calls or names, so that something may call it, is looked into, also the functions it reaches; a closure called
-  // through a local or a parameter of the function, or through `.call()`, may be any code.
+  // calls, also through `.call()`, or passes to a call, which may call it, is looked into, also the functions it
+  // reaches; a closure called through a variable, a local, or a parameter may be any code.
   const looked = new Set<string>();
   const lookInto = (name: string): boolean => {
     if (looked.has(name)) return false;
@@ -10849,15 +10849,31 @@ function laterReadDefault(
   };
   const sees = (node: AstNode, locals: ReadonlySet<string>): boolean => {
     let found = false;
+    const scriptFunction = (value: AstNode | null): string | null => {
+      const name = value?.kind === "variable" ? variableName(value) : null;
+      return name !== null && !locals.has(name) && context.functions.has(name) ? name : null;
+    };
     walkAst(node, (child) => {
-      const name = child.kind === "variable" ? variableName(child) : null;
-      if (name === read.name) found = true;
-      else if (name !== null && !locals.has(name) && context.functions.has(name))
-        found ||= lookInto(name);
+      if (child.kind === "variable" && variableName(child) === read.name) found = true;
       const call = child.kind === "methodCall" ? callParts(child) : null;
       if (call === null) return;
-      if (!call.inherited) found ||= CLOSURE_CALLS.has(call.name);
-      else if (call.name === read.name || locals.has(call.name)) found = true;
+      for (const argument of call.arguments) {
+        const passed = scriptFunction(argument);
+        if (passed !== null) found ||= lookInto(passed);
+      }
+      if (!call.inherited) {
+        if (!CLOSURE_CALLS.has(call.name)) return;
+        const held = scriptFunction(asNode(child.object));
+        if (held === null) found = true;
+        else found ||= lookInto(held);
+      } else if (
+        call.name === read.name ||
+        locals.has(call.name) ||
+        // A closure that a variable of the script holds.
+        (!context.functions.has(call.name) &&
+          (context.assignedValues.has(call.name) || context.constantInitializers.has(call.name)))
+      )
+        found = true;
       else if (legacyApiCall(child, context) !== null) return;
       else if (context.functions.has(call.name)) found ||= lookInto(call.name);
       else found = true;
