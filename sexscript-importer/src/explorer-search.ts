@@ -852,7 +852,8 @@ class CellFrontier {
       this.#groups.set(key, id);
       this.#entries.push({ cell, group, states: new Frontier(), queued: null });
     }
-    this.#entries[id]!.states.push(node, rank.slice(GROUP + 1));
+    // Within a cell, the states queued when it was expanded least go first: the ones that waited longest.
+    this.#entries[id]!.states.push(node, [this.#expansions(cell), ...rank.slice(GROUP + 1)]);
     this.#size += 1;
     this.#queue(id);
   }
