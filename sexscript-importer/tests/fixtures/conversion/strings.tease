@@ -31,11 +31,17 @@ function sexscriptLegacyTextMinus(text, part) {
   return "${text.substring(0, position)}${text.substring(position + part.length)}"
 }
 function sexscriptLegacySlice(value, from, to, exclusive = false) {
-  let first = toInteger(from)
+  let start = from
+  let finish = to
+  if not (from is integer and to is integer) and from > to {
+    start = to
+    finish = from
+  }
+  let first = toInteger(start)
   if first < 0 {
     first += value.length
   }
-  let last = toInteger(to)
+  let last = toInteger(finish)
   if last < 0 {
     last += value.length
   }
@@ -51,18 +57,6 @@ function sexscriptLegacySlice(value, from, to, exclusive = false) {
       low = last + 1
     }
     high = first + 1
-  }
-  if not (from is integer and to is integer) {
-    runsBack = false
-    low = first
-    high = last
-    if first > last {
-      low = last
-      high = first
-    }
-    if not exclusive {
-      high += 1
-    }
   }
   let position = low
   let stop = high

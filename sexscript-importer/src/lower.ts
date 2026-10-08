@@ -737,12 +737,24 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
     );
   };
   walkAst(body, (node) => {
-    if (node.kind === "binary" && ["==", "!=", "in"].includes(String(node.operator))) {
+    if (
+      node.kind === "binary" &&
+      ["==", "!=", "in", "<", ">", "<=", ">=", "<=>"].includes(String(node.operator))
+    ) {
       const left = asNode(node.left);
       const right = asNode(node.right);
       if (!distinct(right)) pass(left);
       if (!distinct(left)) pass(right);
     }
+    // `value.equals(other)` and its kin tell null from an empty value as `==` does.
+    if (
+      node.kind === "methodCall" &&
+      ["equals", "equalsIgnoreCase", "compareTo", "compareToIgnoreCase"].includes(
+        constantString(node.method) ?? "",
+      ) &&
+      !nodeArray(asNode(node.arguments)?.items).every((argument) => distinct(argument))
+    )
+      pass(asNode(node.object));
     if (
       node.kind === "switch" &&
       !nodeArray(node.cases).every((item) => distinct(asNode(item.expression)))
@@ -5602,15 +5614,11 @@ function lowerAssignment(
   ) {
     context.syntheticHelpers.add("spliced");
     const range = target.index;
-    // Groovy computed the values before the range, so they come first unless the range is constant or neither has an
-    // effect.
+    // Groovy computed the values before the list and the range, so they come first unless neither has an effect.
     const rangeNode = targetNode.kind === "binary" ? asNode(targetNode.right) : null;
     const ends = [asNode(rangeNode?.from), asNode(rangeNode?.to)];
-    const constant = ends.every(
-      (end) => end === null || end.kind === "constant" || negativeConstantIndex(end) !== null,
-    );
     const pure = [right, ...ends].every((item) => item === null || isPure(item, context));
-    const first = constant || pure ? null : freshName("values", context);
+    const first = pure ? null : freshName("values", context);
     return [
       ...(first === null ? [] : [{ kind: "let" as const, name: first, value, span }]),
       {
@@ -11359,10 +11367,13 @@ function textRange(
   const backTo = fromEnd(toNode);
   const fromStart = (value: unknown): value is number =>
     typeof value === "number" && Number.isInteger(value) && value >= 0;
+  const inclusive = range.inclusive === true;
+  const back = (value: number | null): value is number => value !== null && Number.isInteger(value);
+  // An exclusive range with equal ends is empty, also past the end, where `substring` fails.
   const forwards =
-    (fromStart(first) && fromStart(last) && first <= last) ||
-    (fromStart(first) && backTo === 1 && range.inclusive === true) ||
-    (backFrom !== null && backTo !== null && backFrom >= backTo);
+    (fromStart(first) && fromStart(last) && (first < last || (first === last && inclusive))) ||
+    (fromStart(first) && backTo === 1 && inclusive) ||
+    (back(backFrom) && back(backTo) && (backFrom > backTo || (backFrom === backTo && inclusive)));
   if (!forwards) return undefined;
   const bound = (node: AstNode, offset: number): IrExpression | null => {
     const back = fromEnd(node);
@@ -11479,8 +11490,14 @@ function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
     case "BigDecimal":
       return { kind: "call", name: "toNumber", positional: [value], named: {} };
     case "String":
-    case "java.lang.String":
-      return { kind: "call", name: "toString", positional: [value], named: {} };
+    case "java.lang.String": {
+      // Groovy's cast keeps text as it is and null as null.
+      const type = inferType(valueNode!, context.types);
+      if (onlyOf(type, STRING) && type !== 0) return value;
+      return (type & NULL) === 0
+        ? { kind: "call", name: "toString", positional: [value], named: {} }
+        : useHelper(context, "text", [value]);
+    }
     case "Boolean":
     case "boolean":
       return { kind: "call", name: "toBoolean", positional: [value], named: {} };

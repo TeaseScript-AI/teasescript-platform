@@ -23,7 +23,12 @@ switch (room) {
 	default: show("In the ${room}")
 }
 show("Using the ${chosen}")
-// So does one that the code compares with a value that may be empty, or that a parameter takes as its default.
+// So does one that the code compares with a value that may be empty, or that a parameter takes as its default, and one
+// that a String cast copies, which keeps null as Groovy's did.
+def nick = null
+def copied = (String) nick
+nick = "Kim"
+if (copied.equals(nick)) show("Same nick")
 def answer = null
 if (answer == "") show("No answer")
 answer = getString("Answer?", "")

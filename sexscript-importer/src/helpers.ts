@@ -395,17 +395,38 @@ function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrState
  * The part a Groovy range index `from..to`, or `from..<to` when `exclusive`, covers: the positions from `low` up to but
  * not including `high`, and whether it `runsBack`. Like Groovy's subListBorders, a negative end counts from the end
  * first; the range runs backwards where `from` then comes after `to`, and leaves out its `to` end when exclusive. A
- * read (`fractions`) drops a fraction of an end toward zero, and a fractional end makes Groovy's NumberRange, which
- * reads its part forwards and leaves out its higher end when exclusive; a write keeps the fraction, which stops the
- * script where Groovy failed too.
+ * read (`fractions`) drops a fraction of an end toward zero, and a fractional end makes Groovy's NumberRange, whose
+ * ends come in order of their values first; a write keeps the fraction, which stops the script where Groovy failed too.
  */
 const positions = (fractions: boolean): IrStatement[] => {
   const whole = (name: string): IrExpression =>
     fractions ? { kind: "call", name: "toInteger", positional: [v(name)], named: {} } : v(name);
   return [
-    letS("first", whole("from")),
+    ...(fractions
+      ? [
+          letS("start", v("from")),
+          letS("finish", v("to")),
+          ifS(
+            bin(
+              "and",
+              {
+                kind: "unary",
+                operator: "not",
+                value: bin(
+                  "and",
+                  { kind: "typeTest", value: v("from"), type: "integer" },
+                  { kind: "typeTest", value: v("to"), type: "integer" },
+                ),
+              },
+              bin(">", v("from"), v("to")),
+            ),
+            [set(v("start"), v("to")), set(v("finish"), v("from"))],
+          ),
+        ]
+      : []),
+    letS("first", whole(fractions ? "start" : "from")),
     ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
-    letS("last", whole("to")),
+    letS("last", whole(fractions ? "finish" : "to")),
     ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
     letS("runsBack", bin(">", v("first"), v("last"))),
     letS("low", v("first")),
@@ -416,33 +437,6 @@ const positions = (fractions: boolean): IrStatement[] => {
       ifS(v("exclusive"), [set(v("low"), bin("+", v("last"), lit(1)))]),
       set(v("high"), bin("+", v("first"), lit(1))),
     ]),
-    ...(fractions
-      ? [
-          ifS(
-            {
-              kind: "unary",
-              operator: "not",
-              value: bin(
-                "and",
-                { kind: "typeTest", value: v("from"), type: "integer" },
-                { kind: "typeTest", value: v("to"), type: "integer" },
-              ),
-            },
-            [
-              set(v("runsBack"), lit(false)),
-              set(v("low"), v("first")),
-              set(v("high"), v("last")),
-              ifS(bin(">", v("first"), v("last")), [
-                set(v("low"), v("last")),
-                set(v("high"), v("first")),
-              ]),
-              ifS({ kind: "unary", operator: "not", value: v("exclusive") }, [
-                set(v("high"), bin("+", v("high"), lit(1))),
-              ]),
-            ],
-          ),
-        ]
-      : []),
   ];
 };
 const fn = (
@@ -1370,10 +1364,15 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["value", "from", "to", "values", "exclusive"],
         [
           ...positions(false),
-          // A part that reaches past the end replaces the elements up to the end.
-          ifS(bin(">", v("high"), prop(v("value"), "length")), [
-            set(v("high"), prop(v("value"), "length")),
-          ]),
+          // A part that reaches past the end replaces the elements up to the end; a fractional end stays, to fail.
+          ifS(
+            bin("and", bin(">", v("high"), prop(v("value"), "length")), {
+              kind: "typeTest",
+              value: v("to"),
+              type: "integer",
+            }),
+            [set(v("high"), prop(v("value"), "length"))],
+          ),
           letS("items", {
             kind: "methodCall",
             target: v("value"),

@@ -1,3 +1,9 @@
+function sexscriptLegacyText(value): string? {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
 // A text or a flag declared as null, or without a value, whose later values all have one type starts empty: no code
 // compares it with null or passes it on, and Groovy truth treats null like the empty text and false.
 let name = ""
@@ -36,7 +42,14 @@ if room == null {
   say "In the ${room}"
 }
 say "Using the ${chosen}"
-// So does one that the code compares with a value that may be empty, or that a parameter takes as its default.
+// So does one that the code compares with a value that may be empty, or that a parameter takes as its default, and one
+// that a String cast copies, which keeps null as Groovy's did.
+let nick: string? = null
+let copied: string? = sexscriptLegacyText(nick)
+nick = "Kim"
+if copied == nick {
+  say "Same nick"
+}
 let answer: string? = null
 if answer == "" {
   say "No answer"
