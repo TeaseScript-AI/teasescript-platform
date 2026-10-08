@@ -633,7 +633,13 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   number (`SX_WAIT_BEAT`, `beats`), and a loop's tick, a wait of a second at most after a text the loop's body builds
   anew each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`); animations and counters keep theirs as
   updatable messages (above), whose first message keeps `instant` as a beat does. A beat split into paragraphs keeps
-  `instant` on every paragraph, so the text shows whole at once. A beat keeps its `instant`, so a text whose
+  `instant` on every paragraph, so the text shows whole at once. A sound that starts between a text and its wait, a
+  background sound, took no time in legacy, so the wait is the text's (owner decision 2026-10-08): where it stays, the
+  text is a beat said at once with its sound, also as the last text of every branch of an `if` before the sound
+  (DisciplineClinic's strokes; `SX_WAIT_SOUND_BEAT`, `soundBeats`), and where the reading time replaces it, the sound
+  starts before its text so that the two come together, unless computing the text has an effect
+  (`SX_SOUND_WITH_TEXT`, `soundsWithText`). A background sound that surely plays waits for the reading time before it,
+  as media do. A beat keeps its `instant`, so a text whose
   replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead, a beat itself
   in turn unless it was split (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or
   from a loop's earlier pass, gives way to the beat.

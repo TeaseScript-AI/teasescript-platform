@@ -78,3 +78,14 @@ for (int left = 3; left > 0; left--) {
     show("Starting soon.\n\nStarting in " + left)
     wait(1)
 }
+// DisciplineClinic Punish spank(): a sound that starts between a stroke's text and its wait took no time in legacy, so
+// the wait stays as the stroke's beat and the text appears at once, with its sound.
+def message = "Right cheek"
+def counting = false
+def tempTime = 0.5
+for (int tempSpankCount = 1; tempSpankCount <= 3; tempSpankCount++) {
+	if (counting) show("<font size='10'><b>"+message+"</b></font>")
+	else show("<font size='10'><b>"+message+"\n."+tempSpankCount+".</b></font>")
+	playBackgroundSound("DisciplinePack/hand"+(1+getRandom(3))+".wav")
+	wait(tempTime)
+}

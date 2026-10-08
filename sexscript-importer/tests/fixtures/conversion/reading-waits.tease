@@ -1,3 +1,4 @@
+// NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (2 texts in this file).
 // A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
 // button; a wait that timed the reading goes, also in milliseconds.
 showButton "Start"
@@ -81,5 +82,22 @@ while left > 0 {
   say "Starting in ${left}", instant
   wait 1
   left -= 1
+}
+// DisciplineClinic Punish spank(): a sound that starts between a stroke's text and its wait took no time in legacy, so
+// the wait stays as the stroke's beat and the text appears at once, with its sound.
+let message = "Right cheek"
+let counting = false
+let tempTime = 0.5
+for tempSpankCount in 1..=3 {
+  if counting {
+    say "**${message}**", instant
+  } else {
+    say """
+      **${message}**
+      **.${tempSpankCount}.**
+    """, instant
+  }
+  playAudio async "DisciplinePack/hand${1 + randomInteger(0..3)}.wav"
+  wait tempTime
 }
 exit
