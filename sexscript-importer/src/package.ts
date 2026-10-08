@@ -7,7 +7,13 @@ import {
   type ParsedGroovyFile,
   type SourceSpan,
 } from "./ast.ts";
-import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
+import type {
+  IrExpression,
+  IrStatement,
+  LegacyMetadata,
+  MigrationDiagnostic,
+  MigrationProgram,
+} from "./ir.ts";
 import { packageResources, type PackageFileReader } from "./java-data.ts";
 import {
   buildHelperRegistry,
@@ -589,23 +595,73 @@ function entryMenu(
             span: null,
           },
         ];
+  const metadata = entryMetadata(choices, scripts, programs);
   // One entry needs no menu and no note: main.tease goes there.
   if (choices.length === 1 && variants.length === 0)
     return {
       sourceName: `${scripts.root}/main.tease`,
-      metadata: null,
+      metadata,
       statements: chain,
       diagnostics: [],
     };
   return {
     sourceName: `${scripts.root}/main.tease`,
-    metadata: null,
+    metadata,
     statements: [
       { kind: "comment", text: `// NOTE SX_ENTRY_MENU: ${message}`, trailing: false, span: null },
       ...question,
       ...chain,
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
+  };
+}
+
+/**
+ * The title and author of a generated main.tease, which the Player shows for the package: those of the one script it
+ * goes to; for a menu, the offered title that every offered script's title starts with, and the authors that every
+ * offered script names. Without such a value, the header leaves it out.
+ */
+function entryMetadata(
+  choices: readonly string[],
+  scripts: PackageScripts,
+  programs: readonly MigrationProgram[],
+): LegacyMetadata | null {
+  const indexes = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
+  const offered = choices.map((path) => programs[indexes.get(path) ?? -1]?.metadata ?? null);
+  const written = (value: string | null | undefined): string | null =>
+    value === null || value === undefined || value.trim() === "" ? null : value.trim();
+  const titles = offered.map((metadata) => written(metadata?.title));
+  const authors = offered.map((metadata) => written(metadata?.author));
+  const lower = (value: string): string => value.toLocaleLowerCase();
+  const title =
+    titles
+      .filter((candidate): candidate is string => candidate !== null)
+      .sort((left, right) => left.length - right.length)
+      .find((candidate) =>
+        titles.every((other) => other !== null && lower(other).startsWith(lower(candidate))),
+      ) ?? null;
+  const names = authors.map((author) =>
+    author === null
+      ? []
+      : author
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean),
+  );
+  const shared = (names[0] ?? []).filter((name) =>
+    names.every((other) => other.some((candidate) => lower(candidate) === lower(name))),
+  );
+  const author = shared.length === 0 ? null : shared.join(", ");
+  if (title === null && author === null) return null;
+  return {
+    apiVersion: null,
+    title,
+    summary: null,
+    author,
+    status: null,
+    color: null,
+    language: null,
+    tags: null,
   };
 }
 
