@@ -112,8 +112,8 @@
 }
 
 /* One polarity-aware translucent material for chrome over Stage media: the title, top-media controls, and the
-   viewfinder. */
-:is([data-player-top-bar], [data-viewfinder], [data-floating-viewfinder], [data-stage-camera]) {
+   viewfinder; and for the tools over a code block. */
+:is([data-player-top-bar], [data-viewfinder], [data-floating-viewfinder], [data-stage-camera], [data-code-block-tools]) {
   --media-surface: var(--theme-media-surface, oklch(96% 0.01 70 / 58%));
   --media-text: var(--theme-media-text, oklch(15% 0 0));
   --media-border: var(--theme-media-border, oklch(15% 0 0 / 22%));
@@ -332,13 +332,14 @@
 }
 [data-compact-settings="true"] .panel-settings-compact { display: block; }
 
-.tool-panel-drag-placeholder { opacity: 0.35; }
-.tool-panel-dragging { opacity: 0.85; pointer-events: none; }
+/* One drag for reorderable lists, the tool panels and a shuffle's items: a body-level copy follows the pointer. */
+.reorder-drag-placeholder { opacity: 0.35; }
+.reorder-dragging { opacity: 0.85; pointer-events: none; }
 
 /* Sortable's body-level drag copy lets the pointer hit underlying controls. */
-body:has(> .tool-panel-dragging),
-body:has(> .tool-panel-dragging) * { cursor: grabbing !important; }
-body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hidden; }
+body:has(> .reorder-dragging),
+body:has(> .reorder-dragging) * { cursor: grabbing !important; }
+body:has(> .reorder-dragging) [data-slot="tooltip-content"] { visibility: hidden; }
 
 /* Match the menu's 14px text, icon, gap, padding and border without reserving space. */
 .menu-width-ruler {

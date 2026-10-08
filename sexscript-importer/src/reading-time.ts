@@ -4,6 +4,8 @@ import { hasEffect, ownEffect, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
+// The generated helper that plays a legacy background sound (helpers.ts).
+const BACKGROUND_SOUND = "sexscriptLegacyPlayBackgroundSound";
 // The Player's default reading time of a `say` (docs/RUNTIME.md "Smart-autoplay session settings").
 const BASE_MS = 1500;
 const WORD_MS = 300;
@@ -52,8 +54,24 @@ export function withReadingTimes(
     const result = [...nested];
     const dropped = new Set<number>();
     nested.forEach((statement, index) => {
+      // A sound that starts between a text and its wait took no time in legacy, so the wait is the text's (owner
+      // decision 2026-10-08).
+      const sound = startsSound(nested[next[index]!]) ? next[index]! : -1;
+      if (statement.kind === "if" && sound !== -1) {
+        const wait = nested[next[sound]!];
+        const stays =
+          wait?.kind === "wait" &&
+          !wait.visible &&
+          (literalMilliseconds(wait) === null || nested[next[next[sound]!]!]?.kind === "wait");
+        const beat = stays ? withTrailingTexts(statement, soundBeat) : null;
+        if (beat !== null) {
+          result[index] = beat;
+          report("SX_WAIT_SOUND_BEAT", SOUND_BEAT, statement);
+        }
+        return;
+      }
       if (statement.kind !== "say") return;
-      const waitIndex = next[index]!;
+      const waitIndex = sound === -1 ? next[index]! : next[sound]!;
       const wait = nested[waitIndex];
       if (wait?.kind !== "wait" || wait.visible) return;
       const milliseconds = literalMilliseconds(wait);
@@ -88,7 +106,8 @@ export function withReadingTimes(
         return;
       }
       if (milliseconds === null || after?.kind === "wait") {
-        result[index] = { ...statement, instant: true };
+        if (sound !== -1) report("SX_WAIT_SOUND_BEAT", SOUND_BEAT, statement);
+        result[index] = sound === -1 ? { ...statement, instant: true } : soundBeat(statement);
         return;
       }
       if (milliseconds > READING_WAIT_RATIO * shortestReadingTime(statement.value)) {
@@ -98,7 +117,8 @@ export function withReadingTimes(
           "The legacy wait after this text is longer than 1.5 times the text's reading time, time for an action or a task, so it stays and the text appears without reading time.",
           statement,
         );
-        result[index] = { ...statement, instant: true };
+        if (sound !== -1) report("SX_WAIT_SOUND_BEAT", SOUND_BEAT, statement);
+        result[index] = sound === -1 ? { ...statement, instant: true } : soundBeat(statement);
         return;
       }
       report(
@@ -106,12 +126,70 @@ export function withReadingTimes(
         "The legacy wait after this text timed its reading, at most 1.5 times the Player's reading time of the text, so the Player's skippable reading time replaces it.",
         statement,
       );
-      result[index] = { ...statement, readingTime: wait };
+      // The sound starts before its text, so that it plays with it rather than after the reading time, where the text
+      // only reads variables: a value read through one, as `list[i]`, may rely on a test before it that the sound,
+      // which waits, would let lapse.
+      if (sound !== -1 && readsOnlyVariables(statement.value)) {
+        report(
+          "SX_SOUND_WITH_TEXT",
+          "The sound after this text starts before it, so that it plays with the text, as legacy started it at once, rather than after the reading time that replaces the legacy wait.",
+          statement,
+        );
+        result[index] = nested[sound]!;
+        result[sound] = { ...statement, readingTime: wait };
+      } else result[index] = { ...statement, readingTime: wait };
       dropped.add(waitIndex);
     });
     return dropped.size === 0 ? result : result.filter((_, index) => !dropped.has(index));
   };
   return block(statements);
+}
+
+const SOUND_BEAT =
+  "A sound starts between this text and the legacy wait after it, which legacy did at once, so the wait stays as the beat and the text appears without reading time, with its sound.";
+
+/** A text said at once with the sound that starts after it, a beat that sets its own timing. */
+function soundBeat(text: Extract<IrStatement, { kind: "say" }>): IrStatement {
+  return { ...text, instant: true, beat: true };
+}
+
+/** Whether a text is fixed or interpolates only variables. */
+function readsOnlyVariables(value: IrExpression): boolean {
+  if (value.kind === "literal") return true;
+  return (
+    value.kind === "template" &&
+    value.parts.every((part) => "text" in part || part.value.kind === "variable")
+  );
+}
+
+/** Whether a statement starts a sound and goes on at once, as legacy playBackgroundSound() did. */
+function startsSound(statement: IrStatement | undefined): boolean {
+  if (statement?.kind === "playAudio") return statement.async && statement.video !== true;
+  return (
+    statement?.kind === "expression" &&
+    statement.expression.kind === "call" &&
+    statement.expression.name === BACKGROUND_SOUND
+  );
+}
+
+/**
+ * The statement with `change` applied to the text that ends each of its paths, a `say` or an `if` with an `else` whose
+ * blocks each end in one; null where a path ends otherwise.
+ */
+function withTrailingTexts(
+  statement: IrStatement,
+  change: (text: Extract<IrStatement, { kind: "say" }>) => IrStatement,
+): IrStatement | null {
+  if (statement.kind === "say") return change(statement);
+  if (statement.kind !== "if" || statement.else.length === 0) return null;
+  const last = (items: IrStatement[]): IrStatement[] | null => {
+    const at = items.findLastIndex(significant);
+    const changed = at === -1 ? null : withTrailingTexts(items[at]!, change);
+    return changed === null ? null : items.map((item, index) => (index === at ? changed : item));
+  };
+  const then = last(statement.then);
+  const otherwise = last(statement.else);
+  return then === null || otherwise === null ? null : { ...statement, then, else: otherwise };
 }
 
 /**
@@ -233,6 +311,10 @@ function walkTexts(
     return [result, state];
   };
   const step = (item: IrStatement, running: Running): [IrStatement, Running] => {
+    // The background sound helper plays its sound as media do where it surely plays one: a file of text and at least
+    // one pass.
+    if (playsSound(item))
+      return [item, item.expression.positional.every(sayless) ? NONE : UNKNOWN_TIME(new Set())];
     // A message kept in a handle (withMessageHandles) is said as a `say` is, after its text is computed; one said at
     // once starts an animation or a counter, a beat.
     if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
@@ -276,8 +358,14 @@ function walkTexts(
       // Media wait for the reading time first and then compute what they show, which may say something itself.
       case "showImage":
       case "hideImage":
-      case "playAudio":
         return [item, own(item, NONE)];
+      case "playAudio":
+        return [
+          item,
+          [item.file, item.repeatCount].every((value) => value === null || sayless(value))
+            ? NONE
+            : own(item, NONE),
+        ];
       case "if": {
         const before = own(item, running);
         const [then, afterThen] = walk(item.then, before);
@@ -356,6 +444,36 @@ function withRestoredWaits(
     });
   };
   return block(statements);
+}
+
+/** A call of the background sound helper that surely plays its sound, which waits for the reading time first. */
+function playsSound(
+  statement: IrStatement,
+): statement is Extract<IrStatement, { kind: "expression" }> & {
+  expression: Extract<IrExpression, { kind: "call" }>;
+} {
+  if (statement.kind !== "expression" || statement.expression.kind !== "call") return false;
+  if (statement.expression.name !== BACKGROUND_SOUND) return false;
+  const [file, passes] = statement.expression.positional;
+  return (
+    (file?.kind === "template" || (file?.kind === "literal" && typeof file.value === "string")) &&
+    passes?.kind === "literal" &&
+    typeof passes.value === "number" &&
+    passes.value >= 1
+  );
+}
+
+/** Whether computing a value says nothing: it has no effect but a random draw of the legacy random helper. */
+function sayless(value: IrExpression): boolean {
+  const draw =
+    value.kind === "call" && value.local !== true && value.name === "sexscriptLegacyRandom";
+  if (!draw && ownEffect(value)) return false;
+  let quiet = true;
+  mapChildren(value, (child) => {
+    quiet &&= sayless(child);
+    return child;
+  });
+  return quiet;
 }
 
 // Statements after which nothing runs on the straight path, or that run code elsewhere.

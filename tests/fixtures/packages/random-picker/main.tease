@@ -1,0 +1,11 @@
+let items = ["red", "green", "blue"]
+let hit = chance(25)
+say "Hit: ${hit}", instant
+let value = randomNormal(30, 5)
+say "Value: ${value}", instant
+items.shuffle()
+say "First: ${items[0]}", instant
+let again = chance(50)
+say "Again: ${again}", instant
+showButton "Done"
+exit

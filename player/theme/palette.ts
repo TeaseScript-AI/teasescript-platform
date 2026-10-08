@@ -82,6 +82,11 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const error = status(25, 72);
   // The debug room's bug while Debug runs: one red, the same in both modes, between the error reds (owner, #512).
   const debugMark = tonalColor(25, 72, 53);
+  // Code syntax colours (`syntax-*`), for every view of a script's code: the random draw picker now, the editor once it
+  // moves off Monaco's own colours. Strings and numbers take the warning and info hues one step further from the
+  // background than the status marks, as code text is small and sits on a tinted line; the others are the text colours.
+  const syntax = (hue: number, chroma: number) =>
+    tonalColor(hue, chroma, dark ? (high ? 88 : 80) : high ? 28 : 40);
   const base = {
     "surface-canvas": surface(tones.canvas),
     "surface-chrome": surface(tones.chrome, dark ? 0.85 : 0.75),
@@ -110,10 +115,16 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "status-warning-soft": warning.soft,
     "status-error": error.solid,
     "status-error-soft": error.soft,
+    "syntax-string": syntax(60, 64),
+    "syntax-number": syntax(260, 56),
     "debug-mark": debugMark,
   };
   const roles = {
     ...base,
+    "syntax-keyword": base["text-primary"],
+    "syntax-name": base["text-primary"],
+    "syntax-comment": base["text-secondary"],
+    "syntax-operator": base["text-secondary"],
     "surface-hover": stateTone(panelTone, 7, 8),
     "surface-pressed": stateTone(panelTone, 15, 17),
     "control-hover": stateTone(tones.control, 7, 7),
@@ -173,6 +184,15 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   }
   // The bug's fill, a mark in the title pill's chrome.
   inspect("debug-mark", "surface-chrome", 3);
+  for (const role of [
+    "syntax-keyword",
+    "syntax-name",
+    "syntax-string",
+    "syntax-number",
+    "syntax-comment",
+    "syntax-operator",
+  ] as const)
+    inspect(role, "surface-canvas", textTarget);
   inspect("text-disabled", "surface-disabled", null);
   const effects = {
     "overlay-shadow": { color: black, alpha: 0.65 },

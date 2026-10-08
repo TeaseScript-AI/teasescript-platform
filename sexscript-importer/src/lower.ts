@@ -7930,10 +7930,16 @@ function lowerBackgroundSound(
       },
     ];
   }
-  return [{ kind: "playAudio", file, async: true, repeatCount, span }];
+  // One pass is the plain form.
+  const passes = repeatCount?.kind === "literal" && repeatCount.value === 1 ? null : repeatCount;
+  return [{ kind: "playAudio", file, async: true, repeatCount: passes, span }];
 }
 
-/** Whether any file stops all background sounds with playBackgroundSound(null) or stopSoundThreads(). */
+/**
+ * Whether any file stops all background sounds with playBackgroundSound(null) or stopSoundThreads() (owner decision
+ * 2026-10-08): a package that never does plays each sound plainly and keeps no handles. A file computed at runtime that
+ * is null would have stopped them too; no corpus package that never stops them computes a null one.
+ */
 export function packageStopsBackgroundSounds(files: readonly ParsedGroovyFile[]): boolean {
   let stops = false;
   for (const file of files) {
@@ -7941,14 +7947,7 @@ export function packageStopsBackgroundSounds(files: readonly ParsedGroovyFile[])
       const call = node.kind === "methodCall" ? callParts(node) : null;
       if (call === null || !call.inherited) return;
       if (call.name === "stopSoundThreads") stops = true;
-      // A file that may be null at runtime stops all sounds as well.
-      const file = call.arguments[0];
-      if (
-        call.name === "playBackgroundSound" &&
-        !(file?.kind === "constant" && typeof file.value === "string")
-      ) {
-        stops = true;
-      }
+      if (call.name === "playBackgroundSound" && isNullConstant(call.arguments[0])) stops = true;
     });
   }
   return stops;

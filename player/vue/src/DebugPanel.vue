@@ -11,14 +11,17 @@ import DebugNow from "./DebugNow.vue";
 import DebugVariables from "./DebugVariables.vue";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
+import type { DebugRandom, DebugRandomNext } from "./useDebugRandom";
 import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and the debug export, and, while Debug is on, the time
-// controls (#615) above the tabs: Now, Variables, the Debug log, newest line first, and Storage when the host persists
-// script storage. An explanation opens from its label, by click, tap or keyboard; any number may be open.
+// controls (#615) and random draws above the tabs: Now, Variables, the Debug log, newest line first, and Storage when
+// the host persists script storage. Explanations open from their labels, by click, tap or keyboard, several at once.
 defineProps<{
   time: DevelopmentTime | null;
+  /** Random draws while the Debug features run, else `null`. */
+  random: DebugRandom | null;
   log: DebugLog;
   player: PlayerSessionHost;
   /** Whether the camera view covers the Stage image. */
@@ -33,6 +36,10 @@ defineProps<{
 const emit = defineEmits<{ export: [] }>();
 const active = defineModel<boolean>("active", { required: true });
 const tab = defineModel<string>("tab", { default: "now" });
+const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
+  random: "Random",
+  untried: "Prefer untried",
+};
 </script>
 
 <template>
@@ -132,6 +139,50 @@ const tab = defineModel<string>("tab", { default: "now" });
           +1 min
         </Button>
       </div>
+    </section>
+    <section v-if="random?.available.value" aria-labelledby="debug-random" class="grid gap-2">
+      <h3 id="debug-random" class="font-semibold">Random draws</h3>
+      <Collapsible v-slot="{ open }" class="grid gap-1">
+        <div class="flex items-center justify-between gap-2">
+          <CollapsibleTrigger as-child>
+            <Button variant="ghost" size="xs" aria-label="About choosing outcomes">
+              Choose outcomes
+              <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
+            </Button>
+          </CollapsibleTrigger>
+          <Switch
+            v-model="random.enabled.value"
+            aria-label="Choose outcomes"
+            data-debug-random-active
+          />
+        </div>
+        <CollapsibleContent class="text-muted-foreground">
+          The script pauses at every random draw so you can choose its outcome, unless that draw's
+          Next time is set to Random or Prefer untried.
+        </CollapsibleContent>
+      </Collapsible>
+      <ul v-if="random.settings.value.length" class="grid gap-1" data-debug-random-sites>
+        <li
+          v-for="setting in random.settings.value"
+          :key="setting.site"
+          class="flex min-w-0 items-center justify-between gap-2"
+          data-debug-random-site
+        >
+          <span class="min-w-0 break-words">
+            <span class="break-all font-mono">{{ setting.site }}</span> ·
+            <span class="whitespace-nowrap">{{ nextLabels[setting.next] }}</span>
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            data-debug-random-reset
+            @click="random.setNext(setting.site, 'ask')"
+          >
+            Reset
+          </Button>
+        </li>
+      </ul>
     </section>
     <Tabs v-model="tab">
       <!-- The tabs wrap to a second row in the narrowest panel; each keeps its own 44 px height. -->

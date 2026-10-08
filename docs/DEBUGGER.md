@@ -32,8 +32,9 @@ tools menu; the switch is not stored, so every load starts with it off in the no
 the menu on in the normal room goes on there.
 Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
 Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
-auto-skip, ends a jump at its next yield, and drops the value trace with its history. The time controls stand above the
-tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears when the host persists script storage.
+auto-skip, ends a jump at its next yield, and drops the value trace with its history. The time controls, and in the
+debug room [Random draws](#random-draws), stand above the tabs **Now** (first), **Variables**, **Log**, and **Storage**,
+which appears when the host persists script storage.
 **Download debug export…** in the panel opens the [debug export](#debug-export) dialog from any tab, also with Debug off.
 [Rewind](#rewind) keeps the session's history while both switches are on.
 
@@ -126,6 +127,56 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
 - The Debug panel's Storage tab, an export of saved data, and an import treat the rooms apart: the tab shows the debug
   room's values, an export takes the script's own, and an import in the debug room replaces the script's own without
   ending the debug session.
+
+### Random draws
+
+In the debug room, the Debug panel's **Random draws** section, above the tabs, lets a developer choose the outcomes of
+the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug features run
+(`player/vue/src/useDebugRandom.ts`). Normal play never pauses at a draw.
+
+- **Choose outcomes**, off on every load, pauses the session at every random draw and asks for its outcome, unless that
+  draw's site is set to go on by itself; its collapsed explanation reads "The script pauses at every random draw so you
+  can choose its outcome, unless that draw's Next time is set to Random or Prefer untried." While a draw waits, the
+  session's clock stands, media keep their position without playing, load reports and auto-skip wait, and a time skip
+  waits for the outcome; time spent at a draw is no scene time. Turning the switch, Debug, or the Debug menu off goes on
+  from a waiting draw with its natural outcome, and so does **Continue** of a kept session that stood at one. A state
+  [Rewind](#rewind) restores at a draw shows no picker while it is inspected; once input adopts it, the picker asks, or
+  without Choose outcomes it goes on naturally.
+- **The picker**, "Random draw", names the draw's file as a breadcrumb that starts with the package's name, or the
+  script's title when the host names no package, and collapses its middle parts into an ellipsis when it does not fit.
+  It answers the draw with one click:
+  - a button for each outcome of a `chance`, of a whole-number range of at most 17 values, of a pick from a list or
+    set, and of a weighted pick whose weight is above 0, each with a muted `×N` when the site took it before;
+  - an **Outcome** field for any other number, with its range ("From 0 through 1.", "Any finite number. Suggested: 15
+    to 45." for a normal draw's ±3 spreads), and **Use this value**;
+  - for a shuffle, the items in their order before it, to drag or move with **Move up** and **Move down**, and **Use
+    this order**;
+  - **Least tried**, the outcome Prefer untried would take, and **Random**, the natural outcome, which has the focus.
+- **Next time**, Ask, Random, or Prefer untried, is set per draw site. **Random** goes on with the natural outcome
+  without asking. **Prefer untried** takes the outcome the site took least often while Debug chose its outcomes: of all
+  its outcomes when the draw has few, the natural one first on a tie, and otherwise of
+  [representative alternatives](RUNTIME.md#controlled-randomness) only, as a natural continuous value hardly ever
+  repeats. The section lists the sites set to Random or Prefer untried, `path:line:column · Prefer untried`, each with
+  **Reset** to Ask.
+- **Earlier outcomes** lists the outcomes the site took while Debug chose them, oldest first and numbered from the
+  site's first draw, opening at the newest at the bottom; it keeps the last 1,000 per site, diagnostic tuning rather
+  than a script limit, while the `×N` counts count all.
+- **Code** shows the draw's whole file, coloured by the compiler's own lexer with the theme's `syntax-*` roles: 7 lines
+  by default, with the draw's line highlighted in the middle and the draw itself underlined. A file the lexer rejects
+  shows plain. **Show whole function**, **Show whole block** for a top-level statement of several lines, or **Show whole
+  file** fits that range together with the lines already shown, and **Show less** returns. Both blocks have **Copy
+  visible lines**, **Wrap long lines**, and **Expand** in their top-right corner, shown while the pointer is over the
+  block or one of them has keyboard focus, and always where the pointer cannot hover. A corner grip, also by arrow keys,
+  resizes a block by whole lines, keeping the draw's line in the middle. Expand shows the block large over the dimmed
+  page, at most 80% of the view's height, with the breadcrumb as its title; its X, Escape, or a click beside it closes
+  it.
+- **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
+  (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
+  controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools
+  menu, the sidebar's `Ctrl/Meta+B`, Settings, the panel's switches and buttons, the Storage tab's controls, and the
+  chat wait for the outcome.
+- The switch, the Next time settings, and the sites' outcomes last as long as the Debug features run, and nothing
+  stores them. A chosen outcome is a host input that the [debug export](#debug-export)'s replay data records.
 
 ### Rewind
 

@@ -202,7 +202,9 @@ export interface FeasibilityReport {
    * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
    * than 1.5 times it, or kept as the `beats` of texts without letters or a loop's `ticks`, or replaced and kept
    * again before a beat (`keptForBeats`); `keptPaced` texts that keep their reading time where a replaced
-   * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`.
+   * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`. A sound that
+   * starts between a text and its wait makes the text a beat where the wait stays (`soundBeats`), and starts before
+   * its text where the wait goes (`soundsWithText`).
    */
   readingWaits: {
     replaced: number;
@@ -211,6 +213,8 @@ export interface FeasibilityReport {
     beats: number;
     keptForBeats: number;
     ticks: number;
+    soundBeats: number;
+    soundsWithText: number;
     shortened: number;
     dropped: number;
   };
@@ -387,6 +391,8 @@ export function analyzeFeasibility(
       beats: 0,
       keptForBeats: 0,
       ticks: 0,
+      soundBeats: 0,
+      soundsWithText: 0,
       shortened: 0,
       dropped: 0,
     },
@@ -535,6 +541,8 @@ export function analyzeFeasibility(
       else if (code === "SX_WAIT_BEAT") report.readingWaits.beats += 1;
       else if (code === "SX_WAIT_FOR_BEAT") report.readingWaits.keptForBeats += 1;
       else if (code === "SX_WAIT_TICK") report.readingWaits.ticks += 1;
+      else if (code === "SX_WAIT_SOUND_BEAT") report.readingWaits.soundBeats += 1;
+      else if (code === "SX_SOUND_WITH_TEXT") report.readingWaits.soundsWithText += 1;
       else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
       else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
       else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;

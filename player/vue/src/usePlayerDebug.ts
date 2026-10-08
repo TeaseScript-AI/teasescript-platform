@@ -7,6 +7,7 @@ import {
 } from "../../runtime-adapter.js";
 import type { RuntimeDebugContext } from "../../../src/index.js";
 import { useDebugLog, type DebugLog } from "./useDebugLog";
+import { useDebugRandom, type DebugRandom } from "./useDebugRandom";
 import { useDebugRewind, type DebugRewind } from "./useDebugRewind";
 import { useDevelopmentTime, type DevelopmentTime } from "./useDevelopmentTime";
 import type { PlayerSessionHost } from "./usePlayerSession";
@@ -42,6 +43,7 @@ export function usePlayerDebug(
   const log = shallowRef<DebugLog | null>(null);
   const time = shallowRef<DevelopmentTime | null>(null);
   const rewind = shallowRef<DebugRewind | null>(null);
+  const random = shallowRef<DebugRandom | null>(null);
   let logScope: EffectScope | null = null;
   let timeScope: EffectScope | null = null;
   // Only the first enablement takes the host's initial auto-skip.
@@ -64,9 +66,11 @@ export function usePlayerDebug(
       const features = timeScope?.run(() => ({
         time: useDevelopmentTime(player, { autoSkip }, (text) => log.value?.add(text)),
         rewind: useDebugRewind(player),
+        random: useDebugRandom(player),
       }));
       time.value = features?.time ?? null;
       rewind.value = features?.rewind ?? null;
+      random.value = features?.random ?? null;
       if (enabled) autoSkip = false;
       player.setDebugTracing(enabled);
       // The script reads it as `debugMode`; on in the normal room, play goes on in the debug room (DEBUGGER.md "Debug room").
@@ -137,6 +141,8 @@ export function usePlayerDebug(
     time: computed(() => time.value),
     /** Rewind while the Debug features run, else `null`. */
     rewind: computed(() => rewind.value),
+    /** Random draws while the Debug features run, else `null`. */
+    random: computed(() => random.value),
     /** The Debug countdown line for the current foreground wait while the Debug features run, else `null`. */
     countdownText,
     tab,
