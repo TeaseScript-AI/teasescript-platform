@@ -572,7 +572,11 @@ function withReplayCommands(result: ExploreResult, file: string) {
  * catalog reads the rest of the report.
  */
 function catalogBlock(result: ExploreResult) {
-  const crash = result.crashes.find((entry) => !entry.clock) ?? result.crashes[0];
+  // A crash of play first, then one only play with chosen random outcomes reached, then a clock one.
+  const crash =
+    result.crashes.find((entry) => !entry.clock && entry.chosen !== true) ??
+    result.crashes.find((entry) => !entry.clock) ??
+    result.crashes[0];
   const location = result.traps.flatMap((trap) => trap.locations)[0];
   return {
     coveragePercent: result.coverage.percent,
@@ -581,7 +585,13 @@ function catalogBlock(result: ExploreResult) {
     firstCrash:
       crash === undefined
         ? null
-        : { code: crash.code, path: crash.path, line: crash.line, message: crash.message },
+        : {
+            code: crash.code,
+            path: crash.path,
+            line: crash.line,
+            message: crash.message,
+            ...(crash.chosen === true ? { chosen: true } : {}),
+          },
     firstTrap: location === undefined ? null : { location },
     reach: result.coverage.reach,
   };
@@ -598,7 +608,11 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
         `(${corpus.stale} stale, ${corpus.replayMs} ms), then `;
   return (
     `${fromCorpus}${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
-    `${crashes.length} crashes, ${traps.length} traps, ` +
+    `${crashes.length} crashes` +
+    (crashes.some((crash) => crash.chosen === true)
+      ? ` (${crashes.filter((crash) => crash.chosen === true).length} only with chosen random outcomes)`
+      : "") +
+    `, ${traps.length} traps, ` +
     `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
     `directed ${directed.reached.play} play + ${directed.reached.clock} clock` +
     (directed.reached.chosen === undefined ? "" : ` + ${directed.reached.chosen} chosen`) +
@@ -721,7 +735,8 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       lines.push(
         `- Crash \`${text(crash.code)}\` at \`${text(crash.path)}:${count(crash.line)}:${count(crash.column)}\`: ` +
           `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs` +
-          `${crash.clock === true ? ", with the clock set" : ""}${records(crash.earlier).length > 0 ? `, in session ${records(crash.earlier).length + 1}` : ""}; \`${text(crash.replay)}\`)`,
+          `${crash.clock === true ? ", with the clock set" : ""}` +
+          `${crash.chosen === true ? ", only with chosen random outcomes" : ""}${records(crash.earlier).length > 0 ? `, in session ${records(crash.earlier).length + 1}` : ""}; \`${text(crash.replay)}\`)`,
       );
     }
     for (const trap of records(report.traps)) {
@@ -758,6 +773,13 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
         (reach.chosen === undefined ? "" : `${count(reach.chosen)} play (chosen random), `) +
         `${count(reach.clock)} clock, ${count(reach.unreachable)} unreachable, ${count(reach.unknown)} unknown`,
     );
+    // What a player reaches only with a particular run of luck, apart from what play reaches anyway.
+    if (reach.chosen !== undefined)
+      lines.push(
+        `- Only with chosen random outcomes: ${count(reach.chosen)} lines, ` +
+          `${count(fields(fields(report.directed).reached).chosen)} ways, ` +
+          `${records(report.crashes).filter((crash) => crash.chosen === true).length} crashes`,
+      );
     const directed = fields(report.directed);
     const reached = fields(directed.reached);
     const bySource = Object.entries(fields(directed.bySource))

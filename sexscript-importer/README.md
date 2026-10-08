@@ -366,7 +366,8 @@ way only they reached stays a goal of directed search. A path records only the o
 `random` list of the input during which they were drawn (draw ID, site, and outcome), so repros, the corpus, and
 `--replay` choose them again; a replay or corpus path with chosen outcomes plays them also without the flag. Play with
 a chosen outcome is play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts,
-the directed ways, and the crashes show it apart. It is off by default.
+the directed ways, and the crashes show it apart, as does a line per unit in `summary.md` with the lines, ways, and
+crashes only it reached: what a player hits only with a particular run of luck. It is off by default.
 
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
@@ -420,9 +421,9 @@ no line is labelled `unreachable` (`staticContradictions`).
 The report `<out>/<unit>.json` has these parts:
 
 - for a unit that compiles, a `catalog` block for the importer catalog's Explorer column: `coveragePercent` by play,
-  the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`) and `firstTrap` (`location`)
-  or `null`, and `reach`, the coverable lines by label (`play`, `chosen` with random choices, `clock`, `unreachable`,
-  `unknown`);
+  the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`, and `chosen` when only play
+  with chosen random outcomes reached it) and `firstTrap` (`location`) or `null`, and `reach`, the coverable lines by
+  label (`play`, `chosen` with random choices, `clock`, `unreachable`, `unknown`);
 - per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
   their label;
 - each condition and loop that play reached but left only one way, with its source, the missed way, its first line,

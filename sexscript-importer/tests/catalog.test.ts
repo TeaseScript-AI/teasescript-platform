@@ -142,7 +142,7 @@ test(
           traps: 2,
           firstCrash: null,
           firstTrap: { location: "main.tease:4" },
-          reach: { play: 3, unknown: 1 },
+          reach: { play: 3, chosen: 2, unknown: 1 },
         },
       });
 
@@ -202,7 +202,7 @@ test(
       );
       assert.match(
         page,
-        /First trap at main\.tease:4\. Lines by reach: 3 reached by play, 1 of unknown reach\."><summary><span class="status stops">75% &middot; 0 crashes &middot; 2 traps<\/span>/u,
+        /First trap at main\.tease:4\. Lines by reach: 3 reached by play, 2 reached by play with chosen random outcomes, 1 of unknown reach\."><summary><span class="status stops">75% &middot; 0 crashes &middot; 2 traps<\/span>/u,
       );
       assert.match(
         page,
