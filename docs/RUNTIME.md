@@ -938,10 +938,11 @@ operations stay as they are.
 - **Creation.** `createRuntimeSession(plan, snapshot)` captures and completely validates both like a snapshot-taking
   entry (`TSR100`, `TSR101`); `createFreshRuntimeSession(plan, freshOptions)` creates the state that
   `createFreshRuntimeSnapshot` would; `restoreRuntimeSession(checkpoint)` and `deserializeRuntimeSession(json)` restore
-  as `restoreCheckpoint` and `deserializeCheckpoint` do. The last `options` argument may give `capabilities`, which
-  every operation of the session and of its forks uses, and `randomControl` ([Controlled
-  randomness](#controlled-randomness)), which `setRandomControl` changes. Sessions come only from these factories and
-  `fork()`; the state lives in a private field, and `session.plan` is the validated, deeply frozen plan.
+  as `restoreCheckpoint` and `deserializeCheckpoint` do; and `createTaggedRuntimeSession(plan, tagged)` restores a
+  tagged export (Boundaries). The last `options` argument may give `capabilities`, which every operation of the session
+  and of its forks uses, and `randomControl` ([Controlled randomness](#controlled-randomness)), which `setRandomControl`
+  changes. Sessions come only from these factories and `fork()`; the state lives in a private field, and `session.plan`
+  is the validated, deeply frozen plan.
 - **Operations.** `run`, `stepToEvent`, `executeInstruction`, `observeTime`, `completeAction`, `updateInteraction`,
   `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, `applyExternalStorageEdit`, `setDebugMode`, and
   `resumeRandomDraw` take the arguments and options of the snapshot API without plan, snapshot, capabilities, and
@@ -964,12 +965,17 @@ operations stay as they are.
   text of each message with a handle, in work proportional to the number of variables and those texts, not to the size
   of the values; and `temporalPresentation()` gives the date and time presentation in force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
   whole state. Storage and other script data are read from an export.
-- **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return
-  plain data that later operations do not change; importing it again crosses the external-data boundary. For trusted
-  hosts only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or
-  validation, which shares nothing with the session: for a host that keeps the snapshot itself, such as a search
-  frontier. It is not a boundary; the snapshot is captured and validated wherever it crosses one later, such as
-  `createRuntimeSession`.
+- **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return plain
+  data that later operations do not change; importing it again crosses the external-data boundary. For trusted hosts
+  only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or validation,
+  which shares nothing with the session: for a host that keeps the snapshot itself, such as a search frontier. It is not
+  a boundary; the snapshot is captured and validated wherever it crosses one later, such as `createRuntimeSession`.
+  `exportTaggedSnapshot()` returns that JSON, written without capture or validation, with a `tag`, SipHash-2-4 of the
+  JSON's UTF-16 code units under a random 128-bit key that the process keeps for the session's plan object and never
+  exposes. `createTaggedRuntimeSession(plan, tagged)` runs the JSON without capture or validation only when the tag
+  proves that a session of that same plan object exported it in this process; it captures and completely validates any
+  other input, such as changed JSON, a changed tag, another plan, or another process's export. Either way the state is
+  the one `createRuntimeSession(plan, JSON.parse(json))` gives.
 - **Failures.** A structured runtime failure, such as `TSR037`, commits the failed state as in the snapshot API. An
   operation that throws, such as `TSR101` when an event sequence runs out or a host callback's error, ends the session:
   the error reaches the caller, and every later call, including `view`, the exports, and `fork`, throws

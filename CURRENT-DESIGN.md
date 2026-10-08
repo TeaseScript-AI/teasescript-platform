@@ -69,8 +69,8 @@ JSON-safe at every instruction boundary does not mean serializing or persisting 
 runner may mutate validated in-memory state between checkpoint boundaries, provided observable source order,
 deterministic behavior, copy semantics, event order, and restore behavior remain equivalent. An engine-owned runtime
 session is such a runner: it keeps the plan and canonical state private, completely validates snapshots and checkpoints
-where they enter or leave, and validates only new host input in between
-([ADR 0025](docs/decisions/0025-engine-owned-runtime-sessions.md)).
+where they enter or leave, apart from the trusted and tagged exports that ADR 0025 allows, and validates only new host
+input in between ([ADR 0025](docs/decisions/0025-engine-owned-runtime-sessions.md)).
 
 Pending actions, handles, canonical identities, time, validation, continuation positions, cleanup, events,
 checkpointing, and restore are engine-owned. Hosts supply validated observations and typed outcomes through atomic
