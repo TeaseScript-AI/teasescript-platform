@@ -12,7 +12,8 @@ countdown(2)
 def limits = { -> return [low: 1, high: 3] }()
 show("Up to " + limits.high)
 // A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
-// functions; one that reads a variable of such a block stays unconverted.
+// functions; one that reads a variable of such a block stays unconverted, and so does one whose name the script uses
+// outside the block, where it meant something else.
 def punish
 if (getBoolean("Estim connected?")) {
 	def shock = { message, shocks ->
@@ -24,3 +25,7 @@ if (getBoolean("Estim connected?")) {
 	punish = { -> shock("Ouch", 2) }
 }
 if (punish) punish()
+if (getBoolean("Hurry?")) {
+	def wait = { seconds -> show("Skipping ${seconds} seconds") }
+}
+wait(1)

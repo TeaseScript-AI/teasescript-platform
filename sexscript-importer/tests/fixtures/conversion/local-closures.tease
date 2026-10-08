@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 2 error diagnostics.
+// MIGRATION INCOMPLETE: 3 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
@@ -29,12 +29,13 @@ function scriptCallback2 {
 let limits = scriptCallback2()
 say "Up to ${limits.high}"
 // A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
-// functions; one that reads a variable of such a block stays unconverted.
+// functions; one that reads a variable of such a block stays unconverted, and so does one whose name the script uses
+// outside the block, where it meant something else.
 let punish = null
 say "Estim connected?"
 function shock(message, shocks) {
   say message
-  // NOTE SX_IMPLICIT_RETURN_VALUE line 20: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
+  // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
   for it in 1..=floor(shocks) {
     wait 1
   }
@@ -44,11 +45,17 @@ function scriptCallback4 {
 }
 if (choose yes: "Yes", no: "No") == "yes" {
   let note = "Careful"
-  // TODO SX_CLOSURE_DISCOVERY line 23: Closure warn is declared in a block of the script and reads a variable of such a block, or another declaration has its name; TeaseScript declares functions at the top of the script, so pass those values as parameters.
+  // TODO SX_CLOSURE_DISCOVERY line 24: Closure warn is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
   // | def warn = { -> show(note) }
   punish = "scriptCallback4"
 }
 if punish != null and punish != "" {
   sexscriptLegacyCall(punish, [])
 }
+say "Hurry?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  // TODO SX_CLOSURE_DISCOVERY line 29: Closure wait is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
+  // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
+}
+wait 1
 exit

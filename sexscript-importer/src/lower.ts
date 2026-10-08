@@ -4440,7 +4440,7 @@ function lowerClosureDeclaration(
         context,
         closure,
         "SX_CLOSURE_DISCOVERY",
-        `Closure ${name} is declared in a block of the script and reads a variable of such a block, or another declaration has its name; TeaseScript declares functions at the top of the script, so pass those values as parameters.`,
+        `Closure ${name} is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.`,
       ),
     ];
   }
@@ -16415,42 +16415,89 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
     if (name === null || closure?.kind !== "closure") continue;
     add(name, closure, false);
   }
-  // A closure declared in a block of the script, such as an `if` body, becomes a script function at the top too
-  // (TeaseScript declares functions there), where nothing else declares its name and it reads no variable that a block
-  // of the script declares.
+  // A closure declared in a block of the script, such as an `if` body, becomes a script function at the top too, where
+  // TeaseScript declares functions, when that keeps what each name refers to: nothing else declares or binds its name,
+  // every use of the name follows the declaration in its block, and the closure reads no variable that a block or loop
+  // around it declares, apart from other closures lifted so.
   const declarations = new Map<string, number>();
+  const bound = new Set<string>();
   walkAst(body, (node) => {
     const name = node.kind === "declaration" ? variableName(node.left) : null;
     if (name !== null) declarations.set(name, (declarations.get(name) ?? 0) + 1);
-  });
-  const blockLocals = new Set<string>();
-  const nested: Array<{ name: string; closure: AstNode }> = [];
-  const visit = (node: AstNode): void => {
-    if (node.kind === "closure") return;
-    if (node.kind === "declaration") {
-      const name = variableName(node.left);
-      const closure = asNode(node.right);
-      if (name !== null) blockLocals.add(name);
-      if (name !== null && closure?.kind === "closure" && declarations.get(name) === 1)
-        nested.push({ name, closure });
+    if (node.kind === "for" && typeof node.variable === "string") bound.add(node.variable);
+    if (node.kind === "closure") {
+      for (const parameter of groovyParameters(node.parameters) ?? []) bound.add(parameter.name);
+      if (node.parameterSpecified !== true) bound.add("it");
     }
-    for (const child of nodeChildren(node)) visit(child);
+  });
+  type Placed = { node: AstNode; blocks: readonly AstNode[] };
+  const uses = new Map<string, Placed[]>();
+  // The scopes, blocks and loops, that declare each variable of a block of the script.
+  const blockLocals = new Map<string, AstNode[]>();
+  const local = (name: string, scope: AstNode): void => {
+    blockLocals.set(name, [...(blockLocals.get(name) ?? []), scope]);
   };
-  for (const statement of nodeArray(body.statements)) {
-    const expression =
-      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-    for (const child of nodeChildren(expression?.kind === "declaration" ? expression : statement))
-      visit(child);
-  }
-  const lifted = new Set(nested.map(({ name }) => name));
-  for (const { name, closure } of nested) {
-    let reads = false;
-    walkAst(closure, (node) => {
-      const read = node.kind === "variable" ? variableName(node) : null;
-      if (read !== null && blockLocals.has(read) && !lifted.has(read)) reads = true;
+  const nested: Array<{ name: string; closure: AstNode; at: Placed }> = [];
+  const place = (node: AstNode, blocks: readonly AstNode[], script: boolean): void => {
+    const inner = node.kind === "block" || node.kind === "for" ? [...blocks, node] : blocks;
+    const name =
+      node.kind === "variable"
+        ? variableName(node)
+        : node.kind === "methodCall" && node.implicitThis === true
+          ? constantString(node.method)
+          : null;
+    if (name !== null) uses.set(name, [...(uses.get(name) ?? []), { node, blocks: inner }]);
+    // The script's own blocks, outside closures and apart from its top level; a loop's variable belongs to its loop.
+    const nestedHere = script && blocks.length > 1;
+    if (script && node.kind === "for" && typeof node.variable === "string")
+      local(node.variable, node);
+    if (nestedHere && node.kind === "declaration") {
+      const declared = variableName(node.left);
+      const closure = asNode(node.right);
+      if (declared !== null) local(declared, blocks.at(-1)!);
+      if (declared !== null && closure?.kind === "closure")
+        nested.push({ name: declared, closure, at: { node, blocks: inner } });
+    }
+    for (const child of nodeChildren(node)) place(child, inner, script && node.kind !== "closure");
+  };
+  place(body, [], true);
+  const after = (node: AstNode, start: AstNode): boolean => {
+    const a = node.span;
+    const b = start.span;
+    if (a === null || a === undefined || b === null || b === undefined) return false;
+    return a.line > b.line || (a.line === b.line && a.column >= b.column);
+  };
+  let lifted = nested.filter(({ name, at }) => {
+    const block = at.blocks.at(-1);
+    return (
+      declarations.get(name) === 1 &&
+      !bound.has(name) &&
+      !result.has(name) &&
+      block !== undefined &&
+      (uses.get(name) ?? []).every((use) => use.blocks.includes(block) && after(use.node, at.node))
+    );
+  });
+  for (let changed = true; changed;) {
+    const names = new Set(lifted.map(({ name }) => name));
+    const kept = lifted.filter(({ closure, at }) => {
+      let reads = false;
+      walkAst(closure, (node) => {
+        // Calling a closure of such a block reads it too.
+        const read =
+          node.kind === "variable"
+            ? variableName(node)
+            : node.kind === "methodCall" && node.implicitThis === true
+              ? constantString(node.method)
+              : null;
+        const scopes = read === null || names.has(read) ? [] : (blockLocals.get(read) ?? []);
+        if (scopes.some((scope) => at.blocks.includes(scope))) reads = true;
+      });
+      return !reads;
     });
-    if (!reads && !result.has(name)) add(name, closure, true);
+    changed = kept.length !== lifted.length;
+    lifted = kept;
   }
+  for (const { name, closure } of lifted) add(name, closure, true);
 
   walkAst(body, (node) => {
     if (node.kind !== "methodCall" || node.implicitThis !== true) return;
