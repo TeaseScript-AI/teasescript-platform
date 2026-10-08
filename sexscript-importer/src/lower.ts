@@ -1840,6 +1840,8 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   const result = enforceVariableTypes(statements, helperResults);
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
+  if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
+    context.syntheticHelpers.add("textAt");
   // A list or text append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(
     [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),
@@ -5413,6 +5415,26 @@ function lowerAssignment(
         "SX_UNSUPPORTED_ASSIGNMENT_VALUE",
         `Cannot safely migrate assignment to ${targetName}.`,
       ),
+    ];
+  }
+  // Groovy `list[a..b] = values` replaced those elements by the values; the list becomes a new one without them.
+  if (
+    operator === "=" &&
+    target.kind === "index" &&
+    target.dict !== true &&
+    target.index.kind === "range" &&
+    target.target.kind === "variable"
+  ) {
+    context.syntheticHelpers.add("spliced");
+    const range = target.index;
+    return [
+      {
+        kind: "assign",
+        target: target.target,
+        operator: "=",
+        value: helperCall("spliced", [target.target, range.from, rangeLast(range), value]),
+        span,
+      },
     ];
   }
   const grown =
@@ -9603,9 +9625,14 @@ function repetition(node: AstNode, context: LowerContext): IrExpression | null |
   const left = inferType(leftNode, context.types);
   const text = onlyOf(left, STRING) && left !== 0;
   const list = onlyOf(left, LIST) && left !== 0;
-  // Groovy repeated text only by a number, so a text repeated by a count of unknown type takes it as a number.
+  // Groovy repeated text and lists only by a number, so a count of unknown type, or one that may be null, is taken as
+  // a number.
   const count = inferType(rightNode, context.types);
-  if ((!text && !list) || !(onlyOf(count, NUMBER) || (text && count === UNKNOWN)) || count === 0)
+  if (
+    (!text && !list) ||
+    !(onlyOf(count, NUMBER | NULL) || count === UNKNOWN) ||
+    ((count & NUMBER) === 0 && count !== UNKNOWN)
+  )
     return undefined;
   const value = lowerExpression(leftNode, context);
   const times = lowerExpression(rightNode, context);
@@ -9678,7 +9705,13 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       return key === null ? null : { kind: "index", target, index: key, dict: true };
     }
     const negativeIndex = negativeConstantIndex(indexNode);
-    // Groovy `text[a..b]` is the text from a through b, also counted from the end; TeaseScript text takes `substring`.
+    // Groovy `value[a..b]` is the part of a list or text from a through b, also counted from the end or backwards.
+    const slice = (): IrExpression | null => {
+      const range = lowerExpression(indexNode, context);
+      if (range?.kind !== "range") return null;
+      context.syntheticHelpers.add("slice");
+      return helperCall("slice", [target, range.from, rangeLast(range)]);
+    };
     if (
       targetNode !== null &&
       indexNode.kind === "range" &&
@@ -9688,6 +9721,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     ) {
       const range = textRange(targetNode, target, indexNode, context);
       if (range !== undefined) return range;
+    }
+    if (indexNode.kind === "range" && !context.writeTargets.has(node)) {
+      const part = slice();
+      if (part !== null) return part;
     }
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
     if (
@@ -15164,6 +15201,14 @@ function noteUnintendedMarkup(node: AstNode | undefined, context: LowerContext):
       node.span,
     );
   }
+}
+
+/** The last position of a range index: its end, or the one before it where the range leaves the end out. */
+function rangeLast(range: Extract<IrExpression, { kind: "range" }>): IrExpression {
+  if (range.inclusive) return range.to;
+  return range.to.kind === "literal" && typeof range.to.value === "number"
+    ? { kind: "literal", value: range.to.value - 1 }
+    : { kind: "binary", operator: "-", left: range.to, right: { kind: "literal", value: 1 } };
 }
 
 /** The legacy names of the setInfos() arguments, in order. */

@@ -938,6 +938,14 @@ function analyse(
             ? child.arguments[0]!
             : null;
       if (position !== null && isNumber(typeOf(position, scope))) analysis.indexes.add(child);
+      // Groovy `text[i]` on a variable typing proves text, which the lowering could not tell, is its character there.
+      if (child.kind === "index" && child.dict !== true && child.index.kind !== "range") {
+        const target = nonNull(typeOf(child.target, scope));
+        if (target.kind === "scalar" && target.name === "string") {
+          textIndexes.set(child, isNumber(typeOf(child.index, scope)));
+          analysis.indexes.add(child);
+        } else textIndexes.delete(child);
+      }
       // The truth helper on a variable whose type is now known is written as a plain test, which narrows it.
       const tested =
         child.kind === "call" && child.name === TRUTH_HELPER && child.positional.length === 1
@@ -2211,6 +2219,8 @@ const TRUTH_HELPER = "sexscriptLegacyTruth";
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
+/** Indexes of a value typing proves text, by whether their position may hold a fraction. */
+const textIndexes = new WeakMap<IrExpression, boolean>();
 
 /** Groovy truth of a variable of a scalar type: not null, and not 0, "", or false. */
 function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
@@ -2275,6 +2285,9 @@ function withIntegerIndexes<T extends IrStatement>(
     const truthType = plainTruths.get(value);
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);
+    const textIndex = textIndexes.get(value);
+    if (copy.kind === "index" && textIndex !== undefined)
+      return helperCall("textAt", [copy.target, textIndex ? truncated(copy.index) : copy.index]);
     if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
     if (copy.kind === "range") {
       const name = copy.count === true ? "toInteger" : copy.inclusive ? "floor" : "ceil";

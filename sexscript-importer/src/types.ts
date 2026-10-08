@@ -237,6 +237,8 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     // A text read by a position or a range is text.
     const target = inferType(asNode(node.left), environment);
     if (onlyOf(target, STRING) && target !== 0) return STRING;
+    // A list read by a range is the list of those elements.
+    if (asNode(node.right)?.kind === "range") return LIST;
     if (environment.elementsPending === true) return 0;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
@@ -696,7 +698,10 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
     const left = asNode(node.left);
     const value = asNode(node.right);
     if (left?.kind === "binary" && left.operator === "[" && value !== null) {
-      add(variableName(left.left), inferType(value, environment));
+      // `list[a..b] = values` puts the elements of a list of values in place of that part.
+      if (asNode(left.right)?.kind === "range" && (inferType(value, environment) & LIST) !== 0)
+        appendList(variableName(left.left), value);
+      else add(variableName(left.left), inferType(value, environment));
       return;
     }
     const name = variableName(left);

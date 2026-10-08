@@ -192,6 +192,9 @@ export type HelperName =
   | "loadInteger"
   | "loadFloat"
   | "textMinus"
+  | "textAt"
+  | "slice"
+  | "spliced"
   | "repeatList"
   | "compare"
   | "replaceChars"
@@ -245,7 +248,8 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
-  if (needed.has("loadInteger") || needed.has("loadFloat")) needed.add("value");
+  if (needed.has("loadInteger") || needed.has("loadFloat") || needed.has("slice"))
+    needed.add("value");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -302,6 +306,9 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMinus",
   "booleanText",
   "textMinus",
+  "textAt",
+  "slice",
+  "spliced",
   "repeatList",
   "compare",
   "replaceChars",
@@ -384,6 +391,13 @@ function parsedLoad(name: string, conversion: "toInteger" | "toNumber"): IrState
   };
 }
 
+/** The positions `from` and `to` of a Groovy range index as `first` and `last`, a negative one counted from the end. */
+const positions = (): IrStatement[] => [
+  letS("first", v("from")),
+  ifS(bin("<", v("first"), lit(0)), [set(v("first"), prop(v("value"), "length"), "+=")]),
+  letS("last", v("to")),
+  ifS(bin("<", v("last"), lit(0)), [set(v("last"), prop(v("value"), "length"), "+=")]),
+];
 const fn = (name: string, parameters: string[], body: IrStatement[]): IrStatement => ({
   kind: "function",
   name,
@@ -1213,6 +1227,127 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `text[position]`: the one character there as text, a negative position counting from the end.
+  textAt: {
+    name: "sexscriptLegacyTextAt",
+    build: () =>
+      fn(
+        "sexscriptLegacyTextAt",
+        ["text", "position"],
+        [
+          letS("at", v("position")),
+          ifS(bin("<", v("at"), lit(0)), [set(v("at"), prop(v("text"), "length"), "+=")]),
+          ret({
+            kind: "methodCall",
+            target: v("text"),
+            name: "substring",
+            arguments: [v("at"), bin("+", v("at"), lit(1))],
+          }),
+        ],
+      ),
+  },
+  // Groovy `value[from..to]`: the elements of a list, or the characters of a text, from `from` through `to`, a negative
+  // position counting from the end, in reverse order where `from` comes after `to`.
+  slice: {
+    name: "sexscriptLegacySlice",
+    build: () => {
+      const walk = (step: IrStatement): IrStatement => ({
+        kind: "while",
+        condition: bin("!=", v("position"), bin("+", v("last"), v("step"))),
+        body: [step, set(v("position"), v("step"), "+=")],
+        span: null,
+      });
+      return fn(
+        "sexscriptLegacySlice",
+        ["value", "from", "to"],
+        [
+          ...positions(),
+          letS("step", lit(1)),
+          ifS(bin(">", v("first"), v("last")), [set(v("step"), lit(-1))]),
+          letS("position", v("first")),
+          letS("part", v("value")),
+          ifS(
+            { kind: "typeTest", value: v("value"), type: "string" },
+            [
+              letS("text", lit("")),
+              walk(
+                set(
+                  v("text"),
+                  {
+                    kind: "methodCall",
+                    target: v("value"),
+                    name: "substring",
+                    arguments: [v("position"), bin("+", v("position"), lit(1))],
+                  },
+                  "+=",
+                ),
+              ),
+              set(v("part"), v("text")),
+            ],
+            [
+              letS("items", { kind: "list", items: [] }),
+              walk(add("items", at(v("value"), v("position")))),
+              set(v("part"), v("items")),
+            ],
+          ),
+          // Through `value`, the part keeps an open type, as Groovy's did.
+          ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("part")], named: {} }),
+        ],
+      );
+    },
+  },
+  // Groovy `list[from..to] = values`: the list with those elements replaced by the values, a list or one value.
+  spliced: {
+    name: "sexscriptLegacySpliced",
+    build: () =>
+      fn(
+        "sexscriptLegacySpliced",
+        ["value", "from", "to", "values"],
+        [
+          ...positions(),
+          letS("items", {
+            kind: "methodCall",
+            target: v("value"),
+            name: "take",
+            arguments: [v("first")],
+          }),
+          ifS(
+            { kind: "typeTest", value: v("values"), type: "list" },
+            [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "methodCall",
+                  target: v("items"),
+                  name: "addAll",
+                  arguments: [v("values")],
+                },
+                span: null,
+              },
+            ],
+            [add("items", v("values"))],
+          ),
+          {
+            kind: "expression",
+            expression: {
+              kind: "methodCall",
+              target: v("items"),
+              name: "addAll",
+              arguments: [
+                {
+                  kind: "methodCall",
+                  target: v("value"),
+                  name: "takeLast",
+                  arguments: [bin("-", bin("-", prop(v("value"), "length"), v("last")), lit(1))],
+                },
+              ],
+            },
+            span: null,
+          },
+          ret(v("items")),
         ],
       ),
   },

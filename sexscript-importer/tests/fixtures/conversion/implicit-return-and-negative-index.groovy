@@ -20,3 +20,19 @@ lastPick = pick
 def ratings = ["soft", "hard", "none"]
 def limit = getSelectedValue("Which limit?", ["Back", "Soft", "Hard"])
 show("Limit " + ratings[limit - 1])
+// A range index takes a part of a list, also counted from the end or backwards, and a write to a range replaces it.
+def deck = ["a", "b", "c", "d", "e"]
+def top = deck[0..1]
+def backwards = deck[-1..0]
+deck[1..2] = ["x"]
+show("Top " + top.join(",") + ", back " + backwards.join(",") + ", deck " + deck.join(","))
+// A character of a text that only the converted types prove text, as a function's result, reads through a helper.
+def nextShot = { -> return "C7" }
+def shot = ""
+shot = nextShot()
+show("Column " + shot[0] + ", row " + shot[1])
+// A list repeated by a count that may be missing is repeated as a number.
+def rounds = loadInteger("game.rounds")
+if (rounds == null) rounds = 2
+def marks = [null] * rounds
+show("Marks " + marks.size())

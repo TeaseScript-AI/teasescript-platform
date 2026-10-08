@@ -1,3 +1,13 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
     return listValue[listValue.length + position]
@@ -6,6 +16,72 @@ function sexscriptLegacyItemAt(listValue, position) {
     return null
   }
   return listValue[position]
+}
+function sexscriptLegacyTextAt(text, position) {
+  let at = position
+  if at < 0 {
+    at += text.length
+  }
+  return text.substring(at, at + 1)
+}
+function sexscriptLegacySlice(value, from, to) {
+  let first = from
+  if first < 0 {
+    first += value.length
+  }
+  let last = to
+  if last < 0 {
+    last += value.length
+  }
+  let step = 1
+  if first > last {
+    step = -1
+  }
+  let position = first
+  let part = value
+  if value is string {
+    let text = ""
+    while position != last + step {
+      text += value.substring(position, position + 1)
+      position += step
+    }
+    part = text
+  } else {
+    let items = []
+    while position != last + step {
+      items.add(value[position])
+      position += step
+    }
+    part = items
+  }
+  return sexscriptLegacyValue(part)
+}
+function sexscriptLegacySpliced(value, from, to, values) {
+  let first = from
+  if first < 0 {
+    first += value.length
+  }
+  let last = to
+  if last < 0 {
+    last += value.length
+  }
+  let items = value.take(first)
+  if values is list {
+    items.addAll(values)
+  } else {
+    items.add(values)
+  }
+  items.addAll(value.takeLast(value.length - last - 1))
+  return items
+}
+function sexscriptLegacyRepeatList(items, times) {
+  let result = []
+  let roundValue = 0
+  while roundValue < times {
+    result += items
+    roundValue += 1
+  }
+  return result
 }
 let scores = [3, 5, 8]
 say "Last ${scores.last}, second last ${scores[scores.length - 2]}"
@@ -50,4 +126,23 @@ let limit = choose 0: "Back",
   2: "Hard"
 // NOTE SX_NEGATIVE_INDEX line 22: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
 say "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}"
+// A range index takes a part of a list, also counted from the end or backwards, and a write to a range replaces it.
+let deck = ["a", "b", "c", "d", "e"]
+let top = sexscriptLegacySlice(deck, 0, 1)
+let backwards = sexscriptLegacySlice(deck, -1, 0)
+deck = sexscriptLegacySpliced(deck, 1, 2, ["x"])
+// NOTE SX_LIST_JOIN line 28: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+// NOTE SX_LIST_JOIN line 28: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Top ${top.join(",")}, back ${backwards.join(",")}, deck ${deck.join(",")}"
+// A character of a text that only the converted types prove text, as a function's result, reads through a helper.
+function nextShot {
+  return "C7"
+}
+let shot = ""
+shot = nextShot()
+say "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}"
+// A list repeated by a count that may be missing is repeated as a number.
+let rounds = sexscriptLegacyLoadInteger("game.rounds", 2)
+let marks = sexscriptLegacyRepeatList([null], toInteger(rounds))
+say "Marks ${marks.length}"
 exit
