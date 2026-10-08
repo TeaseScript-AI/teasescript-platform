@@ -1,0 +1,10 @@
+---
+title: "Debug room fixture"
+author: "Author fixture"
+---
+let runs = load("runs", default: 0)
+runs += 1
+save runs as "runs"
+say "Run ${runs}."
+showButton "Next"
+exit

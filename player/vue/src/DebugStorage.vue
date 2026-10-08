@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from "vue";
-import { useEventListener } from "@vueuse/core";
 import { Plus, RefreshCw } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,28 +37,6 @@ async function refresh() {
 }
 onMounted(refresh);
 watch(props.player.savedDataRevision, refresh);
-// Another tab of this browser changed this script's saved values: its storage keys name the script's scope. While a
-// read for such changes runs, further changes ask for one more read after it, not one each.
-const scope = props.player.savedDataScope === null ? null : JSON.stringify(props.player.savedDataScope);
-let reading: Promise<void> | null = null;
-let readAgain = false;
-useEventListener(window, "storage", (event: StorageEvent) => {
-  if (scope === null) return;
-  if (event.key !== null && !(event.key.startsWith("player-storage") && event.key.includes(scope))) return;
-  if (reading !== null) {
-    readAgain = true;
-    return;
-  }
-  const read = async () => {
-    do {
-      readAgain = false;
-      await refresh();
-    } while (readAgain);
-    reading = null;
-  };
-  reading = read();
-});
-
 // Each text shaped like a photo reference once, with the keys whose values contain it; whether it names a saved photo,
 // the media store says when its thumbnail comes into view.
 const photos = computed(() => {

@@ -3,7 +3,7 @@ import { ref, type ShallowRef } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
-import type { KeptSessionStore } from "../../kept-sessions.js";
+import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
@@ -37,9 +37,15 @@ import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 // Development preview root; main.ts loads it on the development server or with `?dev`.
 // Visual Lab holds temporary Owner A/B settings only; runtime content comes from a real script.
 const query = new URLSearchParams(window.location.search);
-// The explicit `?dev` opt-in starts with the Debug menu on, also on the development server; `time=skip` starts Debug
-// with auto-skip on.
-const debug = { menu: query.has("dev"), autoSkip: query.get("time") === "skip" };
+// The explicit `?dev` opt-in starts with the Debug menu on, also on the development server, unless `debug=off`, so that
+// play stays in the script's own room; `time=skip` starts Debug with auto-skip on.
+const debug = {
+  menu: query.has("dev") && query.get("debug") !== "off",
+  autoSkip: query.get("time") === "skip",
+};
+// The preview opens the debug room (DEBUGGER.md "Debug room") while it starts with the Debug menu on, since Debug on in
+// the normal room goes on in the debug room, and with `room=debug`.
+const room = debug.menu || query.get("room") === "debug" ? "debug" : "normal";
 const tools: readonly PlayerTool[] = [
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
@@ -60,6 +66,7 @@ const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 const props = defineProps<{
   capturedMediaRepository?: CapturedMediaRepository | null;
   keptSessions?: KeptSessionStore;
+  debugRooms?: KeptRoomStore;
   /** The package `?package=<id>` selects; the preview plays it instead of a development scenario. */
   packageHost?: ScriptHost | null;
 }>();
@@ -84,6 +91,8 @@ const player = usePlayerSession(
           props.keptSessions,
         ),
         ...(props.keptSessions && { keptSessions: props.keptSessions }),
+        ...(props.debugRooms && { debugRooms: props.debugRooms }),
+        room,
         debugPackage: { id: packageHost.storageScope, version: null },
       }
     : {
@@ -101,6 +110,8 @@ const player = usePlayerSession(
             props.capturedMediaRepository ?? null,
             props.keptSessions,
           ),
+          ...(props.debugRooms && { debugRooms: props.debugRooms }),
+          room,
         }),
       },
 );

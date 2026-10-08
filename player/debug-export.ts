@@ -10,6 +10,7 @@ import {
   pressPermanentButton,
   recordContinueCapture,
   applyExternalStorageEdit,
+  setDebugMode,
   reportMediaLoad,
   updateInteraction,
   restoreCheckpoint,
@@ -145,7 +146,8 @@ export type DebugOperationKind = (typeof OPERATION_KINDS)[number];
  * One engine call the Player made, with the plain arguments it passed after the plan and snapshot: `run` takes its run
  * options; `observeTime` the time and media reports; `completeAction` the request; `reportMediaLoad` the media and
  * report; `pressPermanentButton` the button; `recordContinueCapture` the capture; `applyExternalStorageEdit` the edit;
- * `updateInteraction` the form edit; `resumeRandomDraw` the resolution of a draw that paused before the anchor.
+ * `updateInteraction` the form edit; `resumeRandomDraw` the resolution of a draw that paused before the anchor;
+ * `setDebugMode` whether Debug is on.
  *
  * A call that paused at a random draw (`docs/RUNTIME.md#controlled-randomness`) stays one record while the Player
  * resolves its draws: each resolution adds its events to the call it continues, and a chosen one also its outcome, so
@@ -208,8 +210,8 @@ export class DebugExportError extends Error {
 
 export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
 // 2: adds the `applyExternalStorageEdit` call. 3: adds the `updateInteraction` call. 4: adds a call's chosen random
-// outcomes and paused draw, and the `resumeRandomDraw` call.
-export const DEBUG_EXPORT_VERSION = 4;
+// outcomes and paused draw, and the `resumeRandomDraw` call. 5: adds the `setDebugMode` call.
+export const DEBUG_EXPORT_VERSION = 5;
 /** The most JSON a reader decompresses or parses; a diagnostic-tool limit, not a TeaseScript one. */
 export const DEBUG_EXPORT_MAX_JSON_BYTES = 64 * 1024 * 1024;
 
@@ -223,6 +225,7 @@ const OPERATION_KINDS = [
   "applyExternalStorageEdit",
   "updateInteraction",
   "resumeRandomDraw",
+  "setDebugMode",
 ] as const;
 const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   run: 1,
@@ -234,6 +237,7 @@ const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   applyExternalStorageEdit: 1,
   updateInteraction: 1,
   resumeRandomDraw: 1,
+  setDebugMode: 1,
 };
 const STATUSES = ["ready", "running", "waiting", "halted", "failed"] as const;
 const SELECTION_FIELDS = [
@@ -948,6 +952,8 @@ function dispatch(
       return withOutcome(applyExternalStorageEdit(plan, snapshot, first));
     case "updateInteraction":
       return withOutcome(updateInteraction(plan, snapshot, first));
+    case "setDebugMode":
+      return withOutcome(setDebugMode(plan, snapshot, first));
   }
 }
 
@@ -1033,6 +1039,8 @@ function dispatchToSession(
       return settled(session.applyExternalStorageEdit(first));
     case "updateInteraction":
       return settled(session.updateInteraction(first));
+    case "setDebugMode":
+      return settled(session.setDebugMode(first));
   }
 }
 

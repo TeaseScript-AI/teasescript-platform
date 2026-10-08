@@ -96,7 +96,7 @@ export function isWellFormedCapturedMediaReference(value: string): boolean {
  * later by `sweep`, which runs only when no Player of the namespace is live.
  */
 export class CapturedMediaStore {
-  readonly #repository: CapturedMediaRepository | null;
+  #repository: CapturedMediaRepository | null;
   readonly #urls: CapturedMediaUrls;
   readonly #namespace: string;
   readonly #changed: () => void;
@@ -141,6 +141,18 @@ export class CapturedMediaStore {
     };
     this.#records.set(record.reference, record);
     return describe(record);
+  }
+
+  /**
+   * Makes `repository` the durable storage from now on, such as a debug room's (DEBUGGER.md "Debug room"). Media this
+   * store holds stays available; of it, only `durable` counts as stored there, and the rest is stored when a save
+   * references it. Call it only while no storage work of the store runs.
+   */
+  useRepository(repository: CapturedMediaRepository | null, durable: ReadonlySet<string>): void {
+    this.#repository = repository;
+    for (const reference of this.#durable)
+      if (!durable.has(reference)) this.#durable.delete(reference);
+    this.#missing.clear();
   }
 
   /** Keeps captures as session media from now on, for example when coordination with other Players failed. */
