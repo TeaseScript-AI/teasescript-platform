@@ -10,6 +10,7 @@ import {
   DataFlow,
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
+import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
 import { clockModel, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
 import {
@@ -945,5 +946,41 @@ test(
     assert.equal(conjunctive(conditionOf("a == 3 or b == 10"), false), true);
     assert.equal(conjunctive(conditionOf("a == 3 or b == 10"), true), false);
     assert.deepEqual(measure("a == 3 or b == 10", false), { unsatisfied: 2, sum: 2 });
+  },
+);
+
+test(
+  "the map of a plan counts the decisions from each instruction to the nearest code not reached, through calls and a next session, past constant conditions",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'function deep {\n  say "Deep."\n}\nlet pick = choose a: "A", b: "B"\nif pick == "b" {\n  let more = choose c: "C", d: "D"\n' +
+      '  if more == "d" {\n    deep()\n  }\n}\nif false {\n  say "Never."\n}\nsay "End."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const index = (kind: string, text?: string) =>
+      instructions.findIndex(
+        (instruction) =>
+          instruction.kind === kind &&
+          (text === undefined || JSON.stringify(instruction).includes(text)),
+      );
+    const deep = index("say", "Deep.");
+    const never = index("say", "Never.");
+    const first = index("interaction");
+    const constant = index("jumpIfFalse", '"value":false');
+    const map = new TreasureMap(plan, instructions, new Map([[constant, false]]));
+    // Only the deep text is not reached: from the first prompt, its answer, the condition after it, the second
+    // prompt's answer, and the condition before the call are four decisions.
+    map.update((at) => at === deep);
+    assert.equal(map.distances[deep], 0);
+    assert.equal(map.distances[first], 4);
+    // After the end of the session, the next one starts: three decisions more than from the start.
+    assert.equal(map.distances[index("exit")], 3 + map.distances[0]!);
+    // Code behind a condition the plan knows is false is not on the way to anything.
+    map.update((at) => at === never);
+    assert.equal(map.distances[first], FAR);
   },
 );

@@ -21,6 +21,7 @@ import {
   type PlanDiagnostic,
   type Slot,
 } from "./explorer-analysis.ts";
+import { FAR, TreasureMap } from "./explorer-guidance.ts";
 import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "./explorer-time.ts";
 import {
   EPOCH_MS,
@@ -218,6 +219,11 @@ export interface ExploreOptions {
    * the parts on other keys too. Off by default.
    */
   readonly conjunctive?: boolean;
+  /**
+   * Static guidance: among states otherwise alike (after the cell's expansions), those whose next decisions bring them
+   * nearer to code play has not reached go first, by the plan's control flow (`TreasureMap`). Off by default.
+   */
+  readonly guidance?: boolean;
 }
 
 /**
@@ -1021,6 +1027,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const cells = options.cells === false ? null : new Cells(comparedSlots(flow, instructions));
   const elseIfs =
     options.realign === true ? elseIfChains(instructions) : new Map<number, number[]>();
+  // With guidance, the map of the plan, measured again from what play has not reached at each analysis.
+  const map = options.guidance === true ? new TreasureMap(plan, instructions, allConstants) : null;
+  const dead = map === null ? null : unreachableInstructions(plan, instructions, allConstants);
+  const guide = () => map?.update((index) => session.visited[index] === 0 && dead?.[index] === 0);
   const store = new SnapshotStore();
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
@@ -1202,6 +1212,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       starts[node.start]!.session,
       // With cells, the states of the cell expanded least first (see `CellFrontier`).
       ...(cells === null ? [] : [cells.expansions[node.cell]!]),
+      // With guidance, those nearer to code not reached yet first.
+      ...(map === null
+        ? []
+        : [typeof node.waitsAt === "number" ? (map.distances[node.waitsAt] ?? FAR) : FAR]),
       tier,
       ...rest,
     ];
@@ -2165,6 +2179,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const replayed = options.corpus === undefined ? null : replayCorpus(options.corpus, firstStep);
   replaying = false;
   replayWork = replayed === null ? 0 : session.operations;
+  guide();
   for (const id of replayedOpen) {
     const node = nodes[id]!;
     node.resumed = node.edges.length > 0;
@@ -2200,6 +2215,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       analyzedAt = performance.now();
       analyzedOps = session.operations;
       analyze();
+      guide();
     }
     // With forward time, the time steps of a place where a clock condition was read for the first time.
     if (timeJobs.length > 0 && (frontier.size === 0 || withinShare())) {
@@ -2225,6 +2241,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     const node = nodes[frontier.pop()!]!;
     if (node.status !== "open") continue;
+    // With guidance, a state queued before the map was measured again goes back when its place is now behind another.
+    if (map !== null && frontier.size > 0) {
+      const own = order(node);
+      const next = frontier.pop()!;
+      frontier.push(next, order(nodes[next]!));
+      if (before(order(nodes[next]!), own)) {
+        frontier.push(node.id, own);
+        continue;
+      }
+    }
     // A lead that was spent, or whose target was reached, gives its states back their own place.
     if (node.lead !== null && !leads(node) && frontier.size > 0) {
       const own = order(node);

@@ -42,7 +42,7 @@ function destinationTargets(destination: unknown, plan: Data): unknown[] {
  * entries of the timer, cue, and button blocks an instruction sets up. Interactions continue after their answer;
  * `exit` continues nowhere.
  */
-function successors(
+export function successors(
   plan: Data,
   instructions: readonly Data[],
   dead: ReadonlyMap<number, boolean>,
