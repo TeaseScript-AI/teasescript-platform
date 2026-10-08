@@ -360,14 +360,17 @@ explorer decide the draws that pick what happens (`chance`, random integers, pic
 tag queries, and glob file transfers), which run naturally unless it chooses. A step also offers the other outcomes of
 the first four draws it made (`randomDrawAlternatives`: all of a small support, 16 representative ones of a large one;
 at most three per draw, each outcome of a draw site once per waiting place and input) as steps with the same input and
-that outcome chosen. Those steps and the expansions of the states after them take at most an eighth of all runtime
-operations while other states are open, and all of them when none is; they can cost much more than other steps, and a
-way only they reached stays a goal of directed search. A path records only the outcomes it chose, as the
-`random` list of the input during which they were drawn (draw ID, site, and outcome), so repros, the corpus, and
-`--replay` choose them again; a replay or corpus path with chosen outcomes plays them also without the flag. Play with
-a chosen outcome is play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts,
-the directed ways, and the crashes show it apart, as does a line per unit in `summary.md` with the lines, ways, and
-crashes only it reached: what a player hits only with a particular run of luck. It is off by default.
+that outcome chosen, also after directed steps. Those steps and the expansions of the states after them (and of later
+sessions they lead to) take at most an eighth of all runtime operations while other states are open, checked before
+each input, and all of them when none is; they can cost much more than other steps. They keep their own loop keys and
+cell expansions, so that they do not move play states back; a way only they reached stays a goal of directed search,
+and play that reaches a state only they reached takes it over and expands it again. A path records only the outcomes it
+chose, one per draw, as the `random` list of the input during which they were drawn (draw ID, site, and outcome), so
+repros, the corpus, and `--replay` choose them again; a replay or corpus path with chosen outcomes plays them also
+without the flag, and an input whose outcomes are not all drawn and taken does not fit. Play with a chosen outcome is
+play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts, the directed ways,
+and the crashes show it apart, as does a line per unit in `summary.md` with the lines, ways, and crashes only it
+reached: what a player hits only with a particular run of luck. It is off by default.
 
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
