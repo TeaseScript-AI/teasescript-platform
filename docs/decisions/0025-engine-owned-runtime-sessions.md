@@ -21,8 +21,12 @@ state, or a coverage explorer settling thousands of inputs, spends most of its t
 3. Real boundaries keep complete fresh capture and validation of the whole snapshot: creating a session from a
    snapshot or checkpoint, exporting a snapshot or checkpoint, debug export, and later the server. A trusted host that
    keeps a snapshot itself may export it with `exportTrustedSnapshot()` instead, the same JSON as a trusted copy like
-   `fork()`'s; the snapshot is captured and validated wherever it crosses a boundary later, so the engine never runs
-   data it did not check (approved 2026-10-07 under the Owner's rule for low-risk performance improvements, #512).
+   `fork()`'s; the snapshot is captured and validated wherever it crosses a boundary later (approved 2026-10-07 under
+   the Owner's rule for low-risk performance improvements, #512). The host may instead keep the JSON with a tag from
+   `exportTaggedSnapshot()`, SipHash-2-4 under a key that the process keeps for the plan and never exposes.
+   `createTaggedRuntimeSession` skips capture and validation only when the tag proves that a session of the same plan
+   exported that JSON in this process, and checks any other input completely, so the engine runs only data that it
+   checked or provably wrote itself (approved 2026-10-08 by the #512 coordinator, Owner informed).
 4. Results, views, and exports are detached: nothing a session publishes shares a mutable object with its state.
 5. A session whose operation throws is finished. The error reaches the caller, and every later call, including
    exports and forks, throws, so state that the operation may have changed in part never becomes visible; callers
