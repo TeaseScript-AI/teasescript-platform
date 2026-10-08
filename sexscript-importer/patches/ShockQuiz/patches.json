@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "settings-ranges",
+      "layer": "source",
+      "category": "b",
+      "reason": "loadConfig cleared the pain level and shock time lists and added each stored setting, null for a missing one, then took the defaults where any was null. The lists shared their default lists after resetDefault, so clearing them cleared the defaults too, and a list of whole numbers cannot hold the null of a missing setting. The settings are read into new lists that keep only stored values, and a list that misses one takes its defaults, as the null test meant.",
+      "diff": "settings-ranges.diff"
+    }
+  ]
+}
