@@ -836,7 +836,7 @@ function workingToward(branches: readonly Readonly<Record<string, unknown>>[]): 
     ...shown.map((branch) => {
       const written = text(fields(branch.condition).text) || "?";
       // A switch case's condition reads as its pattern.
-      const condition = /^[-\d."]/u.test(written) ? `case ${written}` : written;
+      const condition = branch.case === true ? `case ${written}` : written;
       const needs =
         branch.missed === "true" || branch.missed === "enter" ? condition : `not (${condition})`;
       const best = fields(branch.best);

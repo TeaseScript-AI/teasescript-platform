@@ -705,6 +705,57 @@ test(
 );
 
 test(
+  "the closest state to a missed way's part is read where the condition's function runs, as a value of the constant's type, and of alternatives the nearest unmet one keeps the way closed",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let rounds = 0\nlet far = 0\nlet flag = 1\nfunction low {\n  let points = 0\n  showButton "Low"\n' +
+      '  if points >= 5 {\n    say "Low."\n  }\n}\nfunction high {\n  let points = 99\n  showButton "High"\n}\n' +
+      'while true {\n  let pick = choose go: "Go", leave: "Leave"\n  if pick == "leave" {\n    exit\n  }\n' +
+      '  rounds += 1\n  low()\n  high()\n  if far >= 10000 or rounds >= 200 {\n    say "Either."\n  }\n' +
+      '  if flag == true {\n    say "Flag."\n  }\n  switch pick {\n    case "never" {\n      say "Never."\n    }\n  }\n}\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 600,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+    });
+    const branch = (line: number) =>
+      result.coverage.unvisitedBranches.find((entry) => entry.line === line);
+    const shown = (line: number) =>
+      branch(line)?.parts.map((part) => [part.needs, part.status, part.closest?.value]);
+    // `high` holds its own `points` at 99: only `low`'s count, while `low` runs.
+    assert.deepEqual(shown(7), [["points >= 5", "unmet", 0]]);
+    assert.deepEqual(branch(7)?.best && [branch(7)!.best!.value, branch(7)!.best!.trend], [
+      0,
+      "flat",
+    ]);
+    // Either part opens the way: the rising one is what to watch, not the one far away.
+    assert.deepEqual(
+      shown(23)?.map(([needs, status]) => [needs, status]),
+      [
+        ["far >= 10000", "unmet"],
+        ["rounds >= 200", "unmet"],
+      ],
+    );
+    assert.deepEqual(branch(23)?.best && [branch(23)!.best!.needs, branch(23)!.best!.trend], [
+      "rounds >= 200",
+      "improving",
+    ]);
+    // A whole number compared with `true` is never `true`: no closest value is made up.
+    assert.deepEqual(shown(26), [["flag == true", "unmeasured", undefined]]);
+    assert.equal(branch(26)?.best, undefined);
+    assert.equal(branch(30)?.case, true);
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

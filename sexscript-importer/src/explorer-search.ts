@@ -381,6 +381,8 @@ export interface UnvisitedBranch {
   } | null;
   /** The missed way: `true`/`false` for a condition, `enter`/`exit` for a loop. */
   missed: "true" | "false" | "enter" | "exit";
+  /** For a `switch` case, whose condition text is its pattern. */
+  case?: true;
   /** The first instruction and line of the missed way. */
   targetInstruction: number;
   targetLine: number | null;
@@ -1089,18 +1091,83 @@ interface Chain {
 interface Watch {
   readonly target: number;
   readonly goal: Goal;
+  /** The function the condition is in (0 for none): its variables are read in its innermost running call. */
+  readonly scope: number;
   readonly name: string;
   readonly operator: string;
   readonly constant: number;
   readonly shown: number | boolean;
   /** `closer` once a state came closer than the first one watched. */
   closest: {
-    value: number;
+    value: number | boolean;
     distance: number;
     session: number;
     operations: number;
     closer: boolean;
   } | null;
+}
+
+/** How the comparisons of a condition combine to take a way: all needed, any one enough, both, or one comparison. */
+function combination(condition: unknown, wanted: boolean): "all" | "any" | "mixed" | "one" {
+  const value = record(condition);
+  if (value.kind === "group") return combination(value.expression, wanted);
+  if (value.kind === "unary" && value.operator === "not")
+    return combination(value.operand, !wanted);
+  if (value.kind !== "binary" || (value.operator !== "and" && value.operator !== "or"))
+    return "one";
+  const kind = (value.operator === "and") === wanted ? "all" : "any";
+  return [combination(value.left, wanted), combination(value.right, wanted)].every(
+    (side) => side === kind || side === "one",
+  )
+    ? kind
+    : "mixed";
+}
+
+/** A `switch` case: its subject, held in a temporary, compared with the case's pattern. */
+function isCase(condition: unknown): boolean {
+  const value = record(condition);
+  return (
+    value.kind === "binary" && value.operator === "==" && record(value.left).kind === "temporary"
+  );
+}
+
+/**
+ * The variables of a state by the function whose code reads them: for a function, those of its innermost running call,
+ * over the top-level variables of the file activation it was called in (`rootScopeId`); for 0, those of code outside
+ * functions (the scopes before the first call, and those of called files). An inner binding hides an outer one.
+ */
+function scopeValues(snapshot: Data): Map<number, Map<string, unknown>> {
+  const frames = list(snapshot.frames);
+  const byId = new Map(
+    [...list(snapshot.retainedScopes), ...frames].map((frame) => [frame.id, frame]),
+  );
+  const calls = list(snapshot.callFrames);
+  const take = (into: Map<string, unknown>, scopes: readonly Data[]) => {
+    for (const scope of scopes)
+      for (const binding of list(scope.bindings))
+        if (typeof binding.name === "string") into.set(binding.name, binding.value);
+    return into;
+  };
+  const outside = take(
+    new Map(),
+    frames.slice(0, calls.length === 0 ? frames.length : Number(calls[0]!.scopeBaseDepth)),
+  );
+  const scopes = new Map<number, Map<string, unknown>>([[0, outside]]);
+  calls.forEach((call, place) => {
+    const own = frames.slice(
+      Number(call.scopeBaseDepth),
+      place + 1 < calls.length ? Number(calls[place + 1]!.scopeBaseDepth) : frames.length,
+    );
+    if (call.kind !== "function") take(outside, own);
+    else {
+      const root = byId.get(call.rootScopeId);
+      scopes.set(
+        Number(call.functionId),
+        take(take(new Map(), root === undefined ? [] : [root]), own),
+      );
+    }
+  });
+  return scopes;
 }
 
 /** A condition way that directed search aims at. */
@@ -1542,6 +1609,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * state since each became a target. Only read, never steering.
    */
   const watched = new Map<string, Watch[]>();
+  /** Per instruction, the function it is in, or 0. */
+  const functionAt = new Int32Array(instructions.length);
+  for (const definition of list(plan.functions))
+    for (
+      let index = Number(definition.entryInstruction);
+      index <= Number(definition.endInstruction);
+      index += 1
+    )
+      functionAt[index] = Number(definition.id);
   // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
   /**
@@ -1979,12 +2055,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
   /** Keeps each watched comparison's closest state up to date with a new state of session `number`. */
   const watch = (snapshot: Data, number: number): void => {
-    const values = bindings(snapshot);
+    const scopes = scopeValues(snapshot);
+    const globals = new Map(
+      list(snapshot.globals).map((binding) => [binding.name, binding.value] as const),
+    );
     for (const [name, watches] of watched) {
-      const value = values.get(name);
-      if (value === undefined) continue;
       for (const entry of watches) {
-        const away = distance(value, entry.operator, entry.constant);
+        // A function's variables only while it runs; a value of another type than the constant compares as no value.
+        const variables = scopes.get(entry.scope);
+        if (variables === undefined) continue;
+        const value = variables.has(name) ? variables.get(name) : globals.get(name);
+        if (
+          typeof value !== typeof entry.shown ||
+          (typeof value !== "number" && typeof value !== "boolean")
+        )
+          continue;
+        const away = distance(Number(value), entry.operator, entry.constant);
         if (entry.closest === null || away < entry.closest.distance)
           entry.closest = {
             value,
@@ -2371,7 +2457,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         watched
           .set(name, watched.get(name) ?? [])
           .get(name)!
-          .push({ target: code, goal, name, operator, constant, shown, closest: null });
+          .push({
+            target: code,
+            goal,
+            scope: functionAt[index]!,
+            name,
+            operator,
+            constant,
+            shown,
+            closest: null,
+          });
       }
       scheduled = schedule(code, target) || scheduled;
     });
@@ -3778,7 +3873,7 @@ function lineCoverage(
     )
       next[index] = [];
     else if (instruction.kind === "transfer" && "value" in record(instruction.destination))
-      next[index] = instruction.mode === "call" ? [index + 1] : [];
+      next[index] = [];
   });
   const behind = (from: number): number => {
     if (from < 0 || from >= instructions.length || ran(from)) return 0;
@@ -3833,7 +3928,7 @@ function lineCoverage(
       if (watch != null)
         closest = {
           needs,
-          value: typeof comparison?.shown === "boolean" ? watch.value !== 0 : watch.value,
+          value: watch.value,
           distance: watch.distance,
           session: watch.session,
           atOperations: watch.operations,
@@ -3888,10 +3983,16 @@ function lineCoverage(
           : undefined;
     const reached = directed?.reach;
     const parts = partsOf(directed);
-    // The unmet part measured furthest from holding is what keeps the way closed.
-    const best = parts
-      .filter((part) => part.status === "unmet" && part.closest !== undefined)
-      .sort((left, right) => right.closest!.distance - left.closest!.distance)[0]?.closest;
+    // What keeps the way closed, as far as measured: of the condition's own unmet parts, the furthest from holding when
+    // the way needs all of them, the nearest when any one would do; none when they combine both ways.
+    const combined = combination(condition, way === 0);
+    const unmet = parts
+      .filter(
+        (part) => part.of === "condition" && part.status === "unmet" && part.closest !== undefined,
+      )
+      .sort((left, right) => left.closest!.distance - right.closest!.distance);
+    const best =
+      combined === "mixed" ? undefined : (combined === "any" ? unmet[0] : unmet.at(-1))?.closest;
     unvisitedBranches.push({
       instruction: index,
       kind: instruction.kind === "jumpIfFalse" ? "if" : "loop",
@@ -3899,6 +4000,7 @@ function lineCoverage(
       line: lineOf[index] ?? 0,
       condition: conditionText(instruction, files[index]!, sources),
       missed: wayName(instruction, way),
+      ...(isCase(condition) ? { case: true as const } : {}),
       targetInstruction: missedTarget ? target : index + 1,
       targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,
       reach: label,
