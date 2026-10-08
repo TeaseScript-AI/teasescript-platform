@@ -36,4 +36,16 @@ if room == null {
   say "In the ${room}"
 }
 say "Using the ${chosen}"
+// So does one that the code compares with a value that may be empty, or that a parameter takes as its default.
+let answer: string? = null
+if answer == "" {
+  say "No answer"
+}
+answer = askText "Answer?"
+let hint: string? = null
+function remind(text = hint) {
+  say "Hint: ${text}"
+}
+hint = "Look up"
+remind()
 exit

@@ -23,3 +23,11 @@ switch (room) {
 	default: show("In the ${room}")
 }
 show("Using the ${chosen}")
+// So does one that the code compares with a value that may be empty, or that a parameter takes as its default.
+def answer = null
+if (answer == "") show("No answer")
+answer = getString("Answer?", "")
+def hint = null
+def remind = { text = hint -> show("Hint: ${text}") }
+hint = "Look up"
+remind()

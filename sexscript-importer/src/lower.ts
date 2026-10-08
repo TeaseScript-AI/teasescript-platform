@@ -703,9 +703,11 @@ const SHOWING_API_CALLS = new Set([
 ]);
 
 /**
- * The variables whose value the code passes on: copies it into another variable or a collection, passes it to a
- * function or a method, returns it, or sets it to null again. A legacy API call that only shows the value or asks the
- * player with it does not pass it on.
+ * The variables whose value the code passes on or tells from an empty one: copies it into another variable or a
+ * collection, passes it to a function or a method, also as a parameter's default, returns it, compares it with a value
+ * that may be empty (`== ""`, `== other`), switches on it with such a case, or sets it to null again. A legacy API call
+ * that only shows the value or asks the player with it does not pass it on, and neither does a comparison with a text
+ * that is not empty, a number, or true, where null and the empty value give the same result.
  */
 function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment): Set<string> {
   const passed = new Set<string>();
@@ -714,7 +716,7 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
     if (value?.kind === "ternary")
       for (const branch of [value.true, value.false]) pass(asNode(branch));
     if (value?.kind === "elvis") pass(asNode(value.false));
-    if (value?.kind === "cast") pass(asNode(value.expression));
+    if (value?.kind === "cast") pass(asNode(value.value));
     const key = value?.kind === "variable" ? bindingKey(value, keys) : null;
     if (key !== null) passed.add(key);
   };
@@ -727,7 +729,31 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
       passResult(asNode(statement.else));
     }
   };
+  // A constant that equals neither null nor the empty text or false.
+  const distinct = (node: AstNode | null): boolean => {
+    const value = node?.kind === "constant" ? node.value : undefined;
+    return (
+      (typeof value === "string" && value !== "") || typeof value === "number" || value === true
+    );
+  };
   walkAst(body, (node) => {
+    if (node.kind === "binary" && ["==", "!=", "in"].includes(String(node.operator))) {
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (!distinct(right)) pass(left);
+      if (!distinct(left)) pass(right);
+    }
+    if (
+      node.kind === "switch" &&
+      !nodeArray(node.cases).every((item) => distinct(asNode(item.expression)))
+    )
+      pass(asNode(node.expression));
+    if (node.kind === "closure")
+      for (const parameter of groovyParameters(node.parameters) ?? [])
+        if (parameter.defaultValue !== null)
+          walkAst(parameter.defaultValue, (child) => {
+            if (child.kind === "variable") pass(child);
+          });
     const assigns =
       node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
     if (assigns) {
@@ -778,8 +804,25 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
   for (const body of bodies) collectEarlyDisplays(body, uses.shownEarly);
-  for (const { body, types, keys } of bodies) {
+  // The names each body reads, as variables or as properties such as a module's `owner.field`: a variable of the
+  // script that another body reads may pass its value on there.
+  const namesRead = bodies.map(({ body }) => {
+    const names = new Set<string>();
+    walkAst(body, (node) => {
+      const name =
+        node.kind === "variable"
+          ? variableName(node)
+          : node.kind === "property"
+            ? constantString(node.property)
+            : null;
+      if (name !== null) names.add(name);
+    });
+    return names;
+  });
+  for (const [index, { body, types, keys }] of bodies.entries()) {
     const passed = passedOnValues(body, keys, types);
+    const readElsewhere = (key: string): boolean =>
+      !key.includes("@") && namesRead.some((names, other) => other !== index && names.has(key));
     const values = assignedValues(body, keys);
     walkAst(body, (node) => {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
@@ -809,6 +852,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
         !uses.nullTested.has(key) &&
         !passed.has(key) &&
+        !readElsewhere(key) &&
         // Every value set later is one of a known type, never null; an input the player answers gives a value.
         (values.get(key) ?? []).every(
           (value) =>
