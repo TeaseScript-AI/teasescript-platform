@@ -197,6 +197,7 @@ export type HelperName =
   | "spliced"
   | "repeatList"
   | "times"
+  | "castText"
   | "compare"
   | "replaceChars"
   | "askInteger"
@@ -318,6 +319,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "spliced",
   "repeatList",
   "times",
+  "castText",
   "compare",
   "replaceChars",
   "askInteger",
@@ -1245,6 +1247,19 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [ifS(bin("==", v("value"), lit(null)), [ret(lit(null))]), ret(template(v("value")))],
       ),
   },
+  // Groovy `(String) value`: null stays null, and another value becomes its text.
+  castText: {
+    name: "sexscriptLegacyCastText",
+    build: () =>
+      fn(
+        "sexscriptLegacyCastText",
+        ["value"],
+        [
+          ifS(bin("==", v("value"), lit(null)), [ret(lit(null))]),
+          ret({ kind: "call", name: "toString", positional: [v("value")], named: {} }),
+        ],
+      ),
+  },
   // Groovy truth: false for null, false, zero, empty text, and an empty list, set, dict, or map.
   truth: {
     name: "sexscriptLegacyTruth",
@@ -1542,41 +1557,51 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyTimes",
         ["value", "count"],
         [
-          ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
-            ret({
-              kind: "call",
-              name: "sexscriptLegacyValue",
-              positional: [
-                {
-                  kind: "methodCall",
-                  target: v("value"),
-                  name: "repeat",
-                  arguments: [
-                    { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
-                  ],
-                },
-              ],
-              named: {},
-            }),
-          ]),
-          ifS({ kind: "typeTest", value: v("value"), type: "list" }, [
-            ret({
-              kind: "call",
-              name: "sexscriptLegacyValue",
-              positional: [
-                {
+          // Groovy repeated only by a number that is not negative, and failed otherwise, as `*` does here.
+          ifS(
+            bin(
+              "and",
+              { kind: "typeTest", value: v("count"), type: "number" },
+              bin(">=", v("count"), lit(0)),
+            ),
+            [
+              ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+                ret({
                   kind: "call",
-                  name: "sexscriptLegacyRepeatList",
+                  name: "sexscriptLegacyValue",
                   positional: [
-                    v("value"),
-                    { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
+                    {
+                      kind: "methodCall",
+                      target: v("value"),
+                      name: "repeat",
+                      arguments: [
+                        { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
+                      ],
+                    },
                   ],
                   named: {},
-                },
-              ],
-              named: {},
-            }),
-          ]),
+                }),
+              ]),
+              ifS({ kind: "typeTest", value: v("value"), type: "list" }, [
+                ret({
+                  kind: "call",
+                  name: "sexscriptLegacyValue",
+                  positional: [
+                    {
+                      kind: "call",
+                      name: "sexscriptLegacyRepeatList",
+                      positional: [
+                        v("value"),
+                        { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
+                      ],
+                      named: {},
+                    },
+                  ],
+                  named: {},
+                }),
+              ]),
+            ],
+          ),
           ret({
             kind: "call",
             name: "sexscriptLegacyValue",

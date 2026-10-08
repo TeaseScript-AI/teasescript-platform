@@ -11513,14 +11513,13 @@ function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
       return { kind: "call", name: "toNumber", positional: [value], named: {} };
     case "String":
     case "java.lang.String": {
-      // Groovy's cast keeps text as it is and null as null; a list or an object keeps `toString`, which the compiler
-      // checks, as its text has no faithful form yet.
+      // Groovy's cast keeps text as it is and null as null; a known list or object keeps a plain `toString`, which
+      // the compiler checks, as its text has no faithful form yet.
       const type = inferType(valueNode!, context.types);
       if (onlyOf(type, STRING) && type !== 0) return value;
-      return (type & NULL) !== 0 &&
-        type !== UNKNOWN &&
-        onlyOf(type, STRING | NUMBER | BOOLEAN | NULL)
-        ? useHelper(context, "text", [value])
+      const collection = type !== UNKNOWN && (type & (LIST | OBJECT)) !== 0;
+      return (type & NULL) !== 0 && !collection
+        ? useHelper(context, "castText", [value])
         : { kind: "call", name: "toString", positional: [value], named: {} };
     }
     case "Boolean":

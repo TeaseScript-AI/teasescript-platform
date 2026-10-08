@@ -122,11 +122,13 @@ function sexscriptLegacyRepeatList(items, times) {
   return result
 }
 function sexscriptLegacyTimes(value, count) {
-  if value is string {
-    return sexscriptLegacyValue(value.repeat(toInteger(count)))
-  }
-  if value is list {
-    return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, toInteger(count)))
+  if count is number and count >= 0 {
+    if value is string {
+      return sexscriptLegacyValue(value.repeat(toInteger(count)))
+    }
+    if value is list {
+      return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, toInteger(count)))
+    }
   }
   return sexscriptLegacyValue(value * count)
 }
