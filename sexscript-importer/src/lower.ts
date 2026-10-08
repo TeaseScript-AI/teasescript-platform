@@ -15230,7 +15230,7 @@ function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpa
 
 /**
  * A metadata value known before the script runs: a literal, text joined from such values with `+`, or a variable that
- * the script assigns one such value once, as `titleline = "Escape Room"` before `setInfos(9, titleline, ...)`.
+ * the script assigns one such text once, as `titleline = "Escape Room"` before `setInfos(9, titleline, ...)`.
  */
 function staticMetadataValue(
   node: AstNode | undefined,
@@ -15251,9 +15251,12 @@ function staticMetadataValue(
   if (name === null || seen.has(name) || context.types.singleAssignment?.has(name) !== true)
     return undefined;
   const initializer = context.constantInitializers.get(name);
-  return initializer === undefined
-    ? undefined
-    : staticMetadataValue(initializer, context, new Set([...seen, name]));
+  // Only text: a number may change by the variable's declared type, as `int size = 1.9` holds 1.
+  const value =
+    initializer === undefined
+      ? undefined
+      : staticMetadataValue(initializer, context, new Set([...seen, name]));
+  return typeof value === "string" ? value : undefined;
 }
 
 /** The legacy source of an expression, on one line. */
