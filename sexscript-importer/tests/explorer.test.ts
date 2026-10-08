@@ -652,6 +652,47 @@ test(
 );
 
 test(
+  "a missed way reports what it depends on, the code behind it, and the closest state to a comparison it needs: a capped counter stays flat, a rising one is still improving",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let points = 0\nlet rounds = 0\nwhile true {\n  let pick = choose train: "Train", leave: "Leave"\n' +
+      '  if pick == "leave" {\n    exit\n  }\n  rounds += 1\n  if points < 3 {\n    points += 1\n  }\n' +
+      '  if points >= 5 {\n    say "Master."\n    say "You did it."\n  }\n  if rounds >= 200 {\n' +
+      '    say "Two hundred."\n  }\n}\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 400,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+    });
+    const branch = (line: number) =>
+      result.coverage.unvisitedBranches.find((entry) => entry.line === line);
+    // `points` stops at 3: the closest state is 3 away by 2, and no state came closer later on.
+    const capped = branch(12);
+    assert.deepEqual(capped && [capped.dependsOn, capped.behindLines], [["points"], 2]);
+    assert.deepEqual(capped?.best && [capped.best.needs, capped.best.value, capped.best.distance], [
+      "points >= 5",
+      3,
+      2,
+    ]);
+    assert.equal(capped?.best?.trend, "flat");
+    // `rounds` rises with every round: still closer at the end of the run.
+    const rising = branch(16);
+    assert.deepEqual(rising && [rising.dependsOn, rising.behindLines], [["rounds"], 1]);
+    assert.equal(rising?.best?.needs, "rounds >= 200");
+    assert.equal(rising?.best?.trend, "improving");
+    assert.ok(Number(rising?.best?.value ?? 0) > 10);
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

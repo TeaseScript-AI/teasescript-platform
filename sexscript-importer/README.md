@@ -444,7 +444,12 @@ The report `<out>/<unit>.json` has these parts:
 - per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
   their label;
 - each condition and loop that play reached but left only one way, with its source, the missed way, its first line,
-  what it depends on, the directed attempts, its label, and the reason, when known;
+  what it depends on (`dependsOn`: variables, stored keys, asks, the clock), the directed attempts, its label, and the
+  reason, when known; `behindLines`, the coverable lines no state ran that the missed way leads to through code no state
+  ran (a call goes into its function and on after it; a return, an end, or a transfer to a computed destination stops
+  the count); and for a variable the way compares with a constant, `best`: the closest state since the condition became
+  a target, with the value, its session, the operations done when a state first came that close, and `trend`
+  (`improving` when that was in the last quarter of the run's operations, else `flat`);
 - `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
   directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
@@ -462,7 +467,9 @@ The report `<out>/<unit>.json` has these parts:
   constant.
 
 A path has the inputs of each session: the earlier sessions (`earlier`), each from the storage the one before it left,
-and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit.
+and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit, and
+per unit the missed ways with the most lines behind them: what each needs, and why play did not get there (the closest
+state to the comparison it needs, still improving or not, the reason directed search knows, or what it depends on).
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
 runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime

@@ -16,6 +16,7 @@ import {
   keyMatcher,
   namesIn,
   callsClock,
+  successors,
   unreachableInstructions,
   type AtomValue,
   type Goal,
@@ -390,8 +391,32 @@ export interface UnvisitedBranch {
   /** What directed search found the condition depends on, and the attempts it made. */
   sources: SourceKind[];
   attempts: number;
+  /** The variables, stored keys, asks, and clock the missed way depends on, as far as the data flow shows. */
+  dependsOn: string[];
+  /**
+   * Coverable lines that no explored state ran and that the missed way leads to without passing code a state ran:
+   * how much code waits behind it.
+   */
+  behindLines: number;
+  /** For a variable the missed way compares with a constant: the closest explored state, from when it was a target. */
+  best?: Closest;
   /** For a `clock` way, the shortest path found to it. */
   repro?: Repro;
+}
+
+/** The closest an explored state came to a comparison a missed way needs. */
+export interface Closest {
+  /** The comparison, as `name operator constant`. */
+  needs: string;
+  /** A boolean variable's value is a boolean. */
+  value: number | boolean;
+  /** How far `value` is from the comparison holding, as directed search measures it. */
+  distance: number;
+  /** The session of that state, and the runtime operations done when a state first came that close. */
+  session: number;
+  atOperations: number;
+  /** `improving` when a state got closer than the first one watched, in the last quarter of the run's operations. */
+  trend: "improving" | "flat";
 }
 
 /** A condition way that was missed when directed search first looked at it, and was reached later. */
@@ -1040,6 +1065,23 @@ interface Chain {
   readonly matches: (key: string) => boolean;
 }
 
+/** A comparison of a variable with a constant that a target's missed way needs, and the closest state so far. */
+interface Watch {
+  readonly target: number;
+  readonly name: string;
+  readonly operator: string;
+  readonly constant: number;
+  readonly shown: number | boolean;
+  /** `closer` once a state came closer than the first one watched. */
+  closest: {
+    value: number;
+    distance: number;
+    session: number;
+    operations: number;
+    closer: boolean;
+  } | null;
+}
+
 /** A condition way that directed search aims at. */
 interface Target {
   readonly instruction: number;
@@ -1474,6 +1516,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const laterAttempts: Attempt[] = [];
   const witnesses = new Map<number, Witness>();
   const targets = new Map<number, Target>();
+  /**
+   * For the report, by variable name: the comparisons with a constant that targets' missed ways need, and the closest
+   * state since each became a target. Only read, never steering.
+   */
+  const watched = new Map<string, Watch[]>();
   // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
   /**
@@ -1709,6 +1756,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     nodes.push(node);
     if (later) wallEnd[node.id] = wallClockOf(step.snapshot);
     byState.set(stateKey, node.id);
+    if (watched.size > 0) watch(step.snapshot, start.session);
     if (parent !== null) parent.edges.push(node.id);
     if (!clock && !chosen) remember(step.snapshot, node);
     if (node.status === "failed") {
@@ -1906,6 +1954,26 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     take(list(snapshot.globals));
     for (const frame of list(snapshot.frames)) take(list(frame.bindings));
     return values;
+  };
+
+  /** Keeps each watched comparison's closest state up to date with a new state of session `number`. */
+  const watch = (snapshot: Data, number: number): void => {
+    const values = bindings(snapshot);
+    for (const [name, watches] of watched) {
+      const value = values.get(name);
+      if (value === undefined) continue;
+      for (const entry of watches) {
+        const away = distance(value, entry.operator, entry.constant);
+        if (entry.closest === null || away < entry.closest.distance)
+          entry.closest = {
+            value,
+            distance: away,
+            session: number,
+            operations: session.operations,
+            closer: entry.closest !== null,
+          };
+      }
+    }
   };
 
   /** Per distance target, the lead its closer states share. */
@@ -2275,6 +2343,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         note: null,
       };
       targets.set(code, target);
+      for (const goal of goals) {
+        if (goal.source.kind !== "variable" || goal.comparison === null) continue;
+        const { name } = goal.source;
+        const { operator, constant, shown } = goal.comparison;
+        watched
+          .set(name, watched.get(name) ?? [])
+          .get(name)!
+          .push({ target: code, name, operator, constant, shown, closest: null });
+      }
       scheduled = schedule(code, target) || scheduled;
     });
     /** A next visit from the storage a state left: a minute later, and in the windows of the comparisons read. */
@@ -2922,6 +2999,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
 
   const coverage = lineCoverage(
+    plan,
     instructions,
     files,
     session,
@@ -2933,6 +3011,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     constants,
     fixed,
     targets,
+    watched,
     session.randomChoices,
   );
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
@@ -3555,6 +3634,7 @@ const STORAGE_FIXED =
   "only behind a condition on stored values that this package's saves never meet";
 
 function lineCoverage(
+  plan: Data,
   instructions: readonly Data[],
   files: readonly string[],
   session: Session,
@@ -3563,6 +3643,7 @@ function lineCoverage(
   constants: ReadonlyMap<number, boolean>,
   fixed: ReadonlyMap<number, { value: boolean; reason: string }>,
   targets: ReadonlyMap<number, Target>,
+  watched: ReadonlyMap<string, readonly Watch[]>,
   randomChoices: boolean,
 ): ExploreResult["coverage"] {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
@@ -3658,6 +3739,56 @@ function lineCoverage(
     });
   const coverable = fileCoverage.reduce((sum, file) => sum + file.coverableLines, 0);
   const visited = fileCoverage.reduce((sum, file) => sum + file.visitedLines, 0);
+  // Code behind a missed way: what it leads to through code no state ran. A call goes into the function and on after
+  // it; a return, an end, or a transfer to a computed destination stops the walk, so it stays in the code that way
+  // opens.
+  const ran = (index: number) =>
+    session.visited[index] === 1 ||
+    session.chosenVisited[index] === 1 ||
+    session.clockVisited[index] === 1;
+  const next = successors(plan, instructions, constants);
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind === "callFunction")
+      next[index] = [...next[index]!, Number(instruction.returnInstruction)];
+    else if (
+      instruction.kind === "returnValue" ||
+      instruction.kind === "returnVoid" ||
+      instruction.kind === "end"
+    )
+      next[index] = [];
+    else if (instruction.kind === "transfer" && "value" in record(instruction.destination))
+      next[index] = instruction.mode === "call" ? [index + 1] : [];
+  });
+  const behind = (from: number): number => {
+    if (from < 0 || from >= instructions.length || ran(from)) return 0;
+    const seen = new Set([from]);
+    const found = new Set<string>();
+    const queue = [from];
+    for (let at = queue.pop(); at !== undefined; at = queue.pop()) {
+      const line = lineOf[at];
+      const label = line == null ? undefined : lines.get(files[at]!)?.get(line)?.reach;
+      if (label !== undefined && label !== "play" && label !== "chosen")
+        found.add(`${files[at]}:${line}`);
+      for (const to of next[at] ?? [])
+        if (to >= 0 && to < instructions.length && !ran(to) && !seen.has(to)) {
+          seen.add(to);
+          queue.push(to);
+        }
+    }
+    return found.size;
+  };
+  const watchesOf = new Map<number, Watch[]>();
+  for (const watches of watched.values())
+    for (const entry of watches)
+      watchesOf.set(entry.target, [...(watchesOf.get(entry.target) ?? []), entry]);
+  const sourceText = (source: Goal["source"]): string =>
+    source.kind === "ask"
+      ? `ask at ${files[source.instruction]}:${lineOf[source.instruction] ?? 0}`
+      : source.kind === "storage"
+        ? `stored ${source.key.replaceAll(KEY_PLACEHOLDER, "*")}`
+        : source.kind === "clock"
+          ? "the clock"
+          : source.name;
   const unvisitedBranches: UnvisitedBranch[] = [];
   instructions.forEach((instruction, index) => {
     if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
@@ -3689,6 +3820,27 @@ function lineCoverage(
           ? (directed?.note ?? undefined)
           : undefined;
     const reached = directed?.reach;
+    // The comparison furthest from holding is what keeps the way closed.
+    const closest = (watchesOf.get(index * 2 + way) ?? [])
+      .filter((entry) => entry.closest !== null)
+      .sort((left, right) => right.closest!.distance - left.closest!.distance)[0];
+    const best: Closest | undefined =
+      closest?.closest == null
+        ? undefined
+        : {
+            needs: `${closest.name} ${closest.operator} ${String(closest.shown)}`,
+            value:
+              typeof closest.shown === "boolean"
+                ? closest.closest.value !== 0
+                : closest.closest.value,
+            distance: closest.closest.distance,
+            session: closest.closest.session,
+            atOperations: closest.closest.operations,
+            trend:
+              closest.closest.closer && closest.closest.operations * 4 > session.operations * 3
+                ? "improving"
+                : "flat",
+          };
     unvisitedBranches.push({
       instruction: index,
       kind: instruction.kind === "jumpIfFalse" ? "if" : "loop",
@@ -3702,6 +3854,9 @@ function lineCoverage(
       ...(reason === undefined ? {} : { reason }),
       sources: directed === undefined ? [] : sourceKinds(directed.goals),
       attempts: directed?.attempts ?? 0,
+      dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
+      behindLines: behind(missedTarget ? target : index + 1),
+      ...(best === undefined ? {} : { best }),
       ...(label === "clock" && reached != null ? { repro: reached.repro } : {}),
     });
   });

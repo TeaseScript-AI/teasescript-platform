@@ -57,6 +57,8 @@ import {
 import { packageContentHash } from "./catalog.ts";
 
 const SELF = fileURLToPath(import.meta.url);
+/** Missed ways the summary lists per unit, by the code behind them. */
+const WORKING_TOWARD_ROWS = 8;
 
 /** The search strategies a corpus records, in one order. */
 const STRATEGIES = [
@@ -810,6 +812,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
         `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
         `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
+    lines.push(...workingToward(records(coverage.unvisitedBranches)));
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);
     if (count(engineErrors.count) > 0)
@@ -819,6 +822,43 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** Ways still missed, those with the most code behind them first: what each needs, and why play did not get there. */
+function workingToward(branches: readonly Readonly<Record<string, unknown>>[]): string[] {
+  const shown = branches
+    .filter((branch) => count(branch.behindLines) > 0)
+    .sort((left, right) => count(right.behindLines) - count(left.behindLines))
+    .slice(0, WORKING_TOWARD_ROWS);
+  if (shown.length === 0) return [];
+  return [
+    "- Working toward (the missed ways with the most code behind them):",
+    ...shown.map((branch) => {
+      const written = text(fields(branch.condition).text) || "?";
+      // A switch case's condition reads as its pattern.
+      const condition = /^[-\d."]/u.test(written) ? `case ${written}` : written;
+      const needs =
+        branch.missed === "true" || branch.missed === "enter" ? condition : `not (${condition})`;
+      const best = fields(branch.best);
+      const dependsOn = texts(branch.dependsOn);
+      const why =
+        branch.reach === "unreachable"
+          ? `unreachable: ${text(branch.reason)}`
+          : branch.reach === "clock"
+            ? "reached only at another wall clock time"
+            : branch.best !== undefined
+              ? `${best.trend === "improving" ? "still improving" : "no progress"}: the closest state had ` +
+                `\`${text(best.needs).split(" ")[0]}\` = ${typeof best.value === "boolean" ? String(best.value) : count(best.value)} in session ${count(best.session)}` +
+                `${best.trend === "improving" ? "" : `, no closer after ${count(best.atOperations)} operations`} ` +
+                `(needs \`${text(best.needs)}\`)`
+              : branch.reason !== undefined
+                ? `no progress: ${text(branch.reason)}`
+                : dependsOn.length > 0
+                  ? `no progress; depends on ${dependsOn.join(", ")}`
+                  : "no progress; what it depends on is not traced";
+      return `  - \`${text(branch.path)}:${count(branch.line)}\` needs \`${needs}\` (${count(branch.behindLines)} lines behind): ${why}`;
+    }),
+  ];
 }
 
 /** The earlier sessions of a path read back from a report: none when absent, null when malformed. */
