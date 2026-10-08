@@ -1330,21 +1330,37 @@ function withDeclaredKeys(
 
 /**
  * The types of the values the statements give each variable besides storage reads, by binding (Scope): `null`, a type
- * the importer knows here, or `unknown`.
+ * the importer knows here, also of a copied variable that the script never sets again, or `unknown`.
  */
 function otherValueTypes(statements: readonly IrStatement[]): Map<string, Set<string>> {
   const types = new Map<string, Set<string>>();
-  const add = (binding: string, value: IrExpression): void => {
+  // The type of each variable that the script never sets again: its annotation, its value's, or a read's default.
+  const started = new Map<string, string>();
+  const counts = assignmentCounts(statements);
+  const startType = (value: IrExpression): string | null =>
+    value.kind === "load"
+      ? value.defaultValue === undefined
+        ? null
+        : valueType(value.defaultValue)
+      : valueType(value);
+  const add = (binding: string, value: IrExpression, scope: Scope): void => {
     if (value.kind === "load") return;
     const set = types.get(binding) ?? new Set<string>();
-    set.add(isNullLiteral(value) ? "null" : (valueType(value) ?? "unknown"));
+    const copied = value.kind === "variable" ? started.get(scope.resolve(value.name)) : undefined;
+    set.add(isNullLiteral(value) ? "null" : (copied ?? valueType(value) ?? "unknown"));
     types.set(binding, set);
   };
   const block = (items: readonly IrStatement[], scope: Scope): void => {
     for (const item of items) {
-      if (item.kind === "let") add(scope.declare(item.name, item.span), item.value);
+      if (item.kind === "let") {
+        const binding = scope.declare(item.name, item.span);
+        add(binding, item.value, scope);
+        const type = item.type ?? startType(item.value);
+        if (type !== null && counts.get(item.name) === 1 && !/\?$|\bnull\b/u.test(type))
+          started.set(binding, type);
+      }
       if (item.kind === "assign" && item.operator === "=" && item.target.kind === "variable")
-        add(scope.resolve(item.target.name), item.value);
+        add(scope.resolve(item.target.name), item.value, scope);
       withNestedBlocks(item, (body) => {
         block(body, scope.inner(item));
         return body;
