@@ -494,11 +494,12 @@ export function withStorageDefaults(
       });
     scan(program.statements);
   }
-  // A legacy loadString or loadBoolean read of a key that values of another type are saved under too, or that reads of
-  // the other type read too, reads the value as stored and turns it into the type legacy read (withTypedTextReads).
+  // A legacy loadString or loadBoolean read of a key that values of another type are saved under too, or, where the
+  // package saves nothing under it, that reads of the other type read too, reads the value as stored and turns it into
+  // the type legacy read (withTypedTextReads).
   const routed = new Map<string, Set<string>>();
   for (const [key, types] of read) {
-    const held = [...(saved.get(key) ?? []), ...types];
+    const held = saved.has(key) ? [...saved.get(key)!] : [...types];
     const kept = [...types].filter((type) => held.every((other) => other === type));
     if (kept.length === types.size) continue;
     routed.set(key, new Set([...types].filter((type) => !kept.includes(type))));

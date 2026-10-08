@@ -110,7 +110,7 @@ def work = { ->
     if (getBoolean("Ask?")) { def v = getString("Your name?", "x"); if (v == null) show("No name.") }
 }
 work()
-// A key read both as text and as a flag reads the stored value and turns it into each.
+// A flag read of a key that the package saves text under, and reads as text too, reads the flag from the text.
 save("game.choice", "true")
 def choiceText = loadString("game.choice")
 if (loadBoolean("game.choice")) show("Chosen " + choiceText)

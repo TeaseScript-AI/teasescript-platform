@@ -244,10 +244,9 @@ function work {
   }
 }
 work()
-// A key read both as text and as a flag reads the stored value and turns it into each.
+// A flag read of a key that the package saves text under, and reads as text too, reads the flag from the text.
 save "true" as "game.choice"
-// NOTE SX_LOAD_STRING_TEXT line 115: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text.
-let choiceText = "${load("game.choice", default: sexscriptLegacyValue(""))}"
+let choiceText = load "game.choice", default: ""
 // NOTE SX_LOAD_BOOLEAN_TEXT line 116: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
 if sexscriptLegacyBooleanText(load("game.choice", default: "")) == true {
   say "Chosen ${choiceText}"
