@@ -447,7 +447,7 @@ test("adjusting remaining changes only the current round and zero expires it imm
       "t.remaining = 20 s",
       'say "${t.state} ${t.remaining}"',
       "t.remaining -= 1 h",
-      'say "${t.state} ${t.remaining} fired ${fired}"',
+      'say "${t.state} ${t.remaining} fired ${fired}", instant',
       "wait 1",
       'say "fired ${fired}"',
       "exit",
@@ -519,7 +519,7 @@ test("an expiry block interrupts an unanswered ask and the prompt returns afterw
   const session = new Session(
     [
       "let t = timer async 5 {",
-      '  say "Hurry up."',
+      '  say "Hurry up.", instant',
       "  wait 2",
       '  say "Still waiting."',
       "}",
@@ -1015,7 +1015,7 @@ test("late observations run expiry blocks at their due scene time, like on-time 
   // Scene-time replay makes the complete result independent of observation cadence, not only the output.
   const scripts = [
     ...cases.map(([source]) => source),
-    'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
+    'say "a"\nwait 2\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
   ];
   for (const source of scripts) {
     const onTime = new Session(source, { pacing: true });
@@ -1027,7 +1027,7 @@ test("late observations run expiry blocks at their due scene time, like on-time 
 });
 
 test("late observations replay the script at scene time and reject an unexplained observed-time lead", () => {
-  const late = new Session('wait 1\nsay "done"\nwait 1\nsay "later"\nexit').at(5_000);
+  const late = new Session('wait 1\nsay "done", instant\nwait 1\nsay "later"\nexit').at(5_000);
   const delays = late.events.flatMap((event) =>
     event.kind === "actionCompleted" && event.settlement.actionKind === "delay"
       ? [event.settlement.completedAtMs]
@@ -1035,7 +1035,7 @@ test("late observations replay the script at scene time and reject an unexplaine
   );
   assert.deepEqual(delays, [1_000, 2_000], "every delay settles at its deadline");
   assert.deepEqual(late.said(), ["done", "later"]);
-  const onTime = new Session('wait 1\nsay "done"\nwait 1\nsay "later"\nexit');
+  const onTime = new Session('wait 1\nsay "done", instant\nwait 1\nsay "later"\nexit');
   for (const nowMs of [1_000, 2_000, 5_000]) onTime.at(nowMs);
   assert.deepEqual(late.snapshot, onTime.snapshot);
 

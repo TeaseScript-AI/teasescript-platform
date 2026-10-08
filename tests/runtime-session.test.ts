@@ -51,7 +51,7 @@ const CHOICE_LOOP = `let rounds = 0
 while rounds < 100 {
     let picked = choose "left", "right"
     rounds += 1
-    say "Round \${rounds}: \${picked}"
+    say "Round \${rounds}: \${picked}", instant
     wait 1
 }
 exit

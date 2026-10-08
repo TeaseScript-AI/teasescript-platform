@@ -154,7 +154,7 @@ test("the getters read the captured wall clock through the captured zone as scen
       session(
         [
           "say getTimestamp().toISO()",
-          "say getTime().toISO()",
+          "say getTime().toISO(), instant",
           "wait 1 s",
           "say getTimestamp().toISO()",
           "say getTime().toISO()",
@@ -176,7 +176,7 @@ test("the getters read the captured wall clock through the captured zone as scen
 test("a late observation gives the same events and state as observing every deadline on time", () => {
   const plain = runSession(
     session(
-      "wait 1 s\nsay getTimestamp().toISO()\nwait 1.0004 s\nsay getTimestamp().toISO()\nexit",
+      "wait 1 s\nsay getTimestamp().toISO(), instant\nwait 1.0004 s\nsay getTimestamp().toISO()\nexit",
     ),
   );
   const onTime = observe(observe(copy(plain), 1_000), 2_000.4);
@@ -192,7 +192,7 @@ test("a late observation gives the same events and state as observing every dead
       session(
         [
           "timer async 50 ms {",
-          "    say getTimestamp().toISO()",
+          "    say getTimestamp().toISO(), instant",
           "    wait 75 ms",
           "    say getTimestamp().toISO()",
           "}",
