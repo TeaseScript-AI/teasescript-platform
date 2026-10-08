@@ -138,11 +138,17 @@ test("a dynamic prefill is evaluated once after the hint and survives checkpoint
 
 test("a prefill the compiler knows is wrong is a compile error that names the fix", () => {
   const cases = [
-    // The earlier name of an ask's prefill (owner decision on #512, 2026-10-08).
+    // The earlier name of an ask's prefill (owner decision on #512, 2026-10-08), also written first.
     [
       'let answer = askText "Name?", default: "Ada"',
       "TSP032",
       "askText has no 'default:'; use 'prefill:'.",
+    ],
+    ['let answer = askText default: "Ada"', "TSP032", "askText has no 'default:'; use 'prefill:'."],
+    [
+      'let answer = askBooleans defaults: [true], texts: ["A"]',
+      "TSP032",
+      "askBooleans has no 'defaults:'; use 'prefill:'.",
     ],
     [
       "let answer = askNumber(default: 3)",

@@ -1688,9 +1688,9 @@ export class InstructionCompiler {
 
   /**
    * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
-   * then opens its two buttons. The question, the hint, and the default are evaluated once, in that written order,
-   * before the question is said, so a default that asks itself comes first. The question is said by the requesting
-   * speaker, captured before any operand.
+   * then opens its two buttons. The question and the options are evaluated once, in written order, before the question
+   * is said, so a prefill that asks itself comes first. The question is said by the requesting speaker, captured before
+   * any operand.
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     if (expression.interactionKind === "form" || expression.interactionKind === "booleans")

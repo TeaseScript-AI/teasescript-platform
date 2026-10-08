@@ -141,8 +141,8 @@ test("askBoolean evaluates runtime operands once, in written order, and keeps it
 
 test("a for loop goes through the answers of askBooleans in both forms", () => {
   for (const ask of [
-    'askBooleans("Choose", texts: ["A", "B"], defaults: [true, false])',
-    'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]',
+    'askBooleans("Choose", texts: ["A", "B"], prefill: [true, false])',
+    'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]',
   ]) {
     const session = createPlayerRuntimeSession(
       `for value in ${ask} {\n    say "\${value}", instant\n}\nexit`,

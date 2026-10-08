@@ -3683,11 +3683,14 @@ class Parser {
 
     if (interactionKind !== "choice") {
       const names = NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS;
+      // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
+      const removed = removedPrefillName(interactionKind);
+      const recognized = removed === null ? names : [...names, removed];
       const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
         !this.#atStorageDelimiter() &&
-        this.#askOptionAt(0, names) === null
+        this.#askOptionAt(0, recognized) === null
           ? yield* parseChild(this.#parseOr())
           : null;
       // The named options follow in any order, each after a comma, or first without a question.
@@ -3695,19 +3698,14 @@ class Parser {
       let end = question?.span ?? speaker?.span ?? command.span;
       let offset = question === null ? 0 : this.#offsetAfterComma();
       for (;;) {
-        if (offset === null && this.#askOptionAt(0, names) !== null) {
+        if (offset === null && this.#askOptionAt(0, recognized) !== null) {
           this.#reportInsertion(
             parserDiagnosticCode.expectedDelimiter,
             `Expected ',' before '${this.#peek().lexeme}:'.`,
           );
           offset = 0;
         }
-        const removed = removedPrefillName(interactionKind);
-        const option =
-          offset === null
-            ? null
-            : (this.#askOptionAt(offset, names) ??
-              (removed === null ? null : this.#askOptionAt(offset, [removed])));
+        const option = offset === null ? null : this.#askOptionAt(offset, recognized);
         if (option === null) {
           // A form names every argument, as do askBoolean and askBooleans, so another `name:` after a comma is a
           // misspelled one.
@@ -3879,7 +3877,7 @@ class Parser {
   }
 
   /**
-   * `askText [as speaker] ([question][, hint: text][, default: value])` and the other basic asks: the parentheses hold
+   * `askText [as speaker] ([question][, hint: text][, prefill: value])` and the other basic asks: the parentheses hold
    * the arguments of the compact form, so `)` ends the ask and both forms give the same interaction.
    */
   *#parseBoundedAsk(
