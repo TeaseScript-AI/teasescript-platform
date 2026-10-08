@@ -207,7 +207,7 @@ say "Twice ${twiceValue.join(",")}"
 // `shot` of both blocks as one variable, of unknown type.
 say "Replay?"
 if (choose yes: "Yes", no: "No") == "yes" {
-  // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+  // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
   let shot = load "game.shot", default: sexscriptLegacyValue(null)
   say "Saved ${shot}"
 }

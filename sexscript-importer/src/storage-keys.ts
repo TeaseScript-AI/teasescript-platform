@@ -41,6 +41,7 @@ export function withFillableLoads(statements: IrStatement[], shared: boolean): I
     if (value.kind === "load" && use === "usedUp") usedUp.add(value);
   };
   const assigned = assignmentCounts(statements);
+  const strict = strictNames(statements);
   const block = (items: readonly IrStatement[]): void => {
     for (const item of items) {
       statementUses(item, visit, into);
@@ -59,10 +60,13 @@ export function withFillableLoads(statements: IrStatement[], shared: boolean): I
     const target = shared ? undefined : into.get(value);
     if (usedUp.has(value) || (target !== undefined && !passed.has(target)))
       return { ...next, fill: true };
-    // A variable read so that the script sets again and uses as a value: legacy filled it in before using it, which
-    // the compiler cannot prove for a declared optional type (withDeclaredKeys).
+    // A variable read so that the script sets again and uses where null fails the compiler's check: legacy filled it
+    // in before using it, which the compiler cannot prove for a declared optional type (withDeclaredKeys).
     const variable = into.get(value);
-    return variable !== undefined && (assigned.get(variable) ?? 0) > 1 && usedUpNames.has(variable)
+    return variable !== undefined &&
+      (assigned.get(variable) ?? 0) > 1 &&
+      usedUpNames.has(variable) &&
+      strict.has(variable)
       ? { ...next, open: true }
       : next;
   };
@@ -70,6 +74,48 @@ export function withFillableLoads(statements: IrStatement[], shared: boolean): I
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, marked), mark));
   return marked(statements);
 }
+
+/**
+ * The names, in the whole file, of variables used where a null fails the compiler's check of an optional type: as the
+ * receiver of a member, method, or index, in arithmetic, an order comparison, or `and`, `or`, `not`, as a number
+ * built-in's argument, as the collection of a loop or a bare condition, or put into a list.
+ */
+function strictNames(statements: readonly IrStatement[]): Set<string> {
+  const names = new Set<string>();
+  const strict = (value: IrExpression | undefined): void => {
+    if (value?.kind === "variable") names.add(value.name);
+  };
+  const visit = (value: IrExpression): IrExpression => {
+    if (value.kind === "property" || value.kind === "index" || value.kind === "methodCall")
+      strict(value.target);
+    if (value.kind === "methodCall" && LIST_PUTS.has(value.name)) value.arguments.forEach(strict);
+    if (value.kind === "binary" && USED_UP_OPERATORS.has(value.operator)) {
+      strict(value.left);
+      strict(value.right);
+    }
+    if (value.kind === "unary") strict(value.value);
+    if (value.kind === "call" && value.local !== true && NUMERIC_CALLS.has(value.name))
+      value.positional.forEach(strict);
+    return mapChildren(value, visit);
+  };
+  const block = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "if" || item.kind === "while") strict(item.condition);
+      if (item.kind === "for") strict(item.collection);
+      if (item.kind === "assign" && item.target.kind === "index") strict(item.value);
+      mapOwnExpressions(item, visit);
+      withNestedBlocks(item, (body) => {
+        block(body);
+        return body;
+      });
+    }
+  };
+  block(statements);
+  return names;
+}
+
+/** List methods that put a value into a list, whose type a null may not fit. */
+const LIST_PUTS = new Set(["add", "insert", "push"]);
 
 /** How often each name is declared or set with `=`, by name in the whole file. */
 function assignmentCounts(statements: readonly IrStatement[]): Map<string, number> {
