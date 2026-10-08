@@ -1232,6 +1232,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let nextFromCompleted = 0;
   /** Storage that started a next session without a target. */
   const startedFrom = new Set<string>([JSON.stringify([])]);
+  /**
+   * With forward time: the storages next sessions started from, with the first state of the one a minute later and
+   * its wall clock, to start more in windows sessions read later; and how many comparisons sessions had read then.
+   */
+  const sessionOrigins: {
+    readonly key: string;
+    readonly entry: Left;
+    readonly snapshot: Data;
+    readonly now: number;
+    readonly begun: number;
+  }[] = [];
+  let learnedAtOrigins = 0;
   let transitions = 0;
   /** Whether the step {@link transition} last took reached something new, for the productive expansions. */
   let lastStepNew = false;
@@ -1913,12 +1925,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
         const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
         const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
+        const now = wallEnd[first.node.id]!;
+        if (snapshot !== null) sessionOrigins.push({ key, entry, snapshot, now, begun });
         const steps =
           snapshot === null
             ? []
-            : sessionGaps(snapshot, wallEnd[first.node.id]!, `storage ${key}`).map(
-                (gap) => wallEnd[first.node.id]! + gap - begun,
-              );
+            : sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
         for (const gap of steps)
           startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
         timeStepsTaken.sessions += steps.length;
@@ -1936,6 +1948,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         );
       directedWork += session.operations - work;
       scheduled = true;
+    }
+    // Comparisons sessions read since: the storages next sessions started from get their windows too.
+    const learned = [...clockAfter.values()].reduce((sum, after) => sum + after.size, 0);
+    if (later && learned > learnedAtOrigins) {
+      learnedAtOrigins = learned;
+      for (const { key, entry, snapshot, now, begun } of sessionOrigins) {
+        if (!withinShare()) break;
+        const work = session.operations;
+        const steps = sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
+        for (const gap of steps)
+          startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
+        timeStepsTaken.sessions += steps.length;
+        directedWork += session.operations - work;
+        scheduled = scheduled || steps.length > 0;
+      }
     }
     return scheduled;
   };

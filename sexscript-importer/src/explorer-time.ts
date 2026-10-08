@@ -546,9 +546,13 @@ function callAt(node: Data, reading: Reading): Value {
     const [left, right] = list(node.arguments).map((argument) => valueAt(argument.value, reading));
     if (left === undefined || right === undefined) return undefined;
     if (left === null || right === null) return left === right ? 0 : left === null ? -1 : 1;
+    // Values of one kind only, as the runtime compares them: numbers, texts, or moments or durations alike.
+    const kindOf = (value: Value) =>
+      typeof value === "object" && value !== null ? value.kind : typeof value;
+    if (kindOf(left) !== kindOf(right)) return undefined;
     const a = typeof left === "string" ? left : magnitude(left);
     const b = typeof right === "string" ? right : magnitude(right);
-    if (a === undefined || b === undefined || typeof a !== typeof b) return undefined;
+    if (a === undefined || b === undefined) return undefined;
     return a < b ? -1 : a > b ? 1 : 0;
   }
   if (callee.kind === "property") {
@@ -724,14 +728,22 @@ export function flipGap(
     context,
     inside: new Map<string, Definition | null>(),
   };
+  // The converter's compare helper against 0 changes where its two values meet: measure those instead.
+  const compared = helperOperands(comparison);
+  const subject = compared?.[0] ?? comparison.left;
   const apart = (at: number, right: unknown) => {
     const then = { ...reading, now: at, memo: new Map<Definition, Value>() };
-    const left = magnitude(valueAt(comparison.left, then));
+    const left = magnitude(valueAt(subject, then));
     const bound = magnitude(valueAt(right, then));
     return left === undefined || bound === undefined ? undefined : left - bound;
   };
   const range = record(comparison.right);
-  const bounds = comparison.operator === "in" ? [range.start, range.end] : [comparison.right];
+  const bounds =
+    compared !== null
+      ? [compared[1]]
+      : comparison.operator === "in"
+        ? [range.start, range.end]
+        : [comparison.right];
   const meetings: number[] = [];
   for (const bound of bounds) {
     const before = apart(now, bound);
@@ -759,6 +771,24 @@ export function flipGap(
     else low = middle;
   }
   return high + MARGIN <= HORIZON && flipped(now + high + MARGIN) ? high + MARGIN : high;
+}
+
+/**
+ * The two values of a comparison of the converter's compare helper with 0 (`sexscriptLegacyCompare(a, b) <= 0`, also
+ * through the temporary that holds its result), which come out as `a <= b`; null for another comparison.
+ */
+function helperOperands(comparison: ClockComparison): [unknown, unknown] | null {
+  const call = (side: Data): Data | null => {
+    const value =
+      side.kind === "temporary" && typeof side.temporaryId === "number"
+        ? record(comparison.temporaries.get(side.temporaryId))
+        : side;
+    return value.kind === "call" && calleeName(value) === COMPARE_HELPER ? value : null;
+  };
+  const zero = (side: Data) => side.kind === "literal" && side.value === 0;
+  const found = zero(comparison.right) ? call(comparison.left) : null;
+  const args = found === null ? [] : list(found.arguments);
+  return args.length === 2 ? [args[0]!.value, args[1]!.value] : null;
 }
 
 /** A value's size as a number: a number itself, or the milliseconds of a duration or moment. */

@@ -666,6 +666,14 @@ test(
         true,
       ],
       [
+        "converted timestamp equality",
+        "global function sexscriptLegacyCompare(left, right) {\n  if left == null {\n    if right == null {\n" +
+          "      return 0\n    }\n    return -1\n  }\n  if right == null {\n    return 1\n  }\n  if left < right {\n" +
+          '    return -1\n  }\n  if left > right {\n    return 1\n  }\n  return 0\n}\nshowButton "Check"\n' +
+          'if sexscriptLegacyCompare(getTimestamp().toSeconds(), 1790943000) == 0 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
         "time taken against a bound from the clock",
         "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
           'showButton "Check"\nlet took = getTimestamp().toSeconds() - start\ntook = took * 2\nlet bound = limit()\n' +
@@ -718,12 +726,13 @@ test(
       assert.equal(holdsAt(comparison!, model, bound, EPOCH_MS), undefined, update);
     }
     // A return window learned in an earlier session, from a time away the session computes when it starts: a next
-    // session starts inside it, after "too soon" and before "too late", which neither a minute nor a day later is.
-    {
+    // session starts inside it, after "too soon" and before "too late", which neither a minute nor a day later is; also
+    // when a visit outside it leaves the storage as it was, so that the window is learned from the same storage.
+    for (const outside of ["", "    exit\n"]) {
       const source =
         'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
-        'if last > 0 {\n  if away < 7200 {\n    say "Too soon."\n' +
-        '  } else if away > 18000 {\n    say "Too late."\n  } else {\n    say "Welcome back."\n  }\n}\n' +
+        `if last > 0 {\n  if away < 7200 {\n    say "Too soon."\n${outside}` +
+        `  } else if away > 18000 {\n    say "Too late."\n${outside}  } else {\n    say "Welcome back."\n  }\n}\n` +
         'save getTimestamp().toSeconds() as "last"\nexit\n';
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
@@ -741,6 +750,7 @@ test(
           const [from = 0, to = from] = range.lines.split("-").map(Number);
           return welcome >= from && welcome <= to;
         }),
+        outside,
       );
       assert.equal(result.coverage.reach.clock, 0);
     }
@@ -922,6 +932,19 @@ test(
       }),
     );
     assert.equal(result.coverage.reach.clock, 0);
+    // Sessions by number: first sessions (also those started later or at another clock), and next ones from what
+    // sessions stored; each counts its completions.
+    const { started, completed } = result.search.bySession;
+    assert.ok(started[0]! >= 1 && started.length >= 2);
+    assert.equal(
+      started.reduce((sum, value) => sum + value, 0),
+      result.search.sessions,
+    );
+    assert.equal(completed.length, started.length);
+    assert.equal(
+      completed.reduce((sum, value) => sum + value, 0),
+      result.endStates.completed,
+    );
     // The corpus keeps the path, with its later input, and replaying it says "Late.".
     const kept = result.corpus!.entries.find((entry) =>
       entry.inputs.some((input) => input.kind === "later"),
@@ -1070,6 +1093,9 @@ test(
     const unreached = new Set([deep, deep + 1, back]);
     const regions = map.regions((at) => unreached.has(at));
     assert.deepEqual(regions, [[deep, deep + 1, back].sort((left, right) => left - right)]);
+    // With the function's return reached, its code and the call's continuation are apart.
+    const apart = map.regions((at) => at === deep || at === back);
+    assert.equal(apart.length, 2);
   },
 );
 

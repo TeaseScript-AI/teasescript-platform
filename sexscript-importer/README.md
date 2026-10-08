@@ -356,9 +356,10 @@ deterministic measure of what steps cost.
 
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
-`getTimestamp().toSeconds() - lastVisit > day`), also
-through variables computed from the clock in one way and helpers that return one part of the date or time (exactly
-when they only return it; a helper that adjusts it is an approximation), and evaluates it in a state at a later wall
+`getTimestamp().toSeconds() - lastVisit > day`), also through variables computed from the clock in one way, helpers
+that return one part of the date or time (exactly when they only return it; a helper that adjusts it is an
+approximation), and the converted scripts' `sexscriptLegacyCompare` (where its two values meet), and evaluates it in a
+state at a later wall
 clock, with the state's variables and stored values. A state that waits where such a condition was read next gets
 time steps: `later` inputs to just past the first moment, within 400 days, at which one of those comparisons comes out
 the other way, as far as the explorer finds it: at the second, minute, hour, or day boundaries where a compared part
@@ -367,7 +368,10 @@ halving (the next 18:01, the next weekday, saved time plus a day and a minute, i
 once per cell and outcome; where the condition was first read, the state the step left, or the session start, gets
 them too. Their outcomes at a state's wall clock are part of its cell, so a new outcome or change of one counts as
 reaching something new. A later session starts a minute after the wall clock where the state it continues stands,
-and also at the time steps of the clock conditions its first state reads; a session chain keeps the gap of the session
+and also in the windows of every clock comparison sessions have read so far, as its first state would compute them
+(a return window such as back too soon and too late, from a stored time of the last visit): just past and just before
+each moment one changes, and midway between two, each once per outcome of them all, at most eight from a storage, and
+again from the same storage when sessions read more comparisons later; a session chain keeps the gap of the session
 it continues. A condition that compares how long the player took between two clock reads (a reaction time held in a
 variable, against a constant or another value) gets no forward time: think times at the button between the reads
 reach it, and coming back later changes nothing. For a clock condition the explorer cannot read in full, or reads
