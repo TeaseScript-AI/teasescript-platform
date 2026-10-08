@@ -790,7 +790,11 @@ test(
       writeFileSync(main, 'save("level", 3)\nreturn "pack/next.groovy"\n');
       // Without the entry's saved level, the comparison would fail at runtime.
       writeFileSync(next, 'if (loadInteger("level") > 2) show("High level")\n');
-      writeFileSync(unreached, 'show("Only isolated")\n');
+      // A key that only a loop condition reads is declared in main.tease, which an isolated run keeps.
+      writeFileSync(
+        unreached,
+        'show("Only isolated")\nwhile (loadBoolean("seen") == null) save("seen", true)\n',
+      );
       const files = await Promise.all(
         [main, next, unreached].map((file) => parseGroovySource(file)),
       );
