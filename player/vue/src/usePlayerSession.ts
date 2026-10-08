@@ -1,16 +1,19 @@
 import { computed, ref, shallowRef, watch } from "vue";
-import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
+import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import { createBrowserCaptureHost, browserMediaUrls } from "../../browser-capture.js";
 import { CaptureDevice } from "../../capture-device.js";
 import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
   isCapturedMediaReference,
+  type CapturedMediaRecord,
   type CapturedMediaRepository,
 } from "../../captured-media.js";
 import {
   browserCapturedMediaLocks,
   capturedMediaStorage,
+  withCapturedMedia,
+  type CapturedMediaStorage,
 } from "../../captured-media-persistence.js";
 import {
   browserImageDecoder,
@@ -32,9 +35,12 @@ import {
   playerRuntimeMediaOrigin,
   playerRuntimePermanentButtons,
   playerRuntimeSnapshot,
+  playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
+  restorePlayerRuntimeSessionAt,
+  setPlayerRuntimeDebugMode,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -52,6 +58,15 @@ import {
 } from "../../debug-history.js";
 import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
 import { DebugRecorder } from "../../debug-recorder.js";
+import {
+  capturedMediaReferencesInJson,
+  keptPhotoReferences,
+  keptSession,
+  memoryKeptRoomStore,
+  memoryKeptSessionStore,
+  type KeptRoomStore,
+  type KeptSessionStore,
+} from "../../kept-sessions.js";
 import { RuntimeDebugContext } from "../../../src/index.js";
 import type { SavedDataHost } from "../../saved-data.js";
 import { playerBuildIdentity } from "./buildIdentity";
@@ -76,6 +91,8 @@ import {
 import {
   validateScriptStorageEntries,
   type CapturedMediaAdmission,
+  type InstructionPlan,
+  type InterpreterEvent,
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
   type TemporalContext,
@@ -128,6 +145,19 @@ export interface PlayerSessionOptions {
    * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
    */
   temporalContext?: () => TemporalContext;
+  /**
+   * Where the script's session is kept, so that a reload or a later visit in this browser continues it (PLAYER-UI
+   * "Session start and user activation"); in this page's memory by default. Only a script with storage that the host
+   * prepares with `prepareScript` keeps one.
+   */
+  keptSessions?: KeptSessionStore;
+  /**
+   * Where the debug rooms of this browser's scripts are kept (DEBUGGER.md "Debug room"): each with its own session,
+   * saved values, and photos; in this page's memory by default.
+   */
+  debugRooms?: KeptRoomStore;
+  /** The room the page opens (DEBUGGER.md "Debug room"): the script's own, `normal` by default, or its debug room. */
+  room?: "normal" | "debug";
   /** Opens where Debug's rewind history spills snapshots; IndexedDB by default, `null` keeps them in memory. */
   debugHistorySpill?: () => Promise<DebugHistorySpill | null>;
   /** Characters of state JSON a rewind history keeps in memory before it spills; diagnostic tuning for tests. */
@@ -137,15 +167,18 @@ export interface PlayerSessionOptions {
 type Activation = {
   readonly kind: "start" | "continue";
   readonly begin: () => PlayerRuntimeSession;
+  /** The marks a continued session had, which it keeps. */
+  readonly marks?: DebugHistoryMarks;
 };
 
 /**
- * Creates a new session at Start; pass `recording` on to `createPlayerRuntimeSession`, so a debug export can replay it
- * and, while Debug runs, its value trace records it from the start.
+ * Creates a new session at Start; pass `recording` on to `createPlayerRuntimeSession`, so a debug export can replay it,
+ * while Debug runs its value trace records it from the start, and the script reads whether Debug is on.
  */
 export type PlayerSessionStart = (recording: {
   readonly recorder: DebugRecorder;
   readonly debugTrace?: RuntimeDebugContext;
+  readonly debugMode: boolean;
 }) => PlayerRuntimeSession;
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
@@ -184,9 +217,104 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const capturedMediaPersistence =
     options.scriptStorage &&
     (options.capabilities?.camera === true || options.capturedMedia !== undefined)
-      ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
+      ? capturedMediaStorage(
+          options.scriptStorage,
+          capturedMedia,
+          browserCapturedMediaLocks(),
+          keptPhotoReferences(options.keptSessions),
+        )
       : undefined;
-  const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
+  // The script's own saved data, which the debug room leaves as they are.
+  const normalStorage = capturedMediaPersistence ?? options.scriptStorage;
+  // The room shown, whose session, saved values, and photos are in use (DEBUGGER.md "Debug room"): the script's own,
+  // `normal`, or its debug room, `debug`, which the page's URL opens and Debug on in the normal room goes on in. Only a
+  // script with storage has a debug room.
+  const room = ref<"normal" | "debug">(
+    options.room === "debug" && normalStorage !== undefined ? "debug" : "normal",
+  );
+  // Whether Debug is on, which the script reads as `debugMode`.
+  let debugMode = false;
+  // The script's debug room, or `null` without one, and whether it keeps a session.
+  let debugRooms = options.debugRooms ?? memoryKeptRoomStore();
+  const debugRoom = shallowRef<{ readonly session: boolean } | null>(null);
+  let debugRoomStorage: CapturedMediaStorage | null = null;
+  // Where storage operations go: the provider in use, or a switch to another one, which operations issued meanwhile wait
+  // for, in issue order.
+  let storageRoute: ScriptStorageProvider | Promise<ScriptStorageProvider> | undefined =
+    normalStorage;
+  const routed = <T>(operation: (provider: ScriptStorageProvider) => Promise<T>): Promise<T> => {
+    const route = storageRoute!;
+    return route instanceof Promise ? route.then(operation) : operation(route);
+  };
+  const storageProvider: ScriptStorageProvider | undefined = normalStorage && {
+    scope: normalStorage.scope,
+    load: () => routed((provider) => provider.load()),
+    write: (key, value) => routed((provider) => provider.write(key, value)),
+    replace: (entries) => routed((provider) => provider.replace(entries)),
+    clear: () => routed((provider) => provider.clear()),
+  };
+  /**
+   * Sends storage operations where `next` resolves from now on, once the operations issued before have finished where
+   * they were issued. `next` must not reject.
+   */
+  function switchStorage(next: () => Promise<ScriptStorageProvider>): Promise<void> {
+    const previous = storageRoute!;
+    const switched = (async () => {
+      const provider = await previous;
+      await (provider === debugRoomStorage ? debugRoomStorage : capturedMediaPersistence)?.flush();
+      return next();
+    })();
+    storageRoute = switched;
+    return switched.then((provider) => {
+      if (storageRoute === switched) storageRoute = provider;
+    });
+  }
+  /** Sends saved values and photos to the scope's debug room, which exists; `durable` are its photos this Player holds. */
+  function enterDebugRoom(
+    scope: string,
+    state: { readonly session: boolean },
+    durable: ReadonlySet<string>,
+  ): ScriptStorageProvider {
+    capturedMedia.useRepository(debugRooms.media, durable);
+    debugRoomStorage = withCapturedMedia(debugRooms.values(scope), capturedMedia);
+    debugRoom.value = state;
+    return debugRoomStorage;
+  }
+  // The room the page opens is in use before a session is prepared; the debug room is made from a copy of the script's
+  // own saved data when there is none yet.
+  if (normalStorage !== undefined)
+    void switchStorage(async () => {
+      debugRoom.value = await debugRooms.read(normalStorage.scope).catch(() => null);
+      if (room.value === "normal") return normalStorage;
+      const durable =
+        debugRoom.value === null
+          ? await createDebugRoom(normalStorage.scope, false)
+          : new Set<string>();
+      return enterDebugRoom(normalStorage.scope, debugRoom.value ?? { session: false }, durable);
+    });
+  // Every change this Player makes to the stored values goes through here, which keeps the values the next Start loads
+  // (`storedEntries`) equal to what the provider holds, so Play again starts without reading storage again. A failed
+  // change leaves them as they were; session-local values (`null`) stay session-local.
+  const scriptStorage: ScriptStorageProvider | undefined = storageProvider && {
+    scope: storageProvider.scope,
+    load: () => storageProvider.load(),
+    write: (key, value) =>
+      seeding(storageProvider.write(key, value), () => seedNextStart(key, value)),
+    replace: (entries) =>
+      seeding(storageProvider.replace(entries), () => {
+        if (storedEntries.value !== null) storedEntries.value = [...entries];
+      }),
+    clear: () =>
+      seeding(storageProvider.clear(), () => {
+        if (storedEntries.value !== null) storedEntries.value = [];
+      }),
+  };
+  // Seeds once the provider stored the change, before its caller learns of it, and hands the caller the provider's own
+  // promise, so the change settles for it exactly as it would without seeding.
+  function seeding(change: Promise<void>, seed: () => void): Promise<void> {
+    change.then(seed, () => {});
+    return change;
+  }
   // Changes whenever the session camera may have opened, failed, ended, or been released.
   const cameraRevision = ref(0);
   const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
@@ -431,8 +559,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   let activationToken = 0;
-  // The latest Start, offered again after an import replaced the saved data.
-  let lastStart: PlayerSessionStart | null = null;
+  // The latest Start, offered again after an import replaced the saved data, and by Play again.
+  const lastStart = shallowRef<PlayerSessionStart | null>(null);
+  // The source text of each file of the script Start runs, by path, when its host supplied it.
+  let scriptSources: ReadonlyMap<string, string> = new Map();
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
@@ -448,7 +578,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     captureCamera.release();
     // Issued saves still finish and store their photos before the live lock and the session media are released.
-    void (capturedMediaPersistence?.close() ?? Promise.resolve()).finally(() =>
+    void Promise.all([capturedMediaPersistence?.close(), debugRoomStorage?.drain()]).finally(() =>
       capturedMedia.close(),
     );
   });
@@ -533,7 +663,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the script's own write waits for the host, an edit is not taken: it would have to come between that write and the
   // script. A write the script issues while an edit is being stored settles as usual first.
   let editChain: Promise<unknown> = Promise.resolve();
-  /** Puts a stored edit into the values the next Start loads, as the provider now holds them. */
+  /** Puts a stored value into the values the next Start loads, as the provider now holds them; see `scriptStorage`. */
   function seedNextStart(key: string, value: SerializableRuntimeValue) {
     const entries = storedEntries.value;
     if (entries === null) return;
@@ -636,8 +766,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         return failed("The change could not be saved in this browser. Nothing changed.");
       }
       savedDataRevision.value++;
-      // The next Start loads the stored values as they are now.
-      seedNextStart(key, value);
       while (
         !retired() &&
         session.value !== null &&
@@ -648,10 +776,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       scriptWritesStored.delete(stored);
     }
     if (retired()) return { kind: "saved", live: false };
-    if (stored.has(key)) {
-      seedNextStart(key, stored.get(key)!);
-      return { kind: "overtaken" };
-    }
+    if (stored.has(key)) return { kind: "overtaken" };
     if (!liveSession()) return { kind: "saved", live: false };
     const latest = session.value!;
     const edited = applyPlayerRuntimeStorageEdit(latest, { key, value });
@@ -683,7 +808,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     clearing.value = true;
     try {
       await scriptStorage.clear();
-      storedEntries.value = [];
       savedDataRevision.value++;
       // Debug's rewind could restore the saved data cleared now, so its history ends.
       rewindRetirements.value++;
@@ -703,10 +827,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     for (const scope of [...scopes].sort()) {
       const name = options.savedData?.name(scope) ?? null;
       let script: SavedScript;
-      // This Player's script is read through its own storage, after the saves its session issued.
-      if (scope === scriptStorage?.scope)
-        script = await collectSavedScript(scriptStorage, capturedMedia, name);
-      else if (options.savedData) {
+      // This Player's script is read through its own storage, after the saves its session issued; the debug room is
+      // never exported.
+      if (scope === scriptStorage?.scope) {
+        if (room.value === "normal")
+          script = await collectSavedScript(scriptStorage, capturedMedia, name);
+        else {
+          const media = ownStoredMedia(scope);
+          try {
+            script = await collectSavedScript(normalStorage!, media, name);
+          } finally {
+            media.close();
+          }
+        }
+      } else if (options.savedData) {
         const media = options.savedData.media(scope);
         try {
           script = await collectSavedScript(options.savedData.provider(scope), media, name);
@@ -734,7 +868,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       let current: readonly RuntimeScriptStorageEntrySnapshot[];
       try {
         current = own
-          ? await scriptStorage!.load()
+          ? await (room.value === "normal" ? scriptStorage! : normalStorage!).load()
           : await options.savedData!.provider(script.scope).load();
       } catch {
         throw new StorageTransferError(
@@ -747,7 +881,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         values: script.entries.length,
         photos: script.photos.length,
         currentValues: current.length,
-        shown: own,
+        // The debug room's session does not use the script's own saved data, so an import does not end it.
+        shown: own && room.value === "normal",
       });
     }
     return { bundle, images, scripts };
@@ -764,7 +899,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ): Promise<void> {
     if (importing.value || clearing.value)
       throw new StorageTransferError("Saved data cannot be replaced right now.");
-    const ownChosen = scriptStorage !== undefined && chosen.has(scriptStorage.scope);
+    // In the debug room an import replaces the script's own saved data, which the debug room and its session do not use.
+    const inDebugRoom = room.value === "debug";
+    const ownChosen =
+      scriptStorage !== undefined && chosen.has(scriptStorage.scope) && !inDebugRoom;
     importing.value = true;
     const failed: string[] = [];
     try {
@@ -773,11 +911,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (ownChosen) {
         if (sessionInProgress.value || inspecting.value) endSession();
         rewindRetirements.value++;
+        // A session being kept is kept before the import discards it.
+        while (keeping !== null) await keeping;
       }
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
-          if (script.scope === scriptStorage?.scope) {
+          if (script.scope === scriptStorage?.scope && inDebugRoom) {
+            const media = ownStoredMedia(script.scope);
+            const storage = withCapturedMedia(options.scriptStorage!, media);
+            try {
+              if (capturedMediaPersistence === undefined && usesImages(script))
+                throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+              await replaceScript(storage, media, script, review.images);
+            } finally {
+              await storage.drain();
+              media.close();
+            }
+          } else if (script.scope === scriptStorage?.scope) {
             // Without durable captured media, imported photos would not outlive this page.
             if (capturedMediaPersistence === undefined && usesImages(script))
               throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
@@ -791,6 +942,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               media.close();
             }
           }
+          // The script's next session loads the imported values: a kept session, with its older view, does not go on.
+          await keptSessions.discard(script.scope).catch(() => {});
         } catch (error) {
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
@@ -801,13 +954,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (ownChosen) {
         await loadScriptStorage();
         importing.value = false;
-        if (lastStart !== null && !sessionInProgress.value) prepare(lastStart);
+        if (lastStart.value !== null && !sessionInProgress.value) prepare(lastStart.value);
       } else importing.value = false;
     }
     if (failed.length > 0)
       throw new StorageTransferError(
         `Not imported, and their saved data is unchanged: ${failed.join("; ")}. Any other chosen script was imported.`,
       );
+  }
+  /** The script's own stored photos while the debug room is shown; close it after use. */
+  function ownStoredMedia(scope: string): CapturedMediaStore {
+    return new CapturedMediaStore(
+      options.capturedMedia?.repository ?? null,
+      browserMediaUrls,
+      scope,
+    );
   }
   /** Whether a session runs, waits for Continue, or is starting; its own view of the saved values is in use. */
   const sessionInProgress = computed(
@@ -857,11 +1018,358 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     jumpedRevision.value = -1;
     session.value = next;
     clock.rebase();
+    if (!paused) applyDebugMode();
+    // The session that runs is the one a reload continues in its room.
+    if (!paused) keepSessionLater();
   }
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
   function update(next: PlayerRuntimeSession) {
     if (!inspecting.value) session.value = next;
+  }
+  // Counts the sessions that ended as they played, also within their Start; a state Debug's rewind restored has ended
+  // before and does not end anew.
+  const endings = ref(0);
+  let rewoundGeneration = -1;
+  watch([session, generation], ([next, current], [previous, before]) => {
+    if (next?.state.status !== "halted") return;
+    if (current === before ? previous?.state.status !== "halted" : current !== rewoundGeneration)
+      endings.value++;
+  });
+
+  // The script's kept session, which a reload or a later visit continues (PLAYER-UI "Session start and user
+  // activation"); only a script with storage keeps one, under its storage scope. The debug room keeps its own.
+  const keptSessions = options.keptSessions ?? memoryKeptSessionStore();
+  const keptScope = options.scriptStorage?.scope ?? null;
+  const keptStore = (): KeptSessionStore => (room.value === "debug" ? debugRooms : keptSessions);
+  // The plan of the script, which a kept session runs.
+  let scriptPlan: InstructionPlan | null = null;
+  // What is kept of the shown session, so that keeping it again adds only the events after it: whether the plan is kept,
+  // and how many events, the last of which is `last`. A new session starts with none.
+  let kept: {
+    readonly plan: boolean;
+    readonly count: number;
+    readonly last: InterpreterEvent | null;
+  } = { plan: false, count: 0, last: null };
+  let keeping: Promise<void> | null = null;
+  let keepAgain = false;
+  /**
+   * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
+   * time; a request meanwhile keeps the session as it is once that is done. A state Debug's rewind shows for inspection
+   * is never kept: the session it left is.
+   */
+  function keepSessionLater() {
+    if (keeping !== null) {
+      keepAgain = true;
+      return;
+    }
+    keeping = (async () => {
+      // The caller finishes first, such as a Continue that gives the session its marks.
+      await Promise.resolve();
+      do {
+        keepAgain = false;
+        await keepOnce();
+      } while (keepAgain && !disposed);
+    })().finally(() => (keeping = null));
+  }
+  async function keepOnce() {
+    const current = session.value;
+    // Only a script a host prepared with `prepareScript` keeps its session.
+    if (keptScope === null || scriptPlan === null || current === null) return;
+    if (inspecting.value || activation.value !== null) return;
+    // Taken before anything waits: later operations change the session.
+    let snapshotJson: string;
+    try {
+      snapshotJson = playerRuntimeSnapshotJson(current);
+    } catch {
+      return;
+    }
+    const events = current.events;
+    const from =
+      kept.count <= events.length && (kept.count === 0 || events[kept.count - 1] === kept.last)
+        ? kept.count
+        : 0;
+    const count = events.length;
+    const added = events.slice(from, count);
+    const last = events[count - 1] ?? null;
+    const planJson = kept.plan && from > 0 ? null : JSON.stringify(current.plan);
+    const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
+    const references = capturedMediaReferencesInJson(snapshotJson + JSON.stringify(added));
+    const inDebugRoom = room.value === "debug";
+    const store = keptStore();
+    // The room's saved data are in use once storage reached it.
+    await storageRoute;
+    if (disposed || (room.value === "debug") !== inDebugRoom) return;
+    try {
+      if (inDebugRoom) {
+        // The debug room stores the session's photos like its saved ones.
+        await capturedMedia.promote(references).catch(() => {});
+      } else {
+        // A new session replaces the one kept before, with its photos.
+        if (from === 0) await store.discard(keptScope);
+        // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
+        // while the session uses it (`capturedMediaStorage`).
+        for (const photo of capturedMedia.sessionRecords(references))
+          await store.media.add(photo).catch(() => {});
+      }
+      await store.publish(keptScope, {
+        planJson,
+        snapshotJson,
+        eventsFrom: from,
+        events: added,
+        marks,
+      });
+      kept = { plan: true, count, last };
+      if (inDebugRoom) debugRoom.value = { session: true };
+    } catch {
+      // The session kept before stays; a reload continues from there.
+    }
+  }
+  /** Keeps the shown session as it is now and waits until it is kept. */
+  async function keepSession(): Promise<void> {
+    keepSessionLater();
+    while (keeping !== null) await keeping;
+  }
+  // The session is kept at each interaction it newly presents and when it ends, and when the page is hidden.
+  let keptActionId: number | null = null;
+  watch(session, (current) => {
+    if (current === null || inspecting.value) return;
+    const actionId = activePlayerRuntimeInteraction(current.state)?.actionId ?? null;
+    const ended = current.state.status === "halted" || current.state.status === "failed";
+    if ((actionId === null || actionId === keptActionId) && !ended) return;
+    keptActionId = actionId;
+    keepSessionLater();
+  });
+  useEventListener(
+    () => (typeof document === "undefined" ? undefined : document),
+    "visibilitychange",
+    () => {
+      if (document.visibilityState === "hidden") keepSessionLater();
+    },
+  );
+  /**
+   * Prepares a session of `plan`, which `create` starts: Continue when the script keeps a session that can go on, else
+   * Start. Call it instead of `prepare` once the stored values are loaded.
+   */
+  async function prepareScript(
+    plan: InstructionPlan,
+    create: PlayerSessionStart,
+    sources?: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    scriptPlan = plan;
+    lastStart.value = create;
+    if (sources !== undefined) scriptSources = sources;
+    await prepareKept();
+  }
+  /** Shows Continue when the script keeps a session that can go on, else Start. */
+  async function prepareKept(): Promise<void> {
+    const continued = scriptPlan === null ? null : await restoreKept(scriptPlan);
+    if (disposed) return;
+    if (continued !== null) {
+      kept = {
+        plan: true,
+        count: continued.session.events.length,
+        last: continued.session.events.at(-1) ?? null,
+      };
+      prepareRestore(continued.session, continued.marks);
+    } else if (lastStart.value !== null) prepare(lastStart.value);
+  }
+  /**
+   * The kept session, restored, when it runs `plan` and has not ended; else `null`. The photos only it uses are its
+   * session media again.
+   */
+  async function restoreKept(
+    plan: InstructionPlan,
+  ): Promise<{ readonly session: PlayerRuntimeSession; readonly marks: DebugHistoryMarks } | null> {
+    if (keptScope === null) return null;
+    await storageRoute;
+    const store = keptStore();
+    const stored = await store.session(keptScope).catch(() => null);
+    const found = stored === null ? null : keptSession(stored);
+    if (found === null || found.planJson !== JSON.stringify(plan)) return null;
+    let restored: PlayerRuntimeSession;
+    try {
+      restored = restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events);
+    } catch {
+      return null;
+    }
+    if (restored.state.status === "halted" || restored.state.status === "failed") return null;
+    // The debug room reads its photos like its saved ones; a normal session's come back as session media.
+    if (store === keptSessions)
+      for (const reference of capturedMediaReferencesInJson(
+        found.snapshotJson + JSON.stringify(found.events),
+      ))
+        capturedMedia.restoreSessionMedia(
+          reference,
+          await store.media.get(keptScope, reference).catch(() => null),
+        );
+    return { session: restored, marks: found.marks };
+  }
+  /**
+   * Returns to the start page once the session ended by `exit`, which the host does when the player closes the end
+   * dialog; the ended session is kept first, so a reload starts anew.
+   */
+  async function toStartPage(): Promise<void> {
+    if (session.value?.state.status !== "halted") return;
+    await keepSession();
+    if (disposed || session.value?.state.status !== "halted") return;
+    endSession();
+    await prepareKept();
+  }
+
+  /**
+   * Turns Debug on or off for the script. On in the normal room, play goes on in the debug room (`copyToDebugRoom`). Off,
+   * play goes on where it is. A running session reads the change from its next statement on.
+   */
+  function setDebugMode(enabled: boolean) {
+    if (enabled === debugMode) return;
+    debugMode = enabled;
+    if (enabled && room.value === "normal" && normalStorage !== undefined) void copyToDebugRoom();
+    else applyDebugMode();
+  }
+  /**
+   * Gives the running session the current Debug state. One that waits for Continue takes it at Continue, and a state
+   * Debug's rewind shows for inspection once it is adopted or the session it left is back.
+   */
+  function applyDebugMode() {
+    const current = session.value;
+    if (
+      current === null ||
+      inspecting.value ||
+      activation.value !== null ||
+      (current.state.status !== "running" && current.state.status !== "waiting") ||
+      current.state.debugMode === debugMode
+    )
+      return;
+    const result = setPlayerRuntimeDebugMode(current, debugMode);
+    if (result.outcome.kind !== "set") return;
+    session.value = result.session;
+    keepSessionLater();
+  }
+  /** Whether the shown session runs or waits. */
+  const sessionLive = computed(
+    () =>
+      session.value !== null &&
+      (session.value.state.status === "running" || session.value.state.status === "waiting"),
+  );
+  // A room change runs to its end before another starts; like an import, it replaces the saved data in use.
+  let roomChange: Promise<void> = Promise.resolve();
+  /**
+   * Goes on in the debug room. A normal session that runs or waits goes on there as a copy, with a copy of the script's
+   * own saved values and photos as they are now, replacing any earlier debug room; the normal session stays where it is
+   * and keeps counting, and its saves until now stay the script's own. Without one, the debug room is made from that copy
+   * unless there is one, and shows its Start or Continue.
+   */
+  function copyToDebugRoom(): Promise<void> {
+    // The switch excludes Start and Continue: a prepared one, also one waiting for the camera, is retired at once, none
+    // runs meanwhile, and the debug room's own is prepared once its saved data are in use.
+    if (!sessionLive.value) endSession();
+    importing.value = true;
+    roomChange = roomChange.then(async () => {
+      try {
+        if (normalStorage === undefined || room.value !== "normal" || !debugMode || disposed)
+          return;
+        const scope = normalStorage.scope;
+        const live = sessionLive.value;
+        // The normal room keeps its session as it is now, which a later visit continues.
+        if (live) await keepSession();
+        const making = live || debugRoom.value === null;
+        const replacing = live && debugRoom.value !== null;
+        room.value = "debug";
+        kept = { plan: false, count: 0, last: null };
+        keptActionId = null;
+        await switchStorage(async () => {
+          if (replacing) await debugRooms.discard(scope).catch(() => {});
+          const durable = making ? await createDebugRoom(scope, false) : new Set<string>();
+          return enterDebugRoom(scope, making ? { session: live } : debugRoom.value!, durable);
+        });
+        await loadScriptStorage();
+        if (live) applyDebugMode();
+        else {
+          // A normal session that ended meanwhile stays in the normal room.
+          endSession();
+          await prepareKept();
+        }
+      } finally {
+        importing.value = false;
+      }
+    });
+    return roomChange;
+  }
+  /**
+   * Stores a new debug room with a copy of the script's own saved values and photos as they are now, or none when
+   * `empty`. Resolves to the references of its photos.
+   */
+  async function createDebugRoom(scope: string, empty: boolean): Promise<ReadonlySet<string>> {
+    let entries: readonly RuntimeScriptStorageEntrySnapshot[] = [];
+    let photos: readonly CapturedMediaRecord[] = [];
+    try {
+      if (!empty) {
+        entries = await normalStorage!.load();
+        photos = await storedPhotos(scope);
+      }
+    } catch {
+      // Saved data this browser cannot read is not copied; the debug room starts without it.
+    }
+    try {
+      await debugRooms.create(scope, entries, photos);
+    } catch {
+      // Another tab created it meanwhile, or this browser cannot keep it: then it lives in this page.
+      if ((await debugRooms.read(scope).catch(() => null)) === null) {
+        debugRooms = memoryKeptRoomStore();
+        await debugRooms
+          .create(scope, entries, photos)
+          .catch(() => debugRooms.create(scope, [], []));
+      }
+    }
+    return new Set(photos.map((photo) => photo.reference));
+  }
+  /** The script's stored photos, checked as the Player reads them. */
+  async function storedPhotos(scope: string): Promise<readonly CapturedMediaRecord[]> {
+    const repository = options.capturedMedia?.repository ?? null;
+    if (repository === null) return [];
+    const reader = new CapturedMediaStore(repository, browserMediaUrls, scope);
+    try {
+      const photos: CapturedMediaRecord[] = [];
+      for (const reference of await repository.listReferences(scope)) {
+        const record = await reader.read(reference);
+        if (record !== null) photos.push(record);
+      }
+      return photos;
+    } finally {
+      reader.close();
+    }
+  }
+  /**
+   * From the debug room's start page and the player's click, starts a new debug session: with the debug room's saved
+   * data as they are, deleting only its session (`reload`), or with its saved data and photos deleted too (`reset`).
+   */
+  function startDebugSessionAnew(clear: "reload" | "reset"): Promise<void> {
+    primeAudio();
+    roomChange = roomChange.then(async () => {
+      if (room.value !== "debug" || normalStorage === undefined || disposed) return;
+      const scope = normalStorage.scope;
+      importing.value = true;
+      try {
+        while (keeping !== null) await keeping;
+        endSession();
+        kept = { plan: false, count: 0, last: null };
+        keptActionId = null;
+        if (clear === "reset")
+          await switchStorage(async () => {
+            await debugRooms.discard(scope).catch(() => {});
+            return enterDebugRoom(scope, { session: false }, await createDebugRoom(scope, true));
+          });
+        await loadScriptStorage();
+      } finally {
+        importing.value = false;
+      }
+      if (lastStart.value !== null && !disposed) {
+        prepare(lastStart.value);
+        await activate();
+      }
+    });
+    return roomChange;
   }
   /**
    * Readies the session for input before the input is evaluated: an inspected state Debug's rewind restored is adopted
@@ -883,8 +1391,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ) {
     // An unmounted Player publishes nothing.
     if (disposed) return;
-    const next = create({ recorder });
+    const next = create({ recorder, debugMode });
     start(next, state.paused);
+    rewoundGeneration = generation.value;
     debugEdits.value = state.marks.editedWhileDebugging;
     rewound.value = state.marks.rewoundWhileDebugging;
   }
@@ -945,11 +1454,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
     if (disposed || generation.value !== owner || !inspecting.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
-    storedEntries.value = adopted.scriptStorage;
     savedDataRevision.value++;
     rewindAdopted?.();
     inspecting.value = false;
     clock.rebase();
+    applyDebugMode();
     return true;
   }
   /**
@@ -976,10 +1485,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
-   * on page load and the click is the user activation later audible playback relies on.
+   * on page load and the click is the user activation later audible playback relies on. `sources`, the text of the
+   * script's files by path, lets the error dialog show a failing line; a later `prepare` without them keeps them.
    */
-  function prepare(create: PlayerSessionStart) {
-    lastStart = create;
+  function prepare(create: PlayerSessionStart, sources?: ReadonlyMap<string, string>) {
+    lastStart.value = create;
+    if (sources !== undefined) scriptSources = sources;
     activationToken++;
     openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
@@ -988,7 +1499,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       kind: "start",
       begin: () =>
         create(
-          debugTrace.value === null ? { recorder } : { recorder, debugTrace: debugTrace.value },
+          debugTrace.value === null
+            ? { recorder, debugMode }
+            : { recorder, debugTrace: debugTrace.value, debugMode },
         ),
     };
   }
@@ -1004,7 +1517,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
-  function prepareRestore(restored: PlayerRuntimeSession) {
+  function prepareRestore(restored: PlayerRuntimeSession, marks?: DebugHistoryMarks) {
     activationToken++;
     openingCamera.value = false;
     camera.release();
@@ -1014,11 +1527,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // The recording of a restored session starts from the state it continues, and so does a new trace epoch.
         beginPlayerRuntimeRecording(restored, recorder);
         debugTrace.value?.reset("restore");
-        return continuePlayerRuntimeSession(
-          Object.freeze({ ...restored, recorder, debugTrace: debugTrace.value }),
-          temporalCapture(),
-        ).session;
+        let continued: PlayerRuntimeSession = Object.freeze({
+          ...restored,
+          recorder,
+          debugTrace: debugTrace.value,
+        });
+        // The script reads whether Debug is on now.
+        if (continued.state.debugMode !== debugMode)
+          continued = setPlayerRuntimeDebugMode(continued, debugMode).session;
+        return continuePlayerRuntimeSession(continued, temporalCapture()).session;
       },
+      ...(marks === undefined ? {} : { marks }),
     };
   }
   /**
@@ -1068,6 +1587,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     start(next);
+    // A new session replaces the one kept before.
+    if (pending.kind === "start") {
+      kept = { plan: false, count: 0, last: null };
+      keptActionId = null;
+    }
+    if (pending.marks !== undefined) {
+      debugEdits.value = pending.marks.editedWhileDebugging;
+      rewound.value = pending.marks.rewoundWhileDebugging;
+    }
   }
 
   return {
@@ -1079,6 +1607,27 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * play: what development time jumps published (#615). -1 for none since the session started.
      */
     jumpedRevision: computed(() => jumpedRevision.value),
+    setDebugMode,
+    /**
+     * The normal room and the debug room (DEBUGGER.md "Debug room"). `reloadDebug` and `resetDebug` start a new debug
+     * session from the debug room's start page on the player's click.
+     */
+    rooms: {
+      /** The room shown. */
+      current: computed(() => room.value),
+      /** Whether the debug room keeps a session, which Debug on during a normal session would overwrite. */
+      debugSessionExists: computed(() => debugRoom.value?.session === true),
+      /** Whether the debug room is shown and has something to delete: a kept session or saved values. */
+      debugHasData: computed(
+        () =>
+          room.value === "debug" &&
+          (debugRoom.value?.session === true || (storedEntries.value?.length ?? 0) > 0),
+      ),
+      /** Whether Debug on copies the normal session shown, which runs or waits, over the debug room's session. */
+      copies: computed(() => room.value === "normal" && sessionLive.value),
+      reloadDebug: () => startDebugSessionAnew("reload"),
+      resetDebug: () => startDebugSessionAnew("reset"),
+    },
     /** The prepared Start or Continue, or `null` once the session runs or while saved data is cleared or imported. */
     activation: computed(() =>
       clearing.value || importing.value ? null : (activation.value?.kind ?? null),
@@ -1128,8 +1677,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     })),
     /** Whether Debug changed this session's saved values: from which scene time and how often; for its debug export. */
     debugEdits: computed(() => debugEdits.value),
-    /** The host's storage scope of this script's saved values, or `null` without script storage. */
-    savedDataScope: scriptStorage?.scope ?? null,
     /** A saved photo, loaded on first use: its URL once ready, or whether it still loads or is missing. */
     savedPhoto(reference: string) {
       void mediaRevision.value;
@@ -1313,8 +1860,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       },
     },
     prepare,
+    prepareScript,
     prepareRestore,
     activate,
+    toStartPage,
+    /** The source text of a file of the script, or `null` when its host did not supply it. */
+    scriptSource: (path: string): string | null => scriptSources.get(path) ?? null,
+    /** Changes whenever a session ends as it plays, including at its Start; not when Debug's rewind restores an end. */
+    endings: computed(() => endings.value),
     /** The capture a new session records at Start; Continue records its own. */
     temporalCapture,
   };

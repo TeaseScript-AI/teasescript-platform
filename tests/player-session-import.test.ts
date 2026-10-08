@@ -56,6 +56,7 @@ let usePlayerSession: (options: {
 let browserSavedData: (
   storage: Storage,
   repository: FakeMediaRepository,
+  keptSessions: undefined,
   locks: CapturedMediaLocks,
 ) => SavedDataHost;
 
@@ -193,7 +194,7 @@ function createHost(context: TestContext, provider: MemoryProvider) {
   stubBrowser(context);
   const storage = new MemoryStorage();
   const repository = new FakeMediaRepository();
-  const savedData = browserSavedData(storage, repository, idle);
+  const savedData = browserSavedData(storage, repository, undefined, idle);
   const decoded: number[] = [];
   const scope = effectScope();
   const host = scope.run(() =>
@@ -364,7 +365,7 @@ test("a bundle that includes the shown script ends its session, and the next Sta
   // A new session loads the imported values.
   host.prepare(() =>
     createPlayerRuntimeSession(
-      'let photo: string = load("photo")\nsave photo as "copy"\nsave load("score", default: 0) + 1 as "score"\nexit',
+      'let photo: string = load("photo", default: "")\nsave photo as "copy"\nsave load("score", default: 0) + 1 as "score"\nexit',
       host.scriptStorageOptions(),
     ),
   );

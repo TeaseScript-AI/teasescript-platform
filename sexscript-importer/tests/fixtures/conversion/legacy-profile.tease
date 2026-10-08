@@ -1,16 +1,22 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
 speaker system {
   title: "System"
 }
 function sexscriptLegacyAskProfile {
-  if load("intro.name") == null {
+  if load("intro.name", default: "") == "" {
     save (askText as system "What is your name?", default: "Slave") as "intro.name"
   }
-  if load("intro.female") == null {
+  let savedFemale: boolean? = load "intro.female", default: null
+  if savedFemale == null {
     say as system "Are you a woman ?"
     save (choose yes: "Yes", no: "No") == "yes" as "intro.female"
   }
-  if load("intro.likemale") == null {
-    if load("intro.likefemale") == true {
+  let savedLikemale: boolean? = load "intro.likemale", default: null
+  if savedLikemale == null {
+    // NOTE SX_LOAD_OPEN_NULL: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+    if load("intro.likefemale", default: sexscriptLegacyValue(null)) == true {
       say as system "Are you also attracted to men ?"
       save (choose yes: "Yes", no: "No") == "yes" as "intro.likemale"
     } else {
@@ -20,7 +26,7 @@ function sexscriptLegacyAskProfile {
   let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.dildo"] {
-    if load(profileToysKey) == null {
+    if load(profileToysKey, default: null) == null {
       profileToysFields[profileToysKey] = { value: false, text: ["dildo"][profileToysIndex] }
     }
     profileToysIndex += 1
@@ -36,14 +42,14 @@ function sexscriptLegacyAskProfile {
 sexscriptLegacyAskProfile()
 // The legacy desktop intro asked the player's name and gender once; a package that only reads them asks once.
 let gender = "boy"
-if load("intro.female") == true {
+if load("intro.female", default: false) == true {
   gender = "girl"
 }
-say "Hello, ${load("intro.name")}, my good ${gender}"
-if load("intro.likemale") == true {
+say "Hello, ${load("intro.name", default: "")}, my good ${gender}"
+if load("intro.likemale", default: false) == true {
   say "You like men too"
 }
-if load("toys.dildo") != true {
+if load("toys.dildo", default: false) != true {
   say "A dildo or dildo alternative is needed"
 }
 exit

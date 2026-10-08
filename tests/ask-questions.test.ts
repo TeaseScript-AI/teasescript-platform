@@ -116,7 +116,9 @@ test("a question is text: a list is rejected, and a scalar is shown as text", ()
     "field nobody: null",
   ]);
   // A list the compiler cannot see fails before anything is said or asked.
-  const plan = compileValidPlan('save ["Name?"] as "q"\nlet answer = askText(load("q"))\nexit');
+  const plan = compileValidPlan(
+    'save ["Name?"] as "q"\nlet answer = askText(load("" + "q", default: null))\nexit',
+  );
   const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(failed.snapshot.failure?.code, "TSR021");
   assert.deepEqual(

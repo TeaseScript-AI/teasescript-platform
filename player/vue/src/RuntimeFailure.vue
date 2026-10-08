@@ -1,51 +1,48 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Download } from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { computed, ref } from "vue";
+import { CircleAlert } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { RuntimeSessionView } from "../../../src/index.js";
 
-// How a session ended, above the composer (PLAYER-UI "Session end and failure"): after an error it says so, names the
-// error and where it happened, and offers a debug export; an ordinary end is only noted. The transcript and Stage stay.
+// A session an error stopped, as one short line above the composer (PLAYER-UI "Session end and failure"): it says so and
+// offers Details, which opens the error dialog. The transcript and Stage stay.
 const props = defineProps<{
   state: Pick<RuntimeSessionView, "failure" | "status"> | null;
   /** The error name of an exception of the Player itself. */
   hostError: string | null;
 }>();
-const emit = defineEmits<{ export: [] }>();
+const emit = defineEmits<{ details: [] }>();
 
 const failure = computed(() => props.state?.failure ?? null);
-const ended = computed(() => props.state?.status === "halted" && props.hostError === null);
+const line = ref<HTMLElement | null>(null);
+defineExpose({
+  /** Focuses the line's control, where a dialog about the end returns focus; `false` without one. */
+  focus(): boolean {
+    const control = line.value?.querySelector("button");
+    control?.focus();
+    return control !== null && control !== undefined;
+  },
+});
 </script>
 
 <template>
-  <div v-if="failure || hostError || ended" class="runtime-end" data-runtime-end>
-    <div v-if="failure || hostError" class="rounded-lg shadow-lg">
-      <Alert variant="destructive" data-runtime-failure>
-        <AlertDescription>
-          <div class="grid gap-2">
-            <p class="font-medium">
-              {{ failure ? "The session stopped because of an error." : "The Player ran into an error." }}
-            </p>
-            <p v-if="failure" class="font-mono text-xs" data-runtime-failure-location>
-              {{ failure.code }} · {{ failure.path }}, line {{ failure.span.start.line + 1 }}
-            </p>
-            <p v-else class="font-mono text-xs">{{ hostError }}</p>
-            <Button
-              variant="outline"
-              class="min-h-11 justify-self-start"
-              data-runtime-failure-export
-              @click="emit('export')"
-            >
-              <Download />
-              Download debug export
-            </Button>
-          </div>
-        </AlertDescription>
-      </Alert>
-    </div>
-    <p v-else class="rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground shadow-sm" role="status">
-      Session ended.
+  <div v-if="failure || hostError" ref="line" class="runtime-end" data-runtime-end>
+    <p
+      class="flex items-center gap-2 rounded-md border bg-card py-1 ps-3 pe-1 text-sm text-destructive shadow-sm"
+      data-runtime-failure
+    >
+      <CircleAlert class="size-4 shrink-0" aria-hidden="true" />
+      <span class="min-w-0">{{
+        failure ? "The script stopped because of an error." : "The Player ran into an error."
+      }}</span>
+      <Button
+        variant="outline"
+        class="min-h-11 shrink-0"
+        data-runtime-failure-details
+        @click="emit('details')"
+      >
+        Details
+      </Button>
     </p>
   </div>
 </template>

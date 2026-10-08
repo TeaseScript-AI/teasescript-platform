@@ -3,6 +3,7 @@ import { ref, type ShallowRef } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
+import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
@@ -10,7 +11,7 @@ import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
-import { prepareHostedScript, type ScriptHost } from "./hostedScript";
+import { prepareHostedScript, type ScriptHost, type ScriptIdentity } from "./hostedScript";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
@@ -36,9 +37,15 @@ import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 // Development preview root; main.ts loads it on the development server or with `?dev`.
 // Visual Lab holds temporary Owner A/B settings only; runtime content comes from a real script.
 const query = new URLSearchParams(window.location.search);
-// The explicit `?dev` opt-in starts with the Debug menu on, also on the development server; `time=skip` starts Debug
-// with auto-skip on.
-const debug = { menu: query.has("dev"), autoSkip: query.get("time") === "skip" };
+// The explicit `?dev` opt-in starts with the Debug menu on, also on the development server, unless `debug=off`, so that
+// play stays in the script's own room; `time=skip` starts Debug with auto-skip on.
+const debug = {
+  menu: query.has("dev") && query.get("debug") !== "off",
+  autoSkip: query.get("time") === "skip",
+};
+// The preview opens the debug room (DEBUGGER.md "Debug room") while it starts with the Debug menu on, since Debug on in
+// the normal room goes on in the debug room, and with `room=debug`.
+const room = debug.menu || query.get("room") === "debug" ? "debug" : "normal";
 const tools: readonly PlayerTool[] = [
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
@@ -58,6 +65,8 @@ const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{
   capturedMediaRepository?: CapturedMediaRepository | null;
+  keptSessions?: KeptSessionStore;
+  debugRooms?: KeptRoomStore;
   /** The package `?package=<id>` selects; the preview plays it instead of a development scenario. */
   packageHost?: ScriptHost | null;
 }>();
@@ -76,7 +85,14 @@ const player = usePlayerSession(
         scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
         // As in the default build: an image the script saves a reference to stays in this browser for later runs.
         capturedMedia: { repository: props.capturedMediaRepository ?? null },
-        savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
+        savedData: browserSavedData(
+          browserStorage(),
+          props.capturedMediaRepository ?? null,
+          props.keptSessions,
+        ),
+        ...(props.keptSessions && { keptSessions: props.keptSessions }),
+        ...(props.debugRooms && { debugRooms: props.debugRooms }),
+        room,
         debugPackage: { id: packageHost.storageScope, version: null },
       }
     : {
@@ -89,7 +105,13 @@ const player = usePlayerSession(
         ...(cameraScenario && {
           scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
           capturedMedia: { repository: props.capturedMediaRepository ?? null },
-          savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
+          savedData: browserSavedData(
+            browserStorage(),
+            props.capturedMediaRepository ?? null,
+            props.keptSessions,
+          ),
+          ...(props.debugRooms && { debugRooms: props.debugRooms }),
+          room,
         }),
       },
 );
@@ -114,7 +136,8 @@ const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
 });
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
 let failure: ShallowRef<ScriptFailure | null> | null = null;
-if (packageHost !== null) failure = prepareHostedScript(player, packageHost);
+let identity: ShallowRef<ScriptIdentity> | null = null;
+if (packageHost !== null) ({ failure, identity } = prepareHostedScript(player, packageHost));
 else if (cameraScenario)
   void player
     .loadScriptStorage()
@@ -145,7 +168,8 @@ else
     v-model:theme-intent="themeIntent"
     :player="player"
     :tools="tools"
-    :title="packageHost === null ? 'Evening by the coast' : ''"
+    :title="packageHost === null ? 'Evening by the coast' : (identity?.title ?? '')"
+    :author="identity?.author ?? ''"
     :failure="failure ?? null"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
     :debug="debug"
@@ -206,8 +230,12 @@ else
         </fieldset>
         <fieldset class="grid min-w-0 gap-2" data-notice-preview>
           <legend class="mb-2">Player notices</legend>
-          <Button class="min-w-0" variant="outline" @click="showSampleNotices">Show every notice level</Button>
-          <Button class="min-w-0" variant="outline" @click="clearSampleNotices">Clear notices</Button>
+          <Button class="min-w-0" variant="outline" @click="showSampleNotices"
+            >Show every notice level</Button
+          >
+          <Button class="min-w-0" variant="outline" @click="clearSampleNotices"
+            >Clear notices</Button
+          >
         </fieldset>
       </div>
     </template>

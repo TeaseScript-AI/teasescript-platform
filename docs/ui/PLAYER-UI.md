@@ -243,7 +243,11 @@ space is constrained; a bar narrower than `200px` hides the title visually while
 Display controls include the light/dark toggle and the rightmost fullscreen control. Tools access
 appears in the top controls when the sidebar is hidden and in the tools framework while it is open.
 
-The embedding caller supplies the title. The final host/package title-source contract remains open.
+The title pill shows the `title` and `author` of the package's `main.tease` header: "BuzzQuiz by NIFOC99", the title
+only, or "by NIFOC99", with the author in quieter text; without either it is absent, with no fallback. A pill the bar
+cuts off shows the full title and author in the bar's tooltip on hover, keyboard focus, or a tap; otherwise it is plain
+text. In the [debug room](../DEBUGGER.md#debug-room) a bug before the title marks the pill, named by the bar's tooltip
+"Debug session". Which identity a multi-script package or the active script should show remains open.
 
 The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
 title-bar A/B setting chooses the presentation:
@@ -265,7 +269,8 @@ available in every build to every user. It currently offers:
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
 - **Title bar on short screens · A/B test:** variant A or B above;
-- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)).
+- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)); on
+  in the normal room, play goes on in the [debug room](../DEBUGGER.md#debug-room).
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
   started, also with the Debug menu off.
 
@@ -423,11 +428,25 @@ Debug off removes the buttons without re-creating the transcript's rows.
 
 ## Session start and user activation
 
-The Player does not run a script on page load. A script that does not compile cannot start: instead of Start, the
-Player lists its diagnostics, each with its file, line, and message. Before the first runtime entry of a new session, it
-shows an explicit Start control; after a page load that restores an existing session, it shows an explicit Continue control before
-execution resumes. The player's activation of that control is the user activation that later audible media playback
-relies on, so scripts may play audio from their first statement without a separate unlock step. Start and Continue
+The Player does not run a script on page load. It opens on the start page: the menu and the title bar, and in the
+middle the `title` and "by" `author` of the script's `main.tease` header, either alone when only it is given and
+neither without them, above an explicit **Start** control, which takes focus. The transcript, composer, and Stage stay
+hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player lists its
+diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
+audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
+
+The Player keeps the session in this browser: at each interaction it newly presents, when it ends, and when the page
+is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
+save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
+again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
+goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
+stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
+a kept session whose events lack what the Player reads from them, such as a message's markup or an answer's form, is
+not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
+moment after an answer, can be lost. A saved-data import of the script discards its kept session
+([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
+scenario, keeps none. The debug room has a start page of its own, with its restarts
+([`DEBUGGER.md`](../DEBUGGER.md#debug-room)). Start and Continue
 also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
 the account setting when the host supplies one, else the browser's. They are session data
 ([Date and time context](../RUNTIME.md#date-and-time-context)).
@@ -436,19 +455,35 @@ If the browser still refuses required audible playback, the Player surfaces a de
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
 cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
 click. In the Player the
-session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
-checkpoint storage and automatic resume across page reloads are tracked in #469.
+session is created only when Start is activated; Continue resumes a kept session. Keeping a session across browsers or
+devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in another tab,
+are tracked in #469.
 
 ## Session end and failure
 
-When a script error stops the session, a card above the composer says "The session stopped because of an error.", names
-the error code and its file and line, and offers **Download debug export**; an exception of the Player itself says "The
-Player ran into an error." with the error's name instead. An error notice with the same action supplements the card
-until a new session starts. An ordinary end shows only "Session ended.", and media warnings are notices, never failures.
-The transcript and Stage stay for inspection, with the transcript's end scrolling clear of the card, and nothing opens
-by itself.
+An ordinary end opens the end dialog by itself: **The end**, a review placeholder, and **Close**, which takes focus. The
+review is a placeholder that sends and stores nothing: a 1 to 5 star rating, a radio group of 44px stars chosen by click
+or arrow keys, an empty "Write a review (optional)", and **Send review**, unavailable, with the note "Sending reviews
+will be possible once TeaseScript has its website.". An end Debug's [rewind](../DEBUGGER.md#rewind) restores does not
+open it again. While the dialog is open the session stays behind it, so its last messages remain visible; closing it,
+with Close or Escape, returns to the [start page](#session-start-and-user-activation), whose Start begins a new session
+and takes focus.
 
-The card, its notice, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
+When a script error stops the session, a line above the composer says "The script stopped because of an error." and
+offers **Details**; after an exception of the Player itself it says "The Player ran into an error." An error notice with
+**Details** supplements the line until a new session starts. Both open one error dialog, which never opens by itself. It
+shows "Script error" and "In rules.tease, line 3.", then **Technical details**, collapsed, with the error code and the
+runtime's message ("TSR036: Numeric operation produced a non-finite result."), the failing line with the failing
+expression marked, when the host supplied the script's source, and, for an error inside a function, called file, or
+timer, media, or button block, the call path, such as "in punish(), called from main.tease:6". After a Player exception
+it shows "Player error" and "The script did not cause this.", with the error's name as its technical detail. **Download
+debug export** and, for a script error while Debug runs, **Open in Debug** close it and open the debug export dialog, or
+the Debug panel's Now tab, which names the error and its statement; **Close** returns focus to the line. Apart from
+those hand-overs, each dialog closes only with **Close** or Escape. Media warnings are notices, never failures. The
+transcript and Stage stay for inspection, with the transcript's end scrolling clear of the line. The dialogs fit narrow
+screens, and their buttons are at least 44px tall.
+
+The error dialog, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
 labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
 saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed
@@ -488,7 +523,7 @@ The current conditions are blocked audio (warning, with **Enable audio**), brows
 Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
-**Download debug export**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
+**Details**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
 the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
 solid tone for the border and icon; a panel entry uses the same tint with a solid mark along its start edge and a solid
 icon; and the bell's dot takes the most severe level that needs attention. The development preview's Visual Lab shows every level.
@@ -714,7 +749,7 @@ Debug's [rewind](../DEBUGGER.md#rewind) works in the chat. While Debug runs, eac
 interaction before the state shown has a 44 px **Back to here** button beside its bubble. While a restored state is
 inspected, the transcript ends at that state, the messages of the later state Forward restores follow it grey, under
 **Future · Forward restores it**, without Back to here or Explain values, and the interaction of the state shown is
-offered again after them. A bar above the composer, below a failure card when the inspected state failed, shows a **Debug fork** badge,
+offered again after them. A bar above the composer, below the error line when the inspected state failed, shows a **Debug fork** badge,
 what the interaction shown was answered before, and **Forward**, **Resume**, and **Return to session**, each a 44 px
 button with a tooltip; it wraps on a narrow screen. New input or Resume removes the bar and the grey messages.
 

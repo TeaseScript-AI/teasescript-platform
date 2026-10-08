@@ -73,7 +73,7 @@ let earlier3 = likes("tape")
 let conditional4 = asked()
 let both = earlier3 and conditional4
 // A stored flag of unknown type and a comparison are both tested as conditions.
-let helpmode = load "help"
+let helpmode = load "help", default: false
 if helpmode == true or missed < 0 {
   say "Help"
 }
@@ -157,12 +157,12 @@ for it in amounts {
 say labels.join(", ")
 // An Elvis assignment of a value that may be null to a text variable keeps it text: the fallback goes first.
 function pick {
-  return load "x.pick"
+  return load "x.pick", default: ""
 }
 let word = "none"
 let elvisValue2 = pick()
 word = ""
-if elvisValue2 != null and elvisValue2 != "" {
+if elvisValue2 != "" and elvisValue2 != "" {
   word = elvisValue2
 }
 // NOTE SX_LENGTH_RECEIVER line 52: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.

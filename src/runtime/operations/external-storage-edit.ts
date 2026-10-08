@@ -1,3 +1,5 @@
+import type { RandomDrawPendingOutcome } from "../random-control.js";
+import { randomDrawPending } from "./observe-time.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import type { ScriptStorageEditedEvent } from "../events.js";
@@ -14,6 +16,7 @@ import {
 } from "../debug-trace.js";
 
 export type ExternalStorageEditOutcome =
+  | RandomDrawPendingOutcome
   | { readonly kind: "applied"; readonly key: string; readonly operation: "set" | "delete" }
   | { readonly kind: "invalidEdit"; readonly message: string }
   /** An ended or failed session accepts no edit. */
@@ -61,6 +64,8 @@ function applyCapturedStorageEdit(
   trace: TraceStore | null,
 ): PendingActionOperationResult<ExternalStorageEditOutcome> {
   const refuse = (outcome: ExternalStorageEditOutcome) => pendingResult(current, [], outcome);
+  const paused = randomDrawPending(current);
+  if (paused !== null) return refuse(paused);
   const input = captureExternalData(edit);
   if (
     !input.ok ||

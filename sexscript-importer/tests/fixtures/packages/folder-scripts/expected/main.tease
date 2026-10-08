@@ -1,3 +1,7 @@
+---
+title: "folder-scripts"
+---
+
 // NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.
 say "Which script do you want to start?"
 let picked = choose background: "background", sound: "sound"

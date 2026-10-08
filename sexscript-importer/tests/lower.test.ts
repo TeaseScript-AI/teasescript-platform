@@ -222,10 +222,23 @@ test("lowers nullable legacy scalar storage reads to read-only TeaseScript load"
   ]);
 
   const program = lowerParsedFile(source);
-  assert.deepEqual(program.diagnostics, []);
+  // Nothing tells the type of the key that `raw` reads, so its null stays open (#690).
+  assert.deepEqual(
+    program.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_LOAD_OPEN_NULL"],
+  );
   assert.equal(
     emitTease(program),
-    ['let enabled = load "feature.enabled"', 'let raw = load "legacy.raw"', "exit", ""].join("\n"),
+    [
+      "function sexscriptLegacyValue(value) {",
+      "  return value",
+      "}",
+      'let enabled = load "feature.enabled", default: false',
+      "// NOTE SX_LOAD_OPEN_NULL line 1: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.",
+      'let raw = load "legacy.raw", default: sexscriptLegacyValue(null)',
+      "exit",
+      "",
+    ].join("\n"),
   );
 });
 

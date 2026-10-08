@@ -5,7 +5,7 @@ function sexscriptLegacyAskProfile {
   let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.crop", "toys.paddle"] {
-    if load(profileToysKey) == null {
+    if load(profileToysKey, default: null) == null {
       profileToysFields[profileToysKey] = { value: false, text: ["crop / cane", "paddle"][profileToysIndex] }
     }
     profileToysIndex += 1
@@ -23,7 +23,7 @@ function sexscriptLegacyValue(value) {
   return value
 }
 function sexscriptLegacyLoadInteger(key, whenMissing = null) {
-  let value = load key
+  let value = load key, default: null
   if value == null {
     return whenMissing
   }
@@ -113,14 +113,14 @@ if n <= 3 and n >= 1 {
 // A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
 switch randomInteger(0..2) {
   case 0 {
-    if load("toys.paddle") == true {
+    if load("toys.paddle", default: false) == true {
       say "Fetch the paddle"
-    } else if load("toys.crop") == true {
+    } else if load("toys.crop", default: false) == true {
       say "Fetch the crop"
     }
   }
   default {
-    if load("toys.crop") == true {
+    if load("toys.crop", default: false) == true {
       say "Fetch the crop"
     }
   }

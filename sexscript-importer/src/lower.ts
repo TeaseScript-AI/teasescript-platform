@@ -45,6 +45,7 @@ import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
 import { withMessageHandles } from "./message-handles.ts";
 import { withParsedLoads } from "./parsed-loads.ts";
+import { withFillableLoads, withStorageDefaults } from "./storage-keys.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1294,7 +1295,13 @@ export function lowerParsedFile(
     };
   }
 
-  if (file.root.kind === "compilationUnit") return lowerHelperCompilationUnit(file, context);
+  if (file.root.kind === "compilationUnit") {
+    const unit = lowerHelperCompilationUnit(file, context);
+    // A helper class converted on its own gives its reads their defaults by its own saves.
+    return options.renameIdentifiers === false
+      ? unit
+      : (withStorageDefaults([unit], false)[0] ?? unit);
+  }
   if (file.root.kind !== "scriptBody") {
     context.diagnostics.push({
       code: "SX_UNIT_LOWERING_DEFERRED",
@@ -1433,7 +1440,7 @@ export function lowerParsedFile(
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
-  let texts = withParsedLoads(typedStatements, context.syntheticHelpers);
+  let texts = withFillableLoads(withParsedLoads(typedStatements, context.syntheticHelpers), shared);
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -1469,10 +1476,12 @@ export function lowerParsedFile(
       : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
   };
   if (options.renameIdentifiers === false) return program;
-  const results = functionResultTypes(program.statements);
+  // A file converted on its own gives its reads their defaults by its own saves, as a package does by all of them.
+  const stored = withStorageDefaults([program], false)[0] ?? program;
+  const results = functionResultTypes(stored.statements);
   const dispatched = withActionDispatcher(
-    program,
-    new Set((program.actions ?? []).filter((action) => results.get(action)?.kind === "null")),
+    stored,
+    new Set((stored.actions ?? []).filter((action) => results.get(action)?.kind === "null")),
   );
   return renameConflictingIdentifiers({
     ...dispatched,
@@ -1629,9 +1638,12 @@ function lowerHelperCompilationUnit(
     withReadingTimes(
       withMessageHandles(
         withElapsedDurations(
-          withParsedLoads(
-            withEnforcedTypes([...fieldStatements, ...statements], baseContext),
-            baseContext.syntheticHelpers,
+          withFillableLoads(
+            withParsedLoads(
+              withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+              baseContext.syntheticHelpers,
+            ),
+            true,
           ),
           diagnostics,
           true,
@@ -9996,7 +10008,14 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
     // A missing key (or a stored null) reads as null, which Groovy treats like the type's false value.
     const key = lowerExpression(legacyLoad.key, context);
     if (key === null) return null;
-    const read = (): IrExpression => ({ kind: "load", key });
+    // The read keeps the type legacy read, which its default takes (storage-keys.ts).
+    const typed =
+      legacyLoad.falseValue.value === false
+        ? { read: "boolean" as const }
+        : legacyLoad.falseValue.value === ""
+          ? { read: "string" as const }
+          : {};
+    const read = (): IrExpression => ({ kind: "load", key, ...typed });
     if (legacyLoad.falseValue.value === false) {
       return {
         kind: "binary",
@@ -14379,6 +14398,10 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       );
       return useHelper(context, "booleanText", [{ kind: "load", key }]);
     }
+    if (call.name === "loadString" || call.name === "receiveString")
+      return { kind: "load", key, read: "string" };
+    if (call.name === "loadBoolean" || call.name === "receiveBoolean")
+      return { kind: "load", key, read: "boolean" };
     return { kind: "load", key };
   }
   if (call.name === "loadMap") {
@@ -15171,10 +15194,12 @@ function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpa
     );
     return;
   }
-  const values = args.map(staticMetadataValue);
+  const values = args.map((arg) => staticMetadataValue(arg, context));
   const tagsNode = args[7];
   const tagNames =
-    tagsNode?.kind === "list" ? nodeArray(tagsNode.items).map(staticMetadataValue) : [];
+    tagsNode?.kind === "list"
+      ? nodeArray(tagsNode.items).map((tag) => staticMetadataValue(tag, context))
+      : [];
   const tagsKnown = tagsNode?.kind === "list" && tagNames.every((tag) => typeof tag === "string");
   const computed = METADATA_FIELDS.flatMap((field, index) =>
     (index === 7 ? tagsKnown : values[index] !== undefined)
@@ -15203,20 +15228,35 @@ function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpa
   };
 }
 
-/** A metadata value known before the script runs: a literal, or text joined from literals with `+`. */
+/**
+ * A metadata value known before the script runs: a literal, text joined from such values with `+`, or a variable that
+ * the script assigns one such text once, as `titleline = "Escape Room"` before `setInfos(9, titleline, ...)`.
+ */
 function staticMetadataValue(
   node: AstNode | undefined,
+  context: LowerContext,
+  seen = new Set<string>(),
 ): string | number | boolean | null | undefined {
   if (node === undefined) return undefined;
   const literal = constantValue(node);
   if (literal !== undefined) return literal;
   if (node.kind === "binary" && node.operator === "+") {
-    const left = staticMetadataValue(asNode(node.left) ?? undefined);
-    const right = staticMetadataValue(asNode(node.right) ?? undefined);
+    const left = staticMetadataValue(asNode(node.left) ?? undefined, context, seen);
+    const right = staticMetadataValue(asNode(node.right) ?? undefined, context, seen);
     if (typeof left === "string" || typeof right === "string")
       return left === undefined || right === undefined ? undefined : `${left}${right}`;
+    return undefined;
   }
-  return undefined;
+  const name = variableName(node);
+  if (name === null || seen.has(name) || context.types.singleAssignment?.has(name) !== true)
+    return undefined;
+  const initializer = context.constantInitializers.get(name);
+  // Only text: a number may change by the variable's declared type, as `int size = 1.9` holds 1.
+  const value =
+    initializer === undefined
+      ? undefined
+      : staticMetadataValue(initializer, context, new Set([...seen, name]));
+  return typeof value === "string" ? value : undefined;
 }
 
 /** The legacy source of an expression, on one line. */

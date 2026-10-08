@@ -1740,7 +1740,7 @@ class Parser {
       if (parts.value === null) {
         this.#reportSpan(
           parserDiagnosticCode.expectedStorageKey,
-          "Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+          "Expected a storage key in 'load(...)', such as 'load(\"name\", default: \"\")'.",
           call.span,
         );
         return null;

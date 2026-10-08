@@ -221,7 +221,7 @@ test("type checking follows long function, default, and property chains, wide li
       chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()\\nexit",
       "function f(obj) { obj" + ".x".repeat(4096) + ".p = 1 }\\nexit",
       "let wide = [" + "1, ".repeat(32767) + "1]\\nexit",
-      'let passed = (load "v") is ' + Array.from({ length: 65536 }, (_, index) => (index % 2 === 0 ? "integer" : "string")).join(" | ") + "\\nexit",
+      'let passed = (load "" + "v", default: null) is ' + Array.from({ length: 65536 }, (_, index) => (index % 2 === 0 ? "integer" : "string")).join(" | ") + "\\nexit",
     ];
     process.stdout.write(JSON.stringify(sources.map((source) => {
       const compiled = compileSource(source);

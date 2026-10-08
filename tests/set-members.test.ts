@@ -275,7 +275,7 @@ test("storage keeps sets of composite members, and a checkpoint restores them or
     says(
       [
         'save set[{ name: "front", tags: set[[1]] }, { name: "back", tags: set[] }] as "doors"',
-        'let doors: set = load "doors"',
+        'let doors: set = load "doors", default: set[]',
         "say doors",
         'say doors.contains({ tags: set[], name: "back" })',
         "exit",

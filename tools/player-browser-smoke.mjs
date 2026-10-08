@@ -131,6 +131,9 @@ async function main() {
       await demoScenario(cdp, origin);
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
+      await titleBarScenario(cdp, origin);
+      await keptSessionScenario(cdp, origin, profile);
+      await debugRoomScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -142,6 +145,8 @@ async function main() {
       await debugStorageEditScenario(cdp, origin);
       await debugHistoryStorageScenario(cdp, origin);
       await debugRewindScenario(cdp, origin);
+      await sessionEndScenario(cdp, origin);
+      await errorCallPathScenario(cdp, origin);
       await heldPressScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
@@ -155,7 +160,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -493,8 +498,9 @@ async function scriptStorageScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-player-settings]')`);
     await waitFor(cdp, `!!document.querySelector('[data-clear-saved-data]')`);
   };
+  // A new visit to the demo, which starts a new session.
   const reloadBeforeStart = async () => {
-    await cdp.call("Page.reload");
+    await navigate(cdp, `${origin}/player/`);
     await waitFor(
       cdp,
       `!!document.querySelector('${start}') && !document.querySelector('[data-player-settings]')`,
@@ -1093,6 +1099,12 @@ async function physicalClick(cdp, selector) {
   }
 }
 
+// A physical click at the top left corner of the viewport, beside any centred dialog: on its backdrop.
+async function backdropClick(cdp) {
+  for (const type of ["mousePressed", "mouseReleased"])
+    await cdp.call("Input.dispatchMouseEvent", { type, x: 8, y: 8, button: "left", clickCount: 1 });
+}
+
 /**
  * A physical click once the element stands still and nothing covers its centre. After a session is replaced, as by
  * Debug's rewind, the transcript remounts, measures its rows, and follows its end, so controls that are already present
@@ -1320,6 +1332,332 @@ async function packageScenario(cdp, origin) {
  * valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
  * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
  */
+/**
+ * The title bar shows the title and author of `main.tease`'s header, for the default build and the development preview;
+ * a title cut off by a narrow bar opens in full on a tap, and on short screens with the auto-hide bar the first tap only
+ * reveals the bar.
+ */
+// The start page shows the script's header, and the session it starts is kept: a reload continues it where it was, also
+// with a photo only the session holds, and after `exit` the session stays behind the end dialog until it is closed,
+// which returns to the start page.
+async function keptSessionScenario(cdp, origin, profile) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-start]";
+  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
+  const choice = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
+  // Keeping is asynchronous browser storage; a reload waits until the kept snapshot includes `text`, such as the label
+  // of the interaction it should come back to.
+  const kept = (text) =>
+    evaluate(
+      cdp,
+      `return new Promise((resolve) => {
+        const request = indexedDB.open('teasescript-kept-sessions');
+        request.onsuccess = () => {
+          const sessions = request.result.transaction('sessions').objectStore('sessions').getAll();
+          sessions.onsuccess = () => {
+            request.result.close();
+            resolve(sessions.result.some((session) => session.snapshotJson.includes(${JSON.stringify(JSON.stringify(text))})));
+          };
+          sessions.onerror = () => resolve(false);
+        };
+        request.onerror = () => resolve(false);
+      })`,
+    );
+  const reloadOnceKept = async (text) => {
+    const deadline = Date.now() + 8_000;
+    while (!(await kept(text))) {
+      if (Date.now() > deadline) throw new Error("The session was not kept");
+      await delay(50);
+    }
+    await cdp.call("Page.reload");
+  };
+  await navigate(cdp, `${origin}/player/?package=kept-session`);
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-start-title]')?.textContent + ' / ' + document.querySelector('[data-start-author]')?.textContent`,
+    ),
+    "Kept session fixture / by Author fixture",
+    "The start page shows the header's title and author",
+  );
+  assertEqual(
+    await value(cdp, `document.activeElement === document.querySelector('${start}')`),
+    true,
+    "Start takes focus on the start page",
+  );
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `!!${choice("One point")}`);
+
+  await reloadOnceKept("One point");
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `!!${choice("One point")}`);
+  assertEqual(
+    await value(
+      cdp,
+      `${messages}.flatMap((text) => text.match(/This is visit \\d+\\./g) ?? []).join()`,
+    ),
+    "This is visit 1.",
+    "Continue resumes the kept session without running its start again",
+  );
+
+  await physicalClick(cdp, `[data-foreground-controls] button`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-end-dialog]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `!document.querySelector('${start}') && ${messages}.some((text) => text.includes('You chose 1.'))`,
+    ),
+    true,
+    "After exit the session stays behind the end dialog",
+  );
+  await physicalClick(cdp, "[data-session-end-close]");
+  await waitFor(
+    cdp,
+    `document.querySelector('${start}')?.textContent.trim() === 'Start' && document.activeElement === document.querySelector('${start}')`,
+    5_000,
+    "Closing the end dialog returns to the start page, whose Start takes focus",
+  );
+  await cdp.call("Page.reload");
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('This is visit 2.'))`,
+    8_000,
+    "A session that ended is not kept: the next one starts anew",
+  );
+
+  // A chosen picture the script shows after its saved reference was deleted comes back with the session, although a
+  // later visit reclaims the stored photo no saved value references.
+  const chosen = join(profile, "kept-photo.png");
+  await writeFile(chosen, solidPng(24, 16, [200, 90, 40]));
+  const stageImage = `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth > 0 && image.getAttribute('src').startsWith('blob:'); })()`;
+  await navigate(cdp, `${origin}/player/?package=kept-photo`);
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `${stageImage} && !!${choice("Done")}`,
+    8_000,
+    "The chosen picture is not shown",
+  );
+  await reloadOnceKept("Done");
+  await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${stageImage} && !!${choice("Done")}`,
+    8_000,
+    "The picture the kept session shows did not come back after a reload",
+  );
+}
+
+// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with its own start page, which offers Reload session
+// and Reset session once there is something to delete; Debug on during a normal session goes on there with a copy,
+// after a warning when it overwrites a debug session, while the normal session stays as it was.
+async function debugRoomScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-start]";
+  const control = `document.querySelector('${start}')?.textContent.trim()`;
+  const runs = `[...document.querySelectorAll('.transcript-entry')].flatMap((entry) => entry.textContent.match(/Run \\d+\\./g) ?? []).join()`;
+  const anew = `[...document.querySelectorAll('[data-debug-reload], [data-debug-reset]')].map((button) => button.textContent.trim()).join()`;
+  // A visit that keeps this browser's kept sessions and debug rooms.
+  const visit = async (query) => {
+    await cdp.call("Page.navigate", { url: `${origin}/player/?package=debug-room${query}` });
+    await waitFor(
+      cdp,
+      `document.readyState === 'complete' && !!document.querySelector('${start}')`,
+    );
+  };
+  // Keeping is asynchronous browser storage; a reload waits until the debug room keeps a session at its button.
+  const reloadOnceKept = async () => {
+    const deadline = Date.now() + 8_000;
+    while (
+      !(await evaluate(
+        cdp,
+        `return new Promise((resolve) => {
+          const request = indexedDB.open('teasescript-debug-rooms');
+          request.onsuccess = () => {
+            const sessions = request.result.transaction('sessions').objectStore('sessions').getAll();
+            sessions.onsuccess = () => { request.result.close(); resolve(sessions.result.some((session) => session.snapshotJson.includes('"Next"'))); };
+            sessions.onerror = () => resolve(false);
+          };
+          request.onerror = () => resolve(false);
+        })`,
+      ))
+    ) {
+      if (Date.now() > deadline) throw new Error("The debug session was not kept");
+      await delay(50);
+    }
+    await cdp.call("Page.reload");
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+  };
+
+  await navigate(cdp, `${origin}/player/?package=debug-room&room=debug`);
+  await waitFor(cdp, `${control} === 'Start debug session'`);
+  assertEqual(
+    await value(cdp, `[!!document.querySelector('[data-debug-room-indicator]'), ${anew}].join()`),
+    "true,",
+    "A new debug room shows its bug and nothing to delete",
+  );
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `${runs} === 'Run 1.'`);
+  await reloadOnceKept();
+  await waitFor(cdp, `${control} === 'Continue debug session'`);
+  assertEqual(
+    await value(cdp, anew),
+    "Reload session,Reset session",
+    "A debug room with a session offers Reload session and Reset session",
+  );
+  await physicalClick(cdp, "[data-debug-reload]");
+  await waitFor(cdp, `${runs} === 'Run 2.'`, 8_000, "Reload session did not keep the saved data");
+  await reloadOnceKept();
+  await waitFor(cdp, `!!document.querySelector('[data-debug-reset]')`);
+  await physicalClick(cdp, "[data-debug-reset]");
+  await waitFor(cdp, `${runs} === 'Run 1.'`, 8_000, "Reset session did not delete the saved data");
+
+  // Debug on during a normal session overwrites the debug session after a warning, and goes on with a copy.
+  await visit("");
+  await waitFor(cdp, `${control} === 'Start'`);
+  await physicalClick(cdp, start);
+  await waitFor(cdp, `${runs} === 'Run 1.'`);
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await physicalClick(cdp, '[data-player-setting="debug-menu"]');
+  await waitFor(cdp, `!!document.querySelector('[data-confirm-dialog="debug-session-overwrite"]')`);
+  await physicalClick(cdp, "[data-confirm-action]");
+  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+  await waitFor(
+    cdp,
+    `new URLSearchParams(location.search).get('room') === 'debug' && !!document.querySelector('[data-debug-room-indicator]') && ${runs} === 'Run 1.'`,
+    8_000,
+    "Debug on did not go on with the copy in the debug room",
+  );
+  await visit("");
+  await waitFor(cdp, `${control} === 'Continue'`);
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${runs} === 'Run 1.' && !document.querySelector('[data-debug-room-indicator]')`,
+    8_000,
+    "The normal session did not stay as it was",
+  );
+}
+
+async function titleBarScenario(cdp, origin) {
+  const title = `document.querySelector('.player-top-bar-title').textContent`;
+  const open = async (query) => {
+    await navigate(cdp, `${origin}/player/?${query}`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  };
+  await setViewport(cdp, 1440, 900);
+  await open("package=title-header");
+  assertEqual(await value(cdp, title), "Title fixture by Author fixture", "Title and author");
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
+    false,
+    "A title that fits offered to open in full",
+  );
+  await open("dev&package=title-author");
+  assertEqual(await value(cdp, title), "by Author fixture", "Author only, in the preview");
+  await open("package=house");
+  assertEqual(await value(cdp, title), "The house", "Title only");
+
+  const full = "A title too long for the title bar of a narrow screen by Author fixture";
+  // The bar's tooltip, read once: its content also holds a copy for assistive technology.
+  const tooltip = `document.querySelector('[data-player-title-tooltip] [role="tooltip"]')?.textContent.trim() ?? null`;
+  await setViewport(cdp, 390, 760);
+  await open("package=title-long");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-player-title-full]')`,
+    5_000,
+    "No full title",
+  );
+  await touchTap(cdp, "[data-player-title-full]");
+  await waitFor(
+    cdp,
+    `${tooltip} === ${JSON.stringify(full)}`,
+    5_000,
+    "A tap did not show the full title",
+  );
+
+  // A title without spaces wraps inside the tooltip rather than running off the screen.
+  await open("package=title-unbroken");
+  await touchTap(cdp, "[data-player-title-full]");
+  await waitFor(cdp, `!!document.querySelector('[data-player-title-tooltip]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const tooltip = document.querySelector('[data-player-title-tooltip]'); const box = tooltip.getBoundingClientRect(); return tooltip.scrollWidth <= tooltip.clientWidth && box.left >= 0 && box.right <= innerWidth; })()`,
+    ),
+    true,
+    "An unbroken title ran out of its tooltip or off the screen",
+  );
+  // A bar too narrow for the title hides it visually and keeps it plain text, never an invisible control.
+  await setViewport(cdp, 180, 760);
+  await open("package=title-long");
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
+    false,
+    "A visually hidden title became a control",
+  );
+
+  // The auto-hide bar on a short screen: the first tap reveals it, the next opens the title.
+  await evaluate(cdp, `localStorage.setItem('player-titlebar-variant', 'overlap')`);
+  try {
+    await setViewport(cdp, 600, 380);
+    await open("package=title-long");
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-player-top-bar]').checkVisibility({ opacityProperty: true }) && !!document.querySelector('[data-player-title-full]')`,
+      6_000,
+      "The auto-hide bar did not start hidden with a cut-off title",
+    );
+    await touchTap(cdp, "[data-player-title-full]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-player-top-bar]').hasAttribute('data-revealed')`,
+    );
+    assertEqual(await value(cdp, tooltip), null, "The tap that revealed the bar opened the title");
+    await touchTap(cdp, "[data-player-title-full]");
+    await waitFor(
+      cdp,
+      `${tooltip} === ${JSON.stringify(full)}`,
+      5_000,
+      "A tap did not show the full title",
+    );
+  } finally {
+    await evaluate(cdp, `localStorage.removeItem('player-titlebar-variant')`);
+    await setViewport(cdp, 1440, 900);
+  }
+}
+
+/** A touch tap at the middle of the first element `selector` matches. */
+async function touchTap(cdp, selector) {
+  const point = await value(
+    cdp,
+    `(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+  );
+  await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true });
+  try {
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
+  }
+}
+
 async function missingMediaScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const button = (label) =>
@@ -2047,6 +2385,10 @@ async function debugStorageEditScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(cdp, `!document.querySelector('[data-foreground-controls] button')`);
+  // The end opens the end dialog, which leaves the Debug panel once closed.
+  await waitFor(cdp, `!!document.querySelector('[data-session-end-close]')`);
+  await physicalClick(cdp, "[data-session-end-close]");
+  await waitFor(cdp, `!document.querySelector('[data-session-end-dialog]')`);
   await physicalClick(cdp, "[data-debug-storage-delete]");
   await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
   await save(
@@ -2443,7 +2785,7 @@ function quadrantColors(element) {
 }
 
 async function cameraScenario(cdp, origin) {
-  const url = `${origin}/player/?dev&scenario=camera`;
+  const url = `${origin}/player/?dev&debug=off&scenario=camera`;
   const start = async () => {
     await navigate(cdp, url);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -2589,7 +2931,7 @@ function assertTestCard(colors, message) {
 }
 
 async function viewfinderScenario(cdp, origin) {
-  const url = `${origin}/player/?dev&scenario=viewfinder`;
+  const url = `${origin}/player/?dev&debug=off&scenario=viewfinder`;
   const start = async () => {
     await navigate(cdp, url);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -3504,8 +3846,9 @@ async function savedDataImportScenario(debugPort, origin, exported) {
   }
 }
 
-// A script error in the default build, without Debug: the failure card names the error, and its debug export holds no
-// personal content until the player chooses it; with replay data chosen, the offline tool reproduces the failure.
+// A script error in the default build, without Debug: the error line and its notice open one error dialog, which names
+// the error, and only on request; its debug export holds no personal content until the player chooses it; with replay
+// data chosen, the offline tool reproduces the failure.
 async function debugExportScenario(cdp, origin, profile) {
   const downloads = join(profile, "debug-downloads");
   await mkdir(downloads, { recursive: true });
@@ -3533,28 +3876,101 @@ async function debugExportScenario(cdp, origin, profile) {
   );
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [picture]);
+  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`, 8_000, "No error line");
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-runtime-failure]').textContent.replace(/\\s+/g, ' ').trim()`,
+    ),
+    "The script stopped because of an error. Details",
+    "The error line",
+  );
+  await delay(300);
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-session-error-dialog]')`),
+    false,
+    "The error dialog opened by itself",
+  );
+  const errorDialog = `document.querySelector('[data-session-error-dialog]')`;
+  const openErrorDialog = async () => {
+    await physicalClick(cdp, "[data-runtime-failure-details]");
+    await waitFor(cdp, `!!${errorDialog} && ${errorDialog}.dataset.state === 'open'`);
+  };
+  await openErrorDialog();
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([${errorDialog}.querySelector('h2').textContent.trim(), ${errorDialog}.querySelector('[data-session-error-summary]').textContent.trim(), !!document.querySelector('[data-session-error-technical]'), !!document.querySelector('[data-session-error-debug]'), [...${errorDialog}.querySelectorAll('button')].map((button) => button.textContent.trim())])`,
+    ),
+    JSON.stringify([
+      "Script error",
+      "In main.tease, line 10.",
+      false,
+      false,
+      ["Technical details", "Download debug export", "Close"],
+    ]),
+    "The error dialog says where the script stopped, with its details closed, one Close, and no Debug without Debug",
+  );
+  // A click beside the dialog leaves it open; only Close and Escape close it.
+  await backdropClick(cdp);
+  await delay(300);
+  assertEqual(
+    await value(cdp, `${errorDialog}?.dataset.state`),
+    "open",
+    "A click beside the error dialog closed it",
+  );
+  await physicalClick(cdp, "[data-session-error-technical-toggle]");
+  await waitFor(cdp, `!!document.querySelector('[data-session-error-technical]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([document.querySelector('[data-session-error-code]').textContent.trim(), document.querySelector('[data-session-error-source]').textContent, document.querySelector('[data-session-error-failing]').textContent, !!document.querySelector('[data-session-error-calls]')])`,
+    ),
+    JSON.stringify([
+      "TSR036: Numeric operation produced a non-finite result.",
+      "let result = 1 / zero",
+      "1 / zero",
+      false,
+    ]),
+    "The technical details: the code with the runtime's message, and the failing line with its expression marked",
+  );
+  // Close returns focus to the error line; the notice's Details opens the same dialog.
+  await physicalClick(cdp, "[data-session-error-close]");
   await waitFor(
     cdp,
-    `!!document.querySelector('[data-runtime-failure]')`,
-    8_000,
-    "No failure card",
+    `!${errorDialog} && document.activeElement?.matches('[data-runtime-failure-details]')`,
+    5_000,
+    "Closing the error dialog did not return focus to the error line",
+  );
+  await physicalClick(cdp, "[data-notification-bell]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-player-notification-panel] [data-notice-action]')`,
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('[data-runtime-failure-location]').textContent.trim()`,
-    ),
-    "TSR036 · main.tease, line 10",
-    "The failure card names the error and where it happened",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.body.innerText.includes('The session stopped because of an error.')`,
+      `document.querySelector('[data-player-notification-panel] [data-player-notice]').textContent.includes('The script stopped because of an error.')`,
     ),
     true,
-    "The failure is said",
+    "The error notice",
   );
+  await physicalClick(cdp, "[data-player-notification-panel] [data-notice-action]");
+  await waitFor(cdp, `!!${errorDialog} && ${errorDialog}.dataset.state === 'open'`);
+  await physicalClick(cdp, "[data-session-error-close]");
+  await waitFor(cdp, `!${errorDialog}`);
+  // The error dialog hands over to the export dialog instead of staying beneath it.
+  const openExport = async () => {
+    await openErrorDialog();
+    await physicalClick(cdp, "[data-session-error-export]");
+    await waitFor(cdp, ready, 8_000, "The debug export was not prepared");
+    await waitFor(
+      cdp,
+      `!${errorDialog}`,
+      5_000,
+      "The error dialog stayed beneath the export dialog",
+    );
+  };
 
   const download = async (expectedName) => {
     const before = new Set(await readdir(downloads));
@@ -3580,12 +3996,12 @@ async function debugExportScenario(cdp, origin, profile) {
     }
     throw new Error("The debug export was not downloaded");
   };
-  const fileName = "development-package-debug-failure-debug.teasedebug.json.gz";
+  // Named after the title of the package's header.
+  const fileName = "Debug-failure-debug.teasedebug.json.gz";
   const ready = `!!document.querySelector('[data-debug-export-download]')`;
 
   // Nothing personal is chosen at first.
-  await physicalClick(cdp, "[data-runtime-failure-export]");
-  await waitFor(cdp, ready, 8_000, "The debug export was not prepared");
+  await openExport();
   assertEqual(
     await value(
       cdp,
@@ -3664,7 +4080,7 @@ async function debugExportScenario(cdp, origin, profile) {
   });
   await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
   await setViewport(cdp, 390, 844);
-  // At the transcript's end, its last message is clear of the failure card above the composer.
+  // At the transcript's end, its last message is clear of the error line above the composer.
   await waitFor(
     cdp,
     `(() => {
@@ -3676,10 +4092,33 @@ async function debugExportScenario(cdp, origin, profile) {
       return last.bottom <= card.top && document.getAnimations().every((animation) => animation.playState !== 'running');
     })()`,
     8_000,
-    "The failure card covers the transcript's last message",
+    "The error line covers the transcript's last message",
   );
-  await physicalClick(cdp, "[data-runtime-failure-export]");
-  await waitFor(cdp, ready);
+  // The error dialog fits a narrow screen with touch-sized buttons.
+  await openErrorDialog();
+  await physicalClick(cdp, "[data-session-error-technical-toggle]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-session-error-technical]') && document.getAnimations().every((animation) => animation.playState !== 'running')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const dialog = ${errorDialog}.getBoundingClientRect();
+        const problems = [];
+        if (dialog.left < 0 || dialog.right > innerWidth || dialog.top < 0 || dialog.bottom > innerHeight) problems.push('dialog outside the screen');
+        for (const button of ${errorDialog}.querySelectorAll('[data-session-error-technical-toggle], [data-session-error-export], [data-session-error-close]'))
+          if (button.getBoundingClientRect().height < 44) problems.push(button.textContent.trim());
+        return problems.join('; ') || 'fits';
+      })()`,
+    ),
+    "fits",
+    "The error dialog on a narrow screen",
+  );
+  await physicalClick(cdp, "[data-session-error-close]");
+  await waitFor(cdp, `!${errorDialog}`);
+  await openExport();
   await waitFor(
     cdp,
     `document.getAnimations().every((animation) => animation.playState !== 'running')`,
@@ -4519,6 +4958,153 @@ async function debugRewindScenario(cdp, origin) {
     `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-failure]')`,
   );
   await setViewport(cdp, 1440, 900);
+  // With Debug on, the error dialog's Open in Debug shows the failure on the Debug panel's Now tab and focuses the tab.
+  await physicalClick(cdp, "[data-runtime-failure-details]");
+  await waitFor(cdp, `!!document.querySelector('[data-session-error-debug]')`);
+  await physicalClick(cdp, "[data-session-error-debug]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-session-error-dialog]') && document.querySelector('[data-debug-now-next]')?.textContent.trim() === 'Error TSR036 at main.tease:13' && document.activeElement?.matches('[data-debug-tab="now"]')`,
+    5_000,
+    "Open in Debug did not show the failure on the Now tab",
+  );
+}
+
+/**
+ * A script error inside a function of another file: the error dialog's technical details show the failing line with the
+ * failing expression marked, and the call path from the function to its call site.
+ */
+async function errorCallPathScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?package=call-failure`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Continue'`,
+  );
+  await settledClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure-details]')`);
+  await physicalClick(cdp, "[data-runtime-failure-details]");
+  await waitFor(cdp, `!!document.querySelector('[data-session-error-technical-toggle]')`);
+  await physicalClick(cdp, "[data-session-error-technical-toggle]");
+  await waitFor(cdp, `!!document.querySelector('[data-session-error-technical]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([document.querySelector('[data-session-error-source]').textContent, document.querySelector('[data-session-error-failing]').textContent, document.querySelector('[data-session-error-calls]').textContent.trim()])`,
+    ),
+    JSON.stringify([
+      'say "Doing ${count / rounds} rounds."',
+      "count / rounds",
+      "in punish(), called from main.tease:6",
+    ]),
+    "The failing line and the call path",
+  );
+  await physicalClick(cdp, "[data-session-error-close]");
+  await waitFor(cdp, `!document.querySelector('[data-session-error-dialog]')`);
+}
+
+/**
+ * An ordinary end opens the end dialog with its review placeholder, a five-star radio group and an unavailable Send
+ * review, and Close, focused, as its one control to close besides Escape; closing it returns to the start page, whose
+ * Start begins the script anew.
+ */
+async function sessionEndScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const dialog = `document.querySelector('[data-session-end-dialog]')`;
+  const entries = `[...document.querySelectorAll('.transcript-entry:not([data-future])')].map((entry) => entry.textContent)`;
+  const start = async (url) => {
+    await navigate(cdp, url);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const finish = async () => {
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Finish'`,
+    );
+    await settledClick(cdp, "[data-foreground-controls] button");
+    await waitFor(
+      cdp,
+      `!!${dialog} && ${dialog}.dataset.state === 'open' && document.getAnimations().every((animation) => animation.playState !== 'running')`,
+      5_000,
+      "The end dialog did not open",
+    );
+  };
+  const startedAnew = `!document.querySelector('[data-runtime-end]') && ${entries}.some((text) => text.includes('Ready to finish?')) && !${entries}.some((text) => text.includes('This is the last message.'))`;
+
+  await start(`${origin}/player/?package=session-end`);
+  await finish();
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([${dialog}.querySelector('h2').textContent.trim(), document.querySelector('[data-session-end-rating]').getAttribute('role'), [...document.querySelectorAll('[data-session-end-star]')].map((star) => [star.getAttribute('role'), star.getAttribute('aria-label'), star.getAttribute('aria-checked'), star.getBoundingClientRect().height >= 44]), document.querySelector('[data-session-end-send]').disabled, document.getElementById(${dialog}.getAttribute('aria-describedby'))?.textContent.trim(), [...${dialog}.querySelectorAll('button:not([role=radio])')].map((button) => button.textContent.trim()), document.activeElement?.matches('[data-session-end-close]'), !!document.querySelector('[data-runtime-ended]')])`,
+    ),
+    JSON.stringify([
+      "The end",
+      "radiogroup",
+      [1, 2, 3, 4, 5].map((star) => [
+        "radio",
+        star === 1 ? "1 star" : `${star} stars`,
+        "false",
+        true,
+      ]),
+      true,
+      "Sending reviews will be possible once TeaseScript has its website.",
+      ["Send review", "Close"],
+      true,
+      false,
+    ]),
+    "The end dialog: a five-star rating, Send review unavailable with its note, and Close focused, with no end line yet",
+  );
+  // A click beside the dialog leaves it open, with what the player chose or typed.
+  await backdropClick(cdp);
+  await delay(300);
+  assertEqual(
+    await value(cdp, `${dialog}?.dataset.state`),
+    "open",
+    "A click beside the end dialog closed it",
+  );
+  // A star is chosen by click, and by holding an arrow key, as a radio group does; nothing is sent.
+  const checked = `[...document.querySelectorAll('[data-session-end-star]')].map((star) => star.getAttribute('aria-checked') === 'true' ? 'X' : '-').join('')`;
+  await physicalClick(cdp, "[data-session-end-star]:nth-child(4)");
+  await waitFor(cdp, `${checked} === '---X-'`, 5_000, "A click did not choose the fourth star");
+  for (const type of ["keyDown", "keyUp"]) {
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "ArrowRight",
+      code: "ArrowRight",
+      windowsVirtualKeyCode: 39,
+    });
+    if (type === "keyDown") await delay(50);
+  }
+  await waitFor(
+    cdp,
+    `${checked} === '----X' && document.activeElement?.getAttribute('aria-label') === '5 stars'`,
+    5_000,
+    "An arrow key did not choose the next star",
+  );
+  await physicalClick(cdp, "[data-session-end-close]");
+  const onStartPage = `!${dialog} && document.querySelector('[data-session-start]')?.textContent.trim() === 'Start' && document.activeElement === document.querySelector('[data-session-start]')`;
+  await waitFor(
+    cdp,
+    onStartPage,
+    5_000,
+    "Closing the end dialog did not return to the start page with its Start focused",
+  );
+  // Start begins the script anew; Escape also closes the dialog.
+  await physicalClick(cdp, "[data-session-start]");
+  await waitFor(cdp, startedAnew, 5_000, "Start after the end did not start anew");
+  await finish();
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
+  await waitFor(cdp, onStartPage, 5_000, "Escape did not close the end dialog for the start page");
 }
 
 /**
@@ -4587,7 +5173,15 @@ async function heldPressScenario(cdp, origin) {
   await steady("a form toggle");
 }
 
+// Each visit starts without the session the Player keeps for a script (PLAYER-UI "Session start and user activation") and
+// without a debug room (DEBUGGER.md "Debug room"), so scenarios stay independent of the order they run in;
+// `keptSessionScenario` and `debugRoomScenario` reload to keep them.
 async function navigate(cdp, url) {
+  for (const databaseName of ["teasescript-kept-sessions", "teasescript-debug-rooms"])
+    await cdp.call("IndexedDB.deleteDatabase", {
+      securityOrigin: new URL(url).origin,
+      databaseName,
+    });
   const response = await cdp.call("Page.navigate", { url });
   if (response?.result?.errorText) throw new Error(response.result.errorText);
   await waitFor(cdp, `document.readyState === 'complete'`);

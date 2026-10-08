@@ -3,8 +3,11 @@
  * `images/`, and `sounds/`) into a root of TeaseScript packages that the playground server offers with
  * `PLAYGROUND_PACKAGES`.
  *
- * Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] [--patches dir] <corpus-root>
- *   <converted-root>
+ * Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--units-file file] [--report-only] [--patches dir]
+ *   <corpus-root> <converted-root>
+ *
+ * `--only` and `--units-file` (one unit per line, `#` comments, such as `core-units.txt`) select the units; both
+ * together select the units of either.
  *
  * Each package is converted by `src/cli.ts convert-package`, and `src/cli.ts report --run --package` writes its report
  * to `.report.json` in the package folder, with `finalPackage` checking the files as written; `--report-only` writes
@@ -107,6 +110,14 @@ export type UnitResult =
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
 
+/** The unit IDs of a units file such as `core-units.txt`: one per line; `#` starts a comment. */
+export async function readUnitsFile(file: string): Promise<string[]> {
+  return (await readFile(file, "utf8"))
+    .split("\n")
+    .map((line) => line.replace(/#.*/u, "").trim())
+    .filter((line) => line !== "");
+}
+
 async function main(rawArgs: string[]): Promise<void> {
   let jobs = 3;
   let only: Set<string> | null = null;
@@ -116,14 +127,16 @@ async function main(rawArgs: string[]): Promise<void> {
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index]!;
     if (arg === "--jobs") jobs = Number(rawArgs[++index]);
-    else if (arg === "--only") only = new Set(rawArgs[++index]!.split(","));
+    else if (arg === "--only") only = new Set([...(only ?? []), ...rawArgs[++index]!.split(",")]);
+    else if (arg === "--units-file")
+      only = new Set([...(only ?? []), ...(await readUnitsFile(rawArgs[++index] ?? ""))]);
     else if (arg === "--report-only") reportOnly = true;
     else if (arg === "--patches") patchesRoot = path.resolve(rawArgs[++index] ?? "");
     else args.push(arg);
   }
   if (args.length !== 2 || !Number.isInteger(jobs) || jobs < 1) {
     process.stderr.write(
-      "Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] [--patches dir] <corpus-root> <converted-root>\n",
+      "Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--units-file file] [--report-only] [--patches dir] <corpus-root> <converted-root>\n",
     );
     process.exit(2);
   }
@@ -157,6 +170,11 @@ async function main(rawArgs: string[]): Promise<void> {
   for (const target of targets)
     for (const id of target.packages) byPackage.set(id, [...(byPackage.get(id) ?? []), target]);
 
+  const unknown = [...(only ?? [])].filter((id) => !scriptPackages.some((unit) => unit.id === id));
+  if (unknown.length > 0) {
+    process.stderr.write(`No script package in ${corpusRoot}: ${unknown.join(", ")}\n`);
+    process.exit(2);
+  }
   const selected = scriptPackages.filter(({ id }) => only === null || only.has(id));
   await mkdir(outputRoot, { recursive: true });
   const importer = await importerVersion();

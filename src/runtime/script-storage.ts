@@ -1,4 +1,4 @@
-import type { PlanSourceLocation } from "../plan/model.js";
+import type { InstructionPlan, PlanSourceLocation, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { messageText } from "./text-length.js";
@@ -22,7 +22,7 @@ interface ScriptStorageView {
 }
 
 export const LOAD_KEY_MESSAGE =
-  "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
 export const WRITE_KEY_MESSAGE = "Storage key must be a string.";
 
 export function storageKey(
@@ -44,6 +44,24 @@ export function findScriptStorageEntry(
 ): RuntimeScriptStorageEntrySnapshot | undefined {
   const position = entryPosition(view.scriptStorage, key);
   return view.scriptStorage[position]?.key === key ? view.scriptStorage[position] : undefined;
+}
+
+/** The type a storage key's value has to fit (ADR 0021 §6), from the plan's key-ordered table, if the key has one. */
+export function storageKeyType(plan: InstructionPlan, key: string): TypePlan | undefined {
+  const types = plan.storageTypes;
+  let low = 0;
+  let high = types.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (types[middle]!.key < key) low = middle + 1;
+    else high = middle;
+  }
+  return types[low]?.key === key ? types[low]!.type : undefined;
+}
+
+/** How a runtime type error names a storage key whose type a saved value or default does not fit. */
+export function storageKeyPlace(key: string): string {
+  return `storage key ${JSON.stringify(key)}`;
 }
 
 /** Stores a copy of a persistable value, or removes the key when the value is `null`. */

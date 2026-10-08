@@ -1,6 +1,6 @@
 // Each script repeats the same table, reads the mistress from storage, and defines the same helpers.
 let phrases = ["Kneel.", "Wait."]
-let mistress = load "mistress"
+let mistress = load "mistress", default: ""
 function image {
   showImage "room.jpg"
 }

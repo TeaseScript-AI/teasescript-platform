@@ -1,6 +1,7 @@
 say "The end."
 // The legacy player counted the starts of each script; this one reads how often the story began.
-if load("Story.start.launch.nb") != null {
+let savedNb: integer? = load "Story.start.launch.nb", default: null
+if savedNb != null {
   say "You began ${sexscriptLegacyLoadInteger("Story.start.launch.nb")} times."
 }
 exit

@@ -122,7 +122,9 @@ test("a malformed edit, or one an ended session cannot take, changes nothing", (
 });
 
 test("while the script's own write waits for the host, the edit waits too, and applies before the script goes on", () => {
-  const compiled = plan('save 1 as "k"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit');
+  const compiled = plan(
+    'save 1 as "k"\nlet loaded: integer? = load("k", default: null)\nsay "${loaded}", instant\nexit',
+  );
   const waiting = run(
     compiled,
     createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),

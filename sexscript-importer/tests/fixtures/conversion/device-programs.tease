@@ -2,7 +2,7 @@ function sexscriptLegacyValue(value) {
   return value
 }
 function sexscriptLegacyLoadInteger(key, whenMissing = null) {
-  let value = load key
+  let value = load key, default: null
   if value == null {
     return whenMissing
   }
@@ -48,10 +48,10 @@ function sexscriptLegacyShowSwitch(command) {
 let switchbox_onText = ""
 // NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
 let path = ""
-let estim_start = load "training.estim_start"
-let estim_finish = load "training.estim_finish"
-let lock_start = load "training.lock"
-let arm_finish = load "training.disarm"
+let estim_start = load "training.estim_start", default: ""
+let estim_finish = load "training.estim_finish", default: ""
+let lock_start = load "training.lock", default: ""
+let arm_finish = load "training.disarm", default: ""
 // NOTE SX_DEVICE_STATE line 7: useFile() ran the device command in lock_start on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Lock: LOCKED".
 if lock_start != "" {
   sexscriptLegacyShowDevice("Lock", "LOCKED")

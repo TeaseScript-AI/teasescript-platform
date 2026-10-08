@@ -28,9 +28,11 @@ accept syntax, architecture, or implementation details.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
   [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
-  boundaries, on which the Player runs its sessions.
-- **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
-  host-acknowledged atomic writes under [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
+  boundaries, on which the Player runs its sessions, and [controlled randomness](docs/RUNTIME.md#controlled-randomness),
+  with which a host chooses random outcomes or pauses at draws.
+- **Script storage:** `save`/`load`/`delete`, required lazy defaults, typed loads that ignore stored values of another
+  type, a validated checkpointed session view, and host-acknowledged atomic writes under
+  [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
   with a Clear saved script data control.
 - **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
@@ -61,8 +63,9 @@ accept syntax, architecture, or implementation details.
   authored runtime timers render in its timer rail on a session-owned scene clock (#444), and permanent buttons below
   them, inactive while their block runs (#610).
   It also has the tools framework, browser-local Player Settings, and the Debug panel that Settings' Debug menu offers,
-  with time controls, countdowns, and a Now view (`docs/DEBUGGER.md#player-debug`), and a debug export a player
-  downloads with their consent from the failure card, Settings, or the Debug panel, which `tools/debug-export.mjs`
+  with time controls, countdowns, a Now view, and a debug room that keeps debugging apart from normal play
+  (`docs/DEBUGGER.md#player-debug`), and a debug export a player
+  downloads with their consent from the error dialog, Settings, or the Debug panel, which `tools/debug-export.mjs`
   inspects and replays offline (`docs/DEBUGGER.md#debug-export`). It shows the runtime Stage image and plays authored
   audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
   repository demo `examples/demo/demo.tease` (#448), or with `?package=<id>` a package of the playground's development

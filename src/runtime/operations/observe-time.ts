@@ -42,6 +42,15 @@ import {
   type TraceStore,
 } from "../debug-trace.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
+import { randomControlFor } from "../random-control.js";
+import {
+  compileRandomPolicy,
+  type RandomControl,
+  RandomSuspension,
+  type RandomControlOptions,
+  type RandomDrawPendingOutcome,
+  type RandomPolicy,
+} from "../random-control.js";
 
 /** One Player sample of media playback: the active playback time of `segment` so far. */
 export interface MediaProgressReport {
@@ -55,14 +64,22 @@ export interface MediaProgressReport {
  * report in an observation has made no known progress since its last sample. Reports for unknown, settled, or
  * unloaded media, another segment, an earlier or equal time, or decreasing progress are ignored.
  */
+/** The options of an operation whose catch-up may draw a repeating timer's next round. */
+export interface CatchUpOptions {
+  readonly debugTrace?: RuntimeDebugContext;
+  /** Which draws the host decides or pauses at (`docs/RUNTIME.md#controlled-randomness`). */
+  readonly randomControl?: RandomControlOptions;
+}
+
 export function observeTime(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   suppliedNowMs: unknown,
   mediaReports: unknown = [],
-  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+  options: CatchUpOptions = {},
 ): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
+  const policy = catchUpPolicy(captured.plan, options);
   const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
   const observed = observeCapturedTime(
     captured.plan,
@@ -70,6 +87,7 @@ export function observeTime(
     suppliedNowMs,
     mediaReports,
     trace,
+    policy,
   );
   closeDebugTrace(trace, observed);
   return observed;
@@ -81,12 +99,89 @@ export function observeValidatedTime(
   snapshot: RuntimeSnapshot,
   suppliedNowMs: unknown,
   mediaReports: unknown = [],
-  options: { readonly debugTrace?: RuntimeDebugContext } = {},
+  options: CatchUpOptions & { readonly randomPolicy?: RandomPolicy | null } = {},
 ): PendingActionOperationResult<TimeObservationOutcome> {
+  const policy =
+    options.randomPolicy === undefined ? catchUpPolicy(plan, options) : options.randomPolicy;
   const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const observed = observeCapturedTime(plan, snapshot, suppliedNowMs, mediaReports, trace);
+  const observed = observeCapturedTime(plan, snapshot, suppliedNowMs, mediaReports, trace, policy);
   closeDebugTrace(trace, observed);
   return observed;
+}
+
+/** The checked random policy of a snapshot operation that only catches up; its timers draw from the session state. */
+export function catchUpPolicy(
+  plan: InstructionPlan,
+  options: Pick<CatchUpOptions, "randomControl">,
+): RandomPolicy | null {
+  return options.randomControl === undefined
+    ? null
+    : compileRandomPolicy(plan, options.randomControl, false);
+}
+
+/**
+ * Catches up due work at the root of an operation with the host's random policy. A draw that pauses keeps what
+ * finishing the catch-up needs. Returns the operation's control, whose receipts its result carries.
+ */
+export function catchUp(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  trace: TraceStore | null,
+  policy: RandomPolicy | null,
+): RandomControl | null {
+  const control = randomControlFor(plan, policy, trace);
+  try {
+    processDueWork(plan, current, events, trace, control);
+  } catch (error) {
+    if (!(error instanceof RandomSuspension)) throw error;
+    current.randomControl = {
+      forcedChoices: current.randomControl?.forcedChoices ?? 0,
+      pending: {
+        draw: error.draw,
+        unit: "dueWork",
+        root: "dueWork",
+        instructionBudget: null,
+        instructionsUsed: null,
+        eventsBefore: false,
+        forced: error.journal.forced,
+        builtinResults: error.journal.builtinResults,
+      },
+    };
+  }
+  if (control !== null && control.receipts.length > 0)
+    current.randomControl = {
+      forcedChoices: (current.randomControl?.forcedChoices ?? 0) + control.receipts.length,
+      pending: current.randomControl?.pending ?? null,
+    };
+  return control;
+}
+
+/** The result of an operation that caught up, with the chosen outcomes and refusal of its control. */
+export function catchUpResult<T>(
+  current: RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  outcome: T,
+  control: RandomControl | null,
+): PendingActionOperationResult<T> {
+  const settled = pendingResult(current, events, outcome);
+  if (control === null || (control.receipts.length === 0 && control.refusal === null))
+    return settled;
+  return Object.freeze({
+    ...settled,
+    ...(control.receipts.length === 0
+      ? {}
+      : { randomChoices: Object.freeze([...control.receipts]) }),
+    ...(control.refusal === null ? {} : { randomRefusal: control.refusal }),
+  });
+}
+
+/** The refusal of a host operation while a draw is paused: it changes nothing until the host resolves the draw. */
+export function randomDrawPending(current: RuntimeSnapshot): RandomDrawPendingOutcome | null {
+  const pending = current.randomControl?.pending ?? null;
+  return pending === null
+    ? null
+    : Object.freeze({ kind: "randomDrawPending", drawId: pending.draw.drawId } as const);
 }
 
 function observeCapturedTime(
@@ -95,7 +190,10 @@ function observeCapturedTime(
   suppliedNowMs: unknown,
   mediaReports: unknown,
   trace: TraceStore | null,
+  policy: RandomPolicy | null,
 ): PendingActionOperationResult<TimeObservationOutcome> {
+  const paused = randomDrawPending(current);
+  if (paused !== null) return pendingResult(current, [], paused);
   if (!isValidSessionTime(suppliedNowMs))
     return pendingResult(current, [], {
       kind: "invalidObservation",
@@ -121,11 +219,13 @@ function observeCapturedTime(
     }
   }
   const events: InterpreterEvent[] = [];
-  processDueWork(plan, current, events, trace);
-  return pendingResult(current, events, {
-    kind: "observed",
-    currentSessionTimeMs: current.currentSessionTimeMs,
-  });
+  const control = catchUp(plan, current, events, trace, policy);
+  return catchUpResult(
+    current,
+    events,
+    { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs } as const,
+    control,
+  );
 }
 
 /**
@@ -139,6 +239,7 @@ export function processDueWork(
   current: RuntimeSnapshot,
   events: InterpreterEvent[],
   trace: TraceStore | null = null,
+  control: RandomControl | null = null,
 ): void {
   // A failed session is terminal: later observations record time but settle nothing.
   if (current.status === "failed") return;
@@ -152,29 +253,46 @@ export function processDueWork(
       }
       return;
     }
-    current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
     if (due.kind === "timer") {
-      // Silent rounds may be skipped only up to the next other work, which could observe or change this timer.
-      const boundary = nextOtherWork(current, due.actionId);
-      skipSilentRounds(
-        due.action.timer,
-        boundary.deadlineMs,
-        boundary.phase > 0 || due.actionId < boundary.actionId,
-      );
-      current.currentSessionTimeMs = Math.max(
-        current.currentSessionTimeMs,
-        due.action.timer.deadlineMs!,
-      );
-      trace?.at(due.action.owningInstruction, current.currentSessionTimeMs);
-      expireTimerAction(
-        current,
-        due.action,
-        due.action.timer.deadlineMs!,
-        timerSpan(plan, due.action.owningInstruction),
-        events,
-        trace,
-      );
-    } else if (due.kind === "media") {
+      // A round's draw comes first in its expiry, so a pause undoes the round with the counters a unit restores.
+      const unit =
+        control !== null &&
+        due.action.timer.range !== null &&
+        control.beginUnit("dueWork", current, events, trace, null);
+      try {
+        current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
+        // Silent rounds may be skipped only up to the next other work, which could observe or change this timer.
+        const boundary = nextOtherWork(current, due.actionId);
+        skipSilentRounds(
+          due.action.timer,
+          boundary.deadlineMs,
+          boundary.phase > 0 || due.actionId < boundary.actionId,
+        );
+        current.currentSessionTimeMs = Math.max(
+          current.currentSessionTimeMs,
+          due.action.timer.deadlineMs!,
+        );
+        trace?.at(due.action.owningInstruction, current.currentSessionTimeMs);
+        expireTimerAction(
+          current,
+          due.action,
+          due.action.timer.deadlineMs!,
+          timerSpan(plan, due.action.owningInstruction),
+          events,
+          trace,
+          control,
+        );
+      } catch (error) {
+        if (unit && error instanceof RandomSuspension)
+          control.abortUnit(error, current, events, trace);
+        else if (unit) control.discardUnit(trace);
+        throw error;
+      }
+      if (unit) control.endUnit(trace);
+      continue;
+    }
+    current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
+    if (due.kind === "media") {
       // One timeline event per iteration, so a queued cue block holds catch-up like a timer expiry.
       const media = due.action.media;
       let event = due.event;

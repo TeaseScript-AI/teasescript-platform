@@ -41,7 +41,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
   `debug-export-assembly.ts` builds an export from the player's choices. `debug-history.ts` keeps Debug's rewind
   history and `debug-history-indexeddb.ts` the database it spills to (see
   [`DEBUGGER.md`](../docs/DEBUGGER.md#rewind)); `restorePlayerRuntimeSessionAt` in `runtime-adapter.ts` restores its
-  states.
+  states, and those of the session `kept-sessions.ts` keeps for a reload, also the debug room's (see
+  [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#session-start-and-user-activation)).
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,
@@ -160,8 +161,8 @@ with `[data-debug-trace-status]`, each derivation list `[data-debug-trace]` with
 message's `[data-explain-values]`, the log lines under
 `[data-debug-log]` in
 the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
-the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision` and on `storage`
-events for its `savedDataScope`, renders each value as the flat, paged outline of `storageOutline`
+the saved values through the session host's `readSavedData`, which in the debug room are the debug room's own,
+refreshes on its `savedDataRevision`, renders each value as the flat, paged outline of `storageOutline`
 (`player/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
 keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
 the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`. It refuses an edit (`busy`)

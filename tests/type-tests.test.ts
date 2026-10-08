@@ -102,7 +102,7 @@ test("a type test evaluates its operand once and never changes it", () => {
 
 test("a test on a value of unknown type narrows it, for example a loaded value", () => {
   const source = [
-    'let saved = load "level"',
+    'let saved = load "le" + "vel", default: null',
     "let level = 1",
     "if saved is integer {",
     "    level = saved",
@@ -437,13 +437,13 @@ test("an assignment narrows the variable to the assigned value's type", () => {
   // A variable of unknown type takes a copy of the assigned value's type: each object then gets its own properties.
   assert.deepEqual(
     sayTexts(
-      'let given = {}\nlet loaded = load "k"\nloaded = given\nloaded.flag = 1\ngiven.flag = true\nsay loaded\nsay given\nexit',
+      'let given = {}\nlet loaded = load "" + "k", default: null\nloaded = given\nloaded.flag = 1\ngiven.flag = true\nsay loaded\nsay given\nexit',
     ),
     ["{ flag: 1 }", "{ flag: true }"],
   );
   assert.deepEqual(
     errors(
-      'let given = { flag: true }\nlet loaded = load "k"\nloaded = given\nloaded.flag = 1\nexit',
+      'let given = { flag: true }\nlet loaded = load "" + "k", default: null\nloaded = given\nloaded.flag = 1\nexit',
     ),
     [["TSV041", "1"]],
   );
@@ -535,7 +535,9 @@ test("is checks a type, and a provably constant test is a warning", () => {
   ]);
   // A number may still be whole, and a value of unknown type may be anything.
   assert.deepEqual(
-    diagnostics('let r = 2.5\nlet a = r is integer\nlet s = load "s"\nlet b = s is integer\nexit'),
+    diagnostics(
+      'let r = 2.5\nlet a = r is integer\nlet s = load "" + "s", default: null\nlet b = s is integer\nexit',
+    ),
     [],
   );
   assert.notEqual(compileSource("let n = 5\nlet a = n is number\nexit").plan, null);
@@ -587,7 +589,7 @@ test("a comparison with a value the other side can never hold is a warning, like
         "  let c = l == m",
         "  let d = p != null",
         "}",
-        'let u = load "u"',
+        'let u = load "" + "u", default: null',
         "let e = u == 5",
         "exit",
       ].join("\n"),
@@ -612,7 +614,9 @@ function findKind(
 }
 
 test("plan validation rejects a malformed type test at its path", () => {
-  const compiled = compileValidPlan('let saved = load "level"\nlet whole = saved is integer\nexit');
+  const compiled = compileValidPlan(
+    'let saved = load "le" + "vel", default: null\nlet whole = saved is integer\nexit',
+  );
   for (const [description, field, value, path] of [
     ["negated that is not true or false", "negated", "yes", "negated"],
     ["unknown type kind", "type", { kind: "whole" }, "type.kind"],

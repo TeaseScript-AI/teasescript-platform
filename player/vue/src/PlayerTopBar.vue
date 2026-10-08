@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useResizeObserver } from "@vueuse/core";
 import { Maximize, Minimize, Moon, Sun } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
+import DebugRoomMark from "./DebugRoomMark.vue";
 
 defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 
@@ -12,6 +14,10 @@ const topBar = ref<HTMLElement | null>(null);
 const revealed = ref(false);
 const props = defineProps<{
   title: string;
+  /** The script's author, shown after its title in quieter text; empty when unknown. */
+  author: string;
+  /** Whether the debug room is shown (DEBUGGER.md "Debug room"), which a bug before the title marks in its pill. */
+  debugRoom?: boolean;
   fullscreen: boolean;
   fullscreenSupported: boolean;
   fullscreenError: string;
@@ -32,9 +38,47 @@ function cancelHide() {
   hideTimer = undefined;
 }
 
+// A title cut off by the bar's width shows in full in the bar's tooltip, also on a tap; otherwise the pill is plain text.
+const titleText = ref<HTMLElement | null>(null);
+const truncated = ref(false);
+const fullTitleOpen = ref(false);
+const fullTitle = computed(() => (props.title && props.author ? `${props.title} by ${props.author}` : props.title || `by ${props.author}`));
+// Below the bar width that hides the title visually, it stays plain text for assistive technology, never a control.
+function measureTitle() {
+  const text = titleText.value;
+  const heading = text?.closest("h1");
+  truncated.value =
+    text !== null &&
+    heading !== null &&
+    heading !== undefined &&
+    heading.getBoundingClientRect().width > 1 &&
+    text.scrollWidth > text.clientWidth;
+}
+useResizeObserver(titleText, measureTitle);
+watch(
+  () => [props.title, props.author],
+  () => void nextTick(measureTitle),
+);
+watch(truncated, (cut) => {
+  if (!cut) fullTitleOpen.value = false;
+});
+function changeFullTitle(open: boolean) {
+  fullTitleOpen.value = open;
+  if (!open) hideLater();
+}
+// Touch has no hover, and the trigger's own press closes the tooltip: a tap toggles it from how it was before the press.
+let tapOpens: boolean | null = null;
+function pressFullTitle(event: PointerEvent) {
+  tapOpens = event.pointerType === "touch" ? !fullTitleOpen.value : null;
+}
+function tapFullTitle() {
+  if (tapOpens !== null) changeFullTitle(tapOpens);
+  tapOpens = null;
+}
+
 function hideLater() {
   cancelHide();
-  if (pointerInside || topBar.value?.contains(document.activeElement)) return;
+  if (pointerInside || fullTitleOpen.value || topBar.value?.contains(document.activeElement)) return;
   hideTimer = setTimeout(() => { revealed.value = false; }, 3000);
 }
 
@@ -79,7 +123,14 @@ onBeforeUnmount(cancelHide);
   >
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
     <h1 class="player-top-bar-title">
-      <span v-if="title"><span class="player-top-bar-title-text">{{ title }}</span></span>
+      <Tooltip v-if="truncated" :open="fullTitleOpen" @update:open="changeFullTitle">
+        <TooltipTrigger as-child>
+          <button type="button" data-player-title-full @pointerdown.capture="pressFullTitle" @click="tapFullTitle"><DebugRoomMark v-if="debugRoom" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
+        </TooltipTrigger>
+        <!-- A long title wraps within the screen, also one without spaces. -->
+        <TooltipContent :collision-padding="8" class="max-w-(--reka-tooltip-content-available-width) wrap-anywhere" data-player-title-tooltip>{{ fullTitle }}</TooltipContent>
+      </Tooltip>
+      <span v-else-if="title || author || debugRoom"><DebugRoomMark v-if="debugRoom" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></span>
     </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
       <slot name="notifications" />
@@ -183,7 +234,7 @@ onBeforeUnmount(cancelHide);
   line-height: calc(1em + 8px);
   font-weight: 500;
 }
-.player-top-bar-title > span {
+.player-top-bar-title > :is(span, button) {
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
@@ -198,6 +249,10 @@ onBeforeUnmount(cancelHide);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.player-top-bar-author {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 @container player-titlebar (max-width: 200px) {
   .player-top-bar-title {
@@ -235,7 +290,7 @@ onBeforeUnmount(cancelHide);
   --button-pressed: var(--theme-media-pressed, oklch(78% 0.01 70 / 78%));
   --button-text: var(--media-text);
 }
-[data-player-top-bar] :is(.player-top-bar-tools button, .player-top-bar-title > span) {
+[data-player-top-bar] :is(.player-top-bar-tools button, .player-top-bar-title > :is(span, button)) {
   border: 1px solid var(--media-border);
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
@@ -243,9 +298,15 @@ onBeforeUnmount(cancelHide);
 [data-player-top-bar] .player-top-bar-tools button {
   --button-rest: var(--media-surface);
 }
-[data-player-top-bar] .player-top-bar-title > span {
+[data-player-top-bar] .player-top-bar-title > :is(span, button) {
   background: var(--media-surface);
   color: var(--media-text);
+}
+/* Plain title text lets clicks through to the Stage; a cut-off title takes them to open in full. */
+[data-player-top-bar] .player-top-bar-title > button {
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
 }
 :root[data-player-theme] [data-player-top-bar] button:disabled {
   background: transparent;

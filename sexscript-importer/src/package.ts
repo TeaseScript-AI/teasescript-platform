@@ -7,7 +7,13 @@ import {
   type ParsedGroovyFile,
   type SourceSpan,
 } from "./ast.ts";
-import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
+import type {
+  IrExpression,
+  IrStatement,
+  LegacyMetadata,
+  MigrationDiagnostic,
+  MigrationProgram,
+} from "./ir.ts";
 import { packageResources, type PackageFileReader } from "./java-data.ts";
 import {
   buildHelperRegistry,
@@ -37,6 +43,7 @@ import {
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
+import { withStorageDefaults } from "./storage-keys.ts";
 import {
   expressionType,
   functionResultTypes,
@@ -588,23 +595,79 @@ function entryMenu(
             span: null,
           },
         ];
+  const metadata = entryMetadata(choices, scripts, programs);
   // One entry needs no menu and no note: main.tease goes there.
   if (choices.length === 1 && variants.length === 0)
     return {
       sourceName: `${scripts.root}/main.tease`,
-      metadata: null,
+      metadata,
       statements: chain,
       diagnostics: [],
     };
   return {
     sourceName: `${scripts.root}/main.tease`,
-    metadata: null,
+    metadata,
     statements: [
       { kind: "comment", text: `// NOTE SX_ENTRY_MENU: ${message}`, trailing: false, span: null },
       ...question,
       ...chain,
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
+  };
+}
+
+/**
+ * The title and author of a generated main.tease, which the Player shows for the package: those of the one script it
+ * goes to; for a menu, the offered title that every offered script's title starts with, else the name of the package's
+ * folder, as the catalog lists it, and the authors that every offered script names. Without such a value, the header
+ * leaves it out.
+ */
+function entryMetadata(
+  choices: readonly string[],
+  scripts: PackageScripts,
+  programs: readonly MigrationProgram[],
+): LegacyMetadata | null {
+  const indexes = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
+  const offered = choices.map((path) => programs[indexes.get(path) ?? -1]?.metadata ?? null);
+  const written = (value: string | null | undefined): string | null =>
+    value === null || value === undefined || value.trim() === "" ? null : value.trim();
+  const titles = offered.map((metadata) => written(metadata?.title));
+  const authors = offered.map((metadata) => written(metadata?.author));
+  const lower = (value: string): string => value.toLocaleLowerCase();
+  const title =
+    titles
+      .filter((candidate): candidate is string => candidate !== null)
+      .sort((left, right) => left.length - right.length)
+      .find((candidate) =>
+        titles.every((other) => other !== null && lower(other).startsWith(lower(candidate))),
+      ) ?? null;
+  const names = authors.map((author) =>
+    author === null
+      ? []
+      : author
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean),
+  );
+  const shared = (names[0] ?? []).filter((name) =>
+    names.every((other) => other.some((candidate) => lower(candidate) === lower(name))),
+  );
+  const author = shared.length === 0 ? null : shared.join(", ");
+  // The package's folder holds its legacy scripts folder, or is the scripts' common folder itself.
+  const folders = scripts.root.split("/").filter(Boolean);
+  const folder =
+    folders.at(-1)?.toLowerCase() === "scripts" ? folders.at(-2) : (folders.at(-1) ?? undefined);
+  const named = title ?? (choices.length > 1 ? (folder ?? null) : null);
+  if (named === null && author === null) return null;
+  return {
+    apiVersion: null,
+    title: named,
+    summary: null,
+    author,
+    status: null,
+    color: null,
+    language: null,
+    tags: null,
   };
 }
 
@@ -868,10 +931,13 @@ export function lowerPackage(
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withNullableParameters(
-      withClasses.map((program, index) =>
-        index === entryIndex ? withProfile(program, withClasses) : program,
+    const programs = withStorageDefaults(
+      withNullableParameters(
+        withClasses.map((program, index) =>
+          index === entryIndex ? withProfile(program, withClasses) : program,
+        ),
       ),
+      false,
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -918,9 +984,6 @@ export function lowerPackage(
     const position = outputIndexes.indexOf(index);
     return position < 0 ? program : apart(shared.programs[position]!, false);
   });
-  // Calls in any file may pass null for a parameter whose default gives it a type.
-  const nullable = withNullableParameters([apartMain, ...apartPrograms]);
-  const main = nullable[0]!;
   const paths = files.map(
     (file, index) =>
       scripts.pathOf.get(index) ??
@@ -928,6 +991,23 @@ export function lowerPackage(
         ? packagePath(file.sourceName, scripts.root)
         : null),
   );
+  // Calls in any file may pass null for a parameter whose default gives it a type; reads get defaults by the types of
+  // the keys of the whole package, declared in the files it publishes.
+  const nullable = withStorageDefaults(
+    withNullableParameters([apartMain, ...apartPrograms]),
+    true,
+    {
+      published: [
+        legacyMain === null,
+        ...apartPrograms.map(
+          (program, index) =>
+            paths[index] !== null && paths[index] !== undefined && program.module === undefined,
+        ),
+      ],
+      main: legacyMain === null ? 0 : legacyMain + 1,
+    },
+  );
+  const main = nullable[0]!;
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
   const programs = withoutRepeatedChainText(nullable.slice(1), paths);
   return {

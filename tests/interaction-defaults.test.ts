@@ -257,7 +257,7 @@ test("a default that is null or blank when the field opens starts the field empt
     for (const [command, kind, typed] of asks) {
       const label = `${command} with ${JSON.stringify(stored)}`;
       const session = createPlayerRuntimeSession(
-        `let answer = ${command} hint: "Hint", default: load "saved"\nsay "Got \${answer}"\nexit`,
+        `let answer = ${command} hint: "Hint", default: load("sa" + "ved", default: null)\nsay "Got \${answer}"\nexit`,
         {
           temporalContext: AMSTERDAM,
           ...(stored === undefined ? {} : { scriptStorage: [{ key: "saved", value: stored }] }),
@@ -280,7 +280,7 @@ test("a default that is null or blank when the field opens starts the field empt
 
   // Once saved, the same source prefills the field as before.
   const saved = createPlayerRuntimeSession(
-    'let answer = askText "Your name?", default: load "name"\nexit',
+    'let answer = askText "Your name?", default: load("name", default: "")\nexit',
     { scriptStorage: [{ key: "name", value: "Ada" }] },
   );
   const prefilled = playerRuntimeForeground(saved);
@@ -298,7 +298,9 @@ test("a default that may be null compiles, and prefills only when it holds a val
 });
 
 test("an open field without a prefill restores without one", () => {
-  const plan = compileValidPlan('let answer = askText "Your name?", default: load "name"\nexit');
+  const plan = compileValidPlan(
+    'let answer = askText "Your name?", default: load("name", default: "")\nexit',
+  );
   const { snapshot, ui } = pendingInput(plan);
   assert.equal("prefill" in ui, false);
   assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
@@ -322,7 +324,7 @@ test("an open field without a prefill restores without one", () => {
   assert.equal(validateRuntimeSnapshot(tampered, plan).valid, false);
 
   const session = createPlayerRuntimeSession(
-    'let answer = askDate "Which day?", default: load "day"\nexit',
+    'let day: date? = load("day", default: null)\nlet answer = askDate "Which day?", default: day\nexit',
     { temporalContext: AMSTERDAM },
   );
   const reopened = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));

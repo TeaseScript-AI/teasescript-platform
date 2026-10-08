@@ -61,11 +61,12 @@ export interface Runtime {
   fork: () => Runtime;
 }
 
-/** The compiler and the runtime session factories the explorer uses. */
+/** The compiler and the runtime session factories the explorer and the smoke runs (`runtime-check.ts`) use. */
 export interface Engine {
   compileProject: (sources: unknown, options: unknown) => Data;
-  /** A session at the start of a plan. */
-  createFreshRuntimeSession: (plan: Data, fresh: Data) => Runtime;
+  compileSource: (source: string, options: unknown) => Data;
+  /** A session at the start of a plan; `options` may give the `capabilities` every operation uses. */
+  createFreshRuntimeSession: (plan: Data, fresh: Data, options?: Data) => Runtime;
   /** A session that goes on from a snapshot, which the runtime checks completely. */
   createRuntimeSession: (plan: Data, snapshot: Data) => Runtime;
 }
@@ -82,11 +83,12 @@ export async function loadEngine(): Promise<Engine> {
     const value = isRecord(module) ? module[name] : undefined;
     if (typeof value !== "function")
       throw new Error(
-        `Repository build does not export ${name}(); the explorer needs runtime sessions.`,
+        `Repository build does not export ${name}(); the importer needs runtime sessions.`,
       );
     return value;
   };
   const compileProject = exported("compileProject");
+  const compileSource = exported("compileSource");
   const fresh = exported("createFreshRuntimeSession");
   const restore = exported("createRuntimeSession");
   return {
@@ -96,7 +98,12 @@ export async function loadEngine(): Promise<Engine> {
         throw new Error("compileProject() returned an unexpected result shape.");
       return value;
     },
-    createFreshRuntimeSession: (plan, options) => runtimeOf(fresh(plan, options)),
+    compileSource: (source, options) => {
+      const value: unknown = compileSource(source, options);
+      if (!isRecord(value)) throw new Error("compileSource() returned an unexpected result shape.");
+      return value;
+    },
+    createFreshRuntimeSession: (plan, start, options) => runtimeOf(fresh(plan, start, options)),
     createRuntimeSession: (plan, snapshot) => runtimeOf(restore(plan, snapshot)),
   };
 }

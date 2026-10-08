@@ -1,0 +1,6 @@
+---
+title: "Title fixture"
+author: "Author fixture"
+---
+say "Title fixture"
+exit

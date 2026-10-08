@@ -54,12 +54,32 @@ import {
   assertEventSequenceCapacity,
   captureExecutableData,
   copySpan,
+  isPlainRecord,
+  pendingResult,
   requiredFutureActionCompletionEvents,
   result,
+  RuntimeDataError,
   setCapturedTemporary,
   takeSequence,
 } from "./operations/support.js";
-import type { RuntimeOperationResult } from "./operations/model.js";
+import type { PendingActionOperationResult, RuntimeOperationResult } from "./operations/model.js";
+import { captureExternalData } from "../external-data-capture.js";
+import { copyPlainData } from "./plain-data.js";
+import {
+  compileRandomPolicy,
+  RandomControl,
+  randomControlFor,
+  RandomReplayDivergence,
+  checkedOutcome,
+  RandomSuspension,
+  unitNeedsStateCopy,
+  type RandomControlOptions,
+  type RandomDrawResolutionOutcome,
+  type RandomOutcome,
+  type RandomPolicy,
+  type RandomRootOperation,
+  type RuntimePendingRandomDrawSnapshot,
+} from "./random-control.js";
 import {
   executeEnd,
   executeGoto,
@@ -98,6 +118,8 @@ import {
   assertPersistable,
   storageKey,
   WRITE_KEY_MESSAGE,
+  storageKeyPlace,
+  storageKeyType,
   writeScriptStorage,
 } from "./script-storage.js";
 import {
@@ -203,6 +225,13 @@ export interface RuntimeRunOptions {
   readonly debugTrace?: RuntimeDebugContext;
   /** `true` returns what the call executed as `instructionTrace` (`docs/RUNTIME.md#instruction-trace`). */
   readonly instructionTrace?: boolean;
+  /** Which draws the host decides or pauses at (`docs/RUNTIME.md#controlled-randomness`). */
+  readonly randomControl?: RandomControlOptions;
+}
+
+/** Run options of engine-owned state, whose host already checked its random control once. */
+export interface ValidatedRunOptions extends RuntimeRunOptions {
+  readonly randomPolicy?: RandomPolicy | null;
 }
 
 function instructionTraceFor(
@@ -214,31 +243,36 @@ function instructionTraceFor(
     : null;
 }
 
+/** The host's checked random policy: a session's own, or the snapshot API's `randomControl` option. */
+export function randomPolicyFor(
+  plan: InstructionPlan,
+  options: Pick<ValidatedRunOptions, "randomControl" | "randomPolicy">,
+  capabilities: RuntimeCapabilities,
+): RandomPolicy | null {
+  if (options.randomPolicy !== undefined) return options.randomPolicy;
+  return options.randomControl === undefined
+    ? null
+    : compileRandomPolicy(plan, options.randomControl, capabilities.random !== undefined);
+}
+
 export function executeInstruction(
   plan: InstructionPlan,
   inputSnapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
-  options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
+  options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace" | "randomControl"> = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
+  const policy = randomPolicyFor(captured.plan, options, capabilities);
   const trace = openDebugTrace(options.debugTrace, captured.plan, inputSnapshot);
-  const context = new RuntimeExecutionContext(
+  const executed = driveRoot(
+    captured.plan,
     captured.snapshot,
     capabilities,
-    captured.plan,
+    options,
     trace,
-    instructionTraceFor(captured.plan, options),
-  );
-  const instructionsExecuted = executeCapturedInstruction(
-    captured.plan,
-    captured.snapshot,
-    context,
-  );
-  const executed = result(
-    captured.snapshot,
-    context.events,
-    instructionsExecuted,
-    context.instructionTrace,
+    policy,
+    "executeInstruction",
+    null,
   );
   closeDebugTrace(trace, executed);
   return executed;
@@ -249,20 +283,30 @@ export function executeValidatedInstruction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
-  options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
+  options: Pick<
+    ValidatedRunOptions,
+    "debugTrace" | "instructionTrace" | "randomControl" | "randomPolicy"
+  > = {},
 ): RuntimeOperationResult {
+  const policy = randomPolicyFor(plan, options, capabilities);
   const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const context = new RuntimeExecutionContext(
+  const executed = driveRoot(
+    plan,
     snapshot,
     capabilities,
-    plan,
+    options,
     trace,
-    instructionTraceFor(plan, options),
+    policy,
+    "executeInstruction",
+    null,
   );
-  const instructionsExecuted = executeCapturedInstruction(plan, snapshot, context);
-  const executed = result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
   closeDebugTrace(trace, executed);
   return executed;
+}
+
+/** How many instructions an operation executed so far, including one whose due work a draw then paused. */
+interface Progress {
+  executed: number;
 }
 
 /**
@@ -273,17 +317,17 @@ function executeCapturedInstruction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
-): number {
-  const executed = executeInstructionBoundary(plan, snapshot, context);
+  progress: Progress,
+): void {
+  progress.executed += executeInstructionBoundary(plan, snapshot, context);
   if (
     snapshot.status !== "failed" &&
     // Work due exactly at the observed time also settles once execution waits or ends.
     snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs &&
     !executionRunnable(snapshot)
   ) {
-    processDueWork(plan, snapshot, context.events, context.trace);
+    processDueWork(plan, snapshot, context.events, context.trace, context.control);
   }
-  return executed;
 }
 
 function executeInstructionBoundary(
@@ -304,6 +348,19 @@ function executeInstructionBoundary(
   // Every region of a validated plan ends in a transfer, so execution never runs past one.
   const instruction = plan.instructions[instructionIndex]!;
 
+  // A draw that pauses undoes the instruction; a few instructions can only be undone from a copy of the state.
+  const control = context.control;
+  const unit =
+    control !== null &&
+    control.beginUnit(
+      "instruction",
+      snapshot,
+      context.events,
+      context.trace,
+      unitNeedsStateCopy(plan, snapshot, instructionIndex)
+        ? () => copyPlainData(snapshot, "fork")
+        : null,
+    );
   snapshot.status = "running";
   const evaluator = context.evaluator();
   context.trace?.at(
@@ -320,12 +377,19 @@ function executeInstructionBoundary(
       snapshot.interactionResultHandoff = null;
     }
   } catch (error) {
+    if (unit && error instanceof RandomSuspension) {
+      control.abortUnit(error, snapshot, context.events, context.trace);
+      throw error;
+    }
     // A text too long that no check foresaw still fails as one, on V8, which says so with this message.
     const failure =
       error instanceof RangeError && error.message === "Invalid string length"
         ? textTooLong("this line", instruction.span, null)
         : error;
-    if (!(failure instanceof RuntimeFault)) throw error;
+    if (!(failure instanceof RuntimeFault)) {
+      if (unit) control.discardUnit(context.trace);
+      throw error;
+    }
     failSnapshot(
       snapshot,
       failure.toInfo(),
@@ -335,6 +399,7 @@ function executeInstructionBoundary(
   } finally {
     snapshot.contextualSpeaker = null;
   }
+  if (unit) control.endUnit(context.trace);
   return 1;
 }
 
@@ -345,13 +410,17 @@ export function stepToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
+  const policy = randomPolicyFor(captured.plan, options, capabilities);
   const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const stepped = stepCapturedToEvent(
+  const stepped = driveRoot(
     captured.plan,
     captured.snapshot,
     capabilities,
     options,
     trace,
+    policy,
+    "stepToEvent",
+    instructionBudget(options.instructionBudget),
   );
   closeDebugTrace(trace, stepped);
   return stepped;
@@ -362,38 +431,22 @@ export function stepValidatedStateToEvent(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
-  options: RuntimeRunOptions = {},
+  options: ValidatedRunOptions = {},
 ): RuntimeOperationResult {
+  const policy = randomPolicyFor(plan, options, capabilities);
   const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const stepped = stepCapturedToEvent(plan, snapshot, capabilities, options, trace);
-  closeDebugTrace(trace, stepped);
-  return stepped;
-}
-
-function stepCapturedToEvent(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  capabilities: RuntimeCapabilities,
-  options: RuntimeRunOptions,
-  trace: TraceStore | null,
-): RuntimeOperationResult {
-  const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(
+  const stepped = driveRoot(
+    plan,
     snapshot,
     capabilities,
-    plan,
+    options,
     trace,
-    instructionTraceFor(plan, options),
+    policy,
+    "stepToEvent",
+    instructionBudget(options.instructionBudget),
   );
-  let instructionsExecuted = 0;
-  while (executionRunnable(snapshot) && context.events.length === 0) {
-    if (instructionsExecuted >= budget) {
-      failForBudget(plan, snapshot, context.events, budget);
-      break;
-    }
-    instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
-  }
-  return result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
+  closeDebugTrace(trace, stepped);
+  return stepped;
 }
 
 export function run(
@@ -403,8 +456,18 @@ export function run(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
+  const policy = randomPolicyFor(captured.plan, options, capabilities);
   const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const ran = runCaptured(captured.plan, captured.snapshot, capabilities, options, trace);
+  const ran = driveRoot(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    options,
+    trace,
+    policy,
+    "run",
+    instructionBudget(options.instructionBudget),
+  );
   closeDebugTrace(trace, ran);
   return ran;
 }
@@ -414,38 +477,263 @@ export function runValidatedState(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
-  options: RuntimeRunOptions = {},
+  options: ValidatedRunOptions = {},
 ): RuntimeOperationResult {
+  const policy = randomPolicyFor(plan, options, capabilities);
   const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const ran = runCaptured(plan, snapshot, capabilities, options, trace);
+  const ran = driveRoot(
+    plan,
+    snapshot,
+    capabilities,
+    options,
+    trace,
+    policy,
+    "run",
+    instructionBudget(options.instructionBudget),
+  );
   closeDebugTrace(trace, ran);
   return ran;
 }
 
-function runCaptured(
+/**
+ * Runs, steps to an event, or executes one instruction. A paused draw keeps what finishing the operation needs; while
+ * a draw is paused, nothing runs.
+ */
+function driveRoot(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities,
-  options: RuntimeRunOptions,
+  options: Pick<RuntimeRunOptions, "instructionTrace">,
   trace: TraceStore | null,
+  policy: RandomPolicy | null,
+  root: "run" | "stepToEvent" | "executeInstruction",
+  budget: number | null,
 ): RuntimeOperationResult {
-  const budget = instructionBudget(options.instructionBudget);
+  if (snapshot.randomControl?.pending != null) return result(snapshot, [], 0);
+  const control = randomControlFor(plan, policy, trace);
   const context = new RuntimeExecutionContext(
     snapshot,
     capabilities,
     plan,
     trace,
     instructionTraceFor(plan, options),
+    control,
   );
-  let instructionsExecuted = 0;
-  while (executionRunnable(snapshot)) {
-    if (instructionsExecuted >= budget) {
+  const progress: Progress = { executed: 0 };
+  try {
+    if (root === "executeInstruction")
+      executeCapturedInstruction(plan, snapshot, context, progress);
+    else runInstructions(plan, snapshot, context, progress, budget!, 0, root === "stepToEvent");
+  } catch (error) {
+    if (!(error instanceof RandomSuspension)) throw error;
+    pauseAtDraw(snapshot, error, root, budget, progress.executed, context.events.length > 0);
+  }
+  return controlledResult(snapshot, context, progress.executed);
+}
+
+/** Runs instructions within `budget`, of which an operation that a draw paused used `used` before. */
+function runInstructions(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  context: RuntimeExecutionContext,
+  progress: Progress,
+  budget: number,
+  used: number,
+  untilEvent: boolean,
+): void {
+  while (executionRunnable(snapshot) && !(untilEvent && context.events.length > 0)) {
+    if (used + progress.executed >= budget) {
       failForBudget(plan, snapshot, context.events, budget);
       break;
     }
-    instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
+    executeCapturedInstruction(plan, snapshot, context, progress);
   }
-  return result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
+}
+
+/** Keeps a paused draw and what finishing its interrupted operation needs. */
+export function pauseAtDraw(
+  snapshot: RuntimeSnapshot,
+  suspension: RandomSuspension,
+  root: RandomRootOperation,
+  budget: number | null,
+  used: number,
+  eventsBefore: boolean,
+): void {
+  const budgeted = root === "run" || root === "stepToEvent";
+  snapshot.randomControl = {
+    forcedChoices: snapshot.randomControl?.forcedChoices ?? 0,
+    pending: {
+      draw: suspension.draw,
+      unit: suspension.unit,
+      root,
+      instructionBudget: budgeted ? budget : null,
+      instructionsUsed: budgeted ? used : null,
+      eventsBefore: root === "stepToEvent" && eventsBefore,
+      forced: suspension.journal.forced,
+      builtinResults: suspension.journal.builtinResults,
+    },
+  };
+}
+
+/** The result of an operation, with the chosen outcomes it accepted, which also count in the state. */
+export function controlledResult(
+  snapshot: RuntimeSnapshot,
+  context: Pick<RuntimeExecutionContext, "events" | "instructionTrace" | "control">,
+  instructionsExecuted: number,
+): RuntimeOperationResult {
+  const control = context.control;
+  if (control !== null && control.receipts.length > 0)
+    snapshot.randomControl = {
+      forcedChoices: (snapshot.randomControl?.forcedChoices ?? 0) + control.receipts.length,
+      pending: snapshot.randomControl?.pending ?? null,
+    };
+  const executed = result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
+  if (control === null || (control.receipts.length === 0 && control.refusal === null))
+    return executed;
+  return Object.freeze({
+    ...executed,
+    ...(control.receipts.length === 0
+      ? {}
+      : { randomChoices: Object.freeze([...control.receipts]) }),
+    ...(control.refusal === null ? {} : { randomRefusal: control.refusal }),
+  });
+}
+
+/**
+ * Resolves the paused draw and finishes the operation it interrupted: the unit it belongs to executes again from its
+ * start and takes the resolution at the draw, then the operation continues with its own budget. `natural` keeps the
+ * natural result, which is no host input; an outcome is a chosen input with a receipt. A request that does not fit
+ * the paused draw changes nothing.
+ */
+export function resumeRandomDraw(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  request: unknown,
+  capabilities: RuntimeCapabilities = {},
+  options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace" | "randomControl"> = {},
+): PendingActionOperationResult<RandomDrawResolutionOutcome> {
+  const captured = captureExecutableData(plan, snapshot);
+  const policy = randomPolicyFor(captured.plan, options, capabilities);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const resumed = resumeCaptured(
+    captured.plan,
+    captured.snapshot,
+    request,
+    capabilities,
+    options,
+    trace,
+    policy,
+  );
+  closeDebugTrace(trace, resumed);
+  return resumed;
+}
+
+/** Resolves the paused draw of engine-owned plan/state that already passed complete validation. */
+export function resumeValidatedRandomDraw(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  request: unknown,
+  capabilities: RuntimeCapabilities = {},
+  options: Pick<
+    ValidatedRunOptions,
+    "debugTrace" | "instructionTrace" | "randomControl" | "randomPolicy"
+  > = {},
+): PendingActionOperationResult<RandomDrawResolutionOutcome> {
+  const policy = randomPolicyFor(plan, options, capabilities);
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const resumed = resumeCaptured(plan, snapshot, request, capabilities, options, trace, policy);
+  closeDebugTrace(trace, resumed);
+  return resumed;
+}
+
+function resumeCaptured(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  request: unknown,
+  capabilities: RuntimeCapabilities,
+  options: Pick<RuntimeRunOptions, "instructionTrace">,
+  trace: TraceStore | null,
+  policy: RandomPolicy | null,
+): PendingActionOperationResult<RandomDrawResolutionOutcome> {
+  const pending = snapshot.randomControl?.pending ?? null;
+  if (pending === null) return pendingResult(snapshot, [], { kind: "noPendingDraw" } as const);
+  const resolution = randomDrawRequest(request, pending);
+  if (typeof resolution === "string")
+    return pendingResult(snapshot, [], { kind: "invalidOutcome", message: resolution } as const);
+  if (resolution.drawId !== pending.draw.drawId)
+    return pendingResult(snapshot, [], { kind: "staleDraw", drawId: pending.draw.drawId } as const);
+  if (capabilities.random !== undefined)
+    throw new TypeError(
+      "A paused random draw resumes with the session generator, so capabilities.random must not be injected.",
+    );
+  // A state whose history chose nothing is the state natural draws give.
+  const forcedChoices = snapshot.randomControl!.forcedChoices;
+  snapshot.randomControl = forcedChoices === 0 ? null : { forcedChoices, pending: null };
+  const control = new RandomControl(plan, policy, trace, {
+    forced: new Map(pending.forced.map((entry) => [entry.drawId, entry.outcome])),
+    builtinResults: pending.builtinResults,
+    pending: pending.draw,
+    resolution: resolution.outcome,
+  });
+  const context = new RuntimeExecutionContext(
+    snapshot,
+    capabilities,
+    plan,
+    trace,
+    instructionTraceFor(plan, options),
+    control,
+  );
+  const progress: Progress = { executed: 0 };
+  const budget = pending.instructionBudget;
+  const used = pending.instructionsUsed ?? 0;
+  try {
+    if (pending.unit === "instruction")
+      executeCapturedInstruction(plan, snapshot, context, progress);
+    else processDueWork(plan, snapshot, context.events, trace, control);
+    control.assertReplayDone();
+    if (pending.root === "run" || (pending.root === "stepToEvent" && !pending.eventsBefore))
+      runInstructions(
+        plan,
+        snapshot,
+        context,
+        progress,
+        budget!,
+        used,
+        pending.root === "stepToEvent",
+      );
+  } catch (error) {
+    if (error instanceof RandomReplayDivergence)
+      throw new RuntimeDataError("TSR101", error.message);
+    if (!(error instanceof RandomSuspension)) throw error;
+    pauseAtDraw(
+      snapshot,
+      error,
+      pending.root,
+      budget,
+      used + progress.executed,
+      pending.eventsBefore || context.events.length > 0,
+    );
+  }
+  return Object.freeze({
+    ...controlledResult(snapshot, context, progress.executed),
+    outcome: Object.freeze({ kind: "resolved", forced: resolution.outcome !== "natural" } as const),
+  });
+}
+
+/** The request's draw ID and resolution, or why it is malformed or does not fit the paused draw. */
+function randomDrawRequest(
+  request: unknown,
+  pending: RuntimePendingRandomDrawSnapshot,
+): { readonly drawId: number; readonly outcome: "natural" | RandomOutcome } | string {
+  const captured = captureExternalData(request);
+  if (!captured.ok || !isPlainRecord(captured.value))
+    return 'A random draw request is { drawId, outcome }, with outcome "natural" or a chosen outcome.';
+  const { drawId, outcome } = captured.value;
+  if (typeof drawId !== "number")
+    return 'A random draw request is { drawId, outcome }, with outcome "natural" or a chosen outcome.';
+  if (outcome === "natural") return { drawId, outcome };
+  const checked = checkedOutcome(pending.draw.support, outcome);
+  return typeof checked === "string" ? checked : { drawId, outcome: checked };
 }
 
 function executePlannedInstruction(
@@ -638,6 +926,8 @@ function executePlannedInstruction(
       if (instruction.expectBoolean && typeof value !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
       }
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
       setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       if (evaluator.trace !== null) {
         const copied =
@@ -773,11 +1063,11 @@ function executePlannedInstruction(
       const value = evaluator.evaluate(instruction.value);
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
-      returnFromFunction(plan, snapshot, value, instruction.span, events, evaluator.trace);
+      returnFromFunction(plan, snapshot, value, instruction.span, events, evaluator);
       return;
     }
     case "returnVoid":
-      returnFromFunction(plan, snapshot, null, instruction.span, events, evaluator.trace);
+      returnFromFunction(plan, snapshot, null, instruction.span, events, evaluator);
       return;
     case "say": {
       executeSayAtomically(plan, instruction, snapshot, evaluator, events);
@@ -1098,7 +1388,7 @@ function executePlannedInstruction(
       showPermanentButton(instruction, snapshot, evaluator, events);
       return;
     case "storageWrite":
-      writeStorage(instruction, snapshot, evaluator, events);
+      writeStorage(plan, instruction, snapshot, evaluator, events);
       return;
     case "playMedia":
       startMedia(plan, instruction, snapshot, evaluator, events);
@@ -1110,7 +1400,7 @@ function executePlannedInstruction(
       executeTransfer(plan, instruction, snapshot, evaluator, events);
       return;
     case "end":
-      executeEnd(plan, instruction, snapshot, events, evaluator.trace);
+      executeEnd(plan, instruction, snapshot, events, evaluator.trace, evaluator.control);
       return;
     case "setFallback":
       executeSetFallback(plan, instruction, snapshot, evaluator);
@@ -1686,11 +1976,12 @@ function returnFromFunction(
   value: SerializableRuntimeValue,
   span: SourceSpan,
   events: InterpreterEvent[],
-  trace: TraceStore | null,
+  evaluator: Evaluator,
 ): void {
+  const trace = evaluator.trace;
   const { frame } = activeFunction(plan, snapshot, span);
   if (frame.timerInterruption !== null) {
-    returnFromTimerHandler(plan, snapshot, frame, events, trace);
+    returnFromTimerHandler(plan, snapshot, frame, events, trace, evaluator.control);
     return;
   }
   const returned = cloneCapturedSerializableValue(value);
@@ -2246,6 +2537,8 @@ function expressionFreeSayStagingClone(
     // Records are never changed in place; a shown message adds one.
     liveMessages: givesHandle ? [...snapshot.liveMessages] : snapshot.liveMessages,
     debugMode: snapshot.debugMode,
+    // A say changes no control state; the operation's control keeps it.
+    randomControl: snapshot.randomControl,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure: snapshot.failure,
@@ -2903,6 +3196,7 @@ function startTimer(
       copySpan(instruction.span),
       events,
       evaluator.trace,
+      evaluator.control,
     );
   }
   advance(snapshot);
@@ -2943,6 +3237,7 @@ function showImage(
  * the view changes only when the host reports the write as stored.
  */
 function writeStorage(
+  plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "storageWrite" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
@@ -2959,6 +3254,10 @@ function writeStorage(
     instruction.key.span,
   );
   assertPersistable(value, instruction.span);
+  // A saved value has to fit the key's type, which every load of the key relies on (V30 §25).
+  const type = value === null ? undefined : storageKeyType(plan, key);
+  if (type !== undefined)
+    assertValueType(value, { type, place: storageKeyPlace(key) }, instruction.value!.span);
   if (!snapshot.scriptStoragePersistent) {
     writeScriptStorage(snapshot, key, value);
     evaluator.trace?.storage(key, value);

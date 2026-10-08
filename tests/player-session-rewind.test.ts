@@ -15,6 +15,7 @@ import {
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 
@@ -42,6 +43,7 @@ interface RewindHost {
     }) => PlayerRuntimeSession,
   ): void;
   activate(): void;
+  toStartPage(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   prepareInput(): true | Promise<boolean>;
   setDebugTracing(on: boolean): void;
@@ -96,6 +98,7 @@ let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
   debugHistorySpill: () => Promise<DebugHistorySpill | null>;
   debugHistoryMemoryBudget?: number;
+  debugRooms?: KeptRoomStore;
 }) => RewindHost;
 let useDebugRewind: (player: RewindHost) => Rewind;
 let usePlayerDebug: (
@@ -214,7 +217,7 @@ function memorySpill() {
 function createHost(
   context: TestContext,
   provider: ScriptStorageProvider,
-  options: { readonly memoryBudget?: number } = {},
+  options: { readonly memoryBudget?: number; readonly debugRooms?: KeptRoomStore } = {},
 ) {
   // Event targets are the only browser surface these scripts use; no media elements are created.
   for (const name of ["document", "window"]) {
@@ -232,6 +235,7 @@ function createHost(
     usePlayerSession({
       scriptStorage: provider,
       debugHistorySpill: async () => spill.spill,
+      ...(options.debugRooms && { debugRooms: options.debugRooms }),
       ...(options.memoryBudget === undefined
         ? {}
         : { debugHistoryMemoryBudget: options.memoryBudget }),
@@ -605,15 +609,20 @@ test("every restored state begins a new epoch of the value trace, which may turn
 
 test("turning the Debug switch off while an adoption fails reinstates the session, also as the trace turns off", async (context) => {
   const storage = memoryStorage();
-  const { host, debug: rewindScope } = createHost(context, storage.provider);
+  // Debug on goes on in the debug room, whose saved data here are the ones `storage` holds.
+  const { host, debug: rewindScope } = createHost(context, memoryStorage().provider, {
+    debugRooms: { ...memoryKeptRoomStore(), values: () => storage.provider },
+  });
   // The Player's own Debug features, as the Debug panel's switch turns them on and off.
   rewindScope.stop();
   const scope = effectScope();
   const debug = scope.run(() => usePlayerDebug(host, { menu: true, autoSkip: false }))!;
   context.after(() => scope.stop());
+  // Debug on goes on in the debug room first; Start waits for it.
+  await settle(context);
   await start(context, host);
   await choose(context, host, "One");
-  const tip = host.session.value!;
+  const tip = playerRuntimeSnapshot(host.session.value!);
   assert.equal(await debug.rewind.value!.back(0), true);
   const release = storage.holdReplaces();
   storage.failReplaces();
@@ -622,7 +631,10 @@ test("turning the Debug switch off while an adoption fails reinstates the sessio
   release();
   await chosen;
   assert.equal(host.rewind.inspecting.value, false);
-  assert.deepEqual(playerRuntimeSnapshot(host.session.value!), playerRuntimeSnapshot(tip));
+  // The session is back as it was, and reads that Debug is off.
+  assert.equal(tip.debugMode, true);
+  assert.equal(host.session.value!.state.debugMode, false);
+  assert.deepEqual({ ...playerRuntimeSnapshot(host.session.value!), debugMode: true }, tip);
   assert.deepEqual(said(host), ["One", "first One"]);
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
 });
@@ -697,4 +709,45 @@ test("a step whose state was read after Start or Continue began changes nothing"
       assert.deepEqual(rewind.state.value.inspection, before);
     });
   }
+});
+
+test("a session-local state that rewind adopted leaves Play again session-local", async (context) => {
+  const writes: string[] = [];
+  const { host, rewind } = createHost(context, {
+    scope: "test",
+    load: async () => {
+      throw new Error("Storage is denied.");
+    },
+    write: async (key) => void writes.push(key),
+    replace: async () => void writes.push("replace"),
+    clear: async () => {},
+  });
+  await host.loadScriptStorage();
+  host.prepare((recording) =>
+    createPlayerRuntimeSession(
+      [
+        'let k = load("k", default: 0) + 1',
+        'save k as "k"',
+        'let pick = choose "Go", "Stay"',
+        'say "${k}", instant',
+        "exit",
+      ].join("\n"),
+      { ...host.scriptStorageOptions(), ...recording },
+    ),
+  );
+  host.activate();
+  await settle(context);
+  await choose(context, host, "Go");
+  assert.equal(host.session.value?.state.status, "halted");
+  assert.equal(await rewind.back(0), true);
+  await choose(context, host, "Stay");
+  assert.equal(host.rewind.inspecting.value, false);
+  assert.equal(host.session.value?.state.status, "halted");
+
+  await host.toStartPage();
+  await host.activate();
+  await settle(context);
+  await choose(context, host, "Go");
+  assert.equal(said(host).at(-1), "1");
+  assert.deepEqual(writes, []);
 });

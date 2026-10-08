@@ -202,6 +202,29 @@ test("a sweep runs only when no Player is live, against a fresh read of the save
   assert.equal(repository.size, 0);
 });
 
+test("a sweep keeps the stored photos a session kept for a reload uses, and defers when they cannot be read", async () => {
+  const repository = new FakeMediaRepository();
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  const storage = withCapturedMedia(provider, earlier);
+  // Saved, then no longer referenced by any saved value, while the kept session still shows it.
+  const shown = earlier.add("image", png("shown")).reference;
+  await storage.write("photo", shown);
+  await storage.write("photo", null);
+  earlier.close();
+  const later = new CapturedMediaStore(repository, urls, "package");
+  await assert.rejects(
+    sweepCapturedMedia(provider, later, idle, async () => {
+      throw new Error("unreadable");
+    }),
+  );
+  assert.equal(await sweepCapturedMedia(provider, later, idle, async () => [shown]), true);
+  assert.deepEqual(await repository.listReferences("package"), [shown]);
+  // Once the kept session no longer uses it, the next sweep reclaims it.
+  await sweepCapturedMedia(provider, later, idle, async () => []);
+  assert.equal(repository.size, 0);
+});
+
 /**
  * Runs a script like the Player: answers each `takePhoto()` from `media`, and acknowledges each persistent `save` once
  * `storage` persisted it, or as failed when it rejected. It stops right before the script's `exit`, which clears its
@@ -263,7 +286,7 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
 
   const secondRun = new CapturedMediaStore(repository, urls, "package");
   const second = await runWithCamera(
-    'let album = load "album"\nshowImage album.shot\nexit',
+    'let album = load "al" + "bum", default: null\nshowImage album.shot\nexit',
     secondRun,
     withCapturedMedia(provider, secondRun),
   );
@@ -277,7 +300,7 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
   // A string of the right shape that the store never created grants nothing, also after `save` and `load`.
   const forged = shown.replace(/:\d+$/u, ":99");
   const third = await runWithCamera(
-    `save "${forged}" as "fake"\nshowImage load "fake"\nexit`,
+    `save "${forged}" as "fake"\nshowImage load "fa" + "ke", default: null\nexit`,
     secondRun,
     withCapturedMedia(provider, secondRun),
   );
@@ -387,7 +410,7 @@ test("a save whose photo cannot be stored fails atomically and the script keeps 
   const media = new CapturedMediaStore(repository, urls, "package");
   repository.failWrites = true;
   const finished = await runWithCamera(
-    'let photo = takePhoto()\nsave photo as "photo"\nlet seen = load "photo"\nexit',
+    'let photo = takePhoto()\nsave photo as "photo"\nlet seen: string? = load "photo", default: null\nexit',
     media,
     withCapturedMedia(provider, media),
   );

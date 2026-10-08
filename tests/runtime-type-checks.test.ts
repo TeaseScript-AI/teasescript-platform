@@ -340,7 +340,7 @@ test("deep values and types are checked without exhausting the native stack", ()
       for (let level = 0; level < depth; level++) value = { kind: 'list', items: [value] };
       return value;
     };
-    const source = 'let value = ' + '['.repeat(depth) + '1' + ']'.repeat(depth) + '\\nvalue = load "k"\\nexit';
+    const source = 'let value = ' + '['.repeat(depth) + '1' + ']'.repeat(depth) + '\\nvalue = load "k" + "", default: value\\nexit';
     const compiled = m.compileSource(source);
     assert.deepEqual(compiled.diagnostics, []);
     const failures = [deep(2), deep('x')].map((stored) => {

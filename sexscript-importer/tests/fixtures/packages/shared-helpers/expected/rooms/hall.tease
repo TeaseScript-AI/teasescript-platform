@@ -1,5 +1,5 @@
 let phrases = ["Kneel.", "Wait."]
-let mistress = load "mistress"
+let mistress = load "mistress", default: ""
 function image {
   showImage "room.jpg"
 }

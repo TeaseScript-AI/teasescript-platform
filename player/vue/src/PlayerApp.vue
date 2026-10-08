@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onErrorCaptured, provide, ref, watch } from "vue";
+import { computed, nextTick, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -21,6 +21,7 @@ import PlayerTopBar from "./PlayerTopBar.vue";
 import PermanentButtons from "./PermanentButtons.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import ScriptProblems, { type ScriptFailure } from "./ScriptProblems.vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
 import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
 import StageRightRail from "./StageRightRail.vue";
@@ -30,9 +31,11 @@ import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
-import { playerRuntimeDebugNow } from "../../runtime-adapter.js";
+import { playerRuntimeCalls, playerRuntimeDebugNow } from "../../runtime-adapter.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
+import SessionEndDialog from "./SessionEndDialog.vue";
+import SessionErrorDialog from "./SessionErrorDialog.vue";
 import RewindInspection from "./RewindInspection.vue";
 import { rewindFutureTranscript } from "../../debug-history.js";
 import { rewindRows } from "./rewindPresentation";
@@ -50,7 +53,9 @@ import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 const props = withDefaults(
   defineProps<{
     player: PlayerSessionHost;
+    /** The script's title and author for the title bar, each empty when unknown. */
     title?: string;
+    author?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
     /** Why the script cannot start; shown instead of Start. */
@@ -58,7 +63,13 @@ const props = withDefaults(
     /** How Debug starts: the Debug menu, and auto-skip once Debug runs. Both are off unless the host asks (`?dev`). */
     debug?: { readonly menu: boolean; readonly autoSkip: boolean };
   }>(),
-  { title: "", tools: () => [], failure: null, debug: () => ({ menu: false, autoSkip: false }) },
+  {
+    title: "",
+    author: "",
+    tools: () => [],
+    failure: null,
+    debug: () => ({ menu: false, autoSkip: false }),
+  },
 );
 // The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
@@ -114,7 +125,7 @@ function toggleThemeMode() {
 const session = computed(() => props.player.session.value);
 // The Debug menu adds the Debug panel first in the tools menu.
 const debug = usePlayerDebug(props.player, props.debug);
-// A debug export for a developer, from the failure card, its notice, or Settings (DEBUGGER.md "Debug export").
+// A debug export for a developer, from the error dialog, Settings, or the Debug panel (DEBUGGER.md "Debug export").
 const debugExport = useDebugExport(
   props.player,
   () => props.title,
@@ -169,20 +180,89 @@ function openDebugExport() {
 onErrorCaptured((error) => {
   props.player.reportHostError(error);
 });
-// After an error the notice offers the export too, until a new session starts.
+const debugTool: PlayerTool = { name: "Debug", icon: Bug };
+const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
+// Session end and failure (PLAYER-UI "Session end and failure"). An ordinary end opens the end dialog by itself; the
+// error dialog opens only from the error line or its notice, which stays until a new session starts. Like the debug
+// export, each opening of either dialog mounts it anew, so it stays above Settings or the notification panel.
+const runtimeEnd = ref<InstanceType<typeof RuntimeFailure> | null>(null);
+const endDialogOpen = ref(false);
+const endDialogOpening = ref(0);
+watch(props.player.endings, () => {
+  if (props.player.hostError.value !== null) return;
+  if (!endDialogOpen.value) endDialogOpening.value += 1;
+  endDialogOpen.value = true;
+});
+// The start page (PLAYER-UI "Session start and user activation") shows while no session is shown, or one waits for its
+// Start or Continue. After `exit` the session stays behind the end dialog, so its last messages stay visible; closing
+// the dialog returns to the start page, whose Start then takes focus.
+const onStartPage = computed(
+  () => props.player.session.value === null || props.player.activation.value !== null,
+);
+const startPage = ref<InstanceType<typeof SessionActivation> | null>(null);
+// Turning Debug on in the normal room (DEBUGGER.md "Debug room") goes on in the debug room, with a copy of the normal
+// session that runs. Overwriting a debug session with it is confirmed first, the only confirmation; it stacks above
+// Settings, which it opens from, as the debug export dialog does.
+const overwritingDebugSession = ref(false);
+const overwriteOpening = ref(0);
+function setDebugMenu(on: boolean) {
+  const rooms = props.player.rooms;
+  if (on && rooms.copies.value && rooms.debugSessionExists.value) {
+    overwriteOpening.value += 1;
+    overwritingDebugSession.value = true;
+  } else debug.menu.value = on;
+}
+function overwriteDebugSession() {
+  overwritingDebugSession.value = false;
+  debug.menu.value = true;
+}
+// A reload stays in the room shown: once play goes on in the debug room, the address says so.
+watch(
+  () => props.player.rooms.current.value,
+  (room) => {
+    if (room !== "debug" || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("room") === "debug") return;
+    url.searchParams.set("room", "debug");
+    window.history.replaceState(window.history.state, "", url);
+  },
+  { immediate: true },
+);
+watch(endDialogOpen, (open, wasOpen) => {
+  if (wasOpen && !open)
+    void props.player.toStartPage().then(async () => {
+      await nextTick();
+      startPage.value?.focus();
+    });
+});
+const errorDialogOpen = ref(false);
+const errorDialogOpening = ref(0);
+function showErrorDetails() {
+  if (!errorDialogOpen.value) errorDialogOpening.value += 1;
+  errorDialogOpen.value = true;
+}
 watch(
   () => [session.value?.state.failure ?? null, props.player.hostError.value] as const,
   ([failure, hostError]) => {
-    if (failure === null && hostError === null)
+    if (failure === null && hostError === null) {
+      errorDialogOpen.value = false;
       props.player.withdrawNotice(playerNoticeKeys.sessionError);
-    else
+    } else
       props.player.publishNotice(
-        playerNotices.sessionError(failure === null ? "player" : "script", openDebugExport),
+        playerNotices.sessionError(failure === null ? "player" : "script", showErrorDetails),
       );
   },
 );
-const debugTool: PlayerTool = { name: "Debug", icon: Bug };
-const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
+// The calls a script error happened in, for the error dialog while it is open.
+const failureCalls = computed(() =>
+  errorDialogOpen.value && session.value?.state.failure ? playerRuntimeCalls(session.value) : [],
+);
+// Open in Debug shows the Debug panel's Now tab, which names the error and its statement, and focuses the tab.
+async function openFailureInDebug() {
+  debug.tab.value = "now";
+  await toolsShell.value?.showTool(debugTool.name);
+  document.querySelector<HTMLElement>('[data-debug-tab="now"]')?.focus({ preventScroll: true });
+}
 // Explain values on a chat message opens the Debug panel on its Variables tab.
 provide(explainValues, {
   offers: debug.offers,
@@ -311,7 +391,8 @@ async function toggleFullscreen() {
     :debug-export="{ available: debugExport.available.value, open: openDebugExport }"
     v-model:contrast="contrast"
     v-model:titlebar-option="titlebarOption"
-    v-model:debug-menu="debug.menu.value"
+    :debug-menu="debug.menu.value"
+    @update:debug-menu="setDebugMenu"
   >
     <template #tool="scope">
       <DebugPanel
@@ -334,10 +415,12 @@ async function toggleFullscreen() {
       <slot v-else name="tool" v-bind="scope" />
     </template>
     <template #default="{ sidebarVisible }">
-      <PlayerComposition>
+      <PlayerComposition :start-page="onStartPage && !failure">
         <template #topbar>
           <PlayerTopBar
             :title="title"
+            :author="author"
+            :debug-room="player.rooms.current.value === 'debug'"
             :fullscreen="fullscreen"
             :fullscreen-supported="fullscreenSupported"
             :fullscreen-error="fullscreenError"
@@ -407,14 +490,50 @@ async function toggleFullscreen() {
           </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation
-            v-else
+            v-else-if="onStartPage"
+            ref="startPage"
             :activation="player.activation.value"
+            :title="title"
+            :author="author"
+            :debug-room="player.rooms.current.value === 'debug'"
+            :start-anew="player.rooms.debugHasData.value"
             @activate="player.activate"
+            @reload="void player.rooms.reloadDebug()"
+            @reset="void player.rooms.resetDebug()"
+          />
+          <ConfirmDialog
+            :key="overwriteOpening"
+            :open="overwritingDebugSession"
+            name="debug-session-overwrite"
+            title="Overwrite the debug session?"
+            description="A copy of your normal session replaces the debug session and what it saved. Your normal session stays as it is."
+            action="Overwrite"
+            destructive
+            @confirm="overwriteDebugSession"
+            @cancel="overwritingDebugSession = false"
           />
           <DebugExportDialog
             :key="debugExportOpening"
             :exporter="debugExport"
             :photo-url="player.resolveAsset"
+          />
+          <SessionEndDialog
+            :key="endDialogOpening"
+            v-model:open="endDialogOpen"
+          />
+          <SessionErrorDialog
+            :key="errorDialogOpening"
+            v-model:open="errorDialogOpen"
+            :failure="session?.state.failure ?? null"
+            :host-error="player.hostError.value"
+            :source="
+              session?.state.failure ? player.scriptSource(session.state.failure.path) : null
+            "
+            :calls="failureCalls"
+            :debug-available="debug.time.value !== null && !!session?.state.failure"
+            @export="openDebugExport"
+            @debug="void openFailureInDebug()"
+            @return-focus="runtimeEnd?.focus()"
           />
           <PlayerToasts
             :notifications="notifications.notifications.value"
@@ -470,9 +589,10 @@ async function toggleFullscreen() {
           <template #end>
             <RuntimeFailure
               v-if="!failure && player.activation.value === null"
+              ref="runtimeEnd"
               :state="session?.state ?? null"
               :host-error="player.hostError.value"
-              @export="openDebugExport"
+              @details="showErrorDetails"
             />
             <!-- Closest to the composer, also below a failure the inspected state shows. -->
             <RewindInspection

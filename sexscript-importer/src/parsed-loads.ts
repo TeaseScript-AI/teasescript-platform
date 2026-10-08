@@ -82,9 +82,44 @@ export function withParsedLoads(
     const key: IrStatement = { kind: "let", name, value: read.key, span: item.span };
     return [key, { ...item, value: withKey(item.value, { kind: "variable", name }) }];
   };
+  // A number variable that a read starts or is set to reads 0 for a missing key, where legacy's `int` or `double`
+  // failed on null: one declared so, or one whose value a whole-number or number conversion stores.
+  const counted = (item: IrStatement): IrStatement => {
+    if (item.kind !== "let" && (item.kind !== "assign" || item.operator !== "=")) return item;
+    const converted =
+      item.value.kind === "call" &&
+      item.value.local !== true &&
+      (item.value.name === "toInteger" || item.value.name === "toNumber") &&
+      item.value.positional.length === 1
+        ? item.value
+        : null;
+    const read = converted?.positional[0] ?? item.value;
+    const numeric =
+      converted !== null ||
+      (item.kind === "let" && (item.type === "integer" || item.type === "number"));
+    if (
+      !numeric ||
+      read.kind !== "load" ||
+      (read.integer !== true && read.number !== true) ||
+      read.defaultValue !== undefined
+    )
+      return item;
+    const decimal =
+      converted === null
+        ? item.kind === "let" && item.type === "number"
+        : converted.name === "toNumber";
+    const defaulted: IrExpression = {
+      ...read,
+      defaultValue: { kind: "literal", value: 0, ...(decimal ? { decimal: true as const } : {}) },
+    };
+    return {
+      ...item,
+      value: converted === null ? defaulted : { ...converted, positional: [defaulted] },
+    };
+  };
   const block = (items: IrStatement[]): IrStatement[] =>
     items.flatMap(keyed).map((item) => {
-      const statement = mapOwnExpressions(withNestedBlocks(item, block), parse);
+      const statement = mapOwnExpressions(withNestedBlocks(counted(item), block), parse);
       return statement.kind === "function"
         ? {
             ...statement,

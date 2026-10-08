@@ -123,7 +123,11 @@ export type IrStatement =
       /** Declares a variable holding the handle of async media. */
       handle?: string;
     })
-  | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression })
+  /**
+   * `valueType` is the type of the saved value where the importer knows it and the key is one literal, written as an
+   * annotation, from which the package decides the key's type (storage-keys.ts).
+   */
+  | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression; valueType?: string })
   | (IrBase & { kind: "delete"; key: IrExpression })
   | (IrBase & {
       kind: "function";
@@ -265,7 +269,21 @@ export type IrExpression =
    * number and dropped its fraction toward zero, and `number` a legacy `loadFloat()`, which parsed it as a number
    * (withParsedLoads).
    */
-  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression; integer?: true; number?: true }
+  /**
+   * `read` is the type a legacy `loadString` or `loadBoolean` read; `fill` marks a read whose null nothing tests, which
+   * gets the empty value of that type, or of its key's, as default (storage-keys.ts).
+   */
+  | {
+      kind: "load";
+      key: IrExpression;
+      defaultValue?: IrExpression;
+      integer?: true;
+      number?: true;
+      read?: "string" | "boolean";
+      fill?: true;
+      /** A read whose variable the script fills in later and uses as a value, which keeps an open null. */
+      open?: true;
+    }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
    * option gets the identifier label that `choose` returns.

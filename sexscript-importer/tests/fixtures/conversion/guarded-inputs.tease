@@ -1,8 +1,8 @@
 // A question that && or || guards is asked only where Groovy's short circuit reached it.
-let name = load "training.name"
+let name = load "training.name", default: ""
 while true {
   let answered = false
-  if name == null {
+  if name == "" {
     answered = true
   } else {
     say "Is ${name} your name?"

@@ -96,7 +96,7 @@ export function isWellFormedCapturedMediaReference(value: string): boolean {
  * later by `sweep`, which runs only when no Player of the namespace is live.
  */
 export class CapturedMediaStore {
-  readonly #repository: CapturedMediaRepository | null;
+  #repository: CapturedMediaRepository | null;
   readonly #urls: CapturedMediaUrls;
   readonly #namespace: string;
   readonly #changed: () => void;
@@ -143,6 +143,18 @@ export class CapturedMediaStore {
     return describe(record);
   }
 
+  /**
+   * Makes `repository` the durable storage from now on, such as a debug room's (DEBUGGER.md "Debug room"). Media this
+   * store holds stays available; of it, only `durable` counts as stored there, and the rest is stored when a save
+   * references it. Call it only while no storage work of the store runs.
+   */
+  useRepository(repository: CapturedMediaRepository | null, durable: ReadonlySet<string>): void {
+    this.#repository = repository;
+    for (const reference of this.#durable)
+      if (!durable.has(reference)) this.#durable.delete(reference);
+    this.#missing.clear();
+  }
+
   /** Keeps captures as session media from now on, for example when coordination with other Players failed. */
   disableDurable(): void {
     this.#durableDisabled = true;
@@ -184,6 +196,26 @@ export class CapturedMediaStore {
       }
       this.#durable.add(reference);
     }
+  }
+
+  /** Of `references`, the session media no save stored durably, to keep with a session elsewhere. */
+  sessionRecords(references: Iterable<string>): CapturedMediaRecord[] {
+    const records: CapturedMediaRecord[] = [];
+    for (const reference of references) {
+      const record = this.#records.get(reference);
+      if (record !== undefined && !this.#durable.has(reference)) records.push(record);
+    }
+    return records;
+  }
+
+  /**
+   * Holds a capture a kept session uses as session media again, so a save stores it like a new capture. `stored` is
+   * external data, checked here; anything else, or a reference this store already holds, is ignored.
+   */
+  restoreSessionMedia(reference: string, stored: StoredCapturedMedia | null): void {
+    if (this.#records.has(reference)) return;
+    const record = validRecord(stored, this.#namespace, reference);
+    if (record !== null) this.#records.set(reference, record);
   }
 
   /** The record, reading it from storage when needed. */

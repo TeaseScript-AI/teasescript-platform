@@ -127,7 +127,10 @@ runtime boundary is [Runtime script storage](RUNTIME.md#script-storage). The hos
 script and player. Before each Start the Player loads the scope; during the session it persists every pending write
 through the provider and then reports it to the runtime, which keeps the previous value when the write failed. When
 loading fails, for example because the browser denies storage, the session plays session-local and nothing is kept for
-a later run. Script storage is separate from checkpoint persistence (#469).
+a later run. In the [debug room](DEBUGGER.md#debug-room) the session uses the debug room's own saved values instead,
+which an export never takes. Script storage is separate from the session the Player keeps for a reload
+([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)) and from durable checkpoint
+persistence (#469).
 
 The browser-local provider keeps one local-storage item per key, holding `{ v: 1, value }`; it validates items as
 external input and skips unreadable ones. Items are named `player-storage:` plus the JSON array `[scope, key]` until
@@ -191,7 +194,9 @@ session of the shown script ends when that script is ticked. For each script, ea
 scope with a fresh reference, and every value that held that exported reference, as text, list or set item, object
 property name or value, or dict key or value, gets the new one. The values then replace the scope's saved data all at
 once, with key order kept; the photos are stored first, under the scope's live lock as a Player of it holds, so a
-failure leaves that scope's previous data. Scripts replace one after another, and a failure of one
+failure leaves that scope's previous data. A script whose values were replaced loses the session the Player kept for it
+([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)), so its next session starts
+with the imported values. Scripts replace one after another, and a failure of one
 leaves the others to continue, so the import reports which scripts kept their previous data. Earlier media records are never overwritten, and photos left unreferenced are reclaimed
 later.
 

@@ -22,6 +22,7 @@ import type {
   TagQueryExpressionPlan,
   TagQueryStepPlan,
   TypeCheckPlan,
+  TypePlan,
 } from "../plan/model.js";
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
@@ -72,6 +73,12 @@ import {
   type PrimitiveDraw,
 } from "./random-draws.js";
 import {
+  RandomControlSignal,
+  type RandomControl,
+  type RandomNatural,
+  type RandomSupport,
+} from "./random-control.js";
+import {
   isVisibleScalar,
   quotedText,
   quotedTextWithin,
@@ -107,7 +114,12 @@ import {
   stringLength,
 } from "./string-operations.js";
 import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
-import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
+import {
+  LOAD_KEY_MESSAGE,
+  findScriptStorageEntry,
+  storageKey,
+  storageKeyPlace,
+} from "./script-storage.js";
 import {
   addSerializableSetValue,
   clearSerializableSet,
@@ -169,6 +181,7 @@ import {
   assertValueType,
   describeValue as describeTypedValue,
   matchesValueType,
+  storedValueMismatch,
 } from "./value-types.js";
 import {
   mediaEndMs,
@@ -264,6 +277,8 @@ export class RuntimeExecutionContext {
     public readonly trace: TraceStore | null = null,
     /** The instruction trace the call returns, or `null` when it returns none. */
     public readonly instructionTrace: InstructionTraceCollector | null = null,
+    /** The operation's controlled randomness, or `null` when every draw is natural. */
+    public readonly control: RandomControl | null = null,
   ) {}
 
   public evaluator(): Evaluator {
@@ -277,6 +292,7 @@ export class RuntimeExecutionContext {
       this.events,
       this.plan,
       this.trace,
+      this.control,
     );
     return this.#evaluator;
   }
@@ -290,6 +306,9 @@ export class Evaluator {
   /** Whether a start value is being evaluated, which may not select anything at random (ADR 0022 §6). */
   #startValue = false;
 
+  /** With controlled randomness, the generator state before the last draw: its ID. */
+  #drawId = 0;
+
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
@@ -297,6 +316,8 @@ export class Evaluator {
     private readonly plan: InstructionPlan,
     /** The debug trace that observes evaluation, or `null`. */
     public readonly trace: TraceStore | null = null,
+    /** The operation's controlled randomness, or `null` when every draw is natural. */
+    public readonly control: RandomControl | null = null,
   ) {
     this.refreshBuiltinRegistration();
   }
@@ -307,7 +328,7 @@ export class Evaluator {
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
-    return new Evaluator(snapshot, this.capabilities, events, this.plan, this.trace);
+    return new Evaluator(snapshot, this.capabilities, events, this.plan, this.trace, this.control);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -577,7 +598,7 @@ export class Evaluator {
                     ? 0
                     : expression.name === "last"
                       ? base.items.length - 1
-                      : this.#drawIndex(expression.span, "collectionRandom", base.items.length);
+                      : this.#drawIndex(expression.span, "collectionRandom", base.items);
                 if (expression.name === "random") trace?.randomResult(base.items[index]!);
                 if (isSet(base)) {
                   // A set member is read as a copy: changing it must not change the set or its uniqueness.
@@ -1033,7 +1054,10 @@ export class Evaluator {
           if (frame.stage === 1) {
             const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
-            if (entry !== undefined) {
+            if (
+              entry !== undefined &&
+              this.#storedValueFits(key, entry.value, expression.type, expression.span)
+            ) {
               value = entry.value;
               if (trace !== null) {
                 trace.readStorage(key);
@@ -1046,13 +1070,23 @@ export class Evaluator {
               trace?.load(key, false, false, value, expression.span);
               break;
             }
-            // The default is evaluated only for an absent key.
-            if (trace !== null) frame.key = key;
+            // The default is evaluated only for an absent key, or a stored value that does not fit the load's type.
+            frame.key = key;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.default));
             continue;
           }
           value = result.value;
+          // The default takes the place of the stored value, so it fits the load's type, or is null.
+          if (expression.type !== null)
+            assertValueType(
+              value,
+              {
+                type: { kind: "union", members: [expression.type, { kind: "null" }] },
+                place: storageKeyPlace(frame.key!),
+              },
+              expression.default!.span,
+            );
           trace?.load(frame.key!, false, true, value, expression.span);
           break;
       }
@@ -1807,10 +1841,14 @@ export class Evaluator {
           case "escapeMarkup":
             returned = this.#escapeMarkupBuiltin(call);
             break;
-          default:
-            returned = builtin!(call);
+          default: {
+            const recorded = this.control?.replayedBuiltin();
+            returned = recorded === undefined ? builtin!(call) : recorded;
+          }
         }
       } catch (error) {
+        // A pause, or the host's decision callback failing, is not the builtin's failure.
+        if (error instanceof RandomControlSignal) throw error;
         if (error instanceof SerializableValueError) {
           const code = error.code === "cyclic" ? "TSR031" : "TSR013";
           throw fault(code, error.message, expression.span);
@@ -1845,6 +1883,7 @@ export class Evaluator {
           expression.span,
         );
       }
+      if (!coreBuiltin && !platformPrelude) this.control?.recordBuiltin(copied);
       return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
@@ -2070,12 +2109,7 @@ export class Evaluator {
           expect(0);
           this.#reorderList(
             receiver,
-            name === "sort"
-              ? sortOrder(receiver.items, span)
-              : // A trace records the whole shuffle as one record of its draws, not each swap.
-                this.#draw(span, "shuffle", receiver.items.length, null, (draw) =>
-                  sampleOrder(draw, receiver.items.length),
-                ),
+            name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
           );
           return null;
         case "intersection":
@@ -2223,7 +2257,7 @@ export class Evaluator {
     if (warning !== null) this.#warn(warning.code, warning.message, span);
     // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
     if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
-      expireTimerAction(this.snapshot, action, now, span, this.events, this.trace);
+      expireTimerAction(this.snapshot, action, now, span, this.events, this.trace, this.control);
     }
     return null;
   }
@@ -2279,6 +2313,7 @@ export class Evaluator {
         span,
         this.events,
         this.trace,
+        this.control,
       );
     } else if (warning !== null) {
       this.#warn(warning.code, warning.message, span);
@@ -2446,6 +2481,22 @@ export class Evaluator {
     if (warning !== null) this.#warn(warning.code, warning.message, span);
   }
 
+  /**
+   * Whether a stored value fits the load's type, if it has one (V30 §25). A value that does not is ignored by this load,
+   * with a warning, and stays stored.
+   */
+  #storedValueFits(
+    key: string,
+    value: SerializableRuntimeValue,
+    type: TypePlan | null,
+    span: SourceSpan,
+  ): boolean {
+    const warning = type === null ? null : storedValueMismatch(key, value, type);
+    if (warning === null) return true;
+    this.#warn("TSW016", warning, span);
+    return false;
+  }
+
   #warn(code: string, message: string, span: SourceSpan): void {
     this.events.push(
       Object.freeze({
@@ -2564,7 +2615,7 @@ export class Evaluator {
         query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
         query.span,
       );
-    const picked = found[this.#drawIndex(query.span, "tagQuery", found.length)]!;
+    const picked = found[this.#drawIndex(query.span, "tagQuery", found)]!;
     this.trace?.randomResult(picked);
     return picked;
   }
@@ -2593,7 +2644,9 @@ export class Evaluator {
     sample: (draw: PrimitiveDraw) => T,
   ): T {
     const trace = this.trace;
-    const before = trace === null ? null : this.#randomState();
+    const before = trace === null && this.control === null ? null : this.#randomState();
+    // A controlled run has no injected source, so the state before is the draw's ID.
+    if (this.control !== null) this.#drawId = before!;
     let draws = 0;
     const outcome = sample(() => {
       draws += 1;
@@ -2604,9 +2657,41 @@ export class Evaluator {
     return outcome;
   }
 
-  /** The index of one of `count` equally likely outcomes. */
-  #drawIndex(span: SourceSpan, operation: RuntimeDebugRandomOperation, count: number): number {
-    return this.#draw(span, operation, count, null, (draw) => sampleIndex(draw, count));
+  /**
+   * The outcome a controlled draw takes after its natural sampling: the natural one, one the host chose, or none, when
+   * the draw pauses.
+   */
+  #resolve(
+    span: SourceSpan,
+    operation: RuntimeDebugRandomOperation,
+    natural: RandomNatural,
+    support: () => RandomSupport,
+  ): RandomNatural {
+    return this.control!.resolve(
+      this.snapshot.nextInstruction,
+      span,
+      operation,
+      this.#drawId,
+      natural,
+      support,
+    );
+  }
+
+  /** The index of one of the equally likely `candidates`. */
+  #drawIndex(
+    span: SourceSpan,
+    operation: RuntimeDebugRandomOperation,
+    candidates: readonly SerializableRuntimeValue[],
+  ): number {
+    const count = candidates.length;
+    const index = this.#draw(span, operation, count, null, (draw) => sampleIndex(draw, count));
+    if (this.control === null) return index;
+    return outcomeIndex(
+      this.#resolve(span, operation, { kind: "index", index }, () => ({
+        kind: "candidates",
+        candidates,
+      })),
+    );
   }
 
   /** The session generator's state, or `null` when the host injected the random source. */
@@ -2633,7 +2718,13 @@ export class Evaluator {
 
   #randomBuiltin(call: RuntimeCapabilityCall): number {
     this.#expectBuiltinArguments("random", call, 0);
-    const random = this.#draw(call.span, "random", null, null, (draw) => draw());
+    let random = this.#draw(call.span, "random", null, null, (draw) => draw());
+    if (this.control !== null)
+      random = outcomeNumber(
+        this.#resolve(call.span, "random", { kind: "number", value: random }, () => ({
+          kind: "unit",
+        })),
+      );
     this.trace?.randomResult(random);
     return random;
   }
@@ -2648,9 +2739,14 @@ export class Evaluator {
         call.span,
       );
     }
-    const chosen = this.#draw(call.span, "chance", null, null, (draw) =>
-      sampleChance(draw, percent),
-    );
+    let chosen = this.#draw(call.span, "chance", null, null, (draw) => sampleChance(draw, percent));
+    if (this.control !== null)
+      chosen = outcomeBoolean(
+        this.#resolve(call.span, "chance", { kind: "boolean", value: chosen }, () => ({
+          kind: "chance",
+          percent,
+        })),
+      );
     this.trace?.randomResult(chosen);
     return chosen;
   }
@@ -2676,9 +2772,17 @@ export class Evaluator {
     if (length < 1) {
       throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
-    const drawn = this.#draw(span, operation, length, range, (draw) =>
+    let drawn = this.#draw(span, operation, length, range, (draw) =>
       sampleRangeInteger(draw, range, length),
     );
+    if (this.control !== null)
+      drawn = outcomeNumber(
+        this.#resolve(span, operation, { kind: "number", value: drawn }, () => ({
+          kind: "integer",
+          min: range.start,
+          max: range.start + length - 1,
+        })),
+      );
     this.trace?.randomResult(drawn);
     return drawn;
   }
@@ -2846,9 +2950,17 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const { choices, weights } = weightedChoices(positional, named, span);
-    const index = this.#draw(span, "randomWeighted", choices.length, null, (draw) =>
+    let index = this.#draw(span, "randomWeighted", choices.length, null, (draw) =>
       weightedIndex(weights, draw()),
     );
+    if (this.control !== null)
+      index = outcomeIndex(
+        this.#resolve(span, "randomWeighted", { kind: "index", index }, () => ({
+          kind: "weighted",
+          candidates: choices,
+          weights,
+        })),
+      );
     const chosen = cloneSerializableValue(choices[index]!);
     this.trace?.randomResult(chosen);
     return chosen;
@@ -2886,17 +2998,24 @@ export class Evaluator {
     const invalid = random?.(numbers);
     if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
     // A trace records a random function's draws as one record, like a shuffle.
-    const result =
+    // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
+    const operation = name as RuntimeDebugRandomOperation;
+    let result =
       random === undefined
         ? apply(numbers, options, NO_DRAWS)
-        : this.#draw(
-            span,
-            // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
-            name as RuntimeDebugRandomOperation,
-            null,
-            null,
-            (draw) => apply(numbers, options, draw),
-          );
+        : this.#draw(span, operation, null, null, (draw) => apply(numbers, options, draw));
+    if (random !== undefined && this.control !== null) {
+      const resolved = this.#resolve(
+        span,
+        operation,
+        typeof result === "number"
+          ? { kind: "number", value: result }
+          : { kind: "failure", code: result.code, message: result.failure },
+        () => distributionSupport(name, numbers),
+      );
+      // A natural failure stays the draw's failure; a chosen outcome replaces it.
+      if (resolved.kind !== "failure") result = outcomeNumber(resolved);
+    }
     if (typeof result !== "number") throw fault(result.code, result.failure, span);
     if (random !== undefined) this.trace?.randomResult(result);
     return result;
@@ -2934,6 +3053,20 @@ export class Evaluator {
     return argument.items;
   }
 
+  /** A uniform random order of the list's items, as their old indexes; a trace records it as one record of its draws. */
+  #shuffleOrder(list: SerializableRuntimeList, span: SourceSpan): readonly number[] {
+    const length = list.items.length;
+    const order = this.#draw(span, "shuffle", length, null, (draw) => sampleOrder(draw, length));
+    // Fewer than two items draw nothing, so nothing pauses.
+    if (this.control === null || length < 2) return order;
+    return outcomeOrder(
+      this.#resolve(span, "shuffle", { kind: "order", order }, () => ({
+        kind: "order",
+        items: list.items,
+      })),
+    );
+  }
+
   /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
   #reorderList(list: SerializableRuntimeList, order: readonly number[]): void {
     const newIndexOf: number[] = [];
@@ -2965,7 +3098,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    const item = items[this.#drawIndex(span, operation, items.length)]!;
+    const item = items[this.#drawIndex(span, operation, items)]!;
     this.trace?.randomResult(item);
     return item;
   }
@@ -3133,6 +3266,41 @@ export class Evaluator {
 }
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
+
+/** The support of a random distribution function's draw, from its checked arguments. */
+function distributionSupport(name: string, numbers: readonly number[]): RandomSupport {
+  if (name === "randomNormal") return { kind: "normal", mean: numbers[0]!, spread: numbers[1]! };
+  if (name === "randomBeta") return { kind: "beta", alpha: numbers[0]!, beta: numbers[1]! };
+  return { kind: "pert", min: numbers[0]!, mostLikely: numbers[1]!, max: numbers[2]! };
+}
+
+/*
+ * A resolved draw has the kind of outcome its support admits: control checks every chosen outcome against the support
+ * before it is used, and a natural one has its sampler's kind.
+ */
+function outcomeIndex(outcome: RandomNatural): number {
+  if (outcome.kind !== "index")
+    throw new Error("A random draw resolved to another kind of outcome.");
+  return outcome.index;
+}
+
+function outcomeNumber(outcome: RandomNatural): number {
+  if (outcome.kind !== "number")
+    throw new Error("A random draw resolved to another kind of outcome.");
+  return outcome.value;
+}
+
+function outcomeBoolean(outcome: RandomNatural): boolean {
+  if (outcome.kind !== "boolean")
+    throw new Error("A random draw resolved to another kind of outcome.");
+  return outcome.value;
+}
+
+function outcomeOrder(outcome: RandomNatural): readonly number[] {
+  if (outcome.kind !== "order")
+    throw new Error("A random draw resolved to another kind of outcome.");
+  return outcome.order;
+}
 
 /** The draws of a numeric function that is not random: it never takes one. */
 const NO_DRAWS: PrimitiveDraw = () => {

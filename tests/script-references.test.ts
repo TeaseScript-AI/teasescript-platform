@@ -73,7 +73,7 @@ test("a script reference is a value that shows as the call that makes it and com
           'say set[hall, start, script("rooms/hall.tease")].length',
           'let kept = dict{ "next": start }',
           'save kept["next"] as "next"',
-          'let loaded = load "next"',
+          'let loaded = load "ne" + "xt", default: null',
           "say loaded is script and loaded == start",
           "exit",
         ].join("\n"),
@@ -131,7 +131,7 @@ test("a reference saved in one session goes to its label in the next; a let skip
   assert.deepEqual(saved, [
     { key: "next", value: { kind: "script", path: "room.tease", label: "late" } },
   ]);
-  const reader = 'let next = load "next"\ngoto (next)';
+  const reader = 'let next = load "ne" + "xt", default: null\ngoto (next)';
   assert.deepEqual(said(project(reader, { "room.tease": room }), { scriptStorage: saved }), [
     "late",
     "count 3",
@@ -172,7 +172,7 @@ test("a computed target that names no file, no label, or a file that runs nothin
     ["back", "exit"],
   );
   // A loaded value that is not a reference is no target.
-  assert.deepEqual(failure('let next = load "next"\ngoto (next)'), [
+  assert.deepEqual(failure('let next = load "ne" + "xt", default: null\ngoto (next)'), [
     "failure TSR058: goto needs a script reference here, made with script(...), but this is null.",
   ]);
 });
@@ -282,10 +282,13 @@ test("a button shows a script reference only when a written value is what it ret
     { key: "next", value: { kind: "script" as const, path: "rooms/hall.tease", label: null } },
   ];
   assert.deepEqual(
-    said(project('let next = load "next"\nlet answer = choose next, "stay"\nexit', HALL), {
-      scriptStorage,
-      ending: "failed",
-    }),
+    said(
+      project(
+        'let next = load "ne" + "xt", default: null\nlet answer = choose next, "stay"\nexit',
+        HALL,
+      ),
+      { scriptStorage, ending: "failed" },
+    ),
     [
       "failure TSR052: A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.",
     ],
