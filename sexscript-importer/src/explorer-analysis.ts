@@ -100,6 +100,9 @@ export function successors(
         ]);
       case "callFunction":
         return numbers([entry(instruction.functionId)]);
+      case "prepareParameterDefault":
+        // A supplied argument skips the default.
+        return numbers([index + 1, instruction.target]);
       case "startTimer":
       case "showPermanentButton":
         return numbers([index + 1, entry(instruction.handlerFunctionId)]);

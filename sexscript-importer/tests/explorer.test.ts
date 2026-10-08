@@ -623,6 +623,35 @@ test(
 );
 
 test(
+  "a supplied argument skips its default: a function body after a default that always exits is reachable",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'function stop(code) {\n  exit\n  return code\n}\nfunction greet(times = stop(1)) {\n  say "Hello."\n' +
+      '  return times\n}\nshowButton "Go"\ngreet(times: 2)\nsay "Done."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 200,
+      maxStates: 100,
+      sources: new Map(),
+      diagnostics: [],
+    });
+    // Without the skip the body ran though the analysis held it unreachable, and no line could be labelled.
+    assert.equal(result.coverage.staticContradictions, 0);
+    const unvisited = result.coverage.files[0]!.unvisited;
+    assert.deepEqual(
+      unvisited.find((range) => range.lines === "3"),
+      { lines: "3", reach: "unreachable", reason: "no execution path from the session start" },
+    );
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
