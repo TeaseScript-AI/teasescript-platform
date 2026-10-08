@@ -990,15 +990,21 @@ function analyse(
           analysis.indexes.add(child);
         } else textIndexes.delete(child);
       }
-      // The truth helper on a variable whose type is now known is written as a plain test, which narrows it.
+      // The truth helper on a value whose type is now known is written as a plain test, which narrows a variable. A
+      // value that may be null is tested twice, which only a variable may be.
       const tested =
         child.kind === "call" && child.name === TRUTH_HELPER && child.positional.length === 1
           ? child.positional[0]!
           : null;
-      if (tested?.kind === "variable") {
-        const known = nonNull(typeOf(tested, scope));
-        if (known.kind === "scalar" && known.name !== "duration") {
-          plainTruths.set(child, typeOf(tested, scope));
+      if (tested !== null) {
+        const type = typeOf(tested, scope);
+        const known = nonNull(type);
+        const plain =
+          (tested.kind === "variable" || type.kind !== "optional") &&
+          ((known.kind === "scalar" && known.name !== "duration") ||
+            (known.kind === "list" && type.kind !== "optional"));
+        if (plain) {
+          plainTruths.set(child, type);
           analysis.indexes.add(child);
         } else plainTruths.delete(child);
       }
@@ -2363,9 +2369,20 @@ function isMixed(type: TeaseType): boolean {
  */
 const textIndexes = new WeakSet<IrExpression>();
 
-/** Groovy truth of a variable of a scalar type: not null, and not 0, "", or false. */
+/**
+ * Groovy truth of a value of a scalar type, or a list: not null, and not 0, "", false, or empty. A boolean that cannot be
+ * null is the test itself.
+ */
 function plainTruth(value: IrExpression, type: TeaseType): IrExpression {
   const scalarType = nonNull(type);
+  if (scalarType.kind === "list")
+    return {
+      kind: "binary",
+      operator: ">",
+      left: { kind: "property", target: value, name: "length" },
+      right: { kind: "literal", value: 0 },
+    };
+  if (type.kind === "scalar" && type.name === "boolean") return value;
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
     operator,
