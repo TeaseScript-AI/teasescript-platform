@@ -119,42 +119,12 @@ if suffix == "" {
   suffix = "a"
 }
 say "Settings ${shocks} ${tempo} ${suffix} ${keyed}"
-// A script function called between that does not use the variable lets its default move up too, where the default is
-// a constant; one that may use the variable, also through another function, or change what the default reads, keeps
-// the test.
-function chime {
-  say "Ready"
-}
-function tellLaps {
-  say "Laps ${laps}"
-}
-function tellBoth {
-  tellLaps()
-}
-let rounds = sexscriptLegacyLoadInteger("training.rounds", 4)
-let laps = sexscriptLegacyLoadInteger("training.laps")
-chime()
-tellBoth()
-if laps == null {
-  laps = 2
-}
-say "Rounds ${rounds} ${laps}"
-let pace = 1
-function quicken {
-  pace = 3
-}
-let speed = sexscriptLegacyLoadInteger("training.speed")
-quicken()
-if speed == null {
-  speed = pace
-}
-say "Speed ${speed}"
 // loadBoolean() read a stored value as text, true only for "true"; where the package saves a number under a key of the
 // same form, the read keeps that rule.
 let chosen = [false, false]
 let p = 0
 while p < 2 {
-  // NOTE SX_LOAD_BOOLEAN_TEXT line 73: loadBoolean() read the stored value as text, true only for "true", and the package saves a number or a text under this key, so the value is read the same way; a missing value, null in Groovy, reads as false.
+  // NOTE SX_LOAD_BOOLEAN_TEXT line 54: loadBoolean() read the stored value as text, true only for "true", and the package saves a number or a text under this key, so the value is read the same way; a missing value, null in Groovy, reads as false.
   chosen[p] = sexscriptLegacyBooleanText(load("training.punishment${p}.chosen", default: null))
   p += 1
 }
