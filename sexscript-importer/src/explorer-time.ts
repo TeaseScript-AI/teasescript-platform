@@ -749,12 +749,13 @@ function magnitude(value: Value): number | undefined {
 }
 
 /**
- * Whether a condition holds on stored values alone (a load's default for an unset key); undefined when it reads
- * anything else, such as a variable, a call, or the clock.
+ * Whether a condition holds on stored values alone (a load's default for an unset key), and the variables given in
+ * `bindings`; undefined when it reads anything else, such as another variable, a call, or the clock.
  */
 export function storedHolds(
   condition: unknown,
   storage: ReadonlyMap<string, unknown>,
+  bindings: ReadonlyMap<string, unknown> = new Map(),
 ): boolean | undefined {
   const model: ClockModel = {
     comparisons: new Map(),
@@ -767,7 +768,7 @@ export function storedHolds(
   const value = valueAt(condition, {
     temporaries: none,
     model,
-    context: { bindings: new Map(), storage },
+    context: { bindings, storage },
     now: 0,
     inside: new Map(),
     memo: new Map(),

@@ -233,6 +233,33 @@ test(
     assert.equal(realigned.stale, 0);
     assert.equal(realigned.realigned, withInputs.length);
     assert.ok(realigned.coverageAtStart.visitedLines > strict.coverageAtStart.visitedLines);
+    // Entries that share a moved option ("Count" and "Stay" swap) each count as realigned, also when one before
+    // already applied it.
+    const { plan: swappedPlan } = engine.compileProject(
+      [
+        {
+          path: "main.tease",
+          source: source.replace('stay: "Stay", count: "Count"', 'count: "Count", stay: "Stay"'),
+        },
+      ],
+      { builtins: [] },
+    );
+    assert.ok(isRecord(swappedPlan));
+    const counting = corpus.filter((entry) =>
+      [...(entry.earlier ?? []), entry].some((part) =>
+        part.inputs.some(
+          (input) => input.kind === "option" && (input.label === "Count" || input.label === "Stay"),
+        ),
+      ),
+    ).length;
+    assert.ok(counting >= 3);
+    const swapped = explore(engine, swappedPlan, {
+      ...options,
+      maxStates: 12,
+      corpus,
+      realign: true,
+    }).corpus!;
+    assert.deepEqual([swapped.stale, swapped.realigned], [0, counting]);
 
     // An earlier condition of an `else if` chain is read from stored values, an unset key by its load's default.
     const { plan: guarded } = engine.compileProject(
@@ -762,9 +789,23 @@ test(
         `function ask${index} {\n  let word = "word${index}"\n  let answer = askText "Say ${index}"\n` +
         `  if answer == word {\n    say "Hit ${index}."\n  }\n}\n`,
     ).join("");
+    // Asks whose comparisons read other variables come first, and the last compares its answer far after the ask: its
+    // own comparison still counts before theirs. Each of two timers keeps the word its call was given.
+    const far = Array.from({ length: 100 }, (_, index) => `  say "Line ${index}."\n`).join("");
+    const own = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `function own${index} {\n  let word${index} = "own${index}"\n  let answer = askText "Own ${index}"\n` +
+        `${index === 4 ? far : ""}  if answer == word${index} {\n    say "Own hit ${index}."\n  }\n}\n`,
+    ).join("");
+    const kept =
+      'function arm(word) {\n  timer async 1 s {\n    let answer = askText "Say"\n    if answer == word {\n' +
+      '      if word == kept[0] {\n        say "Kept one."\n      }\n      say "Kept."\n    }\n  }\n}\n' +
+      'let kept = ["one", "two"]\narm(kept[0])\narm(kept[1])\nwait 5 s\n';
     const words =
-      `${asks}ask0()\nask1()\nask2()\nask3()\nask4()\nlet info = { length: "secret" }\nlet reply = askText "Say it"\n` +
-      'if reply == info.length {\n  say "Secret."\n}\nexit\n';
+      `${asks}${own}ask0()\nask1()\nask2()\nask3()\nask4()\nown0()\nown1()\nown2()\nown3()\nown4()\n${kept}` +
+      'let info = { length: "secret" }\nlet reply = askText "Say it"\nif reply == info.length {\n  say "Secret."\n}\n' +
+      "exit\n";
     const { plan: wordPlan } = engine.compileProject([{ path: "main.tease", source: words }], {
       builtins: [],
     });
@@ -821,6 +862,20 @@ test(
       wallClockMs: kept.wallClockMs ?? EPOCH_MS,
     });
     assert.ok(replayed.steps.some((step) => step.texts.includes("Late.")));
+    // A corpus replays it too, with or without realignment.
+    for (const realign of [false, true]) {
+      const again = explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 5000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics,
+        later: true,
+        realign,
+        corpus: [kept],
+      }).corpus!;
+      assert.deepEqual([again.replayed, again.stale], [1, 0]);
+    }
     // A next session starts after the clock where the session it continues ended.
     const back = result.directed.ways.find((entry) => entry.sessions === 2)!;
     const earlier = replay(engine, plan, 1, back.repro.earlier![0]!.inputs);

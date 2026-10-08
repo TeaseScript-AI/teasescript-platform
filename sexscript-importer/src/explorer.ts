@@ -356,6 +356,11 @@ export class Session {
   readonly timedWith = new Map<number, readonly unknown[]>();
   readonly clockDifferences: ClockDifference[] = [];
   /**
+   * Whether values in a state are read as the running code sees them ({@link bindingsOf}, {@link valueOf}), as compared
+   * answers need; otherwise, for timed buttons alone, as before them.
+   */
+  scopedReads = false;
+  /**
    * Runtime operations called so far, a deterministic measure of the work the session's steps took: fresh sessions,
    * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
    */
@@ -761,9 +766,9 @@ export class Session {
         ? this.timedWith.get(action.owningInstruction)
         : undefined;
     if (expressions !== undefined && state !== undefined) {
-      const bindings = bindingsOf(state());
+      const bindings = bindingsOf(state(), this.scopedReads);
       for (const expression of expressions) {
-        const value = valueOf(expression, bindings);
+        const value = valueOf(expression, bindings, this.scopedReads);
         const duration = record(value);
         if (typeof value === "number") found.numbers.push(value);
         else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
@@ -904,10 +909,10 @@ function comparedValues(
   snapshot: Data,
   integer: boolean | null,
 ): string[] {
-  const bindings = bindingsOf(snapshot);
+  const bindings = bindingsOf(snapshot, true);
   const found = new Set<string>();
   for (const expression of expressions) {
-    const value = valueOf(expression, bindings);
+    const value = valueOf(expression, bindings, true);
     if (integer === null && typeof value === "string" && value.trim() !== "") found.add(value);
     if (integer !== null && typeof value === "number" && (!integer || Number.isSafeInteger(value)))
       for (const near of [value - 1, value, value + 1]) found.add(String(near));
@@ -917,19 +922,36 @@ function comparedValues(
 }
 
 /**
- * The variables of a state by name, each by its innermost binding: in scope, else kept for a running timer, media, or
- * button block, else global.
+ * The variables of a state by name. `scoped`: those the running code sees, each by its innermost binding: the scopes of
+ * the active call, the variables it captured (a timer, media, or button block keeps them), the scope it was declared
+ * in, and the globals. Otherwise every scope's, the innermost last, and the globals.
  */
-function bindingsOf(snapshot: Data): Map<string, unknown> {
+function bindingsOf(snapshot: Data, scoped: boolean): Map<string, unknown> {
   const bindings = new Map<string, unknown>();
+  const take = (scope: Data | undefined) => {
+    for (const binding of list(scope?.bindings))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  };
   for (const binding of list(snapshot.globals))
     if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
-  for (const frame of list(snapshot.retainedScopes))
-    for (const binding of list(frame.bindings))
-      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
-  for (const frame of list(snapshot.frames))
-    for (const binding of list(frame.bindings))
-      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+  const frames = list(snapshot.frames);
+  const call = list(snapshot.callFrames).at(-1);
+  if (!scoped || call === undefined) {
+    for (const frame of frames) take(frame);
+    return bindings;
+  }
+  const scopes = new Map(
+    [...frames, ...list(snapshot.retainedScopes)].map((scope) => [scope.id, scope]),
+  );
+  take(scopes.get(call.rootScopeId));
+  for (const capture of list(call.captures)) {
+    const binding = list(scopes.get(capture.scopeId)?.bindings).find(
+      (entry) => entry.name === capture.name,
+    );
+    if (binding !== undefined && typeof capture.name === "string")
+      bindings.set(capture.name, binding.value);
+  }
+  for (const frame of frames.slice(Number(call.scopeBaseDepth) || 0)) take(frame);
   return bindings;
 }
 
@@ -948,7 +970,11 @@ function readValue(value: unknown): ReadValue {
 }
 
 /** An expression's value in a state, from its variables' values, or undefined when it cannot be read. */
-function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): ReadValue {
+function valueOf(
+  expression: unknown,
+  bindings: ReadonlyMap<string, unknown>,
+  current: boolean,
+): ReadValue {
   const value = record(expression);
   switch (value.kind) {
     case "literal":
@@ -956,14 +982,14 @@ function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): R
     case "identifier":
       return typeof value.name === "string" ? readValue(bindings.get(value.name)) : undefined;
     case "group":
-      return valueOf(value.expression, bindings);
+      return valueOf(value.expression, bindings, current);
     case "unary": {
-      const operand = valueOf(value.operand, bindings);
+      const operand = valueOf(value.operand, bindings, current);
       return value.operator === "-" && typeof operand === "number" ? -operand : undefined;
     }
     case "binary": {
-      const left = valueOf(value.left, bindings);
-      const right = valueOf(value.right, bindings);
+      const left = valueOf(value.left, bindings, current);
+      const right = valueOf(value.right, bindings, current);
       if (value.operator === "+" && typeof left === "string" && typeof right === "string")
         return left + right;
       if (typeof left !== "number" || typeof right !== "number") return undefined;
@@ -983,8 +1009,21 @@ function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): R
       }
     }
     case "property": {
-      const object = valueOf(value.object, bindings);
+      const object = valueOf(value.object, bindings, current);
       const holder = record(object);
+      // Read as before compared answers: the length of a text or list, else an object's property.
+      if (!current)
+        return value.name === "length"
+          ? typeof object === "string"
+            ? [...object].length
+            : Array.isArray(holder.items)
+              ? holder.items.length
+              : undefined
+          : readValue(
+              (holder.kind === "object" ? list(holder.properties) : []).find(
+                (property) => property.name === value.name,
+              )?.value,
+            );
       // An object's property by name, also one named `length`; the length of a text, list, set, or dict.
       if (holder.kind === "object")
         return readValue(
@@ -996,10 +1035,12 @@ function valueOf(expression: unknown, bindings: ReadonlyMap<string, unknown>): R
       return Array.isArray(holder.entries) ? holder.entries.length : undefined;
     }
     case "index": {
-      const object = record(valueOf(value.object, bindings));
-      const index = valueOf(value.index, bindings);
+      const object = record(valueOf(value.object, bindings, current));
+      const index = valueOf(value.index, bindings, current);
       if (object.kind === "list" && typeof index === "number" && Array.isArray(object.items))
-        return readValue(object.items.at(index));
+        return current && (!Number.isSafeInteger(index) || index < 0)
+          ? undefined
+          : readValue(object.items.at(index));
       if (object.kind === "dict" && typeof index === "string")
         return readValue(list(object.entries).find((entry) => entry.key === index)?.value);
       return undefined;

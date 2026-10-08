@@ -250,7 +250,7 @@ function scalar(value: unknown): SavedScalar | undefined {
 }
 
 /** A variable whose every assignment is one `load` of a literal key, with no default or a literal one. */
-interface LoadAlias {
+export interface LoadAlias {
   readonly key: string;
   readonly fallback: SavedScalar | null;
 }
@@ -275,7 +275,7 @@ function keyText(expression: unknown): string | null {
 }
 
 /** The variables an expression reads; a called function's name is no variable. */
-function namesIn(expression: unknown): Set<string> {
+export function namesIn(expression: unknown): Set<string> {
   const names = new Set<string>();
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(walk);
@@ -316,6 +316,8 @@ export class DataFlow {
   readonly #saves = new Map<string, SavedValue[]>();
   /** Variables whose every assignment is the same `load`, by name; null for any other variable. */
   readonly #loads = new Map<string, LoadAlias | null>();
+  /** The function each instruction of a function body belongs to, by its ID. */
+  readonly #functionOf = new Map<number, number>();
 
   /**
    * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
@@ -327,7 +329,7 @@ export class DataFlow {
     settings: { computedPrompts?: boolean } = {},
   ) {
     const functions = list(plan.functions);
-    const functionOf = new Map<number, number>();
+    const functionOf = this.#functionOf;
     for (const definition of functions) {
       const end = Number(definition.endInstruction);
       for (let index = Number(definition.entryInstruction); index <= end; index += 1)
@@ -398,6 +400,19 @@ export class DataFlow {
       });
       if (!changed) break;
     }
+  }
+
+  /**
+   * The load a variable only ever holds (`let ready = load("ready", default: true)`): its key and default; null for
+   * another variable.
+   */
+  loadAlias(name: string): LoadAlias | null {
+    return this.#loads.get(name) ?? null;
+  }
+
+  /** The function an instruction is in, by its ID; 0 for a file's own code. */
+  functionAt(index: number): number {
+    return this.#functionOf.get(index) ?? 0;
   }
 
   /** The asks, stored keys, and clock reads an expression's value comes from. */
@@ -1022,6 +1037,8 @@ function readable(expression: unknown, top = true): boolean {
 
 /** Instructions after a timed button or a clock read within which the code that times it is looked for. */
 const TIMING_WINDOW = 40;
+/** The expressions kept per typed ask or timed button that the code compares its answer or time with. */
+const MAX_COMPARED = 4;
 
 /**
  * The expressions the code compares the results of interactions with, by the instruction of the interaction, when their
@@ -1053,8 +1070,17 @@ export function comparedWith(
       return button !== undefined && at - button <= TIMING_WINDOW && typed(button) ? [button] : [];
     });
   };
-  /** Per interaction, the expressions found, by shape, with how far from it the comparison is. */
-  const found = new Map<number, Map<string, { expression: unknown; distance: number }>>();
+  /**
+   * Per interaction, at most {@link MAX_COMPARED} expressions found, by shape. A timed button's are the first ones after
+   * it. A typed ask's are those nearest it, those in its own function first: a name other code also uses (`answer`)
+   * brings in theirs.
+   */
+  const found = new Map<
+    number,
+    Map<string, { expression: unknown; rank: readonly [number, number] }>
+  >();
+  const worse = (left: readonly [number, number], right: readonly [number, number]) =>
+    left[0] - right[0] || left[1] - right[1];
   const pair = (answer: unknown, other: unknown, at: number) => {
     if (!readable(other)) return;
     // A timed button's result divided by a duration (`/ 10 s`) is compared in that unit: the other side, read in
@@ -1071,14 +1097,36 @@ export function comparedWith(
           };
     for (const source of sources(answer, at)) {
       const known =
-        found.get(source) ?? new Map<string, { expression: unknown; distance: number }>();
+        found.get(source) ??
+        new Map<string, { expression: unknown; rank: readonly [number, number] }>();
+      found.set(source, known);
       const key = JSON.stringify(compared, (name, item: unknown) =>
         name === "span" ? undefined : item,
       );
-      const distance = Math.abs(at - source);
-      if ((known.get(key)?.distance ?? Infinity) > distance)
-        known.set(key, { expression: compared, distance });
-      found.set(source, known);
+      if (kind === "timed") {
+        if (known.size < MAX_COMPARED) known.set(key, { expression: compared, rank: [0, 0] });
+        continue;
+      }
+      const rank = [
+        flow.functionAt(at) === flow.functionAt(source) ? 0 : 1,
+        Math.abs(at - source),
+      ] as const;
+      const before = known.get(key);
+      if (before !== undefined) {
+        if (worse(rank, before.rank) < 0) known.set(key, { expression: compared, rank });
+        continue;
+      }
+      if (known.size < MAX_COMPARED) {
+        known.set(key, { expression: compared, rank });
+        continue;
+      }
+      const [last, kept] = [...known].reduce((most, entry) =>
+        worse(entry[1].rank, most[1].rank) > 0 ? entry : most,
+      );
+      if (worse(rank, kept.rank) < 0) {
+        known.delete(last);
+        known.set(key, { expression: compared, rank });
+      }
     }
   };
   const walk = (value: unknown, at: number): void => {
@@ -1118,13 +1166,11 @@ export function comparedWith(
     )
       results.set(instruction.temporaryId, held);
   });
-  // The comparisons nearest the interaction first: a name other code also uses (`answer`) brings in theirs.
   return new Map(
     [...found].map(([ask, expressions]) => [
       ask,
       [...expressions.values()]
-        .sort((left, right) => left.distance - right.distance)
-        .slice(0, 4)
+        .sort((left, right) => worse(left.rank, right.rank))
         .map(({ expression }) => expression),
     ]),
   );

@@ -9,9 +9,11 @@ import {
   distance,
   goalsFor,
   keyMatcher,
+  namesIn,
   callsClock,
   unreachableInstructions,
   type Goal,
+  type LoadAlias,
   type PlanDiagnostic,
   type Slot,
 } from "./explorer-analysis.ts";
@@ -952,9 +954,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const flow = new DataFlow(plan, instructions, {
     computedPrompts: options.comparedAnswers === true,
   });
-  if (options.comparedAnswers === true)
+  if (options.comparedAnswers === true) {
+    session.scopedReads = true;
     for (const [ask, expressions] of comparedWith(flow, instructions, "asks"))
       session.comparedWith.set(ask, expressions);
+  }
   for (const [button, expressions] of comparedWith(flow, instructions, "timed"))
     session.timedWith.set(button, expressions);
   const differences = clockDifferences(flow, instructions);
@@ -1672,10 +1676,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
       const guards =
         options.realign === true
-          ? (elseIfs.get(index) ?? []).map((earlier) => ({
-              condition: instructions[earlier]!.condition,
-              goals: goalsFor(flow, instructions[earlier]!.condition, false),
-            }))
+          ? (elseIfs.get(index) ?? []).map((earlier) => {
+              const before = instructions[earlier]!.condition;
+              const aliases = new Map<string, LoadAlias>();
+              for (const name of namesIn(before)) {
+                const alias = flow.loadAlias(name);
+                if (alias !== null) aliases.set(name, alias);
+              }
+              return { condition: before, aliases, goals: goalsFor(flow, before, false) };
+            })
           : [];
       const goals = [
         ...(conditional ? goalsFor(flow, condition, way === 0) : []),
@@ -1900,6 +1909,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     let stale = 0;
     /** With realignment: the entries whose replay realigned an input, and the entry being replayed. */
     const realigned = new Set<CorpusEntry>();
+    /** The inputs from a state that applied another input there (`applied`), which count as realigned. */
+    const realignedKeys = new Set<string>();
     let currentEntry: CorpusEntry | null = null;
     /** The state an input led to from a state, and the start of a session from a state's storage at a wall clock. */
     const applied = new Map<string, number>();
@@ -1952,6 +1963,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const key = `${node.id} ${JSON.stringify(input)}`;
         const known = applied.get(key);
         if (known !== undefined) {
+          if (realignedKeys.has(key) && currentEntry !== null) realigned.add(currentEntry);
           node = nodes[known]!;
           runtime = null;
           index += 1;
@@ -1966,18 +1978,30 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           const found = realign(runtime, inputs, index, allowance);
           if (found === null) return null;
           ({ input: applying, next } = found);
-          if (
-            (JSON.stringify(applying) !== JSON.stringify(input) || next !== index + 1) &&
-            currentEntry !== null
-          )
-            realigned.add(currentEntry);
+          const moved = JSON.stringify(applying) !== JSON.stringify(input) || next !== index + 1;
+          if (moved && currentEntry !== null) realigned.add(currentEntry);
+          // An input applied here before, such as the only button another entry pressed first, is not applied again.
+          const before = applied.get(`${node.id} ${JSON.stringify(applying)}`);
+          if (before !== undefined) {
+            if (next === index + 1) {
+              applied.set(key, before);
+              if (moved) realignedKeys.add(key);
+            }
+            node = nodes[before]!;
+            runtime = null;
+            index = next;
+            continue;
+          }
         } else if (!fitsPending(input, session.options(runtime))) return null;
         const stepped = step(node, runtime, applying);
         if (stepped === null) return null;
         const reached = transition(node, applying, stepped, node.start, null);
         reach(reached, stepped.snapshot);
         applied.set(`${node.id} ${JSON.stringify(applying)}`, reached.id);
-        if (next === index + 1) applied.set(key, reached.id);
+        if (next === index + 1) {
+          applied.set(key, reached.id);
+          if (JSON.stringify(applying) !== JSON.stringify(input)) realignedKeys.add(key);
+        }
         node = reached;
         runtime = stepped.snapshot.status === "waiting" ? stepped.runtime : null;
         index = next;
@@ -2481,23 +2505,29 @@ function elseIfChains(instructions: readonly Data[]): Map<number, number[]> {
   return chains;
 }
 
-/** An earlier condition of an `else if` chain, which must take its other way, with the goals for that way. */
+/**
+ * An earlier condition of an `else if` chain, which must take its other way, with the goals for that way and the
+ * variables it reads that only hold a load, by name.
+ */
 interface Guard {
   readonly condition: unknown;
+  readonly aliases: ReadonlyMap<string, LoadAlias>;
   readonly goals: readonly Goal[];
 }
 
 /**
  * How far a storage is from what an earlier condition of an `else if` chain needs, to take its other way: 0 when the
- * condition, read from the storage alone (`storedHolds`, with each load's default for an unset key), is false;
+ * condition, read from the storage alone (`storedHolds`, with each load's default for an unset key, also through a
+ * variable that only holds one load), is false;
  * otherwise, or when it reads more than storage, how far its stored values are from its goals (see
  * {@link storageDistance}), at least 1 when it holds.
  */
 function guardDistance(entries: readonly StorageEntry[], guard: Guard): number {
-  const holds = storedHolds(
-    guard.condition,
-    new Map(entries.map((entry) => [entry.key, entry.value])),
-  );
+  const storage = new Map<string, unknown>(entries.map((entry) => [entry.key, entry.value]));
+  const loaded = new Map<string, unknown>();
+  for (const [name, alias] of guard.aliases)
+    loaded.set(name, storage.has(alias.key) ? storage.get(alias.key) : alias.fallback);
+  const holds = storedHolds(guard.condition, storage, loaded);
   if (holds === false) return 0;
   let distance = 0;
   for (const goal of guard.goals) {
@@ -2513,10 +2543,10 @@ function guardDistance(entries: readonly StorageEntry[], guard: Guard): number {
 /**
  * Whether a corpus input fits the pending action: one of the options the explorer tries there, by kind, label, and
  * index or ID. A typed answer needs a typed ask, a form a form (with cancel for a cancel), a wait the same deadline;
- * another wall clock fits any waiting state, and the runtime decides the rest.
+ * another wall clock, or continuing later, fits any waiting state, and the runtime decides the rest.
  */
 function fitsPending(input: ExplorerInput, options: readonly ExplorerInput[]): boolean {
-  if (input.kind === "clock") return true;
+  if (input.kind === "clock" || input.kind === "later") return true;
   return options.some((option) => {
     switch (input.kind) {
       case "option":
