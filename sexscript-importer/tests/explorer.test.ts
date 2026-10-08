@@ -653,6 +653,13 @@ test(
         true,
       ],
       [
+        "time taken against a bound from the clock",
+        "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
+          'showButton "Check"\nlet took = getTimestamp().toSeconds() - start\ntook = took * 2\nlet bound = limit()\n' +
+          'if took <= bound {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
         "repeated without cells",
         'let n = 0\nwhile n < 2 {\n  showButton "Go"\n  n += 1\n}\nif getDateTime().hour >= 22 {\n' +
           '  say "Hit."\n}\nexit\n',

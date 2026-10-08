@@ -1337,8 +1337,9 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
       } else if (right.kind === "duration") compared(value.left, value.right);
       else if (left.kind === "duration") compared(value.right, value.left);
       else if (left.kind !== "literal" && right.kind !== "literal") {
-        compared(value.left, undefined);
-        compared(value.right, undefined);
+        // Against a value that does not come from the clock (`took <= limit`), only how long the player took varies.
+        if (!flow.flowOf(value.right).clock) compared(value.left, undefined);
+        if (!flow.flowOf(value.left).clock) compared(value.right, undefined);
       }
     };
     walk(condition);
