@@ -111,4 +111,26 @@ pics = settings2.pics
 save pics as "game.pics"
 rounds = settings2.rounds
 save rounds as "game.rounds"
+// DisciplineClinic Punish: a list of alternative texts that the script only picks one of to say has its texts split as
+// a text said directly is, and the same draw picks the same alternative.
+let dialogArray = []
+let dialog = ""
+let dialogs = [
+  ["Are you satisfied with the session you had?", "Are you feeling well punished?"],
+  ["Well..", "Did she do a good job?"],
+  ["Tell me, how do you feel?"]
+]
+for line in dialogs.random {
+  say line
+}
+// DisciplineClinic Punish: a picked text that the script reads again, here as a question, stays one message.
+dialogArray = ["""
+  You need to learn this.
+
+  Take your position.
+""", "Bend over."]
+dialog = dialogArray.random
+say dialog
+say dialog
+let response = choose 0: "I understand.", 1: "Please, no."
 exit

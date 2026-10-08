@@ -158,7 +158,15 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
   whose blank lines lay them out stay whole: two aligned lines, a ruled line, an empty box (`[  ]`), a table row, or a
   block of value rows (`Score: 12`, `Time unit = ${unit}`; three, or two that make up half the text). A unit whose
-  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). Corpus: 10,635 says split in 172 units,
+  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). A list of alternative texts that the
+  script only picks one of to say, `dialog = dialogArray.random; say dialog` or `say text[randomInteger(0..3)]`,
+  becomes a list of each alternative's paragraphs said one message each, `let dialogs = [["…", "…"], ["…"]]` and
+  `for line in dialogs.random { say line }`, which draws the same alternative (owner decision 2026-10-08;
+  `SX_PARAGRAPH_PICK`, `picks`). It stays whole where the list or the picked text has another use: read again later,
+  also as a leftover after the function that picked it returns (DisciplineClinic asks some questions with the last
+  picked `dialog`), or used before the pick other than for its length (`SX_PARAGRAPH_PICK_KEPT`, `picksKept`); 217
+  lists in 13 units are said this way, and 232 in 14 units stay whole.
+  Corpus: 10,635 says split in 172 units,
   172 questions in 50 units (71 that ask, 49 with remarks after them, 52 by the fallback), 263 single paragraphs
   trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
   outros (no form question in the corpus has a literal blank line); report counter `paragraphs`.

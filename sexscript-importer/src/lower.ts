@@ -42,6 +42,7 @@ import {
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
+import { withParagraphPicks } from "./paragraph-picks.ts";
 import { withParagraphs } from "./paragraphs.ts";
 import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
@@ -1628,8 +1629,8 @@ export function lowerParsedFile(
   // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
   // kept as a duration, empty texts dropped,
   // animations and counters made messages that change in place, legacy waits replaced by reading time, repeated texts
-  // shortened, texts folded into asks, paragraphs split, and `instant` taken away where it would cut a reading time
-  // short.
+  // shortened, texts folded into asks, picked texts and paragraphs split, and `instant` taken away where it would cut a
+  // reading time short.
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
@@ -1643,6 +1644,7 @@ export function lowerParsedFile(
   texts = withReadingTimes(texts, diagnostics);
   texts = withoutRepeatedText(texts, diagnostics);
   texts = withAskQuestions(texts, diagnostics);
+  texts = withParagraphPicks(texts, diagnostics, options.keepParagraphs === true, shared);
   texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
   texts = withoutCutReadingTimes(texts, diagnostics);
   const statements = [

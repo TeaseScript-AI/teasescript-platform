@@ -246,9 +246,9 @@ test("cue positions may start with an object literal and continue like other exp
   assert.deepEqual(firstError(choiceBeforeBrace), ["TSP031", choiceBrace, choiceBrace + 1]);
   // A block inside a cue position parses like any other block.
   const blockInPosition =
-    'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    repeat choose 1: "Once", 2: "Twice" { }\n  }) { }\n}';
-  const repeatBrace = blockInPosition.indexOf("{ }");
-  assert.deepEqual(firstError(blockInPosition), ["TSP031", repeatBrace, repeatBrace + 1]);
+    'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    let n = choose 1: "Once", 2: "Twice" { }\n  }) { }\n}';
+  const innerBrace = blockInPosition.indexOf("{ }");
+  assert.deepEqual(firstError(blockInPosition), ["TSP031", innerBrace, innerBrace + 1]);
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {
