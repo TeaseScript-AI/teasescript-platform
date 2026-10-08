@@ -345,8 +345,9 @@ test(
           'save("tracks", tracks.join(","))',
           'save("decks", decks.join(","))',
           'save("videos", videos.size())',
-          // A variable named FileType does not change the qualified enum.
+          // A variable named FileType or groovy does not change the qualified enum.
           "def FileType = [FILES: null]",
+          "def groovy = [io: [FileType: [FILES: null]]]",
           "def flat = 0",
           'new File("sounds/Beats").eachFileRecurse(groovy.io.FileType.FILES) { flat++ }',
           'save("flat", flat)',

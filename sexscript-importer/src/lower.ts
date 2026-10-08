@@ -16681,21 +16681,6 @@ const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFil
 
 /** Groovy's `FileType.FILES`, also written `groovy.io.FileType.FILES`, which walks only through files. */
 function isFilesOnly(node: AstNode, context: LowerContext): boolean {
-  // A variable or parameter that the selector's root names, `def FileType = [FILES: null]`, is no enum.
-  let root: AstNode | null = node;
-  while (root?.kind === "property") root = asNode(root.object);
-  const rootName = root?.kind === "variable" ? variableName(root) : null;
-  if (rootName !== null) {
-    const key = bindingKey(root, context.pathBindings?.keys ?? context.bindings) ?? rootName;
-    if (
-      key !== rootName ||
-      context.assignedValues.has(rootName) ||
-      context.pathBindings?.values.has(rootName) === true ||
-      context.constantInitializers.has(rootName) ||
-      context.changingPaths.has(rootName)
-    )
-      return false;
-  }
   const name = (value: AstNode | null): string | null => {
     if (value?.kind === "variable") return variableName(value);
     if (value?.kind === "classExpression") return text(value.type) ?? null;
@@ -16705,7 +16690,20 @@ function isFilesOnly(node: AstNode, context: LowerContext): boolean {
     return owner === null || property === null ? null : `${owner}.${property}`;
   };
   const written = name(node);
-  return written === "FileType.FILES" || written === "groovy.io.FileType.FILES";
+  // Groovy resolves the qualified name to the enum, also where a variable is named `groovy`.
+  if (written === "groovy.io.FileType.FILES") return true;
+  if (written !== "FileType.FILES") return false;
+  // A variable or parameter named FileType, `def FileType = [FILES: null]`, is no enum.
+  const owner = asNode(node.object);
+  if (owner?.kind !== "variable") return true;
+  const key = bindingKey(owner, context.pathBindings?.keys ?? context.bindings) ?? "FileType";
+  return !(
+    key !== "FileType" ||
+    context.assignedValues.has("FileType") ||
+    context.pathBindings?.values.has("FileType") === true ||
+    context.constantInitializers.has("FileType") ||
+    context.changingPaths.has("FileType")
+  );
 }
 
 /**
