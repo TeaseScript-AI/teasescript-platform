@@ -379,8 +379,9 @@ function validPoints(value: unknown, observedSessionTimeMs: unknown): boolean {
 }
 
 /**
- * Every issued media ID has exactly one active or settled record, handles refer only to issued IDs, and queued cue
- * blocks and cue-block frames belong to their media's own blocks. Only one video is active.
+ * Each issued media ID has at most one active or settled record, every handle and every queued or running cue block has
+ * the record of its media, and cue blocks and cue-block frames belong to their media's own blocks. Only one video is
+ * active.
  */
 export function validateMediaState(
   value: Record<string, unknown>,

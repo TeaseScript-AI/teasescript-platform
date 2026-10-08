@@ -416,6 +416,32 @@ test("an ordinary session step captures and validates only its new input", () =>
   assert.deepEqual(work(2_000), narrow);
 });
 
+test("a kept settled media handle does not make a session step walk unrelated values", () => {
+  // Diagnostic scale evidence, not a capacity contract: the host's large value comes before the script's global list.
+  const work = (width: number) => {
+    const plan = compileValidPlan(
+      'global keeper: list = []\nkeeper.add(playAudio async "a.mp3")\nkeeper[0].stop()\nwait 1000\nexit',
+    );
+    const payload = {
+      kind: "list" as const,
+      items: Array.from({ length: width }, (_, index) => index),
+    };
+    const session = createFreshRuntimeSession(plan, { ...IMMEDIATE, globals: { payload } });
+    session.run();
+    session.reportMediaLoad(1, { kind: "loaded", durationMs: 1_000 });
+    session.run();
+    return withValidationTestStatistics((statistics) => {
+      session.observeTime(1);
+      session.run();
+      assert.equal(session.exportTrustedSnapshot().settledMedia.length, 1);
+      return statistics().counts;
+    });
+  };
+  const narrow = work(4);
+  assert.ok((narrow.recordReachVisits ?? 0) > 0);
+  assert.deepEqual(work(2_000), narrow);
+});
+
 test("an operation that throws ends its session, and argument errors leave it usable", () => {
   const ended = (session: RuntimeSession, cause: unknown) => {
     for (const call of [

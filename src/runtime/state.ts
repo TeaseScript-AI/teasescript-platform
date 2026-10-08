@@ -3631,9 +3631,11 @@ function identityRootValues(
  */
 export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
   if (snapshot.liveMessages.length === 0 && snapshot.settledMedia.length === 0) return;
-  const handleIds = emptyIdentityIds();
+  // The records not reached yet. Once every record is reached nothing is dropped, so the search stops there.
+  const messages = new Set(snapshot.liveMessages.map((message) => message.messageId));
+  const media = new Set(snapshot.settledMedia.map((record) => record.mediaId));
   for (const invocation of snapshot.pendingTimerHandlers) {
-    if ("mediaId" in invocation) handleIds.media.add(invocation.mediaId);
+    if ("mediaId" in invocation) media.delete(invocation.mediaId);
   }
   for (const frame of snapshot.callFrames) {
     if (
@@ -3641,7 +3643,7 @@ export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
       frame.timerInterruption !== null &&
       "mediaId" in frame.timerInterruption
     )
-      handleIds.media.add(frame.timerInterruption.mediaId);
+      media.delete(frame.timerInterruption.mediaId);
   }
   const roots = identityRootValues(
     [...snapshot.frames, ...snapshot.retainedScopes, { bindings: snapshot.globals }],
@@ -3650,34 +3652,74 @@ export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
     snapshot.temporaries,
     snapshot.callFrames,
   );
-  // Handles are usually the values of variables themselves. When those reach every record, nothing is dropped, and the
-  // values inside lists and other containers, which may be large, need not be walked.
-  for (const value of roots) {
-    if (isPlainRecord(value) && value.kind === "mediaHandle" && typeof value.mediaId === "number")
-      handleIds.media.add(value.mediaId);
-    if (
-      isPlainRecord(value) &&
-      value.kind === "messageHandle" &&
-      typeof value.messageId === "number"
-    )
-      handleIds.message.add(value.messageId);
+  reachRecords(roots, messages, media);
+  if (messages.size > 0) {
+    let kept = 0;
+    for (const message of snapshot.liveMessages) {
+      if (!messages.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+    }
+    snapshot.liveMessages.length = kept;
   }
-  if (
-    snapshot.liveMessages.every((message) => handleIds.message.has(message.messageId)) &&
-    snapshot.settledMedia.every((media) => handleIds.media.has(media.mediaId))
-  )
-    return;
-  for (const value of roots) collectSpeakerReferenceIds(value, new Set(), handleIds);
-  let kept = 0;
-  for (const message of snapshot.liveMessages) {
-    if (handleIds.message.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+  if (media.size > 0) {
+    let kept = 0;
+    for (const record of snapshot.settledMedia) {
+      if (!media.has(record.mediaId)) snapshot.settledMedia[kept++] = record;
+    }
+    snapshot.settledMedia.length = kept;
   }
-  snapshot.liveMessages.length = kept;
-  kept = 0;
-  for (const media of snapshot.settledMedia) {
-    if (handleIds.media.has(media.mediaId)) snapshot.settledMedia[kept++] = media;
+}
+
+/**
+ * Removes from `messages` and `media` the IDs that handles in `roots` name, looking into lists, sets, objects, and dicts,
+ * until both are empty. The roots are walked side by side, one value of each in turn, so a handle near the top of one
+ * root is reached without walking a large unrelated value of another first.
+ */
+function reachRecords(roots: readonly unknown[], messages: Set<number>, media: Set<number>): void {
+  /** A container's values, from `next` on; `field` reads each value from a property or entry record. */
+  interface Cursor {
+    readonly values: readonly unknown[];
+    readonly field: boolean;
+    next: number;
   }
-  snapshot.settledMedia.length = kept;
+  let walks: Cursor[][] = roots.map((root) => [{ values: [root], field: false, next: 0 }]);
+  while (walks.length > 0 && (messages.size > 0 || media.size > 0)) {
+    const continuing: Cursor[][] = [];
+    for (const walk of walks) {
+      recordValidationTestWork("recordReachVisits");
+      const cursor = walk.at(-1)!;
+      const item = cursor.values[cursor.next];
+      cursor.next += 1;
+      if (cursor.next >= cursor.values.length) walk.pop();
+      const value = cursor.field ? (isPlainRecord(item) ? item.value : undefined) : item;
+      if (isPlainRecord(value)) {
+        if (value.kind === "mediaHandle" && typeof value.mediaId === "number") {
+          media.delete(value.mediaId);
+        } else if (value.kind === "messageHandle" && typeof value.messageId === "number") {
+          messages.delete(value.messageId);
+        } else if (
+          (value.kind === "list" || value.kind === "set") &&
+          Array.isArray(value.items) &&
+          value.items.length > 0
+        ) {
+          walk.push({ values: value.items, field: false, next: 0 });
+        } else if (
+          value.kind === "object" &&
+          Array.isArray(value.properties) &&
+          value.properties.length > 0
+        ) {
+          walk.push({ values: value.properties, field: true, next: 0 });
+        } else if (
+          value.kind === "dict" &&
+          Array.isArray(value.entries) &&
+          value.entries.length > 0
+        ) {
+          walk.push({ values: value.entries, field: true, next: 0 });
+        }
+      }
+      if (walk.length > 0) continuing.push(walk);
+    }
+    walks = continuing;
+  }
 }
 
 /**
