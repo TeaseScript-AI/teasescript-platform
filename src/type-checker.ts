@@ -41,6 +41,7 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import {
   askOperands,
   expressionChildren,
+  namedAskArguments,
   sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
@@ -67,7 +68,7 @@ import {
   unknownFormTypeMessage,
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
   emptyImageFilterMessage,
   IMAGE_NO_SOURCE_MESSAGE,
@@ -3584,15 +3585,16 @@ class TypeChecker {
   }
 
   /**
-   * `askBooleans(...)`: the message is shown text, `texts:` a list of texts, `defaults:` a list of booleans of the same
-   * length when both are written, and `cancel:` a button. Returns whether the form may be cancelled.
+   * `askBooleans` (V30 §20): the message is shown text, `texts:` a list of texts, `defaults:` a list of booleans of the
+   * same length when both are written, and `cancel:` a button. A form of toggles, it returns one boolean per text, or
+   * `null` when it may be cancelled and the player cancels it.
    */
-  *#askBooleansTask(expression: CallExpression, scope: Scope): CompileTask<boolean> {
+  *#askBooleansTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
     let cancellable = false;
     const written = new Map<string, Expression>();
-    for (const argument of expression.arguments) {
+    for (const argument of namedAskArguments(expression)) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
-      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      const name = argument.name;
       written.set(name, argument.value);
       if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
       else if (name === "texts")
@@ -3639,7 +3641,8 @@ class TypeChecker {
         `askBooleans has ${textsList.elements.length} texts but ${defaultsList.elements.length} defaults; give one default for each text.`,
         defaultsList.span,
       );
-    return cancellable;
+    const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
+    return cancellable ? optional(answers) : answers;
   }
 
   /**
@@ -4392,13 +4395,6 @@ class TypeChecker {
       // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);
-    }
-    if (isAskBooleansCall(expression)) {
-      const cancellable = yield* compileChild(this.#askBooleansTask(expression, scope));
-      // A form of toggles: one boolean per text, or `null` when the player cancels it.
-      this.#suspend();
-      const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
-      return cancellable ? optional(answers) : answers;
     }
     if (isAskImageCall(expression)) {
       yield* compileChild(this.#askImageTask(expression, scope));
@@ -5253,6 +5249,16 @@ class TypeChecker {
   ): CompileTask<StaticType> {
     if (expression.interactionKind === "form")
       return yield* compileChild(this.#formTask(expression, scope));
+    if (expression.interactionKind === "booleans")
+      return yield* compileChild(this.#askBooleansTask(expression, scope));
+    if (expression.interactionKind === "boolean") {
+      // Two buttons that return true and false (V30 §20).
+      for (const { name, value } of namedAskArguments(expression)) {
+        const type = yield* compileChild(this.#expressionTask(value, scope));
+        this.#checkShownText(value, type, name === "message" ? "an ask question" : "a button text");
+      }
+      return BOOLEAN_TYPE;
+    }
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
         const type = yield* compileChild(this.#expressionTask(operand, scope));
@@ -8015,7 +8021,10 @@ function staticText(expression: Expression): string | undefined {
 
 /** The type of the answer an `ask...` interaction returns. */
 function interactionResultType(
-  kind: Exclude<InteractionExpression["interactionKind"], "choice" | "form">,
+  kind: Exclude<
+    InteractionExpression["interactionKind"],
+    "choice" | "form" | "boolean" | "booleans"
+  >,
 ): StaticType {
   switch (kind) {
     case "number":

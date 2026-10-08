@@ -97,6 +97,11 @@ The compact compiler fully lowers these forms into the versioned plan. Static co
 
 A basic ask's question is an ordinary prepared `say` that the compiler places before its interaction: after the requesting speaker, `prepareSaySpeaker` and `prepareSayContextualSpeaker` capture the same speaker, `prepareSayText` with `field: true` captures the question, then the `default:` and `hint:` operands are evaluated in written order, the `say` runs, and the interaction opens. The question's `say` follows ordinary pacing, staging, and checkpoint rules, and the interaction that follows consumes its pacing gate. A pending field, a refused answer, an interrupt, or a restore never says the question again; a question known as static text with a static field becomes a literal `say` before a static interaction.
 
+`askBoolean` lowers to a `choice` of two buttons, `{ text: yesText, value: true }` and `{ text: noText, value: false }`,
+with `"Yes"` and `"No"` as the default texts. With a static question and static texts it is a literal `say` before a
+static choice. Otherwise, like a [form](#forms), it evaluates its question and named arguments once, in written order,
+into one request temporary, says the question from it, and prepares the two choice objects from it.
+
 Result-bearing text, number, choice, and valued button instructions require the destination temporary to be absent
 when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
 records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without
@@ -1280,9 +1285,9 @@ A form is the `form` interaction of [V30 §20](specifications/accepted-syntaxes-
 fields the player edits until submitting. It is always prepared: after the requesting speaker, `askForm` evaluates its
 question and named arguments once, in written order, into one request temporary (`message`, `fields`, an object or
 dict, and optional `hint`, `submit`, and `outro`; for `askBooleans`, `texts` and `defaults`), says the question from it
-like a basic ask, and opens the form. `askBooleans(...)`, a reserved call like `askImage(...)`, lowers the same way
-with its `message`, `texts`, `defaults`, and `cancel` as the request and the `booleanList` shape; plan validation
-rejects it unlowered. The prepared
+like a basic ask, and opens the form. `askBooleans`, an ask in both forms like `askForm`, lowers the same way with its
+`message`, `texts`, `defaults`, and `cancel` as the request and the `booleanList` shape; plan validation rejects an
+unlowered `askBooleans` call. The prepared
 UI carries the result `shape`: `object` with the `numericKinds` of named fields, `dict` with one `numericKind` or `null`,
 or `booleanList`. A runtime number does not record whether it is an `integer` or a `number`, so the compiler supplies the
 kind for a field whose number gives its kind; a field without one needs `type:`. The shape also carries the answer type

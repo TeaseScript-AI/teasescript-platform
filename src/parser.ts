@@ -196,7 +196,9 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDate", "date"],
   ["askTime", "time"],
   ["askDateTime", "datetime"],
+  ["askBoolean", "boolean"],
   ["askForm", "form"],
+  ["askBooleans", "booleans"],
 ]);
 /** The named arguments of each basic ask and of `askForm`, in the order the message suggests them. */
 const ASK_OPTIONS: readonly string[] = ["default", "hint"];
@@ -209,6 +211,13 @@ const FORM_OPTIONS: readonly string[] = [
   "timeout",
   "onTimeout",
 ];
+/** The asks that name every argument other than the question, with their names; the question may be `message:`. */
+const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], readonly string[]> =
+  new Map([
+    ["form", FORM_OPTIONS],
+    ["boolean", ["yesText", "noText", "message"]],
+    ["booleans", ["texts", "defaults", "cancel", "message"]],
+  ]);
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 /** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
 const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([
@@ -3501,7 +3510,9 @@ class Parser {
       this.#checkIdentifier("askDate") ||
       this.#checkIdentifier("askTime") ||
       this.#checkIdentifier("askDateTime") ||
+      this.#checkIdentifier("askBoolean") ||
       this.#checkIdentifier("askForm") ||
+      this.#checkIdentifier("askBooleans") ||
       this.#checkIdentifier("choose")
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
@@ -3647,7 +3658,7 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const names = interactionKind === "form" ? FORM_OPTIONS : ASK_OPTIONS;
+      const names = NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS;
       const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
@@ -3669,16 +3680,17 @@ class Parser {
         }
         const option = offset === null ? null : this.#askOptionAt(offset, names);
         if (option === null) {
-          // A form names every argument, so another `name:` after a comma is a misspelled one.
+          // A form names every argument, as do askBoolean and askBooleans, so another `name:` after a comma is a
+          // misspelled one.
           const unknown = offset === null ? null : this.#peek(offset);
           if (
-            interactionKind === "form" &&
+            NAMED_ASK_OPTIONS.has(interactionKind) &&
             unknown?.kind === TokenKind.Identifier &&
             this.#peek(offset! + 1).kind === TokenKind.Colon
           ) {
             this.#reportSpan(
               parserDiagnosticCode.unsupportedInteractionForm,
-              `Unknown askForm option '${unknown.lexeme}'; use ${names.map((known) => `'${known}:'`).join(", ")}.`,
+              `Unknown ${command.lexeme} option '${unknown.lexeme}'; use ${names.map((known) => `'${known}:'`).join(", ")}.`,
               unknown.span,
             );
             this.#synchronizeStatement();
@@ -3849,7 +3861,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      interactionKind === "form" ? FORM_OPTIONS : ASK_OPTIONS,
+      NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS,
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
@@ -3899,8 +3911,9 @@ class Parser {
   }
 
   /**
-   * A basic ask or `askForm` from its question and named options in written order. A basic ask keeps `hint:` and
-   * `default:`; a form keeps every option and needs `fields:`, or `texts:` and `defaults:` for `askBooleans`.
+   * A basic ask, `askForm`, `askBoolean`, or `askBooleans` from its question and named options in written order. A basic
+   * ask keeps `hint:` and `default:`; the others keep every option, and a form needs `fields:`, or `texts:` and
+   * `defaults:` for `askBooleans`.
    */
   #askExpression(
     command: Token,
@@ -3911,15 +3924,31 @@ class Parser {
     named: readonly FormArgument[],
     span: SourceSpan,
   ): InteractionExpression {
-    const form = interactionKind === "form";
-    if (form && !named.some((argument) => argument.name.name === "fields"))
+    const keepsArguments = NAMED_ASK_OPTIONS.has(interactionKind);
+    const has = (name: string) => named.some((argument) => argument.name.name === name);
+    if (interactionKind === "form" && !has("fields"))
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
         "askForm needs its fields, as in 'fields: { enabled: false }'.",
         command.span,
       );
+    for (const required of interactionKind === "booleans" ? ["texts", "defaults"] : [])
+      if (!has(required))
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          `askBooleans needs ${required}:, as in 'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]'.`,
+          command.span,
+        );
+    if (question !== null && has("message"))
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        `${command.lexeme} has a question and 'message:'; keep one.`,
+        named.find((argument) => argument.name.name === "message")!.name.span,
+      );
     const option = (name: string) =>
-      form ? null : (named.find((argument) => argument.name.name === name)?.value ?? null);
+      keepsArguments
+        ? null
+        : (named.find((argument) => argument.name.name === name)?.value ?? null);
     return Object.freeze({
       kind: "interactionExpression",
       interactionKind,
@@ -3930,7 +3959,7 @@ class Parser {
       hint: option("hint"),
       defaultValue: option("default"),
       options: Object.freeze([]),
-      formArguments: Object.freeze(form ? [...named] : []),
+      formArguments: Object.freeze(keepsArguments ? [...named] : []),
       span,
     });
   }

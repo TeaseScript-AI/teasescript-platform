@@ -603,7 +603,7 @@ test("askBooleans asks with one toggle per text and returns their states in orde
     "askBooleans has 2 texts but 1 defaults; give one default for each text.",
   ]);
   assert.deepEqual(errors('let a = askBooleans("Q", texts: ["A"])'), [
-    'askBooleans() needs defaults:, such as askBooleans("Choose", texts: ["A", "B"], defaults: [true, false]).',
+    `askBooleans needs defaults:, as in 'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]'.`,
   ]);
   assert.deepEqual(
     errors(

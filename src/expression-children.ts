@@ -8,16 +8,38 @@ import type {
   TagQueryExpression,
 } from "./ast.js";
 
+/** Whether an ask keeps all its named arguments in written order: `askForm`, `askBoolean`, and `askBooleans`. */
+function hasNamedAskArguments(expression: InteractionExpression): boolean {
+  return (
+    expression.interactionKind === "form" ||
+    expression.interactionKind === "boolean" ||
+    expression.interactionKind === "booleans"
+  );
+}
+
 /**
- * The operands of a basic ask in evaluation order: the question, then `hint:` and `default:` in the order they are
- * written.
+ * The arguments of `askForm`, `askBoolean`, or `askBooleans` in written order, by name: the question, which comes first,
+ * as `message`, then the named arguments.
+ */
+export function namedAskArguments(
+  expression: InteractionExpression,
+): readonly { readonly name: string; readonly value: Expression }[] {
+  return [
+    ...(expression.question === null ? [] : [{ name: "message", value: expression.question }]),
+    ...expression.formArguments.map((argument) => ({
+      name: argument.name.name,
+      value: argument.value,
+    })),
+  ];
+}
+
+/**
+ * The operands of an ask in evaluation order: the question, then `hint:` and `default:` in the order they are written,
+ * or every named argument of an ask that keeps them.
  */
 export function askOperands(expression: InteractionExpression): readonly Expression[] {
-  if (expression.interactionKind === "form")
-    return [
-      ...(expression.question === null ? [] : [expression.question]),
-      ...expression.formArguments.map((argument) => argument.value),
-    ];
+  if (hasNamedAskArguments(expression))
+    return namedAskArguments(expression).map((argument) => argument.value);
   const named = [expression.hint, expression.defaultValue].filter(
     (operand): operand is Expression => operand !== null,
   );
