@@ -646,10 +646,10 @@ export interface InteractionExpression {
   readonly speaker: Identifier | null;
   /** The question of a basic ask, said in the chat by its speaker before the field opens. */
   readonly question: Expression | null;
-  /** The `hint:` text shown in the field only; its position against `default:` gives their evaluation order. */
+  /** The `hint:` text shown in the field only; its position against `prefill:` gives their evaluation order. */
   readonly hint: Expression | null;
-  /** The `default:` answer that prefills the field of a basic ask. */
-  readonly defaultValue: Expression | null;
+  /** The `prefill:` answer that a basic ask's field starts with. */
+  readonly prefill: Expression | null;
   readonly options: readonly InteractionChoiceOption[];
   /**
    * The named arguments of `askForm`, `askBoolean`, and `askBooleans`, such as `fields:` and `yesText:`, in written

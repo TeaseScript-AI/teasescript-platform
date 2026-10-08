@@ -83,7 +83,7 @@ test("context, hover, and signature help select the compact command and its slot
     end: languagePositionAt(document, start + "askText".length),
   });
   const signature = languageSignatureHelp(document, position);
-  assert.deepEqual(signature?.parameters, ["speaker", "hint", "default"]);
+  assert.deepEqual(signature?.parameters, ["speaker", "hint", "prefill"]);
   assert.equal(signature?.activeParameter, 1);
 });
 
@@ -242,12 +242,12 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot("askText as mistress"), "speaker");
   assert.equal(activeSlot("askText as mistress "), "hint");
   assert.equal(activeSlot("askNumber as mistress "), "hint");
-  assert.equal(activeSlot('askText "Name?", default: '), "default");
-  assert.equal(activeSlot("askNumber default: "), "default");
-  assert.equal(activeSlot('askInteger "How many?", default: '), "default");
-  assert.equal(activeSlot('askDateTime "When?", default: '), "default");
+  assert.equal(activeSlot('askText "Name?", prefill: '), "prefill");
+  assert.equal(activeSlot("askNumber prefill: "), "prefill");
+  assert.equal(activeSlot('askInteger "How many?", prefill: '), "prefill");
+  assert.equal(activeSlot('askDateTime "When?", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
-  assert.equal(activeSlot('let answer = askText "${askNumber default: 3}"'), "hint");
+  assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "hint");
   assert.equal(activeSlot("showButton as mistress "), "label");
   assert.equal(activeSlot('showButton "Go", timeout: '), "timeout");
   assert.equal(

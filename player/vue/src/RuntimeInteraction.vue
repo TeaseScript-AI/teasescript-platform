@@ -325,7 +325,7 @@ watch(
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
-    // A default answer starts in the composer; the player submits it unchanged or edits it first.
+    // A prefill starts in the composer; the player submits it unchanged or edits it first.
     const presentedInput = foreground.value;
     // A form field being edited, also one that resumes after an interruption, keeps the text typed for it.
     if (!loadFormEditor(form.value))

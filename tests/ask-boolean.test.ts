@@ -82,12 +82,12 @@ test("compact and parenthesized askBoolean and askBooleans compile to the same p
     ],
     ['askBoolean(question(), noText: "Nope")', 'askBoolean question(), noText: "Nope"'],
     [
-      'askBooleans("Which?", texts: ["A", "B"], defaults: [true, false], cancel: "Back")',
-      'askBooleans "Which?", texts: ["A", "B"], defaults: [true, false], cancel: "Back"',
+      'askBooleans("Which?", texts: ["A", "B"], prefill: [true, false], cancel: "Back")',
+      'askBooleans "Which?", texts: ["A", "B"], prefill: [true, false], cancel: "Back"',
     ],
     [
-      'askBooleans as mistress (message: question(), texts: ["A"], defaults: [true])',
-      'askBooleans as mistress message: question(), texts: ["A"], defaults: [true]',
+      'askBooleans as mistress (message: question(), texts: ["A"], prefill: [true])',
+      'askBooleans as mistress message: question(), texts: ["A"], prefill: [true]',
     ],
   ])
     assert.equal(plan(bounded!), plan(compact!), bounded);
@@ -109,7 +109,7 @@ test("compact and parenthesized askBoolean and askBooleans compile to the same p
     'A list cannot be a button text. Select one element with "${list}" or list.random.',
   ]);
   assert.deepEqual(errors('let a = askBooleans "Q", texts: ["A"]'), [
-    `askBooleans needs defaults:, as in 'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]'.`,
+    `askBooleans needs prefill:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
   ]);
 });
 

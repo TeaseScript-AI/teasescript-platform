@@ -1498,7 +1498,7 @@ function preparedInteractionUiMatchesAction(
       prepared.hintTemporary === null
         ? null
         : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
-    // A field without a prefill left `null` in the temporary of its empty default.
+    // A field without a prefill left `null` in the temporary of its empty prefill.
     const prefill =
       prepared.prefillTemporary === undefined
         ? undefined
@@ -2161,7 +2161,7 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&
-      // Only a default prefills, and one that was empty when the field opened did not.
+      // Only a `prefill:` prefills, and one that was empty when the field opened did not.
       (!("prefill" in ui) || prepared.prefillTemporary !== undefined) &&
       ui.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );

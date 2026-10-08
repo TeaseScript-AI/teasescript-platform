@@ -97,19 +97,19 @@ let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
 let text = askText as mistress "What do you say?"
-let name = askText "Your name?", default: "Ada", hint: "Type your name"
+let name = askText "Your name?", prefill: "Ada", hint: "Type your name"
 
 let amount = askNumber
 let amount = askNumber as mistress "How many?"
-let minutes = askNumber default: 10
-let count = askInteger "How many?", default: 3
+let minutes = askNumber prefill: 10
+let count = askInteger "How many?", prefill: 3
 
 let day = askDate "Which day?"
-let start = askTime as mistress "What time?", default: toTime("20:00")
+let start = askTime as mistress "What time?", prefill: toTime("20:00")
 let moment = askDateTime "When are you free?"
 
-let name = askText("Your name?", default: "Ada")
-let more = askInteger as mistress ("How many?", default: 3) + 1
+let name = askText("Your name?", prefill: "Ada")
+let more = askInteger as mistress ("How many?", prefill: 3) + 1
 
 let ok = askBoolean as mistress "Ready?", yesText: "Sure!", noText: "No, thanks"
 ```
@@ -120,10 +120,10 @@ expression, and `as speaker` comes before the parentheses
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
 speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
-only; in a text or number field it shows only while the field is empty, so a default usually hides it
+only; in a text or number field it shows only while the field is empty, so a prefill usually hides it
 ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
-optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
-it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers). `askBoolean` says its question the
+optional `prefill:` answer starts in the field; the player still submits it, and a cleared field does not fall back to
+it. See [prefilled answers](specifications/accepted-syntaxes-v30.md#prefilled-answers). `askBoolean` says its question the
 same way, then shows two buttons: `yesText:` (default "Yes") returns `true` and `noText:` (default "No") returns
 `false` ([boolean input](specifications/accepted-syntaxes-v30.md#boolean-input)).
 

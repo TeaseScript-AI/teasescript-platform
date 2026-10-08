@@ -88,7 +88,7 @@ export type PlayerForegroundPresentation =
       readonly kind: "ask-text" | "ask-number" | "ask-date" | "ask-time" | "ask-datetime";
       readonly accessibleName: string;
       readonly hint: string;
-      /** The default answer that initially fills the composer. */
+      /** The prefill that initially fills the composer. */
       readonly prefill?: string;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;

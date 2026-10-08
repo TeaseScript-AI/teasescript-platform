@@ -1483,7 +1483,7 @@ function materializeInteractionUi(
     const integer = prepared.kind === "number" && prepared.integer === true;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      if (!isEmptyDefault(temporary.value))
+      if (!isEmptyPrefill(temporary.value))
         prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
       stagedWrites.push({ temporaryId: temporary.id, value: prefill ?? null });
     }
@@ -1499,7 +1499,7 @@ function materializeInteractionUi(
     let prefill: string | undefined;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      if (!isEmptyDefault(temporary.value))
+      if (!isEmptyPrefill(temporary.value))
         prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
       stagedWrites.push({ temporaryId: temporary.id, value: prefill ?? null });
     }
@@ -1563,10 +1563,10 @@ function materializeInteractionUi(
 }
 
 /**
- * A default that is `null` or blank text when the field opens prefills nothing (V30 §20), such as a `load` of a key a
+ * A prefill that is `null` or blank text when the field opens prefills nothing (V30 §20), such as a `load` of a key a
  * first play has not saved yet. Its temporary then holds `null`, which checkpoint validation reads as no prefill.
  */
-function isEmptyDefault(value: SerializableRuntimeValue): boolean {
+function isEmptyPrefill(value: SerializableRuntimeValue): boolean {
   return value === null || (typeof value === "string" && isBlankTextAnswer(value));
 }
 
@@ -1636,18 +1636,18 @@ function imageFilterTexts(
   });
 }
 
-/** The prefill text of a default answer, which must be an answer the field accepts. */
+/** The prefill text of a `prefill:` value, which must be an answer the field accepts. */
 function interactionPrefill(
   kind: "text" | "number" | "integer",
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): string {
   if (kind === "integer") {
-    // A non-whole default is an error, never rounded.
+    // A non-whole prefill is an error, never rounded.
     if (typeof value !== "number" || !Number.isSafeInteger(value))
       throw fault(
         "TSR052",
-        "The default answer of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'default:'.",
+        "The prefill of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'prefill:'.",
         span,
       );
     return numberAnswerText(value);
@@ -1656,7 +1656,7 @@ function interactionPrefill(
     if (typeof value !== "number" || !Number.isFinite(value))
       throw fault(
         "TSR052",
-        "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.",
+        "The prefill of askNumber must be a finite number. Ask without 'prefill:' when there is no number to offer.",
         span,
       );
     return numberAnswerText(value);
@@ -1664,13 +1664,13 @@ function interactionPrefill(
   if (typeof value !== "string")
     throw fault(
       "TSR052",
-      "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.",
+      "The prefill of askText must be text. Write the value as text with interpolation: 'prefill: \"${...}\"'.",
       span,
     );
   return value;
 }
 
-/** The ISO prefill text of a date or time default answer, which must be of the kind the field asks for. */
+/** The ISO prefill text of a date or time `prefill:` value, which must be of the kind the field asks for. */
 function temporalPrefill(
   kind: InteractionTemporalKind,
   value: SerializableRuntimeValue,
@@ -1691,7 +1691,7 @@ function temporalPrefill(
         : ["askDateTime", "a date and time", "toDateTime"];
   throw fault(
     "TSR052",
-    `The default answer of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
     span,
   );
 }

@@ -260,7 +260,7 @@ const typeCode = {
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
-  invalidInteractionDefault: "TSV039",
+  invalidInteractionPrefill: "TSV039",
   listInText: "TSV040",
   unshowableValue: "TSV042",
   constantTest: "TSV046",
@@ -3585,7 +3585,7 @@ class TypeChecker {
   }
 
   /**
-   * `askBooleans` (V30 §20): the message is shown text, `texts:` a list of texts, `defaults:` a list of booleans of the
+   * `askBooleans` (V30 §20): the message is shown text, `texts:` a list of texts, `prefill:` a list of booleans of the
    * same length when both are written, and `cancel:` a button. A form of toggles, it returns one boolean per text, or
    * `null` when it may be cancelled and the player cancels it.
    */
@@ -3605,14 +3605,14 @@ class TypeChecker {
           argument.value,
           "'texts:' takes a list of texts",
         );
-      else if (name === "defaults")
+      else if (name === "prefill")
         this.#reportUnless(
           type,
           (member) =>
             member.kind === "list" &&
             (!isKnown(member.element) || isScalar(member.element, "boolean")),
           argument.value,
-          "'defaults:' takes a list of true or false",
+          "'prefill:' takes a list of true or false",
         );
       else if (name === "cancel") {
         cancellable = true;
@@ -3626,20 +3626,20 @@ class TypeChecker {
       }
     }
     const texts = written.get("texts");
-    const defaults = written.get("defaults");
+    const prefill = written.get("prefill");
     const textsList = texts === undefined ? undefined : unwrap(texts);
-    const defaultsList = defaults === undefined ? undefined : unwrap(defaults);
+    const prefillList = prefill === undefined ? undefined : unwrap(prefill);
     if (textsList?.kind === "listLiteral" && textsList.elements.length === 0)
       this.#report(typeCode.invalidOperand, "askBooleans needs at least one text.", textsList.span);
     else if (
       textsList?.kind === "listLiteral" &&
-      defaultsList?.kind === "listLiteral" &&
-      textsList.elements.length !== defaultsList.elements.length
+      prefillList?.kind === "listLiteral" &&
+      textsList.elements.length !== prefillList.elements.length
     )
       this.#report(
         typeCode.invalidOperand,
-        `askBooleans has ${textsList.elements.length} texts but ${defaultsList.elements.length} defaults; give one default for each text.`,
-        defaultsList.span,
+        `askBooleans has ${textsList.elements.length} texts but ${prefillList.elements.length} prefill values; give one for each text.`,
+        prefillList.span,
       );
     const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
     return cancellable ? optional(answers) : answers;
@@ -5262,8 +5262,8 @@ class TypeChecker {
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
         const type = yield* compileChild(this.#expressionTask(operand, scope));
-        if (operand === expression.defaultValue)
-          this.#checkInteractionDefault(expression.interactionKind, operand, type);
+        if (operand === expression.prefill)
+          this.#checkInteractionPrefill(expression.interactionKind, operand, type);
         else
           this.#checkShownText(
             operand,
@@ -5671,12 +5671,12 @@ class TypeChecker {
   }
 
   /**
-   * A default answer must be an answer the field accepts: text for askText, a number for askNumber, and a whole number
-   * for askInteger. One that is `null` or blank when the field opens prefills nothing, but one known here to be `null`
-   * or blank is an error. The compiler rejects a default it knows is wrong; the runtime checks the others when the field
+   * A prefill must be an answer the field accepts: text for askText, a number for askNumber, and a whole number for
+   * askInteger. One that is `null` or blank when the field opens prefills nothing, but one known here to be `null` or
+   * blank is an error. The compiler rejects a prefill it knows is wrong; the runtime checks the others when the field
    * opens.
    */
-  #checkInteractionDefault(
+  #checkInteractionPrefill(
     kind: Exclude<InteractionExpression["interactionKind"], "choice">,
     expression: Expression,
     type: StaticType,
@@ -5689,12 +5689,12 @@ class TypeChecker {
         ? `, not ${describeValue(type)}`
         : `, but '${name}' holds ${describeValue(type)}`;
     if (kind === "date" || kind === "time" || kind === "datetime") {
-      // A date or time field shows its default as ISO text; text is converted first (V30 §20, §35).
+      // A date or time field shows its prefill as ISO text; text is converted first (V30 §20, §35).
       const expected = interactionResultType(kind);
       if (!isAssignable(expected, value))
         this.#report(
-          typeCode.invalidInteractionDefault,
-          `The default answer of ${TEMPORAL_ASKS[kind]} must be ${describeValue(expected)}${holds}.${
+          typeCode.invalidInteractionPrefill,
+          `The prefill of ${TEMPORAL_ASKS[kind]} must be ${describeValue(expected)}${holds}.${
             resolved(type).kind === "null"
               ? EMPTY_FIELD_FIX
               : isScalar(type, "string")
@@ -5709,26 +5709,26 @@ class TypeChecker {
       resolved(type).kind === "null"
         ? EMPTY_FIELD_FIX
         : kind === "text"
-          ? textDefaultFix(expression, name)
-          : numberDefaultFix(expression);
+          ? textPrefillFix(expression, name)
+          : numberPrefillFix(expression);
     if (kind === "integer") {
-      // A non-whole default is never rounded; a number variable may be one that widened (rule 1.2).
+      // A non-whole prefill is never rounded; a number variable may be one that widened (rule 1.2).
       if (isScalar(value, "number"))
         this.#report(
-          typeCode.invalidInteractionDefault,
-          `The default answer of askInteger must be a whole number (integer)${holds}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
+          typeCode.invalidInteractionPrefill,
+          `The prefill of askInteger must be a whole number (integer)${holds}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
           expression.span,
         );
       else if (!isAssignable(INTEGER_TYPE, value))
         this.#report(
-          typeCode.invalidInteractionDefault,
-          `The default answer of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" || isNullable(type) ? fix : " Use a whole number, such as 'default: 10'."}`,
+          typeCode.invalidInteractionPrefill,
+          `The prefill of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" || isNullable(type) ? fix : " Use a whole number, such as 'prefill: 10'."}`,
           expression.span,
         );
       else if (!Number.isSafeInteger(staticNumber(expression) ?? 0))
         this.#report(
-          typeCode.invalidInteractionDefault,
-          `The default answer of askInteger must be a whole number from ${-Number.MAX_SAFE_INTEGER} through ${Number.MAX_SAFE_INTEGER}. Use a smaller number, or remove 'default:'.`,
+          typeCode.invalidInteractionPrefill,
+          `The prefill of askInteger must be a whole number from ${-Number.MAX_SAFE_INTEGER} through ${Number.MAX_SAFE_INTEGER}. Use a smaller number, or remove 'prefill:'.`,
           expression.span,
         );
       return;
@@ -5736,16 +5736,16 @@ class TypeChecker {
     if (kind === "number") {
       if (!isAssignable(NUMBER_TYPE, value))
         this.#report(
-          typeCode.invalidInteractionDefault,
-          `The default answer of askNumber must be a number${holds}.${fix}`,
+          typeCode.invalidInteractionPrefill,
+          `The prefill of askNumber must be a number${holds}.${fix}`,
           expression.span,
         );
       return;
     }
     if (!isAssignable(STRING_TYPE, value) || isArithmetic(expression)) {
       this.#report(
-        typeCode.invalidInteractionDefault,
-        `The default answer of askText must be text${holds}.${fix}`,
+        typeCode.invalidInteractionPrefill,
+        `The prefill of askText must be text${holds}.${fix}`,
         expression.span,
       );
       return;
@@ -5753,8 +5753,8 @@ class TypeChecker {
     const text = staticVisibleText(expression);
     if (text !== undefined && isBlankTextAnswer(text))
       this.#report(
-        typeCode.invalidInteractionDefault,
-        `The default answer of askText must contain a non-whitespace character.${EMPTY_FIELD_FIX}`,
+        typeCode.invalidInteractionPrefill,
+        `The prefill of askText must contain a non-whitespace character.${EMPTY_FIELD_FIX}`,
         expression.span,
       );
   }
@@ -7531,23 +7531,23 @@ function isArithmetic(expression: Expression): boolean {
   );
 }
 
-const EMPTY_FIELD_FIX = " Remove 'default:' to start with an empty field.";
+const EMPTY_FIELD_FIX = " Remove 'prefill:' to start with an empty field.";
 
-/** How to offer a non-text default as text: interpolate it explicitly. */
-function textDefaultFix(expression: Expression, name: string | null): string {
-  if (name !== null) return ` Write it as text: 'default: "\${${name}}"'.`;
+/** How to offer a non-text prefill as text: interpolate it explicitly. */
+function textPrefillFix(expression: Expression, name: string | null): string {
+  if (name !== null) return ` Write it as text: 'prefill: "\${${name}}"'.`;
   const literal = unwrap(expression);
   if (literal.kind === "numberLiteral")
-    return ` Write it as text: 'default: "${numberAnswerText(literal.value)}"'.`;
-  return " Write it as text with interpolation: 'default: \"${...}\"'.";
+    return ` Write it as text: 'prefill: "${numberAnswerText(literal.value)}"'.`;
+  return " Write it as text with interpolation: 'prefill: \"${...}\"'.";
 }
 
-/** How to offer a number default: write number text as a number. */
-function numberDefaultFix(expression: Expression): string {
+/** How to offer a number prefill: write number text as a number. */
+function numberPrefillFix(expression: Expression): string {
   const text = staticVisibleText(expression);
   return text !== undefined && isValidInteractionPrefill("number", text)
-    ? ` Write it as a number: 'default: ${text.trim()}'.`
-    : " Use a number, such as 'default: 10'.";
+    ? ` Write it as a number: 'prefill: ${text.trim()}'.`
+    : " Use a number, such as 'prefill: 10'.";
 }
 
 function unwrap(expression: Expression): Expression {
