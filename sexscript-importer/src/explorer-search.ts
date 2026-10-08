@@ -2048,7 +2048,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           )
         )
           continue;
-        // A condition whose clock comparisons can all be read where it was evaluated gets time steps there instead.
+        // A condition whose clock comparisons can all be read where it was evaluated, one of which comes out the other
+        // way later there, gets time steps there instead.
         const comparisons = times?.comparisons.get(target.instruction) ?? [];
         const before = witnessNode === null ? null : snapshotOf(witnessNode);
         const context =
@@ -2056,13 +2057,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const at = witnessNode === null ? witnessStart.wallClockMs : wallEnd[witnessNode.id]!;
         if (
           context !== null &&
+          times !== null &&
           comparisons.length > 0 &&
           comparisons.every(
             (comparison) =>
-              times !== null &&
-              comparison.exact &&
-              holdsAt(comparison, times, context, at) !== undefined,
-          )
+              comparison.exact && holdsAt(comparison, times, context, at) !== undefined,
+          ) &&
+          comparisons.some((comparison) => flipGap(comparison, times, context, at) !== null)
         )
           continue;
         // A condition that reads the clock itself: the player continues later just before the step that evaluated it, or

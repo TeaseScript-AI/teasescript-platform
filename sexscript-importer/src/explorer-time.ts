@@ -91,6 +91,92 @@ export interface ClockModel {
    */
   readonly ambiguous: ReadonlySet<string>;
   readonly helpers: ReadonlyMap<string, Helper>;
+  /**
+   * The script's functions that only compute a value ({@link pureFunctions}), which the model runs; with the plan's
+   * functions and instructions to run them from.
+   */
+  readonly pure: ReadonlySet<number>;
+  readonly functions: readonly Data[];
+  readonly instructions: readonly Data[];
+  /**
+   * Variables set once, and never otherwise: to a literal (`let scriptText = "dc"`), or to another value that is not
+   * computed from the clock (`let last = sexscriptLegacyLoadInteger("${scriptText}.last")`); read from these where a
+   * state has no value for them yet, such as at the start of a session.
+   */
+  readonly once: ReadonlyMap<string, Definition>;
+}
+
+/** A definition no variable has, to look up a missing one. */
+const NO_DEFINITION: Definition = { value: {}, temporaries: new Map(), prior: null };
+
+/** The most instructions, and calls within calls, the model runs of a script's function for one value. */
+const FUNCTION_STEPS = 500;
+const FUNCTION_DEPTH = 4;
+/** Instructions a function that only computes a value may have. */
+const PURE_INSTRUCTIONS = new Set([
+  "bindSuppliedParameter",
+  "beginFunctionDefaults",
+  "prepareParameterDefault",
+  "bindDefaultParameter",
+  "enterFunctionBody",
+  "enterScope",
+  "leaveScope",
+  "clearTemporary",
+  "clearTemporaries",
+  "declareBinding",
+  "assign",
+  "storeTemporary",
+  "jumpIfFalse",
+  "jump",
+  "callFunction",
+  "returnValue",
+  "returnVoid",
+]);
+/** Methods of a value, and functions, an expression of such a function may call. */
+const PURE_CALLS = new Set(["toSeconds", "toMilliseconds", ...CLOCK_GETTERS]);
+
+/**
+ * The functions of a plan that only compute a value: their instructions bind, assign, branch, call such functions, and
+ * return; their expressions call no function but numeric ones and the clock. Storage loads are reads.
+ */
+function pureFunctions(functions: readonly Data[], instructions: readonly Data[]): Set<number> {
+  const calls = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.every(calls);
+    if (!isRecord(value)) return true;
+    if (value.kind === "call") {
+      const name = calleeName(value) ?? "";
+      if (!NUMERIC.has(name) && !PURE_CALLS.has(name)) return false;
+    }
+    return Object.entries(value).every(([key, item]) => key === "span" || calls(item));
+  };
+  const candidates = new Map<number, number[]>();
+  for (const definition of functions) {
+    const id = Number(definition.id);
+    const end = Number(definition.endInstruction);
+    const callees: number[] = [];
+    let ok = definition.handler == null;
+    // A function's end may be one past the plan's last instruction.
+    const last = Math.min(end, instructions.length - 1);
+    for (let index = Number(definition.entryInstruction); ok && index <= last; index += 1) {
+      const instruction = instructions[index];
+      if (instruction === undefined || !PURE_INSTRUCTIONS.has(String(instruction.kind))) ok = false;
+      else if (instruction.kind === "assign" && record(instruction.target).kind !== "identifier")
+        ok = false;
+      else if (!calls(instruction)) ok = false;
+      if (instruction?.kind === "callFunction") callees.push(Number(instruction.functionId));
+    }
+    if (ok) candidates.set(id, callees);
+  }
+  // A function that calls one that is not is not either; until none is left out.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [id, callees] of candidates)
+      if (callees.some((callee) => !candidates.has(callee))) {
+        candidates.delete(id);
+        changed = true;
+      }
+  }
+  return new Set(candidates.keys());
 }
 
 function calleeName(call: Data): string | null {
@@ -158,6 +244,14 @@ function clockReads(
   return found;
 }
 
+/** The variable an assignment to a part of it changes (`items[0] = 1` changes `items`); null for another target. */
+function targetRoot(target: Data): string | null {
+  if (target.kind === "identifier" && typeof target.name === "string") return target.name;
+  if (target.kind === "index" || target.kind === "property")
+    return targetRoot(record(target.object));
+  return null;
+}
+
 /** An expression without its source spans, to tell expressions apart. */
 function shape(expression: Data): string {
   return JSON.stringify(expression, (key, value: unknown) => (key === "span" ? undefined : value));
@@ -192,6 +286,7 @@ function namesOf(expression: unknown, names: Set<string> = new Set()): Set<strin
  */
 export function clockModel(plan: Data, instructions: readonly Data[]): ClockModel {
   const functions = list(plan.functions);
+  const pure = pureFunctions(functions, instructions);
   // The instructions that produce each temporary, in order: a stored value, or a call's result.
   const producers = new Map<number, number[]>();
   instructions.forEach((instruction, index) => {
@@ -221,13 +316,17 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     const producer = instructions[index]!;
     if (producer.kind === "storeTemporary") return record(producer.value);
     const name = String(record(functions[Number(producer.functionId) - 1]).name);
+    const runs = name === COMPARE_HELPER || pure.has(Number(producer.functionId));
     return {
       kind: "call",
       callee: { kind: "identifier", name },
-      arguments:
-        name === COMPARE_HELPER
-          ? list(producer.arguments).map((argument) => ({ value: argument.value }))
-          : [],
+      ...(runs ? { functionId: Number(producer.functionId) } : {}),
+      arguments: runs
+        ? list(producer.arguments).map((argument) => ({
+            parameterName: argument.parameterName,
+            value: argument.value,
+          }))
+        : [],
     };
   };
   /** The temporaries an expression at `at` reads, with what produced them, also those those read. */
@@ -276,7 +375,17 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   const comparisons = new Map<number, ClockComparison[]>();
   const definitions = new Map<string, Definition>();
   const ambiguous = new Set<string>();
-  const model: ClockModel = { comparisons, definitions, ambiguous, helpers };
+  const once = new Map<string, Definition>();
+  const model: ClockModel = {
+    comparisons,
+    definitions,
+    ambiguous,
+    helpers,
+    pure,
+    functions,
+    instructions,
+    once,
+  };
   // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
   // through variables computed so), and is not a bare clock read, which is a time kept to measure from. Updates of the
   // variable from itself (`took = took / 1000`) that follow its one computation straight on compose with it. When the
@@ -285,6 +394,31 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   const assigned = new Map<string, (Definition & { readonly at: number })[]>();
   /** Where each variable is set to a literal, which an update from itself does not compose across. */
   const literalAt = new Map<string, number[]>();
+  // The variables set by exactly one instruction, and never as a parameter or a loop's variable.
+  const setBy = new Map<string, number[]>();
+  const elsewhere = new Set<string>();
+  for (const definition of functions)
+    for (const parameter of list(definition.parameters))
+      if (typeof parameter.name === "string") elsewhere.add(parameter.name);
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind === "loopStart" && typeof instruction.variable === "string")
+      elsewhere.add(instruction.variable);
+    const target = record(instruction.target);
+    const name =
+      instruction.kind === "assign"
+        ? target.kind === "identifier"
+          ? target.name
+          : targetRoot(target)
+        : instruction.kind === "declareBinding" || instruction.kind === "declareGlobal"
+          ? instruction.name
+          : null;
+    if (typeof name === "string") setBy.set(name, [...(setBy.get(name) ?? []), index]);
+  });
+  for (const [name, indices] of setBy) {
+    if (indices.length !== 1 || elsewhere.has(name)) continue;
+    const value = record(instructions[indices[0]!]!.value);
+    once.set(name, { value, temporaries: temporariesAt(value, indices[0]!), prior: null });
+  }
   instructions.forEach((instruction, index) => {
     const target = record(instruction.target);
     const name =
@@ -469,6 +603,16 @@ interface Reading {
   readonly inside: ReadonlyMap<string, Definition | null>;
   /** The values of definitions computed in this reading, each computed once. */
   readonly memo: Map<Definition, Value>;
+  /** Inside a script's function the model runs: its variables, its temporaries' values, and how deep the call is. */
+  readonly frame?: Frame | undefined;
+}
+
+/** A script's function the model runs: its variables, its temporaries' values, how deep the call is, steps left. */
+interface Frame {
+  readonly locals: Map<string, Value>;
+  readonly values: Map<number, Value>;
+  readonly depth: number;
+  readonly steps: { left: number };
 }
 
 /** An expression's value in a reading, or undefined when it cannot be read. */
@@ -486,10 +630,25 @@ function valueAt(expression: unknown, reading: Reading): Value {
       return valueAt(node.expression, reading);
     case "identifier": {
       if (typeof node.name !== "string") return undefined;
+      if (reading.frame?.locals.has(node.name) === true) return reading.frame.locals.get(node.name);
       const within = reading.inside.has(node.name);
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
-      if (defined == null) return runtimeValue(context.bindings.get(node.name));
+      if (defined == null) {
+        if (context.bindings.has(node.name)) return runtimeValue(context.bindings.get(node.name));
+        // Not set yet in the state: from the one value it is set to, as the session will set it.
+        const set = model.once.get(node.name);
+        if (set === undefined || reading.memo.has(set))
+          return reading.memo.get(set ?? NO_DEFINITION);
+        reading.memo.set(set, undefined);
+        const value = valueAt(set.value, {
+          ...reading,
+          temporaries: set.temporaries,
+          frame: undefined,
+        });
+        reading.memo.set(set, value);
+        return value;
+      }
       if (reading.memo.has(defined)) return reading.memo.get(defined);
       const value = valueAt(defined.value, {
         ...reading,
@@ -500,6 +659,8 @@ function valueAt(expression: unknown, reading: Reading): Value {
       return value;
     }
     case "temporary": {
+      if (typeof node.temporaryId === "number" && reading.frame?.values.has(node.temporaryId))
+        return reading.frame.values.get(node.temporaryId);
       const stored =
         typeof node.temporaryId === "number"
           ? reading.temporaries.get(node.temporaryId)
@@ -507,10 +668,21 @@ function valueAt(expression: unknown, reading: Reading): Value {
       return stored === undefined ? undefined : valueAt(stored, reading);
     }
     case "storageLoad": {
-      const key = record(node.key);
-      if (key.kind !== "literal" || typeof key.value !== "string") return undefined;
-      if (context.storage.has(key.value)) return runtimeValue(context.storage.get(key.value));
+      // A key the code computes is read too, such as one from a variable set once (`"${scriptText}.last"`).
+      const key = valueAt(node.key, reading);
+      if (typeof key !== "string") return undefined;
+      if (context.storage.has(key)) return runtimeValue(context.storage.get(key));
       return node.default == null ? null : valueAt(node.default, reading);
+    }
+    case "template": {
+      let text = "";
+      for (const piece of list(node.parts)) {
+        const value = piece.kind === "text" ? piece.value : valueAt(piece.expression, reading);
+        if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean")
+          return undefined;
+        text += String(value);
+      }
+      return text;
     }
     case "unary": {
       const operand = valueAt(node.operand, reading);
@@ -542,6 +714,8 @@ function callAt(node: Data, reading: Reading): Value {
     return { kind: name === "getTimestamp" ? "timestamp" : "datetime", milliseconds: reading.now };
   const helper = callee.kind === "identifier" ? reading.model.helpers.get(name) : undefined;
   if (helper !== undefined) return part(helper.part, reading.now);
+  if (typeof node.functionId === "number" && reading.model.pure.has(node.functionId))
+    return runFunction(node.functionId, list(node.arguments), reading);
   if (callee.kind === "identifier" && name === COMPARE_HELPER) {
     const [left, right] = list(node.arguments).map((argument) => valueAt(argument.value, reading));
     if (left === undefined || right === undefined) return undefined;
@@ -566,6 +740,96 @@ function callAt(node: Data, reading: Reading): Value {
   const transform = NUMERIC.get(name);
   const argument = valueAt(list(node.arguments)[0]?.value, reading);
   return transform !== undefined && typeof argument === "number" ? transform(argument) : undefined;
+}
+
+/**
+ * A script's function that only computes a value, run on its arguments: binding its parameters (their defaults where an
+ * argument is missing), its variables, branches, calls of such functions, and its return. Undefined when it reads what
+ * cannot be read, or takes more than {@link FUNCTION_STEPS} instructions or {@link FUNCTION_DEPTH} calls within calls.
+ */
+function runFunction(id: number, args: readonly Data[], reading: Reading): Value {
+  const { model } = reading;
+  const definition = model.functions[id - 1];
+  const depth = (reading.frame?.depth ?? 0) + 1;
+  if (definition === undefined || depth > FUNCTION_DEPTH) return undefined;
+  const parameters = list(definition.parameters);
+  const frame: Frame = {
+    locals: new Map(),
+    values: new Map(),
+    depth,
+    steps: reading.frame?.steps ?? { left: FUNCTION_STEPS },
+  };
+  const supplied = new Set<number>();
+  for (const argument of args) {
+    const index = parameters.findIndex((parameter) => parameter.name === argument.parameterName);
+    if (index < 0) return undefined;
+    const value = valueAt(argument.value, reading);
+    if (value === undefined) return undefined;
+    frame.locals.set(String(parameters[index]!.name), value);
+    supplied.add(index);
+  }
+  const inside: Reading = { ...reading, frame };
+  const end = Number(definition.endInstruction);
+  for (let at = Number(definition.entryInstruction); at <= end;) {
+    if ((frame.steps.left -= 1) < 0) return undefined;
+    const instruction = model.instructions[at]!;
+    const set = (name: unknown, expression: unknown): boolean => {
+      const value = valueAt(expression, inside);
+      if (typeof name !== "string" || value === undefined) return false;
+      frame.locals.set(name, value);
+      return true;
+    };
+    switch (instruction.kind) {
+      case "prepareParameterDefault":
+        at = supplied.has(Number(instruction.parameterIndex)) ? Number(instruction.target) : at + 1;
+        continue;
+      case "bindDefaultParameter":
+        if (!set(parameters[Number(instruction.parameterIndex)]?.name, instruction.value))
+          return undefined;
+        break;
+      case "declareBinding":
+        if (!set(instruction.name, instruction.value)) return undefined;
+        break;
+      case "assign":
+        if (!set(record(instruction.target).name, instruction.value)) return undefined;
+        break;
+      case "storeTemporary": {
+        const value = valueAt(instruction.value, inside);
+        if (value === undefined) return undefined;
+        frame.values.set(Number(instruction.temporaryId), value);
+        break;
+      }
+      case "callFunction": {
+        const value = runFunction(
+          Number(instruction.functionId),
+          list(instruction.arguments),
+          inside,
+        );
+        if (value === undefined) return undefined;
+        if (typeof instruction.destinationTemporary === "number")
+          frame.values.set(instruction.destinationTemporary, value);
+        at = Number(instruction.returnInstruction);
+        continue;
+      }
+      case "jumpIfFalse": {
+        const holds = valueAt(instruction.condition, inside);
+        if (typeof holds !== "boolean") return undefined;
+        at = holds ? at + 1 : Number(instruction.target);
+        continue;
+      }
+      case "jump":
+        at = Number(instruction.target);
+        continue;
+      case "returnValue":
+        return valueAt(instruction.value, inside);
+      case "returnVoid":
+        return null;
+      default:
+        break;
+    }
+    at += 1;
+  }
+  return undefined;
 }
 
 function binaryAt(node: Data, reading: Reading): Value {
@@ -593,6 +857,14 @@ function binaryAt(node: Data, reading: Reading): Value {
       : typeof value === "object" && value !== null && value.kind !== "data"
         ? value.milliseconds
         : undefined;
+  // Any value equals null only when it is null.
+  if (
+    (operator === "==" || operator === "!=") &&
+    (left === null || right === null) &&
+    left !== undefined &&
+    right !== undefined
+  )
+    return operator === "==" ? left === right : left !== right;
   const [a, b] = [amount(left), amount(right)];
   if (a === undefined || b === undefined) {
     const scalar = (value: Value) =>
@@ -816,6 +1088,10 @@ export function storedHolds(
     definitions: new Map(),
     ambiguous: new Set(),
     helpers: new Map(),
+    pure: new Set(),
+    functions: [],
+    instructions: [],
+    once: new Map(),
   };
   const none = new Map<number, Data>();
   if (!isRecord(condition)) return undefined;

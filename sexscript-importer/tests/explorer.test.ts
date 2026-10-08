@@ -778,6 +778,42 @@ test(
       assert.ok(differences.length > 0);
       assert.ok(differences.every((difference) => !difference.conditions.includes(condition)));
     }
+    // A value a session sets before it reads the clock, through a function that only computes it (the converted load
+    // helper, with a key from a variable set once), is read from the storage where a state has no value for it yet. A
+    // function with an effect, or one that would not end, is not run.
+    {
+      const helpers =
+        "global function sexscriptLegacyValue(value) {\n  return value\n}\n" +
+        "global function sexscriptLegacyLoadInteger(key, whenMissing = null) {\n  let value = load key, default: null\n" +
+        "  if value == null {\n    return whenMissing\n  }\n  return sexscriptLegacyValue(toInteger(value))\n}\n" +
+        'function noisy(key) {\n  say "Loading."\n  return load key, default: 0\n}\n' +
+        "function forever(n) {\n  return forever(n + 1)\n}\n";
+      for (const [load, expected] of [
+        ['sexscriptLegacyLoadInteger("${scriptText}.last")', [false, true]],
+        ['noisy("${scriptText}.last")', [undefined, undefined]],
+        ["forever(1)", [undefined, undefined]],
+      ] as const) {
+        const source =
+          `${helpers}showButton "Start"\nlet scriptText = "dc"\nlet last = ${load}\nshowButton "Go"\n` +
+          'if getTimestamp().toSeconds() - last > 3600 {\n  say "Hit."\n}\nexit\n';
+        const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+        assert.ok(isRecord(plan));
+        const instructions = Array.isArray(plan.instructions)
+          ? plan.instructions.filter(isRecord)
+          : [];
+        const model = clockModel(plan, instructions);
+        const [comparison] = [...model.comparisons.values()].at(-1) ?? [];
+        assert.ok(comparison !== undefined, load);
+        const stored = timeContext({ scriptStorage: [{ key: "dc.last", value: EPOCH_MS / 1000 }] });
+        assert.deepEqual(
+          [60, 7200].map((seconds) =>
+            holdsAt(comparison, model, stored, EPOCH_MS + seconds * 1000),
+          ),
+          expected,
+          load,
+        );
+      }
+    }
     // Updates from itself compose with the clock read before them: one that adds 1 at 17:00 compares 18, also after
     // forty doublings, each computed once; a literal between them ends that.
     const doubled = Array.from({ length: 40 }, () => "h = h + h\n").join("");
