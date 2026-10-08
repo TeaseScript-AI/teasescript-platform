@@ -1,11 +1,11 @@
 # Core test set: the units for routine checks after a converter change (README.md "Core test set").
 # The owner's favourites first, then the units a greedy set cover added over what the published reports, conversion
 # logs, and generated code exercise. Each comment names what only that unit exercises within the set, as
-# `node tools/core-units.ts external/converted-merged` lists it. Selected 2026-10-07: these 30 units cover 372 of the
-# 381 features of the 210 units. Left out: seven single-unit TODO codes (SX_BACKGROUND_SOUND_ARGUMENT, SX_CHOICE_ARITY,
-# SX_DICT_VALUE_TYPE, SX_JAVA_ARRAY, SX_OBJECT_THIS, SX_PARAMETER_DEFAULT_ORDER, SX_UNSUPPORTED_SWITCH_VALUE),
-# SX_STORAGE_MAP_SEMANTICS (AI_Mistress, Locker), and BanjoGameHub's isolated TSR025 (a 110 s report).
-Domme3                # favourite; SX_MESSAGE_COUNTER, SX_POPUP_ELAPSED, SX_REPEATED_TEXT_ACROSS_CHAIN, isolated TSR009/027/058
+# `node tools/core-units.ts external/converted-merged` lists it. Selected 2026-10-07, with BanjoGameHub added on
+# 2026-10-08: these 31 units cover 384 of the 392 features of the 210 units. Left out: seven single-unit TODO codes
+# (SX_BACKGROUND_SOUND_ARGUMENT, SX_CHOICE_ARITY, SX_DICT_VALUE_TYPE, SX_JAVA_ARRAY, SX_OBJECT_THIS,
+# SX_PARAMETER_DEFAULT_ORDER, SX_UNSUPPORTED_SWITCH_VALUE) and SX_STORAGE_MAP_SEMANTICS (AI_Mistress, Locker).
+Domme3                # favourite; SX_MESSAGE_COUNTER, SX_POPUP_ELAPSED, SX_REPEATED_TEXT_ACROSS_CHAIN, isolated TSR009/027
 DisciplineClinic      # favourite; SX_DISCARDED_CONCATENATION
 Toy                   # favourite
 ToyExpanded           # favourite; SX_BINDING_VARIABLE, SX_DICT_DEFAULT, SX_RANDOM_OBJECT, SX_UNSUPPORTED_EXPRESSION
@@ -35,3 +35,4 @@ PunishmentChooser     # SX_DECIMAL_ROUNDING, SX_LOAD_BOOLEAN_TEXT
 joiSession            # SX_PACKAGE_TEXT_CLOSE, SX_CHARACTER_TEXT
 courtroom             # SX_CHARACTER_CODE
 guillotine            # the datetime type
+BanjoGameHub          # isolated TSR025 (its report takes about 110 s)
