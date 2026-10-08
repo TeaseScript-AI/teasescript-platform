@@ -306,9 +306,10 @@ function saveScore {
   save 10 as "game.scoreText"
 }
 // A parameter that a call passes such a text to only under a null test holds no null, unless the script set the text
-// again before the call, and a template the script wrote around a read keeps its text, also where it is copied.
+// again, or called script code that may, before the call; a template the script wrote around a read keeps its text,
+// also where it is copied.
 function measure(measured = "fallback") {
-  // NOTE SX_LENGTH_RECEIVER line 150: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  // NOTE SX_LENGTH_RECEIVER line 151: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
   say "Size ${measured.length}"
 }
 let measuredText: string? = load "game.measured", default: null
@@ -323,13 +324,36 @@ if checkedText != null {
   checkedText = null
   recheck(checkedText)
 }
-// NOTE SX_LOAD_OPEN_NULL line 159: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let plainHint: string? = load "game.plainHint", default: null
+function clearPlain {
+  plainHint = null
+}
+function showPlain(shown: string? = "none") {
+  say "Plain ${shown == null}"
+}
+if plainHint != null {
+  clearPlain()
+  showPlain(plainHint)
+}
+// A stored text that an Elvis copies into a variable of another type gives that variable both types and null.
+let flagged: boolean | string | null = true
+// NOTE SX_LOAD_STRING_TEXT line 169: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
+// NOTE SX_LOAD_OPEN_NULL line 169: Legacy read null for a missing text, which this read keeps; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.
+let conditional = sexscriptLegacyValue(sexscriptLegacyText(load("game.flagged", default: sexscriptLegacyValue(null))))
+if conditional == null or conditional == "" {
+  conditional = flagged
+}
+flagged = conditional
+// NOTE SX_LOAD_BOOLEAN_TEXT line 170: loadBoolean() read the stored value as text, true only for "true", and the package saves values of another type under this key too, or reads it as one, so the value is read the same way; a missing value reads as false.
+// NOTE SX_LOAD_OPEN_NULL line 170: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+say "Flagged ${flagged} ${sexscriptLegacyBooleanText(load("game.flagged", default: sexscriptLegacyValue(null)))}"
+// NOTE SX_LOAD_OPEN_NULL line 171: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let written = "${load("game.written", default: sexscriptLegacyValue(null))}"
 let writtenCopy = written
 say "Written ${writtenCopy}"
 // An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
 let profile = { name: "Guest" }
-// NOTE SX_SHARED_MAP_WRITE line 164: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 176: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 profile.name = load "game.profileName", default: ""
 say "Profile ${profile.name}"
 // A list of one function is apart from a list of the same name in another.
@@ -378,8 +402,8 @@ say "Laps ${laps}"
 let shelves = [["old"]]
 shelves[0][0] = load "game.shelf${slot}", default: ""
 shelves[0].add(load("game.extra${slot}", default: ""))
-// NOTE SX_INDEX_PAST_END line 193: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-// NOTE SX_INDEX_PAST_END line 193: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 205: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 205: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
   say "Empty shelf."
 }

@@ -805,6 +805,7 @@ function withEmptyText(
         // A loop's body may run again after it sets a variable.
         if (item.kind === "while" || item.kind === "repeat" || item.kind === "for") forget(item);
         nonNullHere = new Set(nonNull);
+        const callsBefore = calls.length;
         if (item.kind === "function") {
           functions[index]!.set(item.name, item);
           const inner = scope.inner(item);
@@ -861,6 +862,8 @@ function withEmptyText(
             return body;
           });
         forget(item);
+        // A script function the statement calls may set any variable.
+        if (calls.length > callsBefore) nonNull.clear();
       }
     };
     block(program.statements, Scope.file());
@@ -954,14 +957,18 @@ function withEmptyText(
     // An own variable that holds values of another type too, or null from elsewhere, whose null tests take both.
     const mixed = (binding: string): boolean =>
       [...othersOf(index, binding)].some((type) => type !== "string" && type !== "null");
-    const typeOf = (binding: string): { type?: string; open?: true } => {
+    // The type of a receiver that takes other values too: an own one's null is the empty text, another's stays.
+    const typeOf = (binding: string, isOwn: boolean): { type?: string; open?: true } => {
       const given = [...othersOf(index, binding)].filter(
-        (type) => type !== "string" && type !== "null",
+        (type) => type !== "string" && (type !== "null" || !isOwn),
       );
       if (given.length === 0) return {};
       if (given.includes("unknown")) return { open: true };
-      const held = unionType(["string", ...given.filter((type) => type !== "nullable")])!;
-      return given.includes("nullable") ? { type: optional(held) } : { type: held };
+      const held = unionType([
+        "string",
+        ...given.filter((type) => type !== "nullable" && type !== "null"),
+      ])!;
+      return given.includes("nullable") || !isOwn ? { type: optional(held) } : { type: held };
     };
     const nullSet = (span: IrStatement["span"]): IrExpression => {
       note(
@@ -1086,7 +1093,9 @@ function withEmptyText(
           return [{ ...next, value: nullSet(span) }];
         const value = item.kind === "let" || item.kind === "assign" ? item.value : EMPTY;
         const read = readOf(value);
-        if (next.kind === "assign" && (read !== null || textItem(value, scope)))
+        // A copy of a text read's variable holds text too.
+        const copied = value.kind === "variable" && isReceiver(index, scope.resolve(value.name));
+        if (next.kind === "assign" && (read !== null || copied || textItem(value, scope)))
           widened.add(binding);
         if (
           next.kind === "assign" &&
@@ -1097,23 +1106,27 @@ function withEmptyText(
               isNullable(index, scope.resolve(value.name)))
         )
           nullWidened.add(binding);
-        if (next.kind !== "let" || read === null || !own(index, binding) || next.type !== undefined)
+        // A plain read that keeps its null gets its variable's type with its key's (withDeclaredKeys); a stored text
+        // that does is typed here.
+        const isOwn = own(index, binding);
+        if (
+          next.kind !== "let" ||
+          read === null ||
+          next.type !== undefined ||
+          (!isOwn && next.value.kind === "load")
+        )
           return [next];
-        const held = typeOf(binding);
+        const held = typeOf(binding, isOwn);
         if (held.type !== undefined) return [{ ...next, type: held.type }];
         if (held.open !== true) return [next];
         next = { ...next, value: helperCall("value", [next.value]) };
-        diagnostics.push({
-          code: "SX_LOAD_OPEN_NULL",
-          severity: "warning",
-          message: OPEN_TEXT,
-          span,
-        });
+        const message = isOwn ? OPEN_TEXT : OPEN_KEPT;
+        diagnostics.push({ code: "SX_LOAD_OPEN_NULL", severity: "warning", message, span });
         const line = span === null ? "" : ` line ${span.line}`;
         return [
           {
             kind: "comment",
-            text: `// NOTE SX_LOAD_OPEN_NULL${line}: ${OPEN_TEXT}`,
+            text: `// NOTE SX_LOAD_OPEN_NULL${line}: ${message}`,
             trailing: false,
             span,
           },
@@ -1280,6 +1293,8 @@ class Scope {
 
 const OPEN_TEXT =
   "Legacy read null for a missing text, the empty text here; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.";
+const OPEN_KEPT =
+  "Legacy read null for a missing text, which this read keeps; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.";
 
 function isNullLiteral(value: IrExpression): boolean {
   return value.kind === "literal" && value.value === null;

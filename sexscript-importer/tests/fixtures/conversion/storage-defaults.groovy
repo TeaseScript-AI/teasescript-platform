@@ -146,7 +146,8 @@ def scoreCopy = scoreText
 show("Score " + (scoreCopy == null))
 def saveScore = { save("game.scoreText", 10) }
 // A parameter that a call passes such a text to only under a null test holds no null, unless the script set the text
-// again before the call, and a template the script wrote around a read keeps its text, also where it is copied.
+// again, or called script code that may, before the call; a template the script wrote around a read keeps its text,
+// also where it is copied.
 def measure = { measured = "fallback" -> show("Size " + measured.length()) }
 def measuredText = loadString("game.measured")
 if (measuredText != null) measure(measuredText)
@@ -156,6 +157,17 @@ if (checkedText != null) {
     checkedText = null
     recheck(checkedText)
 }
+def plainHint = loadString("game.plainHint")
+def clearPlain = { plainHint = null }
+def showPlain = { shown = "none" -> show("Plain " + (shown == null)) }
+if (plainHint != null) {
+    clearPlain()
+    showPlain(plainHint)
+}
+// A stored text that an Elvis copies into a variable of another type gives that variable both types and null.
+def flagged = true
+flagged = loadString("game.flagged") ?: flagged
+show("Flagged " + flagged + " " + loadBoolean("game.flagged"))
 def written = "${load('game.written')}"
 def writtenCopy = written
 show("Written " + writtenCopy)
