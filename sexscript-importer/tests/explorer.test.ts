@@ -1316,9 +1316,13 @@ test(
       merged.crashes[0]!.inputs.map((input) => input.random),
       [undefined, undefined],
     );
-    // The corpus counts chosen play's coverage too.
+    // The corpus counts chosen play's coverage too, and keeps it: replayed without random choices, it covers as much.
     assert.ok(luck.coverage.reach.chosen! > 0);
     assert.equal(luck.corpus!.coverageAtEnd.percent, luck.coverage.percent);
+    assert.equal(
+      run(lucky, false, luck.corpus!.entries).corpus!.coverageAtStart.percent,
+      luck.coverage.percent,
+    );
     // A path with an outcome recorded for a draw it does not make is a stale entry, which leaves no coverage.
     const [taken] = forced.inputs[0]!.random!;
     const unmatched = [
@@ -1327,12 +1331,15 @@ test(
     const stale = run(shared, false, [{ seed: 1, reason: "coverage", inputs: unmatched }]);
     assert.equal(stale.corpus!.stale, 1);
     assert.equal(stale.coverage.reach.chosen, 0);
-    // A step directed search takes offers its draws' other outcomes too.
+    // A step directed search takes offers its draws' other outcomes too: the compared number is too far from the ask
+    // for its answers, so that only a directed attempt gives it.
+    const padding = Array.from({ length: 60 }, (_, index) => `say "Padding ${index}."\n`).join("");
     const directed =
-      'let n = askInteger default: 0\nif n == 1234 {\n  if chance(25) {\n    say "Lucky."\n  } else {\n' +
+      `let n = askInteger default: 0\n${padding}if n == 1234 {\n  if chance(25) {\n    say "Lucky."\n  } else {\n` +
       '    say "Unlucky."\n  }\n}\nexit\n';
     const steered = run(directed, true);
+    assert.ok(steered.directed.attempts > 0);
     assert.ok(steered.directed.ways.some((way) => way.reach === "chosen"));
-    assert.ok(covers(steered, 4) && covers(steered, 6));
+    assert.ok(covers(steered, 64) && covers(steered, 66));
   },
 );

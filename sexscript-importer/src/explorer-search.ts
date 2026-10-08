@@ -173,8 +173,12 @@ interface Node {
    * a state is another state than play's in the same runtime state, so that play reaches its own.
    */
   readonly chosen: boolean;
-  /** With random choices, for a state after a chosen outcome whose expansion its share cut short: the inputs tried. */
+  /**
+   * With random choices, for a state after a chosen outcome whose expansion its share cut short: the inputs tried, and
+   * those it had left, which are tried later even if they are not offered again (time steps are offered once).
+   */
   tried?: Set<string>;
+  left?: ExplorerInput[];
   /** The directed attempt, or closeness to a comparison, whose first place it shares; null for none. */
   readonly lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
@@ -1179,7 +1183,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         : cells.expansions[node.cell]!;
   const queue = (expansions: (cell: number) => number): Pick<Frontier, "size" | "push" | "pop"> =>
     cells === null ? new Frontier() : new CellFrontier((node) => nodes[node]!.cell, expansions);
-  const frontier = chooses
+  // Also for a corpus whose paths chose outcomes: their states keep to their share as well.
+  const frontier = session.randomChoices
     ? new SplitFrontier(
         queue((cell) => cells?.expansions[cell] ?? 0),
         queue((cell) => chosenExpansions[cell] ?? 0),
@@ -2388,7 +2393,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const begun = session.start(starts.at(-1)!, chosenStart(starts.at(-1)!));
       const node = transition(null, null, begun, starts.length - 1, null);
       reach(node, begun.snapshot);
-      if (origin !== null && !clockStart(starts.at(-1)!)) startedFrom.add(JSON.stringify(storage));
+      // A session after a chosen outcome leaves play its own next visit from the same storage.
+      if (origin !== null && !origin.chosen && !clockStart(starts.at(-1)!))
+        startedFrom.add(JSON.stringify(storage));
       startFrom.set(key, starts.length - 1);
       firstOf.set(starts.length - 1, node.id);
       firstNodeOf.set(starts.length - 1, node.id);
@@ -2608,6 +2615,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         inputs.push({ kind: "later", afterMs: gap });
         timeStepsTaken.steps += 1;
       }
+    for (const input of node.left ?? [])
+      if (!inputs.some((offered) => JSON.stringify(offered) === JSON.stringify(input)))
+        inputs.push(input);
     if (inputs.length === 0) {
       node.status = "stuck";
       store.drop(node.id);
@@ -2685,10 +2695,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     if (cut) {
       node.status = "open";
+      node.left = inputs.filter((input) => node.tried?.has(JSON.stringify(input)) !== true);
       frontier.push(node.id, order(node));
     } else {
       node.status = "expanded";
       delete node.tried;
+      delete node.left;
     }
   }
 
