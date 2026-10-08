@@ -1376,11 +1376,29 @@ export function callsClock(expression: unknown): boolean {
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */
 export function keyMatcher(pattern: string): (key: string) => boolean {
   if (!pattern.includes(KEY_PLACEHOLDER)) return (key) => key === pattern;
-  const parts = pattern
-    .split(KEY_PLACEHOLDER)
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
-  const matcher = new RegExp(`^${parts.join(".*")}$`, "u");
-  return (key) => matcher.test(key);
+  const parts = pattern.split(KEY_PLACEHOLDER);
+  const matcher = new RegExp(
+    `^${parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join(".*")}$`,
+    "u",
+  );
+  // The parts in order, without a regular expression, which many keys and patterns make slow: the first at the start,
+  // the last at the end, each other one after the one before. A key with a line break is left to the expression.
+  const first = parts[0]!;
+  const last = parts.at(-1)!;
+  const middle = parts.slice(1, -1);
+  const least = parts.reduce((length, part) => length + part.length, 0);
+  return (key) => {
+    if (/[\n\r\u2028\u2029]/u.test(key)) return matcher.test(key);
+    if (key.length < least || !key.startsWith(first) || !key.endsWith(last)) return false;
+    const end = key.length - last.length;
+    let at = first.length;
+    for (const part of middle) {
+      const found = key.indexOf(part, at);
+      if (found < 0 || found + part.length > end) return false;
+      at = found + part.length;
+    }
+    return true;
+  };
 }
 
 /** Whether a save's key (text or pattern) may be the key a load reads (text). */

@@ -752,6 +752,9 @@ function magnitude(value: Value): number | undefined {
  * Whether a condition holds on stored values alone (a load's default for an unset key), and the variables given in
  * `bindings`; undefined when it reads anything else, such as another variable, a call, or the clock.
  */
+/** Whether a condition reads no clock, by condition, found once for each. */
+const clockFreeConditions = new WeakMap<Data, boolean>();
+
 export function storedHolds(
   condition: unknown,
   storage: ReadonlyMap<string, unknown>,
@@ -764,7 +767,13 @@ export function storedHolds(
     helpers: new Map(),
   };
   const none = new Map<number, Data>();
-  if (clockReads(condition, model, none).size > 0) return undefined;
+  if (!isRecord(condition)) return undefined;
+  let clockFree = clockFreeConditions.get(condition);
+  if (clockFree === undefined) {
+    clockFree = clockReads(condition, model, none).size === 0;
+    clockFreeConditions.set(condition, clockFree);
+  }
+  if (!clockFree) return undefined;
   const value = valueAt(condition, {
     temporaries: none,
     model,

@@ -1697,11 +1697,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const parts = conditionDistance(
           condition,
           target.way === 0,
-          atomReader(
-            new Map(),
-            new Map(entry.entries.map((stored) => [stored.key, stored.value])),
-            chain.matches,
-          ),
+          atomReader(new Map(), storageMap(entry.entries), chain.matches),
         );
         measured.distance = branchDistance({
           unsatisfied: parts.unsatisfied + (measured.distance > 0 ? 1 : 0),
@@ -1772,6 +1768,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return false;
   };
 
+  /** With realignment: the guard of each earlier condition of an `else if` chain, one for all the conditions after it. */
+  const guardsByCondition = new Map<number, Guard>();
+  const guardOf = (earlier: number): Guard => {
+    const known = guardsByCondition.get(earlier);
+    if (known !== undefined) return known;
+    const before = instructions[earlier]!.condition;
+    const aliases = new Map<string, LoadAlias>();
+    for (const name of namesIn(before)) {
+      const alias = flow.loadAlias(name);
+      if (alias !== null) aliases.set(name, alias);
+    }
+    const guard = { condition: before, aliases, goals: goalsFor(flow, before, false) };
+    guardsByCondition.set(earlier, guard);
+    return guard;
+  };
+
   /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
   const analyze = (): boolean => {
     let scheduled = false;
@@ -1789,18 +1801,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
       const condition = instruction.condition ?? instruction.expression;
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
-      const guards =
-        options.realign === true
-          ? (elseIfs.get(index) ?? []).map((earlier) => {
-              const before = instructions[earlier]!.condition;
-              const aliases = new Map<string, LoadAlias>();
-              for (const name of namesIn(before)) {
-                const alias = flow.loadAlias(name);
-                if (alias !== null) aliases.set(name, alias);
-              }
-              return { condition: before, aliases, goals: goalsFor(flow, before, false) };
-            })
-          : [];
+      const guards = options.realign === true ? (elseIfs.get(index) ?? []).map(guardOf) : [];
       const goals = [
         ...(conditional ? goalsFor(flow, condition, way === 0) : []),
         ...guards.flatMap((guard) => guard.goals),
@@ -2656,7 +2657,23 @@ interface Guard {
  * {@link storageDistance}), at least 1 when it holds.
  */
 function guardDistance(entries: readonly StorageEntry[], guard: Guard): number {
-  const storage = new Map<string, unknown>(entries.map((entry) => [entry.key, entry.value]));
+  let measured = guardDistances.get(entries);
+  if (measured === undefined) {
+    measured = new Map();
+    guardDistances.set(entries, measured);
+  }
+  const known = measured.get(guard);
+  if (known !== undefined) return known;
+  const found = measureGuard(entries, guard);
+  measured.set(guard, found);
+  return found;
+}
+
+/** The distances of guards from storages measured so far, by storage. */
+const guardDistances = new WeakMap<readonly StorageEntry[], Map<Guard, number>>();
+
+function measureGuard(entries: readonly StorageEntry[], guard: Guard): number {
+  const storage = storageMap(entries);
   const loaded = new Map<string, unknown>();
   for (const [name, alias] of guard.aliases)
     loaded.set(name, storage.has(alias.key) ? storage.get(alias.key) : alias.fallback);
@@ -2665,12 +2682,34 @@ function guardDistance(entries: readonly StorageEntry[], guard: Guard): number {
   let distance = 0;
   for (const goal of guard.goals) {
     if (goal.source.kind !== "storage") continue;
-    const matches = keyMatcher(goal.source.key);
+    const matches = matcherOf(goal.source.key);
     if (!entries.some((entry) => matches(entry.key))) continue;
     const measured = storageDistance(entries, matches, goal).distance;
     distance += Number.isFinite(measured) ? measured : 1;
   }
   return holds === true ? Math.max(1, distance) : distance;
+}
+
+/** The values of a storage by key, made once per storage, which many guards and chains measure. */
+const storageMaps = new WeakMap<readonly StorageEntry[], ReadonlyMap<string, unknown>>();
+function storageMap(entries: readonly StorageEntry[]): ReadonlyMap<string, unknown> {
+  let found = storageMaps.get(entries);
+  if (found === undefined) {
+    found = new Map(entries.map((entry) => [entry.key, entry.value]));
+    storageMaps.set(entries, found);
+  }
+  return found;
+}
+
+/** The matcher of a stored key or key pattern ({@link keyMatcher}), made once per key. */
+const matchers = new Map<string, (key: string) => boolean>();
+function matcherOf(key: string): (key: string) => boolean {
+  let found = matchers.get(key);
+  if (found === undefined) {
+    found = keyMatcher(key);
+    matchers.set(key, found);
+  }
+  return found;
 }
 
 /**
