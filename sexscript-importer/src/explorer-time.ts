@@ -24,6 +24,11 @@ function list(value: unknown): Data[] {
 }
 
 const CLOCK_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
+/**
+ * The helper every converted script has to compare two values as legacy SexScript did: -1, 0, or 1, with null before
+ * everything else. Its calls are read with their arguments; other functions of a script are not.
+ */
+const COMPARE_HELPER = "sexscriptLegacyCompare";
 const PARTS = new Set(["year", "month", "day", "hour", "minute", "second", "weekdayNumber"]);
 const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">=", "in"]);
 const MINUTE = 60_000;
@@ -215,8 +220,15 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     if (index === undefined) return null;
     const producer = instructions[index]!;
     if (producer.kind === "storeTemporary") return record(producer.value);
-    const name = record(functions[Number(producer.functionId) - 1]).name;
-    return { kind: "call", callee: { kind: "identifier", name: String(name) }, arguments: [] };
+    const name = String(record(functions[Number(producer.functionId) - 1]).name);
+    return {
+      kind: "call",
+      callee: { kind: "identifier", name },
+      arguments:
+        name === COMPARE_HELPER
+          ? list(producer.arguments).map((argument) => ({ value: argument.value }))
+          : [],
+    };
   };
   /** The temporaries an expression at `at` reads, with what produced them, also those those read. */
   const temporariesAt = (expression: unknown, at: number): Map<number, Data> => {
@@ -530,6 +542,15 @@ function callAt(node: Data, reading: Reading): Value {
     return { kind: name === "getTimestamp" ? "timestamp" : "datetime", milliseconds: reading.now };
   const helper = callee.kind === "identifier" ? reading.model.helpers.get(name) : undefined;
   if (helper !== undefined) return part(helper.part, reading.now);
+  if (callee.kind === "identifier" && name === COMPARE_HELPER) {
+    const [left, right] = list(node.arguments).map((argument) => valueAt(argument.value, reading));
+    if (left === undefined || right === undefined) return undefined;
+    if (left === null || right === null) return left === right ? 0 : left === null ? -1 : 1;
+    const a = typeof left === "string" ? left : magnitude(left);
+    const b = typeof right === "string" ? right : magnitude(right);
+    if (a === undefined || b === undefined || typeof a !== typeof b) return undefined;
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
   if (callee.kind === "property") {
     const object = valueAt(callee.object, reading);
     if (typeof object === "object" && object !== null && object.kind === "timestamp") {

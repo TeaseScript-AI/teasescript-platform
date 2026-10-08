@@ -658,6 +658,14 @@ test(
         true,
       ],
       [
+        "converted comparison",
+        "global function sexscriptLegacyCompare(left, right) {\n  if left == null {\n    if right == null {\n" +
+          "      return 0\n    }\n    return -1\n  }\n  if right == null {\n    return 1\n  }\n  if left < right {\n" +
+          '    return -1\n  }\n  if left > right {\n    return 1\n  }\n  return 0\n}\nshowButton "Check"\n' +
+          'let minute = getDateTime().minute\nif sexscriptLegacyCompare(minute, 37) == 0 {\n  say "Hit."\n}\nexit\n',
+        true,
+      ],
+      [
         "time taken against a bound from the clock",
         "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
           'showButton "Check"\nlet took = getTimestamp().toSeconds() - start\ntook = took * 2\nlet bound = limit()\n' +
