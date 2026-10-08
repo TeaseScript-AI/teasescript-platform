@@ -15194,10 +15194,12 @@ function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpa
     );
     return;
   }
-  const values = args.map(staticMetadataValue);
+  const values = args.map((arg) => staticMetadataValue(arg, context));
   const tagsNode = args[7];
   const tagNames =
-    tagsNode?.kind === "list" ? nodeArray(tagsNode.items).map(staticMetadataValue) : [];
+    tagsNode?.kind === "list"
+      ? nodeArray(tagsNode.items).map((tag) => staticMetadataValue(tag, context))
+      : [];
   const tagsKnown = tagsNode?.kind === "list" && tagNames.every((tag) => typeof tag === "string");
   const computed = METADATA_FIELDS.flatMap((field, index) =>
     (index === 7 ? tagsKnown : values[index] !== undefined)
@@ -15226,20 +15228,32 @@ function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpa
   };
 }
 
-/** A metadata value known before the script runs: a literal, or text joined from literals with `+`. */
+/**
+ * A metadata value known before the script runs: a literal, text joined from such values with `+`, or a variable that
+ * the script assigns one such value once, as `titleline = "Escape Room"` before `setInfos(9, titleline, ...)`.
+ */
 function staticMetadataValue(
   node: AstNode | undefined,
+  context: LowerContext,
+  seen = new Set<string>(),
 ): string | number | boolean | null | undefined {
   if (node === undefined) return undefined;
   const literal = constantValue(node);
   if (literal !== undefined) return literal;
   if (node.kind === "binary" && node.operator === "+") {
-    const left = staticMetadataValue(asNode(node.left) ?? undefined);
-    const right = staticMetadataValue(asNode(node.right) ?? undefined);
+    const left = staticMetadataValue(asNode(node.left) ?? undefined, context, seen);
+    const right = staticMetadataValue(asNode(node.right) ?? undefined, context, seen);
     if (typeof left === "string" || typeof right === "string")
       return left === undefined || right === undefined ? undefined : `${left}${right}`;
+    return undefined;
   }
-  return undefined;
+  const name = variableName(node);
+  if (name === null || seen.has(name) || context.types.singleAssignment?.has(name) !== true)
+    return undefined;
+  const initializer = context.constantInitializers.get(name);
+  return initializer === undefined
+    ? undefined
+    : staticMetadataValue(initializer, context, new Set([...seen, name]));
 }
 
 /** The legacy source of an expression, on one line. */

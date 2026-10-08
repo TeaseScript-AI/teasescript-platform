@@ -7,8 +7,10 @@ keywords: "femaledom", "chores"
 // Legacy setInfos(): API version 9, color 0x2A52BE, language "en"
 // Legacy setInfos() status, computed when the script ran: "draft-" + build
 
-// setInfos() becomes the file header; written text joined with + is written too, and a computed value stays a comment.
-let build = 3
-// NOTE SX_METADATA_DYNAMIC line 3: setInfos() computed its status when the script ran; a file header holds only written values, so it stays a comment after the header.
+// setInfos() becomes the file header; written text joined with + is written too, also through a variable that the script
+// assigns it once, and a computed value stays a comment.
+let name = "Night shift"
+let build = randomInteger(0..5)
+// NOTE SX_METADATA_DYNAMIC line 5: setInfos() computed its status when the script ran; a file header holds only written values, so it stays a comment after the header.
 say "Ready."
 exit
