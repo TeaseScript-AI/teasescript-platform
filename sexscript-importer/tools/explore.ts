@@ -4,7 +4,7 @@
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]
- *          [--workers 1|2]
+ *          [--workers 1|2] [--until-stalled]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
  *          [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>
@@ -14,7 +14,9 @@
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
- * given.
+ * given. `--until-stalled` runs each unit until it is done or stalled instead (see `ExploreOptions.untilStalled`), with
+ * no state limit and a time cap of two hours unless `--max-states` or `--budget-seconds` is given; the report's
+ * `search.audit` says how it ended: `complete`, `stalled`, `spiral`, or `capped`.
  *
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
@@ -57,6 +59,8 @@ import {
 import { packageContentHash } from "./catalog.ts";
 
 const SELF = fileURLToPath(import.meta.url);
+/** Until stalled, the default time cap per unit. */
+const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
 /** Missed ways the summary lists per unit, by the code behind them. */
 const WORKING_TOWARD_ROWS = 8;
 
@@ -107,7 +111,7 @@ async function main(args: string[]): Promise<void> {
     options: {
       "budget-seconds": { type: "string" },
       "budget-ops": { type: "string" },
-      "max-states": { type: "string", default: "20000" },
+      "max-states": { type: "string" },
       "store-mb": { type: "string" },
       seed: { type: "string", default: "1" },
       workers: { type: "string", default: "1" },
@@ -130,6 +134,7 @@ async function main(args: string[]): Promise<void> {
       guidance: { type: "boolean", default: false },
       "random-choices": { type: "boolean", default: true },
       "quit-anywhere": { type: "boolean", default: false },
+      "until-stalled": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
@@ -141,15 +146,24 @@ async function main(args: string[]): Promise<void> {
     });
     return;
   }
+  const untilStalled = values["until-stalled"];
   const budgetOps = values["budget-ops"] === undefined ? null : Number(values["budget-ops"]);
-  // Without a work budget the time budget is 60 s by default; with one, only a time budget given applies.
+  // Without a work budget the time budget is 60 s by default; with one, only a time budget given applies. Until stalled,
+  // the time budget is a cap of two hours by default.
   const budgetSeconds =
     values["budget-seconds"] === undefined
-      ? budgetOps === null
-        ? 60
-        : null
+      ? untilStalled
+        ? UNTIL_STALLED_CAP_SECONDS
+        : budgetOps === null
+          ? 60
+          : null
       : Number(values["budget-seconds"]);
-  const maxStates = Number(values["max-states"]);
+  const maxStates =
+    values["max-states"] === undefined
+      ? untilStalled
+        ? Number.MAX_SAFE_INTEGER
+        : 20000
+      : Number(values["max-states"]);
   const storeMb = values["store-mb"] === undefined ? null : Number(values["store-mb"]);
   const seed = Number(values.seed);
   const workers = Number(values.workers);
@@ -170,11 +184,11 @@ async function main(args: string[]): Promise<void> {
     (workers !== 1 && workers !== 2) ||
     !Number.isSafeInteger(rounds) ||
     rounds < 1 ||
-    (rounds > 1 && values.corpus === undefined)
+    (rounds > 1 && (values.corpus === undefined || untilStalled))
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]\n" +
-        "         [--workers 1|2]\n" +
+        "         [--workers 1|2] [--until-stalled]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
         "         [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>\n" +
@@ -209,6 +223,7 @@ async function main(args: string[]): Promise<void> {
         {
           ...budgets,
           maxStates,
+          untilStalled,
           storeMb,
           seed,
           corpus,
@@ -252,6 +267,8 @@ interface RunSettings {
   budgetSeconds: number | null;
   budgetOps: number | null;
   maxStates: number;
+  /** Run until done or stalled, the budgets only caps. */
+  untilStalled: boolean;
   /** The snapshot store's limit in MiB, or null for the default. */
   storeMb: number | null;
   seed: number;
@@ -278,7 +295,8 @@ async function exploreUnits(
   out: string,
   workers: number,
 ): Promise<number> {
-  const { budgetSeconds, budgetOps, maxStates, storeMb, seed, corpus, strategies } = settings;
+  const { budgetSeconds, budgetOps, maxStates, untilStalled, storeMb, seed, corpus, strategies } =
+    settings;
   if (workers === 2 && dirs.length > 1) {
     const flags = [
       "--max-states",
@@ -292,6 +310,7 @@ async function exploreUnits(
     if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
     if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
     if (storeMb !== null) flags.push("--store-mb", String(storeMb));
+    if (untilStalled) flags.push("--until-stalled");
     if (corpus !== null) flags.push("--corpus", corpus);
     for (const [name, on] of Object.entries(strategies)) {
       const flag = name.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
@@ -431,6 +450,7 @@ async function exploreUnit(
       budgetMs: settings.budgetSeconds === null ? Infinity : settings.budgetSeconds * 1000,
       ...(settings.budgetOps === null ? {} : { budgetOps: settings.budgetOps }),
       maxStates: settings.maxStates,
+      ...(settings.untilStalled ? { untilStalled: true } : {}),
       ...(settings.storeMb === null ? {} : { storeBytes: settings.storeMb * 1024 ** 2 }),
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
@@ -812,6 +832,20 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
         `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
         `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
+    const audit = fields(fields(report.search).audit);
+    if (typeof audit.result === "string") {
+      const progress = fields(audit.progress);
+      const spiral = fields(audit.spiral);
+      lines.push(
+        `- Until stalled: ${audit.result}` +
+          (typeof spiral.location === "string"
+            ? ` at \`${spiral.location}\` (${count(spiral.share)}% of the expansions since the last progress)`
+            : "") +
+          `; last progress after ${count(audit.lastProgressAt)} operations, window ${count(audit.window)}; ` +
+          `progress: ${count(progress.code)} new code, ${count(progress.ways)} new ways, ${count(progress.closer)} closer ` +
+          `(and ${count(progress.cells)} new cells, which do not hold a run up)`,
+      );
+    }
     lines.push(...workingToward(records(coverage.unvisitedBranches)));
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);

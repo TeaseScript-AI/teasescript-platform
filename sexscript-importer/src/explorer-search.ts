@@ -114,6 +114,23 @@ const RANDOM_DRAWS_PER_STEP = 4;
  * of states after one may take while play states are open. Such steps can cost much more than others.
  */
 const CHOSEN_SHARE = 1 / 16;
+/**
+ * Until stalled: the operations without progress after which a run stops, at least, and more per coverable line; and
+ * how many times the longest stretch without progress that progress still ended the window grows to.
+ */
+const STALL_OPERATIONS = 20_000;
+const STALL_OPERATIONS_PER_LINE = 20;
+const STALL_GAP_FACTOR = 3;
+/** Until stalled: a stall is a spiral when one place took this share of the expansions since the last progress. */
+const SPIRAL_SHARE = 1 / 2;
+
+/**
+ * Until stalled: how many operations without progress stop a run of a plan with `lines` coverable lines, when the
+ * longest stretch without progress that progress ended so far was `gap` operations.
+ */
+export function stallWindow(lines: number, gap: number): number {
+  return Math.max(STALL_OPERATIONS + STALL_OPERATIONS_PER_LINE * lines, STALL_GAP_FACTOR * gap);
+}
 /** With guidance: the fewest instructions a region of code not reached yet must have to be led toward. */
 const MIN_REGION = 10;
 /** The target of the guidance lead, which is no condition's. */
@@ -281,6 +298,13 @@ export interface ExploreOptions {
    * the values of the keys conditions compare and their changes in its session. Off by default.
    */
   readonly quitAnywhere?: boolean;
+  /**
+   * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
+   * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
+   * a missed way needs. New cells are counted but do not hold a run up: cells of counters keep coming long after
+   * anything else does. `search.audit` says how the run ended. Off by default.
+   */
+  readonly untilStalled?: boolean;
   /** The snapshot store's limit in bytes; an eighth of the memory by default, from 256 MiB to 4 GiB. */
   readonly storeBytes?: number;
 }
@@ -441,6 +465,27 @@ export interface Closest {
   trend?: "improving" | "flat";
 }
 
+/** How a run until stalled ended, and the progress it made. */
+export interface Audit {
+  /**
+   * `complete`: nothing was left to try and no line is of unknown reach; `stalled`: no progress for `window`
+   * operations, or nothing left to try with lines of unknown reach; `spiral`: a stall in which one place took most
+   * expansions since the last progress (`spiral`), a problem of the explorer; `capped`: the time or state cap came first.
+   */
+  result: "complete" | "stalled" | "spiral" | "capped";
+  /** The stall window at the end ({@link stallWindow}). */
+  window: number;
+  /** The operations done at the last progress, and the longest stretch of operations without progress, the last one too. */
+  lastProgressAt: number;
+  longestGap: number;
+  /**
+   * Progress events: steps that ran new code, took a new way, or came closer to a comparison; and new cells, which do not
+   * count as progress for the stall.
+   */
+  progress: { code: number; ways: number; cells: number; closer: number };
+  spiral?: { location: string; prompt: string; share: number };
+}
+
 /** A condition way that was missed when directed search first looked at it, and was reached later. */
 export interface ReachedBranch {
   path: string;
@@ -513,8 +558,13 @@ export interface ExploreResult {
      * from the start that throws, or to the state that was refused.
      */
     engineErrors: { count: number; first: ({ message: string } & Repro) | null };
-    /** Why the search stopped: `budget` is the time budget, `operations` the work budget. */
-    stoppedBy: "exhausted" | "budget" | "operations" | "maxStates";
+    /**
+     * Why the search stopped: `budget` is the time budget, `operations` the work budget, `stalled` no progress for the
+     * stall window (with `untilStalled`).
+     */
+    stoppedBy: "exhausted" | "budget" | "operations" | "maxStates" | "stalled";
+    /** With `untilStalled`: how the run ended, and its progress. */
+    audit?: Audit;
     /** Runtime operations the run called: the work that `budgetOps` limits. */
     operations: number;
     elapsedMs: number;
@@ -1618,6 +1668,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       index += 1
     )
       functionAt[index] = Number(definition.id);
+  const untilStalled = options.untilStalled === true;
+  /**
+   * The run's progress (steps that ran new code, took a new condition way, or came closer to a comparison a missed way
+   * needs; and new cells, which are only counted), the operations done at the last one, the longest stretch without
+   * progress that progress ended, and where expansions went since the last progress.
+   */
+  const progress = { code: 0, ways: 0, cells: 0, closer: 0 };
+  let progressAt = 0;
+  let longestGap = 0;
+  const sinceProgress = new Map<number | null, number>();
+  const progressed = (kind: keyof typeof progress): void => {
+    progress[kind] += 1;
+    if (kind === "cells") return;
+    longestGap = Math.max(longestGap, session.operations - progressAt);
+    progressAt = session.operations;
+    sinceProgress.clear();
+  };
+  const waysTaken = new Uint8Array(instructions.length * 2);
   // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
   /**
@@ -1813,6 +1881,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           : [],
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
+    const newWay = step.ways.some((way) => waysTaken[way] === 0);
+    for (const way of step.ways) waysTaken[way] = 1;
+    if (step.newInstructions > 0) progressed("code");
+    else if (newWay) progressed("ways");
+    else if (place?.novel === true || place?.fresh === true) progressed("cells");
     const keys = stateKeys(step.snapshot);
     const stateKey = chosen ? `chosen ${keys.state}` : keys.state;
     const known = byState.get(stateKey);
@@ -2071,6 +2144,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         )
           continue;
         const away = distance(Number(value), entry.operator, entry.constant);
+        if (entry.closest !== null && away < entry.closest.distance) progressed("closer");
         if (entry.closest === null || away < entry.closest.distance)
           entry.closest = {
             value,
@@ -2372,6 +2446,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return true;
     }
     if (best.distance < chain.best && chain.started < MAX_CHAIN) {
+      if (Number.isFinite(chain.best)) progressed("closer");
       Object.assign(chain, {
         best: best.distance,
         value: best.value,
@@ -2728,12 +2803,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
   const budgetOps = options.budgetOps ?? Infinity;
   /** The budget that is spent: `operations` for work, `budget` for time; null while neither is. */
-  const spent = (): "operations" | "budget" | null =>
+  /** Until stalled: the coverable lines, and the operations without progress that stop the run now. */
+  const lines = untilStalled
+    ? new Set(
+        instructions.flatMap((instruction, index) => {
+          const span = compactSpan(instruction.span);
+          return span === null ? [] : [`${files[index]}:${span.line}`];
+        }),
+      ).size
+    : 0;
+  const window = () => (untilStalled ? stallWindow(lines, longestGap) : Infinity);
+  const spent = (): "operations" | "budget" | "stalled" | null =>
     session.operations >= budgetOps
       ? "operations"
       : performance.now() - started >= options.budgetMs
         ? "budget"
-        : null;
+        : session.operations - progressAt >= window()
+          ? "stalled"
+          : null;
   const outOfBudget = () => spent() !== null;
   const full = () => outOfBudget() || nodes.length >= options.maxStates;
 
@@ -2937,8 +3024,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       break;
     }
     // A tenth of the budget: of the work budget when there is one, so that a run it limits stays deterministic.
-    const due =
-      options.budgetOps === undefined
+    // Until stalled, a quarter of the stall window, so that directed search looks again before the run stops.
+    const due = untilStalled
+      ? session.operations - analyzedOps >= window() / 4
+      : options.budgetOps === undefined
         ? performance.now() - analyzedAt >= options.budgetMs / 10
         : session.operations - analyzedOps >= options.budgetOps / 10;
     if (sinceAnalysis >= ANALYZE_EVERY || due) {
@@ -3042,6 +3131,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       expansionsAt.set(node.waitsAt, at);
     }
     at.expansions += 1;
+    sinceProgress.set(node.waitsAt, (sinceProgress.get(node.waitsAt) ?? 0) + 1);
     let productive = false;
     node.status = "partial";
     const closeness =
@@ -3130,6 +3220,46 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     watched,
     session.randomChoices,
   );
+  // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
+  let audit: Audit | undefined;
+  if (untilStalled) {
+    const since = [...sinceProgress.values()].reduce((sum, expansions) => sum + expansions, 0);
+    const [spot, most] = [...sinceProgress].sort((left, right) => right[1] - left[1])[0] ?? [
+      null,
+      0,
+    ];
+    const share = since === 0 ? 0 : most / since;
+    const spiral = stoppedBy === "stalled" && since >= ANALYZE_EVERY && share >= SPIRAL_SHARE;
+    const span = spot === null ? null : compactSpan(instructions[spot]?.span);
+    audit = {
+      result:
+        stoppedBy === "stalled"
+          ? spiral
+            ? "spiral"
+            : "stalled"
+          : stoppedBy === "exhausted"
+            ? (coverage.reach.unknown ?? 0) === 0
+              ? "complete"
+              : "stalled"
+            : "capped",
+      window: window(),
+      lastProgressAt: progressAt,
+      longestGap: Math.max(longestGap, session.operations - progressAt),
+      progress: { ...progress },
+      ...(spiral
+        ? {
+            spiral: {
+              location:
+                spot === null
+                  ? "(nothing in the foreground)"
+                  : `${files[spot]}${span === null ? "" : `:${span.line}`}`,
+              prompt: expansionsAt.get(spot)?.prompt ?? "",
+              share: Math.round(share * 1000) / 10,
+            },
+          }
+        : {}),
+    };
+  }
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
   const sessionCount = Math.max(0, ...starts.map((start) => start.session));
   const bySession = {
@@ -3239,6 +3369,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       rejectedInputs,
       engineErrors,
       stoppedBy,
+      ...(audit === undefined ? {} : { audit }),
       operations: session.operations,
       elapsedMs: Math.round(performance.now() - started),
       cpuMs: Math.round((cpu.user + cpu.system) / 1000),

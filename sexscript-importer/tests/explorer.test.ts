@@ -756,6 +756,48 @@ test(
 );
 
 test(
+  "until stalled, a run ends complete when nothing is left to try, as a spiral when one place took the work since the last progress, and capped while a counter still comes closer",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const run = (source: string, budgetOps?: number) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        ...(budgetOps === undefined ? {} : { budgetOps }),
+        maxStates: Number.MAX_SAFE_INTEGER,
+        sources: new Map(),
+        diagnostics: [],
+        untilStalled: true,
+      }).search;
+    };
+    const complete = run(
+      'let pick = choose a: "A", b: "B"\nif pick == "a" {\n  say "A."\n} else {\n  say "B."\n}\nexit\n',
+    );
+    assert.deepEqual([complete.stoppedBy, complete.audit?.result], ["exhausted", "complete"]);
+    // Every press of "Again" is a new state, and nothing reads the count: no progress after the first round.
+    const loop =
+      'let count = 0\nwhile true {\n  let pick = choose again: "Again", leave: "Leave"\n  if pick == "leave" {\n' +
+      "    exit\n  }\n  count += 1\n";
+    const spiral = run(`${loop}}\n`);
+    assert.equal(spiral.stoppedBy, "stalled");
+    assert.equal(spiral.audit?.result, "spiral");
+    assert.deepEqual(
+      spiral.audit?.spiral && [spiral.audit.spiral.location, spiral.audit.spiral.share],
+      ["main.tease:3", 100],
+    );
+    assert.ok(spiral.operations - spiral.audit!.lastProgressAt >= spiral.audit!.window);
+    // A missed way needs the count at a million: every round is closer, so only the cap ends the run.
+    const capped = run(`${loop}  if count >= 1000000 {\n    say "Done."\n  }\n}\n`, 25_000);
+    assert.equal(capped.audit?.result, "capped");
+    assert.ok((capped.audit?.progress.closer ?? 0) > 1000);
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
