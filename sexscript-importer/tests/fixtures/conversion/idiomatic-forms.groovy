@@ -35,3 +35,7 @@ def drawTable = { cards ->
     return total
 }
 show("Total " + drawTable([[1, 2], [3]]))
+// teachertrouble: a script that never stops its background sounds plays each one plainly, without keeping a handle.
+def spankSound = "hand"
+def spankSoundLimit = 3
+playBackgroundSound("spanks/"+spankSound+(1+getRandom(spankSoundLimit))+".wav")

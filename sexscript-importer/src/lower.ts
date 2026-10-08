@@ -7930,7 +7930,20 @@ function lowerBackgroundSound(
       },
     ];
   }
-  return [{ kind: "playAudio", file, async: true, repeatCount, span }];
+  // One pass is the plain form.
+  const passes = repeatCount?.kind === "literal" && repeatCount.value === 1 ? null : repeatCount;
+  return [{ kind: "playAudio", file, async: true, repeatCount: passes, span }];
+}
+
+/** Whether a Groovy value is text that cannot be null: a text constant, a GString, or `+` with either of them. */
+function isNeverNullText(node: AstNode | undefined): boolean {
+  if (node === undefined) return false;
+  if (node.kind === "gstring" || constantString(node) !== null) return true;
+  if (node.kind !== "binary" || node.operator !== "+") return false;
+  return [node.left, node.right].some((side) => {
+    const operand = asNode(side);
+    return operand !== null && (operand.kind === "gstring" || constantString(operand) !== null);
+  });
 }
 
 /** Whether any file stops all background sounds with playBackgroundSound(null) or stopSoundThreads(). */
@@ -7941,14 +7954,10 @@ export function packageStopsBackgroundSounds(files: readonly ParsedGroovyFile[])
       const call = node.kind === "methodCall" ? callParts(node) : null;
       if (call === null || !call.inherited) return;
       if (call.name === "stopSoundThreads") stops = true;
-      // A file that may be null at runtime stops all sounds as well.
+      // A file that may be null at runtime stops all sounds as well; text, a GString, or a concatenation with text
+      // never is.
       const file = call.arguments[0];
-      if (
-        call.name === "playBackgroundSound" &&
-        !(file?.kind === "constant" && typeof file.value === "string")
-      ) {
-        stops = true;
-      }
+      if (call.name === "playBackgroundSound" && !isNeverNullText(file)) stops = true;
     });
   }
   return stops;
