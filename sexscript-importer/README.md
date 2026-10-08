@@ -447,9 +447,12 @@ The report `<out>/<unit>.json` has these parts:
   what it depends on (`dependsOn`: variables, stored keys, asks, the clock), the directed attempts, its label, and the
   reason, when known; `behindLines`, the coverable lines no state ran that the missed way leads to through code no state
   ran (a call goes into its function and on after it; a return, an end, or a transfer to a computed destination stops
-  the count); and for a variable the way compares with a constant, `best`: the closest state since the condition became
-  a target, with the value, its session, the operations done when a state first came that close, and `trend`
-  (`improving` when that was in the last quarter of the run's operations, else `flat`);
+  the count); `parts`, one per comparison and value source the way needs (also from the earlier conditions of its
+  `else if` chain, which must not hold): `met` when some explored state or stored value satisfied it (not necessarily
+  together with the other parts), `unmet` with the closest one, or `unmeasured`; and `best`, the unmet part furthest
+  from holding. For a variable, the closest state counts from when the condition became a target, with its value, its
+  session, the operations done when a state first came that close, and `trend` (`improving` when a state got closer in
+  the last quarter of the run's operations, else `flat`); for a stored value, the closest storage a state left;
 - `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
   directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when

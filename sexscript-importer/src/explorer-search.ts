@@ -398,25 +398,45 @@ export interface UnvisitedBranch {
    * how much code waits behind it.
    */
   behindLines: number;
-  /** For a variable the missed way compares with a constant: the closest explored state, from when it was a target. */
+  /**
+   * The parts of what the missed way needs, one per value source of each comparison in its condition (and, with
+   * realignment, in the earlier conditions of its `else if` chain, which must not hold): `met` when some explored state
+   * or stored value satisfied that part (not necessarily together with the others), `unmet` with the closest one,
+   * `unmeasured` when nothing measures it.
+   */
+  parts: Part[];
+  /** The unmet part measured furthest from holding, from `parts`: what keeps the way closed, as far as measured. */
   best?: Closest;
   /** For a `clock` way, the shortest path found to it. */
   repro?: Repro;
 }
 
-/** The closest an explored state came to a comparison a missed way needs. */
-export interface Closest {
-  /** The comparison, as `name operator constant`. */
+/** One part of what a missed way needs: a comparison and the source of the value it reads. */
+export interface Part {
+  /** As `name operator constant`, `stored key operator constant`, `answer at path:line`, or `the clock`. */
   needs: string;
-  /** A boolean variable's value is a boolean. */
-  value: number | boolean;
+  /** `earlier condition` for a part of an earlier condition of the `else if` chain, which must not hold. */
+  of: "condition" | "earlier condition";
+  status: "met" | "unmet" | "unmeasured";
+  closest?: Closest;
+}
+
+/** The closest an explored state, or a storage one left, came to a part of what a missed way needs. */
+export interface Closest {
+  /** The part's comparison, as in {@link Part.needs}. */
+  needs: string;
+  /** A boolean variable's value is a boolean; a stored value is its JSON text. */
+  value: number | boolean | string;
   /** How far `value` is from the comparison holding, as directed search measures it. */
   distance: number;
-  /** The session of that state, and the runtime operations done when a state first came that close. */
+  /** The session of that state; for a variable, the runtime operations done when a state first came that close. */
   session: number;
-  atOperations: number;
-  /** `improving` when a state got closer than the first one watched, in the last quarter of the run's operations. */
-  trend: "improving" | "flat";
+  atOperations?: number;
+  /**
+   * For a variable: `improving` when a state got closer than the first one watched, in the last quarter of the run's
+   * operations.
+   */
+  trend?: "improving" | "flat";
 }
 
 /** A condition way that was missed when directed search first looked at it, and was reached later. */
@@ -1068,6 +1088,7 @@ interface Chain {
 /** A comparison of a variable with a constant that a target's missed way needs, and the closest state so far. */
 interface Watch {
   readonly target: number;
+  readonly goal: Goal;
   readonly name: string;
   readonly operator: string;
   readonly constant: number;
@@ -2350,7 +2371,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         watched
           .set(name, watched.get(name) ?? [])
           .get(name)!
-          .push({ target: code, name, operator, constant, shown, closest: null });
+          .push({ target: code, goal, name, operator, constant, shown, closest: null });
       }
       scheduled = schedule(code, target) || scheduled;
     });
@@ -3777,18 +3798,64 @@ function lineCoverage(
     }
     return found.size;
   };
-  const watchesOf = new Map<number, Watch[]>();
+  const watchOf = new Map<Goal, Watch>();
   for (const watches of watched.values())
-    for (const entry of watches)
-      watchesOf.set(entry.target, [...(watchesOf.get(entry.target) ?? []), entry]);
+    for (const entry of watches) watchOf.set(entry.goal, entry);
   const sourceText = (source: Goal["source"]): string =>
     source.kind === "ask"
       ? `ask at ${files[source.instruction]}:${lineOf[source.instruction] ?? 0}`
       : source.kind === "storage"
-        ? `stored ${source.key.replaceAll(KEY_PLACEHOLDER, "*")}`
+        ? `stored ${shownKey(source.key)}`
         : source.kind === "clock"
           ? "the clock"
           : source.name;
+  const shownKey = (key: string) => key.replaceAll(KEY_PLACEHOLDER, "*");
+  const partsOf = (target: Target | undefined): Part[] => {
+    if (target === undefined) return [];
+    const earlier = new Set(target.guards.flatMap((guard) => guard.goals));
+    const parts = new Map<string, Part>();
+    for (const goal of target.goals) {
+      const { source, comparison } = goal;
+      const compared =
+        comparison === null ? "" : ` ${comparison.operator} ${String(comparison.shown)}`;
+      const needs =
+        source.kind === "variable"
+          ? `${source.name}${compared}`
+          : source.kind === "storage"
+            ? `stored ${shownKey(source.key)}${compared}`
+            : source.kind === "ask"
+              ? `answer at ${files[source.instruction]}:${lineOf[source.instruction] ?? 0}`
+              : "the clock";
+      const of = earlier.has(goal) ? "earlier condition" : "condition";
+      let closest: Closest | undefined;
+      const watch = watchOf.get(goal)?.closest;
+      const chain = source.kind === "storage" ? target.chains.get(source.key) : undefined;
+      if (watch != null)
+        closest = {
+          needs,
+          value: typeof comparison?.shown === "boolean" ? watch.value !== 0 : watch.value,
+          distance: watch.distance,
+          session: watch.session,
+          atOperations: watch.operations,
+          trend:
+            watch.closer && watch.operations * 4 > session.operations * 3 ? "improving" : "flat",
+        };
+      else if (chain !== undefined && Number.isFinite(chain.best))
+        closest = { needs, value: chain.value, distance: chain.best, session: chain.sessions };
+      const status =
+        closest === undefined ? "unmeasured" : closest.distance === 0 ? "met" : "unmet";
+      // One part per text: an atom read from two places of the same source is one part.
+      const known = parts.get(`${of} ${needs}`);
+      if (known === undefined || (known.status === "unmeasured" && status !== "unmeasured"))
+        parts.set(`${of} ${needs}`, {
+          needs,
+          of,
+          status,
+          ...(closest === undefined ? {} : { closest }),
+        });
+    }
+    return [...parts.values()];
+  };
   const unvisitedBranches: UnvisitedBranch[] = [];
   instructions.forEach((instruction, index) => {
     if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
@@ -3820,27 +3887,11 @@ function lineCoverage(
           ? (directed?.note ?? undefined)
           : undefined;
     const reached = directed?.reach;
-    // The comparison furthest from holding is what keeps the way closed.
-    const closest = (watchesOf.get(index * 2 + way) ?? [])
-      .filter((entry) => entry.closest !== null)
-      .sort((left, right) => right.closest!.distance - left.closest!.distance)[0];
-    const best: Closest | undefined =
-      closest?.closest == null
-        ? undefined
-        : {
-            needs: `${closest.name} ${closest.operator} ${String(closest.shown)}`,
-            value:
-              typeof closest.shown === "boolean"
-                ? closest.closest.value !== 0
-                : closest.closest.value,
-            distance: closest.closest.distance,
-            session: closest.closest.session,
-            atOperations: closest.closest.operations,
-            trend:
-              closest.closest.closer && closest.closest.operations * 4 > session.operations * 3
-                ? "improving"
-                : "flat",
-          };
+    const parts = partsOf(directed);
+    // The unmet part measured furthest from holding is what keeps the way closed.
+    const best = parts
+      .filter((part) => part.status === "unmet" && part.closest !== undefined)
+      .sort((left, right) => right.closest!.distance - left.closest!.distance)[0]?.closest;
     unvisitedBranches.push({
       instruction: index,
       kind: instruction.kind === "jumpIfFalse" ? "if" : "loop",
@@ -3856,6 +3907,7 @@ function lineCoverage(
       attempts: directed?.attempts ?? 0,
       dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
       behindLines: behind(missedTarget ? target : index + 1),
+      parts,
       ...(best === undefined ? {} : { best }),
       ...(label === "clock" && reached != null ? { repro: reached.repro } : {}),
     });

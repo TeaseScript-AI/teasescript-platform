@@ -652,7 +652,7 @@ test(
 );
 
 test(
-  "a missed way reports what it depends on, the code behind it, and the closest state to a comparison it needs: a capped counter stays flat, a rising one is still improving",
+  "a missed way reports what it depends on, the code behind it, and each part it needs, met or not, with the closest state to the unmet one: a capped counter stays flat, a rising one is still improving",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -660,7 +660,7 @@ test(
     const source =
       'let points = 0\nlet rounds = 0\nwhile true {\n  let pick = choose train: "Train", leave: "Leave"\n' +
       '  if pick == "leave" {\n    exit\n  }\n  rounds += 1\n  if points < 3 {\n    points += 1\n  }\n' +
-      '  if points >= 5 {\n    say "Master."\n    say "You did it."\n  }\n  if rounds >= 200 {\n' +
+      '  if points >= 5 {\n    say "Master."\n    say "You did it."\n  }\n  if points >= 2 and rounds >= 200 {\n' +
       '    say "Two hundred."\n  }\n}\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
     assert.ok(isRecord(plan));
@@ -683,9 +683,21 @@ test(
       2,
     ]);
     assert.equal(capped?.best?.trend, "flat");
-    // `rounds` rises with every round: still closer at the end of the run.
+    assert.deepEqual(
+      capped?.parts.map((part) => [part.needs, part.status]),
+      [["points >= 5", "unmet"]],
+    );
+    // `rounds` rises with every round: still closer at the end of the run. The part on `points` was met: it is not
+    // what keeps the way closed.
     const rising = branch(16);
-    assert.deepEqual(rising && [rising.dependsOn, rising.behindLines], [["rounds"], 1]);
+    assert.deepEqual(rising && [rising.dependsOn, rising.behindLines], [["points", "rounds"], 1]);
+    assert.deepEqual(
+      rising?.parts.map((part) => [part.needs, part.status]),
+      [
+        ["points >= 2", "met"],
+        ["rounds >= 200", "unmet"],
+      ],
+    );
     assert.equal(rising?.best?.needs, "rounds >= 200");
     assert.equal(rising?.best?.trend, "improving");
     assert.ok(Number(rising?.best?.value ?? 0) > 10);

@@ -840,22 +840,52 @@ function workingToward(branches: readonly Readonly<Record<string, unknown>>[]): 
       const needs =
         branch.missed === "true" || branch.missed === "enter" ? condition : `not (${condition})`;
       const best = fields(branch.best);
+      const parts = records(branch.parts);
       const dependsOn = texts(branch.dependsOn);
+      const value = (closest: Readonly<Record<string, unknown>>) =>
+        typeof closest.value === "number" ? count(closest.value) : String(closest.value);
+      const subject = text(best.needs)
+        .split(" ")
+        .slice(0, text(best.needs).startsWith("stored ") ? 2 : 1)
+        .join(" ");
+      const closest =
+        branch.best === undefined
+          ? ""
+          : `${best.trend === "improving" ? "still improving" : "no progress"}: the closest ` +
+            `${best.atOperations === undefined ? "storage" : "state"} had \`${subject}\` = ${value(best)} in session ` +
+            `${count(best.session)}` +
+            `${best.atOperations === undefined || best.trend === "improving" ? "" : `, no closer after ${count(best.atOperations)} operations`}` +
+            ` (needs \`${text(best.needs)}\`)`;
+      // The other parts: met in some state (not necessarily together), or not measured.
+      const listed = (status: string) =>
+        parts
+          .filter((part) => part.status === status && text(part.needs) !== text(best.needs))
+          .map(
+            (part) =>
+              `\`${text(part.needs)}\`${part.of === "earlier condition" ? " (earlier condition)" : ""}` +
+              (status === "met" ? ` (${value(fields(part.closest))})` : ""),
+          );
+      const others = [
+        ...(listed("met").length > 0 ? [`met in some state: ${listed("met").join(", ")}`] : []),
+        ...(listed("unmet").length > 0 ? [`also unmet: ${listed("unmet").join(", ")}`] : []),
+        ...(listed("unmeasured").length > 0
+          ? [`not measured: ${listed("unmeasured").join(", ")}`]
+          : []),
+      ].join("; ");
       const why =
         branch.reach === "unreachable"
           ? `unreachable: ${text(branch.reason)}`
           : branch.reach === "clock"
             ? "reached only at another wall clock time"
-            : branch.best !== undefined
-              ? `${best.trend === "improving" ? "still improving" : "no progress"}: the closest state had ` +
-                `\`${text(best.needs).split(" ")[0]}\` = ${typeof best.value === "boolean" ? String(best.value) : count(best.value)} in session ${count(best.session)}` +
-                `${best.trend === "improving" ? "" : `, no closer after ${count(best.atOperations)} operations`} ` +
-                `(needs \`${text(best.needs)}\`)`
+            : closest !== ""
+              ? `${closest}${others === "" ? "" : `; ${others}`}`
               : branch.reason !== undefined
-                ? `no progress: ${text(branch.reason)}`
-                : dependsOn.length > 0
-                  ? `no progress; depends on ${dependsOn.join(", ")}`
-                  : "no progress; what it depends on is not traced";
+                ? `no progress: ${text(branch.reason)}${others === "" ? "" : `; ${others}`}`
+                : others !== ""
+                  ? `no progress; ${others}`
+                  : dependsOn.length > 0
+                    ? `no progress; depends on ${dependsOn.join(", ")}`
+                    : "no progress; what it depends on is not traced";
       return `  - \`${text(branch.path)}:${count(branch.line)}\` needs \`${needs}\` (${count(branch.behindLines)} lines behind): ${why}`;
     }),
   ];
