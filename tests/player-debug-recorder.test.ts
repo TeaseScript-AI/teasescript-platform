@@ -54,7 +54,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   assert.ok(recording);
   const exported: DebugExport = {
     format: "teasescript-debug-export",
-    version: 4,
+    version: 5,
     build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
     package: { id: null, version: null, contentHash: null },
     incident: {
@@ -583,7 +583,7 @@ async function exportedRecording(recorder: DebugRecorder): Promise<DebugExport> 
   const file = await debugExportFile(
     {
       format: "teasescript-debug-export",
-      version: 4,
+      version: 5,
       build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
       package: { id: null, version: null, contentHash: null },
       incident: {

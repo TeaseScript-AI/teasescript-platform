@@ -23,7 +23,10 @@ specification.
   [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
   the explicit Start control on the start page (`SessionActivation.vue`, with the header's title and author) and
   creates it only on that click. It keeps the session in `player/kept-sessions.ts`, so a reload shows Continue, which
-  restores it; closing the end dialog after `exit` returns to the start page. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
+  restores it; closing the end dialog after `exit` returns to the start page. With `room=debug`, or once Debug goes on in
+  the normal room, the debug room ([`DEBUGGER.md`](../../../docs/DEBUGGER.md#debug-room)) stands in with its own saved
+  values, photos, and session; `DebugRoomMark.vue` marks it in the title pill, and `ConfirmDialog.vue` asks before Debug
+  on overwrites its session. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
   `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
   clock observation, which runs every 100 ms while media loads or plays. With the camera capability, Start

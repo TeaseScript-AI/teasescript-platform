@@ -1,10 +1,16 @@
-import { isMessageMarkup, type InterpreterEvent } from "../src/index.js";
+import {
+  isMessageMarkup,
+  validateScriptStorageEntries,
+  type InterpreterEvent,
+  type RuntimeScriptStorageEntrySnapshot,
+} from "../src/index.js";
 import { isMessagePresentation } from "../src/message-presentation.js";
 import { isFormUi, validFormResult } from "../src/runtime/actions/form.js";
 import type { CapturedMediaRecord, CapturedMediaRepository } from "./captured-media.js";
 import type { MediaInUse } from "./captured-media-persistence.js";
 import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-export.js";
 import type { DebugHistoryMarks } from "./debug-history.js";
+import type { ScriptStorageProvider } from "./script-storage.js";
 
 /**
  * Where the Player keeps each script's session (PLAYER-UI "Session start and user activation"), by storage scope, so that
@@ -23,6 +29,27 @@ export interface KeptSessionStore {
   readonly media: CapturedMediaRepository;
   /** Deletes the scope's session and its photos, at once. */
   discard(scope: string): Promise<void>;
+}
+
+/**
+ * A kept session together with saved values of its own, by storage scope: the debug room of each script (DEBUGGER.md
+ * "Debug room"), whose photos the store's `media` holds under the same references as the photos they were copied from.
+ * A room is created and discarded as a whole.
+ */
+export interface KeptRoomStore extends KeptSessionStore {
+  /** The scope's room, with whether it keeps a session, or `null` without one; rejects when the store cannot be read. */
+  read(scope: string): Promise<{ readonly session: boolean } | null>;
+  /**
+   * Creates the scope's room with `entries` as its saved values and `photos` stored under their references; rejects
+   * when the scope already has a room, or with an invalid entry, and then changes nothing.
+   */
+  create(
+    scope: string,
+    entries: readonly RuntimeScriptStorageEntrySnapshot[],
+    photos: readonly CapturedMediaRecord[],
+  ): Promise<void>;
+  /** The room's saved values, as script storage; every operation rejects once the room is gone. */
+  values(scope: string): ScriptStorageProvider;
 }
 
 /** The state a reload continues: the plan the session runs, its snapshot, the events that led to it, and its marks. */
@@ -238,6 +265,32 @@ function validSettlement(settlement: unknown): boolean {
 
 const noPlan = () => new Error("The kept session has no plan.");
 const eventGap = () => new RangeError("The kept session's events have a gap.");
+const missingRoom = () => new Error("This script has no debug room.");
+
+function checkedEntries(entries: readonly RuntimeScriptStorageEntrySnapshot[]): void {
+  const failure = validateScriptStorageEntries(entries, "entries");
+  if (failure !== null) throw new TypeError(failure);
+}
+
+function writtenEntries(
+  entries: readonly RuntimeScriptStorageEntrySnapshot[],
+  key: string,
+  value: RuntimeScriptStorageEntrySnapshot["value"] | null,
+): RuntimeScriptStorageEntrySnapshot[] {
+  const others = entries.filter((entry) => entry.key !== key);
+  if (value === null) return others;
+  const entry = { key, value };
+  checkedEntries([entry]);
+  return [...others, entry];
+}
+
+/** Stored values when they are valid script storage; they come from storage, so they are checked on every read. */
+function loadedEntries(values: unknown): readonly RuntimeScriptStorageEntrySnapshot[] {
+  if (validateScriptStorageEntries(values, "values") !== null)
+    throw new Error("The debug room's saved data is unreadable.");
+  // EVIDENCE: validation: validateScriptStorageEntries accepted the stored values above.
+  return values as readonly RuntimeScriptStorageEntrySnapshot[];
+}
 
 /** A store in this page's memory, for a browser without IndexedDB; a reload ends its sessions. */
 export function memoryKeptSessionStore(): KeptSessionStore {
@@ -281,7 +334,49 @@ export function memoryKeptSessionStore(): KeptSessionStore {
   };
 }
 
+/** A room store in this page's memory, for a browser without IndexedDB; a reload ends its rooms. */
+export function memoryKeptRoomStore(): KeptRoomStore {
+  const sessions = memoryKeptSessionStore();
+  const rooms = new Map<string, readonly RuntimeScriptStorageEntrySnapshot[]>();
+  const room = (scope: string) => {
+    const values = rooms.get(scope);
+    if (values === undefined) throw missingRoom();
+    return values;
+  };
+  return {
+    ...sessions,
+    read: async (scope) =>
+      rooms.has(scope) ? { session: (await sessions.session(scope)) !== null } : null,
+    async create(scope, entries, photos) {
+      checkedEntries(entries);
+      if (rooms.has(scope)) throw new Error("This script has a debug room already.");
+      await sessions.discard(scope);
+      rooms.set(scope, [...entries]);
+      for (const photo of photos) await sessions.media.add({ ...photo, namespace: scope });
+    },
+    values: (scope) => ({
+      scope,
+      load: async () => room(scope),
+      write: async (key, value) => void rooms.set(scope, writtenEntries(room(scope), key, value)),
+      replace: async (entries) => {
+        checkedEntries(entries);
+        room(scope);
+        rooms.set(scope, [...entries]);
+      },
+      clear: async () => {
+        room(scope);
+        rooms.set(scope, []);
+      },
+    }),
+    async discard(scope) {
+      rooms.delete(scope);
+      await sessions.discard(scope);
+    },
+  };
+}
+
 const DATABASE_VERSION = 1;
+const ROOMS = "rooms";
 const SESSIONS = "sessions";
 const EVENTS = "events";
 const MEDIA = "media";
@@ -291,9 +386,23 @@ const MEDIA = "media";
  * position, and photos by scope and reference. Each operation is one transaction. Rejects when IndexedDB is unavailable
  * or refused.
  */
-export function openIndexedDbKeptSessionStore(
+export async function openIndexedDbKeptSessionStore(
   name = "teasescript-kept-sessions",
 ): Promise<KeptSessionStore> {
+  return indexedDbStore(await openDatabase(name, false));
+}
+
+/**
+ * Opens the debug rooms of this browser in IndexedDB (`teasescript-debug-rooms`): as kept sessions, and each room's
+ * saved values by scope. Each operation is one transaction. Rejects when IndexedDB is unavailable or refused.
+ */
+export async function openIndexedDbKeptRoomStore(
+  name = "teasescript-debug-rooms",
+): Promise<KeptRoomStore> {
+  return indexedDbRoomStore(await openDatabase(name, true));
+}
+
+function openDatabase(name: string, rooms: boolean): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new DOMException("IndexedDB is unavailable.", "NotSupportedError"));
@@ -302,6 +411,7 @@ export function openIndexedDbKeptSessionStore(
     const request = indexedDB.open(name, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
+      if (rooms) database.createObjectStore(ROOMS, { keyPath: "scope" });
       database.createObjectStore(SESSIONS, { keyPath: "scope" });
       database.createObjectStore(EVENTS);
       database.createObjectStore(MEDIA, { keyPath: ["namespace", "reference"] });
@@ -313,7 +423,7 @@ export function openIndexedDbKeptSessionStore(
       const database = request.result;
       // Another tab upgrading the database needs this connection closed.
       database.onversionchange = () => database.close();
-      resolve(indexedDbStore(database));
+      resolve(database);
     };
   });
 }
@@ -323,43 +433,46 @@ const scopeRange = (scope: string) => IDBKeyRange.bound([scope], [scope, []]);
 const eventsFrom = (scope: string, from: number) =>
   IDBKeyRange.bound([scope, from], [scope, Infinity]);
 
+/**
+ * Runs `work` in one transaction of `database` over `stores` and resolves with its result once the transaction committed;
+ * `work` receives a `fail` that aborts the transaction with an error, so nothing it wrote stays.
+ */
+function transact<T>(
+  database: IDBDatabase,
+  stores: readonly string[],
+  mode: IDBTransactionMode,
+  work: (
+    transaction: IDBTransaction,
+    done: (result: T) => void,
+    fail: (error: Error) => void,
+  ) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([...stores], mode);
+    let result: T;
+    let failure: Error | null = null;
+    transaction.oncomplete = () => resolve(result);
+    transaction.onabort = transaction.onerror = () =>
+      reject(failure ?? transaction.error ?? new DOMException("Aborted.", "AbortError"));
+    work(
+      transaction,
+      (value) => (result = value),
+      (error) => {
+        failure = error;
+        transaction.abort();
+      },
+    );
+  });
+}
+
+const got = <T>(request: IDBRequest<T>, then: (value: T) => void) => {
+  request.onsuccess = () => then(request.result);
+};
+
 function indexedDbStore(database: IDBDatabase): KeptSessionStore {
-  /**
-   * Runs `work` in one transaction over `stores` and resolves with its result once the transaction committed; `work`
-   * receives a `fail` that aborts the transaction with an error, so nothing it wrote stays.
-   */
-  function transact<T>(
-    stores: readonly string[],
-    mode: IDBTransactionMode,
-    work: (
-      transaction: IDBTransaction,
-      done: (result: T) => void,
-      fail: (error: Error) => void,
-    ) => void,
-  ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction([...stores], mode);
-      let result: T;
-      let failure: Error | null = null;
-      transaction.oncomplete = () => resolve(result);
-      transaction.onabort = transaction.onerror = () =>
-        reject(failure ?? transaction.error ?? new DOMException("Aborted.", "AbortError"));
-      work(
-        transaction,
-        (value) => (result = value),
-        (error) => {
-          failure = error;
-          transaction.abort();
-        },
-      );
-    });
-  }
-  const got = <T>(request: IDBRequest<T>, then: (value: T) => void) => {
-    request.onsuccess = () => then(request.result);
-  };
   return {
     session: (scope) =>
-      transact([SESSIONS, EVENTS], "readonly", (transaction, done) =>
+      transact(database, [SESSIONS, EVENTS], "readonly", (transaction, done) =>
         got(
           transaction.objectStore(SESSIONS).get(scope),
           (session: Record<string, unknown> | undefined) => {
@@ -376,7 +489,7 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
         ),
       ),
     publish: (scope, update) =>
-      transact<void>([SESSIONS, EVENTS], "readwrite", (transaction, _done, fail) => {
+      transact<void>(database, [SESSIONS, EVENTS], "readwrite", (transaction, _done, fail) => {
         const sessions = transaction.objectStore(SESSIONS);
         got(sessions.get(scope), (previous: Record<string, unknown> | undefined) => {
           const planJson = update.planJson ?? previous?.["planJson"];
@@ -400,22 +513,22 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
       }),
     media: {
       get: (namespace, reference) =>
-        transact([MEDIA], "readonly", (transaction, done) =>
+        transact(database, [MEDIA], "readonly", (transaction, done) =>
           got(transaction.objectStore(MEDIA).get([namespace, reference]), (record) =>
             done(record ?? null),
           ),
         ),
       // `add`, unlike `put`, fails instead of overwriting an existing record.
       add: (record) =>
-        transact<void>([MEDIA], "readwrite", (transaction) => {
+        transact<void>(database, [MEDIA], "readwrite", (transaction) => {
           transaction.objectStore(MEDIA).add(record);
         }),
       delete: (namespace, reference) =>
-        transact<void>([MEDIA], "readwrite", (transaction) => {
+        transact<void>(database, [MEDIA], "readwrite", (transaction) => {
           transaction.objectStore(MEDIA).delete([namespace, reference]);
         }),
       listReferences: (namespace) =>
-        transact([MEDIA], "readonly", (transaction, done) =>
+        transact(database, [MEDIA], "readonly", (transaction, done) =>
           got(transaction.objectStore(MEDIA).getAllKeys(scopeRange(namespace)), (keys) =>
             done(
               keys.flatMap((key) =>
@@ -426,7 +539,88 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
         ),
     },
     discard: (scope) =>
-      transact<void>([SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
+      transact<void>(database, [SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
+        transaction.objectStore(SESSIONS).delete(scope);
+        transaction.objectStore(EVENTS).delete(scopeRange(scope));
+        transaction.objectStore(MEDIA).delete(scopeRange(scope));
+      }),
+  };
+}
+
+function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
+  const sessions = indexedDbStore(database);
+  /** Changes the scope's saved values within one transaction; fails without a room. */
+  const changeValues = (
+    scope: string,
+    change: (
+      values: readonly RuntimeScriptStorageEntrySnapshot[],
+    ) => readonly RuntimeScriptStorageEntrySnapshot[],
+  ) =>
+    transact<void>(database, [ROOMS], "readwrite", (transaction, _done, fail) => {
+      const rooms = transaction.objectStore(ROOMS);
+      got(rooms.get(scope), (room: { values?: unknown } | undefined) => {
+        if (room === undefined) return fail(missingRoom());
+        try {
+          rooms.put({ scope, values: change(loadedEntries(room.values)) });
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    });
+  return {
+    ...sessions,
+    read: (scope) =>
+      transact(database, [ROOMS, SESSIONS], "readonly", (transaction, done) =>
+        got(transaction.objectStore(ROOMS).getKey(scope), (room) => {
+          if (room === undefined) return done(null);
+          got(transaction.objectStore(SESSIONS).getKey(scope), (session) =>
+            done({ session: session !== undefined }),
+          );
+        }),
+      ),
+    create(scope, entries, photos) {
+      checkedEntries(entries);
+      return transact<void>(
+        database,
+        [ROOMS, SESSIONS, EVENTS, MEDIA],
+        "readwrite",
+        (transaction) => {
+          // Nothing of an earlier room may stay; `add` fails when the scope has a room.
+          transaction.objectStore(SESSIONS).delete(scope);
+          transaction.objectStore(EVENTS).delete(scopeRange(scope));
+          transaction.objectStore(MEDIA).delete(scopeRange(scope));
+          transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
+          for (const photo of photos)
+            transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
+        },
+      );
+    },
+    values: (scope) => ({
+      scope,
+      load: () =>
+        transact(database, [ROOMS], "readonly", (transaction, done, fail) =>
+          got(
+            transaction.objectStore(ROOMS).get(scope),
+            (room: { values?: unknown } | undefined) => {
+              if (room === undefined) return fail(missingRoom());
+              try {
+                done(loadedEntries(room.values));
+              } catch (error) {
+                fail(error instanceof Error ? error : new Error(String(error)));
+              }
+            },
+          ),
+        ),
+      write: (key, value) => changeValues(scope, (values) => writtenEntries(values, key, value)),
+      replace: (entries) => {
+        checkedEntries(entries);
+        return changeValues(scope, () => [...entries]);
+      },
+      clear: () => changeValues(scope, () => []),
+    }),
+    discard: (scope) =>
+      transact<void>(database, [ROOMS, SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
+        transaction.objectStore(ROOMS).delete(scope);
         transaction.objectStore(SESSIONS).delete(scope);
         transaction.objectStore(EVENTS).delete(scopeRange(scope));
         transaction.objectStore(MEDIA).delete(scopeRange(scope));

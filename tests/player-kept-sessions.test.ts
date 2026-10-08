@@ -5,6 +5,7 @@ import { CapturedMediaStore } from "../player/captured-media.js";
 import {
   capturedMediaReferencesInJson,
   keptSession,
+  memoryKeptRoomStore,
   memoryKeptSessionStore,
   type StoredKeptSession,
 } from "../player/kept-sessions.js";
@@ -131,6 +132,32 @@ test("the store keeps one session per scope, extends it from a position, and dis
   await store.discard("script");
   assert.equal(await store.session("script"), null);
   assert.deepEqual(await store.media.listReferences("script"), []);
+});
+
+test("a debug room keeps saved values of its own beside its session and photos, and goes as a whole", async () => {
+  const rooms = memoryKeptRoomStore();
+  assert.equal(await rooms.read("script"), null);
+  await rooms.create("script", [{ key: "best", value: 3 }], []);
+  await assert.rejects(rooms.create("script", [], []), /already/);
+  const values = rooms.values("script");
+  await values.write("on", true);
+  assert.deepEqual(await values.load(), [
+    { key: "best", value: 3 },
+    { key: "on", value: true },
+  ]);
+  assert.deepEqual(await rooms.read("script"), { session: false });
+  await rooms.publish("script", {
+    planJson: "plan",
+    snapshotJson: "1",
+    eventsFrom: 0,
+    events: [],
+    marks,
+  });
+  assert.deepEqual(await rooms.read("script"), { session: true });
+  await rooms.discard("script");
+  assert.equal(await rooms.read("script"), null);
+  assert.equal(await rooms.session("script"), null);
+  await assert.rejects(values.load(), /no debug room/);
 });
 
 test("a photo a kept session holds comes back as session media, which a save stores again", async () => {

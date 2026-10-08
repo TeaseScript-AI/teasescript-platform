@@ -22,6 +22,7 @@ import {
 } from "../player/debug-export.js";
 import {
   applyExternalStorageEdit,
+  setDebugMode,
   compileProject,
   completeAction,
   createCheckpoint,
@@ -103,6 +104,11 @@ class Recording {
     this.add("completeAction", [request], result.outcome.kind, result, queries);
     this.snapshot = result.snapshot;
     if (result.outcome.kind === "completed") this.run();
+  }
+  setDebug(enabled: unknown) {
+    const result = setDebugMode(this.plan, this.snapshot, enabled);
+    this.add("setDebugMode", [enabled], result.outcome.kind, result, []);
+    this.snapshot = result.snapshot;
   }
   editStorage(request: unknown) {
     const result = applyExternalStorageEdit(this.plan, this.snapshot, request);
@@ -797,4 +803,33 @@ test("a Debug storage edit replays from its recorded request, refused ones inclu
   const unedited = new Recording(compiled.plan);
   unedited.observe(1_000);
   assert.equal(unedited.snapshot.status, "halted");
+});
+
+test("Debug turned on and off replays from its recorded calls, refused ones included", async () => {
+  const compiled = compileProject([
+    {
+      path: "main.tease",
+      source:
+        "wait 1 s\nlet divisor = 1\nif debugMode {\n    divisor = 0\n}\nlet result = 1 / divisor\nexit",
+    },
+  ]);
+  assert.ok(compiled.plan);
+  const recording = new Recording(compiled.plan);
+  recording.setDebug("on");
+  recording.setDebug(true);
+  recording.observe(1_000);
+  assert.equal(recording.snapshot.status, "failed");
+  assert.deepEqual(
+    recording.operations.map((operation) => [operation.kind, operation.outcome]).slice(0, 3),
+    [
+      ["run", "ran"],
+      ["setDebugMode", "invalidRequest"],
+      ["setDebugMode", "set"],
+    ],
+  );
+  assert.equal(replayDebugExport(await roundTrip(recording.export())).kind, "reproduced");
+  // Debug is what fails the session: without it the same time passes without a failure.
+  const normal = new Recording(compiled.plan);
+  normal.observe(1_000);
+  assert.equal(normal.snapshot.status, "halted");
 });

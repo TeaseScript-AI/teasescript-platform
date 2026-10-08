@@ -127,7 +127,8 @@ runtime boundary is [Runtime script storage](RUNTIME.md#script-storage). The hos
 script and player. Before each Start the Player loads the scope; during the session it persists every pending write
 through the provider and then reports it to the runtime, which keeps the previous value when the write failed. When
 loading fails, for example because the browser denies storage, the session plays session-local and nothing is kept for
-a later run. Script storage is separate from the session the Player keeps for a reload
+a later run. In the [debug room](DEBUGGER.md#debug-room) the session uses the debug room's own saved values instead,
+which an export never takes. Script storage is separate from the session the Player keeps for a reload
 ([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)) and from durable checkpoint
 persistence (#469).
 

@@ -21,6 +21,7 @@ import PlayerTopBar from "./PlayerTopBar.vue";
 import PermanentButtons from "./PermanentButtons.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import ScriptProblems, { type ScriptFailure } from "./ScriptProblems.vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
 import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
 import StageRightRail from "./StageRightRail.vue";
@@ -199,6 +200,34 @@ const onStartPage = computed(
   () => props.player.session.value === null || props.player.activation.value !== null,
 );
 const startPage = ref<InstanceType<typeof SessionActivation> | null>(null);
+// Turning Debug on in the normal room (DEBUGGER.md "Debug room") goes on in the debug room, with a copy of the normal
+// session that runs. Overwriting a debug session with it is confirmed first, the only confirmation; it stacks above
+// Settings, which it opens from, as the debug export dialog does.
+const overwritingDebugSession = ref(false);
+const overwriteOpening = ref(0);
+function setDebugMenu(on: boolean) {
+  const rooms = props.player.rooms;
+  if (on && rooms.copies.value && rooms.debugSessionExists.value) {
+    overwriteOpening.value += 1;
+    overwritingDebugSession.value = true;
+  } else debug.menu.value = on;
+}
+function overwriteDebugSession() {
+  overwritingDebugSession.value = false;
+  debug.menu.value = true;
+}
+// A reload stays in the room shown: once play goes on in the debug room, the address says so.
+watch(
+  () => props.player.rooms.current.value,
+  (room) => {
+    if (room !== "debug" || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("room") === "debug") return;
+    url.searchParams.set("room", "debug");
+    window.history.replaceState(window.history.state, "", url);
+  },
+  { immediate: true },
+);
 watch(endDialogOpen, (open, wasOpen) => {
   if (wasOpen && !open)
     void props.player.toStartPage().then(async () => {
@@ -362,7 +391,8 @@ async function toggleFullscreen() {
     :debug-export="{ available: debugExport.available.value, open: openDebugExport }"
     v-model:contrast="contrast"
     v-model:titlebar-option="titlebarOption"
-    v-model:debug-menu="debug.menu.value"
+    :debug-menu="debug.menu.value"
+    @update:debug-menu="setDebugMenu"
   >
     <template #tool="scope">
       <DebugPanel
@@ -390,6 +420,7 @@ async function toggleFullscreen() {
           <PlayerTopBar
             :title="title"
             :author="author"
+            :debug-room="player.rooms.current.value === 'debug'"
             :fullscreen="fullscreen"
             :fullscreen-supported="fullscreenSupported"
             :fullscreen-error="fullscreenError"
@@ -464,7 +495,22 @@ async function toggleFullscreen() {
             :activation="player.activation.value"
             :title="title"
             :author="author"
+            :debug-room="player.rooms.current.value === 'debug'"
+            :start-anew="player.rooms.debugHasData.value"
             @activate="player.activate"
+            @reload="void player.rooms.reloadDebug()"
+            @reset="void player.rooms.resetDebug()"
+          />
+          <ConfirmDialog
+            :key="overwriteOpening"
+            :open="overwritingDebugSession"
+            name="debug-session-overwrite"
+            title="Overwrite the debug session?"
+            description="A copy of your normal session replaces the debug session and what it saved. Your normal session stays as it is."
+            action="Overwrite"
+            destructive
+            @confirm="overwriteDebugSession"
+            @cancel="overwritingDebugSession = false"
           />
           <DebugExportDialog
             :key="debugExportOpening"

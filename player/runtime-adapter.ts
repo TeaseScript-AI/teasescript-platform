@@ -14,6 +14,7 @@ import {
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
+  type DebugModeOutcome,
   type ExternalStorageEditOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
@@ -304,6 +305,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly recorder?: DebugRecorder;
   /** Traces the session from Start; the trace begins a new epoch. */
   readonly debugTrace?: RuntimeDebugContext;
+  /** Whether the session starts in Debug, which the script reads as `debugMode`; `false` by default. */
+  readonly debugMode?: boolean;
 }
 
 /**
@@ -404,6 +407,7 @@ export function createPlayerRuntimeSession(
     persistentScriptStorage: options.persistentScriptStorage ?? false,
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
+    ...(options.debugMode === undefined ? {} : { debugMode: options.debugMode }),
   });
   const recorder = options.recorder ?? null;
   const debugTrace = options.debugTrace ?? null;
@@ -1591,6 +1595,20 @@ export function applyPlayerRuntimeStorageEdit(
   });
 }
 
+/** Sets what the script's `debugMode` reads from now on; it runs nothing. */
+export function setPlayerRuntimeDebugMode(
+  session: PlayerRuntimeSession,
+  enabled: boolean,
+): PlayerRuntimeControlResult<DebugModeOutcome> {
+  const operation = session.engine.call(session, "setDebugMode", [enabled], (runtime) =>
+    runtime.setDebugMode(enabled, traceOptions(session.debugTrace)),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation, null),
+    outcome: operation.outcome,
+  });
+}
+
 /** Clicks a permanent button, then runs the session, which starts the button's block. */
 export function pressPlayerRuntimePermanentButton(
   session: PlayerRuntimeSession,
@@ -1764,6 +1782,7 @@ const REFUSALS: ReadonlySet<string> = new Set<
   | ExternalStorageEditOutcome["kind"]
   | PermanentButtonPressOutcome["kind"]
   | RandomDrawResolutionOutcome["kind"]
+  | DebugModeOutcome["kind"]
 >([
   "alreadySettled",
   "staleAction",
@@ -1779,6 +1798,7 @@ const REFUSALS: ReadonlySet<string> = new Set<
   "unknownMedia",
   "invalidReport",
   "invalidEdit",
+  "invalidRequest",
   "invalidState",
   "storageWritePending",
   "busy",

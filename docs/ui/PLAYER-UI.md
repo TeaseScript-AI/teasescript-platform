@@ -246,7 +246,8 @@ appears in the top controls when the sidebar is hidden and in the tools framewor
 The title pill shows the `title` and `author` of the package's `main.tease` header: "BuzzQuiz by NIFOC99", the title
 only, or "by NIFOC99", with the author in quieter text; without either it is absent, with no fallback. A pill the bar
 cuts off shows the full title and author in the bar's tooltip on hover, keyboard focus, or a tap; otherwise it is plain
-text. Which identity a multi-script package or the active script should show remains open.
+text. In the [debug room](../DEBUGGER.md#debug-room) a bug before the title marks the pill, named by the bar's tooltip
+"Debug session". Which identity a multi-script package or the active script should show remains open.
 
 The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
 title-bar A/B setting chooses the presentation:
@@ -268,7 +269,8 @@ available in every build to every user. It currently offers:
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
 - **Title bar on short screens · A/B test:** variant A or B above;
-- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)).
+- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)); on
+  in the normal room, play goes on in the [debug room](../DEBUGGER.md#debug-room).
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
   started, also with the Debug menu off.
 
@@ -443,7 +445,8 @@ a kept session whose events lack what the Player reads from them, such as a mess
 not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
-scenario, keeps none. Start and Continue
+scenario, keeps none. The debug room has a start page of its own, with its restarts
+([`DEBUGGER.md`](../DEBUGGER.md#debug-room)). Start and Continue
 also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
 the account setting when the host supplies one, else the browser's. They are session data
 ([Date and time context](../RUNTIME.md#date-and-time-context)).
