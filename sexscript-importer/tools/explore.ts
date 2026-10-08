@@ -20,7 +20,8 @@
  * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too) are on by default
  * (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`, `--no-realign` switch them off).
  * `--conjunctive` steers toward a way that needs all parts of its condition by their summed distance, and `--guidance`
- * puts states nearer to code not reached yet first (see `src/explorer-search.ts`); `--no-…` switches each off.
+ * leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`); `--no-…` switches each
+ * off.
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.

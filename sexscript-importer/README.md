@@ -325,10 +325,12 @@ part), and a session chain toward a stored value of the condition also counts ho
 With `--guidance`, a static map of the plan steers too: its control flow (conditions, calls and returns, file
 transfers, the blocks a timer, cue, or button sets up; constant conditions cut; a session's end leading to the next
 session's start) gives each instruction the number of decisions (conditions and prompts, a next session as three) to
-the nearest code play has not reached yet, measured again at each analysis. Among states whose cells were expanded
-as often, those that wait nearer to such code go first; the map only orders states. Directed work (attempts, next
-sessions, and expansions in the first place) takes at most a third of all runtime operations (fresh sessions, runs,
-inputs, and automatic answers), a deterministic measure of what steps cost.
+the largest region of code play has not reached yet (of at least ten instructions), measured again at each analysis.
+A step that brings a state nearer to that region shares a lead toward it, as closeness to a comparison does, for 40
+expansions; once the region is reached or its lead spent, the next largest region not tried yet is. It is off by
+default: on the units measured it gained nothing. Directed work (attempts, next sessions, and expansions in the first
+place) takes at most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a
+deterministic measure of what steps cost.
 
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,

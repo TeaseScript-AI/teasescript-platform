@@ -95,6 +95,10 @@ const MAX_DIRECTED_ANSWERS = 6;
 const MAX_SUFFIX = 60;
 /** Variables whose closeness to a comparison steers the search at the same time. */
 const MAX_DISTANCE_TARGETS = 8;
+/** With guidance: the fewest instructions a region of code not reached yet must have to be led toward. */
+const MIN_REGION = 10;
+/** The target of the guidance lead, which is no condition's. */
+const GUIDED = -1;
 /** Sessions one chain toward a stored value may take. */
 const MAX_CHAIN = 100;
 /** Next sessions started from the storage of completed sessions without a target. */
@@ -220,8 +224,8 @@ export interface ExploreOptions {
    */
   readonly conjunctive?: boolean;
   /**
-   * Static guidance: among states otherwise alike (after the cell's expansions), those whose next decisions bring them
-   * nearer to code play has not reached go first, by the plan's control flow (`TreasureMap`). Off by default.
+   * Static guidance: a step that brings a state nearer, by the plan's control flow (`TreasureMap`), to the largest region
+   * of code play has not reached yet shares a lead toward it, as closeness to a comparison does. Off by default.
    */
   readonly guidance?: boolean;
 }
@@ -424,6 +428,8 @@ export interface ExploreResult {
      * is read, and the time steps taken: by states (`later` inputs) and by next sessions.
      */
     time?: { conditions: number; places: number; steps: number; sessions: number };
+    /** With guidance: the regions of code not reached yet that the search was led toward, and those it reached. */
+    guidance?: { regions: number; reached: number };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -1025,13 +1031,36 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   // With guidance, the map of the plan, measured again from what play has not reached at each analysis.
   const map = options.guidance === true ? new TreasureMap(plan, instructions, allConstants) : null;
   const dead = map === null ? null : unreachableInstructions(plan, instructions, allConstants);
-  /** Measures the map again; when that moved any distance, every queued state takes its place again. */
+  /**
+   * With guidance: the region of code not reached yet the search is led toward, by its first instruction, the regions
+   * tried, and the lead that states which come nearer to the region share; measured again at each analysis, and once
+   * the region is reached or its lead spent, the next largest region not tried yet.
+   */
+  const guidance: {
+    region: ReadonlySet<number> | null;
+    lead: Lead | null;
+    readonly tried: Set<number>;
+    reached: number;
+  } = { region: null, lead: null, tried: new Set(), reached: 0 };
   const guide = () => {
-    if (map?.update((index) => session.visited[index] === 0 && dead?.[index] === 0) !== true)
-      return;
-    const queued: number[] = [];
-    for (let id = frontier.pop(); id !== undefined; id = frontier.pop()) queued.push(id);
-    for (const id of queued) if (nodes[id]!.status === "open") frontier.push(id, order(nodes[id]!));
+    if (map === null) return;
+    const { region, lead } = guidance;
+    const reached = region !== null && [...region].some((index) => session.visited[index] === 1);
+    if (reached) guidance.reached += 1;
+    if (region !== null && !reached && lead !== null && lead.remaining > 0) return;
+    if (lead !== null) lead.remaining = 0;
+    const unreached = (index: number) => session.visited[index] === 0 && dead?.[index] === 0;
+    const next = map
+      .regions(unreached)
+      .find((members) => members.length >= MIN_REGION && !guidance.tried.has(members[0]!));
+    guidance.lead = null;
+    guidance.region = null;
+    if (next === undefined) return;
+    const members = new Set(next);
+    guidance.region = members;
+    guidance.tried.add(next[0]!);
+    map.update((index) => members.has(index));
+    guidance.lead = { remaining: CLOSER_EXPANSIONS, target: GUIDED };
   };
   const store = new SnapshotStore();
   const nodes: Node[] = [];
@@ -1205,6 +1234,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * clock attempt takes its own steps but no first place after them, so that play goes first.
    */
   const leads = (node: Node): boolean => !node.clock && active(node.lead);
+  /** With guidance, how many decisions a state waiting at an instruction is from the region it is led toward. */
+  const approachAt = (waitsAt: unknown): number =>
+    map === null || typeof waitsAt !== "number" ? FAR : (map.distances[waitsAt] ?? FAR);
   const order = (node: Node): readonly number[] => {
     const [tier = 0, ...rest] = node.rank;
     return [
@@ -1214,10 +1246,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       starts[node.start]!.session,
       // With cells, the states of the cell expanded least first (see `CellFrontier`).
       ...(cells === null ? [] : [cells.expansions[node.cell]!]),
-      // With guidance, those nearer to code not reached yet first.
-      ...(map === null
-        ? []
-        : [typeof node.waitsAt === "number" ? (map.distances[node.waitsAt] ?? FAR) : FAR]),
       tier,
       ...rest,
     ];
@@ -2313,12 +2341,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
-      const lead = closer < 0 ? null : closerLead(closer);
-      // With progress leads, an expansion of a state that leads by closeness, and that gets closer again, is given back.
+      // With guidance, a step that brings a state nearer to the region of code not reached yet shares the guidance lead.
+      const guideLead = guidance.lead;
+      const guided =
+        closer < 0 &&
+        guideLead !== null &&
+        guideLead.remaining > 0 &&
+        approachAt(record(next.snapshot.foregroundAction).owningInstruction) <
+          approachAt(node.waitsAt);
+      const lead = closer >= 0 ? closerLead(closer) : guided ? guideLead : null;
+      // With progress leads, an expansion of a state that leads by closeness, and that gets closer again, is given back;
+      // not one of the guidance lead, which a loop could bring nearer each round.
       if (
         options.progressLeads === true &&
         leading &&
         lead !== null &&
+        !guided &&
         node.lead === lead &&
         !refunded
       ) {
@@ -2326,7 +2364,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         refunded = true;
       }
       transition(node, input, next, node.start, lead);
-      if (lastStepNew || closer >= 0) {
+      if (lastStepNew || closer >= 0 || guided) {
         if (!productive) at.productive += 1;
         productive = true;
         at.inputs.add(inputKey(input));
@@ -2470,6 +2508,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
       ...(cells === null ? {} : { cells: cells.stats }),
+      ...(map === null
+        ? {}
+        : { guidance: { regions: guidance.tried.size, reached: guidance.reached } }),
       ...(times === null
         ? {}
         : {

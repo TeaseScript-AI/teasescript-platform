@@ -2,8 +2,8 @@ import { successors } from "./explorer-analysis.ts";
 
 /**
  * Static guidance for the explorer's search (`ExploreOptions.guidance`): a map of the whole plan, built once, that tells
- * how far each instruction is from code play has not reached yet, so that states nearer to it go first among states
- * otherwise alike. The map is the plan's control flow ({@link successors}: conditions, calls and returns, file
+ * how far each instruction is from a region of code play has not reached yet, so that states that come nearer to it
+ * share a lead toward it. The map is the plan's control flow ({@link successors}: conditions, calls and returns, file
  * transfers, the blocks a timer, cue, or button sets up), with constant conditions cut, and a session's end leading
  * back to the start of the next session. The distance counts the decisions on the way, the conditions and the prompts
  * the player answers, and a next session as {@link RESTART} of them: the approach level of search-based testing. It only
@@ -81,6 +81,37 @@ export class TreasureMap {
       instruction.kind === "exit" || instruction.kind === "end" ? [index] : [],
     );
     this.distances = new Int32Array(endPlace + 1).fill(FAR);
+  }
+
+  /**
+   * The regions of code `unreached` tells: instructions that may run one right after another make one region. Largest
+   * first, each in instruction order.
+   */
+  regions(unreached: (index: number) => boolean): number[][] {
+    const count = this.#instructions;
+    const parent = Int32Array.from({ length: count }, (_, index) => index);
+    const root = (index: number): number => {
+      let at = index;
+      while (parent[at] !== at) {
+        parent[at] = parent[parent[at]!]!;
+        at = parent[at]!;
+      }
+      return at;
+    };
+    for (let index = 0; index < count; index += 1) {
+      if (!unreached(index)) continue;
+      for (const before of this.#before[index]!)
+        if (before < count && unreached(before)) parent[root(before)] = root(index);
+    }
+    const members = new Map<number, number[]>();
+    for (let index = 0; index < count; index += 1) {
+      if (!unreached(index)) continue;
+      const at = root(index);
+      const region = members.get(at);
+      if (region === undefined) members.set(at, [index]);
+      else region.push(index);
+    }
+    return [...members.values()].sort((left, right) => right.length - left.length);
   }
 
   /** Measures again from the instructions `unreached` tells, each at distance 0; whether any distance moved. */
