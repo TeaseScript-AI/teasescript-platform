@@ -145,6 +145,14 @@ def scoreText = loadString("game.scoreText")
 def scoreCopy = scoreText
 show("Score " + (scoreCopy == null))
 def saveScore = { save("game.scoreText", 10) }
+// A parameter that a call passes such a text to only under a null test holds no null, and a template the script wrote
+// around a read keeps its text, also where it is copied.
+def measure = { measured = "fallback" -> show("Size " + measured.length()) }
+def measuredText = loadString("game.measured")
+if (measuredText != null) measure(measuredText)
+def written = "${load('game.written')}"
+def writtenCopy = written
+show("Written " + writtenCopy)
 // An object's field that a text is set into takes the empty text of a missing one, as a list's item does.
 def profile = [name: "Guest"]
 profile.name = loadString("game.profileName")
