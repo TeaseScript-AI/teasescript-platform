@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -8,6 +9,7 @@ import {
   createCheckpoint,
   createFreshRuntimeSession,
   createRuntimeSession,
+  createTaggedRuntimeSession,
   executeInstruction,
   inspectRuntimeState,
   mediaPlaybackProjection,
@@ -30,6 +32,7 @@ import {
   type RuntimeSession,
   type RuntimeSessionResult,
   type RuntimeSnapshot,
+  type TaggedRuntimeSnapshot,
 } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
@@ -52,6 +55,8 @@ while rounds < 100 {
 }
 exit
 `;
+
+const IMMEDIATE = { seed: 5, baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 } as const;
 
 function choiceRequest(session: RuntimeSession, optionIndex: number) {
   const action = session.view().foregroundAction;
@@ -183,6 +188,157 @@ test("a fork is independent of its parent and shares only the immutable plan", (
   );
 });
 
+test("a tagged snapshot restores without capture or validation to the checked restore's state", () => {
+  const plan = compileValidPlan(CHOICE_LOOP);
+  const source = createFreshRuntimeSession(plan, IMMEDIATE);
+  source.run();
+  source.completeAction(choiceRequest(source, 1));
+  source.run();
+  source.observeTime(1_000);
+  source.run();
+  const atExport = serializeCheckpoint(source.exportCheckpoint());
+  const tagged = withValidationTestStatistics((statistics) => {
+    const exported = source.exportTaggedSnapshot();
+    assert.equal(statistics().counts.snapshotValidationAnalyses ?? 0, 0);
+    return exported;
+  });
+  assert.equal(tagged.json, JSON.stringify(source.exportSnapshot()));
+  assert.equal(Reflect.set(tagged, "json", "{}"), false);
+
+  const restore = () =>
+    withValidationTestStatistics((statistics) => {
+      const restored = createTaggedRuntimeSession(source.plan, tagged);
+      const { counts } = statistics();
+      assert.equal(counts.externalCaptureVisits ?? 0, 0);
+      assert.equal(counts.snapshotValidationAnalyses ?? 0, 0);
+      return restored;
+    });
+  const restored = restore();
+  const checked = createRuntimeSession(plan, JSON.parse(tagged.json));
+  assert.equal(restored.plan, source.plan);
+  assert.equal(serializeCheckpoint(restored.exportCheckpoint()), atExport);
+  assert.equal(serializeCheckpoint(checked.exportCheckpoint()), atExport);
+
+  // The source goes on; the restored session shares nothing with it and continues as the checked restore does.
+  source.completeAction(choiceRequest(source, 1));
+  source.run();
+  restored.completeAction(choiceRequest(restored, 0));
+  checked.completeAction(choiceRequest(checked, 0));
+  assert.deepEqual(restored.run(), checked.run());
+  assert.equal(
+    serializeCheckpoint(restored.exportCheckpoint()),
+    serializeCheckpoint(checked.exportCheckpoint()),
+  );
+  // The tagged snapshot stays as it was exported, and each restore of it is a session of its own.
+  assert.equal(serializeCheckpoint(restore().exportCheckpoint()), atExport);
+});
+
+test("any other tagged input is captured and validated, also a changed one, another plan's, or another process's", () => {
+  const plan = compileValidPlan(CHOICE_LOOP);
+  const session = createFreshRuntimeSession(plan, IMMEDIATE);
+  session.run();
+  const tagged = session.exportTaggedSnapshot();
+  /** Requires the checked path: capture and validation, and the session `createRuntimeSession` gives for the JSON. */
+  const checked = (restorePlan: InstructionPlan, input: TaggedRuntimeSnapshot, context: string) => {
+    const restored = withValidationTestStatistics((statistics) => {
+      const created = createTaggedRuntimeSession(restorePlan, input);
+      assert.ok((statistics().counts.externalCaptureVisits ?? 0) > 0, `${context}: not captured`);
+      return created;
+    });
+    assert.equal(
+      serializeCheckpoint(restored.exportCheckpoint()),
+      serializeCheckpoint(
+        createRuntimeSession(restorePlan, JSON.parse(input.json)).exportCheckpoint(),
+      ),
+      context,
+    );
+  };
+
+  // Another plan object of the same source has a key of its own.
+  const twin = compileValidPlan(CHOICE_LOOP);
+  const twinSession = createFreshRuntimeSession(twin, IMMEDIATE);
+  twinSession.run();
+  const twinTagged = twinSession.exportTaggedSnapshot();
+  assert.equal(twinTagged.json, tagged.json);
+  assert.notEqual(twinTagged.tag, tagged.tag);
+  checked(plan, twinTagged, "another plan's tag");
+  checked(twin, tagged, "another plan");
+  // EVIDENCE: fixture: a plain copy of a validated plan is unvalidated external data.
+  checked(
+    JSON.parse(JSON.stringify(plan)) as InstructionPlan,
+    tagged,
+    "an unvalidated copy of the plan",
+  );
+  const flipped = (tagged.tag.startsWith("0") ? "1" : "0") + tagged.tag.slice(1);
+  checked(plan, { json: tagged.json, tag: flipped }, "a changed tag");
+  // EVIDENCE: fixture: a host's tagged snapshot that lost its tag.
+  checked(plan, { json: tagged.json } as never, "no tag");
+  session.completeAction(choiceRequest(session, 0));
+  session.run();
+  checked(
+    plan,
+    { json: tagged.json, tag: session.exportTaggedSnapshot().tag },
+    "a later snapshot's tag",
+  );
+
+  // A change that validation accepts is kept, and one it refuses throws, though the tag is the original.
+  const changed = JSON.parse(tagged.json);
+  assert.deepEqual(changed.frames[0].bindings[0], { name: "rounds", value: 0 });
+  changed.frames[0].bindings[0].value = 7;
+  const changedJson = JSON.stringify(changed);
+  checked(plan, { json: changedJson, tag: tagged.tag }, "changed JSON");
+  const refused = (input: unknown, message: RegExp) => {
+    // EVIDENCE: fixture: deliberately malformed host input.
+    const malformed = input as TaggedRuntimeSnapshot;
+    assert.throws(
+      () => createTaggedRuntimeSession(plan, malformed),
+      (error) =>
+        error instanceof RuntimeDataError && error.code === "TSR101" && message.test(error.message),
+    );
+  };
+  refused(
+    { json: tagged.json.replace('"nextInstruction":', '"nextInstruction":9'), tag: tagged.tag },
+    /./,
+  );
+  refused({ json: "{", tag: tagged.tag }, /JSON is invalid/);
+  refused({ json: 5, tag: tagged.tag }, /JSON as a string/);
+  refused(null, /JSON as a string/);
+
+  // Each part is read once, so what the tag proves is what runs.
+  let reads = 0;
+  const swapping = {
+    get json() {
+      reads += 1;
+      return reads === 1 ? tagged.json : changedJson;
+    },
+    tag: tagged.tag,
+  };
+  const proven = createTaggedRuntimeSession(plan, swapping);
+  assert.equal(reads, 1);
+  assert.equal(
+    serializeCheckpoint(proven.exportCheckpoint()),
+    serializeCheckpoint(createRuntimeSession(plan, JSON.parse(tagged.json)).exportCheckpoint()),
+  );
+
+  // Another process's engine has keys of its own.
+  const moduleUrl = new URL("../src/index.js", import.meta.url).href;
+  const script = `
+    import * as m from ${JSON.stringify(moduleUrl)};
+    const plan = m.compileSource(${JSON.stringify(CHOICE_LOOP)}).plan;
+    const session = m.createFreshRuntimeSession(plan, ${JSON.stringify(IMMEDIATE)});
+    session.run();
+    process.stdout.write(JSON.stringify(session.exportTaggedSnapshot()));
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(child.status, 0, child.stderr || String(child.error));
+  const foreign: TaggedRuntimeSnapshot = JSON.parse(child.stdout);
+  assert.equal(foreign.json, tagged.json);
+  checked(plan, foreign, "another process's tagged snapshot");
+});
+
 test("sessions come only from the factories, which validate what they import", () => {
   const plan = compileValidPlan(CHOICE_LOOP);
   const other = compileValidPlan('say "other"\nexit');
@@ -268,6 +424,7 @@ test("an operation that throws ends its session, and argument errors leave it us
       () => session.observeTime(1),
       () => session.exportSnapshot(),
       () => session.exportTrustedSnapshot(),
+      () => session.exportTaggedSnapshot(),
       () => session.exportCheckpoint(),
       () => session.fork(),
     ])

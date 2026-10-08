@@ -181,6 +181,7 @@ export {
 export {
   createFreshRuntimeSession,
   createRuntimeSession,
+  createTaggedRuntimeSession,
   deserializeRuntimeSession,
   restoreRuntimeSession,
   RuntimeSessionError,
@@ -193,6 +194,7 @@ export {
   type RuntimeSessionVariablePreview,
   type RuntimeSessionVariablePreviews,
   type RuntimeSessionView,
+  type TaggedRuntimeSnapshot,
 } from "./runtime/session.js";
 export {
   completeAction,
