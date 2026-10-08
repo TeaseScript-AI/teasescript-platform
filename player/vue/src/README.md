@@ -55,7 +55,11 @@ specification.
   composes the Debug panel: `usePlayerDebug.ts` owns the Debug menu and Debug switches, the countdown line that
   `RuntimeInteraction.vue` shows, and the scopes of `useDebugLog.ts`, of the time controls that
   `useDevelopmentTime.ts` drives through the session host's `publishJump`, and of `useDebugRewind.ts`, which restores
-  states through the host's `rewind`; `DebugPanel.vue` and `DebugStatus.vue` present them. In the chat,
+  states through the host's `rewind`, and of `useDebugRandom.ts`, which decides random draws through the host's
+  `setRandomControl` and `resolveRandomDraw`; `DebugPanel.vue` and `DebugStatus.vue` present them. While a draw waits,
+  `RandomDrawPicker.vue` asks for its outcome from what `randomDrawPresentation.ts` derives, showing the code in the
+  shared `CodeBlock.vue` under a `PathBreadcrumb.vue`, and `useRandomDrawGuard.ts` keeps the rest of the page from
+  acting meanwhile. In the chat,
   `TranscriptMessage.vue` offers Back to here through `rewindPresentation.ts`, `Transcript.vue` shows the grey future
   `PlayerApp.vue` appends while a state is inspected, and `RewindInspection.vue` is the bar above the composer.
   `useMessageUpdateAnnouncements.ts` feeds the messages that live play changes in place to

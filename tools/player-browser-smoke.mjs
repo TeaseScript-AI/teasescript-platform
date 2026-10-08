@@ -134,6 +134,7 @@ async function main() {
       await titleBarScenario(cdp, origin);
       await keptSessionScenario(cdp, origin, profile);
       await debugRoomScenario(cdp, origin);
+      await randomPickerScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -160,7 +161,7 @@ async function main() {
       await formsScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -1572,6 +1573,134 @@ async function debugRoomScenario(cdp, origin) {
     `${runs} === 'Run 1.' && !document.querySelector('[data-debug-room-indicator]')`,
     8_000,
     "The normal session did not stay as it was",
+  );
+}
+
+// Debug's random draws (DEBUGGER.md "Random draws"): with Choose outcomes on, the picker asks at each draw, not modal:
+// the theme toggle works while Settings waits. It names the draw's script and file, marks the draw in the code, whose
+// tools show on hover and whose large view the dialogs' X closes, and resizes the code a line at a time. An outcome, a
+// typed value, a new order, and Least tried each go on with the script.
+async function randomPickerScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const picker = (kind) =>
+    `!!document.querySelector('[data-random-draw-picker][data-random-draw-kind="${kind}"]')`;
+  const said = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent).join('|')`;
+  const text = (selector, separator = " ") =>
+    `[...document.querySelectorAll(${JSON.stringify(selector)})].map((node) => node.textContent.trim()).join(${JSON.stringify(separator)})`;
+  const tools = `getComputedStyle(document.querySelector('[data-random-draw-source] [data-code-block-tools]')).opacity`;
+  const key = async (name, code) => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", { type, key: name, code });
+  };
+  await navigate(cdp, `${origin}/player/?package=random-picker&room=debug`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('[data-debug-random-active]')`);
+  await physicalClick(cdp, "[data-debug-random-active]");
+  await physicalClick(cdp, "[data-session-start]");
+  await waitFor(cdp, picker("chance"), 8_000, "The picker did not ask at the first draw");
+  assertEqual(
+    await value(cdp, text("[data-random-draw-location] li:not([role=presentation])")),
+    "random-picker main.tease",
+    "The breadcrumb did not start at the package",
+  );
+  assertEqual(
+    await value(cdp, text("[data-random-draw-source] [data-code-mark]", "")),
+    "chance(25)",
+    "The draw was not marked",
+  );
+  // Not modal: the display controls work, Settings waits for the outcome.
+  const theme = `document.documentElement.dataset.playerTheme`;
+  const before = await value(cdp, theme);
+  await physicalClick(cdp, "[data-theme-mode-control]");
+  await waitFor(
+    cdp,
+    `${theme} !== ${JSON.stringify(before)}`,
+    5_000,
+    "The theme toggle did not work beside the picker",
+  );
+  await physicalClick(cdp, "[data-theme-mode-control]");
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await delay(300);
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-player-settings]')`),
+    false,
+    "Settings opened beside the picker",
+  );
+  // With a mouse, the code's tools show while the pointer is over the code; where the pointer cannot hover, as in a
+  // headless browser without a mouse, they always show. Expand opens it large, and the dialogs' X closes that.
+  if (await value(cdp, `matchMedia("(hover: hover)").matches`)) {
+    assertEqual(
+      await value(cdp, tools),
+      "0",
+      "The code's tools showed without the pointer over it",
+    );
+    const block = await evaluate(
+      cdp,
+      `const rect = document.querySelector('[data-random-draw-source] [data-code-block]').getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };`,
+    );
+    await cdp.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: block.x, y: block.y });
+    await waitFor(cdp, `${tools} === "1"`, 5_000, "The code's tools did not show on hover");
+  } else assertEqual(await value(cdp, tools), "1", "The code's tools hid without hover");
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-code-block-lightbox] [data-code-mark]')`,
+    5_000,
+    "Expand did not open the code large",
+  );
+  await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-code-block-lightbox]') && ${picker("chance")}`,
+    5_000,
+    "The X did not close the large view",
+  );
+  // The corner grip resizes a whole line at a time.
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-random-draw-source] [data-code-block-resize]').focus()`,
+  );
+  await key("ArrowDown", "ArrowDown");
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-random-draw-source] [data-code-block-resize]').getAttribute('aria-valuenow')`,
+    ),
+    "8",
+    "The grip did not add a line",
+  );
+
+  await physicalClick(cdp, "[data-random-draw-outcome]");
+  await waitFor(
+    cdp,
+    `${picker("randomNormal")} && ${said}.includes('Hit: true')`,
+    8_000,
+    "The chosen outcome did not reach the script",
+  );
+  await evaluate(cdp, `document.querySelector('[data-random-draw-value]').focus()`);
+  await cdp.call("Input.insertText", { text: "42" });
+  await physicalClick(cdp, "[data-random-draw-use]");
+  await waitFor(
+    cdp,
+    `${picker("shuffle")} && ${said}.includes('Value: 42')`,
+    8_000,
+    "The typed value did not reach the script",
+  );
+  await physicalClick(cdp, '[data-random-draw-item] button[aria-label="Move down"]');
+  await physicalClick(cdp, "[data-random-draw-use]");
+  await waitFor(
+    cdp,
+    `${picker("chance")} && ${said}.includes('First: green')`,
+    8_000,
+    "The new order did not reach the script",
+  );
+  await physicalClick(cdp, "[data-random-draw-untried]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-random-draw-picker]') && ${said}.includes('Again: ')`,
+    8_000,
+    "Least tried did not go on",
   );
 }
 

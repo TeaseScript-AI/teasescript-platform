@@ -170,6 +170,7 @@ else
     :tools="tools"
     :title="packageHost === null ? 'Evening by the coast' : (identity?.title ?? '')"
     :author="identity?.author ?? ''"
+    :package-name="packageHost?.name ?? ''"
     :failure="failure ?? null"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
     :debug="debug"

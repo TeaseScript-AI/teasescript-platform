@@ -40,7 +40,9 @@ import {
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSessionAt,
+  resumePlayerRuntimeRandomDraw,
   setPlayerRuntimeDebugMode,
+  setPlayerRuntimeRandomControl,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -93,6 +95,9 @@ import {
   type CapturedMediaAdmission,
   type InstructionPlan,
   type InterpreterEvent,
+  type RandomControlOptions,
+  type RandomDrawResolutionOutcome,
+  type RandomOutcome,
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
   type TemporalContext,
@@ -179,6 +184,7 @@ export type PlayerSessionStart = (recording: {
   readonly recorder: DebugRecorder;
   readonly debugTrace?: RuntimeDebugContext;
   readonly debugMode: boolean;
+  readonly randomControl?: RandomControlOptions;
 }) => PlayerRuntimeSession;
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
@@ -344,8 +350,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const inspecting = ref(false);
   // Whether Debug's rewind restored an earlier state of the session; for its debug export.
   const rewound = shallowRef<DebugRewoundWhileDebugging | null>(null);
-  // The session as other parts of the Player service it: none while a restored state is inspected.
-  const servicedSession = computed(() => (inspecting.value ? null : session.value));
+  // While the session is paused at a random draw (DEBUGGER.md "Random draws"), it holds like an inspected state until
+  // the draw is resolved.
+  const drawPending = computed(() => session.value?.state.randomDraw != null);
+  const held = computed(() => inspecting.value || drawPending.value);
+  // Which random draws Debug decides or pauses at; every session of the Player gets it.
+  let randomControl: RandomControlOptions | null = null;
+  // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
+  const servicedSession = computed(() => (held.value ? null : session.value));
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
@@ -397,7 +409,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (mediaId, report) => {
       const current = session.value;
       if (!current) return "delivered";
-      if (inspecting.value) return "pending";
+      if (held.value) return "pending";
       const result = reportPlayerRuntimeMediaLoad(current, mediaId, report);
       if (result.outcome.kind === "executionPending") return "pending";
       if (result.outcome.kind === "accepted") session.value = result.session;
@@ -422,7 +434,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
-  const clock = useRuntimeSceneClock(session, () => device.sample(), inspecting);
+  const clock = useRuntimeSceneClock(session, () => device.sample(), held);
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -441,10 +453,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
 
   watch(
-    [session, inspecting],
+    [session, held],
     ([current, paused]) => {
       const media = current ? playerRuntimeMedia(current.state).media : [];
-      // An inspected state shows its media where they were, without playing them.
+      // An inspected state, and a draw that waits, show their media where they were, without playing them.
       device.reconcile(
         paused ? media.map((projection) => ({ ...projection, state: "paused" as const })) : media,
       );
@@ -1016,6 +1028,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation.value++;
     interactionReset.value++;
     jumpedRevision.value = -1;
+    applyRandomControl(next);
     session.value = next;
     clock.rebase();
     if (!paused) applyDebugMode();
@@ -1245,6 +1258,38 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (result.outcome.kind !== "set") return;
     session.value = result.session;
     keepSessionLater();
+  }
+  /**
+   * Gives every session from now on Debug's random control, or none. Without one, a draw the session is paused at goes
+   * on naturally.
+   */
+  function setRandomControl(control: RandomControlOptions | null) {
+    randomControl = control;
+    const current = session.value;
+    if (current === null) return;
+    applyRandomControl(current);
+    if (control === null && current.state.randomDraw !== null)
+      resolveRandomDraw(current.state.randomDraw.drawId, "natural");
+  }
+  function applyRandomControl(current: PlayerRuntimeSession) {
+    if (current.state.status === "halted" || current.state.status === "failed") return;
+    setPlayerRuntimeRandomControl(current, randomControl);
+  }
+  /**
+   * Resolves the random draw the session is paused at, naturally or with a chosen outcome; the session's clock goes on
+   * from the time it paused at. `null` when the session is not paused at that draw.
+   */
+  function resolveRandomDraw(
+    drawId: number,
+    outcome: "natural" | RandomOutcome,
+  ): RandomDrawResolutionOutcome | null {
+    const current = session.value;
+    if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
+      return null;
+    const result = resumePlayerRuntimeRandomDraw(current, { drawId, outcome });
+    session.value = result.session;
+    clock.rebase();
+    return result.outcome;
   }
   /** Whether the shown session runs or waits. */
   const sessionLive = computed(
@@ -1498,11 +1543,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activation.value = {
       kind: "start",
       begin: () =>
-        create(
-          debugTrace.value === null
-            ? { recorder, debugMode }
-            : { recorder, debugTrace: debugTrace.value, debugMode },
-        ),
+        create({
+          recorder,
+          debugMode,
+          ...(debugTrace.value === null ? {} : { debugTrace: debugTrace.value }),
+          ...(randomControl === null ? {} : { randomControl }),
+        }),
     };
   }
   /**
@@ -1532,9 +1578,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           recorder,
           debugTrace: debugTrace.value,
         });
+        // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
+        // takes no other input.
+        const draw = continued.state.randomDraw;
+        if (draw !== null)
+          continued = resumePlayerRuntimeRandomDraw(continued, {
+            drawId: draw.drawId,
+            outcome: "natural",
+          }).session;
         // The script reads whether Debug is on now.
         if (continued.state.debugMode !== debugMode)
           continued = setPlayerRuntimeDebugMode(continued, debugMode).session;
+        applyRandomControl(continued);
         return continuePlayerRuntimeSession(continued, temporalCapture()).session;
       },
       ...(marks === undefined ? {} : { marks }),
@@ -1608,6 +1663,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      */
     jumpedRevision: computed(() => jumpedRevision.value),
     setDebugMode,
+    setRandomControl,
+    /** The random draw the session is paused at, or `null`. */
+    randomDraw: computed(() => session.value?.state.randomDraw ?? null),
+    resolveRandomDraw,
     /**
      * The normal room and the debug room (DEBUGGER.md "Debug room"). `reloadDebug` and `resetDebug` start a new debug
      * session from the debug room's start page on the player's click.
