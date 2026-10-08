@@ -97,9 +97,18 @@ const MAX_DIRECTED_ANSWERS = 6;
 const MAX_SUFFIX = 60;
 /** Variables whose closeness to a comparison steers the search at the same time. */
 const MAX_DISTANCE_TARGETS = 8;
-/** With random choices: the other outcomes tried of one draw, and the draws of one step that get them. */
+/**
+ * With random choices: the other outcomes tried of one draw, the outcomes they are taken from (all of a small support,
+ * representative ones of a large one), and the draws of one step that get them.
+ */
 const RANDOM_ALTERNATIVES = 3;
+const RANDOM_SUPPORT = 16;
 const RANDOM_DRAWS_PER_STEP = 4;
+/**
+ * With random choices: the share of all runtime operations that steps with a chosen random outcome and the expansions
+ * of states after one may take while play states are open. Such steps can cost much more than others.
+ */
+const CHOSEN_SHARE = 1 / 8;
 /** With guidance: the fewest instructions a region of code not reached yet must have to be led toward. */
 const MIN_REGION = 10;
 /** The target of the guidance lead, which is no condition's. */
@@ -594,6 +603,42 @@ class Frontier {
  * order per cell, which its least expansions and best state give. Expanding a cell moves only its own place, so the
  * search finds the state that comes first without reordering every state of that cell.
  */
+/**
+ * Open states in two queues: those whose path chose a random outcome come first only in their turn, and when no other
+ * state is open.
+ */
+class SplitFrontier {
+  readonly #play: Pick<Frontier, "size" | "push" | "pop">;
+  readonly #chosen: Pick<Frontier, "size" | "push" | "pop">;
+  readonly #isChosen: (node: number) => boolean;
+  readonly #turn: () => boolean;
+
+  constructor(
+    make: () => Pick<Frontier, "size" | "push" | "pop">,
+    isChosen: (node: number) => boolean,
+    turn: () => boolean,
+  ) {
+    this.#play = make();
+    this.#chosen = make();
+    this.#isChosen = isChosen;
+    this.#turn = turn;
+  }
+
+  get size(): number {
+    return this.#play.size + this.#chosen.size;
+  }
+
+  push(node: number, rank: readonly number[]): void {
+    (this.#isChosen(node) ? this.#chosen : this.#play).push(node, rank);
+  }
+
+  pop(): number | undefined {
+    return this.#chosen.size > 0 && (this.#play.size === 0 || this.#turn())
+      ? this.#chosen.pop()
+      : this.#play.pop();
+  }
+}
+
 class CellFrontier {
   /**
    * The open states by cell and by the order before cells (the first {@link GROUP} order elements), each group with its
@@ -1032,8 +1077,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         part.inputs.some((input) => input.random !== undefined),
       ),
     );
-  /** With random choices: the outcomes tried at each draw site, so that each is tried once. */
+  /** With random choices: the outcomes tried of each draw site, by place and input, so that each is tried once there. */
   const randomTried = new Set<string>();
+  /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
+  const chosenSteps: { node: number; input: ExplorerInput }[] = [];
+  let chosenAt = 0;
   const flow = new DataFlow(plan, instructions, {
     computedPrompts: options.comparedAnswers === true,
   });
@@ -1106,13 +1154,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const nodes: Node[] = [];
   const byState = new Map<string, number>();
   const loopSeen = new Map<string, number>();
-  const frontier: Pick<Frontier, "size" | "push" | "pop"> =
+  const queue = (): Pick<Frontier, "size" | "push" | "pop"> =>
     cells === null
       ? new Frontier()
       : new CellFrontier(
           (node) => nodes[node]!.cell,
           (cell) => cells.expansions[cell]!,
         );
+  const frontier = chooses
+    ? new SplitFrontier(
+        queue,
+        (node) => nodes[node]!.chosen,
+        () => withinChosenShare(),
+      )
+    : queue();
   const crashes = new Map<string, CrashReport>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
@@ -1290,6 +1345,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let nextWork = 0;
   /** Runtime operations of the corpus replay, which are no part of this run's work. */
   let replayWork = 0;
+  /** With random choices: runtime operations of steps with a chosen outcome, within {@link CHOSEN_SHARE}. */
+  let chosenWork = 0;
   let attemptCount = 0;
   let expanded = 0;
   let rejectedInputs = 0;
@@ -1324,8 +1381,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
   const withinShare = () => directedWork <= (session.operations - replayWork) * DIRECTED_SHARE;
   const withinNextShare = () => nextWork <= (session.operations - replayWork) * NEXT_SHARE;
+  const withinChosenShare = () => chosenWork <= (session.operations - replayWork) * CHOSEN_SHARE;
+  /**
+   * Whether directed search is done with a target: a way only play with a chosen random outcome reached is still aimed
+   * at by play without one, whose states are not limited by {@link CHOSEN_SHARE}.
+   */
+  const settled = (target: Target | undefined): boolean =>
+    target?.reach != null && target.reach.label !== "chosen";
   const active = (lead: Lead | null): lead is Lead =>
-    lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
+    lead !== null && lead.remaining > 0 && !settled(targets.get(lead.target)) && withinShare();
   /**
    * The order of a state: play states with a lead first, then play, then clock, then the states an earlier run
    * expanded. Within those, states whose step reached new instructions first, in any session; otherwise earlier
@@ -1580,6 +1644,47 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
   };
 
+  /**
+   * With random choices, queues the other outcomes of the draws a step made, each as a step with the same input: each
+   * outcome of a site once per place and input, the first ones not tried there yet.
+   */
+  const offerChoices = (node: Node, input: ExplorerInput, next: Step): void => {
+    if (!chooses) return;
+    const { random: _, ...plain } = input;
+    const context = `${node.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
+    for (const draw of next.draws.slice(0, RANDOM_DRAWS_PER_STEP)) {
+      if (typeof draw.drawId !== "number" || typeof draw.site !== "string") continue;
+      let taken = 0;
+      for (const outcome of engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives) {
+        if (taken === RANDOM_ALTERNATIVES) break;
+        const tried = `${context} ${draw.site} ${JSON.stringify(outcome)}`;
+        if (randomTried.has(tried)) continue;
+        randomTried.add(tried);
+        taken += 1;
+        chosenSteps.push({
+          node: node.id,
+          input: {
+            ...input,
+            random: [...(input.random ?? []), { drawId: draw.drawId, site: draw.site, outcome }],
+          },
+        });
+      }
+    }
+  };
+
+  /** Takes a queued step with another random outcome from the state it was offered at. */
+  const runChosen = (job: { node: number; input: ExplorerInput }): void => {
+    const node = nodes[job.node]!;
+    const work = session.operations;
+    const runtime = runtimeOf(node);
+    const next = runtime === null ? null : step(node, runtime, job.input);
+    if (next !== null) {
+      offerChoices(node, job.input, next);
+      transition(node, job.input, next, node.start, null);
+    }
+    chosenWork += session.operations - work;
+  };
+
   /** Starts a session from `start`; its first state, and its runtime session when it waits for the player. */
   const startSession = (
     start: Start,
@@ -1761,7 +1866,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (target === undefined) return;
     const chain = attempt.chain === undefined ? undefined : target.chains.get(attempt.chain);
     if (chain !== undefined) chain.queued = false;
-    if (target.reach !== null) return;
+    if (settled(target)) return;
     attemptCount += 1;
     const work = session.operations;
     // A chain's next session comes from the storage it reached, so its states take no first place of their own.
@@ -1813,7 +1918,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * storage, to get closer still. Stops when sessions stop getting closer.
    */
   const chainStep = (code: number, target: Target, goal: Goal): boolean => {
-    if (goal.source.kind !== "storage" || target.reach !== null) return false;
+    if (goal.source.kind !== "storage" || settled(target)) return false;
     const key = goal.source.key;
     let chain = target.chains.get(key);
     if (chain === undefined) {
@@ -2409,6 +2514,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       runAttempt(pending.shift()!);
       continue;
     }
+    // With random choices, steps with another random outcome take their share, and all the work when no state is open.
+    if (chosenAt < chosenSteps.length && (frontier.size === 0 || withinChosenShare())) {
+      runChosen(chosenSteps[chosenAt]!);
+      chosenAt += 1;
+      continue;
+    }
     if (frontier.size === 0) {
       if (analyze()) continue;
       break;
@@ -2465,33 +2576,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     node.status = "partial";
     const closeness =
       distanceTargets.length === 0 ? [] : distances(stored ?? base.exportTrustedSnapshot());
-    for (let index = 0; index < inputs.length; index += 1) {
-      const input = inputs[index]!;
+    for (const [index, input] of inputs.entries()) {
       const stop = spent();
       if (stop !== null) {
         stoppedBy = stop;
         break search;
       }
       const work = session.operations;
-      // With random choices the state's session stays as it is: other outcomes may follow the last input.
-      const last = index === inputs.length - 1 && !chooses;
-      const next = step(node, last ? base : base.fork(), input);
+      const next = step(node, index === inputs.length - 1 ? base : base.fork(), input);
       if (leading) directedWork += session.operations - work;
+      if (node.chosen) chosenWork += session.operations - work;
       if (next === null) continue;
-      // The other outcomes of the draws the step made, each with the same input: once per outcome of a site.
-      for (const draw of chooses ? next.draws.slice(0, RANDOM_DRAWS_PER_STEP) : []) {
-        if (typeof draw.drawId !== "number" || typeof draw.site !== "string") continue;
-        for (const outcome of engine.randomDrawAlternatives(draw, RANDOM_ALTERNATIVES)
-          .alternatives) {
-          const tried = `${draw.site} ${JSON.stringify(outcome)}`;
-          if (randomTried.has(tried)) continue;
-          randomTried.add(tried);
-          inputs.push({
-            ...input,
-            random: [...(input.random ?? []), { drawId: draw.drawId, site: draw.site, outcome }],
-          });
-        }
-      }
+      offerChoices(node, input, next);
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));

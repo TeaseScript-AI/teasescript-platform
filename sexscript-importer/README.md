@@ -357,9 +357,12 @@ of what steps cost; starting next visits takes at most another third, apart from
 
 With `--random-choices`, random outcomes are choices too (`docs/RUNTIME.md#controlled-randomness`): sessions let the
 explorer decide the draws that pick what happens (`chance`, random integers, picks from a collection, weighted picks,
-tag queries, and glob file transfers), which run naturally unless it chooses. A step also gets the other outcomes of
-the first four draws it made (`randomDrawAlternatives`, at most three per draw, each outcome of a draw site once in a
-run) as steps with the same input and that outcome chosen. A path records only the outcomes it chose, as the
+tag queries, and glob file transfers), which run naturally unless it chooses. A step also offers the other outcomes of
+the first four draws it made (`randomDrawAlternatives`: all of a small support, 16 representative ones of a large one;
+at most three per draw, each outcome of a draw site once per waiting place and input) as steps with the same input and
+that outcome chosen. Those steps and the expansions of the states after them take at most an eighth of all runtime
+operations while other states are open, and all of them when none is; they can cost much more than other steps, and a
+way only they reached stays a goal of directed search. A path records only the outcomes it chose, as the
 `random` list of the input during which they were drawn (draw ID, site, and outcome), so repros, the corpus, and
 `--replay` choose them again; a replay or corpus path with chosen outcomes plays them also without the flag. Play with
 a chosen outcome is play, labelled `chosen` ("play (chosen random)"): it counts toward coverage, and the reach counts,
