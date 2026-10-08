@@ -406,6 +406,8 @@ export class Session {
   randomChoices = false;
   /** The outcomes the input being applied chose, by draw ID, and the draws the current step made. */
   readonly #decisions = new Map<number, Data>();
+  /** The draws an input's chosen outcomes were taken at, while it is applied. */
+  readonly #taken = new Set<number>();
   #draws: Data[] = [];
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
@@ -461,14 +463,19 @@ export class Session {
           this.#draws.push(draw);
           const outcome =
             typeof draw.drawId === "number" ? this.#decisions.get(draw.drawId) : undefined;
-          return outcome === undefined ? { kind: "natural" } : { kind: "choose", outcome };
+          if (outcome === undefined) return { kind: "natural" };
+          this.#taken.add(Number(draw.drawId));
+          return { kind: "choose", outcome };
         },
       },
     };
   }
 
-  /** A fresh session, run until the player is first asked; a clock session at another wall clock than the play one. */
-  start(setup: Setup = PLAY_SETUP): Step {
+  /**
+   * A fresh session, run until the player is first asked; a clock session at another wall clock than the play one, and
+   * a `chosen` one after a session whose path chose a random outcome.
+   */
+  start(setup: Setup = PLAY_SETUP, chosen = false): Step {
     this.operations += 1;
     const runtime = this.#counted(
       this.#engine.createFreshRuntimeSession(
@@ -490,7 +497,7 @@ export class Session {
     this.#draws = [];
     return this.#reached(
       runtime,
-      this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS, false),
+      this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS, chosen),
     );
   }
 
@@ -613,17 +620,29 @@ export class Session {
     if (input.random !== undefined && !this.randomChoices)
       throw new Error("An input with chosen random outcomes needs a session with random choices.");
     for (const choice of input.random ?? []) this.#decisions.set(choice.drawId, choice.outcome);
+    this.#taken.clear();
     this.#draws = [];
     try {
-      return this.#input(runtime, runtime.view(), input)
+      const settled = this.#input(runtime, runtime.view(), input)
         ? this.#settle(
             runtime,
             clock || isClockInput(input),
             chosen || (input.random?.length ?? 0) > 0,
           )
         : null;
+      // The input did not fit as recorded unless each outcome it chose was drawn and taken, and no draw waits (the
+      // runtime holds a draw whose chosen outcome it refused).
+      if (
+        settled !== null &&
+        input.random !== undefined &&
+        (input.random.some((choice) => !this.#taken.has(choice.drawId)) ||
+          runtime.view().randomDraw != null)
+      )
+        return null;
+      return settled;
     } finally {
       this.#decisions.clear();
+      this.#taken.clear();
     }
   }
 

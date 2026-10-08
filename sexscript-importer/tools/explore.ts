@@ -840,15 +840,18 @@ function parseInputs(value: unknown): ExplorerInput[] | null {
 function parseInput(value: unknown): ExplorerInput | null {
   const input = parseInputKind(value);
   if (input === null || !isRecord(value) || value.random === undefined) return input;
-  // The random outcomes the explorer chose during the input; the runtime checks each outcome against its draw.
+  // The random outcomes the explorer chose during the input, one per draw; the runtime checks each outcome against its
+  // draw, and an input whose outcomes are not all taken does not fit.
   if (!Array.isArray(value.random) || value.random.length === 0) return null;
   const random: RandomChoice[] = [];
   for (const choice of value.random) {
     if (
       !isRecord(choice) ||
       !Number.isSafeInteger(choice.drawId) ||
+      random.some((known) => known.drawId === choice.drawId) ||
       typeof choice.site !== "string" ||
-      !isRecord(choice.outcome)
+      !isRecord(choice.outcome) ||
+      typeof choice.outcome.kind !== "string"
     )
       return null;
     random.push({ drawId: Number(choice.drawId), site: choice.site, outcome: choice.outcome });

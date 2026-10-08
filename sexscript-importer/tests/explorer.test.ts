@@ -1264,3 +1264,70 @@ test(
     assert.ok(resumed.coverage.reach.chosen! >= 2);
   },
 );
+
+test(
+  "play with chosen random outcomes stays apart across sessions, gives way to play that reaches the same state, follows directed steps too, and replays only as recorded",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const compile = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return plan;
+    };
+    const run = (source: string, randomChoices: boolean, corpus: readonly CorpusEntry[] = []) =>
+      explore(engine, compile(source), {
+        seed: 1,
+        budgetMs: 60_000,
+        budgetOps: 5000,
+        maxStates: 2000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        corpus,
+        randomChoices,
+      });
+    // The outcome a session chose that its storage keeps: the next session's crash is chosen play's.
+    const lucky =
+      'if (load "won", default: false) == true {\n  let zero = load "zero", default: 0\n  let boom = 1 / zero\n  exit\n}\n' +
+      'showButton "Go"\nif chance(25) == false {\n  save true as "won"\n}\nexit\n';
+    const later = run(lucky, true);
+    assert.equal(later.crashes.length, 1);
+    assert.equal(later.crashes[0]!.chosen, true);
+    assert.equal(later.crashes[0]!.earlier?.[0]?.inputs[0]?.random?.length, 1);
+    // A state chosen play reached first, which play then reaches too, is play's, and so is the crash after it.
+    const shared =
+      'showButton "Go"\nif chance(25) {\n  say "Lucky."\n}\nshowButton "Next"\nlet zero = load "zero", default: 0\n' +
+      "let boom = 1 / zero\nexit\n";
+    const forced = run(shared, true).corpus!.entries.find((entry) =>
+      entry.inputs.some((input) => input.random !== undefined),
+    )!;
+    const merged = run(shared, false, [{ ...forced, inputs: forced.inputs.slice(0, 1) }]);
+    assert.equal(merged.crashes[0]!.chosen, undefined);
+    assert.deepEqual(
+      merged.crashes[0]!.inputs.map((input) => input.random),
+      [undefined, undefined],
+    );
+    // The corpus counts chosen play's coverage too.
+    assert.equal(merged.corpus!.coverageAtEnd.percent, merged.coverage.percent);
+    // A recorded outcome for a draw the path does not make is a stale entry, not chosen play.
+    const unmatched = forced.inputs
+      .slice(0, 1)
+      .map((input) => ({
+        ...input,
+        random: input.random!.map((choice) => ({ ...choice, drawId: choice.drawId + 1 })),
+      }));
+    const stale = run(shared, false, [{ seed: 1, reason: "coverage", inputs: unmatched }]);
+    assert.equal(stale.corpus!.stale, 1);
+    assert.equal(stale.coverage.reach.chosen, 0);
+    // A step directed search takes offers its draws' other outcomes too.
+    const directed =
+      'let n = askInteger default: 0\nif n == 1234 {\n  if chance(25) {\n    say "Lucky."\n  } else {\n' +
+      '    say "Unlucky."\n  }\n}\nexit\n';
+    const steered = run(directed, true);
+    assert.ok(steered.directed.ways.some((way) => way.reach === "chosen"));
+    assert.ok(
+      !steered.coverage.files[0]!.unvisited.some((range) => ["4", "6"].includes(range.lines)),
+    );
+  },
+);
