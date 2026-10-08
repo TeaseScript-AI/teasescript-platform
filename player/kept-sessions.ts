@@ -1,5 +1,8 @@
-import type { InterpreterEvent } from "../src/index.js";
+import { isMessageMarkup, type InterpreterEvent } from "../src/index.js";
+import { isMessagePresentation } from "../src/message-presentation.js";
+import { isFormUi, validFormResult } from "../src/runtime/actions/form.js";
 import type { CapturedMediaRecord, CapturedMediaRepository } from "./captured-media.js";
+import type { MediaInUse } from "./captured-media-persistence.js";
 import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-export.js";
 import type { DebugHistoryMarks } from "./debug-history.js";
 
@@ -61,8 +64,8 @@ const EVENT_KINDS: ReadonlySet<unknown> = new Set<InterpreterEvent["kind"]>([
 
 /**
  * The stored session when its fields have their types and its events are records of known kinds in increasing
- * sequence, else `null`. Restoring validates the snapshot against the plan; the events are this Player's own record of
- * the same session, so their contents are not checked further here.
+ * sequence, each with the fields the Player reads from it, such as a message's markup, speaker, and presentation or an
+ * answer's form, else `null`. Restoring validates the snapshot against the plan.
  */
 export function keptSession(stored: StoredKeptSession): KeptSession | null {
   const { planJson, snapshotJson, events, marks } = stored;
@@ -71,9 +74,8 @@ export function keptSession(stored: StoredKeptSession): KeptSession | null {
   for (const event of events) {
     if (!isRecord(event)) return null;
     const next = event["sequence"];
-    if (!EVENT_KINDS.has(event["kind"]) || typeof next !== "number" || !Number.isSafeInteger(next))
-      return null;
-    if (next <= sequence) return null;
+    if (!EVENT_KINDS.has(event["kind"]) || !isCount(next) || next <= sequence) return null;
+    if (!validEvent(event)) return null;
     sequence = next;
   }
   if (!isRecord(marks)) return null;
@@ -97,6 +99,17 @@ export function keptSession(stored: StoredKeptSession): KeptSession | null {
 const REFERENCES_IN_TEXT =
   /captured-media:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[1-9][0-9]{0,15}/gu;
 
+/**
+ * The photos the session a store keeps for a scope uses, which stay stored while it does; without a store, none. A
+ * session that cannot be read rejects, so a sweep defers.
+ */
+export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaInUse | undefined {
+  return (
+    store &&
+    (async (scope) => capturedMediaReferencesInJson(JSON.stringify(await store.session(scope))))
+  );
+}
+
 /** The captured-media references in serialized state, such as photos a session shows or holds in variables. */
 export function capturedMediaReferencesInJson(json: string): Set<string> {
   return new Set(json.match(REFERENCES_IN_TEXT));
@@ -104,6 +117,123 @@ export function capturedMediaReferencesInJson(json: string): Set<string> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const isCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const isText = (value: unknown): value is string => typeof value === "string";
+const isTextOrNull = (value: unknown) => value === null || isText(value);
+const isCountOrNull = (value: unknown) => value === null || isCount(value);
+const isPosition = (value: unknown) =>
+  isRecord(value) && isCount(value["offset"]) && isCount(value["line"]) && isCount(value["column"]);
+const isSpan = (value: unknown) =>
+  isRecord(value) && isPosition(value["start"]) && isPosition(value["end"]);
+const isSpeaker = (value: unknown) =>
+  value === null ||
+  (isRecord(value) &&
+    isText(value["identifier"]) &&
+    isText(value["displayName"]) &&
+    isTextOrNull(value["color"]) &&
+    isTextOrNull(value["font"]) &&
+    isTextOrNull(value["avatar"]));
+
+/**
+ * Whether a stored event of a known kind has the fields the Player reads from it: in the transcript, the history of
+ * Debug's rewind, and a debug export.
+ */
+function validEvent(event: Record<string, unknown>): boolean {
+  switch (event["kind"]) {
+    case "say":
+      return (
+        isMessagePresentation(event["presentation"]) &&
+        isSpeaker(event["speaker"]) &&
+        isMessageMarkup(event["content"]) &&
+        isText(event["text"]) &&
+        isSpan(event["span"])
+      );
+    case "messageUpdated":
+      return (
+        isCount(event["messageId"]) &&
+        isMessageMarkup(event["content"]) &&
+        isText(event["text"]) &&
+        isSpan(event["span"])
+      );
+    case "exit":
+      return isSpan(event["span"]);
+    case "actionRequested": {
+      const action = event["action"];
+      return (
+        isRecord(action) &&
+        isText(action["kind"]) &&
+        isCount(action["actionId"]) &&
+        isSpan(event["span"])
+      );
+    }
+    case "actionCompleted":
+      return validSettlement(event["settlement"]) && isSpan(event["span"]);
+    case "playerTranscript":
+      return (
+        event["target"] === "standardChat" &&
+        isCountOrNull(event["requestingSpeakerId"]) &&
+        isText(event["text"]) &&
+        isSpan(event["span"])
+      );
+    case "permanentButtonPressed":
+      return isCount(event["buttonId"]) && isText(event["text"]) && isSpan(event["span"]);
+    case "developerWarning":
+      return (
+        event["severity"] === "warning" &&
+        isText(event["code"]) &&
+        isText(event["message"]) &&
+        isSpan(event["span"])
+      );
+    case "runtimeFailure":
+      return (
+        isText(event["code"]) &&
+        isText(event["message"]) &&
+        isText(event["path"]) &&
+        isSpan(event["span"])
+      );
+    case "scriptStorageEdited":
+      return (
+        isText(event["key"]) &&
+        (event["operation"] === "set" || event["operation"] === "delete") &&
+        typeof event["currentSessionTimeMs"] === "number" &&
+        typeof event["observedSessionTimeMs"] === "number"
+      );
+    default:
+      return false;
+  }
+}
+
+/** A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers checked against it. */
+function validSettlement(settlement: unknown): boolean {
+  if (
+    !isRecord(settlement) ||
+    !isText(settlement["actionKind"]) ||
+    !isCount(settlement["actionId"])
+  )
+    return false;
+  if (settlement["actionKind"] !== "interaction") return true;
+  const ui = settlement["ui"];
+  const transcriptText = settlement["transcriptText"];
+  if (
+    !isText(settlement["interactionKind"]) ||
+    !isCountOrNull(settlement["transcriptEventSequence"]) ||
+    !isTextOrNull(transcriptText) ||
+    !isRecord(ui)
+  )
+    return false;
+  return (
+    ui["kind"] !== "form" ||
+    (isFormUi(ui) &&
+      validFormResult(
+        ui,
+        settlement["result"],
+        transcriptText,
+        settlement["settlementKind"] === "timedOut",
+      ))
+  );
 }
 
 const noPlan = () => new Error("The kept session has no plan.");

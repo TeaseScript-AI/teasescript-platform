@@ -202,6 +202,29 @@ test("a sweep runs only when no Player is live, against a fresh read of the save
   assert.equal(repository.size, 0);
 });
 
+test("a sweep keeps the stored photos a session kept for a reload uses, and defers when they cannot be read", async () => {
+  const repository = new FakeMediaRepository();
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  const storage = withCapturedMedia(provider, earlier);
+  // Saved, then no longer referenced by any saved value, while the kept session still shows it.
+  const shown = earlier.add("image", png("shown")).reference;
+  await storage.write("photo", shown);
+  await storage.write("photo", null);
+  earlier.close();
+  const later = new CapturedMediaStore(repository, urls, "package");
+  await assert.rejects(
+    sweepCapturedMedia(provider, later, idle, async () => {
+      throw new Error("unreadable");
+    }),
+  );
+  assert.equal(await sweepCapturedMedia(provider, later, idle, async () => [shown]), true);
+  assert.deepEqual(await repository.listReferences("package"), [shown]);
+  // Once the kept session no longer uses it, the next sweep reclaims it.
+  await sweepCapturedMedia(provider, later, idle, async () => []);
+  assert.equal(repository.size, 0);
+});
+
 /**
  * Runs a script like the Player: answers each `takePhoto()` from `media`, and acknowledges each persistent `save` once
  * `storage` persisted it, or as failed when it rejected. It stops right before the script's `exit`, which clears its

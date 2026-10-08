@@ -56,6 +56,7 @@ import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-
 import { DebugRecorder } from "../../debug-recorder.js";
 import {
   capturedMediaReferencesInJson,
+  keptPhotoReferences,
   keptSession,
   memoryKeptSessionStore,
   type KeptSessionStore,
@@ -202,7 +203,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const capturedMediaPersistence =
     options.scriptStorage &&
     (options.capabilities?.camera === true || options.capturedMedia !== undefined)
-      ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
+      ? capturedMediaStorage(
+          options.scriptStorage,
+          capturedMedia,
+          browserCapturedMediaLocks(),
+          keptPhotoReferences(options.keptSessions),
+        )
       : undefined;
   const storageProvider = capturedMediaPersistence ?? options.scriptStorage;
   // Every change this Player makes to the stored values goes through here, which keeps the values the next Start loads
@@ -972,6 +978,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const last = events[count - 1] ?? null;
     const planJson = kept.plan && from > 0 ? null : JSON.stringify(current.plan);
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
+    // The photos no save stored go with the session; a stored one stays stored while the session uses it
+    // (`capturedMediaStorage`).
     const photos = capturedMedia.sessionRecords(
       capturedMediaReferencesInJson(snapshotJson + JSON.stringify(added)),
     );

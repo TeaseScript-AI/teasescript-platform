@@ -8,6 +8,10 @@ import {
   memoryKeptSessionStore,
   type StoredKeptSession,
 } from "../player/kept-sessions.js";
+import {
+  activatePlayerRuntimeButton,
+  createPlayerRuntimeSession,
+} from "../player/runtime-adapter.js";
 import type { InterpreterEvent } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
@@ -26,26 +30,44 @@ const stored = (overrides: Partial<StoredKeptSession> = {}): StoredKeptSession =
   ...overrides,
 });
 
-test("a kept session read back from storage is used only when its fields and events have their shape", () => {
-  assert.deepEqual(keptSession(stored()), {
-    planJson: "{}",
-    snapshotJson: "{}",
-    events: events("say", "actionRequested"),
-    marks,
-  });
+test("a kept session read back from storage is used only when its events have the fields the Player reads", () => {
+  // The events of a real session: a message, a button's answer with its settlement, and the end.
+  let session = createPlayerRuntimeSession('say "Hello", instant\nshowButton "Next"\nexit');
+  session = activatePlayerRuntimeButton(session)!.session;
+  const real: Record<string, unknown>[] = JSON.parse(JSON.stringify(session.events));
+  assert.deepEqual(
+    real.map((event) => event["kind"]),
+    ["say", "actionRequested", "playerTranscript", "actionCompleted", "exit"],
+  );
+  const kept = keptSession(stored({ events: real }));
+  assert.equal(kept?.events.length, 5);
+
+  const changed = (kind: string, change: (event: Record<string, unknown>) => void) => {
+    const events: Record<string, unknown>[] = JSON.parse(JSON.stringify(real));
+    change(events.find((event) => event["kind"] === kind)!);
+    return stored({ events });
+  };
   for (const malformed of [
     stored({ planJson: 1 }),
     stored({ snapshotJson: null }),
     stored({ marks: [] }),
     stored({ events: [null] }),
-    stored({ events: events("notAnEvent") }),
-    stored({
-      events: [
-        { kind: "say", sequence: 2 },
-        { kind: "say", sequence: 2 },
-      ],
-    }),
-    stored({ events: [{ kind: "say", sequence: 1.5 }] }),
+    stored({ events: [{ ...real[0], kind: "notAnEvent" }] }),
+    stored({ events: [real[0], real[0]] }),
+    changed("say", (event) => (event["content"] = { broken: true })),
+    changed("say", (event) => (event["speaker"] = { identifier: "Mistress" })),
+    changed("say", (event) => (event["presentation"] = null)),
+    changed("say", (event) => delete event["span"]),
+    changed(
+      "actionCompleted",
+      (event) =>
+        (event["settlement"] = {
+          ...JSON.parse(JSON.stringify(event["settlement"])),
+          ui: { kind: "form" },
+        }),
+    ),
+    changed("actionCompleted", (event) => (event["settlement"] = "settled")),
+    changed("playerTranscript", (event) => (event["text"] = 1)),
   ])
     assert.equal(keptSession(malformed), null, JSON.stringify(malformed));
 });
@@ -111,24 +133,18 @@ test("the store keeps one session per scope, extends it from a position, and dis
   assert.deepEqual(await store.media.listReferences("script"), []);
 });
 
-test("a photo only the session holds goes with it, and comes back as session media a save stores again", async () => {
+test("a photo a kept session holds comes back as session media, which a save stores again", async () => {
   const repository = new FakeMediaRepository();
   const media = new CapturedMediaStore(repository, urls, "script");
   const shown = media.add("image", new Blob(["shown"], { type: "image/png" }));
-  const saved = media.add("image", new Blob(["saved"], { type: "image/png" }));
-  await media.promote([saved.reference]);
-  const state = JSON.stringify({ stage: shown.reference, variables: { photo: saved.reference } });
-  const references = capturedMediaReferencesInJson(state);
-  assert.deepEqual([...references], [shown.reference, saved.reference]);
-  // The photo a save stored stays where it is; only the other one is kept with the session.
-  const kept = media.sessionRecords(references);
+  const record = await media.read(shown.reference);
   assert.deepEqual(
-    kept.map((record) => record.reference),
+    [...capturedMediaReferencesInJson(JSON.stringify({ stage: shown.reference }))],
     [shown.reference],
   );
 
   const after = new CapturedMediaStore(repository, urls, "script");
-  after.restoreSessionMedia(shown.reference, kept[0]!);
+  after.restoreSessionMedia(shown.reference, record);
   assert.equal((await after.read(shown.reference))?.size, 5);
   // Session media again: a save that references it stores it like a new capture.
   await after.promote([shown.reference]);
@@ -136,8 +152,7 @@ test("a photo only the session holds goes with it, and comes back as session med
 
   // Stored data that is not a valid record of this script's photo is ignored.
   const other = new CapturedMediaStore(null, urls, "script");
-  other.restoreSessionMedia(shown.reference, { ...kept[0]!, namespace: "another" });
-  other.restoreSessionMedia(saved.reference, { ...kept[0]!, size: "large" });
+  other.restoreSessionMedia(shown.reference, { ...record!, namespace: "another" });
+  other.restoreSessionMedia(shown.reference, { ...record!, size: "large" });
   assert.equal(await other.read(shown.reference), null);
-  assert.equal(await other.read(saved.reference), null);
 });

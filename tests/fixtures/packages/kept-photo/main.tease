@@ -1,4 +1,6 @@
 let picture: string = askImage("Choose a picture")
+save picture as "picture"
+save null as "picture"
 showImage picture
 showButton "Done"
 exit

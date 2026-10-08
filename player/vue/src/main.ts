@@ -45,7 +45,7 @@ const app = developmentPreview
           // An image the script saves a reference to stays in this browser for later runs.
           capturedMedia: { repository: capturedMediaRepository },
           // Export and import of saved data cover every script this browser has played.
-          savedData: browserSavedData(browserStorage(), capturedMediaRepository),
+          savedData: browserSavedData(browserStorage(), capturedMediaRepository, keptSessions),
           keptSessions,
           // The script's storage scope identifies it; development packages and the demo have no release version.
           debugPackage: { id: host.storageScope, version: null },

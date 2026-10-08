@@ -1253,7 +1253,8 @@ The Player opens the session camera after Start when the trusted host grants the
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
 save stores the photos its value references durably before the value is persisted
 (`player/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
-previous value is kept as for any failed persistent write. Media no saved value references is reclaimed
+previous value is kept as for any failed persistent write. Media no saved value references, nor a session the Player
+keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed
 opportunistically when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved
 values can be read completely; without Web Locks it is not reclaimed, and while a Player lives nothing is deleted. The
 technical playground has no camera and answers a pending capture as `unconfigured` when execution continues.

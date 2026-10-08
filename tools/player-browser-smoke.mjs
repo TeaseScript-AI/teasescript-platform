@@ -1345,23 +1345,27 @@ async function keptSessionScenario(cdp, origin, profile) {
   const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
   const choice = (label) =>
     `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
-  // Keeping is asynchronous browser storage; a reload waits until the kept session has `count` records in `store`.
-  const kept = (store, count) =>
+  // Keeping is asynchronous browser storage; a reload waits until the kept snapshot includes `text`, such as the label
+  // of the interaction it should come back to.
+  const kept = (text) =>
     evaluate(
       cdp,
       `return new Promise((resolve) => {
         const request = indexedDB.open('teasescript-kept-sessions');
         request.onsuccess = () => {
-          const records = request.result.transaction('${store}').objectStore('${store}').count();
-          records.onsuccess = () => { request.result.close(); resolve(records.result >= ${count}); };
-          records.onerror = () => resolve(false);
+          const sessions = request.result.transaction('sessions').objectStore('sessions').getAll();
+          sessions.onsuccess = () => {
+            request.result.close();
+            resolve(sessions.result.some((session) => session.snapshotJson.includes(${JSON.stringify(JSON.stringify(text))})));
+          };
+          sessions.onerror = () => resolve(false);
         };
         request.onerror = () => resolve(false);
       })`,
     );
-  const reloadOnceKept = async (store, count) => {
+  const reloadOnceKept = async (text) => {
     const deadline = Date.now() + 8_000;
-    while (!(await kept(store, count))) {
+    while (!(await kept(text))) {
       if (Date.now() > deadline) throw new Error("The session was not kept");
       await delay(50);
     }
@@ -1385,7 +1389,7 @@ async function keptSessionScenario(cdp, origin, profile) {
   await physicalClick(cdp, start);
   await waitFor(cdp, `!!${choice("One point")}`);
 
-  await reloadOnceKept("events", 1);
+  await reloadOnceKept("One point");
   await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
   await physicalClick(cdp, start);
   await waitFor(cdp, `!!${choice("One point")}`);
@@ -1425,7 +1429,8 @@ async function keptSessionScenario(cdp, origin, profile) {
     "A session that ended is not kept: the next one starts anew",
   );
 
-  // A chosen picture the script only shows, without saving it, comes back with the session.
+  // A chosen picture the script shows after its saved reference was deleted comes back with the session, although a
+  // later visit reclaims the stored photo no saved value references.
   const chosen = join(profile, "kept-photo.png");
   await writeFile(chosen, solidPng(24, 16, [200, 90, 40]));
   const stageImage = `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth > 0 && image.getAttribute('src').startsWith('blob:'); })()`;
@@ -1446,7 +1451,7 @@ async function keptSessionScenario(cdp, origin, profile) {
     8_000,
     "The chosen picture is not shown",
   );
-  await reloadOnceKept("media", 1);
+  await reloadOnceKept("Done");
   await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
   await physicalClick(cdp, start);
   await waitFor(
