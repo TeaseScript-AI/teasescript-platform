@@ -318,10 +318,11 @@ instead), and play states that bring a variable the code counts or sets closer t
 progress leads, on by default and off with `--no-progress-leads`, an expansion in that first place that brings a state
 closer again does not count, so a loop that needs many rounds is followed to the constant, while one that gets no
 closer uses its 40 up); clock states take only their attempt's own steps and otherwise come after all play states.
-With `--conjunctive`, a way that needs all parts of its condition (`a >= 5 and b <= 6` true, an `or` false) is
-steered by the condition's branch distance instead of each part's closeness: a state is closer when fewer of the
-parts it can read are unsatisfied, or as many but nearer in sum (an `or` the way needs either part of takes the nearer
-part), and a session chain toward a stored value of the condition also counts how far its parts on other keys are.
+With conjunctive steering (on by default, off with `--no-conjunctive`), a way that needs all parts of its condition
+(`a >= 5 and b <= 6` true, an `or` false) is steered by the condition's branch distance instead of each part's
+closeness: a state is closer when fewer of the parts it can read are unsatisfied, or as many but nearer in sum (an `or`
+the way needs either part of takes the nearer part), and a session chain toward a stored value of the condition also
+counts how far its parts on other keys are.
 With `--guidance`, a static map of the plan steers too: its control flow (conditions, calls and returns, file
 transfers, the blocks a timer, cue, or button sets up; constant conditions cut; a session's end leading to the next
 session's start) gives each instruction the number of decisions (conditions and prompts, a next session as three) to
