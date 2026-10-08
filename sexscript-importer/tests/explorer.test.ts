@@ -380,6 +380,7 @@ function exhaustedAtStay(engine: Engine, plan: Data, runtime: Runtime): Runtime 
     view: () => inner.view(),
     callReturnInstructions: () => inner.callReturnInstructions(),
     exportTrustedSnapshot: () => inner.exportTrustedSnapshot(),
+    exportSnapshot: () => inner.exportSnapshot(),
     fork: () => exhaustedAtStay(engine, plan, inner.fork()),
   };
 }

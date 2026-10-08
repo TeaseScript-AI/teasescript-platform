@@ -37,7 +37,13 @@ const RUNTIME_OPERATIONS = [
   "recordContinueCapture",
 ] as const;
 const RUNTIME_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
-const RUNTIME_READS = ["view", "callReturnInstructions", "exportTrustedSnapshot", "fork"] as const;
+const RUNTIME_READS = [
+  "view",
+  "callReturnInstructions",
+  "exportSnapshot",
+  "exportTrustedSnapshot",
+  "fork",
+] as const;
 
 /**
  * One runtime session, as the explorer drives it. Its results, view, and projections are detached frozen data. An
@@ -57,6 +63,8 @@ export interface Runtime {
    * (`exportTrustedSnapshot`): the explorer keeps it itself, and the runtime checks it when a session restores it.
    */
   exportTrustedSnapshot: () => Data;
+  /** The same, checked by the runtime (`exportSnapshot`), for a host that keeps it apart from the explorer. */
+  exportSnapshot: () => Data;
   /** An independent session with a copy of the state. */
   fork: () => Runtime;
 }
@@ -118,7 +126,7 @@ function runtimeOf(session: unknown): Runtime {
     }),
   );
   const result = (
-    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportTrustedSnapshot",
+    name: (typeof RUNTIME_OPERATIONS)[number] | "view" | "exportSnapshot" | "exportTrustedSnapshot",
     ...args: unknown[]
   ): Data => {
     const value: unknown = methods.get(name)!.apply(session, args);
@@ -136,6 +144,7 @@ function runtimeOf(session: unknown): Runtime {
         : [];
     },
     exportTrustedSnapshot: () => result("exportTrustedSnapshot"),
+    exportSnapshot: () => result("exportSnapshot"),
     fork: () => runtimeOf(methods.get("fork")!.apply(session, [])),
   };
 }
