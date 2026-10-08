@@ -122,12 +122,13 @@ function sexscriptLegacyRepeatList(items, times) {
   return result
 }
 function sexscriptLegacyTimes(value, count) {
-  if count is number and count >= 0 {
+  if count is number {
+    let whole = toInteger(count)
     if value is string {
-      return sexscriptLegacyValue(value.repeat(toInteger(count)))
+      return sexscriptLegacyValue(value.repeat(whole))
     }
-    if value is list {
-      return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, toInteger(count)))
+    if value is list and (whole >= 0 or value.length == 0) {
+      return sexscriptLegacyValue(sexscriptLegacyRepeatList(value, whole))
     }
   }
   return sexscriptLegacyValue(value * count)

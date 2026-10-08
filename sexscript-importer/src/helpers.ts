@@ -1548,68 +1548,52 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Groovy `value * count` for a value whose type only the running script knows: text and a list repeat, with a
-  // fractional count cut to whole times, and a number multiplies.
+  // Groovy `value * count` for a value whose type only the running script knows: text and a list repeat by the count
+  // cut to whole times, which text checks and a list allows below 0 only when empty, and a number multiplies; another
+  // count fails at `*`, as Groovy failed.
   times: {
     name: "sexscriptLegacyTimes",
-    build: () =>
-      fn(
+    build: () => {
+      const value = (expression: IrExpression): IrStatement =>
+        ret({ kind: "call", name: "sexscriptLegacyValue", positional: [expression], named: {} });
+      return fn(
         "sexscriptLegacyTimes",
         ["value", "count"],
         [
-          // Groovy repeated only by a number that is not negative, and failed otherwise, as `*` does here.
-          ifS(
-            bin(
-              "and",
-              { kind: "typeTest", value: v("count"), type: "number" },
-              bin(">=", v("count"), lit(0)),
+          ifS({ kind: "typeTest", value: v("count"), type: "number" }, [
+            letS("whole", { kind: "call", name: "toInteger", positional: [v("count")], named: {} }),
+            ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+              value({
+                kind: "methodCall",
+                target: v("value"),
+                name: "repeat",
+                arguments: [v("whole")],
+              }),
+            ]),
+            ifS(
+              bin(
+                "and",
+                { kind: "typeTest", value: v("value"), type: "list" },
+                bin(
+                  "or",
+                  bin(">=", v("whole"), lit(0)),
+                  bin("==", prop(v("value"), "length"), lit(0)),
+                ),
+              ),
+              [
+                value({
+                  kind: "call",
+                  name: "sexscriptLegacyRepeatList",
+                  positional: [v("value"), v("whole")],
+                  named: {},
+                }),
+              ],
             ),
-            [
-              ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
-                ret({
-                  kind: "call",
-                  name: "sexscriptLegacyValue",
-                  positional: [
-                    {
-                      kind: "methodCall",
-                      target: v("value"),
-                      name: "repeat",
-                      arguments: [
-                        { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
-                      ],
-                    },
-                  ],
-                  named: {},
-                }),
-              ]),
-              ifS({ kind: "typeTest", value: v("value"), type: "list" }, [
-                ret({
-                  kind: "call",
-                  name: "sexscriptLegacyValue",
-                  positional: [
-                    {
-                      kind: "call",
-                      name: "sexscriptLegacyRepeatList",
-                      positional: [
-                        v("value"),
-                        { kind: "call", name: "toInteger", positional: [v("count")], named: {} },
-                      ],
-                      named: {},
-                    },
-                  ],
-                  named: {},
-                }),
-              ]),
-            ],
-          ),
-          ret({
-            kind: "call",
-            name: "sexscriptLegacyValue",
-            positional: [bin("*", v("value"), v("count"))],
-            named: {},
-          }),
+          ]),
+          value(bin("*", v("value"), v("count"))),
         ],
-      ),
+      );
+    },
   },
   // The items a Groovy loop visited: none of null, the characters of text, the elements of anything else.
   items: {
