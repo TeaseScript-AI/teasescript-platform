@@ -956,13 +956,16 @@ class Cells {
 
   /**
    * The cell of a waiting state, and the ID of its slot values; `novel` when a slot shows a value, or a change of value
-   * from the state before (`from`, the ID of its slot values), seen for the first time.
+   * from the state before (`from`, the ID of its slot values), seen for the first time. A state that only waits, after
+   * a long run of waits (`forced`), has a cell without the passes of its loops: those passes are the time going by, not
+   * places the player gets to by choosing.
    */
   of(
     snapshot: Data,
     waitsAt: number | null,
     from: number | null,
     clock: readonly (readonly [string, string])[] = [],
+    forced = false,
   ): { cell: number; values: number; novel: boolean; fresh: boolean } {
     let novel = false;
     const found = new Map<number, number>();
@@ -1041,7 +1044,7 @@ class Cells {
           ? `r${String(frame.remaining)}`
           : "w",
     );
-    const place = `${waitsAt ?? "-"}/${returns.join("/")}/${loops.join("/")}|${values}`;
+    const place = `${waitsAt ?? "-"}/${returns.join("/")}/${forced ? "" : loops.join("/")}|${values}`;
     let cell = this.#cells.get(place);
     const fresh = cell === undefined;
     if (cell === undefined) {
@@ -1893,6 +1896,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         step.snapshot.status === "waiting"
           ? outcomes(step.snapshot, waitsAt, wallClockOf(step.snapshot))
           : [],
+        step.forced,
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
     const newWay = step.ways.some((way) => waysTaken[way] === 0);

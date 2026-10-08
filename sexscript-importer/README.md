@@ -320,7 +320,9 @@ in. The search first expands directed states (below), then states whose step rea
 session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
 first. The search ranks states by cells (`--no-cells` switches this off). A cell is where a state waits (its pending action, the return
-points of its calls, and the pass of each `for` and `repeat` loop) with the bucket of each value that conditions compare
+points of its calls, and the pass of each `for` and `repeat` loop, except for a state that, after a hundred waits in a
+row, still has nothing to do but wait: its passes are time going by, not places the player chooses) with the bucket of
+each value that conditions compare
 with constants: each variable and stored key (also through the data flow, each key a key template matches apart) a
 comparison reads, or its length, bucketed as unset, `null`, `true` or `false`, a compared text or other text, or a
 number's or duration's place among its compared constants (below, at, between, or above them). A step that shows such

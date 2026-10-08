@@ -366,6 +366,11 @@ export interface Step {
   readonly ways: readonly number[];
   /** With random choices: the random draws the step made that the explorer may choose (`RANDOM_KINDS`), in order. */
   readonly draws: readonly Data[];
+  /**
+   * The step stopped only because it had let time pass {@link MAX_AUTO_WAITS} times in a row: the state it reached waits
+   * with nothing to do but wait, as the ones before it did.
+   */
+  readonly forced: boolean;
 }
 
 function record(value: unknown): Data {
@@ -821,6 +826,7 @@ export class Session {
     let newInstructions = 0;
     let view = runtime.view();
     let waits = 0;
+    let forced = false;
     for (let operations = 0; ; operations += 1) {
       if (view.runnable === true) {
         const execution = execute(runtime);
@@ -853,7 +859,11 @@ export class Session {
         continue;
       }
       const options = this.options(runtime, view);
-      if (waits >= MAX_AUTO_WAITS || options.length !== 1 || options[0]!.kind !== "wait") break;
+      if (options.length !== 1 || options[0]!.kind !== "wait") break;
+      if (waits >= MAX_AUTO_WAITS) {
+        forced = true;
+        break;
+      }
       if (!this.#input(runtime, view, options[0]!)) break;
       view = runtime.view();
       waits += 1;
@@ -864,6 +874,7 @@ export class Session {
       texts: texts.slice(-KEPT_TEXTS),
       ways: [...ways],
       draws: this.#draws,
+      forced,
     };
   }
 
