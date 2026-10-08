@@ -417,33 +417,37 @@ test("an ordinary session step captures and validates only its new input", () =>
   assert.deepEqual(work(2_000), narrow);
 });
 
-test("a kept settled media handle does not make a session step walk unrelated values", () => {
+test("a kept settled media or timer handle does not make a session step walk unrelated values", () => {
   // Diagnostic scale evidence, not a capacity contract: the work of one step must not grow with the size of a large
   // value walked beside the handle, nor with the number of values or retained scopes after the variable that holds it.
   const work = (source: string, globals: NonNullable<FreshRuntimeOptions["globals"]>) => {
     const session = createFreshRuntimeSession(compileValidPlan(source), { ...IMMEDIATE, globals });
     session.run();
-    session.reportMediaLoad(1, { kind: "loaded", durationMs: 1_000 });
-    session.run();
+    if (session.view().backgroundActions.some((action) => action.kind === "media")) {
+      session.reportMediaLoad(1, { kind: "loaded", durationMs: 1_000 });
+      session.run();
+    }
     return withValidationTestStatistics((statistics) => {
       session.observeTime(1);
       session.run();
-      assert.equal(session.exportTrustedSnapshot().settledMedia.length, 1);
+      const { settledMedia, settledTimers } = session.exportTrustedSnapshot();
+      assert.equal(settledMedia.length + settledTimers.length, 1);
       return statistics().counts;
     });
   };
-  const inList =
-    'global keeper: list = []\nkeeper.add(playAudio async "a.mp3")\nkeeper[0].stop()\nwait 1000\nexit';
   const payload = (width: number) => ({
     payload: { kind: "list" as const, items: Array.from({ length: width }, (_, index) => index) },
   });
-  const narrow = work(inList, payload(4));
-  assert.ok((narrow.recordReachVisits ?? 0) > 0);
-  assert.deepEqual(work(inList, payload(2_000)), narrow);
-  const inVariable = 'let keeper = playAudio async "a.mp3"\nkeeper.stop()\nwait 1000\nexit';
   const separate = (count: number) =>
     Object.fromEntries(Array.from({ length: count }, (_, index) => [`value${index}`, index]));
-  assert.deepEqual(work(inVariable, separate(2_000)), work(inVariable, separate(4)));
+  for (const start of ['playAudio async "a.mp3"', "timer async 5"]) {
+    const inList = `global keeper: list = []\nkeeper.add(${start})\nkeeper[0].stop()\nwait 1000\nexit`;
+    const narrow = work(inList, payload(4));
+    assert.ok((narrow.recordReachVisits ?? 0) > 0);
+    assert.deepEqual(work(inList, payload(2_000)), narrow);
+    const inVariable = `let keeper = ${start}\nkeeper.stop()\nwait 1000\nexit`;
+    assert.deepEqual(work(inVariable, separate(2_000)), work(inVariable, separate(4)));
+  }
   // Each pending timer keeps the scope of the call that started it.
   const retained = (count: number) =>
     [

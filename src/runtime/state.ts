@@ -117,7 +117,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 59;
+export const RUNTIME_SNAPSHOT_VERSION = 60;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -424,7 +424,10 @@ export interface RuntimeSnapshot {
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
   preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
-  /** Finished or stopped timers, retained so their handles stay readable. Active timers are background actions. */
+  /**
+   * Finished or stopped timers that a handle or a queued or running expiry block still reaches; a public operation drops
+   * the others before it returns. Active timers are background actions.
+   */
   readonly settledTimers: RuntimeTimerSnapshot[];
   nextTimerId: number;
   /**
@@ -3622,36 +3625,59 @@ function* identityRootValues(
 }
 
 /**
- * Drops the live records of messages and the settled media records that nothing in `snapshot` reaches anymore. A public
- * operation does it before it returns, when every value of the state is in one of its roots; no handle to such a
- * message or media can appear again, so where an operation boundary falls does not change the state. A settled media
- * record stays while a handle reaches it, or a queued or running cue block of the media, which sees its own handle.
+ * Drops the live records of messages and the settled media and timer records that nothing in `snapshot` reaches anymore.
+ * A public operation does it before it returns, when every value of the state is in one of its roots; no handle to such
+ * a message, media, or timer can appear again, so where an operation boundary falls does not change the state. A settled
+ * media or timer record also stays while one of its blocks is queued or running.
  */
 export function dropUnreachableRecords(snapshot: RuntimeSnapshot): void {
-  if (snapshot.liveMessages.length === 0 && snapshot.settledMedia.length === 0) return;
+  if (
+    snapshot.liveMessages.length === 0 &&
+    snapshot.settledMedia.length === 0 &&
+    snapshot.settledTimers.length === 0
+  )
+    return;
   // The records not reached yet. Once every record is reached nothing is dropped, so the search stops there.
-  const messages = new Set(snapshot.liveMessages.map((message) => message.messageId));
-  const media = new Set(snapshot.settledMedia.map((record) => record.mediaId));
-  reachRecords(collectionRoots(snapshot), messages, media);
-  if (messages.size > 0) {
+  const unreached: UnreachedRecords = {
+    messages: new Set(snapshot.liveMessages.map((message) => message.messageId)),
+    media: new Set(snapshot.settledMedia.map((record) => record.mediaId)),
+    timers: new Set(snapshot.settledTimers.map((record) => record.timerId)),
+  };
+  reachRecords(collectionRoots(snapshot), unreached);
+  if (unreached.messages.size > 0) {
     let kept = 0;
     for (const message of snapshot.liveMessages) {
-      if (!messages.has(message.messageId)) snapshot.liveMessages[kept++] = message;
+      if (!unreached.messages.has(message.messageId)) snapshot.liveMessages[kept++] = message;
     }
     snapshot.liveMessages.length = kept;
   }
-  if (media.size > 0) {
+  if (unreached.media.size > 0) {
     let kept = 0;
     for (const record of snapshot.settledMedia) {
-      if (!media.has(record.mediaId)) snapshot.settledMedia[kept++] = record;
+      if (!unreached.media.has(record.mediaId)) snapshot.settledMedia[kept++] = record;
     }
     snapshot.settledMedia.length = kept;
   }
+  if (unreached.timers.size > 0) {
+    let kept = 0;
+    for (const record of snapshot.settledTimers) {
+      if (!unreached.timers.has(record.timerId)) snapshot.settledTimers[kept++] = record;
+    }
+    snapshot.settledTimers.length = kept;
+  }
+}
+
+/** The IDs of the records that the search for unreachable records has not reached yet, by kind. */
+interface UnreachedRecords {
+  readonly messages: Set<number>;
+  readonly media: Set<number>;
+  readonly timers: Set<number>;
 }
 
 /**
- * The values `identityRootValues` gives for `snapshot`, scope by scope without copying its scope lists, and then the
- * handle each queued or running media cue block binds when it runs.
+ * The values `identityRootValues` gives for `snapshot`, scope by scope without copying its scope lists, and then a
+ * handle for the media or timer of each queued or running block: a media block binds its own handle when it runs, and
+ * restore and transfers read the record of a timer block's timer.
  */
 function* collectionRoots(snapshot: RuntimeSnapshot): Generator<unknown, void, undefined> {
   yield* identityRootValues(snapshot.frames, null, null, null, null);
@@ -3666,32 +3692,34 @@ function* collectionRoots(snapshot: RuntimeSnapshot): Generator<unknown, void, u
   );
   for (const invocation of snapshot.pendingTimerHandlers) {
     if ("mediaId" in invocation) yield { kind: "mediaHandle", mediaId: invocation.mediaId };
+    else if ("timerId" in invocation) yield { kind: "timerHandle", timerId: invocation.timerId };
   }
   for (const frame of snapshot.callFrames) {
-    if (
-      frame.kind === "function" &&
-      frame.timerInterruption !== null &&
-      "mediaId" in frame.timerInterruption
-    )
-      yield { kind: "mediaHandle", mediaId: frame.timerInterruption.mediaId };
+    if (frame.kind !== "function" || frame.timerInterruption === null) continue;
+    const interruption = frame.timerInterruption;
+    if ("mediaId" in interruption) yield { kind: "mediaHandle", mediaId: interruption.mediaId };
+    else if ("timerId" in interruption)
+      yield { kind: "timerHandle", timerId: interruption.timerId };
   }
 }
 
 /**
- * Removes from `messages` and `media` the IDs that handles in `roots` name, looking into lists, sets, objects, and dicts,
- * and stops as soon as both are empty. Each round takes the next root and moves every walk taken so far on by one value,
- * so the work done is bounded by how far the walk must go to reach the last record, not by values after it.
+ * Removes from `unreached` the IDs that handles in `roots` name, looking into lists, sets, objects, and dicts, and stops
+ * as soon as nothing is left. Each round takes the next root and moves every walk taken so far on by one value, so the
+ * work done is bounded by how far the walk must go to reach the last record, not by values after it.
  */
-function reachRecords(roots: Iterator<unknown>, messages: Set<number>, media: Set<number>): void {
+function reachRecords(roots: Iterator<unknown>, unreached: UnreachedRecords): void {
   /** A container's values, from `next` on; `field` reads each value from a property or entry record. */
   interface Cursor {
     readonly values: readonly unknown[];
     readonly field: boolean;
     next: number;
   }
+  const { messages, media, timers } = unreached;
+  const searching = (): boolean => messages.size > 0 || media.size > 0 || timers.size > 0;
   let walks: Cursor[][] = [];
   let taking = true;
-  while (messages.size > 0 || media.size > 0) {
+  while (searching()) {
     if (taking) {
       const root = roots.next();
       if (root.done === true) taking = false;
@@ -3703,7 +3731,7 @@ function reachRecords(roots: Iterator<unknown>, messages: Set<number>, media: Se
     if (walks.length === 0 && !taking) return;
     const continuing: Cursor[][] = [];
     for (const walk of walks) {
-      if (messages.size === 0 && media.size === 0) return;
+      if (!searching()) return;
       recordValidationTestWork("recordReachVisits");
       const cursor = walk.at(-1)!;
       const item = cursor.values[cursor.next];
@@ -3713,6 +3741,8 @@ function reachRecords(roots: Iterator<unknown>, messages: Set<number>, media: Se
       if (isPlainRecord(value)) {
         if (value.kind === "mediaHandle" && typeof value.mediaId === "number") {
           media.delete(value.mediaId);
+        } else if (value.kind === "timerHandle" && typeof value.timerId === "number") {
+          timers.delete(value.timerId);
         } else if (value.kind === "messageHandle" && typeof value.messageId === "number") {
           messages.delete(value.messageId);
         } else if (
