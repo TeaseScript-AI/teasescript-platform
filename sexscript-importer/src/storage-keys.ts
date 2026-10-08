@@ -692,6 +692,38 @@ function withNativeIntegerLoads(programs: readonly MigrationProgram[]): Migratio
   };
   for (const program of programs) {
     const texts = textVariables(program.statements);
+    // A key held in a variable that the file only ever sets to texts is one of those texts, or of their shapes.
+    const keyValues = new Map<string, IrExpression[] | null>();
+    // Variables the file declares itself, which no other file sets.
+    const declaredHere = new Set<string>();
+    const collectKeys = (items: readonly IrStatement[]): void => {
+      for (const item of items) {
+        if (item.kind === "let" && item.global !== true) declaredHere.add(item.name);
+        const name =
+          item.kind === "let"
+            ? item.name
+            : item.kind === "assign" && item.target.kind === "variable"
+              ? item.target.name
+              : item.kind === "for"
+                ? item.variable
+                : null;
+        if (name !== null) {
+          const known = keyValues.get(name);
+          const value =
+            item.kind === "let" || (item.kind === "assign" && item.operator === "=")
+              ? item.value
+              : null;
+          keyValues.set(name, known === null || value === null ? null : [...(known ?? []), value]);
+        }
+        if (item.kind === "function")
+          for (const parameter of item.parameters) keyValues.set(parameter.name, null);
+        withNestedBlocks(item, (body) => {
+          collectKeys(body);
+          return body;
+        });
+      }
+    };
+    collectKeys(program.statements);
     const scan = (items: readonly IrStatement[]): void => {
       for (const item of items) {
         if (item.kind === "function" && item.name === askOnce) continue;
@@ -703,7 +735,19 @@ function withNativeIntegerLoads(programs: readonly MigrationProgram[]): Migratio
               : (item.valueType?.replace(/\?$/u, "") ??
                 valueType(item.value) ??
                 (item.value.kind === "variable" && texts.has(item.value.name) ? "string" : null));
+          const held =
+            item.key.kind === "variable" && declaredHere.has(item.key.name)
+              ? keyValues.get(item.key.name)
+              : undefined;
           if (key !== null) note(key, type);
+          // A generated save of a computed key names its keys.
+          else if (item.keys !== undefined) for (const named of item.keys) note(named, null);
+          else if (held !== undefined && held !== null && held.length > 0)
+            for (const value of held) {
+              const named = literalKey(value);
+              if (named !== null) note(named, type);
+              else shapes.push(shape(value));
+            }
           else shapes.push(shape(item.key));
         }
         mapOwnExpressions(item, reads);

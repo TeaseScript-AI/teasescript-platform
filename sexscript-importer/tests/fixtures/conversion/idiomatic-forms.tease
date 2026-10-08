@@ -1,0 +1,40 @@
+// Shortened from corpus scripts: forms a creator would write by hand where the legacy logic allows them.
+// trick_or_treat_poker: a counter loop goes through a range.
+function draw_card {
+  return randomInteger(0..52)
+}
+function deal_hand {
+  let hand = []
+  for i in 0..5 {
+    let card = draw_card()
+    hand.add(card)
+  }
+  return hand
+}
+say "Cards ${deal_hand().length}"
+// BanjoGameHub rockpaperscissors: a ladder of tests of one choice is a switch.
+let opponent = ""
+say "Select your opponent:"
+let pick_opponent = choose 0: "Anna",
+  1: "Bella",
+  2: "Cleo",
+  3: "Dora"
+switch pick_opponent {
+  case 0 {
+    opponent = "Anna"
+  }
+  case 1 {
+    opponent = "Bella"
+  }
+  case 2 {
+    opponent = "Cleo"
+  }
+  case 3 {
+    opponent = "Dora"
+  }
+}
+say "Against ${opponent}"
+// teachertrouble: a bound known before the script runs draws natively.
+let swats = randomInteger(0..20 - 10 + 1) + 10
+say "Swats ${swats}"
+exit

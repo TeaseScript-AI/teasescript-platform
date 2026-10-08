@@ -128,12 +128,9 @@ let pick = sexscriptLegacyRandom(positions.length) + 1
 if sexscriptLegacyItemAt(positions, pick) == "otk" {
   say "Over my knee"
 }
-// A bound known before the script runs, as in teachertrouble, draws natively.
-let swats = randomInteger(0..20 - 10 + 1) + 10
-say "Swats ${swats}"
 // Java replaceAll() with a regular expression that text operations express.
 let serial = "ab12-x|[y]"
-// NOTE SX_SAY_MARKUP line 45: This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.
+// NOTE SX_SAY_MARKUP line 42: This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.
 say "${sexscriptLegacyReplaceChars(serial, "0123456789", true, "", false)} ${serial.replace("[", "").replace("]", "")} ${serial.replace("|", "/")}"
 // Menu options from a value not proven to be a list are offered as one, as Groovy required.
 function rooms {

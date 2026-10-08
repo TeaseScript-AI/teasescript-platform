@@ -126,7 +126,8 @@ export type IrStatement =
   /**
    * `valueType` is the type of the saved value where the importer knows it and the key is one literal, written as an
    * annotation, from which the package decides the key's type (storage-keys.ts). `open` marks a value of no known type
-   * that may be a number or another value, which keeps the key's type open.
+   * that may be a number or another value, which keeps the key's type open. `keys` lists the literal keys that a
+   * computed key can be, where the importer generated it.
    */
   | (IrBase & {
       kind: "save";
@@ -134,6 +135,7 @@ export type IrStatement =
       value: IrExpression;
       valueType?: string;
       open?: true;
+      keys?: string[];
     })
   | (IrBase & { kind: "delete"; key: IrExpression })
   | (IrBase & {

@@ -12,9 +12,9 @@ import { withNestedBlocks } from "./repeated-text.ts";
  */
 export function withSwitchLadders(statements: IrStatement[]): IrStatement[] {
   return statements.map((statement): IrStatement => {
-    const nested = withNestedBlocks(statement, withSwitchLadders);
-    const ladder = nested.kind === "if" ? switchLadder(nested) : null;
-    return ladder ?? nested;
+    // The whole ladder first, from its top; then the blocks it runs.
+    const ladder = statement.kind === "if" ? switchLadder(statement) : null;
+    return withNestedBlocks(ladder ?? statement, withSwitchLadders);
   });
 }
 
