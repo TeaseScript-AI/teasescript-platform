@@ -125,6 +125,10 @@ const MAX_SKIPS = 8;
 const MAX_FORCED = 8;
 /** With forward time: the time steps a state gets at most. */
 const MAX_TIME_STEPS = 6;
+/** The next sessions at most that start in the windows of the clock comparisons sessions read, from one storage. */
+const MAX_SESSION_GAPS = 8;
+/** How far before a moment a clock comparison changes a next session starts, to be just inside the window before it. */
+const SESSION_MARGIN = 60_000;
 /** With forward time: steps before the step that evaluated a clock condition at which the player may also continue. */
 const LATER_BACK = 1;
 
@@ -1144,6 +1148,49 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     return steps;
   };
+  /**
+   * The gaps a next session can start after, from the first state of one that starts now: for every clock comparison
+   * a session has read anywhere so far (a return window: back too soon, too late), each moment it comes out the other
+   * way, just past and just before it, and midway between two such moments; each only once from a storage (`from`) to
+   * the outcomes of all those comparisons it leads to, at most {@link MAX_SESSION_GAPS}, nearest first. A next session
+   * computes its values from the clock again, so the comparisons are read with none kept.
+   */
+  const sessionGaps = (snapshot: Data, now: number, from: string): number[] => {
+    if (times === null) return [];
+    const context = timeContext(snapshot);
+    const read = [...new Set([...clockAfter.values()].flatMap((after) => [...after]))].flatMap(
+      (instruction) => times.comparisons.get(instruction)!,
+    );
+    const moments = [
+      ...new Set(
+        read.flatMap((comparison) => {
+          const gap = flipGap(comparison, times, context, now);
+          return gap === null ? [] : [gap];
+        }),
+      ),
+    ].sort((left, right) => left - right);
+    const candidates = new Set<number>();
+    moments.forEach((gap, index) => {
+      candidates.add(gap);
+      if (gap > 3 * SESSION_MARGIN) candidates.add(gap - 2 * SESSION_MARGIN);
+      const next = moments[index + 1];
+      if (next !== undefined) candidates.add(Math.round((gap + next) / 2));
+    });
+    const outcomesAt = (at: number) =>
+      read.map((comparison) => {
+        const holds = holdsAt(comparison, times, context, at);
+        return holds === undefined ? "?" : holds ? "1" : "0";
+      });
+    const gaps: number[] = [];
+    for (const gap of [...candidates].sort((left, right) => left - right)) {
+      const to = `${from}>${outcomesAt(now + gap).join("")}`;
+      if (timeStepsTried.has(to)) continue;
+      timeStepsTried.add(to);
+      gaps.push(gap);
+      if (gaps.length >= MAX_SESSION_GAPS) break;
+    }
+    return gaps;
+  };
   /** A start is a clock start when it says so; without forward time, when it is not at the play clock. */
   const clockStart = (start: Start): boolean => start.clock ?? start.wallClockMs !== EPOCH_MS;
   /**
@@ -1856,15 +1903,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       startedFrom.add(key);
       const work = session.operations;
       if (later) {
-        // A minute later; then at the time steps of the clock conditions a session start reads, as its first state
-        // reads them; a day later when none can be read.
+        // A minute later; then in the windows of the clock comparisons sessions read (`sessionGaps`), as its first
+        // state reads them; a day later when none can be read.
         const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
         const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
         const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
         const steps =
           snapshot === null
             ? []
-            : timeSteps(snapshot, null, wallEnd[first.node.id]!, `storage ${key}`).map(
+            : sessionGaps(snapshot, wallEnd[first.node.id]!, `storage ${key}`).map(
                 (gap) => wallEnd[first.node.id]! + gap - begun,
               );
         for (const gap of steps)

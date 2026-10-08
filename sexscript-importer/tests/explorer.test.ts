@@ -717,6 +717,33 @@ test(
       const bound = timeContext({ globals: [{ name: "hour", value: 14 }] });
       assert.equal(holdsAt(comparison!, model, bound, EPOCH_MS), undefined, update);
     }
+    // A return window learned in an earlier session, from a time away the session computes when it starts: a next
+    // session starts inside it, after "too soon" and before "too late", which neither a minute nor a day later is.
+    {
+      const source =
+        'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
+        'if last > 0 {\n  if away < 7200 {\n    say "Too soon."\n' +
+        '  } else if away > 18000 {\n    say "Too late."\n  } else {\n    say "Welcome back."\n  }\n}\n' +
+        'save getTimestamp().toSeconds() as "last"\nexit\n';
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const result = explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 2000,
+        sources: new Map(),
+        diagnostics: [],
+        later: true,
+      });
+      const welcome = source.split("\n").findIndex((line) => line.includes("Welcome back.")) + 1;
+      assert.ok(
+        !result.coverage.files[0]!.unvisited.some((range) => {
+          const [from = 0, to = from] = range.lines.split("-").map(Number);
+          return welcome >= from && welcome <= to;
+        }),
+      );
+      assert.equal(result.coverage.reach.clock, 0);
+    }
     // A condition that also compares how long the player took, inline, with a value from the clock is not only timed by
     // the player: it keeps forward time.
     {
