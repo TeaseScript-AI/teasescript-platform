@@ -160,8 +160,8 @@ test("a for loop goes through the answers of askBooleans in both forms", () => {
 
 test("askBooleans may stand alone as a statement in both forms, and its answers are dropped", () => {
   for (const ask of [
-    'askBooleans("Choose", texts: ["A", "B"], defaults: [true, false])',
-    'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]',
+    'askBooleans("Choose", texts: ["A", "B"], prefill: [true, false])',
+    'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]',
   ]) {
     const session = createPlayerRuntimeSession(`${ask}\nsay "done", instant\nexit`);
     const restored = restorePlayerRuntimeSession(
