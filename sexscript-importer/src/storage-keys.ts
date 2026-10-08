@@ -501,7 +501,9 @@ export function withStorageDefaults(
     [...read.keys(), ...routed.keys(), ...saved.keys(), ...openSaved].filter(
       (key) =>
         openSaved.has(key) ||
-        [...(saved.get(key) ?? [])].some((type) => type.endsWith("[]") || type.startsWith("dict")),
+        [...(saved.get(key) ?? [])]
+          .flatMap((type) => type.split(" | "))
+          .some((type) => type.endsWith("[]") || type.startsWith("dict")),
     ),
   );
   const filled = withTypedTextReads(programs, routed, collections).map((program) => ({
