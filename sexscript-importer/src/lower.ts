@@ -2025,6 +2025,9 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
     context.syntheticHelpers.add("textAt");
+  // An element read open, or repeated, through a helper (variable typing).
+  if (callsFunction([result.statements], "sexscriptLegacyValue")) context.syntheticHelpers.add("value");
+  if (callsFunction([result.statements], "sexscriptLegacyTimes")) context.syntheticHelpers.add("times");
   // A list or text append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(
     [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),

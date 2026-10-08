@@ -705,6 +705,8 @@ function analyse(
   const assignedTypes = new Map<Binding, TeaseType[]>();
   const savedVariables = new Map<IrStatement, Binding>();
   const savedScopes = new Map<IrStatement & { kind: "save" }, Scope>();
+  // The variables that get a value of a type the analysis cannot tell somewhere.
+  const unknownAssigned = new Set<Binding>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
@@ -785,6 +787,7 @@ function analyse(
   const store = (target: Binding, value: TeaseType, statement: IrStatement): void => {
     if (nonNull(value).kind !== "unknown")
       assignedTypes.set(target, [...(assignedTypes.get(target) ?? []), nonNull(value)]);
+    else unknownAssigned.add(target);
     if (
       target.fixed === undefined &&
       target.initial.kind === "null" &&
@@ -944,7 +947,10 @@ function analyse(
           : child.kind === "methodCall" && child.name === "removeAt" && child.arguments.length === 1
             ? child.arguments[0]!
             : null;
-      if (position !== null && isNumber(typeOf(position, scope))) analysis.indexes.add(child);
+      if (position !== null && isNumber(typeOf(position, scope))) {
+        analysis.indexes.add(child);
+        numberPositions.add(child);
+      }
       // An element of a list that holds several types, used where one type is needed, `pair[1] * 2` or
       // `pair[1].lowercase()`, is read open: Groovy chose the operation by the value it held.
       const operands =
@@ -959,9 +965,20 @@ function analyse(
         if (operand.kind !== "index" || operand.dict === true || !isMixed(typeOf(operand, scope)))
           continue;
         openElements.add(operand);
-        if (!analysis.indexes.has(operand)) {
-          openOnly.add(operand);
-          analysis.indexes.add(operand);
+        analysis.indexes.add(operand);
+        // Text and a list repeat by a whole count, `pair[0] * 2`, which the repetition helper does at runtime.
+        const count =
+          child.kind === "binary" && child.operator === "*"
+            ? nonNull(typeOf(child.right, scope))
+            : null;
+        if (
+          child.kind === "binary" &&
+          operand === child.left &&
+          count?.kind === "scalar" &&
+          count.name === "integer"
+        ) {
+          openTimes.add(child);
+          analysis.indexes.add(child);
         }
       }
       // Groovy `text[i]` on a variable typing proves text, which the lowering could not tell, is its character there.
@@ -1305,7 +1322,11 @@ function analyse(
         if (own !== undefined && nonNull(own).kind !== "unknown")
           return scope.rulesOutNull(found) ? nonNull(own) : own;
         const start = found.declaration?.value;
-        if (start?.kind !== "load" || (start.integer !== true && start.number !== true))
+        if (
+          start?.kind !== "load" ||
+          (start.integer !== true && start.number !== true) ||
+          unknownAssigned.has(found)
+        )
           return UNKNOWN;
         const read = scalar(start.number === true ? "number" : "integer");
         return sharedValueType([read, ...(assignedTypes.get(found) ?? [])]);
@@ -2273,8 +2294,10 @@ const plainTruths = new WeakMap<IrExpression, TeaseType>();
 const OPEN_OPERATORS = new Set(["+", "-", "*", "/", "%", "<", ">", "<=", ">="]);
 /** Elements of lists of several types that an operation reads open, through sexscriptLegacyValue (findIndexes). */
 const openElements = new WeakSet<IrExpression>();
-/** Those of them whose position needs no whole-number conversion. */
-const openOnly = new WeakSet<IrExpression>();
+/** Products of such an element and a whole count, which repeat text or a list (findIndexes). */
+const openTimes = new WeakSet<IrExpression>();
+/** Indexes whose position may hold a fraction, which a whole-number conversion cuts (findIndexes). */
+const numberPositions = new WeakSet<IrExpression>();
 
 /** Whether a type is a union of text and another scalar type, which an operation cannot take as it is. */
 function isMixed(type: TeaseType): boolean {
@@ -2357,8 +2380,19 @@ function withIntegerIndexes<T extends IrStatement>(
       return plainTruth(copy.positional[0]!, truthType);
     if (copy.kind === "index" && textIndexes.has(value))
       return helperCall("textAt", [copy.target, copy.index]);
+    if (copy.kind === "binary" && openTimes.has(value)) {
+      // The element itself, without the open read the repetition helper does too.
+      const element =
+        copy.left.kind === "call" && copy.left.name === "sexscriptLegacyValue"
+          ? copy.left.positional[0]!
+          : copy.left;
+      return helperCall("times", [element, copy.right]);
+    }
     if (copy.kind === "index") {
-      const read = openOnly.has(value) ? copy : { ...copy, index: truncated(copy.index) };
+      const read =
+        openElements.has(value) && !numberPositions.has(value)
+          ? copy
+          : { ...copy, index: truncated(copy.index) };
       return openElements.has(value) ? helperCall("value", [read]) : read;
     }
     if (copy.kind === "range") {
