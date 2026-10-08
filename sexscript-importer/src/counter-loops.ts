@@ -8,120 +8,117 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * `for i in 0..n { ... }` (`..=` for `<=`). That holds where it visits the same values: the counter starts at a whole
  * number, nothing in the loop sets it but the step at its end, which every `continue` of the loop takes first, and the
  * bound is a whole number that nothing in the loop changes, which a range reads once where the condition read it on every
- * pass. A range counts up only, so a loop that counts down stays a `while`. The counter is the loop's own: no code
- * outside its loops names it, so a later loop of the same counter goes through a range too.
+ * pass. A range counts up only, so a loop that counts down stays a `while`. The counter is its loops' own: the `let`
+ * that declares it starts one, and the rest of its block names it only in counter loops, which a later loop of the
+ * same counter is too; for the file's top level, no function names it without declaring its own.
  */
 export function withCounterLoops(statements: IrStatement[]): IrStatement[] {
-  // Each function is a region of names of its own, the file's top level another; a counter that a function declares is
-  // that function's, any other the file's, which its top level and the functions that do not declare it share.
-  interface Region {
-    uses: Map<string, number>;
-    inLoops: Map<string, number>;
-    declares: ReadonlySet<string>;
-  }
-  const top: Region = { uses: nameUses(statements), inLoops: new Map(), declares: new Set() };
-  const regions = new Map<IrStatement, Region>();
-  const find = (
-    items: readonly IrStatement[],
-    region: Region,
-    locals: ReadonlySet<string>,
-  ): void => {
+  // The loops that go through ranges: those of a counter that a `let` declares, where every use of that counter in the
+  // rest of the `let`'s block lies in its counter loops, and, for a counter of the file's top level, no function that
+  // does not declare one of its own uses it.
+  const ranged = new Set<IrStatement>();
+  const functions = statements.filter(
+    (item): item is Extract<IrStatement, { kind: "function" }> => item.kind === "function",
+  );
+  const visit = (items: readonly IrStatement[], locals: ReadonlySet<string>): void => {
     items.forEach((item, index) => {
-      const loop = counterLoop(items, index, statements, locals);
-      if (loop !== null) {
-        const names = nameUses([items[index - 1]!, item]).get(loop.counter) ?? 0;
-        region.inLoops.set(loop.counter, (region.inLoops.get(loop.counter) ?? 0) + names);
+      const loop = counterLoop(items, index + 1, statements, locals);
+      if (item.kind === "let" && loop !== null && items[index + 1] !== undefined) {
+        const scope = items.slice(index);
+        const loops: IrStatement[] = [];
+        let inLoops = 0;
+        const collect = (block: readonly IrStatement[]): void => {
+          block.forEach((statement, position) => {
+            const found = counterLoop(block, position, statements, locals);
+            if (found !== null && found.counter === loop.counter) {
+              loops.push(statement);
+              inLoops += nameUses([block[position - 1]!, statement]).get(loop.counter) ?? 0;
+            }
+            if (statement.kind !== "function")
+              withNestedBlocks(statement, (body) => {
+                collect(body);
+                return body;
+              });
+          });
+        };
+        collect(scope);
+        const outside =
+          items === statements
+            ? functions
+                .filter((fn) => !functionLocals(fn).has(loop.counter))
+                .reduce((sum, fn) => sum + (nameUses(fn.body).get(loop.counter) ?? 0), 0)
+            : 0;
+        const uses = nameUses(scope.filter((statement) => statement.kind !== "function"));
+        if (outside === 0 && (uses.get(loop.counter) ?? 0) === inLoops)
+          for (const statement of loops) ranged.add(statement);
       }
-      if (item.kind === "function") {
-        const own = functionLocals(item);
-        const inner: Region = { uses: nameUses(item.body), inLoops: new Map(), declares: own };
-        regions.set(item, inner);
-        find(item.body, inner, own);
-        return;
-      }
-      withNestedBlocks(item, (body) => {
-        find(body, region, locals);
-        return body;
-      });
+      if (item.kind === "function") visit(item.body, functionLocals(item));
+      else
+        withNestedBlocks(item, (body) => {
+          visit(body, locals);
+          return body;
+        });
     });
   };
-  find(statements, top, new Set());
-  // The file's names: its top level's, and those of the functions that do not declare them.
-  const shared = (name: string): boolean => {
-    let uses = top.uses.get(name) ?? 0;
-    let inLoops = top.inLoops.get(name) ?? 0;
-    for (const region of regions.values()) {
-      if (region.declares.has(name)) {
-        // A function's own names are apart from the file's; the top level's count included them.
-        uses -= region.uses.get(name) ?? 0;
-        continue;
-      }
-      inLoops += region.inLoops.get(name) ?? 0;
-    }
-    return uses === inLoops;
-  };
-  const own = (counter: string, region: Region): boolean =>
-    region !== top && region.declares.has(counter)
-      ? (region.uses.get(counter) ?? 0) === (region.inLoops.get(counter) ?? 0)
-      : shared(counter);
-  const rewrite = (
-    items: IrStatement[],
-    region: Region,
-    locals: ReadonlySet<string>,
-  ): IrStatement[] => {
+  visit(statements, new Set());
+  const rewrite = (items: IrStatement[], locals: ReadonlySet<string>): IrStatement[] => {
     const result: IrStatement[] = [];
     items.forEach((item, index) => {
-      const loop = counterLoop(items, index, statements, locals);
-      if (loop !== null && own(loop.counter, region)) {
+      const loop = ranged.has(item) ? counterLoop(items, index, statements, locals) : null;
+      if (loop !== null) {
         result.pop();
         result.push({
           kind: "for",
           variable: loop.counter,
           collection: { kind: "range", from: loop.from, to: loop.to, inclusive: loop.inclusive },
-          body: rewrite(loop.body, region, locals),
+          body: rewrite(loop.body, locals),
           span: item.span,
         });
         return;
       }
       if (item.kind === "function") {
-        result.push({
-          ...item,
-          body: rewrite(item.body, regions.get(item)!, functionLocals(item)),
-        });
+        result.push({ ...item, body: rewrite(item.body, functionLocals(item)) });
         return;
       }
-      result.push(withNestedBlocks(item, (body) => rewrite(body, region, locals)));
+      result.push(withNestedBlocks(item, (body) => rewrite(body, locals)));
     });
     return result;
   };
-  return rewrite(statements, top, new Set());
+  return rewrite(statements, new Set());
 }
 
-/** How often the statements name each variable: reading or setting it, declaring it, or going through values into it. */
+/**
+ * How often the statements name each variable: reading or setting it, or declaring it. A `for` loop's variables are its
+ * own, apart from any other of their names, so the loop's uses of them count for none.
+ */
 function nameUses(statements: readonly IrStatement[]): Map<string, number> {
   const uses = new Map<string, number>();
-  const add = (name: string): void => {
-    uses.set(name, (uses.get(name) ?? 0) + 1);
-  };
-  const value = (child: IrExpression): IrExpression => {
-    if (child.kind === "variable") add(child.name);
-    return mapChildren(child, value);
-  };
-  const visit = (items: readonly IrStatement[]): void => {
+  const visit = (items: readonly IrStatement[], own: ReadonlySet<string>): void => {
+    const add = (name: string): void => {
+      if (!own.has(name)) uses.set(name, (uses.get(name) ?? 0) + 1);
+    };
+    const value = (child: IrExpression): IrExpression => {
+      if (child.kind === "variable") add(child.name);
+      return mapChildren(child, value);
+    };
     for (const item of items) {
       if (item.kind === "let") add(item.name);
-      if (item.kind === "for") {
-        add(item.variable);
-        if (item.valueVariable !== undefined) add(item.valueVariable);
-      }
       mapOwnExpressions(item, value);
+      const inner =
+        item.kind === "for"
+          ? new Set([
+              ...own,
+              item.variable,
+              ...(item.valueVariable === undefined ? [] : [item.valueVariable]),
+            ])
+          : own;
       withNestedBlocks(item, (body) => {
-        visit(body);
+        visit(body, inner);
         return body;
       });
     }
   };
-  visit(statements);
+  visit(statements, new Set());
   return uses;
 }
 
