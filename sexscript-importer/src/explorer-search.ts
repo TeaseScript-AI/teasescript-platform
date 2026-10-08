@@ -108,7 +108,7 @@ const RANDOM_DRAWS_PER_STEP = 4;
  * With random choices: the share of all runtime operations that steps with a chosen random outcome and the expansions
  * of states after one may take while play states are open. Such steps can cost much more than others.
  */
-const CHOSEN_SHARE = 1 / 8;
+const CHOSEN_SHARE = 1 / 16;
 /** With guidance: the fewest instructions a region of code not reached yet must have to be led toward. */
 const MIN_REGION = 10;
 /** The target of the guidance lead, which is no condition's. */
@@ -160,17 +160,21 @@ interface Start extends Setup {
 
 interface Node {
   readonly id: number;
-  /** Its path: the state and input that reached it first, or play that reached it after a chosen random outcome did. */
-  parent: number | null;
-  input: ExplorerInput | null;
-  depth: number;
+  readonly parent: number | null;
+  readonly input: ExplorerInput | null;
+  readonly depth: number;
   readonly loop: string;
   /** The index of the {@link Start} of its session. */
-  start: number;
+  readonly start: number;
   /** Whether its session started at another wall clock, or its path set the clock. */
   readonly clock: boolean;
-  /** Whether its path, or one of an earlier session it continues, chose a random outcome (`ExplorerInput.random`). */
-  chosen: boolean;
+  /**
+   * Whether its path, or one of an earlier session it continues, chose a random outcome (`ExplorerInput.random`). Such
+   * a state is another state than play's in the same runtime state, so that play reaches its own.
+   */
+  readonly chosen: boolean;
+  /** With random choices, for a state after a chosen outcome whose expansion its share cut short: the inputs tried. */
+  tried?: Set<string>;
   /** The directed attempt, or closeness to a comparison, whose first place it shares; null for none. */
   readonly lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
@@ -1081,10 +1085,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     );
   /** With random choices: the outcomes tried of each draw site, by place and input, so that each is tried once there. */
   const randomTried = new Set<string>();
-  /**
-   * With random choices: the steps with another random outcome, and the inputs of a state after one left over its
-   * share, not taken yet, from `chosenAt` on.
-   */
+  /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
   let chosenAt = 0;
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
@@ -1446,7 +1447,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const start = starts[startIndex]!;
     const clock = (parent?.clock ?? clockStart(start)) || (input !== null && isClockInput(input));
     const chosen = (parent?.chosen ?? chosenStart(start)) || (input?.random?.length ?? 0) > 0;
-    const inherited = lead ?? (parent !== null && active(parent.lead) ? parent.lead : null);
+    // Play after a chosen random outcome takes no lead, time steps, witness, or storage for later sessions: it stays
+    // within its share, apart from directed work and next visits.
+    const inherited = chosen
+      ? null
+      : (lead ?? (parent !== null && active(parent.lead) ? parent.lead : null));
     const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
     const stepItems = items === null ? NO_ITEMS : items.of(step, clock);
     let first = false;
@@ -1460,14 +1465,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (parent !== null && input !== null) offerChoices(parent, input, step);
     for (const way of step.ways) {
       const instruction = way >> 1;
-      if (times?.comparisons.has(instruction) === true) {
+      if (times?.comparisons.has(instruction) === true && !chosen) {
         const at = clockKey(parent?.waitsAt);
         const known = clockAfter.get(at) ?? new Set();
         // The state the step left was expanded already: it gets its time steps now.
         if (!known.has(instruction)) timeJobs.push({ node: parent?.id ?? null, start: startIndex });
         clockAfter.set(at, known.add(instruction));
       }
-      if (!witnesses.has(instruction))
+      if (!witnesses.has(instruction) && !chosen)
         witnesses.set(instruction, { node: parent?.id ?? null, start: startIndex, input });
       const target = targets.get(way);
       if (target === undefined) {
@@ -1507,12 +1512,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
     const keys = stateKeys(step.snapshot);
-    const known = byState.get(keys.state);
+    const stateKey = chosen ? `chosen ${keys.state}` : keys.state;
+    const known = byState.get(stateKey);
     if (known !== undefined) {
       const node = nodes[known]!;
       if (parent !== null && !parent.edges.includes(node.id)) parent.edges.push(node.id);
-      if (node.chosen && !chosen && node.clock === clock)
-        promote(node, parent, input, step, startIndex);
       return node;
     }
     const status = step.snapshot.status;
@@ -1546,9 +1550,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     };
     nodes.push(node);
     if (later) wallEnd[node.id] = wallClockOf(step.snapshot);
-    byState.set(keys.state, node.id);
+    byState.set(stateKey, node.id);
     if (parent !== null) parent.edges.push(node.id);
-    if (!clock) remember(step.snapshot, node);
+    if (!clock && !chosen) remember(step.snapshot, node);
     if (node.status === "failed") {
       const crash = recordCrash(
         crashes,
@@ -1562,7 +1566,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (node.status === "open") {
       store.put(node.id, step.snapshot, parent === null);
       const ask = node.prompt.instruction;
-      if (ask !== null) {
+      if (ask !== null && !chosen) {
         const waiting = askNodes.get(ask) ?? [];
         if (waiting.length < 5) waiting.push(node.id);
         askNodes.set(ask, waiting);
@@ -1671,39 +1675,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       engineErrors.count += 1;
       engineErrors.first ??= { message: String(error), ...reproOf(node, input, node.start) };
       return null;
-    }
-  };
-
-  /**
-   * Play reached a state only play with chosen random outcomes reached before: its path is this one now, a crash it
-   * failed with is play's, and one that was expanded is expanded again, so that the states after it are play's too.
-   */
-  const promote = (
-    node: Node,
-    parent: Node | null,
-    input: ExplorerInput | null,
-    step: Step,
-    startIndex: number,
-  ): void => {
-    node.chosen = false;
-    node.parent = parent?.id ?? null;
-    node.input = input;
-    node.depth = parent === null ? 0 : parent.depth + 1;
-    node.start = startIndex;
-    if (node.status === "failed") {
-      const crash = recordCrash(
-        crashes,
-        step,
-        node,
-        starts[startIndex]!.session,
-        reproOf(parent, input, startIndex),
-      );
-      if (crash !== null) crashNodes.set(crash, node.id);
-    }
-    if (node.status === "expanded" || node.status === "open") {
-      node.status = "open";
-      if (replaying) replayedOpen.push(node.id);
-      else frontier.push(node.id, order(node));
     }
   };
 
@@ -2657,17 +2628,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     node.status = "partial";
     const closeness =
       distanceTargets.length === 0 ? [] : distances(stored ?? base.exportTrustedSnapshot());
+    // A state after a chosen random outcome goes back to its queue when its share is spent, to go on later with the
+    // inputs it has not tried.
+    let ran = 0;
+    let cut = false;
     for (const [index, input] of inputs.entries()) {
       const stop = spent();
       if (stop !== null) {
         stoppedBy = stop;
         break search;
       }
-      // A state after a chosen random outcome leaves the inputs over its share for later.
-      if (node.chosen && index > 0 && !withinChosenShare()) {
-        for (const rest of inputs.slice(index)) chosenSteps.push({ node: node.id, input: rest });
+      const tried = node.chosen ? JSON.stringify(input) : "";
+      if (node.tried?.has(tried) === true) continue;
+      if (node.chosen && ran > 0 && !withinChosenShare()) {
+        cut = true;
         break;
       }
+      ran += 1;
+      if (node.chosen) (node.tried ??= new Set()).add(tried);
       const work = session.operations;
       const next = step(node, index === inputs.length - 1 ? base : base.fork(), input);
       if (leading) directedWork += session.operations - work;
@@ -2705,7 +2683,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         at.inputs.add(inputKey(input));
       }
     }
-    node.status = "expanded";
+    if (cut) {
+      node.status = "open";
+      frontier.push(node.id, order(node));
+    } else {
+      node.status = "expanded";
+      delete node.tried;
+    }
   }
 
   const coverage = lineCoverage(

@@ -408,6 +408,8 @@ export class Session {
   readonly #decisions = new Map<number, Data>();
   /** The draws an input's chosen outcomes were taken at, while it is applied. */
   readonly #taken = new Set<number>();
+  /** While an input with chosen outcomes is applied: the coverage marks it set, undone when it does not fit. */
+  #marks: { array: Uint8Array; index: number; value: number }[] | null = null;
   #draws: Data[] = [];
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
@@ -621,6 +623,7 @@ export class Session {
       throw new Error("An input with chosen random outcomes needs a session with random choices.");
     for (const choice of input.random ?? []) this.#decisions.set(choice.drawId, choice.outcome);
     this.#taken.clear();
+    this.#marks = input.random === undefined ? null : [];
     this.#draws = [];
     try {
       const settled = this.#input(runtime, runtime.view(), input)
@@ -637,12 +640,16 @@ export class Session {
         input.random !== undefined &&
         (input.random.some((choice) => !this.#taken.has(choice.drawId)) ||
           runtime.view().randomDraw != null)
-      )
+      ) {
+        for (const { array, index, value } of (this.#marks ?? []).toReversed())
+          array[index] = value;
         return null;
+      }
       return settled;
     } finally {
       this.#decisions.clear();
       this.#taken.clear();
+      this.#marks = null;
     }
   }
 
@@ -829,6 +836,7 @@ export class Session {
     for (const index of execution.instructions) {
       if (index < 0 || index >= visited.length) continue;
       if (visited[index] === 0 && ((!clock && !chosen) || this.visited[index] === 0)) fresh += 1;
+      if (visited[index] === 0) this.#marks?.push({ array: visited, index, value: 0 });
       visited[index] = 1;
       executed.add(index);
     }
@@ -837,6 +845,7 @@ export class Session {
       if (instruction?.kind !== "jumpIfFalse" && instruction?.kind !== "loopStart") continue;
       const way = to === from + 1 ? 0 : to === instruction.target ? 1 : -1;
       if (way < 0) continue;
+      this.#marks?.push({ array: branches, index: from, value: branches[from]! });
       branches[from]! |= way === 0 ? 1 : 2;
       ways.add(from * 2 + way);
     }

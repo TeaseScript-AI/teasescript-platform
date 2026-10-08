@@ -1266,7 +1266,7 @@ test(
 );
 
 test(
-  "play with chosen random outcomes stays apart across sessions, gives way to play that reaches the same state, follows directed steps too, and replays only as recorded",
+  "play with chosen random outcomes stays apart across sessions and from play's states, follows directed steps too, and replays only as recorded",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -1287,21 +1287,29 @@ test(
         corpus,
         randomChoices,
       });
-    // The outcome a session chose that its storage keeps: the next session's crash is chosen play's.
+    const covers = (result: ReturnType<typeof run>, line: number) =>
+      !result.coverage.files[0]!.unvisited.some((range) => {
+        const [from, to = from] = range.lines.split("-").map(Number);
+        return line >= from! && line <= to!;
+      });
+    const forcedOf = (result: ReturnType<typeof run>) =>
+      result.corpus!.entries.find((entry) => entry.inputs.some((input) => input.random))!;
+    // A corpus path whose earlier session chose the outcome its storage keeps: the next session's crash is chosen play's.
     const lucky =
       'if (load "won", default: false) == true {\n  let zero = load "zero", default: 0\n  let boom = 1 / zero\n  exit\n}\n' +
       'showButton "Go"\nif chance(25) == false {\n  save true as "won"\n}\nexit\n';
-    const later = run(lucky, true);
+    const luck = run(lucky, true);
+    const won = forcedOf(luck);
+    const later = run(lucky, false, [{ seed: 1, reason: "coverage", earlier: [won], inputs: [] }]);
     assert.equal(later.crashes.length, 1);
     assert.equal(later.crashes[0]!.chosen, true);
     assert.equal(later.crashes[0]!.earlier?.[0]?.inputs[0]?.random?.length, 1);
-    // A state chosen play reached first, which play then reaches too, is play's, and so is the crash after it.
+    // A state chosen play reached first that play reaches too is play's own state, and so is the crash after it.
     const shared =
       'showButton "Go"\nif chance(25) {\n  say "Lucky."\n}\nshowButton "Next"\nlet zero = load "zero", default: 0\n' +
       "let boom = 1 / zero\nexit\n";
-    const forced = run(shared, true).corpus!.entries.find((entry) =>
-      entry.inputs.some((input) => input.random !== undefined),
-    )!;
+    const chosen = run(shared, true);
+    const forced = forcedOf(chosen);
     const merged = run(shared, false, [{ ...forced, inputs: forced.inputs.slice(0, 1) }]);
     assert.equal(merged.crashes[0]!.chosen, undefined);
     assert.deepEqual(
@@ -1309,14 +1317,13 @@ test(
       [undefined, undefined],
     );
     // The corpus counts chosen play's coverage too.
-    assert.equal(merged.corpus!.coverageAtEnd.percent, merged.coverage.percent);
-    // A recorded outcome for a draw the path does not make is a stale entry, not chosen play.
-    const unmatched = forced.inputs
-      .slice(0, 1)
-      .map((input) => ({
-        ...input,
-        random: input.random!.map((choice) => ({ ...choice, drawId: choice.drawId + 1 })),
-      }));
+    assert.ok(luck.coverage.reach.chosen! > 0);
+    assert.equal(luck.corpus!.coverageAtEnd.percent, luck.coverage.percent);
+    // A path with an outcome recorded for a draw it does not make is a stale entry, which leaves no coverage.
+    const [taken] = forced.inputs[0]!.random!;
+    const unmatched = [
+      { ...forced.inputs[0]!, random: [taken!, { ...taken!, drawId: taken!.drawId + 1 }] },
+    ];
     const stale = run(shared, false, [{ seed: 1, reason: "coverage", inputs: unmatched }]);
     assert.equal(stale.corpus!.stale, 1);
     assert.equal(stale.coverage.reach.chosen, 0);
@@ -1326,8 +1333,6 @@ test(
       '    say "Unlucky."\n  }\n}\nexit\n';
     const steered = run(directed, true);
     assert.ok(steered.directed.ways.some((way) => way.reach === "chosen"));
-    assert.ok(
-      !steered.coverage.files[0]!.unvisited.some((range) => ["4", "6"].includes(range.lines)),
-    );
+    assert.ok(covers(steered, 4) && covers(steered, 6));
   },
 );
