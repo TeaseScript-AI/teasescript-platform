@@ -434,6 +434,11 @@ export interface ExploreResult {
     time?: { conditions: number; places: number; steps: number; sessions: number };
     /** With guidance: the regions of code not reached yet that the search was led toward, and those it reached. */
     guidance?: { regions: number; reached: number };
+    /**
+     * By session number (the first session first): the sessions started, and the explored states that completed one,
+     * such as how often a long first session came to its end, which later sessions need.
+     */
+    bySession: { started: number[]; completed: number[] };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -2434,6 +2439,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     targets,
   );
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
+  const sessionCount = Math.max(0, ...starts.map((start) => start.session));
+  const bySession = {
+    started: Array.from({ length: sessionCount }, () => 0),
+    completed: Array.from({ length: sessionCount }, () => 0),
+  };
+  for (const start of starts) bySession.started[start.session - 1]! += 1;
+  for (const node of nodes)
+    if (node.status === "completed") bySession.completed[starts[node.start]!.session - 1]! += 1;
   const traps = findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start));
 
   /**
@@ -2554,6 +2567,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           };
         }),
       store: { peakBytes: store.peakBytes, evicted: store.evicted, replays },
+      bySession,
       ...(cells === null ? {} : { cells: cells.stats }),
       ...(map === null
         ? {}
