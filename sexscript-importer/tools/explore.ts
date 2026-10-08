@@ -39,6 +39,7 @@
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
+import { setFlagsFromString } from "node:v8";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +60,8 @@ import {
 import { packageContentHash } from "./catalog.ts";
 
 const SELF = fileURLToPath(import.meta.url);
+/** The V8 flag that sets how much the heap grows after a collection. */
+const HEAP_GROWING = "--heap-growing-percent";
 /** Until stalled, the default time cap per unit. */
 const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
 /** Missed ways the summary lists per unit, by the code behind them. */
@@ -104,6 +107,11 @@ interface ReportHeader {
 if (process.argv[1] === SELF) await main(process.argv.slice(2));
 
 async function main(args: string[]): Promise<void> {
+  // V8 lets its heap grow to up to four times what a collection keeps, and a long run keeps much: there, unused heap
+  // was a third of the process's memory. Growing it by a fifth at a time keeps memory close to what the run holds. The
+  // flag is V8's own: set only where this Node has it.
+  if (execFileSync(process.execPath, ["--v8-options"], { encoding: "utf8" }).includes(HEAP_GROWING))
+    setFlagsFromString(`${HEAP_GROWING}=20`);
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
