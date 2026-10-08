@@ -1214,6 +1214,8 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
   const differences: (ClockDifference & { readonly name: string | null })[] = [];
   /** The difference each variable holds, by name, as of the instruction looked at; another value ends it. */
   const held = new Map<string, ClockDifference>();
+  /** The variables whose difference was updated from itself since (`took = took / 1000`): in other units. */
+  const transformed = new Set<string>();
   const add = (difference: ClockDifference, constant: unknown, condition: number) => {
     if (!difference.conditions.includes(condition)) difference.conditions.push(condition);
     const duration = record(constant);
@@ -1242,7 +1244,11 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
         const taken = { name, ...difference, numbers: [], durations: [], conditions: [] };
         differences.push(taken);
         held.set(name, taken);
-      } else if (!namesIn(instruction.value).has(name)) held.delete(name);
+        transformed.delete(name);
+      } else if (!namesIn(instruction.value).has(name)) {
+        held.delete(name);
+        transformed.delete(name);
+      } else if (held.has(name)) transformed.add(name);
       if (difference === null && readAt(instruction.value, index) === index) reads.set(name, index);
       else reads.delete(name);
     }
@@ -1258,11 +1264,16 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
         differences.push(own);
         add(own, constant, index);
       }
-      // A condition further on still compares the difference, but its constant is not taken for the button.
+      // A condition further on, or after an update in other units, still compares the difference, but its constant is
+      // not taken for the button.
       for (const name of namesIn(subject)) {
         const difference = held.get(name);
         if (difference !== undefined && index > difference.at)
-          add(difference, index - difference.at <= TIMING_WINDOW ? constant : undefined, index);
+          add(
+            difference,
+            index - difference.at <= TIMING_WINDOW && !transformed.has(name) ? constant : undefined,
+            index,
+          );
       }
     };
     for (const atom of atomsFor(condition, true)) compared(atom.subject, atom.constant);

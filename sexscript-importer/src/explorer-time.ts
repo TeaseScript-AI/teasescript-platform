@@ -136,8 +136,13 @@ function clockReads(
     if (clockCall(record(expression.object))) found.add(String(expression.name));
   if (expression.kind === "identifier" && typeof expression.name === "string") {
     if (model.ambiguous.has(expression.name)) found.add("timestamp");
-    const defined = model.definitions.get(expression.name);
-    if (defined !== undefined) clockReads(defined.value, model, defined.temporaries, found, seen);
+    // Through each value it was computed from, the updates from itself and the computation they follow.
+    for (
+      let defined = model.definitions.get(expression.name) ?? null;
+      defined !== null;
+      defined = defined.prior
+    )
+      clockReads(defined.value, model, defined.temporaries, found, seen);
   }
   if (expression.kind === "temporary" && typeof expression.temporaryId === "number") {
     const stored = temporaries.get(expression.temporaryId);
@@ -266,6 +271,8 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
   // computations differ, or an update may or may not run, the variable cannot be computed again: it is ambiguous.
   // Rounds until no variable is added.
   const assigned = new Map<string, (Definition & { readonly at: number })[]>();
+  /** Where each variable is set to a literal, which an update from itself does not compose across. */
+  const literalAt = new Map<string, number[]>();
   instructions.forEach((instruction, index) => {
     const target = record(instruction.target);
     const name =
@@ -275,6 +282,8 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
           ? instruction.name
           : null;
     const value = record(instruction.value);
+    if (typeof name === "string" && value.kind === "literal")
+      literalAt.set(name, [...(literalAt.get(name) ?? []), index]);
     if (typeof name !== "string" || value.kind === "literal") return;
     const definition = { value, temporaries: temporariesAt(value, index), prior: null, at: index };
     assigned.set(name, [...(assigned.get(name) ?? []), definition]);
@@ -318,6 +327,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
       }
       for (let between = last + 1; between < at; between += 1)
         if (last < 0 || !STRAIGHT.has(String(instructions[between]?.kind))) return null;
+      if ((literalAt.get(name) ?? []).some((index) => index > last && index < at)) return null;
       definition = { value, temporaries, prior: definition };
       last = at;
     }
@@ -445,6 +455,8 @@ interface Reading {
    * computed from just before, or the state (null).
    */
   readonly inside: ReadonlyMap<string, Definition | null>;
+  /** The values of definitions computed in this reading, each computed once. */
+  readonly memo: Map<Definition, Value>;
 }
 
 /** An expression's value in a reading, or undefined when it cannot be read. */
@@ -465,13 +477,15 @@ function valueAt(expression: unknown, reading: Reading): Value {
       const within = reading.inside.has(node.name);
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
-      return defined == null
-        ? runtimeValue(context.bindings.get(node.name))
-        : valueAt(defined.value, {
-            ...reading,
-            temporaries: defined.temporaries,
-            inside: new Map([...reading.inside, [node.name, defined.prior]]),
-          });
+      if (defined == null) return runtimeValue(context.bindings.get(node.name));
+      if (reading.memo.has(defined)) return reading.memo.get(defined);
+      const value = valueAt(defined.value, {
+        ...reading,
+        temporaries: defined.temporaries,
+        inside: new Map([...reading.inside, [node.name, defined.prior]]),
+      });
+      reading.memo.set(defined, value);
+      return value;
     }
     case "temporary": {
       const stored =
@@ -628,7 +642,14 @@ export function holdsAt(
       left: comparison.left,
       right: comparison.right,
     },
-    { temporaries: comparison.temporaries, model, context, now, inside: new Map() },
+    {
+      temporaries: comparison.temporaries,
+      model,
+      context,
+      now,
+      inside: new Map(),
+      memo: new Map(),
+    },
   );
   return typeof value === "boolean" ? value : undefined;
 }
@@ -683,8 +704,9 @@ export function flipGap(
     inside: new Map<string, Definition | null>(),
   };
   const apart = (at: number, right: unknown) => {
-    const left = magnitude(valueAt(comparison.left, { ...reading, now: at }));
-    const bound = magnitude(valueAt(right, { ...reading, now: at }));
+    const then = { ...reading, now: at, memo: new Map<Definition, Value>() };
+    const left = magnitude(valueAt(comparison.left, then));
+    const bound = magnitude(valueAt(right, then));
     return left === undefined || bound === undefined ? undefined : left - bound;
   };
   const range = record(comparison.right);
@@ -748,6 +770,7 @@ export function storedHolds(
     context: { bindings: new Map(), storage },
     now: 0,
     inside: new Map(),
+    memo: new Map(),
   });
   return typeof value === "boolean" ? value : undefined;
 }

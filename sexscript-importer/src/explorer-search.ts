@@ -1778,9 +1778,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       } else if (source.kind === "clock" && later) {
         if (timed) continue;
         timed = true;
-        // A condition that compares how long the player took between two clock reads (a reaction, a hold) is reached
-        // by thinking before the button between them, which its options have; coming back later changes nothing.
-        if (measured.has(target.instruction)) continue;
+        // A condition that compares how long the player took between two clock reads (a reaction, a hold) with what
+        // does not read the clock is reached by thinking before the button between them, which its options have;
+        // coming back later changes nothing.
+        if (
+          measured.has(target.instruction) &&
+          (times?.comparisons.get(target.instruction) ?? []).every(
+            (comparison) => comparison.exact && comparison.parts.size === 0,
+          )
+        )
+          continue;
         // A condition whose clock comparisons can all be read where it was evaluated gets time steps there instead.
         const comparisons = times?.comparisons.get(target.instruction) ?? [];
         const before = witnessNode === null ? null : snapshotOf(witnessNode);

@@ -514,14 +514,16 @@ test(
       ),
       [{ kind: "button", label: "Two" }],
     );
-    // A difference the variable lost before the comparison times nothing either.
-    assert.deepEqual(
-      timedStart(
-        'let a = getTimestamp().toSeconds()\nshowButton "Three"\nlet took = getTimestamp().toSeconds() - a\n' +
-          'took = 0\nif took < 5 {\n  say "Fast."\n}\nexit\n',
-      ),
-      [{ kind: "button", label: "Three" }],
-    );
+    // A difference the variable lost before the comparison times nothing either, nor one updated into other units.
+    for (const update of ["took = 0", "took = took * 2"])
+      assert.deepEqual(
+        timedStart(
+          'let a = getTimestamp().toSeconds()\nshowButton "Three"\nlet took = getTimestamp().toSeconds() - a\n' +
+            `${update}\nif took < 5 {\n  say "Fast."\n}\nexit\n`,
+        ),
+        [{ kind: "button", label: "Three" }],
+        update,
+      );
 
     // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
     const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');
@@ -664,6 +666,26 @@ test(
       const [comparison] = [...model.comparisons.values()][0]!;
       const bound = timeContext({ globals: [{ name: "hour", value: 14 }] });
       assert.equal(holdsAt(comparison!, model, bound, EPOCH_MS), undefined, update);
+    }
+    // Updates from itself compose with the clock read before them: one that adds 1 at 17:00 compares 18, also after
+    // forty doublings, each computed once; a literal between them ends that.
+    const doubled = Array.from({ length: 40 }, () => "h = h + h\n").join("");
+    for (const [updates, expected] of [
+      ["h = h + 1\n", true],
+      [`h = h - 17\n${doubled}h = h + 18\n`, true],
+      ["h = 0\nh = h + 1\n", undefined],
+    ] as const) {
+      const source = `let h = getDateTime().hour\n${updates}showButton "Go"\nif h == 18 {\n  say "Hit."\n}\nexit\n`;
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const model = clockModel(plan, instructions);
+      const [comparison] = [...model.comparisons.values()][0] ?? [];
+      assert.ok(comparison !== undefined, updates);
+      const atFive = EPOCH_MS + 5 * 3_600_000;
+      assert.equal(holdsAt(comparison, model, timeContext({}), atFive), expected, updates);
     }
   },
 );
