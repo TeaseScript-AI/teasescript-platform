@@ -16,13 +16,6 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(toInteger(value))
 }
-function sexscriptLegacyLoadFloat(key, whenMissing = null) {
-  let value = load key, default: null
-  if value == null {
-    return whenMissing
-  }
-  return sexscriptLegacyValue(toNumber(value))
-}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -50,7 +43,7 @@ function sexscriptLegacyCompare(left, right) {
   }
   return 0
 }
-let visits = sexscriptLegacyLoadInteger("training.visits", 0)
+let visits = load "training.visits", default: 0
 save visits + 1 as "training.visits"
 let title = load "training.title", default: ""
 if title == "" or title == "" {
@@ -89,7 +82,7 @@ say "Keep the streak?"
 if (choose yes: "Yes", no: "No") == "yes" {
   let streak = 0
   // NOTE SX_LOAD_KEEPS_VALUE line 27: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
-  streak = sexscriptLegacyLoadInteger("training.streak", streak)
+  streak = load "training.streak", default: streak
   say "Streak ${streak + 1}"
 } else {
   let streak: integer? = 0
@@ -106,13 +99,13 @@ if "${load("training.version", default: sexscriptLegacyValue(""))}" == "2" {
 }
 // An online read with a default for a missing value reads with that default.
 // NOTE SX_ONLINE_STORAGE line 38: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let best = sexscriptLegacyLoadInteger("training.best", 0)
+let best = load "training.best", default: 0
 // NOTE SX_PLUS_OPERAND_TYPE line 40: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Best ${best + 1}"
 // Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a
 // default that a read in between uses stays a test.
-let shocks = sexscriptLegacyLoadInteger("training.shocks", 3)
-let tempo = sexscriptLegacyLoadFloat("training.tempo", 0.5)
+let shocks = load "training.shocks", default: 3
+let tempo = load "training.tempo", default: 0.5
 let suffix = load "training.suffix", default: ""
 let keyed = load "training.key.${suffix}", default: ""
 if suffix == "" {

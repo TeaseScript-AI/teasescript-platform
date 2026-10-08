@@ -473,10 +473,11 @@ export interface PackageLayout {
  * keeps its null. Then declares the keys whose reads keep their null or whose values mix types (withDeclaredKeys).
  */
 export function withStorageDefaults(
-  programs: readonly MigrationProgram[],
+  given: readonly MigrationProgram[],
   shared: boolean,
-  layout: PackageLayout = { published: programs.map(() => true), main: null },
+  layout: PackageLayout = { published: given.map(() => true), main: null },
 ): MigrationProgram[] {
+  const programs = withNativeIntegerLoads(given);
   const saved = new Map<string, Set<string>>();
   // Keys that a value of no known type is saved under, which may be a number or another value (`open`).
   const openSaved = new Set<string>();
@@ -646,6 +647,136 @@ function withTypedTextReads(
       });
     return { ...program, statements: block(program.statements), diagnostics };
   });
+}
+
+/**
+ * Idiomatic output (owner direction 2026-10-08): a legacy `loadInteger(k)` or `loadFloat(k)` read with a default,
+ * `sexscriptLegacyLoadInteger(k, d)`, of a key written as one literal that the package saves only whole numbers under,
+ * or nothing, is a native read, `load k, default: d`: parsing a stored whole number and dropping its fraction give the
+ * number itself, as parsing a stored number does for loadFloat(). Where it saves numbers that may have a fraction, a
+ * loadInteger() read with a whole default is `toInteger(load k, default: d)`. A key that the package saves text, a
+ * flag, or a value of no known type under, that a save of a computed key may name, or that a text or flag read reads
+ * too keeps the helper. A read without a default keeps it too. A helper's definition goes where no call of it is left.
+ */
+function withNativeIntegerLoads(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const integerHelper = helperName("loadInteger");
+  const numberHelper = helperName("loadFloat");
+  const askOnce = helperName("askOnce");
+  // The types saved under each literal key; null for a value of no known type.
+  const saved = new Map<string, Set<string | null>>();
+  // The shapes of keys that saves compute, which may name a literal key.
+  const shapes: RegExp[] = [];
+  const otherReads = new Set<string>();
+  const note = (key: string, type: string | null): void => {
+    const types = saved.get(key) ?? new Set<string | null>();
+    types.add(type);
+    saved.set(key, types);
+  };
+  const shape = (key: IrExpression): RegExp => {
+    if (key.kind !== "template") return /^/u;
+    const pattern = key.parts
+      .map((part) => ("text" in part ? part.text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&") : ".*"))
+      .join("");
+    return new RegExp(`^${pattern}$`, "u");
+  };
+  const reads = (value: IrExpression): IrExpression => {
+    const key = value.kind === "load" ? literalKey(value.key) : null;
+    if (key !== null && value.kind === "load" && value.read !== undefined) otherReads.add(key);
+    // The legacy helper that asks once saves the answer, text, under the key it is given.
+    if (value.kind === "call" && value.name === askOnce) {
+      const asked = literalKey(value.positional[0] ?? { kind: "literal", value: null });
+      if (asked !== null) note(asked, "string");
+      else shapes.push(shape(value.positional[0]!));
+    }
+    return mapChildren(value, reads);
+  };
+  for (const program of programs) {
+    const texts = textVariables(program.statements);
+    const scan = (items: readonly IrStatement[]): void => {
+      for (const item of items) {
+        if (item.kind === "function" && item.name === askOnce) continue;
+        if (item.kind === "save") {
+          const key = literalKey(item.key);
+          const type =
+            item.open === true
+              ? null
+              : (item.valueType?.replace(/\?$/u, "") ??
+                valueType(item.value) ??
+                (item.value.kind === "variable" && texts.has(item.value.name) ? "string" : null));
+          if (key !== null) note(key, type);
+          else shapes.push(shape(item.key));
+        }
+        mapOwnExpressions(item, reads);
+        withNestedBlocks(item, (body) => {
+          scan(body);
+          return body;
+        });
+      }
+    };
+    scan(program.statements);
+  }
+  // The native read of a literal key, or null where the helper stays.
+  const native = (call: Extract<IrExpression, { kind: "call" }>): IrExpression | null => {
+    const [keyValue, missing] = call.positional;
+    const key = keyValue === undefined ? null : literalKey(keyValue);
+    if (key === null || otherReads.has(key) || shapes.some((pattern) => pattern.test(key)))
+      return null;
+    const types = saved.get(key) ?? new Set<string | null>();
+    if ([...types].some((type) => type !== "integer" && type !== "number")) return null;
+    // A default that may fail or have an effect came as the read itself, which runs it only for a missing key.
+    const fallback =
+      missing === undefined || isNullLiteral(missing)
+        ? undefined
+        : missing.kind === "load" && literalKey(missing.key) === key
+          ? missing.defaultValue
+          : missing;
+    // A read without a default keeps its null of the helper's open type, which a declared optional type would not give
+    // the code that uses it.
+    if (fallback === undefined) return null;
+    if (!types.has("number")) return { kind: "load", key: keyValue!, defaultValue: fallback };
+    // A key that holds fractions needs a default that is a number too, which a literal is written as (`0.0`).
+    if (fallback.kind !== "literal" || typeof fallback.value !== "number") return null;
+    const load: IrExpression = {
+      kind: "load",
+      key: keyValue!,
+      defaultValue: { ...fallback, decimal: true },
+    };
+    // loadFloat() parsed a stored number as itself; loadInteger() dropped a stored fraction toward zero, and a whole
+    // default stays as it is.
+    if (call.name === numberHelper) return load;
+    if (!Number.isInteger(fallback.value)) return null;
+    return { kind: "call", name: "toInteger", positional: [load], named: {} };
+  };
+  const rewrite = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, rewrite);
+    return next.kind === "call" && (next.name === integerHelper || next.name === numberHelper)
+      ? (native(next) ?? next)
+      : next;
+  };
+  const block = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), rewrite));
+  const rewritten = programs.map((program) => ({
+    ...program,
+    statements: block(program.statements),
+  }));
+  // A helper's definition goes where nothing calls it any more; withUsedHelpers adds the open-value helper again where
+  // a later step calls it.
+  const unused = [integerHelper, numberHelper, helperName("value")].filter(
+    (helper) =>
+      !rewritten.some((program) =>
+        JSON.stringify(
+          program.statements.filter(
+            (statement) => statement.kind !== "function" || statement.name !== helper,
+          ),
+        ).includes(`"name":"${helper}"`),
+      ),
+  );
+  return rewritten.map((program) => ({
+    ...program,
+    statements: program.statements.filter(
+      (statement) => statement.kind !== "function" || !unused.includes(statement.name),
+    ),
+  }));
 }
 
 /**

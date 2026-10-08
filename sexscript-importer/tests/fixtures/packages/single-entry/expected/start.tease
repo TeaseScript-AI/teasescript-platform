@@ -1,6 +1,6 @@
 // The one script in the package root is its entry.
 say "Hall or garden?"
-let visits = sexscriptLegacyLoadInteger("visits", 0)
+let visits = load "visits", default: 0
 save visits + 1 as "visits"
 if sexscriptLegacyCompare(visits, 2) < 0 {
   goto "rooms/hall.tease"

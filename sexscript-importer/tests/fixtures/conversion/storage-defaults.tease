@@ -409,7 +409,7 @@ function setMood {
 say "Mood ${mood}"
 // A whole number that a number read is set to reads 0 where missing, where Groovy's int failed on null.
 let laps = 0
-laps = toInteger(sexscriptLegacyLoadInteger("game.laps", 0))
+laps = toInteger(load("game.laps", default: 0))
 say "Laps ${laps}"
 // An item of a list in a list reads the item type's empty value too, as does an item that add() appends.
 let shelves = [["old"]]
