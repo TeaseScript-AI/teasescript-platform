@@ -92,6 +92,8 @@ interface ClosureInfo {
   maxArgs: number;
   /** Declared in a block of the script, such as an `if` body, and lifted to the top as a script function. */
   nested?: boolean;
+  /** The closure that the script function is. */
+  closure: AstNode;
 }
 
 export interface HelperFunctionInfo {
@@ -10835,16 +10837,33 @@ function laterReadDefault(
 ): number {
   const read = typedReadAssignment(statements[index]!, context);
   if (read === null) return -1;
+  // Whether code could see the variable: names it, or calls script code that could. A script function is looked into,
+  // also the functions it calls.
+  const looked = new Set<string>();
+  const sees = (node: AstNode): boolean => {
+    let found = false;
+    walkAst(node, (child) => {
+      if (child.kind === "variable" && variableName(child) === read.name) found = true;
+      else if (child.kind === "methodCall" && callParts(child)?.inherited === true) {
+        if (legacyApiCall(child, context) !== null) return;
+        const name = callParts(child)!.name;
+        const closure = context.functions.get(name)?.closure;
+        if (name === read.name || closure === undefined) found = true;
+        else if (!looked.has(name)) {
+          looked.add(name);
+          found ||= sees(closure);
+        }
+      }
+    });
+    return found;
+  };
   // Whether code between could see the variable before its default, or skip the default.
   const interferes = (statement: AstNode): boolean => {
     let found = false;
     walkAst(statement, (child) => {
-      if (child.kind === "variable" && variableName(child) === read.name) found = true;
-      else if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
-      else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
-        found ||= legacyApiCall(child, context) === null;
+      if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
     });
-    return found;
+    return found || sees(statement);
   };
   for (let later = index + 1; later < statements.length; later += 1) {
     if (consumed.has(later)) continue;
@@ -16486,6 +16505,7 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
       minArgs,
       maxArgs: implicitParameter ? 0 : parameters.length,
       ...(nested ? { nested } : {}),
+      closure,
     });
   };
   for (const statement of nodeArray(body.statements)) {
