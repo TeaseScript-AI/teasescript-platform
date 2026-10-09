@@ -13,6 +13,7 @@ import {
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
 import { explore, type CorpusEntry } from "../src/explorer-search.ts";
+import { playtestReport } from "../tools/explore-report.ts";
 import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
 import {
   EPOCH_MS,
@@ -701,6 +702,64 @@ test(
     assert.equal(rising?.best?.needs, "rounds >= 200");
     assert.equal(rising?.best?.trend, "improving");
     assert.ok(Number(rising?.best?.value ?? 0) > 10);
+  },
+);
+
+test(
+  "a missed switch case names what the switch compares, and the hour of day when it reads exactly that; each line not reached counts once, under the missed way with the most code behind it, and the creator's report adds up",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'function encore {\n  say "Bow."\n  say "Wave."\n  say "Leave the stage."\n}\nlet volume = 2\n' +
+      'let pick = choose soft: "Soft", softer: "Softer"\nif pick == "softer" {\n  volume = 1\n}\n' +
+      'if volume > 50 {\n  say "Too loud."\n  encore()\n}\nswitch volume {\n  case 7..=9 {\n    say "Loud."\n' +
+      '    say "Very loud."\n    encore()\n  }\n  default {\n    say "Quiet."\n  }\n}\n' +
+      'let hourNow = getDateTime().hour\nshowButton "Check"\nswitch hourNow {\n  case 25 {\n    say "Never."\n  }\n' +
+      '  default {\n    say "Any time."\n  }\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      later: true,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const branch = (line: number) =>
+      result.coverage.unvisitedBranches.find((entry) => entry.line === line);
+    const loud = branch(11);
+    const ranged = branch(16);
+    const hour = branch(28);
+    assert.deepEqual(ranged && [ranged.case, ranged.subject, ranged.clockPart], [
+      true,
+      "volume",
+      undefined,
+    ]);
+    assert.deepEqual(hour && [hour.case, hour.subject, hour.clockPart], [true, "hourNow", "hour"]);
+    // `encore` waits behind both missed ways; its four lines (its own and three) count under the case, which has more
+    // behind it.
+    assert.ok(loud !== undefined && ranged !== undefined);
+    assert.equal(ranged.ownLines, ranged.behindLines);
+    assert.equal(loud.ownLines, loud.behindLines - 4);
+    assert.equal(
+      result.coverage.unvisitedBranches.reduce((sum, entry) => sum + entry.ownLines, 0),
+      result.coverage.reach.unknown,
+    );
+    const report = playtestReport(
+      JSON.parse(JSON.stringify({ unit: "stage", compile: { ok: true }, ...result })),
+    );
+    assert.match(report, /`volume` in `7\.\.=9`, 7 lines behind it/u);
+    assert.match(report, /the hour of day is 25 \(`hourNow` is `25`\)/u);
+    const unreached = /- Lines not reached: (\d+)\n((?: {2}- .*: \d+\n)+)/u.exec(report);
+    assert.ok(unreached !== null, report);
+    assert.equal(
+      [...unreached[2]!.matchAll(/: (\d+)\n/gu)].reduce((sum, [, lines]) => sum + Number(lines), 0),
+      Number(unreached[1]),
+    );
   },
 );
 

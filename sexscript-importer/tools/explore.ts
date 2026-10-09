@@ -8,12 +8,13 @@
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
  *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]
- *          [--[no-]follow-chains]
+ *          [--[no-]follow-chains] [--no-report]
  *          <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
- * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
+ * per unit, with a playtest report for the script's creator next to it (`<out>/<unit>.report.md`, see
+ * `tools/explore-report.ts`; `--no-report` leaves it out), and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
  * given. `--until-stalled` runs each unit until it is done or stalled instead (see `ExploreOptions.untilStalled`), with
@@ -61,6 +62,7 @@ import {
   type SessionPath,
 } from "../src/explorer.ts";
 import { packageContentHash } from "./catalog.ts";
+import { playtestReport } from "./explore-report.ts";
 
 const SELF = fileURLToPath(import.meta.url);
 /** The V8 flag that sets how much the heap grows after a collection. */
@@ -149,6 +151,7 @@ async function main(args: string[]): Promise<void> {
       rounds: { type: "string", default: "1" },
       // `--no-summary`, as `allowNegative` reads it.
       summary: { type: "boolean", default: true },
+      report: { type: "boolean", default: true },
       cells: { type: "boolean", default: true },
       later: { type: "boolean", default: true },
       "compared-answers": { type: "boolean", default: true },
@@ -219,7 +222,7 @@ async function main(args: string[]): Promise<void> {
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
         "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]\n" +
-        "         [--[no-]follow-chains] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]follow-chains] [--no-report] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -255,6 +258,7 @@ async function main(args: string[]): Promise<void> {
           storeMb,
           seed,
           corpus,
+          report: values.report,
           strategies: {
             cells: values.cells,
             later: values.later,
@@ -305,6 +309,8 @@ interface RunSettings {
   seed: number;
   /** The corpus folder, or null without one. */
   corpus: string | null;
+  /** Whether to write the creator's playtest report next to each unit's report. */
+  report: boolean;
   /** The search strategies that can be switched off (see `ExploreOptions`). */
   strategies: {
     cells: boolean;
@@ -329,8 +335,17 @@ async function exploreUnits(
   out: string,
   workers: number,
 ): Promise<number> {
-  const { budgetSeconds, budgetOps, maxStates, untilStalled, storeMb, seed, corpus, strategies } =
-    settings;
+  const {
+    budgetSeconds,
+    budgetOps,
+    maxStates,
+    untilStalled,
+    storeMb,
+    seed,
+    corpus,
+    report: playtest,
+    strategies,
+  } = settings;
   if (workers === 2 && dirs.length > 1) {
     const flags = [
       "--max-states",
@@ -346,6 +361,7 @@ async function exploreUnits(
     if (storeMb !== null) flags.push("--store-mb", String(storeMb));
     if (untilStalled) flags.push("--until-stalled");
     if (corpus !== null) flags.push("--corpus", corpus);
+    if (!playtest) flags.push("--no-report");
     for (const [name, on] of Object.entries(strategies)) {
       const flag = name.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
       flags.push(on ? `--${flag}` : `--no-${flag}`);
@@ -400,7 +416,10 @@ async function exploreUnits(
             corpus: corpusReport,
           }),
     };
-    await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
+    const json = JSON.stringify(report, null, 2);
+    await writeFile(file, `${json}\n`);
+    if (playtest)
+      await writeFile(path.join(out, `${header.unit}.report.md`), playtestReport(JSON.parse(json)));
     const seconds = Math.round((performance.now() - started) / 1000);
     process.stderr.write(`  ${oneLine(header, result)} (${seconds} s)\n`);
   }

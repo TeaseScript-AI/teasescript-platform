@@ -575,6 +575,12 @@ the last quarter of those operations (its marginal gain), the condition ways it 
 values that came closer to what a missed way needs. `coverage.bySession` gives the lines only a first session ran, such
 as an intro, and the lines no first session ran, by the smallest session number that ran them and per file; these are
 observed, so a line first run in a later session may still be reachable in a first one. `summary.md` shows both.
+Next to each unit's report, `<unit>.report.md` is a playtest report for the script's creator (`--no-report` leaves it
+out; `tools/explore-report.ts` writes one from an existing report): the crashes and loops with no way out with the
+player's steps to each, the missed ways grouped by what they would need (a random draw, a saved value, another time, a
+typed answer, a count, a value the script sets), and the code that can never run. Each line not reached counts once,
+under the missed way with the most code behind it (`ownLines`), so the groups add up to the lines not reached;
+conditions and keys are as the script writes them.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
 runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime

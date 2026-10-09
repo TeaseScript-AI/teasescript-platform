@@ -178,6 +178,44 @@ function drawsAtRandom(branch: Fields): boolean {
   );
 }
 
+/** One part of the date or time a `switch` compares, as a reader says it. */
+const CLOCK_PARTS: Readonly<Record<string, string>> = {
+  year: "the year",
+  month: "the month",
+  day: "the day of the month",
+  hour: "the hour of day",
+  minute: "the minute",
+  second: "the second",
+  weekdayNumber: "the weekday number",
+};
+
+/** A missed `switch` case: what the switch compares against the case as written, and for one part of the clock, in words. */
+function caseShown(branch: Fields, holds: boolean): string {
+  const pattern = text(fields(branch.condition).text) || "?";
+  const subject = text(branch.subject);
+  if (subject === "") return `the case \`${pattern}\`${holds ? "" : " not matching"}`;
+  // `switch true` lists conditions as its cases.
+  if (subject === "true" || subject === "false")
+    return `\`${pattern}\` being ${String((subject === "true") === holds)}`;
+  const range = /^(-?\d+)\.\.([=<])(-?\d+)$/u.exec(pattern);
+  const written =
+    range === null
+      ? `\`${subject}\` ${holds ? "is" : "is not"} \`${pattern}\``
+      : `\`${subject}\` ${holds ? "in" : "not in"} \`${pattern}\``;
+  const part = CLOCK_PARTS[text(branch.clockPart)];
+  if (part === undefined) return written;
+  const values =
+    range === null
+      ? pattern
+      : `${range[1]}–${range[2] === "=" ? range[3] : String(Number(range[3]) - 1)}`;
+  return `${part} ${holds ? "is" : "is not"} ${values} (${written})`;
+}
+
+/** The lines behind a missed way that the report counts for it: each line once (older reports: all behind it). */
+function ownLines(branch: Fields): number {
+  return typeof branch.ownLines === "number" ? branch.ownLines : count(branch.behindLines);
+}
+
 /** What the playtester found out about a stored value a missed way needs, in words. */
 const STORED_REASONS: readonly [RegExp, string][] = [
   [/no explored session stored it/u, "no visit saved the value it needs"],
@@ -189,14 +227,14 @@ const STORED_REASONS: readonly [RegExp, string][] = [
 ];
 
 /** A missed way in one line: where, the condition as written, and what is known of how far play got. */
-function missedWay(branch: Fields): string {
+function missedWay(branch: Fields, measurable: boolean): string {
   const condition = fields(branch.condition);
   const written = text(condition.text) || "?";
   const shown =
     branch.case === true
-      ? `the case \`${written}\``
+      ? caseShown(branch, branch.missed === "true")
       : `\`${written}\` being ${branch.missed === "true" ? "true" : "false"}`;
-  const behind = count(branch.behindLines);
+  const behind = ownLines(branch);
   const best = fields(branch.best);
   const needs = text(best.needs);
   const value = String(best.value ?? "");
@@ -223,8 +261,44 @@ function missedWay(branch: Fields): string {
       : depends.length > 0
         ? `; depends on ${depends.slice(0, 3).join(", ")}${depends.length > 3 ? ` and ${depends.length - 3} more` : ""}`
         : "") +
-    (known !== "" ? "" : found)
+    (known !== "" ? "" : found) +
+    (known === "" && !measurable ? "; the playtester can't measure how close it got" : "")
   );
+}
+
+/** The missed ways by what they would need, each in the first group it fits; groups without one are left out. */
+function missedGroups(
+  missed: Fields[],
+): { title: string; about: string; source: string; members: Fields[] }[] {
+  const listed = new Set<Fields>();
+  const groups: { title: string; about: string; source: string; members: Fields[] }[] = [];
+  const group = (source: string, title: string, about: string, members: Fields[]) => {
+    for (const member of members) listed.add(member);
+    if (members.length > 0) groups.push({ title, about, source, members });
+  };
+  group(
+    "random",
+    "Behind a random draw",
+    "The condition draws at random itself. The playtester also chose the draw's other outcomes, where it could.",
+    missed.filter(drawsAtRandom),
+  );
+  for (const { source, title, about } of GROUPS)
+    group(
+      source,
+      title,
+      about,
+      missed.filter(
+        (branch) =>
+          !listed.has(branch) && Array.isArray(branch.sources) && branch.sources.includes(source),
+      ),
+    );
+  group(
+    "none",
+    "Not reached in this playtest",
+    "No input, saved value, time, or answer the playtester could tell was needed; more play may reach these.",
+    missed.filter((branch) => !listed.has(branch)),
+  );
+  return groups;
 }
 
 /** The report for one unit's explorer report. */
@@ -244,6 +318,17 @@ export function playtestReport(report: Fields): string {
   const crashes = records(report.crashes);
   const traps = records(report.traps);
   const visits = count(search.sessions);
+  const groups = missedGroups(
+    records(coverage.unvisitedBranches).filter((branch) => branch.reach !== "unreachable"),
+  );
+  const grouped = groups.reduce(
+    (sum, { members }) => sum + members.reduce((lines, member) => lines + ownLines(member), 0),
+    0,
+  );
+  // Older reports count a line behind each missed way it waits behind, so their groups do not add up.
+  const addsUp = records(coverage.unvisitedBranches).every(
+    (branch) => typeof branch.ownLines === "number",
+  );
   lines.push(
     `An automatic playtester played this script for ${count(search.operations).toLocaleString("en")} engine steps, over ` +
       `${plural(visits, "visit")}: it pressed every button, picked every option, typed the answers the script compares ` +
@@ -256,6 +341,19 @@ export function playtestReport(report: Fields): string {
     `- Crashes: ${crashes.length}`,
     `- Loops with no way out: ${traps.length}`,
     `- Lines not reached: ${figure(reach.unknown)}${count(reach.clock) > 0 ? `, and ${count(reach.clock)} reached only by setting the clock` : ""}`,
+    ...(addsUp
+      ? [
+          ...groups.map(
+            ({ title, members }) =>
+              `  - ${title.charAt(0).toLowerCase()}${title.slice(1)}: ${figure(members.reduce((lines, member) => lines + ownLines(member), 0))}`,
+          ),
+          ...(count(reach.unknown) > grouped
+            ? [
+                `  - past where play stopped, with no condition in the way: ${figure(count(reach.unknown) - grouped)}`,
+              ]
+            : []),
+        ]
+      : []),
     `- Lines that can never run: ${figure(reach.unreachable)}`,
   );
   if (count(reach.chosen) > 0)
@@ -303,46 +401,30 @@ export function playtestReport(report: Fields): string {
     });
   }
 
-  const missed = records(coverage.unvisitedBranches).filter(
-    (branch) => branch.reach !== "unreachable",
-  );
-  if (missed.length > 0) {
+  if (groups.length > 0) {
     lines.push(
       "",
       "## What the playtester could not reach",
       "",
       "Each entry is a condition play reached but always took the same way, with the code behind its other way. " +
-        "Entries inside a block that was not reached are left out, as reaching the outer one comes first.",
+        "Entries inside a block that was not reached are left out, as reaching the outer one comes first." +
+        (addsUp
+          ? " A line behind more than one entry is counted once, under the one with the most code behind it."
+          : ""),
     );
-    const listed = new Set<Fields>();
-    const group = (title: string, about: string, members: Fields[]) => {
-      if (members.length === 0) return;
-      const sorted = [...members].sort(
-        (left, right) => count(right.behindLines) - count(left.behindLines),
-      );
-      lines.push("", `### ${title}`, "", about, "", ...sorted.slice(0, ROWS).map(missedWay));
-      if (sorted.length > ROWS) lines.push(`- and ${sorted.length - ROWS} more`);
-      for (const member of members) listed.add(member);
-    };
-    group(
-      "Behind a random draw",
-      "The condition draws at random itself. The playtester also chose the draw's other outcomes, where it could.",
-      missed.filter(drawsAtRandom),
-    );
-    for (const { source, title, about } of GROUPS)
-      group(
-        title,
+    for (const { title, about, members, source } of groups) {
+      const sorted = [...members].sort((left, right) => ownLines(right) - ownLines(left));
+      const total = members.reduce((lines, member) => lines + ownLines(member), 0);
+      lines.push(
+        "",
+        `### ${title}${addsUp ? ` (${figure(total)} ${total === 1 ? "line" : "lines"})` : ""}`,
+        "",
         about,
-        missed.filter(
-          (branch) =>
-            !listed.has(branch) && Array.isArray(branch.sources) && branch.sources.includes(source),
-        ),
+        "",
+        ...sorted.slice(0, ROWS).map((branch) => missedWay(branch, source !== "counter")),
       );
-    group(
-      "Not reached in this playtest",
-      "No input, saved value, time, or answer the playtester could tell was needed; more play may reach these.",
-      missed.filter((branch) => !listed.has(branch)),
-    );
+      if (sorted.length > ROWS) lines.push(`- and ${sorted.length - ROWS} more`);
+    }
   }
 
   const neverRuns = records(coverage.files).flatMap((file) =>

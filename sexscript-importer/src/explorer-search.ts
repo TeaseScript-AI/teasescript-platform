@@ -455,8 +455,13 @@ export interface UnvisitedBranch {
   } | null;
   /** The missed way: `true`/`false` for a condition, `enter`/`exit` for a loop. */
   missed: "true" | "false" | "enter" | "exit";
-  /** For a `switch` case, whose condition text is its pattern. */
+  /**
+   * For a `switch` case, whose condition text is its pattern: `case`; the text of what the switch compares; and when that
+   * is one part of the date or time, read exactly, the part (`hour`, `weekdayNumber`, ...).
+   */
   case?: true;
+  subject?: string;
+  clockPart?: string;
   /** The first instruction and line of the missed way. */
   targetInstruction: number;
   targetLine: number | null;
@@ -474,6 +479,12 @@ export interface UnvisitedBranch {
    * how much code waits behind it.
    */
   behindLines: number;
+  /**
+   * Of those lines, the ones no state reached and no analysis rules out (`unknown`), each counted once: under the missed
+   * way with the most lines behind it, play's ways before those that can never be taken. They add up to at most the
+   * `unknown` lines.
+   */
+  ownLines: number;
   /**
    * The parts of what the missed way needs, one per value source of each comparison in its condition (and, with
    * realignment, in the earlier conditions of its `else if` chain, which must not hold): `met` when some explored state
@@ -1515,7 +1526,9 @@ function combination(condition: unknown, wanted: boolean): "all" | "any" | "mixe
 function isCase(condition: unknown): boolean {
   const value = record(condition);
   return (
-    value.kind === "binary" && value.operator === "==" && record(value.left).kind === "temporary"
+    value.kind === "binary" &&
+    (value.operator === "==" || value.operator === "in") &&
+    record(value.left).kind === "temporary"
   );
 }
 
@@ -4152,6 +4165,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     watched,
     routeOf,
     session.randomChoices,
+    (instruction) => {
+      const [comparison, ...others] = times?.comparisons.get(instruction) ?? [];
+      return comparison !== undefined &&
+        others.length === 0 &&
+        comparison.exact &&
+        comparison.parts.size === 1
+        ? [...comparison.parts][0]
+        : undefined;
+    },
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -4882,6 +4904,7 @@ function lineCoverage(
   watched: ReadonlyMap<string, readonly Watch[]>,
   routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
+  clockPartOf: (instruction: number) => string | undefined,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -4996,10 +5019,10 @@ function lineCoverage(
     else if (instruction.kind === "transfer" && "value" in record(instruction.destination))
       next[index] = [];
   });
-  const behind = (from: number): number => {
-    if (from < 0 || from >= instructions.length || ran(from)) return 0;
-    const seen = new Set([from]);
+  const behind = (from: number): Set<string> => {
     const found = new Set<string>();
+    if (from < 0 || from >= instructions.length || ran(from)) return found;
+    const seen = new Set([from]);
     const queue = [from];
     for (let at = queue.pop(); at !== undefined; at = queue.pop()) {
       const line = lineOf[at];
@@ -5012,8 +5035,20 @@ function lineCoverage(
           queue.push(to);
         }
     }
-    return found.size;
+    return found;
   };
+  /** The text of what each `switch` compares, by the temporary its cases read. */
+  const subjects = new Map<number, string>();
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind !== "storeTemporary" || typeof instruction.temporaryId !== "number")
+      return;
+    const span = compactSpan(record(instruction.value).span);
+    const source = sources.get(files[index]!);
+    if (span !== null && source !== undefined)
+      subjects.set(instruction.temporaryId, short(source.slice(span.start, span.end)));
+  });
+  /** The lines behind each missed way, by its place in `unvisitedBranches`. */
+  const regions: Set<string>[] = [];
   const watchOf = new Map<Goal, Watch>();
   for (const watches of watched.values())
     for (const entry of watches) watchOf.set(entry.goal, entry);
@@ -5129,7 +5164,15 @@ function lineCoverage(
       line: lineOf[index] ?? 0,
       condition: conditionText(instruction, files[index]!, sources),
       missed: wayName(instruction, way),
-      ...(isCase(condition) ? { case: true as const } : {}),
+      ...(isCase(condition)
+        ? {
+            case: true as const,
+            ...(subjects.has(Number(record(record(condition).left).temporaryId))
+              ? { subject: subjects.get(Number(record(record(condition).left).temporaryId))! }
+              : {}),
+            ...(clockPartOf(index) === undefined ? {} : { clockPart: clockPartOf(index)! }),
+          }
+        : {}),
       targetInstruction: missedTarget ? target : index + 1,
       targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,
       reach: label,
@@ -5137,13 +5180,38 @@ function lineCoverage(
       sources: directed === undefined ? [] : sourceKinds(directed.goals),
       attempts: directed?.attempts ?? 0,
       dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
-      behindLines: behind(missedTarget ? target : index + 1),
+      behindLines: (regions[unvisitedBranches.length] = behind(missedTarget ? target : index + 1))
+        .size,
+      ownLines: 0,
       parts,
       ...(best === undefined ? {} : { best }),
       ...(chains.length === 0 ? {} : { chains }),
       ...(label === "clock" && reached != null ? { repro: reached.repro } : {}),
     });
   });
+  // Each line no state reached once, under the missed way with the most lines behind it (the first found of equal
+  // ones), play's ways first.
+  const counted = new Set<string>();
+  const never = (index: number) => (unvisitedBranches[index]!.reach === "unreachable" ? 1 : 0);
+  [...unvisitedBranches.keys()]
+    .sort(
+      (left, right) =>
+        never(left) - never(right) || regions[right]!.size - regions[left]!.size || left - right,
+    )
+    .forEach((index) => {
+      let own = 0;
+      for (const line of regions[index]!) {
+        const split = line.lastIndexOf(":");
+        if (
+          counted.has(line) ||
+          lines.get(line.slice(0, split))?.get(Number(line.slice(split + 1)))?.reach !== "unknown"
+        )
+          continue;
+        counted.add(line);
+        own += 1;
+      }
+      unvisitedBranches[index]!.ownLines = own;
+    });
   return {
     coverableLines: coverable,
     visitedLines: visited,
