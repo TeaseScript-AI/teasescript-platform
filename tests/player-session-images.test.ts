@@ -337,6 +337,48 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   await until(() => messages().length === 2, "the new session did not report the missing media");
 });
 
+test("a speaker's avatar that is no package file is a warning when a message first shows it, also after input", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      resolveAsset: (path) => (path === "avatars/guide.png" ? `/files/${path}` : null),
+    }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  const messages = () => host.notices.value.map((notice) => notice.message);
+  const answer = () => {
+    host.update(submitPlayerRuntimeComposer(host.session.value!, "go")!.session);
+    return nextTick();
+  };
+  const script = [
+    'speaker guide {\n  displayName: "Guide"\n  avatar: "avatars/guide.png"\n}',
+    'speaker helper {\n  displayName: "Helper"\n  avatar: "avatars/missing.png"\n}',
+    'say as guide "Hello", instant',
+    'let first = askText "Next?"',
+    // The speaker the session adds after input, and an avatar changed after input.
+    'say as helper "After", instant',
+    'say as helper "Again", instant',
+    'let second = askText "Next?"',
+    'guide.avatar = "avatars/changed.png"',
+    'say as guide "Changed", instant',
+    'let third = askText "Done?"',
+    "exit",
+  ].join("\n");
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await nextTick();
+  assert.deepEqual(messages(), []);
+  await answer();
+  assert.deepEqual(messages(), ["Image not found: avatars/missing.png"]);
+  await answer();
+  assert.deepEqual(messages(), [
+    "Image not found: avatars/missing.png",
+    "Image not found: avatars/changed.png",
+  ]);
+});
+
 test("a package image the Stage cannot load is reported while the Stage shows it", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
