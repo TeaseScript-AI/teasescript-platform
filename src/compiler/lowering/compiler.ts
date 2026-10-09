@@ -18,6 +18,7 @@ import type {
   SwitchStatement,
   TagQueryExpression,
   TypeTestExpression,
+  UnitExpression,
   FileTarget,
   LabelTarget,
   TransferTarget,
@@ -51,6 +52,7 @@ import type {
   PlanSourceLocation,
   PlanLabel,
   TagQueryExpressionPlan,
+  UnitPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
@@ -1566,6 +1568,18 @@ export class InstructionCompiler {
         }
         return { plan, temporaryIds: operand.temporaryIds };
       }
+      case "unitExpression": {
+        const operand = yield* compileChild(this.#lowerExpressionTask(expression.operand));
+        return {
+          plan: {
+            kind: "unit",
+            operand: operand.plan,
+            ...unitOf(expression),
+            span: copySpan(expression.span),
+          },
+          temporaryIds: operand.temporaryIds,
+        };
+      }
       case "binaryExpression": {
         const leftExpression = expression.left;
         const rightExpression = expression.right;
@@ -2949,6 +2963,13 @@ function withTypeCheck(typeCheck: TypeCheckPlan | undefined): { typeCheck?: Type
   return typeCheck === undefined ? {} : { typeCheck };
 }
 
+/** The unit of a unit expression, which the plan keeps as written, with or without `calendar`. */
+function unitOf(expression: UnitExpression): UnitPlan {
+  return expression.calendar
+    ? { calendar: true, unit: expression.unit }
+    : { calendar: false, unit: expression.unit };
+}
+
 function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
 }
@@ -3086,6 +3107,13 @@ function assembleExpression(
       }
       return plan;
     }
+    case "unitExpression":
+      return {
+        kind: "unit",
+        operand: child(expression.operand),
+        ...unitOf(expression),
+        span: copySpan(expression.span),
+      };
     case "binaryExpression":
       return {
         kind: "binary",

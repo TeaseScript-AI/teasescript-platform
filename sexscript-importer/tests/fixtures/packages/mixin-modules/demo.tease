@@ -68,7 +68,7 @@ let enabled = false
 // A field that a module reads keeps the button's seconds.
 let reaction: number = 0
 function pauseCycle(delay, cycleValue = 60) {
-  wait delay / cycleValue s
+  wait (delay / cycleValue) s
 }
 loadModules()
 setupLaterModule()

@@ -49,7 +49,7 @@ test("sort orders numbers, text by code point, and durations in place", () => {
         "exit",
       ].join("\n"),
     ),
-    ["-2, 1.5, 2, 3 | B, Zoe, a, adam, b, ｚ, 😀 | 500 ms, 2 s, 1 min | 0 7"],
+    ["-2, 1.5, 2, 3 | B, Zoe, a, adam, b, ｚ, 😀 | 500 milliseconds, 2 seconds, 1 minute | 0 7"],
   );
 });
 
@@ -149,7 +149,7 @@ test("set operations return a new collection of the receiver's kind with each el
       "collar, gag, cuffs, rope | collar, gag, cuffs, gag | cuffs, collar, rope, rope",
       "2, 3 | 1, 2, 3, 4 | 2, 3 | 3",
       "1 3 2",
-      "2 s",
+      "2 seconds",
     ],
   );
 });

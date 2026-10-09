@@ -480,10 +480,10 @@ test("a repeating timer's random rounds and a block's shared variable stay trace
     [
       "function count {",
       "    let beats = 0",
-      "    let t = timer(duration: 1..=3, async: true, repeat: true) {",
+      "    let t = timer(duration: (1..=3) s, async: true, repeat: true) {",
       "        beats += 1",
       "    }",
-      "    wait 10",
+      "    wait 10 s",
       "    t.stop()",
       '    say "beats ${beats}"',
       "}",
@@ -541,7 +541,7 @@ test("permanent button blocks assign the variables they share with their functio
 
 test("a button that times out while a timer block runs records its timeout as the answer", () => {
   const played = traced(
-    'timer async 1 { wait 5 }\nlet elapsed = showButton "Go", timeout: 3\nsay "After ${elapsed}."\nexit',
+    'timer async 1 s { wait 5 s }\nlet elapsed = showButton "Go", timeout: 3 s\nsay "After ${elapsed}."\nexit',
     { unanswered: true },
   );
   assertComplete(played);
@@ -551,7 +551,7 @@ test("a button that times out while a timer block runs records its timeout as th
     (step) => step.kind === "input",
   )!;
   assert.deepEqual(input.detail?.kind === "input" && input.detail.outcome, "timedOut");
-  assert.equal(input.preview, "3 s");
+  assert.equal(input.preview, "3 seconds");
 });
 
 test("a media block's own handle is its first variable", () => {
@@ -564,7 +564,7 @@ test("a media block's own handle is its first variable", () => {
       '        say "cue at ${music.position}"',
       "    }",
       "}",
-      "wait 3",
+      "wait 3 s",
       "exit",
     ].join("\n"),
     debug,
@@ -637,7 +637,7 @@ test("speaker and handle properties are state that every name for them reads", (
   assertComplete(played);
   const [byName, contextual, remaining, repeat] = causes(
     played.trace,
-    outputOf(played, "Bea Bea 2 s 5 s"),
+    outputOf(played, "Bea Bea 2 seconds 5 seconds"),
   );
   for (const interpolation of [byName!, contextual!]) {
     const steps = lineage(played.trace, interpolation.id);
@@ -683,11 +683,11 @@ test("an overwritten property value is no cause of the value that replaced it", 
       ].join("\n"),
     );
     assertComplete(played);
-    const steps = lineage(played.trace, outputOf(played, "Current 2 s").id);
+    const steps = lineage(played.trace, outputOf(played, "Current 2 seconds").id);
     const values = steps.map((step) => step.preview);
     assert.ok(steps.some((step) => step.target === "current"));
     assert.ok(steps.some((step) => step.target === "kept"));
-    for (const overwritten of ['"Discarded"', '"Original"', "3 s"])
+    for (const overwritten of ['"Discarded"', '"Original"', "3 seconds"])
       assert.ok(!values.includes(overwritten), `${overwritten} is no cause (alias: ${viaAlias})`);
     assert.ok(!steps.some((step) => step.target === "discarded" || step.target === "lost"));
   }
@@ -927,10 +927,10 @@ test("and, or, and load defaults decide too, and blocks keep their own decisions
       'let either = off or (askText "Other?") == "n"',
       "let beats = 0",
       "if flag {",
-      "    let t = timer(duration: 1, async: true, repeat: true) {",
+      "    let t = timer(duration: 1 s, async: true, repeat: true) {",
       "        beats += 1",
       "    }",
-      "    wait 3",
+      "    wait 3 s",
       "    t.stop()",
       "}",
       'say "${sure} ${other} ${either} ${beats}"',
@@ -966,7 +966,7 @@ test("a long chain of unmatched cases keeps only the newest decisions it can nam
       "switch 0 {",
       ...Array.from({ length: cases }, (_, index) => `    case ${index + 1} { }`),
       "    default {",
-      "        wait 1",
+      "        wait 1 s",
       '        say "done", instant',
       "    }",
       "}",
@@ -994,7 +994,7 @@ test("a long chain of unmatched cases keeps only the newest decisions it can nam
 
 test("a rejected say inside a branch leaves no decision behind", () => {
   const played = traced(
-    ["let pace = -1", "if pace < 0 {", '    say "${["a", "b"]}", pace', "}", "exit"].join("\n"),
+    ["let pace = -1 s", "if pace < 0 s {", '    say "${["a", "b"]}", pace', "}", "exit"].join("\n"),
   );
   assert.equal(played.snapshot.status, "failed");
   assert.deepEqual(
@@ -1004,7 +1004,7 @@ test("a rejected say inside a branch leaves no decision behind", () => {
 });
 
 test("a rejected say leaves no output, draw, or link behind", () => {
-  const played = traced(["let pace = -1", 'say "${["a", "b"]}", pace', "exit"].join("\n"));
+  const played = traced(["let pace = -1 s", 'say "${["a", "b"]}", pace', "exit"].join("\n"));
   assert.equal(played.snapshot.status, "failed");
   const all = records(played.trace);
   assert.deepEqual(
@@ -1095,10 +1095,10 @@ function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSessi
       '    say "bonus"',
       "}",
       'let music = playAudio async "x.mp3"',
-      "wait 2",
+      "wait 2 s",
       'let saved: string? = load "who", default: null',
       'say "${pick} ${name} ${saved} ${["x", "y"]}"',
-      "wait 1",
+      "wait 1 s",
       "exit",
     ].join("\n"),
     {
@@ -1290,7 +1290,7 @@ test("oversized values, wide staged messages, and rollbacks stay within the boun
   const failing = compile(
     [
       `let s = "${"x".repeat(1024)}"`,
-      "let pace = -1",
+      "let pace = -1 s",
       `say "${"${s}".repeat(placeholders)}", pace`,
       "exit",
     ].join("\n"),

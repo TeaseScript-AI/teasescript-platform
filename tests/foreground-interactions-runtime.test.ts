@@ -44,8 +44,8 @@ function interactionPlan(
 ): InstructionPlan {
   const source =
     options.speaker === undefined
-      ? "wait 1\nexit"
-      : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
+      ? "wait 1 s\nexit"
+      : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1 s\nexit`;
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -979,7 +979,7 @@ test("huge completion kind tokens are not reflected or allowed to mutate canonic
 });
 
 test("a foreground action keeps identities distinct from the retained settlement", () => {
-  const compiled = compileSource("wait 1\nwait 1\nexit");
+  const compiled = compileSource("wait 1 s\nwait 1 s\nexit");
   assert.deepEqual(compiled.diagnostics, []);
   const base = compiled.plan!;
   const instructions = base.instructions.map((instruction) =>
@@ -1275,7 +1275,7 @@ test("pending actions reserve their complete event sequence capacity", () => {
   assert.equal(failedInteraction.snapshot.nextActionId, beforeInteraction.nextActionId);
   assert.deepEqual(failedInteraction.snapshot.temporaries, []);
 
-  const delayPlan = compileSource("wait 1\nexit").plan!;
+  const delayPlan = compileSource("wait 1 s\nexit").plan!;
   const exactDelay = createFreshRuntimeSnapshot(delayPlan);
   exactDelay.nextEventSequence = max - 2;
   const pendingDelay = run(delayPlan, exactDelay);
@@ -1327,7 +1327,7 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
 
   const pending = waiting(base).snapshot;
   const completed = complete(base, { kind: "selectedOption", optionIndex: 0 }, "choice");
-  const delayPlan = compileSource("wait 1\nexit").plan!;
+  const delayPlan = compileSource("wait 1 s\nexit").plan!;
   const delayPending = run(delayPlan, createFreshRuntimeSnapshot(delayPlan)).snapshot;
   const delayCompleted = observeTime(delayPlan, delayPending, 1_000).snapshot;
   assert.equal(delayPending.foregroundAction?.kind, "delay");

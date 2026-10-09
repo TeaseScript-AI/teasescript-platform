@@ -10,15 +10,15 @@ speaker guide
 
 function hold(pass) {
     say "Round ${pass}: hold still until the timer ends.", instant
-    timer 3..=5
+    timer (3..=5) s
 }
 
 say "A visible timer blocks the script and shows its countdown.", instant
-timer 5
+timer 5 s
 say "Next, a timer between 4 and 8 seconds. Save a checkpoint while it runs, then restore it.", instant
-timer 4..=8
+timer (4..=8) s
 say "A hidden wait pauses without any timer.", instant
-wait 3
+wait 3 s
 for pass in 1..=2 {
     hold(pass)
 }

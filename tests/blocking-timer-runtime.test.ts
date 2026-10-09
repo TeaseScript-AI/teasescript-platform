@@ -18,7 +18,6 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
-import type { SourceSpan } from "../src/source.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -59,7 +58,7 @@ function expectedAt(source: string, code: string, subject: string): string {
 }
 
 test("timer compiles fixed seconds and integer-second ranges into visible foreground delays", () => {
-  const compiled = plan("timer 3\ntimer 5..10\ntimer 5..=10\nwait 2\nexit");
+  const compiled = plan("timer 3 s\ntimer (5..10) s\ntimer (5..=10) s\nwait 2 s\nexit");
   const waits = compiled.instructions.filter(
     (instruction): instruction is WaitInstruction => instruction.kind === "wait",
   );
@@ -68,7 +67,7 @@ test("timer compiles fixed seconds and integer-second ranges into visible foregr
     ["visible", "visible", "visible", "hidden"],
   );
 
-  const { snapshot, events } = start('timer 3\nsay "after"\nexit');
+  const { snapshot, events } = start('timer 3 s\nsay "after"\nexit');
   const action = delayAction(snapshot);
   assert.equal(action.display, "visible");
   assert.equal(action.createdAtMs, 0);
@@ -80,12 +79,12 @@ test("timer compiles fixed seconds and integer-second ranges into visible foregr
   assert.ok(events[0]?.kind === "actionRequested");
   assert.equal(events[0].action.kind === "delay" && events[0].action.display, "visible");
 
-  const hidden = start("wait 3\nexit");
+  const hidden = start("wait 3 s\nexit");
   assert.equal(delayAction(hidden.snapshot).display, "hidden");
 });
 
 test("timer blocks until an explicit observation reaches its deadline", () => {
-  const { compiled, snapshot } = start('timer 2\nsay "after"\nexit');
+  const { compiled, snapshot } = start('timer 2 s\nsay "after"\nexit');
   const early = observeTime(compiled, snapshot, 1_999);
   assert.equal(early.snapshot.status, "waiting");
   assert.deepEqual(early.events, []);
@@ -112,31 +111,35 @@ test("timer ranges draw one whole second from the session RNG in source order", 
   for (const seed of SEEDS) {
     for (let offset = 0; offset < 40; offset += 1) {
       const runSeed = (seed + offset * 0x10_0001) >>> 0 || 1;
-      exclusive.add(delayAction(start("timer 5..7\nexit", runSeed).snapshot).deadlineMs);
-      inclusive.add(delayAction(start("timer 5..=7\nexit", runSeed).snapshot).deadlineMs);
+      exclusive.add(delayAction(start("timer (5..7) s\nexit", runSeed).snapshot).deadlineMs);
+      inclusive.add(delayAction(start("timer (5..=7) s\nexit", runSeed).snapshot).deadlineMs);
     }
   }
   assert.deepEqual([...exclusive].sort(), [5_000, 6_000]);
   assert.deepEqual([...inclusive].sort(), [5_000, 6_000, 7_000]);
 
   for (const seed of SEEDS) {
-    const timer = start("timer 10..=20\nexit", seed);
-    const reference = start("let drawn = randomInteger(10..=20)\nwait drawn\nexit", seed);
+    const timer = start("timer (10..=20) s\nexit", seed);
+    const reference = start("let drawn = randomInteger(10..=20)\nwait drawn s\nexit", seed);
     assert.equal(
       delayAction(timer.snapshot).deadlineMs,
       delayAction(reference.snapshot).deadlineMs,
     );
     assert.deepEqual(timer.snapshot.rng, reference.snapshot.rng, "exactly one RNG draw");
-    assert.deepEqual(start("timer 10..=20\nexit", seed).snapshot, timer.snapshot, "deterministic");
+    assert.deepEqual(
+      start("timer (10..=20) s\nexit", seed).snapshot,
+      timer.snapshot,
+      "deterministic",
+    );
   }
 
   // Duration expressions evaluate before the draw; draws follow source order.
   const ordered = start(
-    'let first = randomInteger(1..=100)\ntimer first..first + 50\nsay "${randomInteger(1..=100)}"\nexit',
+    'let first = randomInteger(1..=100)\ntimer (first..first + 50) s\nsay "${randomInteger(1..=100)}"\nexit',
     SEEDS[1],
   );
   const reference = start(
-    'let first = randomInteger(1..=100)\nlet drawn = randomInteger(first..first + 50)\nwait drawn\nsay "${randomInteger(1..=100)}"\nexit',
+    'let first = randomInteger(1..=100)\nlet drawn = randomInteger(first..first + 50)\nwait drawn s\nsay "${randomInteger(1..=100)}"\nexit',
     SEEDS[1],
   );
   assert.equal(
@@ -155,7 +158,7 @@ test("timer ranges draw one whole second from the session RNG in source order", 
 
 test("a pending timer checkpoint restores without a redraw or duplicate request", () => {
   for (const seed of SEEDS) {
-    const { compiled, snapshot } = start('timer 30..=90\nsay "after"\nexit', seed);
+    const { compiled, snapshot } = start('timer (30..=90) s\nsay "after"\nexit', seed);
     const action = delayAction(snapshot);
     const restored = deserializeCheckpoint(
       serializeCheckpoint(createCheckpoint(compiled, snapshot)),
@@ -180,16 +183,16 @@ test("timer resume equivalence holds at every boundary in loops, calls, and befo
     [
       "function countdown(seconds) {",
       '    say "Hold for ${seconds} seconds."',
-      "    timer seconds",
+      "    timer seconds s",
       "    return seconds",
       "}",
       "let total = 0",
       "repeat 2 {",
-      "    timer 1..=3",
+      "    timer (1..=3) s",
       "    total = total + countdown(2)",
       "}",
       'say "total ${total}"',
-      "timer 4..8",
+      "timer (4..8) s",
       "exit",
     ].join("\n"),
     { scenarioName: "blocking timer equivalence" },
@@ -204,7 +207,7 @@ test("timer resume equivalence holds at every boundary in loops, calls, and befo
 });
 
 test("a timer coexists with an older background pacing gate and settles in deadline order", () => {
-  const compiled = plan('say "hello there"\ntimer 1\nsay "after"\nexit');
+  const compiled = plan('say "hello there"\ntimer 1 s\nsay "after"\nexit');
   const started = run(compiled, createFreshRuntimeSnapshot(compiled));
   const timer = delayAction(started.snapshot);
   assert.equal(started.snapshot.backgroundActions.length, 1);
@@ -231,7 +234,7 @@ test("a timer coexists with an older background pacing gate and settles in deadl
 });
 
 test("zero timers are immediate and create no action", () => {
-  const { snapshot, events } = start('timer 0\nsay "now"\nexit');
+  const { snapshot, events } = start('timer 0 s\nsay "now"\nexit');
   assert.equal(snapshot.status, "halted");
   assert.equal(snapshot.nextActionId, 1);
   assert.deepEqual(
@@ -244,42 +247,42 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
   const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
     ["timer", "TSP012", ""],
     ["timer(10)", "TSP034", "10"],
-    ["timer(duration: 1, repeat: yes)", "TSP034", "yes"],
-    ["timer(duration: 1, speed: 2)", "TSP034", "speed"],
+    ["timer(duration: 1 s, repeat: yes)", "TSP034", "yes"],
+    ["timer(duration: 1 s, speed: 2)", "TSP034", "speed"],
     ['timer(label: "x")', "TSP034", 'timer(label: "x")'],
-    ["timer 10 { exit }", "TSV033", "{ exit }"],
-    ["timer(duration: 1, repeat: true)", "TSV033", "timer(duration: 1, repeat: true)"],
-    ["let t = timer 10", "TSV033", "timer 10"],
-    ['timer(duration: 1, display: "loud")', "TSV033", '"loud"'],
-    ["timer 10 s ms", "TSV033", "10 s"],
-    ["timer -1", "TSV011", "-1"],
-    ["timer 1.5..3", "TSV010", "1.5..3"],
-    ["timer -2..3", "TSV010", "-2..3"],
-    ["timer 5..5", "TSV010", "5..5"],
-    ["timer 6..=5", "TSV010", "6..=5"],
+    ["timer 10 s { exit }", "TSV033", "{ exit }"],
+    ["timer(duration: 1 s, repeat: true)", "TSV033", "timer(duration: 1 s, repeat: true)"],
+    ["let t = timer 10 s", "TSV033", "timer 10 s"],
+    ['timer(duration: 1 s, display: "loud")', "TSV033", '"loud"'],
+    ["timer 10 s ms", "TSP033", "ms"],
+    ["timer -1 s", "TSV011", "-1 s"],
+    ["timer (1.5..3) s", "TSV010", "1.5..3"],
+    ["timer (-2..3) s", "TSV010", "-2..3"],
+    ["timer (5..5) s", "TSV010", "5..5"],
+    ["timer (6..=5) s", "TSV010", "6..=5"],
     ["let timer = 1", "TSV001", "timer"],
     // Async handle members, handler scope, and repeating-timer rules.
-    ["let t = timer async 5\nsay t.nope", "TSV034", "nope"],
-    ["let t = timer async 5\nt.elapsed = 1 s", "TSV034", "elapsed"],
-    ["let t = timer async 5\nt.restart()", "TSV034", "restart"],
+    ["let t = timer async 5 s\nsay t.nope", "TSV034", "nope"],
+    ["let t = timer async 5 s\nt.elapsed = 1 s", "TSV034", "elapsed"],
+    ["let t = timer async 5 s\nt.restart()", "TSV034", "restart"],
     // A block shares the locals of the code that creates it, not those of another function (V30 §14).
     [
-      'function g {\n  let other = 1\n}\nfunction f {\n  timer async 1 { say "${other}" }\n}',
+      'function g {\n  let other = 1\n}\nfunction f {\n  timer async 1 s { say "${other}" }\n}',
       "TSV002",
       "other",
     ],
-    ["timer async 1 { return 5 }", "TSV033", "5"],
+    ["timer async 1 s { return 5 }", "TSV033", "5"],
     [
-      "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
+      "timer(duration: 1 s, async: true, repeat: true)\ntimer(duration: 0 s, async: true, repeat: true)",
       "TSV011",
-      "0",
+      "0 s",
     ],
-    ["timer(duration: 1, display: 5)", "TSV033", "5"],
-    ["let t = timer async 5\n(t).bogus()", "TSV034", "bogus"],
-    ["let t = timer async 5\nt.remaining = 1", "TSV034", "remaining"],
-    ["let t = timer async 5\nt.display = 1", "TSV034", "display"],
-    ["let t = timer async 5\nt.pause(1)", "TSV034", "pause"],
-    ["timer(duration: 0..2, async: true, repeat: true)", "TSV010", "0..2"],
+    ["timer(duration: 1 s, display: 5)", "TSV033", "5"],
+    ["let t = timer async 5 s\n(t).bogus()", "TSV034", "bogus"],
+    ["let t = timer async 5 s\nt.remaining = 1", "TSV034", "remaining"],
+    ["let t = timer async 5 s\nt.display = 1", "TSV034", "display"],
+    ["let t = timer async 5 s\nt.pause(1)", "TSV034", "pause"],
+    ["timer(duration: (0..2) s, async: true, repeat: true)", "TSV010", "0..2"],
   ];
   for (const [source, code, subject] of cases) {
     const found = diagnostics(source);
@@ -291,62 +294,16 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
   }
 });
 
-test("accepted duration forms without an implementation are never read as another duration", () => {
-  // Timer ranges with other units (§27) are accepted but not implemented yet. They may fail with a compile or runtime
-  // error located in the duration, but a started timer must have the accepted meaning, never for example plain
-  // seconds. A calendar duration such as `1 day` is an error for a timer (§35); its case only guards that it is never
-  // read as another duration.
-  const minutesFiveToTen = (deadlineMs: number): boolean =>
-    deadlineMs >= 5 * 60_000 && deadlineMs < 10 * 60_000;
-  const cases: ReadonlyArray<
-    readonly [source: string, subject: string, accepted: (deadlineMs: number) => boolean]
-  > = [
-    // A calendar day spans 23, 24, or 25 elapsed hours around daylight-saving transitions.
-    [
-      "timer 1 day\nexit",
-      "1 day",
-      (deadlineMs) => deadlineMs >= 23 * 3_600_000 && deadlineMs <= 25 * 3_600_000,
-    ],
-    ["timer 5..10 min", "5..10 min", minutesFiveToTen],
-    ["let n = 10\ntimer 5..n min", "5..n min", minutesFiveToTen],
-  ];
-  for (const [source, subject, accepted] of cases) {
-    const start = source.lastIndexOf(subject);
-    const inSubject = (span: SourceSpan): boolean =>
-      span.start.offset >= start && span.end.offset <= start + subject.length;
-    const message = `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(subject)}`;
-    const compiled = compileSource(source);
-    if (compiled.plan === null) {
-      assert.ok(
-        compiled.diagnostics.some(({ span }) => inSubject(span)),
-        message,
-      );
-      continue;
-    }
-    const { snapshot, events } = run(
-      compiled.plan,
-      createImmediatePacingRuntimeSnapshot(compiled.plan, { seed: SEEDS[0]! }),
-    );
-    const failure = events.at(-1);
-    if (failure?.kind === "runtimeFailure") {
-      assert.ok(inSubject(failure.span), message);
-      continue;
-    }
-    const { deadlineMs } = delayAction(snapshot);
-    assert.ok(accepted(deadlineMs), `${JSON.stringify(source)} must not mean ${deadlineMs} ms`);
-  }
-});
-
 test("invalid dynamic timer durations fail deterministically before any action", () => {
   // The subject is the rejected duration or range operand of the timer or wait. `dynamic` hides a value's type from
   // the compiler, which rejects a known text or range duration before runtime.
   const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
     [`${dynamic}let d = dynamic("soon")\ntimer d\nexit`, "TSR050", "d"],
-    ["let d = -1\ntimer d\nexit", "TSR050", "d"],
-    ["let a = 3\ntimer a..a\nexit", "TSR041", "a..a"],
-    ["let a = 0.5\ntimer a..3\nexit", "TSR045", "a..3"],
-    ["let a = -3\ntimer a..3\nexit", "TSR050", "a..3"],
+    ["let d = -1\ntimer d s\nexit", "TSR050", "d"],
+    ["let a = 3\ntimer (a..a) s\nexit", "TSR041", "a..a"],
+    ["let a = 0.5\ntimer (a..3) s\nexit", "TSR045", "a..3"],
+    ["let a = -3\ntimer (a..3) s\nexit", "TSR050", "a..3"],
     [`${dynamic}let d = dynamic(1..3)\nwait d\nexit`, "TSR050", "d"],
   ];
   for (const [source, code, subject] of cases) {
@@ -370,13 +327,13 @@ test("invalid dynamic timer durations fail deterministically before any action",
   }
   // A range below zero names its own rule, not the kinds a duration may be.
   assert.equal(
-    start("let a = -3\ntimer a..3\nexit").snapshot.failure?.message,
-    "A timer range must not start below zero seconds, but this range is -3..3.",
+    start("let a = -3\ntimer (a..3) s\nexit").snapshot.failure?.message,
+    "A timer range must not start below 0, but this range is -3..3.",
   );
 });
 
 test("restored timer display data is validated against its owning instruction", () => {
-  const { compiled, snapshot } = start("timer 5\nexit");
+  const { compiled, snapshot } = start("timer 5 s\nexit");
   const checkpointJson = serializeCheckpoint(createCheckpoint(compiled, snapshot));
 
   const actionVariants: Array<(action: Record<string, unknown>) => void> = [

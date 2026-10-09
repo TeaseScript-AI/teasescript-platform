@@ -400,7 +400,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 test("checkpoint and plan validation never coerce non-string enumerated fields to text", () => {
-  const compiled = plan('let n = 1\nwait n s\nshowButton "Go"\nexit');
+  const compiled = plan('let n = 1\ntimer n s\nshowButton "Go"\nexit');
   const fresh = createFreshRuntimeSnapshot(compiled);
   const waiting = run(compiled, fresh).snapshot;
   for (const snapshot of [fresh, waiting]) {

@@ -120,7 +120,7 @@ test("globals and speakers are set up before the story: main.tease first, then b
         "if false {",
         "  global second = first + 1",
         "}",
-        'timer async 1 { global fromHandler = "h" }',
+        'timer async 1 s { global fromHandler = "h" }',
         "end",
       ].join("\n"),
     },
@@ -146,7 +146,7 @@ test("a start value uses only literals, earlier globals, operators, and load", (
           "global itself = itself",
           "global rolled = random()",
           'global asked = askText "Name?"',
-          "global timed = timer async 5",
+          "global timed = timer async 5 s",
           'global lazy = load "k", default: helper()',
           "global either = false or chance(50)",
           "function helper { return 1 }",
@@ -385,7 +385,7 @@ test("a global or property that starts as null takes its type from a store in an
     {
       path: "lib.tease",
       source:
-        "global function raise {\n  params.level = 2\n}\nglobal function arm {\n  timer async 1 { params.opts.pace = 1.5 }\n  wait 2\n}",
+        "global function raise {\n  params.level = 2\n}\nglobal function arm {\n  timer async 1 s { params.opts.pace = 1.5 }\n  wait 2 s\n}",
     },
     { path: "mods/fast.tease", source: 'params.mode = "fast"\nend' },
   ]);
@@ -717,11 +717,11 @@ test("checkpoints restore in the middle of startup and after it", () => {
         "global score = rounds * 10",
         "global function practice(times) {",
         "  repeat times {",
-        "    wait 1",
+        "    wait 1 s",
         "    score += 1",
         "  }",
-        "  timer async 1 { score += 100 }",
-        "  wait 2",
+        "  timer async 1 s { score += 100 }",
+        "  wait 2 s",
         "}",
       ].join("\n"),
     },
@@ -743,7 +743,7 @@ test("plan validation keeps the startup at the start of main.tease and calls of 
     },
     {
       path: "lib.tease",
-      source: "function helper { }\nglobal function shared {\n  timer async 1 { }\n}",
+      source: "function helper { }\nglobal function shared {\n  timer async 1 s { }\n}",
     },
   ]);
   assert.equal(validateInstructionPlan(plan).valid, true);
@@ -962,7 +962,7 @@ test("a snapshot keeps the startup a phase of its own, before anything else and 
   const plan = compiledPlan([
     {
       path: "main.tease",
-      source: "global g = 1\nglobal h = 2\ntimer async 1 { wait 2 }\nwait 2\nexit",
+      source: "global g = 1\nglobal h = 2\ntimer async 1 s { wait 2 s }\nwait 2 s\nexit",
     },
   ]);
   const prefixEnd = 2;
@@ -1032,7 +1032,7 @@ test("snapshot validation requires exactly the globals set up so far, unshadowed
   const plan = compiledPlan([
     {
       path: "main.tease",
-      source: "global a = 1\nspeaker vera { }\nglobal b = a + 1\nwait 1\nexit",
+      source: "global a = 1\nspeaker vera { }\nglobal b = a + 1\nwait 1 s\nexit",
     },
   ]);
   const fresh = createFreshRuntimeSnapshot(plan);
@@ -1095,7 +1095,10 @@ test("snapshot validation requires exactly the globals set up so far, unshadowed
 test("a call of another file's function that is not global cannot be restored", () => {
   const plan = compiledPlan([
     { path: "main.tease", source: "shared()\nexit" },
-    { path: "lib.tease", source: "function helper { wait 1 }\nglobal function shared { wait 1 }" },
+    {
+      path: "lib.tease",
+      source: "function helper { wait 1 s }\nglobal function shared { wait 1 s }",
+    },
   ]);
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   assert.equal(validateRuntimeSnapshot(waiting, plan).valid, true);
@@ -1120,7 +1123,7 @@ test("a call of another file's function that is not global cannot be restored", 
   // Nor can a session that failed in main.tease claim to stand in another file's code.
   const failing = compiledPlan([
     { path: "main.tease", source: "let x = [1][2]\nexit" },
-    { path: "lib.tease", source: "let y = 2\nlet z = 3\nend\nfunction local { wait 1 }" },
+    { path: "lib.tease", source: "let y = 2\nlet z = 3\nend\nfunction local { wait 1 s }" },
   ]);
   const failed = run(failing, createFreshRuntimeSnapshot(failing)).snapshot;
   assert.equal(validateRuntimeSnapshot(failed, failing).valid, true);

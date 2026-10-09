@@ -34,8 +34,8 @@ function interactionPlan(
 ): InstructionPlan {
   const source =
     options.speaker === undefined
-      ? "wait 1\nexit"
-      : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
+      ? "wait 1 s\nexit"
+      : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1 s\nexit`;
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -1327,7 +1327,7 @@ test("handoff shapes that would reach invalid runtime states are rejected", () =
   assert.equal(validateInstructionPlan(injected.plan).valid, true);
   // Compiler-produced instructions are valid on their own, so rows using them are invalid only
   // through their local handoff position.
-  const bases = compileSource('wait 1\nsay "x", instant\nexit');
+  const bases = compileSource('wait 1 s\nsay "x", instant\nexit');
   assert.deepEqual(bases.diagnostics, []);
   const [validWait, validSay] = bases.plan!.instructions;
   assert.ok(validWait?.kind === "wait" && validSay?.kind === "say");

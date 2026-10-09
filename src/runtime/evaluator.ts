@@ -107,6 +107,7 @@ import {
   isCalendar,
   negateDuration,
   scaleDuration,
+  unitValue,
   ZERO_DIVISOR,
   type AnyDuration,
 } from "../duration.js";
@@ -988,6 +989,40 @@ export class Evaluator {
             value = expression.operator === "+" ? result.value : -result.value;
           }
           break;
+        case "unit": {
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.operand));
+            continue;
+          }
+          const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
+          if (typeof result.value !== "number")
+            throw fault(
+              "TSR027",
+              `A unit follows a number, but this is ${describeShownValue(result.value)}. ${isAnyDuration(result.value) ? `Remove the '${unit}' after it.` : `Use a number before the '${unit}'.`}`,
+              expression.operand.span,
+            );
+          const duration = unitValue(result.value, expression);
+          if (typeof duration === "string")
+            throw fault(
+              "TSR009",
+              `${duration}. Use a whole number before the '${unit}'.`,
+              expression.span,
+            );
+          // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+          const parts = durationParts(duration);
+          if (
+            !Number.isSafeInteger(parts.months) ||
+            !Number.isSafeInteger(parts.days) ||
+            !Number.isFinite(parts.milliseconds)
+          )
+            throw fault(
+              "TSR036",
+              `The number ${operandText(result.value)} before the '${unit}' gives a duration too long to represent. Use a smaller number.`,
+              expression.span,
+            );
+          value = duration;
+          break;
+        }
         case "binary":
           if (frame.stage === 0) {
             frame.stage = 1;
@@ -1329,18 +1364,42 @@ export class Evaluator {
 
   public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
     const descriptor = this.#buildPreparedReference(expression);
-    // A collection call in an index can remove an ancestor of the selected value, so that the path no longer leads
-    // there from the binding. Such a reference is detached now, as its first use would detach it, so that a checkpoint
-    // taken before that use stays valid.
-    if (!descriptor.detached && this.#referenceEpoch !== 0) {
-      try {
-        this.#resolveDescriptor(descriptor, expression.span);
-      } catch (error) {
-        if (!(error instanceof RuntimeFault)) throw error;
-        return serializePreparedReference({ ...descriptor, detached: true });
-      }
+    return serializePreparedReference(this.#restorableDescriptor(descriptor, expression.span));
+  }
+
+  /**
+   * Restore validation needs the path of a stored reference to lead somewhere from its captured root and, while it is
+   * attached, from its binding. Either can fall behind: an index can add the value it names after the root was
+   * captured, or remove an ancestor of that value from the binding, and a reference extended from an earlier one keeps
+   * that one's root, which lacks what a function call since then has added. A reference whose binding no longer leads
+   * there is detached, as its first use would detach it, and fails now if its captured root falls short as well, as
+   * that use would fail. An attached reference whose captured root falls short captures the root it resolves through.
+   */
+  #restorableDescriptor(
+    descriptor: PreparedReferenceDescriptor,
+    span: SourceSpan,
+  ): PreparedReferenceDescriptor {
+    if (descriptor.detached) return descriptor;
+    if (!this.#resolves(descriptor, span)) {
+      const detached = { ...descriptor, detached: true };
+      this.#resolveDescriptor(detached, span);
+      return detached;
     }
-    return serializePreparedReference(descriptor);
+    if (this.#resolves({ ...descriptor, detached: true }, span)) return descriptor;
+    return {
+      ...descriptor,
+      capturedRoot: this.#resolveDescriptor({ ...descriptor, path: [] }, span),
+    };
+  }
+
+  #resolves(descriptor: PreparedReferenceDescriptor, span: SourceSpan): boolean {
+    try {
+      this.#resolveDescriptor(descriptor, span);
+      return true;
+    } catch (error) {
+      if (error instanceof RuntimeFault) return false;
+      throw error;
+    }
   }
 
   public validateAssignmentTarget(target: AssignmentTargetPlan): void {

@@ -252,7 +252,7 @@ test("blocking audio waits for load and natural completion; async audio continue
   );
   assert.deepEqual(background.said(), []);
   background.load(1, 90_000);
-  assert.deepEqual(background.said(), ["started 1 min 30 s running"]);
+  assert.deepEqual(background.said(), ["started 1 minute 30 seconds running"]);
 });
 
 test("a source the Player cannot load warns, stops without cues or finish, and never blocks", () => {
@@ -297,24 +297,24 @@ test("cues fire on every natural pass; the compact block is a per-pass end; fini
       '    say "finish ${beat.state}"',
       "  }",
       "}",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
   session.load(1, 2_000).at(0, [1, 0]).at(4_000, [1, 4_000]);
   assert.deepEqual(session.said(), [
-    "start 0 s",
+    "start 0 seconds",
     "one",
-    "end 2 s",
-    "start 0 s",
+    "end 2 seconds",
+    "start 0 seconds",
     "one",
-    "end 4 s",
+    "end 4 seconds",
     "finish finished",
   ]);
   assert.equal(session.media(1)?.elapsedMs, 4_000);
 
   const compact = new Session(
-    'playAudio async repeat "beat.mp3" {\n  say "again"\n}\nwait 10\nexit',
+    'playAudio async repeat "beat.mp3" {\n  say "again"\n}\nwait 10 s\nexit',
   );
   compact.load(1, 1_000).at(3_500, [1, 3_500]);
   assert.deepEqual(compact.said(), ["again", "again", "again"]);
@@ -331,7 +331,7 @@ test("stop() never runs finish; stopping again is silent and other controls warn
       '    say "never"',
       "  }",
       "}",
-      "wait 5",
+      "wait 5 s",
       "music.stop()",
       "music.stop()",
       "music.pause()",
@@ -358,7 +358,7 @@ test("one late observation and many small ones give the same result under linear
     "  music.stop()",
     '  say "timer ${music.elapsed}"',
     "}",
-    "wait 12",
+    "wait 12 s",
     'say "done ${music.state} ${music.elapsed}"',
     "exit",
   ].join("\n");
@@ -366,7 +366,7 @@ test("one late observation and many small ones give the same result under linear
   const small = new Session(source).load(1, 4_000).at(0, [1, 0]);
   for (let now = 250; now <= 12_000; now += 250) small.at(now, [1, now]);
   assert.deepEqual(late.said(), small.said());
-  assert.deepEqual(late.said(), ["cue 3 s", "timer 5 s", "done stopped 5 s"]);
+  assert.deepEqual(late.said(), ["cue 3 seconds", "timer 5 seconds", "done stopped 5 seconds"]);
 });
 
 test("a stall reported by equal progress delays cues; elapsed excludes stalls and pauses", () => {
@@ -381,7 +381,7 @@ test("a stall reported by equal progress delays cues; elapsed excludes stalls an
       '  say "timer ${music.elapsed}"',
       "  music.pause()",
       "}",
-      "wait 10",
+      "wait 10 s",
       'say "done ${music.elapsed} ${music.state}"',
       "exit",
     ].join("\n"),
@@ -394,7 +394,7 @@ test("a stall reported by equal progress delays cues; elapsed excludes stalls an
     .at(4_000, [1, 1_000])
     .at(6_000, [1, 3_000]);
   session.at(10_000, [1, 3_000]);
-  assert.deepEqual(session.said(), ["timer 1 s", "done 1 s paused"]);
+  assert.deepEqual(session.said(), ["timer 1 second", "done 1 second paused"]);
 });
 
 test("seeks clamp, skip jumped cues, fire a landing cue once playback proceeds, and end a pass at once", () => {
@@ -413,7 +413,7 @@ test("seeks clamp, skip jumped cues, fire a landing cue once playback proceeds, 
       "}",
       "m.position = 2 s",
       'say "seek ${m.position}", instant',
-      "wait 1",
+      "wait 1 s",
       "m.remaining = 0 s",
       'say "after end ${m.position} ${m.elapsed}"',
       "m.position = -5 s",
@@ -425,12 +425,12 @@ test("seeks clamp, skip jumped cues, fire a landing cue once playback proceeds, 
   session.load(1, 3_000).at(0, [1, 0]).at(500, [1, 500]).at(1_000, [1, 1_000]);
   // The wait ends as the pass ends naturally; the seek then completes the next pass at once.
   assert.deepEqual(session.said(), [
-    "seek 2 s",
+    "seek 2 seconds",
     "two",
     "end",
     "end",
-    "after end 0 s 1 s",
-    "clamped 0 s",
+    "after end 0 seconds 1 second",
+    "clamped 0 seconds",
   ]);
 });
 
@@ -445,18 +445,18 @@ test("pausing keeps the position and cues pending; resume continues; no-op calls
       "m.pause()",
       "m.pause()",
       'say "paused ${m.position}"',
-      "wait 2",
+      "wait 2 s",
       "m.resume()",
       "m.resume()",
-      "wait 5",
+      "wait 5 s",
       'say "at ${m.position}"',
       "exit",
     ].join("\n"),
   );
   session.load(1, 60_000).at(2_000);
-  assert.deepEqual(session.said(), ["paused 0 s"]);
+  assert.deepEqual(session.said(), ["paused 0 seconds"]);
   session.at(3_000, [1, 1_000]).at(7_000, [1, 5_000]);
-  assert.deepEqual(session.said(), ["paused 0 s", "start", "at 5 s"]);
+  assert.deepEqual(session.said(), ["paused 0 seconds", "start", "at 5 seconds"]);
   assert.deepEqual(session.warnings(), []);
 });
 
@@ -492,7 +492,7 @@ test("the Stage image persists; a video covers it and stops when replaced", () =
       "hideImage",
       "showImage null",
       'showImage "images/bed.jpg"',
-      "wait 1",
+      "wait 1 s",
       "exit",
     ].join("\n"),
   );
@@ -563,11 +563,11 @@ test("main-story media waits for message pacing, but not inside interrupt blocks
 
   const interrupt = new Session(
     [
-      "timer async 1 {",
+      "timer async 1 s {",
       '  say "Now."',
       '  showImage "images/now.jpg"',
       "}",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
     { pacing: true },
@@ -578,7 +578,7 @@ test("main-story media waits for message pacing, but not inside interrupt blocks
 
 test("the projection reports load state, playhead, and terminal progress of repeated media", () => {
   const session = new Session(
-    'let m = playAudio(file: "a.mp3", async: true, repeat: 3 times, startAt: 1 s)\nwait 10\nm.position = 2 s\nwait 10\nexit',
+    'let m = playAudio(file: "a.mp3", async: true, repeat: 3 times, startAt: 1 s)\nwait 10 s\nm.position = 2 s\nwait 10 s\nexit',
   );
   let [media] = mediaPlaybackProjection(session.snapshot);
   assert.equal(media?.loaded, false);
@@ -610,9 +610,9 @@ test("media scenarios resume equivalently from every checkpoint boundary", () =>
       '    say "end"',
       "  }",
       "}",
-      "wait 2",
+      "wait 2 s",
       "music.position = 500 ms",
-      "wait 1",
+      "wait 1 s",
       "music.stop()",
       "exit",
     ].join("\n"),
@@ -628,7 +628,7 @@ test("media scenarios resume equivalently from every checkpoint boundary", () =>
       '      say "finished"',
       "    }",
       "  }",
-      "  wait 3",
+      "  wait 3 s",
       "}",
       "scene()",
       "exit",
@@ -687,10 +687,10 @@ test("controlling other media inside a cue block keeps the catch-up order of wor
       '    say "b"',
       "  }",
       "}",
-      "wait 10",
+      "wait 10 s",
       'say "${b.state} ${b.position}"',
       "b.resume()",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n");
   const paused = new Session(source('say "timer"'))
@@ -700,7 +700,7 @@ test("controlling other media inside a cue block keeps the catch-up order of wor
   // The cue of b at 500 ms follows the timer; b was paused exactly there, so it fires once b plays on.
   assert.deepEqual(paused.said(), ["a", "timer"]);
   paused.at(10_000).at(10_500, [2, 500]);
-  assert.deepEqual(paused.said(), ["a", "timer", "paused 500 ms", "b"]);
+  assert.deepEqual(paused.said(), ["a", "timer", "paused 500 milliseconds", "b"]);
 
   const stopped = new Session(source('say "timer"\n  b.stop()'))
     .load(1, 1_000)
@@ -773,7 +773,7 @@ test("an interrupt before an async media assignment keeps a valid, resumable sta
   session.load(1, 1_000);
   assert.deepEqual(session.said(), ["timer", "running"]);
   assertRuntimeResumeEquivalent(
-    'timer async 0 s {\n  say "timer"\n}\nlet m = playAudio async "a.mp3"\nsay "${m.state}"\nwait 2\nexit',
+    'timer async 0 s {\n  say "timer"\n}\nlet m = playAudio async "a.mp3"\nsay "${m.state}"\nwait 2 s\nexit',
     { mediaDurationMs: 1_000 },
   );
 });
@@ -868,12 +868,12 @@ test("a media control uses the receiver it had before the pacing wait", () => {
       'let a = playAudio async "a.mp3"',
       'let b = playAudio async "b.mp3"',
       "let h = a",
-      "timer async 1 {",
+      "timer async 1 s {",
       "  h = b",
       "}",
-      'say "gate", 2',
+      'say "gate", 2 s',
       "h.pause()",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
     { pacing: true },
@@ -888,7 +888,7 @@ test("an async play whose loaded source leaves no range continues as a failed lo
     'let m = playAudio(file: "a", async: true, startAt: 2 s)\nsay "${m.state} ${m.duration}"\nexit',
   );
   session.load(1, 1_000);
-  assert.deepEqual(session.said(), ["stopped 1 s"]);
+  assert.deepEqual(session.said(), ["stopped 1 second"]);
   assert.equal(session.warnings().filter((warning) => warning.startsWith("TSW013")).length, 1);
 });
 
@@ -914,13 +914,13 @@ test("pausing media exactly where its repeat duration runs out still finishes it
       '    say "b finished ${b.elapsed}"',
       "  }",
       "}",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
   session.load(1, 1_000).load(2, 1_000).at(1_000, [1, 1_000], [2, 1_000]);
   assert.equal(session.media(2)?.state, "finished");
-  assert.deepEqual(session.said(), ["b finished 500 ms"]);
+  assert.deepEqual(session.said(), ["b finished 500 milliseconds"]);
 });
 
 test("cues at one point run in source order, also when written differently, before finish", () => {
@@ -945,7 +945,7 @@ test("cues at one point run in source order, also when written differently, befo
 });
 
 test("malformed media reports are rejected atomically without changing state or input", () => {
-  const compiled = plan('let m = playAudio async "a.mp3"\nwait 10\nexit');
+  const compiled = plan('let m = playAudio async "a.mp3"\nwait 10 s\nexit');
   let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
   snapshot = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 5_000 }).snapshot;
   snapshot = run(compiled, snapshot).snapshot;
@@ -1002,9 +1002,9 @@ test("restore validation rejects a queued cue owned by another media", () => {
       'let c = playAudio async "c.mp3"',
       "timer async 0 s {",
       '  say "hold"',
-      "  wait 5",
+      "  wait 5 s",
       "}",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
@@ -1060,7 +1060,7 @@ test("stop() cancels a cue block that is queued and not yet started", () => {
       "  m.stop()",
       '  say "stopped"',
       "}",
-      "wait 2",
+      "wait 2 s",
       "exit",
     ].join("\n"),
   );
@@ -1093,7 +1093,7 @@ test("stopAudio stops running and paused audio in start order and leaves finishe
       "}",
       'let v = playVideo async repeat "v.mp4"',
       "b.pause()",
-      "wait 2",
+      "wait 2 s",
       "stopAudio",
       'say "${a.state} ${a.position} ${b.state} ${b.position} ${c.state} ${v.state}"',
       "stopAudio",
@@ -1105,7 +1105,7 @@ test("stopAudio stops running and paused audio in start order and leaves finishe
   session.at(2_000, [1, 2_000], [3, 1_000], [4, 2_000]);
   assert.deepEqual(session.said(), [
     "c finished",
-    "stopped 2 s stopped 0 s finished running",
+    "stopped 2 seconds stopped 0 seconds finished running",
     "running",
   ]);
   // Each sound settles like stop() on its handle, in the order the sounds started; a second stopAudio finds none.
@@ -1133,7 +1133,7 @@ test("stopAudio cancels queued cue blocks, and finish never runs", () => {
       "  stopAudio",
       '  say "${m.state}"',
       "}",
-      "wait 2",
+      "wait 2 s",
       "exit",
     ].join("\n"),
   );
@@ -1147,7 +1147,7 @@ test("stopAudio in a timer block ends a blocking play, which continues when the 
   // Like a failed load, or a blocking video that a block replaces, the stopped sound releases the script's wait.
   const session = new Session(
     [
-      "timer async 1 {",
+      "timer async 1 s {",
       "  stopAudio",
       '  say "stopped"',
       "}",
@@ -1186,11 +1186,11 @@ test("stopAudio waits for message pacing on the story path, but not inside a tim
   const interrupt = new Session(
     [
       'let m = playAudio async "m.mp3"',
-      "timer async 1 {",
+      "timer async 1 s {",
       '  say "Now."',
       "  stopAudio",
       "}",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
     { pacing: true },
@@ -1225,7 +1225,7 @@ test("stopAudio resumes equivalently from every checkpoint boundary", () => {
 
 test("restore validation keeps elapsed and sample history coherent with scene time", () => {
   const compiled = plan(
-    'let m = playAudio async "m.mp3" {\n  at 500 ms {\n    say "cue"\n  }\n}\nwait 10\nexit',
+    'let m = playAudio async "m.mp3" {\n  at 500 ms {\n    say "cue"\n  }\n}\nwait 10 s\nexit',
   );
   let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
   snapshot = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 5_000 }).snapshot;
@@ -1277,11 +1277,11 @@ test("reporting the projected terminal progress ends fractional ranges, also aft
     const controlled = new Session(
       [
         `let m = playAudio(file: "a", async: true, repeat: 7 times, endAt: ${endAt})`,
-        "wait 1",
+        "wait 1 s",
         "m.pause()",
         "m.resume()",
         "m.position = 0.05 ms",
-        "wait 1000000",
+        "wait 1000000 s",
         "exit",
       ].join("\n"),
     );
@@ -1305,12 +1305,12 @@ test("restore validation relates segment anchors to the committed cursor and cur
     assert.equal(validateRuntimeSnapshot(corrupted, compiled).valid, false, name);
   };
   const budget = new Session(
-    'let m = playAudio(file: "a", async: true, repeat: 1500 ms) {\n  at 500 ms { }\n}\nwait 10\nexit',
+    'let m = playAudio(file: "a", async: true, repeat: 1500 ms) {\n  at 500 ms { }\n}\nwait 10 s\nexit',
   );
   budget.load(1, 1_000).at(500, [1, 500]);
   corrupt(budget.plan, budget.snapshot, (media) => (media.segmentPositionMs = 100), "position");
   const counted = new Session(
-    'let m = playAudio(file: "a", async: true, repeat: 3 times)\nwait 10\nexit',
+    'let m = playAudio(file: "a", async: true, repeat: 3 times)\nwait 10 s\nexit',
   );
   counted.load(1, 1_000).at(1_000, [1, 1_000]);
   corrupt(counted.plan, counted.snapshot, (media) => (media.segmentPasses = 1), "passes");
@@ -1342,7 +1342,7 @@ test("restore validation relates segment anchors to the committed cursor and cur
 
 test("a load report waits for catch-up like host input and anchors at the observed time", () => {
   const compiled = plan(
-    'timer async 500 ms {\n  let x = 1\n}\nlet a = playAudio async "a.mp3"\nwait 10\nexit',
+    'timer async 500 ms {\n  let x = 1\n}\nlet a = playAudio async "a.mp3"\nwait 10 s\nexit',
   );
   let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
   snapshot = observeTime(compiled, snapshot, 1_000).snapshot;
@@ -1365,10 +1365,10 @@ test("a load report waits for catch-up like host input and anchors at the observ
 test("the main path reads and stops media at scene time however late playback is observed", () => {
   const source = [
     'let music = playAudio async "a.mp3"',
-    "wait 1",
+    "wait 1 s",
     'say "${music.position}", instant',
     "music.stop()",
-    "wait 1",
+    "wait 1 s",
     'say "${music.elapsed}", instant',
     "exit",
   ].join("\n");
@@ -1376,7 +1376,7 @@ test("the main path reads and stops media at scene time however late playback is
   fine.at(1_000, [1, 1_000]).at(5_000, [1, 5_000]);
   const late = new Session(source).load(1, 10_000);
   late.at(5_000, [1, 5_000]);
-  assert.deepEqual(late.said(), ["1 s", "1 s"]);
+  assert.deepEqual(late.said(), ["1 second", "1 second"]);
   assert.deepEqual(late.said(), fine.said());
   assert.deepEqual(late.media(1)?.positionMs, fine.media(1)?.positionMs);
 });
@@ -1386,11 +1386,11 @@ test("restore validation rejects incoherent anchor elapsed and a cue frame of an
     [
       'let a = playAudio async "a.mp3" {',
       "  at 500 ms {",
-      "    wait 1",
+      "    wait 1 s",
       "  }",
       "}",
       'let b = playAudio async "b.mp3"',
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
@@ -1435,11 +1435,11 @@ test("fractional controls, budget ends, and terminal playheads agree with the ar
   ].join("\n");
   const fine = new Session(source).load(1, 20).at(10, [1, 10.1]).at(20);
   const late = new Session(source).load(1, 20).at(20, [1, 20.2]);
-  assert.deepEqual(fine.said(), ["end", "finish 10.1 ms"]);
+  assert.deepEqual(fine.said(), ["end", "finish 10.1 milliseconds"]);
   assert.deepEqual(late.said(), fine.said());
   // A repeat duration ending inside the last pass never carries the position past the range.
   const budget = new Session(
-    'let m = playAudio(file: "a", async: true, repeat: 7.7 ms, endAt: 1.1 ms)\nwait 1\nexit',
+    'let m = playAudio(file: "a", async: true, repeat: 7.7 ms, endAt: 1.1 ms)\nwait 1 s\nexit',
   );
   budget.load(1, 100);
   const [projected] = mediaPlaybackProjection(budget.snapshot);
@@ -1448,7 +1448,7 @@ test("fractional controls, budget ends, and terminal playheads agree with the ar
   assert.ok(budget.media(1)!.positionMs <= 1.1);
   // Reported playback at the terminal progress projects the end of the last pass.
   const terminal = new Session(
-    'playAudio(file: "a", repeat: 7 times, endAt: 1000.1 ms) {\n  at 500.05 ms {\n    wait 1\n  }\n}\nexit',
+    'playAudio(file: "a", repeat: 7 times, endAt: 1000.1 ms) {\n  at 500.05 ms {\n    wait 1 s\n  }\n}\nexit',
   );
   terminal.load(1, 10_000);
   const end = mediaPlaybackProjection(terminal.snapshot)[0]!.terminalProgressMs!;
@@ -1469,12 +1469,12 @@ test("anchor coherence tolerates rounding only at the magnitude of segment progr
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   };
   const far = new Session(
-    'let m = playAudio(file: "a", async: true, startAt: 1000000000000000 ms, endAt: 1000000000001000 ms) {\n  at 1000000000000500 ms { }\n}\nwait 10\nexit',
+    'let m = playAudio(file: "a", async: true, startAt: 1000000000000000 ms, endAt: 1000000000001000 ms) {\n  at 1000000000000500 ms { }\n}\nwait 10 s\nexit',
   );
   far.load(1, 1_000_000_000_002_000).at(500, [1, 500]);
   corrupt(far, (media) => (media.segmentPositionMs += 1), "far anchor position");
   const passes = new Session(
-    'let m = playAudio(file: "a", async: true, repeat: 3 times, startAt: 8000000000000000 ms, endAt: 8000000000000010 ms)\nwait 10\nexit',
+    'let m = playAudio(file: "a", async: true, repeat: 3 times, startAt: 8000000000000000 ms, endAt: 8000000000000010 ms)\nwait 10 s\nexit',
   );
   passes.load(1, 8_000_000_000_000_100).at(10, [1, 10]);
   corrupt(passes, (media) => (media.segmentPasses = 1), "far anchor passes");
@@ -1488,7 +1488,7 @@ test("the playhead projection stays finite and in range at pass counts beyond ex
     ["0.0000000000000001 ms", "true"],
   ] as const) {
     const session = new Session(
-      `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 10\nexit`,
+      `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 10 s\nexit`,
     );
     session.load(1, 100);
     session.snapshot = observeTime(session.plan, session.snapshot, Number.MAX_SAFE_INTEGER, [
@@ -1543,14 +1543,14 @@ test("reads at a fractional sample are whole milliseconds like interpolated read
   ].join("\n");
   const fine = new Session(source).load(1, 1_000).at(10, [1, 10.1]).at(20);
   const late = new Session(source).load(1, 1_000).at(20, [1, 20.2]);
-  assert.deepEqual(fine.said(), ["10 ms 10 ms 990 ms"]);
+  assert.deepEqual(fine.said(), ["10 milliseconds 10 milliseconds 990 milliseconds"]);
   assert.deepEqual(late.said(), fine.said());
   assert.deepEqual(late.media(1), fine.media(1));
 });
 
 test("a load report waits for a due block even when scene time has caught up", () => {
   const compiled = plan(
-    'timer async 500 ms {\n  let x = 1\n}\nlet a = playAudio async "a.mp3"\nwait 10\nexit',
+    'timer async 500 ms {\n  let x = 1\n}\nlet a = playAudio async "a.mp3"\nwait 10 s\nexit',
   );
   let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
   snapshot = observeTime(compiled, snapshot, 500).snapshot;
@@ -1583,12 +1583,12 @@ test("anchor coherence follows the producing arithmetic exactly", () => {
   // Genuine states at rounding edges stay valid: a wrapped start beyond the previous pass end, and a repeat duration
   // that ends exactly at a cue arrival.
   new Session(
-    'let m = playAudio(file: "a", async: true, repeat: 7 times, endAt: 1.1 ms)\nwait 10\nexit',
+    'let m = playAudio(file: "a", async: true, repeat: 7 times, endAt: 1.1 ms)\nwait 10 s\nexit',
   )
     .load(1, 100)
     .at(1, [1, 6.6]);
   new Session(
-    'let m = playAudio(file: "m", async: true, startAt: 0.1 ms, endAt: 0.3 ms, repeat: 0.7 ms) {\n  at 0.2 ms { }\n}\nwait 10\nexit',
+    'let m = playAudio(file: "m", async: true, startAt: 0.1 ms, endAt: 0.3 ms, repeat: 0.7 ms) {\n  at 0.2 ms { }\n}\nwait 10 s\nexit',
   )
     .load(1, 5_000)
     .at(16, [1, 0.7]);
@@ -1599,12 +1599,12 @@ test("crossings and reads use the exact reported values", () => {
     'let clock = timer async 100 ms\nlet m = playAudio async "a" {\n  at 1.7 ms {\n    say "${clock.elapsed}", instant\n  }\n}\nwait 100 ms\nexit',
   );
   crossing.load(1, 100).at(3, [1, 5.1]);
-  assert.deepEqual(crossing.said(), ["2 ms"]);
+  assert.deepEqual(crossing.said(), ["2 milliseconds"]);
   const read = new Session(
     'let m = playAudio async "a"\nwait 5 ms\nsay "${m.position} ${m.elapsed} ${m.remaining}", instant\nm.pause()\nwait 100 ms\nexit',
   );
   read.load(1, 100).at(6, [1, 0.6]);
-  assert.deepEqual(read.said(), ["0 s 0 s 100 ms"]);
+  assert.deepEqual(read.said(), ["0 seconds 0 seconds 100 milliseconds"]);
 });
 
 test("a terminal playhead stays at the range end beyond exactly countable passes", () => {
@@ -1615,7 +1615,7 @@ test("a terminal playhead stays at the range end beyond exactly countable passes
     ["0.1 ms", "1000000000000000 ms"],
   ] as const) {
     const session = new Session(
-      `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 1000000\nexit`,
+      `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 1000000 s\nexit`,
     );
     session.load(1, 100);
     const terminal = mediaPlaybackProjection(session.snapshot)[0]!.terminalProgressMs!;
@@ -1690,7 +1690,7 @@ test("restore validation accepts only positions the runtime can stand on", () =>
 });
 
 test("restore validation never coerces media settlement enumerations to text", () => {
-  const session = new Session('let a = playAudio async "a.mp3"\nwait 10\nexit').load(1, 1_000);
+  const session = new Session('let a = playAudio async "a.mp3"\nwait 10 s\nexit').load(1, 1_000);
   const settlement = session.snapshot.lastSettlement;
   assert.equal(settlement?.actionKind, "mediaPlayback");
   for (const field of ["outcome", "actionKind"] as const) {
@@ -1716,7 +1716,7 @@ test("restore validation accepts exactly the cursors the runtime's own arrivals 
   };
   const counted = (cue = "") =>
     new Session(
-      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)${cue}\nwait 10\nexit`,
+      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)${cue}\nwait 10 s\nexit`,
     ).load(1, 1_000);
   corrupt(counted(), (media) => (media.positionMs = 5), "anchor position");
   corrupt(counted(), (media) => (media.passesCompleted = 1), "anchor passes");
@@ -1731,12 +1731,12 @@ test("restore validation accepts exactly the cursors the runtime's own arrivals 
     "wrapped start moved to a cue",
   );
   const seek = new Session(
-    'let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)\nm.position = 0.01 ms\nwait 10\nexit',
+    'let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)\nm.position = 0.01 ms\nwait 10 s\nexit',
   ).load(1, 1_000);
   corrupt(seek, (media) => (media.positionMs = 0), "seek anchor moved to the range start");
   corrupt(
     new Session(
-      'let m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: 2 times) {\n  at 5 ms { }\n}\nwait 10\nexit',
+      'let m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: 2 times) {\n  at 5 ms { }\n}\nwait 10 s\nexit',
     )
       .load(1, 10)
       .at(5, [1, 5]),
@@ -1759,7 +1759,11 @@ test("position reads and the terminal playhead use the arrival the timeline comm
     ].join("\n"),
   );
   read.load(1, 4_503_599_627_370_496).at(2, [1, 1]).at(4, [1, 1.25]);
-  assert.deepEqual(read.said(), ["C 0.1 ms", "before 0.1 ms", "after 0.1 ms"]);
+  assert.deepEqual(read.said(), [
+    "C 0.1 milliseconds",
+    "before 0.1 milliseconds",
+    "after 0.1 milliseconds",
+  ]);
   const terminal = new Session(
     'let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 1000.3 ms, repeat: 2498 ms) {\n  at 1.1 ms { }\n}\nwait 10000 ms\nexit',
   );
@@ -1983,17 +1987,22 @@ test("settled media stay readable through every handle and cue block that still 
     'table["keyed"].stop()',
     'playAudio async "unnamed.mp3" {',
     "  finish {",
-    "    wait 1",
+    "    wait 1 s",
     '    say "late finish"',
     "  }",
     "}",
-    "wait 4",
+    "wait 4 s",
     'say "${kept[0].state} ${table["keyed"].duration} ${kept[0].remaining}"',
     "exit",
   ].join("\n");
   const { boundaries, events } = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
   const said = events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
-  assert.deepEqual(said, ["own finished", "late finish", "timer stopped", "stopped 1 s 0 s"]);
+  assert.deepEqual(said, [
+    "own finished",
+    "late finish",
+    "timer stopped",
+    "stopped 1 second 0 seconds",
+  ]);
   // The list and the dict keep theirs; the rest went once their timer or cue block no longer needed them.
   assert.deepEqual(
     boundaries.at(-1)?.settledMedia.map((media) => media.mediaId),
@@ -2015,7 +2024,7 @@ test("a settled record keeps only what its handle reads, the same at every check
     "wait 250 ms",
     "cut.stop()",
     'let empty = playAudio(file: "empty.mp3", async: true, startAt: 2 s)',
-    "wait 2",
+    "wait 2 s",
     "for m in [done, cut, empty] {",
     "  say m",
     '  say "${m.position} ${m.elapsed} ${m.remaining} ${m.duration} ${m.volume}"',
@@ -2038,14 +2047,14 @@ test("a settled record keeps only what its handle reads, the same at every check
       "cue 1",
       "finish 1 finished",
       '<media "done.mp3", finished>',
-      "700 ms 1 s 0 s 1 s 0.5",
-      "finished 700 ms 1 s 0 s",
+      "700 milliseconds 1 second 0 seconds 1 second 0.5",
+      "finished 700 milliseconds 1 second 0 seconds",
       '<media "cut.mp3", stopped>',
-      "250 ms 250 ms 0 s 1 s 1",
-      "stopped 250 ms 250 ms 0 s",
+      "250 milliseconds 250 milliseconds 0 seconds 1 second 1",
+      "stopped 250 milliseconds 250 milliseconds 0 seconds",
       '<media "empty.mp3", stopped>',
-      "2 s 0 s 0 s 1 s 1",
-      "stopped 2 s 0 s 0 s",
+      "2 seconds 0 seconds 0 seconds 1 second 1",
+      "stopped 2 seconds 0 seconds 0 seconds",
     ],
   );
   // Controls of settled media change nothing: each warns except the silent stop.
@@ -2067,7 +2076,7 @@ test("a settled record keeps only what its handle reads, the same at every check
     ]);
   }
   // A source that never loaded reads no duration and no remaining time.
-  const failed = new Session('let m = playAudio async "gone.mp3"\nwait 1\nexit').fail(1);
+  const failed = new Session('let m = playAudio async "gone.mp3"\nwait 1 s\nexit').fail(1);
   assert.deepEqual(failed.snapshot.settledMedia, [
     {
       mediaId: 1,
@@ -2090,9 +2099,9 @@ test("restore validation rejects malformed settled media records and their block
       "  }",
       "}",
       "timer async 0 s {",
-      "  wait 5",
+      "  wait 5 s",
       "}",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   )
@@ -2123,7 +2132,7 @@ test("restore validation rejects malformed settled media records and their block
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   }
   // A source that never loaded stopped without playing.
-  const failed = new Session('let m = playAudio async "gone.mp3"\nwait 1\nexit').fail(1);
+  const failed = new Session('let m = playAudio async "gone.mp3"\nwait 1 s\nexit').fail(1);
   for (const [name, change] of [
     ["finished without loading", { state: "finished" }],
     ["played without loading", { elapsedMs: 5 }],
@@ -2147,8 +2156,8 @@ test("the blocks of one settled media share its variables", () => {
       "}",
       "let a = start(1)",
       "let b = start(2)",
-      "timer async 0 s { wait 5 }",
-      "wait 10",
+      "timer async 0 s { wait 5 s }",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   )
@@ -2196,7 +2205,7 @@ test("a long play and settle loop keeps settledMedia and the snapshot bounded", 
   );
   // Without collection each settled clip would add its record; the state grows by less than one record.
   const record = JSON.stringify(
-    new Session('let clip = playAudio async "clip.mp3"\nclip.stop()\nwait 1\nexit')
+    new Session('let clip = playAudio async "clip.mp3"\nclip.stop()\nwait 1 s\nexit')
       .load(1, 1_000)
       .snapshot.settledMedia.at(0),
   ).length;
@@ -2205,7 +2214,7 @@ test("a long play and settle loop keeps settledMedia and the snapshot bounded", 
 
 test("restore requires a record for every media handle, and the next operation drops the others", () => {
   const session = new Session(
-    'let m: media | integer = playAudio async "a.mp3"\nm.stop()\nwait 1\nm = 0\nwait 1\nexit',
+    'let m: media | integer = playAudio async "a.mp3"\nm.stop()\nwait 1 s\nm = 0\nwait 1 s\nexit',
   ).load(1, 1_000);
   // The handle in `m` keeps the stopped media's record.
   assert.equal(session.snapshot.settledMedia.length, 1);

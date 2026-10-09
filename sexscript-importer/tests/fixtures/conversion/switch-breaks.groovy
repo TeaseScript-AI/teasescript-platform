@@ -63,3 +63,19 @@ switch (getRandom(2)) {
 			break
 		}
 }
+// A case whose if and else both return does not run on into the next case, as in Domme3's main menu.
+def implement = { int choice ->
+	switch (choice) {
+		case 0:
+			if (loadBoolean("toys.paddle")) {
+				return "paddle"
+			}
+			else {
+				return "hand"
+			}
+		case 1:
+			return "crop"
+	}
+	return "none"
+}
+show("Fetch the " + implement(getRandom(2)))

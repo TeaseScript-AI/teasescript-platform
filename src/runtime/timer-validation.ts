@@ -94,9 +94,12 @@ export function validTimerAction(
     owner.persist === timer.persist &&
     owner.handlerFunctionId === timer.handlerFunctionId &&
     (owner.label === null) === (timer.label === null) &&
-    // A duration written as a number or duration never evaluates to a range.
+    // Only a duration with the range's unit after it may be a range, and not one written as a number or duration.
     (timer.range === null ||
-      (owner.duration.kind !== "literal" && owner.duration.kind !== "duration"))
+      (isPlainRecord(timer.range) &&
+        owner.unit === timer.range.unit &&
+        owner.duration.kind !== "literal" &&
+        owner.duration.kind !== "duration"))
   );
 }
 
@@ -523,9 +526,16 @@ function addRecord(
 
 function validRange(value: unknown): boolean {
   if (value === null) return true;
-  if (!isPlainRecord(value) || !hasExactKeys(value, ["start", "end", "inclusive"])) return false;
-  const { start, end, inclusive } = value;
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["start", "end", "inclusive", "unit"]))
+    return false;
+  const { start, end, inclusive, unit } = value;
   return (
+    (unit === "ms" ||
+      unit === "s" ||
+      unit === "min" ||
+      unit === "h" ||
+      unit === "d" ||
+      unit === "w") &&
     typeof start === "number" &&
     typeof end === "number" &&
     Number.isSafeInteger(start) &&

@@ -118,7 +118,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
     plan: project(
       [
         'let labels = ["first", "second", "third"]',
-        "let t = timer(duration: 1..=2, async: true, label: labels.removeFirst())",
+        "let t = timer(duration: (1..=2) s, async: true, label: labels.removeFirst())",
         'say "${labels.length} ${t.label}"',
         "wait 3 s",
         "exit",
@@ -132,8 +132,8 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       [
         'let labels = ["first", "second", "third"]',
         'let shown = ["visible", "hidden", "mystery"]',
-        "timer(duration: 1..=2, display: shown.removeFirst(), label: labels.removeFirst())",
-        "timer 1..=3",
+        "timer(duration: (1..=2) s, display: shown.removeFirst(), label: labels.removeFirst())",
+        "timer (1..=3) s",
         'say "${labels.length} ${shown.length}", instant',
         "exit",
       ].join("\n"),
@@ -185,7 +185,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
   transfers: () => ({
     stepMs: 2000,
     plan: project('fallback "rooms/*.tease"\ncall "rooms/*.tease"\nend', {
-      "rooms/a.tease": 'timer async 5 { say "late" }\nsay "a ${random()}"\nend',
+      "rooms/a.tease": 'timer async 5 s { say "late" }\nsay "a ${random()}"\nend',
       "rooms/b.tease": 'say "b"\nend',
       "rooms/c.tease": 'say "c"\nexit',
     }),
@@ -196,7 +196,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
     plan: project(
       [
         'let items = ["x", "y"]',
-        "let t = timer(duration: 1..=3, async: true, repeat: true) {",
+        "let t = timer(duration: (1..=3) s, async: true, repeat: true) {",
         '  say "tick ${items}"',
         "}",
         "wait 4 s",
@@ -217,8 +217,8 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
     stepMs: 20_000,
     plan: project(
       [
-        'timer async 1 { say "block" }',
-        "let r = timer(duration: 2..=3, async: true, repeat: true)",
+        'timer async 1 s { say "block" }',
+        "let r = timer(duration: (2..=3) s, async: true, repeat: true)",
         "wait 9 s",
         "r.stop()",
         "exit",
@@ -575,7 +575,7 @@ test("while a draw is paused, every other host operation changes nothing", () =>
     [
       'let b = showPermanentButton "B" {',
       "}",
-      "let t = timer(duration: 1..=2, async: true, repeat: true)",
+      "let t = timer(duration: (1..=2) s, async: true, repeat: true)",
       'let answer = choose "A", "B"',
       "wait 10 s",
       "exit",
@@ -1046,19 +1046,19 @@ test("a repeating timer lists round draws only when its duration can be a range,
       (action: { kind: string }) => action.kind === "timer",
     ).timer;
     Object.assign(timer, {
-      range: { start: 1, end: 3, inclusive: true },
+      range: { start: 1, end: 3, inclusive: true, unit: "s" },
       repeatDurationMs: null,
       anchoredRounds: null,
     });
     return checkpoint;
   };
-  // A duration written as a number or duration never evaluates to a range, so its rounds never draw. The same record
-  // restores when the duration is a variable, which may hold a range.
-  for (const written of ["2", "2 s", "d"]) {
+  // A duration without a unit after it never evaluates to a range, also when it is a variable, so its rounds never
+  // draw. The same record restores when the duration is a range with a unit.
+  for (const written of ["2 s", "d", "(a..=3) s"]) {
     const plan = project(
-      `let d = 2\nlet t = timer(duration: ${written}, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit`,
+      `let d = 2 s\nlet a = 1\nlet t = timer(duration: ${written}, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit`,
     );
-    if (written === "d") {
+    if (written === "(a..=3) s") {
       assert.doesNotThrow(() => restoreRuntimeSession(rangeOn(plan)));
       continue;
     }
@@ -1067,7 +1067,7 @@ test("a repeating timer lists round draws only when its duration can be a range,
   }
   // A ranged repeat draws each round at its listed site, also from a restored record.
   const plan = project(
-    "let t = timer(duration: 1..=3, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit",
+    "let t = timer(duration: (1..=3) s, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit",
   );
   assert.deepEqual(
     listRandomSites(plan).map((site) => site.kinds),

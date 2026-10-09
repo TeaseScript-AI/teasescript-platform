@@ -103,12 +103,12 @@ test("Now names the next statement, the wait's statement, and the calls across n
 test("Now lists blocking, suspended and paused timers and the block that interrupted the script", () => {
   let session = createPlayerRuntimeSession(
     [
-      'let paused = timer(duration: 30, async: true, label: "Paused")',
+      'let paused = timer(duration: 30 s, async: true, label: "Paused")',
       "paused.pause()",
-      "timer async 1 {",
-      "  wait 5",
+      "timer async 1 s {",
+      "  wait 5 s",
       "}",
-      'timer(duration: 10, display: "visible", label: "Blocking")',
+      'timer(duration: 10 s, display: "visible", label: "Blocking")',
       "exit",
     ].join("\n"),
   );

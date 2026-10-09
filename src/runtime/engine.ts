@@ -182,7 +182,7 @@ import {
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
-  secondsToPacingMilliseconds,
+  exactPacingMilliseconds,
 } from "./actions/pacing.js";
 import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 import { normalizeOpaqueColor } from "../color.js";
@@ -2594,10 +2594,6 @@ function cloneInteractionAction(
   };
 }
 
-/**
- * A `showButton` timeout in milliseconds: a number of seconds or an elapsed duration greater than zero whose deadline
- * is a representable later scene time.
- */
 /** A form's time limit, whose deadline must be a representable later scene time. */
 function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: SourceSpan): number {
   if (snapshot.currentSessionTimeMs === MAX_RUNTIME_SESSION_TIME_MS)
@@ -2618,6 +2614,10 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
   return timeoutMs;
 }
 
+/**
+ * A `showButton` timeout in milliseconds: a duration greater than zero whose deadline is a representable later scene
+ * time.
+ */
 function buttonTimeoutMs(
   value: SerializableRuntimeValue,
   snapshot: RuntimeSnapshot,
@@ -2629,7 +2629,9 @@ function buttonTimeoutMs(
   if (timeoutMs === null) {
     throw fault(
       "TSR050",
-      `The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms', but this is ${describeShownValue(value)}.`,
+      typeof value === "number"
+        ? `A showButton timeout is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
+        : `A showButton timeout must be a duration greater than zero, but this is ${describeShownValue(value)}.`,
       span,
     );
   }
@@ -3048,7 +3050,20 @@ function sayDurationMs(
     if (pacingValue === "smart") {
       return calculateSmartPacingDurationMs(text, snapshot.chatPacingSettings);
     }
-    return secondsToPacingMilliseconds(pacingValue);
+    if (!isAnyDuration(pacingValue))
+      throw fault(
+        "TSR050",
+        `Say pacing is a duration or instant, but this is ${describeShownValue(pacingValue)}. ${durationFix(pacingValue, "3 s")}`,
+        instruction.span,
+      );
+    const milliseconds = exactDurationMilliseconds(pacingValue, "Say pacing", instruction.span);
+    if (milliseconds < 0)
+      throw fault(
+        "TSR050",
+        `Say pacing must be a duration of at least ${formatDuration(0)}, but this is ${describeShownValue(pacingValue)}.`,
+        instruction.span,
+      );
+    return exactPacingMilliseconds(milliseconds);
   } catch (error) {
     if (error instanceof RuntimeFault) throw error;
     throw fault(
@@ -3257,8 +3272,9 @@ export function instructionBudget(value: number | undefined): number {
 }
 
 /**
- * Converts an evaluated `wait`/`timer` duration to milliseconds: a duration value, a number of `unit` (seconds by
- * default), or, for timers, an integer-second range drawn once from the session RNG. Invalid ranges fail before the draw.
+ * Converts an evaluated `wait`/`timer` duration to milliseconds: a duration value, or a number of the `unit` after it
+ * or a range of whole such units, drawn once from the session RNG. A number without a unit is no time. Invalid ranges
+ * fail before the draw.
  */
 export function timerDurationMs(
   evaluator: Evaluator,
@@ -3267,34 +3283,40 @@ export function timerDurationMs(
   command: "wait" | "timer",
   span: SourceSpan,
 ): number {
-  const range =
-    command === "timer" && isRange(value) && (unit === null || unit === "s") ? value : null;
+  const range = isRange(value) && unit !== null ? value : null;
   const drawn =
     range === null || range.start < 0
       ? value
-      : evaluator.randomIntegerInRange(range, span, "A timer", "duration");
+      : evaluator.randomIntegerInRange(range, span, `A ${command}`, "duration");
   const amount =
     isAnyDuration(drawn) && unit === null
-      ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
+      ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "'wait'", span)
       : drawn;
-  if (command === "timer" && isRange(drawn))
+  if (isRange(drawn))
     throw fault(
       "TSR050",
-      unit !== null && unit !== "s"
-        ? "A timer range counts whole seconds. Other units are not supported for ranges yet."
-        : `A timer range must not start below zero seconds, but this range is ${drawn.start}${drawn.inclusive ? "..=" : ".."}${drawn.end}.`,
+      unit === null
+        ? `A ${command} takes a duration, but this is the range ${rangeText(drawn)}. Give the range a unit, such as '(${rangeText(drawn)}) s'.`
+        : `A ${command} range must not start below 0, but this range is ${rangeText(drawn)}.`,
       span,
     );
-  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
+  if (
+    typeof amount !== "number" ||
+    (unit === null && !isDuration(drawn)) ||
+    !Number.isFinite(amount) ||
+    amount < 0
+  ) {
     throw fault(
       "TSR050",
-      typeof amount === "number" && amount < 0
+      typeof amount === "number" && amount < 0 && (unit !== null || isDuration(drawn))
         ? `${commandName(command)} duration must not be negative, but this is ${describeShownValue(drawn)}.`
-        : `A ${command} duration is a duration such as '30 s'${command === "timer" ? ", a number of seconds, or a range of whole seconds" : " or a number of seconds"}, but this is ${describeShownValue(drawn)}.`,
+        : unit !== null
+          ? `A time before a unit is a number, but this is ${describeShownValue(drawn)}.${isDuration(drawn) ? ` Remove the '${unit}' after it.` : ""}`
+          : `A ${command} takes a duration, but this is ${describeShownValue(drawn)}. ${durationFix(drawn, "30 s")}`,
       span,
     );
   }
-  const durationMs = isDuration(drawn) ? amount : amount * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
+  const durationMs = isDuration(drawn) ? amount : amount * DURATION_UNIT_MILLISECONDS[unit!];
   if (!Number.isFinite(durationMs)) {
     throw fault(
       "TSR050",
@@ -3345,6 +3367,17 @@ function notSkippableFlag(value: SerializableRuntimeValue): string {
   return `Speaker property 'defaultSaySkippable' must be true or false (boolean), but this is ${describeShownValue(value)}.`;
 }
 
+/** How to make a value that is not a duration one: give a number a unit, or use a duration such as `example`. */
+function durationFix(value: SerializableRuntimeValue, example: string): string {
+  return typeof value === "number"
+    ? `Give the number a unit, such as '${describeShownValue(value)} s'.`
+    : `Use a duration such as '${example}'.`;
+}
+
+function rangeText(range: SerializableRuntimeRange): string {
+  return `${range.start}${range.inclusive ? "..=" : ".."}${range.end}`;
+}
+
 function commandName(command: "wait" | "timer"): string {
   return command === "timer" ? "Timer" : "Wait";
 }
@@ -3384,16 +3417,14 @@ function startTimer(
     instruction.label === null
       ? null
       : timerLabel(evaluator.evaluate(instruction.label), instruction.label.span);
-  const range =
-    instruction.repeat &&
-    isRange(duration) &&
-    (instruction.unit === null || instruction.unit === "s")
-      ? duration
-      : null;
+  const unit = instruction.unit;
+  const range = instruction.repeat && isRange(duration) && unit !== null ? duration : null;
   const zeroRoundFault = () =>
     fault(
       "TSR050",
-      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : `${range.start} s`}. Use a duration of at least 1 s.`,
+      range === null || unit === null
+        ? `A repeating timer needs every round to last longer than zero, but this round can be ${describeShownValue(duration)}. Use a duration of at least 1 second.`
+        : `A repeating timer needs every round to last longer than zero, but this range can draw ${formatDuration(range.start * DURATION_UNIT_MILLISECONDS[unit])}. Start the range at 1 or more.`,
       instruction.duration.span,
     );
   // A range that allows a zero-length round is rejected before its first round is drawn.
@@ -3450,7 +3481,9 @@ function startTimer(
       rootScopeId: contextRootId(snapshot),
       captures,
       range:
-        range === null ? null : { start: range.start, end: range.end, inclusive: range.inclusive },
+        range === null || unit === null
+          ? null
+          : { start: range.start, end: range.end, inclusive: range.inclusive, unit },
       repeatDurationMs: instruction.repeat && range === null ? roundDurationMs : null,
       roundDurationMs,
       deadlineMs,
@@ -3604,7 +3637,7 @@ function writeStorage(
   );
 }
 
-/** A media position or duration: a duration value or a number of seconds, finite and not negative. */
+/** A media position or duration: a duration value, finite and not negative. */
 function mediaMilliseconds(
   value: SerializableRuntimeValue,
   subject: string,
@@ -3612,13 +3645,13 @@ function mediaMilliseconds(
 ): number {
   const milliseconds = isAnyDuration(value)
     ? exactDurationMilliseconds(value, subject, span)
-    : typeof value === "number"
-      ? value * 1_000
-      : Number.NaN;
+    : Number.NaN;
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     throw fault(
       "TSR050",
-      `Media ${subject} must be a duration or a number of seconds of at least 0, but this is ${describeShownValue(value)}.`,
+      typeof value === "number"
+        ? `A media position is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
+        : `Media ${subject} must be a duration of at least ${formatDuration(0)}, but this is ${describeShownValue(value)}.`,
       span,
     );
   }
@@ -3710,7 +3743,7 @@ function startMedia(
   if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
     throw fault(
       "TSR050",
-      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? "0 s" : describeShownValue(startAt)}.`,
+      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? formatDuration(0) : describeShownValue(startAt)}.`,
       instruction.endAt.span,
     );
   }

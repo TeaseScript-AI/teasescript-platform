@@ -57,7 +57,7 @@ import type {
   ShowImageStatement,
   CalendarDurationUnit,
   DurationUnit,
-  TrailingDurationUnit,
+  UnitExpression,
   ListLiteral,
   NumberLiteral,
   RepeatStatement,
@@ -87,7 +87,7 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { isTagListOption, tagPredicateSteps } from "./tag-query.js";
-import { calendarDurationUnit, elapsedDurationUnit } from "./duration.js";
+import { calendarDurationUnit, elapsedDurationUnit, UNIT_OPERANDS } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
 
@@ -957,6 +957,9 @@ class Parser {
 
     const value = yield* parseChild(speculative.#parseOr());
     if (value === null) return false;
+    // A unit after the word itself, as in `say bubble() s` or `say skippable ms`, is the earlier modifier followed by
+    // text whose name is a unit word.
+    if (unitAfterWord(value, this.#peek())) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
       if (speculative.#canParseInstantPacingAlias(statement)) {
@@ -1118,7 +1121,7 @@ class Parser {
     ) {
       this.#reportToken(
         parserDiagnosticCode.expectedExpression,
-        "Wait uses command syntax. Write 'wait 1' rather than 'wait(1)'.",
+        "Wait uses command syntax. Write 'wait 1 s'.",
         this.#peek(),
       );
       this.#synchronizeStatement();
@@ -1133,10 +1136,10 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const unit = this.#parseTrailingDurationUnit("wait");
+    const { duration: delay, unit } = this.#timerDuration(duration, "wait");
     return Object.freeze({
       kind: "waitStatement",
-      duration,
+      duration: delay,
       unit,
       span: spanFrom(keyword.span, duration.span),
     });
@@ -1169,36 +1172,17 @@ class Parser {
         break;
       }
     }
-    let duration = this.#parseExpression();
-    if (duration === null) {
+    const written = this.#parseExpression();
+    if (written === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
-        "Expected a timer duration such as '10', '30 s', or '5..10' after 'timer'.",
+        "Expected a timer duration such as '30 s' or '(5..10) s' after 'timer'.",
       );
       this.#synchronizeStatement();
       return null;
     }
-    let end = duration.span;
-    let unit: TrailingDurationUnit | null;
-    // In `timer 5..10 s` the unit belongs to the whole range, not only to its end bound.
-    if (duration.kind === "rangeExpression" && duration.end.kind === "durationLiteral") {
-      unit = duration.end.calendar ? null : (trailingDurationUnit(duration.end.unit) ?? null);
-      if (unit === null)
-        this.#reportSpan(
-          parserDiagnosticCode.unsupportedDurationUnit,
-          "A timer range needs the unit 'ms', 's', 'min', or 'h'.",
-          duration.end.unitSpan,
-        );
-      end = duration.end.span;
-      duration = Object.freeze({
-        ...duration,
-        end: duration.end.amount,
-        span: spanFrom(duration.start.span, duration.end.amount.span),
-      });
-    } else {
-      unit = this.#parseTrailingDurationUnit("timer");
-      if (unit !== null) end = this.#previous().span;
-    }
+    let end = written.span;
+    const { duration, unit } = this.#timerDuration(written, "timer");
     let label: Expression | null = null;
     if (this.#match(TokenKind.StringStart)) {
       label = yield* parseChild(this.#parseStringLiteral(this.#previous()));
@@ -1220,6 +1204,52 @@ class Parser {
       commandSpan: copySpan(command.span),
       span: spanFrom(command.span, handler?.span ?? end),
     };
+  }
+
+  /**
+   * A wait or timer keeps the exact unit after its duration apart, because only they take a range with a unit:
+   * `timer (5..10) min` draws whole minutes. A calendar unit stays with its operand, which a wait or timer refuses like
+   * any calendar duration. A unit after the end of an unparenthesized range, as in `timer 5..10 s`, belongs to the end
+   * alone, so the range must be in parentheses.
+   */
+  #timerDuration(
+    written: Expression,
+    command: "wait" | "timer" | "duration:",
+  ): { duration: Expression; unit: DurationUnit | null } {
+    if (written.kind === "unitExpression" && !written.calendar)
+      return { duration: written.operand, unit: written.unit };
+    if (
+      written.kind !== "rangeExpression" ||
+      (written.end.kind !== "durationLiteral" && written.end.kind !== "unitExpression")
+    )
+      return { duration: written, unit: null };
+    const end = written.end.kind === "durationLiteral" ? written.end.amount : written.end.operand;
+    const range = `${this.#textOf(written.start.span, end.span)}`;
+    const unit = this.#textOf(written.end.unitSpan, written.end.unitSpan);
+    this.#reportSpan(
+      parserDiagnosticCode.unsupportedDurationUnit,
+      `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${command} (${range}) ${unit}'.`,
+      written.span,
+    );
+    return {
+      duration: Object.freeze({ ...written, end, span: spanFrom(written.start.span, end.span) }),
+      unit: written.end.calendar ? null : written.end.unit,
+    };
+  }
+
+  /** The source text from the start of `first` to the end of `last`, from tokens already read. */
+  #textOf(first: SourceSpan, last: SourceSpan): string {
+    // Tokens are in source order, so the first one is found by halving, whatever was read since.
+    let low = 0;
+    let high = this.#current;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (this.tokens[middle]!.span.start.offset < first.start.offset) low = middle + 1;
+      else high = middle;
+    }
+    let end = low;
+    while (end < this.#current && this.tokens[end]!.span.end.offset <= last.end.offset) end += 1;
+    return this.#sourceText(low, end);
   }
 
   *#parseNamedTimer(command: Token): ParseTask<TimerParts | null> {
@@ -1293,12 +1323,13 @@ class Parser {
     }
     const handler = yield* parseChild(this.#parseTimerHandler());
     if (handler === false || duration === null || !valid) return null;
+    const parts = this.#timerDuration(duration, "duration:");
     return {
       form: "named",
       async: flags.async,
       display,
-      duration,
-      unit: null,
+      duration: parts.duration,
+      unit: parts.unit,
       label,
       repeat: flags.repeat,
       persist: flags.persist,
@@ -2291,25 +2322,6 @@ class Parser {
       keywordSpan: copySpan(keyword.span),
       span: spanFrom(keyword.span, body.span),
     });
-  }
-
-  /** A trailing `ms`, `s`, `min`, or `h` after a `wait` or short `timer` duration expression. */
-  #parseTrailingDurationUnit(command: "wait" | "timer"): TrailingDurationUnit | null {
-    if (!this.#check(TokenKind.Identifier)) return null;
-    const token = this.#advance();
-    const unit = trailingDurationUnit(token.lexeme);
-    if (unit !== undefined) return unit;
-    const other = elapsedDurationUnit(token.lexeme) ?? calendarDurationUnit(token.lexeme);
-    this.#reportToken(
-      other !== undefined
-        ? parserDiagnosticCode.unsupportedDurationUnit
-        : parserDiagnosticCode.expectedStatementEnd,
-      other !== undefined
-        ? `A ${command} needs the unit 'ms', 's', 'min', or 'h' here.`
-        : `Expected ${command} unit 'ms', 's', 'min', or 'h' (or their long forms).`,
-      token,
-    );
-    return null;
   }
 
   #parseLetStatement(): LetStatement | null {
@@ -3501,7 +3513,72 @@ class Parser {
       }
       break;
     }
-    return expression;
+    return expression === null ? null : this.#parseUnitSuffix(expression);
+  }
+
+  /**
+   * A unit after a name, a member such as `p.delay` or `list[i]`, a call, or parentheses gives the number before it
+   * that unit, as a number literal takes one: `count s`, `(count / 2) min`, `randomInteger(5..=10) s` (ADR 0026 §8).
+   * It binds tighter than `*` and `+`, so `a + b s` is `a + (b s)`. One duration has one unit: a second unit or a
+   * second amount right after it is an error, and parts are added with `+`.
+   */
+  #parseUnitSuffix(expression: Expression): Expression {
+    let result = expression;
+    const token = this.#peek();
+    if (UNIT_OPERANDS.has(expression.kind) && token.kind === TokenKind.Identifier) {
+      const withUnit = (
+        unit:
+          | { readonly calendar: false; readonly unit: DurationUnit }
+          | { readonly calendar: true; readonly unit: CalendarDurationUnit },
+        last: Token,
+      ): UnitExpression =>
+        Object.freeze({
+          kind: "unitExpression",
+          operand: expression,
+          ...unit,
+          unitSpan: spanFrom(token.span, last.span),
+          span: spanFrom(expression.span, last.span),
+        });
+      const exact = elapsedDurationUnit(token.lexeme);
+      const after = this.#peek(1);
+      const calendar =
+        token.lexeme === "calendar" && after.kind === TokenKind.Identifier
+          ? calendarDurationUnit(after.lexeme)
+          : undefined;
+      // A month or a year without `calendar` stays an ordinary name here, as before units followed names.
+      if (exact !== undefined) {
+        this.#advance();
+        result = withUnit({ calendar: false, unit: exact }, token);
+      } else if (calendar !== undefined) {
+        this.#advance();
+        result = withUnit({ calendar: true, unit: calendar }, this.#advance());
+      }
+    }
+    if (result.kind !== "durationLiteral" && result.kind !== "unitExpression") return result;
+    // `5 s ms` or `1 h 30 min`: the parts of a duration are added with `+`.
+    const next = this.#peek();
+    const unitWord = (candidate: Token): boolean =>
+      candidate.kind === TokenKind.Identifier &&
+      (candidate.lexeme === "calendar" ||
+        elapsedDurationUnit(candidate.lexeme) !== undefined ||
+        calendarDurationUnit(candidate.lexeme) !== undefined);
+    if (unitWord(next)) {
+      this.#advance();
+      this.#reportToken(
+        parserDiagnosticCode.unsupportedDurationUnit,
+        `This duration already has a unit. Remove the '${next.lexeme}' after it.`,
+        next,
+      );
+    } else if (next.kind === TokenKind.NumberLiteral && unitWord(this.#peek(1))) {
+      this.#advance();
+      this.#advance();
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedDurationUnit,
+        "Add the parts of a duration with '+', as in '1 h + 30 min'.",
+        spanFrom(next.span, this.#previous().span),
+      );
+    }
+    return result;
   }
 
   *#finishCall(callee: Expression, left: Token): ParseTask<CallExpression> {
@@ -4830,12 +4907,6 @@ const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
   TokenKind.RightBrace,
 ]);
 
-/** The unit of a whole `wait` or short `timer` expression, or `undefined`. */
-function trailingDurationUnit(name: string): TrailingDurationUnit | undefined {
-  const unit = elapsedDurationUnit(name);
-  return unit === "d" || unit === "w" ? undefined : unit;
-}
-
 const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
   (
     [
@@ -5074,4 +5145,28 @@ function bracketContexts(tokens: readonly Token[]): boolean[] {
     else if (CLOSERS[token.kind] !== undefined && innermost === CLOSERS[token.kind]) openers.pop();
   }
   return contexts;
+}
+
+/**
+ * Whether `value` starts with the say mode or skip word `word` itself and a unit after it: the bare word, or a mode with
+ * its named options, as in `bubble(color: "red") s`. A member, an element, or a call with values stays a value.
+ */
+function unitAfterWord(value: Expression, word: Token): boolean {
+  let node = value;
+  for (;;) {
+    if (node.kind === "unitExpression") {
+      const operand = node.operand;
+      if (operand.span.start.offset !== word.span.start.offset) return false;
+      return (
+        operand.kind === "identifier" ||
+        ((word.lexeme === "bubble" || word.lexeme === "prose") &&
+          operand.kind === "callExpression" &&
+          operand.callee.kind === "identifier" &&
+          operand.arguments.every((argument) => argument.kind === "namedArgument"))
+      );
+    }
+    if (node.kind === "binaryExpression") node = node.left;
+    else if (node.kind === "rangeExpression") node = node.start;
+    else return false;
+  }
 }

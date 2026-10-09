@@ -230,6 +230,17 @@ subsystems may still have different maturity levels.
     devices.
   - **Reference:** Issue #421 and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
+- [ ] **Consider: Player polish and fidelity**
+  - **Outcome:** Decide whether to make these Player refinements.
+    - A permanent button click adds no line to the transcript.
+    - Choice buttons and askForm toggles show their hover fill at once, while other Player buttons fade it in.
+    - The shared dialog close icon is 16 px, below the 44 px touch target.
+
+- [ ] **Consider: check literal media paths at compile time, as a warning**
+  - **Outcome:** Decide whether to check literal media paths against the package files at compile time and warn about
+    a missing file.
+    - A misspelled literal image path shows up only at runtime, as a missing-media warning.
+
 ## Release Candidate
 
 **Goal:** Validate a specific candidate containing the scope selected for the first stable release.
@@ -259,3 +270,23 @@ implemented.
     topology; do not preselect one-worker-per-file, logical-core counts, or a worker pool.
   - **Trigger:** Move this earlier if realistic Beta workloads show a material UI-responsiveness, compilation-latency, or
     runtime-throughput problem that workers could plausibly address.
+
+- [ ] **Consider: glob extensions `**` and `{a,b}`**
+  - **Outcome:** Decide whether to add `**` and `{a,b}` to script globs.
+    - In a script glob, `*` matches within one folder or file name only, and there is no `{a,b}` alternative.
+  - **Trigger:** Only when authors ask for them.
+
+- [ ] **Consider: licenses for publicly hosted converted teases**
+  - **Outcome:** Decide whether and how converted teases may be hosted publicly under their licenses.
+    - Many converted packages are BY-NC-ND or have no license at all.
+  - **Trigger:** Before converted teases are hosted publicly.
+
+- [ ] **Consider: extended reviews with tag feedback**
+  - **Outcome:** Decide whether to extend player reviews with feedback on the author's tags.
+    - Besides stars and text, a player could approve or reject tags and suggest missing ones, such as untagged toys.
+  - **Trigger:** After the website exists.
+
+- [ ] **Consider: translate displayed values and units**
+  - **Outcome:** Decide whether to show displayed values and units in the player's language.
+    - Durations and other displayed values are always English, such as "2 days 6 hours".
+  - **Trigger:** After a translation system exists.

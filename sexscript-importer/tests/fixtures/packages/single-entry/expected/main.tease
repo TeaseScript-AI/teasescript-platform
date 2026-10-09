@@ -1,4 +1,1 @@
-global function sexscriptLegacyValue(value) {
-  return value
-}
 goto "start.tease"

@@ -49,10 +49,12 @@ say "Three."
 say "Four."
 say "Five."
 
-// A computed wait, and a run of waits, stay as they are.
+// A computed wait, and a run of waits, stay as they are; a sum takes parentheses before its unit.
 let n = askInteger "How long?", prefill: 3
 say "Waiting ${n} seconds.", instant
 wait n s
+say "Hold it.", instant
+wait (15 + randomInteger(0..35)) s
 say "Pause", instant
 wait 1 s
 wait 2 s

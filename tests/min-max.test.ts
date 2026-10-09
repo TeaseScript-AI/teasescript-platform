@@ -33,7 +33,7 @@ test("min and max pick from two or more numbers or durations", () => {
         "exit",
       ].join("\n"),
     ),
-    ["20 10 2.5 -1", "1 min 30 s 45 s 0"],
+    ["20 10 2.5 -1", "1 minute 30 seconds 45 seconds 0"],
   );
 });
 

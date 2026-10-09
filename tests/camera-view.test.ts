@@ -125,11 +125,11 @@ test("camera view state survives a JSON checkpoint at every boundary", () => {
     [
       "let view = showCamera stage",
       'say "On the Stage.", instant',
-      "wait 1",
+      "wait 1 s",
       'view.placement = "window"',
       'say "In the window."',
       "hideCamera",
-      "wait 1",
+      "wait 1 s",
       "exit",
     ].join("\n"),
   );
@@ -165,7 +165,7 @@ test("the compiler and runtime reject what a camera view cannot do", () => {
 });
 
 test("restore rejects malformed camera view state and plans", () => {
-  const plan = compileValidPlan("let view = showCamera stage\nwait 5\nexit");
+  const plan = compileValidPlan("let view = showCamera stage\nwait 5 s\nexit");
   const json = serializeCheckpoint(
     createCheckpoint(plan, run(plan, createFreshRuntimeSnapshot(plan)).snapshot),
   );
@@ -203,8 +203,8 @@ test("a camera command inside a loop lets a waiting block change what the loop n
   for (const command of ["showCamera", "hideCamera"]) {
     const source = [
       "let v: integer | string = 1",
-      'timer async hidden 1 {\n    v = "text"\n}',
-      'say "Waiting.", 2',
+      'timer async hidden 1 s {\n    v = "text"\n}',
+      'say "Waiting.", 2 s',
       "if v is integer {",
       "    while v < 3 {",
       `        ${command}`,

@@ -1007,15 +1007,56 @@ export function lowerPackage(
       main: legacyMain === null ? 0 : legacyMain + 1,
     },
   );
-  const main = nullable[0]!;
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
-  const programs = withoutRepeatedChainText(nullable.slice(1), paths);
+  const chained = withoutRepeatedChainText(nullable.slice(1), paths);
+  const [main, ...programs] =
+    legacyMain === null
+      ? withoutUnusedHelpers([nullable[0]!, ...chained])
+      : [nullable[0]!, ...withoutUnusedHelpers(chained)];
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
-    main: legacyMain !== null ? { file: legacyMain } : { menu: main },
+    main: legacyMain !== null ? { file: legacyMain } : { menu: main! },
     paths,
   };
+}
+
+/**
+ * The package without the generated helpers (helpers.ts) that nothing calls or reads once every pass ran, such as a
+ * text helper whose only text a later pass wrote plainly, or a helper only such a helper used. A global helper may
+ * serve any file, another only its own.
+ */
+function withoutUnusedHelpers(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const isHelper = (statement: IrStatement): boolean =>
+    (statement.kind === "function" || statement.kind === "let") &&
+    helperDefinitionOrder(statement) >= 0;
+  let current = [...programs];
+  for (;;) {
+    const unused = new Set<IrStatement>();
+    for (const program of current)
+      for (const statement of program.statements) {
+        if (!isHelper(statement) || !("name" in statement)) continue;
+        const scope = "global" in statement && statement.global === true ? current : [program];
+        const used = scope.some((other) =>
+          other.statements.some((item) => item !== statement && namesValue(item, statement.name)),
+        );
+        if (!used) unused.add(statement);
+      }
+    if (unused.size === 0) return current;
+    current = current.map((program) => ({
+      ...program,
+      statements: program.statements.filter((statement) => !unused.has(statement)),
+    }));
+  }
+}
+
+/** Whether `value` calls or reads `name`, or keeps it as an action. */
+function namesValue(value: unknown, name: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => namesValue(item, name));
+  if (!isRecord(value)) return false;
+  if ((value.kind === "call" || value.kind === "variable") && value.name === name) return true;
+  if (value.kind === "literal" && value.action === true && value.value === name) return true;
+  return Object.values(value).some((child) => namesValue(child, name));
 }
 
 /**

@@ -3968,7 +3968,26 @@ function lowerConditionalAssignment(
     const rightNode = asNode(conditional.right);
     const name = variableName(target);
     if (leftNode === null || rightNode === null || name === null) return [];
-    const first = lowerCondition(leftNode, context);
+    // A left side that asks inside its own short circuit, as in `a && b && c`, stores its truth the same way first.
+    const nested = hasGuardedInput(leftNode)
+      ? lowerConditionalAssignment(declaration, target, leftNode, span, context)
+      : null;
+    const first = nested === null ? lowerCondition(leftNode, context) : null;
+    const opening: IrStatement[] | null =
+      nested ??
+      (first === null
+        ? null
+        : [
+            declaration
+              ? { kind: "let", name, value: first, span }
+              : {
+                  kind: "assign",
+                  target: { kind: "variable", name },
+                  operator: "=",
+                  value: first,
+                  span,
+                },
+          ]);
     const facts = conditionFacts(leftNode, context, conditional.operator === "||");
     const variable: IrExpression = { kind: "variable", name };
     // An input on the right side asks inside the branch; a conditional expression there gets its own statements.
@@ -3992,14 +4011,12 @@ function lowerConditionalAssignment(
       const [prelude, lowered, postlude] = withSurroundings(context, truth);
       return [...prelude, ...lowered, ...postlude];
     });
-    if (first === null || then === null) {
+    if (opening === null || then === null) {
       const legacySource = span === null ? [] : legacySourceLines(context, span);
       return [{ kind: "unsupported", legacySource, span }];
     }
     return [
-      declaration
-        ? { kind: "let", name, value: first, span }
-        : { kind: "assign", target: variable, operator: "=", value: first, span },
+      ...opening,
       {
         kind: "if",
         condition: conditional.operator === "&&" ? variable : negate(variable),
@@ -9619,11 +9636,26 @@ function collectSwitchPath(
     if (body === null) return null;
     const terminal = body.at(-1);
     result.push(...withoutTerminalBreak(body));
-    if ((terminal !== undefined && isSwitchBreak(terminal)) || terminal?.kind === "return")
-      return result;
+    if (leavesCase(terminal)) return result;
   }
   result.push(...withoutTerminalBreak(defaultSource));
   return result;
+}
+
+/**
+ * Whether a case's last statement never lets it fall through to the next case: a return, break, continue, or throw,
+ * also at the end of both branches of an if, as in Domme3's menu, whose cases go to the popup or their script.
+ */
+function leavesCase(statement: AstNode | undefined): boolean {
+  if (statement === undefined) return false;
+  if (["return", "break", "continue", "throw"].includes(statement.kind)) return true;
+  if (statement.kind === "block") return leavesCase(nodeArray(statement.statements).at(-1));
+  return (
+    statement.kind === "if" &&
+    branchStatements(statement.else).length > 0 &&
+    leavesCase(branchStatements(statement.then).at(-1)) &&
+    leavesCase(branchStatements(statement.else).at(-1))
+  );
 }
 
 function switchBodyStatements(node: AstNode | null): AstNode[] | null {
@@ -14410,8 +14442,9 @@ function isCurrentDateConstructor(node: AstNode): boolean {
 /**
  * Java date pattern formatting of the current moment (#532): the fixed machine format `yyyy-MM-dd` is a date's
  * `toISO()`; a display pattern of a whole date, time, or both becomes `formatDate()`, `formatTime()`, or
- * `formatDateTime()`, which show the player's local form instead of the legacy pattern, with a note. Other patterns
- * (weekday names, partial fields, time zones) and dates built from Unix time are reported.
+ * `formatDateTime()`, which show the player's local form instead of the legacy pattern, with a note; a pattern of number
+ * fields that is no whole date or time is written from the fields (datePatternFields). Other patterns (weekday and
+ * month names, time zones) and dates built from Unix time are reported.
  */
 function dateFormat(
   node: AstNode,
@@ -14459,6 +14492,8 @@ function dateFormat(
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
+  const fields = pattern === null || kind !== null ? null : datePatternFields(pattern);
+  if (fields !== null) return fields;
   if (kind === null) {
     return unsupportedExpression(
       context,
@@ -14559,6 +14594,57 @@ function datePatternKind(pattern: string): "isoDate" | "date" | "time" | "dateTi
   if (date && !/[HhkKmsSa]/u.test(fields)) return "date";
   if (time && !/[yMd]/u.test(fields)) return "time";
   return null;
+}
+
+/** The current date and time's fields that Java's pattern letters write as numbers. */
+const NUMBER_PATTERN_FIELDS = new Map([
+  ["y", "year"],
+  ["M", "month"],
+  ["d", "day"],
+  ["H", "hour"],
+  ["m", "minute"],
+  ["s", "second"],
+]);
+
+/**
+ * A Java pattern of number fields that is no whole date or time, such as jewell's `dd/MM` or `HH`, as the current
+ * date and time's fields written the same way, padded to the letters' count: exact, since Java writes numbers the
+ * same in every locale. Null for a pattern with another letter, such as a month or weekday name.
+ */
+function datePatternFields(pattern: string): IrExpression | null {
+  const now: IrExpression = { kind: "call", name: "getDateTime", positional: [], named: {} };
+  const parts: Array<{ text: string } | { value: IrExpression }> = [];
+  for (const [token, letter] of pattern.matchAll(/'(?:[^']|'')*'|([A-Za-z])\1*|[^A-Za-z']+/gu)) {
+    if (letter === undefined) {
+      parts.push({
+        text: token.startsWith("'") ? token.slice(1, -1).replaceAll("''", "'") || "'" : token,
+      });
+      continue;
+    }
+    const field = NUMBER_PATTERN_FIELDS.get(letter);
+    if (field === undefined || (letter === "M" && token.length > 2)) return null;
+    const value: IrExpression = { kind: "property", target: now, name: field };
+    // `yy` writes the year's last two digits.
+    const shown: IrExpression =
+      letter === "y" && token.length === 2
+        ? { kind: "binary", operator: "%", left: value, right: { kind: "literal", value: 100 } }
+        : value;
+    parts.push({
+      value:
+        token.length === 1
+          ? shown
+          : {
+              kind: "methodCall",
+              target: { kind: "call", name: "toString", positional: [shown], named: {} },
+              name: "padStart",
+              arguments: [
+                { kind: "literal", value: token.length },
+                { kind: "literal", value: "0" },
+              ],
+            },
+    });
+  }
+  return { kind: "template", parts };
 }
 
 /** `Calendar.getInstance().get(Calendar.FIELD)` reads one field of the current local date and time. */

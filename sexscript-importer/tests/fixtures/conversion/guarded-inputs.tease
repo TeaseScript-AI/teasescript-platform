@@ -19,5 +19,15 @@ if conditional {
 if conditional {
   say "Hello, ${name.substring(0, 3)}"
 }
+let conditional2 = askBoolean("Do you remember the contract?") or true
+if conditional2 {
+  conditional2 = askBoolean "Did you read it?"
+}
+if conditional2 {
+  conditional2 = askBoolean "Will you take the consequences?"
+}
+if conditional2 {
+  say "Then we begin."
+}
 say "Hello, ${name}"
 exit

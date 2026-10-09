@@ -403,7 +403,7 @@ test("restore accepts a fallback that a computed fallback resolved to, and check
       "end",
     ].join("\n"),
     {
-      "rooms/hall.tease": "wait 1\nend\nlabel start\nexit",
+      "rooms/hall.tease": "wait 1 s\nend\nlabel start\nexit",
       "helpers.tease": 'function greet { say "hi" }',
     },
   );
@@ -466,7 +466,7 @@ test("restore accepts a fallback that a computed fallback resolved to, and check
   // Without a computed fallback, the fallback is still exactly the destination of a fallback statement.
   const literal = compiled(
     project('fallback "rooms/hall.tease" start\ncall "rooms/hall.tease"\nend', {
-      "rooms/hall.tease": "wait 1\nend\nlabel start\nexit",
+      "rooms/hall.tease": "wait 1 s\nend\nlabel start\nexit",
     }),
   );
   const literalWaiting = run(literal, createImmediatePacingRuntimeSnapshot(literal)).snapshot;
@@ -485,7 +485,7 @@ test("restore checks a deeply nested computed fallback target without walking it
   const depth = 6_000;
   const path = `${"toString(".repeat(depth)}"room.tease"${")".repeat(depth)}`;
   const plan = compiled([
-    { path: "main.tease", source: `fallback script(${path})\nwait 1\nend` },
+    { path: "main.tease", source: `fallback script(${path})\nwait 1 s\nend` },
     { path: "room.tease", source: 'say "room"\nexit' },
   ]);
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;

@@ -267,7 +267,7 @@ test("restore rejects capture tags or catalog entries no engine produces", () =>
   );
 
   // A session that has not started has taken no photos, also in a plan without startup declarations.
-  const fresh = compileValidPlan('let found = findImages(where: "selfie")\nwait 1\nexit');
+  const fresh = compileValidPlan('let found = findImages(where: "selfie")\nwait 1 s\nexit');
   const saved = JSON.parse(
     serializeCheckpoint(createCheckpoint(fresh, createFreshRuntimeSnapshot(fresh))),
   );

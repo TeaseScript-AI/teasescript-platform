@@ -1,5 +1,5 @@
-say "Start.", 2
-say "Entering.", 2
+say "Start.", 2 s
+say "Entering.", 2 s
 wait 2 s
 say "Pick one.", instant
 let go = choose "Go"

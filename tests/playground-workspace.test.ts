@@ -64,7 +64,7 @@ test("workspace helper reports parser and semantic diagnostics", () => {
 });
 
 test("workspace helper stops blocking waits in waiting with action events", () => {
-  const result = executeWorkspaceSource("wait 1\nexit");
+  const result = executeWorkspaceSource("wait 1 s\nexit");
   assert.equal(result.status, "waiting");
   assert.deepEqual(
     result.events.map((event) => event.kind),
@@ -198,7 +198,7 @@ test("a control rendered for an earlier interaction cannot answer a later one", 
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
   // The long wait keeps the session running while the message's pacing gate is in the background.
-  const compiled = compileWorkspaceSource('say "paced"\nwait 2000\nexit');
+  const compiled = compileWorkspaceSource('say "paced"\nwait 2000 s\nexit');
   assert.ok(compiled.plan && compiled.snapshot);
   const running = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
   assert.ok(running.snapshot);
@@ -315,7 +315,7 @@ test("composer text for a choice remains engine-owned and rejects ambiguous visi
 
 test("workspace controls preserve engine pacing and completion rejection outcomes", () => {
   // Each long wait keeps the session running while the message's pacing gate is in the background.
-  const unskippable = compileWorkspaceSource('say unskippable "paced"\nwait 2000\nexit');
+  const unskippable = compileWorkspaceSource('say unskippable "paced"\nwait 2000 s\nexit');
   assert.ok(unskippable.plan && unskippable.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(unskippable.plan, unskippable.snapshot, "run");
   assert.ok(waiting.snapshot);
@@ -325,7 +325,7 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(rejectedSkip.events, []);
   assert.equal(JSON.stringify(rejectedSkip.snapshot), before);
 
-  const skippable = compileWorkspaceSource('say "paced"\nwait 2000\nexit');
+  const skippable = compileWorkspaceSource('say "paced"\nwait 2000 s\nexit');
   assert.ok(skippable.plan && skippable.snapshot);
   const running = executeValidatedWorkspaceSnapshot(skippable.plan, skippable.snapshot, "run");
   assert.ok(running.snapshot);

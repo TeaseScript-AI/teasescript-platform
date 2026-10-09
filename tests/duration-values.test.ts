@@ -45,9 +45,27 @@ test("duration literals accept short and long elapsed units and convert exactly"
       ].join("\n"),
     ),
     [
-      "500 ms 1 ms 30 s 1 s 2 s",
-      "10 min 1 min 3 min 2 h 1 h 4 h",
-      "1 min 30 s 1.5 s 1 h 2 min 5.25 s 0 s -1 min 30 s",
+      "500 milliseconds 1 millisecond 30 seconds 1 second 2 seconds",
+      "10 minutes 1 minute 3 minutes 2 hours 1 hour 4 hours",
+      "1 minute 30 seconds 1.5 seconds 1 hour 2 minutes 5.25 seconds 0 seconds -1 minute 30 seconds",
+    ],
+  );
+});
+
+test("interpolation writes duration unit words in full, singular only for exactly 1 or -1 (ADR 0026)", () => {
+  assert.deepEqual(
+    sayTexts(
+      [
+        'say "${2 days + 6 h} | ${2 weeks} | ${90 min} | ${500 ms}"',
+        'say "${1 day} | ${1 h} | ${1.5 s} | ${-(1 s)} | ${0.5 ms}"',
+        'say "${1 calendar day - 2 h} | ${0 calendar days} | ${1 calendar month + 16 calendar days} | ${-(1 calendar day)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      "2 days 6 hours | 14 days | 1 hour 30 minutes | 500 milliseconds",
+      "1 day | 1 hour | 1.5 seconds | -1 second | 0.5 milliseconds",
+      "1 calendar day -2 hours | 0 calendar days | 1 calendar month 16 calendar days | -1 calendar day",
     ],
   );
 });
@@ -64,25 +82,41 @@ test("duration arithmetic and cross-unit comparisons follow V30 section 35", () 
           "exit",
         ].join("\n"),
     ),
-    ["true true true false", "1 min 30 s -30 s 1 min 1 min 30 s 15 min", "2 5 s true false"],
+    [
+      "true true true false",
+      "1 minute 30 seconds -30 seconds 1 minute 1 minute 30 seconds 15 minutes",
+      "2 5 seconds true false",
+    ],
   );
 });
 
 test("mixing plain numbers with durations fails instead of guessing a unit", () => {
   const arithmetic = "Add or subtract two durations, or multiply or divide a duration by a number.";
   for (const [declaration, expression, message] of [
-    ["let n = 1", "1 s + n", `'+' cannot combine a duration (1 s) and a number (1). ${arithmetic}`],
-    ["let n = 1", "n - 1 s", `'-' cannot combine a number (1) and a duration (1 s). ${arithmetic}`],
-    ["let n = 2", "n / 1 s", `'/' cannot combine a number (2) and a duration (1 s). ${arithmetic}`],
+    [
+      "let n = 1",
+      "1 s + n",
+      `'+' cannot combine a duration (1 second) and a number (1). ${arithmetic}`,
+    ],
+    [
+      "let n = 1",
+      "n - 1 s",
+      `'-' cannot combine a number (1) and a duration (1 second). ${arithmetic}`,
+    ],
+    [
+      "let n = 2",
+      "n / 1 s",
+      `'/' cannot combine a number (2) and a duration (1 second). ${arithmetic}`,
+    ],
     [
       "let n = 2",
       "1 s < n",
-      "'<' cannot compare a duration (1 s) with a number (2). Use a duration on both sides.",
+      "'<' cannot compare a duration (1 second) with a number (2). Use a duration on both sides.",
     ],
     [
       "let d = 1 s",
       "d * d",
-      `'*' cannot combine a duration (1 s) and a duration (1 s). ${arithmetic}`,
+      `'*' cannot combine a duration (1 second) and a duration (1 second). ${arithmetic}`,
     ],
   ] as const) {
     const source = `${declaration}\nsay "\${${expression}}"\nexit`;
@@ -111,7 +145,7 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
   }
   assert.equal(runValidSource("wait (1 + 2) ms\nexit").snapshot.foregroundAction?.kind, "delay");
   assert.deepEqual(sayTexts('say "${2 * 1 s} ${1 s * 2} ${1 s / 2} ${-(1 s) * 2}"\nexit'), [
-    "2 s 2 s 500 ms -2 s",
+    "2 seconds 2 seconds 500 milliseconds -2 seconds",
   ]);
 });
 
@@ -120,7 +154,7 @@ test("wait never measures a calendar duration; doubled units and overflow are re
   // compile error located in it, and one it cannot see fails when the wait starts.
   for (const [source, duration] of [
     ["wait 3 calendar days\nexit", "3 calendar days"],
-    ["let n = 3\nwait n calendar days", "calendar"],
+    ["let n = 3\nwait n calendar days", "n calendar days"],
     ["let n = 3\nwait n months", "months"],
     ["wait 2 calendar weeks\nexit", "2 calendar weeks"],
     ["wait 1 h + 1 calendar mo\nexit", "1 h + 1 calendar mo"],
@@ -139,7 +173,7 @@ test("wait never measures a calendar duration; doubled units and overflow are re
     );
   }
   assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 calendar mo)\nwait a\nexit`), "TSR065");
-  assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
+  assert.deepEqual(diagnostics("wait 10 s ms"), ["TSP033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });
 
@@ -147,7 +181,7 @@ test("a unit only binds to a number on the same line", () => {
   const plan = compileValidPlan("let s = 1\nlet a = 2\ns = a\nexit");
   assert.equal(validateInstructionPlan(plan).valid, true);
   // `min` is a protected built-in (V30 §13), so the unit name used as a variable is `ms`.
-  assert.deepEqual(sayTexts('let ms = 3\nsay "${ms} ${2 ms}"\nexit'), ["3 2 ms"]);
+  assert.deepEqual(sayTexts('let ms = 3\nsay "${ms} ${2 ms}"\nexit'), ["3 2 milliseconds"]);
 });
 
 test("wait accepts duration values and keeps its trailing unit form", () => {
@@ -156,7 +190,7 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
     ["wait 2 min\nexit", 120_000],
     ["let d = 1.5 s\nwait d\nexit", 1_500],
     ["let n = 3\nwait n ms\nexit", 3],
-    ["wait 2\nexit", 2_000],
+    ["wait 2 s\nexit", 2_000],
     // A day is exactly 24 hours (ADR 0026).
     ["wait 1 day\nexit", 86_400_000],
   ] as const) {
@@ -170,13 +204,14 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
       source,
     );
   }
-  assert.equal(runtimeFailure("wait -(1 s)\nexit"), "TSR050");
+  assert.deepEqual(diagnostics("wait -(1 s)\nexit"), ["TSV011"]);
+  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(-1 s)\nwait d\nexit`), "TSR050");
   assert.deepEqual(diagnostics("let d = 1 s\nwait d ms\nexit"), ["TSV043"]);
   assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR050");
 });
 
 test("duration values persist through checkpoint JSON and reject malformed data", () => {
-  const plan = compileValidPlan('let d = 90 s\nwait 1\nsay "${d}"\nexit');
+  const plan = compileValidPlan('let d = 90 s\nwait 1 s\nsay "${d}"\nexit');
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
@@ -185,7 +220,7 @@ test("duration values persist through checkpoint JSON and reject malformed data"
   assert.equal(resumed.snapshot.status, "halted");
   assert.deepEqual(
     resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["1 min 30 s"],
+    ["1 minute 30 seconds"],
   );
   assert.equal(
     validateSerializableValue({ kind: "duration", milliseconds: Number.NaN }) === null,
@@ -221,7 +256,7 @@ test("+= and -= apply to variables, properties, and indexes with one target eval
         "exit",
       ].join("\n"),
     ),
-    ["2.5 11 7 1 45 s"],
+    ["2.5 11 7 1 45 seconds"],
   );
 });
 

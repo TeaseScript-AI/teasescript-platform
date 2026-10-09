@@ -129,9 +129,12 @@ other consumers of an exact duration take a `duration` and reject a `calendarDur
 
 ### 6. Display
 
-A `duration` displays in days, hours, minutes, and seconds, without weeks: `2 days + 6 h` shows `2 d 6 h` and `2 weeks`
-shows `14 d`. A `calendarDuration` is normalized, weeks into days and 12 months into a year, and every calendar part is
-marked: `1 calendar month + 16 calendar days` shows `1 calendar month 16 calendar days`.
+Displayed unit words are written in full, singular only for an amount of exactly 1 or -1. A `duration` displays in
+days, hours, minutes, and seconds, without weeks: `2 days + 6 h` shows `2 days 6 hours`, `2 weeks` shows `14 days`,
+`90 min` shows `1 hour 30 minutes`, and `1.5 s` shows `1.5 seconds`. Below a second it displays in milliseconds:
+`500 ms` shows `500 milliseconds`. A `calendarDuration` is normalized, weeks into days and 12 months into a year, and
+every calendar part is marked: `1 calendar month + 16 calendar days` shows `1 calendar month 16 calendar days`,
+`1 calendar day - 2 h` shows `1 calendar day -2 hours`, and a zero one shows `0 calendar days`.
 
 ### 7. Stored values
 
@@ -140,6 +143,50 @@ calendar months or days, fails validation when it is read, and `load` returns it
 checkpoints follow the existing format-revision rule: an older revision is refused, and a session kept in an older
 format shows Start.
 
+### 8. Explicit units for time quantities
+
+Every time quantity names its unit, and a number never counts as seconds. `wait 5`, `timer 10`, `timeout: 30`,
+`say "x", 3`, and `startAt: 30` are compile errors that name the fix, such as `wait 5 s`. A number that reaches a time
+at runtime is a runtime error. Counts and switches stay counts and switches, as in `repeat: 3 times`, and `instant`
+stays a pacing mode.
+
+A unit follows a numeric primary: a number literal, a name, a member such as `p.delay` or `list[i]`, a call, or
+parentheses. It binds tighter than `*` and `+`, so `a + b days` is `a + (b days)`. `calendar` and its unit follow the
+same rule.
+
+```tease
+let limit = count s
+let half = (count / 2) min
+let pause = randomInteger(5..=10) s
+let alsoValid = count * 1 h
+```
+
+The value before a unit must be a number. A known other value is a compile error, and any other value is a runtime
+error. Repeated units and adjacent parts are errors: write `1 h + 30 min`, not `1 h 30 min`. `wait` and `timer` have
+no unit rule of their own, so `wait 15 + randomInteger(0..35) s` adds a number and a duration. That is a compile error
+that suggests `wait (15 + randomInteger(0..35)) s`.
+
+A random length for a `wait` or a timer is a range with an exact unit after it, as `wait` is a hidden blocking timer.
+The range is drawn in whole units of that unit, once per wait or round, from the session RNG, so `wait (1..3) min` waits
+1 or 2 minutes like `wait randomInteger(1..3) min`. A calendar unit after a range is refused like any calendar duration,
+because a calendar day or month has no fixed length. A range is not a numeric primary, so a written range takes
+parentheses, `wait (1..3) s`, `timer (1..=4) h`, and `timer(duration: (5..=10) s, ...)`, and a range in a variable takes
+the unit after its name, `timer(duration: r min, ...)`. In `timer 5..10 s` the unit belongs to `10` alone, which is a
+compile error that suggests the parentheses. The unit belongs to the duration itself: this is the owner's choice over a
+separate `unit: "seconds"` parameter.
+
+Each consumer takes an exact duration D:
+
+| Consumer | Accepted D |
+| --- | --- |
+| `wait`, a one-shot timer | D ≥ 0, and zero continues at once |
+| a repeating timer's round, `repeatDuration` | D > 0 |
+| `say` pacing | D ≥ 0, and zero is immediate like `instant` |
+| a `showButton` or `askForm` timeout | D > 0 |
+| a media position or cue offset | D ≥ 0 |
+| a media repeat budget | D > 0 |
+| an assignment to a timer's `remaining` | any D, and zero or less ends the round at once |
+
 ## Not decided
 
 These parts of the #512 time proposal remain open:
@@ -147,7 +194,6 @@ These parts of the #512 time proposal remain open:
 - anchored conversion and explicit time zones, with options for month ends and daylight-saving gaps and overlaps (`zone:`,
   `disambiguation:`, `overflow:`, applying a `calendarDuration` to an `absoluteDateTime`, and measuring one from an
   anchor);
-- units after arbitrary expressions, such as `count days` or `(n / 2) days`;
 - `askDuration` and `askCalendarDuration`;
 - scheduling and `schedule(...)` ([V30 §36](../specifications/accepted-syntaxes-v30.md#36-scheduling));
 - `waitUntil`;
@@ -160,6 +206,8 @@ These parts of the #512 time proposal remain open:
 - Source with the `timestamp` names or with `month` or `year` without `calendar` stops compiling, and so does `date`
   and `datetime` arithmetic with a `duration`. The SexScript importer emits the new forms.
 - A `1 day` that meant a calendar day on a `date` or `datetime` is now a compile error, not a silent one-hour shift.
+- A time given as a number without a unit, such as `wait 5`, stops compiling, and so does a unit after a sum or a range,
+  such as `wait a + 5 s` or `timer 5..10 s`. The SexScript importer writes `wait (a + 5) s` and `timer (5..10) s`.
 - Each part bumps the plan, snapshot, and checkpoint revisions whose contracts it changes.
 
 ## Alternatives considered
@@ -170,5 +218,9 @@ These parts of the #512 time proposal remain open:
   but a `duration` then no longer means time that passed.
 - `date ± D` with a whole number of days, as in `getDate() + 1 day`: shorter for the most common date step, but a
   `day` would then mean a calendar day on a date and 24 hours elsewhere.
+- A unit after the whole expression of `wait` and `timer`: shorter for computed waits, but a second grammar for the same
+  unit, which reads `a + b s` differently there than anywhere else.
+- Numbers as seconds wherever a time is expected, in setters too: shorter and closer to older scripts, but a variable
+  without a unit, such as an answer to "How many minutes?", silently counts seconds.
 - Converting old `save` values when they are read: keeps progress across the change, but adds a conversion path to
   every reader of saved data before any release has saved data to keep.

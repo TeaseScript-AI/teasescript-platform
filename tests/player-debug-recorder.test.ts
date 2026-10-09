@@ -131,7 +131,7 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
       "let photo = takePhoto()",
       "let draw = random()",
       'save name as "name"',
-      "wait 2",
+      "wait 2 s",
       "exit",
     ].join("\n"),
     {
@@ -227,7 +227,7 @@ test("recording changes nothing about the session", () => {
 test("each call keeps its own copy of the arguments and the store's answers, also refusals", () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'let music = playAudio async "music.mp3"\nwait 5\nexit',
+    'let music = playAudio async "music.mp3"\nwait 5 s\nexit',
     { recorder },
   );
   session = reportPlayerRuntimeMediaLoad(session, 1, {
@@ -268,9 +268,10 @@ test("each call keeps its own copy of the arguments and the store's answers, als
 
 test("a recording outgrowing its limits starts again before a Player call and still replays", async () => {
   const recorder = new DebugRecorder({ operations: 6 });
-  let session = createPlayerRuntimeSession("wait 1\nwait 1\nwait 1\nwait 1\nwait 1\nexit", {
-    recorder,
-  });
+  let session = createPlayerRuntimeSession(
+    "wait 1 s\nwait 1 s\nwait 1 s\nwait 1 s\nwait 1 s\nexit",
+    { recorder },
+  );
   for (let atMs = 1_000; atMs <= 5_000; atMs += 1_000) {
     session = observePlayerRuntimeTime(session, atMs).session;
     assert.ok(recorder.recording()!.operations.length <= 6);
@@ -307,9 +308,10 @@ test("a failure freezes the recording, from the first run on, and a too large ca
 
   // A development time jump past a failure: the recording reaches the failure, not the later observed time.
   const jumped = new DebugRecorder();
-  const waiting = createPlayerRuntimeSession("wait 1\nlet zero = 0\nlet result = 1 / zero\nexit", {
-    recorder: jumped,
-  });
+  const waiting = createPlayerRuntimeSession(
+    "wait 1 s\nlet zero = 0\nlet result = 1 / zero\nexit",
+    { recorder: jumped },
+  );
   const advanced = advancePlayerRuntimeTime(waiting, 5_000);
   assert.equal(advanced.state.status, "failed");
   const jumpedResult = await replay(jumped);
@@ -331,7 +333,7 @@ test("a failure freezes the recording, from the first run on, and a too large ca
 test("a call the recorder cannot copy still runs exactly as without it", () => {
   const recorder = new DebugRecorder();
   const session = createPlayerRuntimeSession(
-    'showPermanentButton "Count" {\n    wait 1\n}\nwait 10\nexit',
+    'showPermanentButton "Count" {\n    wait 1 s\n}\nwait 10 s\nexit',
     { recorder },
   );
   // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: test: a value JSON cannot copy, which the engine refuses like any other invalid button.
@@ -385,7 +387,7 @@ test("a random decision that throws during a recorded call leaves the recording 
   ]) {
     const recorder = new DebugRecorder();
     let session = createPlayerRuntimeSession(
-      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      'wait 1 s\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
       { recorder },
     );
     session = observePlayerRuntimeTime(session, 500).session;
@@ -406,7 +408,7 @@ test("a random decision that calls its session is refused there, and the call it
   for (const rethrow of [false, true]) {
     const recorder = new DebugRecorder();
     let session = createPlayerRuntimeSession(
-      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      'wait 1 s\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
       { recorder },
     );
     session = observePlayerRuntimeTime(session, 500).session;
@@ -455,7 +457,7 @@ test("a session a host callback starts with the same recorder keeps a recording 
   for (const rethrow of [false, true]) {
     const recorder = new DebugRecorder();
     let session = createPlayerRuntimeSession(
-      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      'wait 1 s\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
       { recorder },
     );
     session = observePlayerRuntimeTime(session, 500).session;
@@ -816,7 +818,7 @@ function pausedDraws(
   resolveLast = true,
 ): PlayerRuntimeSession {
   let session = createPlayerRuntimeSession(
-    `wait 1\nlet total = 0\nrepeat ${draws} {\n  total += randomInteger(1..=6)\n}\nsay "\${total}"\nexit`,
+    `wait 1 s\nlet total = 0\nrepeat ${draws} {\n  total += randomInteger(1..=6)\n}\nsay "\${total}"\nexit`,
     { recorder },
   );
   setPlayerRuntimeRandomControl(session, {});
@@ -906,7 +908,7 @@ test("a replay whose chosen outcome differs from the recorded one diverges", asy
 
 test("a recording that begins paused keeps the resolution as its own call after refused calls", async () => {
   let session = createPlayerRuntimeSession(
-    'wait 1\nlet x = randomInteger(1..=6)\nsay "${x}", instant\nexit',
+    'wait 1 s\nlet x = randomInteger(1..=6)\nsay "${x}", instant\nexit',
   );
   setPlayerRuntimeRandomControl(session, {});
   session = observePlayerRuntimeTime(session, 1000).session;
@@ -943,7 +945,7 @@ test("a recording that begins paused keeps the resolution as its own call after 
 test("a resolution whose continuation throws leaves the session at the paused state it showed", () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'let t = timer(duration: 1..=2, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10\nexit',
+    'let t = timer(duration: (1..=2) s, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10 s\nexit',
     { recorder },
   );
   setPlayerRuntimeRandomControl(session, { filter: { kinds: ["timerRepeat"] } });
@@ -965,7 +967,7 @@ test("a resolution whose continuation throws leaves the session at the paused st
 test("a call the recorder cannot keep while a draw is paused leaves recovery of the paused state intact", () => {
   const recorder = new DebugRecorder({ argumentBytes: 128 });
   let session = createPlayerRuntimeSession(
-    'let t = timer(duration: 1..=2, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10\nexit',
+    'let t = timer(duration: (1..=2) s, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10 s\nexit',
     { recorder },
   );
   setPlayerRuntimeRandomControl(session, { filter: { kinds: ["timerRepeat"] } });
@@ -1001,7 +1003,7 @@ test("a log that starts again at a paused state keeps the resolution exact", asy
   // Two calls fit: the log starts again before the third, while the draw is paused.
   const recorder = new DebugRecorder({ operations: 3 });
   let session = createPlayerRuntimeSession(
-    'wait 1\nlet x = randomInteger(1..=6) + randomInteger(1..=6)\nsay "${x}", instant\nexit',
+    'wait 1 s\nlet x = randomInteger(1..=6) + randomInteger(1..=6)\nsay "${x}", instant\nexit',
     { recorder },
   );
   setPlayerRuntimeRandomControl(session, {});

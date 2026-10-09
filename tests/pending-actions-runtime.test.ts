@@ -43,8 +43,9 @@ test("negative static waits fail compilation and backward observations never mov
   // ADR 0016: a statically provable negative duration is a compile-time error at the duration, whether it is a
   // negated literal or folded from arithmetic.
   for (const [source, end] of [
-    ["wait -1", 7],
-    ["wait 1 - 2", 10],
+    ["wait -1 s", 9],
+    ["wait (1 - 2) s", 12],
+    ["wait 1 s - 2 s", 14],
   ] as const) {
     assert.deepEqual(
       compileSource(source).diagnostics.map((diagnostic) => [

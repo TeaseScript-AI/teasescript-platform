@@ -352,15 +352,18 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   timeout known before the run is reported.
 - Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
-  player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
-  formatting sites, 3 use `toISO()` and 3 `formatTime()`; the 3 that format a date built from stored Unix seconds stay
-  reported (`SX_DATE_FORMAT`), see the observations below.
+  player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`; a pattern of number fields
+  that is no whole date or time, such as `dd/MM` or `HH`, is written from the current date and time's fields, exactly.
+  A pattern with names (weekday, month) or a time zone stays reported (`SX_DATE_FORMAT`), as does a date built from a
+  Unix time unless it shows a whole date or time (`SX_DATE_FROM_SECONDS`); see the observations below.
 - Legacy `getImage()` took a webcam picture without asking and returned its path, or null; only without a webcam did
   it open a file chooser titled with the message. `takePhoto()` returns a photo reference or null; the file-chooser
   fallback and the message are dropped with a `NOTE`, and the Player decides how the photo is taken (3 corpus sites).
 - Rewrites that move evaluation (ternary branches, input prompts) are applied only when the expression is not behind
   `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
-  reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`).
+  reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`). A condition or assignment whose `&&`/`||` chain asks,
+  such as `getBoolean(a) && getBoolean(b) && getBoolean(c)`, is computed step by step and asks each question only
+  where the short circuit reaches it.
 
 ## Type enforcement findings (#519, #526, #530)
 
@@ -725,8 +728,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   a missing script becomes `exit` (`SX_UNREACHABLE_BRANCH`). A chain to a script of the legacy desktop player
   (`system/...`, `welcome`, `exit`) ends the session (`SX_DESKTOP_SCRIPT`).
 - The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
-  clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
-  of `main.tease`, with the distribution's questions (the owned items as one `askForm` of toggles keyed by their
+  clothes the player owns; a package that reads such keys and never saves them, or saves a toy or a garment only to
+  correct the answer (jewell), asks the missing ones once at the start of `main.tease`, with the distribution's questions (the owned items as one `askForm` of toggles keyed by their
   storage keys, asked as the system speaker), and saves them under the legacy keys; storage is per package, so each
   package asks once (`SX_LEGACY_PROFILE`, 141 selected units).
 - `show("")` only cleared the legacy text area and is dropped, as is any other empty text, such as a question in a

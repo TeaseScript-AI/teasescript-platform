@@ -59,7 +59,11 @@ test("statistics read a property with by:, and durations give durations", () => 
         "exit",
       ].join("\n"),
     ),
-    ["12 36 12", "38.333 s 1 min 55 s 45 s 42.426 s", "2026-10-01 2026-01-05 8 d"],
+    [
+      "12 36 12",
+      "38.333 seconds 1 minute 55 seconds 45 seconds 42.426 seconds",
+      "2026-10-01 2026-01-05 8 days",
+    ],
   );
 });
 
@@ -195,7 +199,7 @@ test("statistics and trends keep their precision for equal, close, tiny, and hug
       "1e-100 3.3333333333333336e-101",
       "1e+308",
       "0",
-      "1 ms 2 d 0 s",
+      "1 millisecond 2 days 0 seconds",
     ],
   );
 });
@@ -356,7 +360,7 @@ test("linearRegression fits a line through the points of a list, and predict rea
       "22",
       "1.7143 10.1429 0.9796 2026-10-01",
       "25.6 18",
-      "-1.6 s 1 min 1.9 s 53.9 s",
+      "-1.6 seconds 1 minute 1.9 seconds 53.9 seconds",
       "2 2 1",
     ],
   );

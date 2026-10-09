@@ -52,11 +52,11 @@ test("a wait counts down, but a blocking timer, which runs as the same delay, ne
     W(5_000),
     W(5_000),
   ]);
-  assert.deepEqual(countdowns("wait 0\nexit", []), [null]);
+  assert.deepEqual(countdowns("wait 0 s\nexit", []), [null]);
 });
 
 test("only a presented showButton with a timeout counts down, until it is pressed or times out", () => {
-  assert.deepEqual(countdowns('showButton "Go", timeout: 5\nexit', [1_000, 5_000]), [
+  assert.deepEqual(countdowns('showButton "Go", timeout: 5 s\nexit', [1_000, 5_000]), [
     B(5_000),
     B(5_000),
     null,
@@ -72,29 +72,28 @@ test("only a presented showButton with a timeout counts down, until it is presse
 
 test("pacing counts down while nothing else owns the foreground", () => {
   // Staged output, also unskippable; the second message's gate is consumed by the untimed button.
-  assert.deepEqual(countdowns('say "A", 5\nsay "B", 2\nshowButton "Go"\nexit', [1_000, 5_000]), [
-    P(5_000),
-    P(5_000),
-    null,
-  ]);
-  assert.deepEqual(countdowns('say unskippable "A", 5\nsay "B", 2\nexit', []), [P(5_000)]);
+  assert.deepEqual(
+    countdowns('say "A", 5 s\nsay "B", 2 s\nshowButton "Go"\nexit', [1_000, 5_000]),
+    [P(5_000), P(5_000), null],
+  );
+  assert.deepEqual(countdowns('say unskippable "A", 5 s\nsay "B", 2 s\nexit', []), [P(5_000)]);
   assert.deepEqual(countdowns('say "A", instant\nshowButton "Go"\nexit', []), [null]);
   // A wait owns the overlap, then the pacing that remains takes over; a real timer shows nothing meanwhile.
-  assert.deepEqual(countdowns('say "A", 5\nwait 2\nsay "B", 2\nexit', [1_000, 2_000]), [
+  assert.deepEqual(countdowns('say "A", 5 s\nwait 2 s\nsay "B", 2 s\nexit', [1_000, 2_000]), [
     W(2_000),
     W(2_000),
     P(5_000),
   ]);
-  assert.deepEqual(countdowns('say "A", 5\ntimer 2\nsay "B", 2\nexit', [1_000, 2_000]), [
+  assert.deepEqual(countdowns('say "A", 5 s\ntimer 2 s\nsay "B", 2 s\nexit', [1_000, 2_000]), [
     null,
     null,
     P(5_000),
   ]);
   // A timed button consumes the pacing before it.
-  assert.deepEqual(countdowns('say "A", 5\nshowButton "Go", timeout: 4\nexit', []), [B(4_000)]);
+  assert.deepEqual(countdowns('say "A", 5 s\nshowButton "Go", timeout: 4 s\nexit', []), [B(4_000)]);
   // A pending save owns progress although its pacing has not settled.
   assert.deepEqual(
-    countdowns('say "A", 5\nsave 1 as "x"\nshowButton "Go"\nexit', [], {
+    countdowns('say "A", 5 s\nsave 1 as "x"\nshowButton "Go"\nexit', [], {
       persistentScriptStorage: true,
     }),
     [null],
@@ -104,21 +103,21 @@ test("pacing counts down while nothing else owns the foreground", () => {
 test("a block's own foreground work counts down while the action it interrupted waits hidden", () => {
   assert.deepEqual(
     countdowns(
-      'timer async 1 { wait 5 }\nshowButton "Go", timeout: 3\nexit',
+      'timer async 1 s { wait 5 s }\nshowButton "Go", timeout: 3 s\nexit',
       [1_000, 3_000, 6_000],
     ),
     [B(3_000), W(6_000), W(6_000), null],
   );
   assert.deepEqual(
     countdowns(
-      'timer async 1 {\n  say "H", 5\n  say "I", 2\n}\nshowButton "Go", timeout: 3\nexit',
+      'timer async 1 s {\n  say "H", 5 s\n  say "I", 2 s\n}\nshowButton "Go", timeout: 3 s\nexit',
       [1_000, 6_000],
     ),
     [B(3_000), P(6_000), null],
   );
   assert.deepEqual(
     countdowns(
-      'timer async 1 { let x = askText hint: "Inside" }\nshowButton "Go", timeout: 3\nexit',
+      'timer async 1 s { let x = askText hint: "Inside" }\nshowButton "Go", timeout: 3 s\nexit',
       [1_000, 5_000],
     ),
     [B(3_000), null, null],
@@ -134,7 +133,7 @@ test("a restored session counts down to the same deadline, and an ended or faile
     W(5_000),
   );
   assert.deepEqual(countdowns("exit", []), [null]);
-  assert.deepEqual(countdowns('say "A", 5\nlet x = 0\nlet y = 1 / x\nexit', []), [null]);
+  assert.deepEqual(countdowns('say "A", 5 s\nlet x = 0\nlet y = 1 / x\nexit', []), [null]);
 });
 
 test("the countdown text rounds whole seconds up and says when a deadline elapsed before its action settled", () => {

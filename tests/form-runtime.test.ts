@@ -490,7 +490,7 @@ test("a dict form keeps its keys and order, and a boolean list shows each state"
 });
 
 test("a timer block suspends the form with its draft, which takes no edits until the block returns", () => {
-  const plan = formPlan(SETTINGS, OBJECT, "timer async 1 {\n  wait 1\n}\n");
+  const plan = formPlan(SETTINGS, OBJECT, "timer async 1 s {\n  wait 1 s\n}\n");
   const snapshot = edited(plan, started(plan), [
     { kind: "edit", fieldId: "name" },
     { kind: "draft", fieldId: "name", text: "Bo" },

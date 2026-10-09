@@ -1,3 +1,4 @@
+import { formatDuration } from "../duration.js";
 import { interpolateCeilMs, interpolateRoundMs } from "./exact-interpolation.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
@@ -695,7 +696,7 @@ export function loadMedia(
   media.durationMs = durationMs;
   if (media.startAtMs >= mediaEndMs(media)) {
     media.state = "stopped";
-    return `Media "${media.source}" has no playback range: startAt is not before the end of the ${durationMs} ms source.`;
+    return `Media "${media.source}" has no playback range: startAt is not before the end of the source, which lasts ${formatDuration(durationMs)}.`;
   }
   media.positionMs = media.startAtMs;
   media.startCuesPending = cuesAt(media, media.startAtMs).length > 0;

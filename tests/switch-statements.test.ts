@@ -275,7 +275,7 @@ test("the block after a switch subject or cue position ends only an ungrouped co
   for (const source of [
     'switch askNumber "How many?" { case 1 {} }\nexit',
     'switch (askNumber { hint: "Number" }.hint) { case 1 {} }\nexit',
-    'playAudio "a" {\n  at (askNumber { hint: "Number" }.hint) {}\n}\nexit',
+    'playAudio "a" {\n  at (askNumber { hint: "Number" }.hint) * 1 s {}\n}\nexit',
   ]) {
     assert.deepEqual(compileSource(source).diagnostics, [], source);
   }
