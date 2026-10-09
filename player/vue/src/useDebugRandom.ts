@@ -38,6 +38,10 @@ export function useDebugRandom(player: PlayerSessionHost) {
     { readonly counts: Map<string, number>; readonly labels: string[]; dropped: number }
   >();
   const historyRevision = ref(0);
+  // What each site took, as `tried` gave it since the history last changed: the same object until then, so the picker,
+  // with all its outcomes, renders again only when the history changes.
+  let triedRevision = -1;
+  const triedSites = new Map<string, DebugRandomTried>();
 
   /** Records that the draw's site took `outcome`; the returned function takes the record back. */
   function record(draw: RandomDrawView, outcome: RandomOutcome): () => void {
@@ -159,13 +163,21 @@ export function useDebugRandom(player: PlayerSessionHost) {
      * often it took each outcome, by `outcomeKey`.
      */
     tried(site: string): DebugRandomTried {
-      void historyRevision.value;
-      const taken = history.get(site);
-      return {
-        history: taken === undefined ? [] : [...taken.labels],
-        first: (taken?.dropped ?? 0) + 1,
-        counts: new Map(taken?.counts),
-      };
+      if (triedRevision !== historyRevision.value) {
+        triedSites.clear();
+        triedRevision = historyRevision.value;
+      }
+      let tried = triedSites.get(site);
+      if (tried === undefined) {
+        const taken = history.get(site);
+        tried = {
+          history: taken === undefined ? [] : [...taken.labels],
+          first: (taken?.dropped ?? 0) + 1,
+          counts: new Map(taken?.counts),
+        };
+        triedSites.set(site, tried);
+      }
+      return tried;
     },
   };
 }
