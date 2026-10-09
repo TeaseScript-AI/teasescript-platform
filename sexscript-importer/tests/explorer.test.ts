@@ -1605,6 +1605,103 @@ test(
 );
 
 test(
+  "code without comparisons added near an ask leaves its typed answers as they were: the constants compared nearby, and the expressions compared with the answer, in the same order",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const compile = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return plan;
+    };
+    // A list and a loop of says, as a conversion may write a random line.
+    const filler =
+      'for verse in [["Hum."], ["Sing.", "Clap."]].random {\n  say verse\n}\nlet colours = ["red", "green", "blue"]\n' +
+      'say colours.random\nsay "Ready?"\nsay "Steady."\n';
+    // The ask is far from any comparison; its caller compares on both sides of where the helper returns.
+    const pause = (from: number) =>
+      Array.from({ length: 45 }, (_, index) => `  say "Pause ${from + index}."`).join("\n");
+    const nearby = (extra: string) => {
+      const session = new Session(
+        engine,
+        compile(
+          `function pickMood {\n${pause(1)}\n  let picked = askInteger prefill: 0\n${pause(100)}\n  return picked\n}\n` +
+            `let level = 1\nif level > 7 {\n  say "Too high."\n}\n${extra}let mood = pickMood()\nif mood == 3 {\n` +
+            '  say "Three."\n} else if mood == 6 {\n  say "Six."\n} else if mood == 9 {\n  say "Nine."\n}\nexit\n',
+        ),
+        1,
+      );
+      return session.options(session.start().runtime);
+    };
+    assert.deepEqual(nearby(filler), nearby(""));
+    assert.deepEqual(
+      nearby("").map((input) => (input.kind === "text" ? input.text : input.kind)),
+      ["0", "1", "-1", "1000000", "6", "7", "8", "2", "3", "4", "5"],
+    );
+    // The answer is compared before the ask (in `judge`) and after it (in `review`); the filler goes after the ask only.
+    const compared = (extra: string) => {
+      const plan = compile(
+        "let last = 0\nlet low = 10\nlet high = 20\nlet first = 30\nlet second = 40\nlet third = 50\n" +
+          'function judge {\n  if last < low {\n    say "Low."\n  }\n  if last > high {\n    say "High."\n  }\n}\n' +
+          `function pickMood {\n  let picked = askInteger prefill: 0\n  last = picked\n${extra}  return picked\n}\n` +
+          'function review {\n  if last == first {\n    say "First."\n  }\n  if last == second {\n    say "Second."\n  }\n' +
+          '  if last == third {\n    say "Third."\n  }\n}\npickMood()\nreview()\njudge()\nexit\n',
+      );
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      return [...comparedWith(new DataFlow(plan, instructions), instructions, "asks").values()].map(
+        (expressions) =>
+          expressions.map((expression) => (isRecord(expression) ? expression.name : null)),
+      );
+    };
+    assert.deepEqual(compared(filler), compared(""));
+    assert.deepEqual(compared(""), [["high", "first", "low", "second"]]);
+    // A comparison just before the ask and one just after are equally near: the code compares the answer with `before`
+    // to leave the loop, and with `after` inside it.
+    const looped = compile(
+      "let before = 10\nlet after = 20\nlet answer = 0\nwhile answer != before {\n" +
+        '  answer = askInteger prefill: 0\n  if answer == after {\n    say "After."\n  }\n}\nsay "Out."\nexit\n',
+    );
+    const loopedInstructions = Array.isArray(looped.instructions)
+      ? looped.instructions.filter(isRecord)
+      : [];
+    assert.deepEqual(
+      [
+        ...comparedWith(
+          new DataFlow(looped, loopedInstructions),
+          loopedInstructions,
+          "asks",
+        ).values(),
+      ].map((expressions) =>
+        expressions.map((expression) => (isRecord(expression) ? expression.name : null)),
+      ),
+      [["before", "after"]],
+    );
+    // A helper's ask looks for constants in its own function, not in the function laid out next to it.
+    const helper = new Session(
+      engine,
+      compile(
+        "function pickMood {\n  let picked = askInteger prefill: 0\n  return picked\n}\nfunction other(x) {\n" +
+          '  if x == 50 {\n    say "Fifty."\n  }\n  if x == 60 {\n    say "Sixty."\n  }\n  if x == 70 {\n' +
+          '    say "Seventy."\n  }\n}\nlet mood = pickMood()\nif mood == 3 {\n  say "Three."\n} else if mood == 6 {\n' +
+          '  say "Six."\n} else if mood == 9 {\n  say "Nine."\n}\nother(1)\nexit\n',
+      ),
+      1,
+    );
+    const answers = helper
+      .options(helper.start().runtime)
+      .map((input) => (input.kind === "text" ? input.text : input.kind));
+    assert.ok(
+      ["3", "6", "9"].every((answer) => answers.includes(answer)),
+      answers.join(","),
+    );
+    assert.ok(!answers.includes("50"), answers.join(","));
+  },
+);
+
+test(
   "with compared answers, a typed ask is also answered with what the code compares the answer with in that state, such as the line to type",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

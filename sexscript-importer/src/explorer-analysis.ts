@@ -1359,6 +1359,16 @@ export function comparedWith(
   >();
   const worse = (left: readonly [number, number], right: readonly [number, number]) =>
     left[0] - right[0] || left[1] - right[1];
+  // How near a comparison is to an ask counts the instructions with a comparison between them, so that code without
+  // comparisons (a list, a loop of `say`s) does not move them: per instruction, how many such come before it.
+  const comparing: number[] = [];
+  /** The instructions with a comparison strictly between two instructions. */
+  const between = (one: number, other: number) =>
+    one === other ? 0 : comparing[Math.max(one, other)]! - comparing[Math.min(one, other) + 1]!;
+  instructions.reduce((count, instruction, index) => {
+    comparing[index] = count;
+    return count + (hasComparison(instruction) ? 1 : 0);
+  }, 0);
   const pair = (answer: unknown, other: unknown, at: number) => {
     if (!readable(other)) return;
     // A timed button's result divided by a duration (`/ 10 s`) is compared in that unit: the other side, read in
@@ -1387,7 +1397,7 @@ export function comparedWith(
       }
       const rank = [
         flow.functionAt(at) === flow.functionAt(source) ? 0 : 1,
-        Math.abs(at - source),
+        between(at, source),
       ] as const;
       const before = known.get(key);
       if (before !== undefined) {
@@ -1452,6 +1462,17 @@ export function comparedWith(
         .map(({ expression }) => expression),
     ]),
   );
+}
+
+/** Whether an instruction compares (`<`, `==`, ...) or tests text (`contains`, ...), as {@link comparedWith} reads it. */
+function hasComparison(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasComparison);
+  if (!isRecord(value)) return false;
+  if (value.kind === "binary" && COMPARED.has(String(value.operator))) return true;
+  const callee = record(value.callee);
+  if (value.kind === "call" && callee.kind === "property" && TEXT_TESTS.has(String(callee.name)))
+    return true;
+  return Object.entries(value).some(([key, item]) => key !== "span" && hasComparison(item));
 }
 
 /** The duration in milliseconds an expression divides by (`took / 10 s`), the first one found; null without one. */
