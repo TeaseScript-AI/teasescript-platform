@@ -215,16 +215,18 @@ interface ParsedSayValue {
   readonly parts: SayParts | null;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
-  /**
-   * The statement ranges its parse recorded: `list` from `from` up to `to`. `list` only grows, so a nested value shares
-   * it rather than copying its ranges into every value around it.
-   */
-  readonly ranges: {
-    readonly list: readonly StatementRange[];
-    readonly from: number;
-    readonly to: number;
-  };
+  /** The statement ranges its parse recorded. */
+  readonly ranges: RangeSegment;
   readonly recovered: boolean;
+}
+/**
+ * The statement ranges from `from` up to `to` in `list`, which only grows. A parser that reuses a `say` value lists its
+ * segment rather than a copy of its ranges, so a value nested in others is not copied into each of them.
+ */
+interface RangeSegment {
+  readonly list: readonly (StatementRange | RangeSegment)[];
+  readonly from: number;
+  readonly to: number;
 }
 /** The compact interaction commands other than `choose`, and the kind of answer each asks for. */
 const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionKind"]> = new Map([
@@ -298,7 +300,7 @@ export function parse(source: string): ParseResult {
     program,
     header: header.header,
     diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
-    statementRanges: Object.freeze(parser.statementRanges),
+    statementRanges: Object.freeze(parser.statementRanges()),
   });
 }
 
@@ -308,7 +310,7 @@ class Parser {
    * A speculative parser keeps its own, so only the statements of the parse that counts are listed, also those of a
    * `say` value it reuses.
    */
-  readonly #statementRanges: StatementRange[] = [];
+  readonly #statementRanges: (StatementRange | RangeSegment)[] = [];
   #current = 0;
   #commaLookahead: {
     readonly at: number;
@@ -349,8 +351,20 @@ class Parser {
     return this.#diagnostics;
   }
 
-  public get statementRanges(): readonly StatementRange[] {
-    return this.#statementRanges;
+  /** The statement ranges, with those of each reused `say` value in its place, read once without recursion. */
+  public statementRanges(): readonly StatementRange[] {
+    const ranges: StatementRange[] = [];
+    const pending: RangeSegment[] = [
+      { list: this.#statementRanges, from: 0, to: this.#statementRanges.length },
+    ];
+    for (let segment = pending.pop(); segment !== undefined; segment = pending.pop()) {
+      for (let index = segment.from; index < segment.to; index += 1) {
+        const entry = segment.list[index]!;
+        if ("list" in entry) pending.push(entry);
+        else ranges.push(entry);
+      }
+    }
+    return ranges;
   }
 
   public parseProgram(): Program {
@@ -828,8 +842,7 @@ class Parser {
     );
     if (known !== undefined) {
       this.#diagnostics.push(...known.diagnostics);
-      const { list, from, to } = known.ranges;
-      for (let index = from; index < to; index += 1) this.#statementRanges.push(list[index]!);
+      this.#statementRanges.push(known.ranges);
       this.#current = known.end;
       this.#recoveredAtStatementBoundary = known.recovered;
       return known.parts;
