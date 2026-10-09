@@ -2013,6 +2013,7 @@ function validateFunctionPrologue(
           "jumpIfFalse",
           "jump",
           "showPermanentButton",
+          "startTimer",
         ])
       ) {
         errors.push(
