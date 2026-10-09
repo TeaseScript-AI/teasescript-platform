@@ -756,6 +756,83 @@ test(
 );
 
 test(
+  "a comparison of two variables is measured as their difference: read where the condition's function runs, it reports the closest difference and its trend, and each closer one is progress until stalled",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // `warmUp` holds its own `reps` above its `target`: only `lift`'s pair counts, while `lift` runs.
+    const source =
+      'function warmUp(target) {\n  let reps = 99\n  showButton "Warm up"\n}\nfunction lift(target) {\n' +
+      '  let reps = 0\n  while true {\n    let pick = choose more: "More", stop: "Stop"\n' +
+      '    if pick == "stop" {\n      return\n    }\n    reps += 1\n    if reps >= target {\n' +
+      '      say "Set done."\n    }\n  }\n}\nwarmUp(1)\nlift(1000)\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const run = (untilStalled: boolean, budgetOps: number) =>
+      explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps,
+        maxStates: Number.MAX_SAFE_INTEGER,
+        sources: new Map(),
+        diagnostics: [],
+        untilStalled,
+      });
+    const set = run(false, 600).coverage.unvisitedBranches.find((entry) => entry.line === 13);
+    assert.deepEqual(
+      set?.parts.map((part) => [part.needs, part.status]),
+      [["reps - target >= 0", "unmet"]],
+    );
+    const best = set?.best;
+    assert.equal(best?.needs, "reps - target >= 0");
+    assert.equal(best?.trend, "improving");
+    assert.ok(typeof best?.value === "number" && best.value > -1000 && best.value < 0);
+    assert.equal(best?.distance, -Number(best?.value));
+    // Every round brings the pair closer: only the cap ends the run.
+    const capped = run(true, 6000).search;
+    assert.equal(capped.audit?.result, "capped");
+    assert.ok((capped.audit?.progress.closer ?? 0) > 100);
+  },
+);
+
+test(
+  "a key a helper loads by a template, also through a helper it calls, is the one key its argument names at the condition, so other keys of the template are no closest storage",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'global ROPE = "rope"\nglobal KNIFE = "knife"\nfunction owns(item) {\n' +
+      '  return packed(item) or load("gear.${item}", default: false) == true\n}\n' +
+      'function packed(thing) {\n  return load("pack.${thing}", default: false) == true\n}\n' +
+      'let pick = choose rope: "Rope", knife: "Knife"\nif pick == "rope" {\n  save true as "gear.${ROPE}"\n' +
+      '} else {\n  save false as "gear.${KNIFE}"\n}\nshowButton "Next"\nif owns(KNIFE) {\n' +
+      '  say "Sharp."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+    });
+    // Also through the helper `owns` calls with its own parameter.
+    const sharp = result.coverage.unvisitedBranches.find((entry) => entry.line === 16);
+    assert.deepEqual(sharp?.dependsOn, ["stored gear.knife", "stored pack.knife"]);
+    assert.deepEqual(
+      sharp?.parts.map((part) => [part.needs, part.status, part.closest?.value]),
+      [
+        ["stored gear.knife == true", "unmet", "gear.knife = false"],
+        ["stored pack.knife == true", "unmeasured", undefined],
+      ],
+    );
+  },
+);
+
+test(
   "until stalled, a run ends complete when nothing is left to try, as a spiral when one place took the work since the last progress, and capped while a counter still comes closer",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
@@ -1362,6 +1439,73 @@ test(
       !file.unvisited.some((range) => {
         const [from = 0, to = from] = range.lines.split("-").map(Number);
         return done >= from && done <= to;
+      }),
+    );
+  },
+);
+
+test(
+  "a key template stays a pattern where a helper rebinds the parameter that names its key, or where its result also reads the template another way",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'global KNIFE = "knife"\nlet kind = choose rope: "Rope", saw: "Saw"\n' +
+      'let spare = load("gear.${kind}", default: false)\n' +
+      'function owns(item) {\n  return load("gear.${item}", default: false) == true\n}\n' +
+      'function plural(item) {\n  item = "${item}s"\n  return load("gear.${item}", default: false) == true\n}\n' +
+      "function either(item) {\n  return owns(item) or spare == true\n}\n" +
+      'showButton "Go"\nif owns(KNIFE) {\n  say "One."\n}\nif plural(KNIFE) {\n  say "Two."\n}\n' +
+      'if either(KNIFE) {\n  say "Three."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const flow = new DataFlow(plan, instructions);
+    const keys = instructions.flatMap((instruction, index) =>
+      instruction.kind === "jumpIfFalse" && flow.functionAt(index) === 0
+        ? [flow.keyAt("gear.\u0000", instruction.condition, index).replaceAll("\u0000", "*")]
+        : [],
+    );
+    // `owns` names its key; `plural` rebinds `item` first; `either` also reads `spare`, which any key of it may be.
+    assert.deepEqual(keys, ["gear.knife", "gear.*", "gear.*"]);
+  },
+);
+
+test(
+  "with progress leads, a loop that runs until one variable reaches another is followed to its end beside a wide tree of choices",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // As above, but the climb ends where `height` reaches `summit`, a variable: no constant to come closer to.
+    const branches = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `  let path${index} = choose left: "L${index}", right: "R${index}", back: "B${index}"\n` +
+        `  if path${index} == "left" {\n    say "left${index}"\n  }\n  showButton "On${index}"\n`,
+    ).join("");
+    const source =
+      `let way = choose trail: "Trail", climb: "Climb"\nif way == "trail" {\n${branches}  exit\n}\n` +
+      'let height = 0\nlet summit = 60 + 40\nwhile height < summit {\n  showButton "Step"\n  height += 1\n}\n' +
+      'say "Summit."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2400,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+      progressLeads: true,
+    });
+    const summit = source.split("\n").findIndex((line) => line.includes('say "Summit."')) + 1;
+    const file = result.coverage.files.find((entry) => entry.path === "main.tease")!;
+    assert.ok(
+      !file.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return summit >= from && summit <= to;
       }),
     );
   },

@@ -264,6 +264,21 @@ export interface LoadAlias {
 export const KEY_PLACEHOLDER = "\u0000";
 
 /**
+ * A function's own code: its loads with a key template, its calls of functions, the variables it reads and those it
+ * assigns, declares, or loops over, and the literal keys it loads.
+ */
+interface Code {
+  readonly loads: Data[];
+  readonly calls: Data[];
+  readonly names: Set<string>;
+  readonly bound: Set<string>;
+  readonly keys: Set<string>;
+}
+
+/** How many helper calls deep a key template's parts are followed to the arguments of the call a condition reads. */
+const HELPER_DEPTH = 3;
+
+/**
  * A storage key: its text, or for a template such as `"script${i}.time"` a pattern with {@link KEY_PLACEHOLDER} for
  * each computed part.
  */
@@ -323,6 +338,13 @@ export class DataFlow {
   readonly #loads = new Map<string, LoadAlias | null>();
   /** The function each instruction of a function body belongs to, by its ID. */
   readonly #functionOf = new Map<number, number>();
+  /** Variables whose every assignment is the same literal, by name; null for any other variable. */
+  readonly #literals = new Map<string, SavedScalar | null>();
+  readonly #instructions: readonly Data[];
+  /** The instructions a jump, condition, or loop goes to. */
+  readonly #jumpTargets = new Set<number>();
+  /** Each function's own code, by its ID ({@link Code}); made when first needed. */
+  #code: Map<number, Code> | null = null;
 
   /**
    * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
@@ -333,6 +355,7 @@ export class DataFlow {
     instructions: readonly Data[],
     settings: { computedPrompts?: boolean } = {},
   ) {
+    this.#instructions = instructions;
     const functions = list(plan.functions);
     const functionOf = this.#functionOf;
     for (const definition of functions) {
@@ -340,6 +363,9 @@ export class DataFlow {
       for (let index = Number(definition.entryInstruction); index <= end; index += 1)
         functionOf.set(index, Number(definition.id));
     }
+    for (const instruction of instructions)
+      for (const target of [instruction.target, instruction.continueTarget])
+        if (typeof target === "number") this.#jumpTargets.add(target);
     instructions.forEach((instruction, index) => {
       if (
         instruction.kind !== "interaction" ||
@@ -418,6 +444,162 @@ export class DataFlow {
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
   functionAt(index: number): number {
     return this.#functionOf.get(index) ?? 0;
+  }
+
+  /**
+   * The one stored key that a key pattern a condition at instruction `at` reads stands for, when every read of it there
+   * names that key with constants: a load whose template's computed parts are literals or variables that only ever hold
+   * one literal, or a load in a helper whose result the condition reads, with the helper's parameters that its code
+   * does not assign as the arguments of the call that gave that result right before (also in the helpers it calls, a
+   * few calls deep). The pattern otherwise, also when the pattern can come another way: through a variable, a stored
+   * value, or a helper call that names no key.
+   */
+  keyAt(pattern: string, condition: unknown, at: number): string {
+    if (!pattern.includes(KEY_PLACEHOLDER)) return pattern;
+    const keys = new Set<string | null>();
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(walk);
+      if (!isRecord(value)) return;
+      if (value.kind === "storageLoad" && keyText(value.key) === pattern)
+        keys.add(this.#keyNamed(value.key, new Map()));
+      else if (value.kind === "storageLoad") {
+        if (this.#stored.get(keyText(value.key) ?? "")?.keys.has(pattern) === true) keys.add(null);
+      } else if (value.kind === "identifier" && typeof value.name === "string") {
+        if (this.#variables.get(value.name)?.keys.has(pattern) === true) keys.add(null);
+      } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
+        if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
+        const call = this.#callBefore(value.temporaryId, at);
+        const named = call === null ? [] : this.#keysCalled(call, pattern, new Map(), HELPER_DEPTH);
+        if (named.length === 0) keys.add(null);
+        for (const key of named) keys.add(key);
+      }
+      for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+    };
+    walk(condition);
+    const [key] = keys;
+    return keys.size === 1 && typeof key === "string" ? key : pattern;
+  }
+
+  /**
+   * The keys of a key pattern that a helper call loads: in the helper's own code, with its parameters that the code
+   * does not assign as the call's arguments (`passed` gives the caller's own parameters theirs), and in the helpers it
+   * calls, `depth` calls deep; null for a load that names no one key, and for the pattern coming another way: through a
+   * variable the code does not assign, a stored value, or a call that names no key.
+   */
+  #keysCalled(
+    call: Data,
+    pattern: string,
+    passed: ReadonlyMap<unknown, unknown>,
+    depth: number,
+  ): (string | null)[] {
+    const code = this.#codeOf(Number(call.functionId));
+    const parameters = new Map(
+      list(call.arguments)
+        .filter((argument) => !code.bound.has(String(argument.parameterName)))
+        .map((argument) => {
+          const value = record(argument.value);
+          const outer = value.kind === "identifier" && passed.has(value.name);
+          return [argument.parameterName, outer ? passed.get(value.name) : argument.value];
+        }),
+    );
+    const keys = code.loads
+      .filter((load) => keyText(load.key) === pattern)
+      .map((load) => this.#keyNamed(load.key, parameters));
+    for (const name of code.names)
+      if (!code.bound.has(name) && this.#variables.get(name)?.keys.has(pattern) === true)
+        keys.push(null);
+    for (const key of code.keys)
+      if (this.#stored.get(key)?.keys.has(pattern) === true) keys.push(null);
+    for (const inner of code.calls) {
+      if (this.#functions.get(Number(inner.functionId))?.keys.has(pattern) !== true) continue;
+      const named = depth === 0 ? [] : this.#keysCalled(inner, pattern, parameters, depth - 1);
+      keys.push(...(named.length === 0 ? [null] : named));
+    }
+    return keys;
+  }
+
+  /**
+   * The key a load's template names, with `passed` giving the helper's parameters their call's arguments; null when a
+   * computed part is not a constant: a literal text or whole number, or a variable that only ever holds one.
+   */
+  #keyNamed(key: unknown, passed: ReadonlyMap<unknown, unknown>): string | null {
+    let text = "";
+    for (const part of list(record(key).parts)) {
+      if (part.kind === "text" && typeof part.value === "string") {
+        text += part.value;
+        continue;
+      }
+      const expression = record(part.expression);
+      const parameter = expression.kind === "identifier" && passed.has(expression.name);
+      const value = record(parameter ? passed.get(expression.name) : expression);
+      const constant =
+        value.kind === "literal"
+          ? value.value
+          : value.kind === "identifier" && typeof value.name === "string"
+            ? this.#literals.get(value.name)
+            : undefined;
+      if (typeof constant !== "string" && !Number.isSafeInteger(constant)) return null;
+      text += String(constant);
+    }
+    return text;
+  }
+
+  /**
+   * The helper call that gives temporary `id` its value for instruction `at`: the write of it right before, in the same
+   * code with no jump going between; null when that is no call, or there is none.
+   */
+  #callBefore(id: number, at: number): Data | null {
+    const owner = this.functionAt(at);
+    for (let index = at - 1; index >= 0 && this.functionAt(index) === owner; index -= 1) {
+      if (this.#jumpTargets.has(index + 1)) return null;
+      const instruction = this.#instructions[index]!;
+      if (instruction.destinationTemporary === id)
+        return instruction.kind === "callFunction" ? instruction : null;
+      if (instruction.temporaryId === id) return null;
+    }
+    return null;
+  }
+
+  /** A function's own code ({@link Code}). */
+  #codeOf(functionId: number): Code {
+    const empty = (): Code => ({
+      loads: [],
+      calls: [],
+      names: new Set(),
+      bound: new Set(),
+      keys: new Set(),
+    });
+    if (this.#code === null) {
+      const found = new Map<number, Code>();
+      const walk = (value: unknown, code: Code): void => {
+        if (Array.isArray(value)) value.forEach((item) => walk(item, code));
+        if (!isRecord(value)) return;
+        const key = value.kind === "storageLoad" ? record(value.key) : null;
+        if (key?.kind === "template") code.loads.push(value);
+        else if (key?.kind === "literal" && typeof key.value === "string") code.keys.add(key.value);
+        if (value.kind === "identifier" && typeof value.name === "string")
+          code.names.add(value.name);
+        for (const [field, item] of Object.entries(value)) if (field !== "span") walk(item, code);
+      };
+      this.#instructions.forEach((instruction, index) => {
+        const owner = this.functionAt(index);
+        const code = found.get(owner) ?? empty();
+        found.set(owner, code);
+        if (instruction.kind === "callFunction") code.calls.push(instruction);
+        const bound =
+          instruction.kind === "assign"
+            ? [targetName(instruction.target)]
+            : instruction.kind === "declareBinding" || instruction.kind === "declareGlobal"
+              ? [instruction.name]
+              : instruction.kind === "loopStart"
+                ? [instruction.variable, instruction.valueVariable]
+                : [];
+        for (const name of bound) if (typeof name === "string") code.bound.add(name);
+        walk(instruction, code);
+      });
+      this.#code = found;
+    }
+    return this.#code.get(functionId) ?? empty();
   }
 
   /** The asks, stored keys, and clock reads an expression's value comes from. */
@@ -659,6 +841,9 @@ export class DataFlow {
         literal === undefined
           ? null
           : { key, fallback: literal };
+      const only = expression.kind === "literal" ? (scalar(expression.value) ?? null) : null;
+      const fixed = this.#literals.get(name);
+      this.#literals.set(name, fixed === undefined || fixed === only ? only : null);
       const known = this.#loads.get(name);
       if (known === undefined) this.#loads.set(name, load);
       else if (
@@ -670,10 +855,15 @@ export class DataFlow {
     // Parameters and loop variables get their values elsewhere.
     for (const definition of list(plan.functions))
       for (const parameter of list(definition.parameters))
-        if (typeof parameter.name === "string") this.#loads.set(parameter.name, null);
+        if (typeof parameter.name === "string") {
+          this.#loads.set(parameter.name, null);
+          this.#literals.set(parameter.name, null);
+        }
     for (const instruction of instructions) {
-      if (instruction.kind === "loopStart" && typeof instruction.variable === "string")
+      if (instruction.kind === "loopStart" && typeof instruction.variable === "string") {
         this.#loads.set(instruction.variable, null);
+        this.#literals.set(instruction.variable, null);
+      }
       if (
         (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
         typeof instruction.name === "string"
@@ -684,7 +874,10 @@ export class DataFlow {
         const name = targetName(instruction.target);
         if (name === null) continue;
         if (target.kind === "identifier") assign(name, instruction.value);
-        else this.#loads.set(name, null);
+        else {
+          this.#loads.set(name, null);
+          this.#literals.set(name, null);
+        }
       }
     }
   }
@@ -729,12 +922,16 @@ export class DataFlow {
 /** A value directed search tries for a source: a JSON-safe value, or `absent` for a key that is not stored. */
 export type Candidate = string | number | boolean | { readonly absent: true };
 
-/** One comparison in a condition between a source expression and a constant, wanted true or false. */
+/**
+ * One comparison in a condition between a source expression and a constant, wanted true or false; or, with `against`,
+ * between two expressions, `subject operator against`, with 0 as the constant.
+ */
 interface Atom {
   readonly subject: unknown;
   readonly operator: string;
   readonly constant: string | number | boolean | null;
   readonly wanted: boolean;
+  readonly against?: unknown;
 }
 
 const FLIP: Readonly<Record<string, string>> = {
@@ -750,13 +947,15 @@ const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equ
 /**
  * The comparisons a condition must make for it to have the value `wanted`, as alternatives: each one alone is a way to
  * get there (for `and` wanted true, all of its parts are listed, and a value is checked against the whole condition).
+ * With `pairs`, a comparison of two expressions neither of which is a constant is listed too.
  */
-function atomsFor(expression: unknown, wanted: boolean): Atom[] {
+function atomsFor(expression: unknown, wanted: boolean, pairs = false): Atom[] {
   const value = record(expression);
-  if (value.kind === "group") return atomsFor(value.expression, wanted);
-  if (value.kind === "unary" && value.operator === "not") return atomsFor(value.operand, !wanted);
+  if (value.kind === "group") return atomsFor(value.expression, wanted, pairs);
+  if (value.kind === "unary" && value.operator === "not")
+    return atomsFor(value.operand, !wanted, pairs);
   if (value.kind === "binary" && (value.operator === "and" || value.operator === "or"))
-    return [...atomsFor(value.left, wanted), ...atomsFor(value.right, wanted)];
+    return [...atomsFor(value.left, wanted, pairs), ...atomsFor(value.right, wanted, pairs)];
   if (value.kind === "binary" && typeof value.operator === "string" && value.operator in FLIP) {
     const left = record(value.left);
     const right = record(value.right);
@@ -784,7 +983,17 @@ function atomsFor(expression: unknown, wanted: boolean): Atom[] {
           wanted,
         },
       ];
-    return [];
+    return pairs
+      ? [
+          {
+            subject: value.left,
+            operator: value.operator,
+            constant: 0,
+            wanted,
+            against: value.right,
+          },
+        ]
+      : [];
   }
   if (value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "")) {
     const text = list(value.arguments)
@@ -850,27 +1059,46 @@ export interface Goal {
   readonly candidates: readonly Candidate[];
   /**
    * For a variable: the comparison that takes the missed way, for measuring how close a state is to it. A boolean
-   * constant is measured as 0 or 1; `shown` keeps the constant as the condition writes it, for notes.
+   * constant is measured as 0 or 1; `shown` keeps the constant as the condition writes it, for notes. With `against`,
+   * the variable is compared with another value instead, a variable or a stored value (`text` names it), and their
+   * difference, the variable's value less that value, is measured against `constant` 0.
    */
   readonly comparison: {
     readonly operator: string;
     readonly constant: number;
     readonly shown: number | boolean;
+    readonly against?: { readonly subject: unknown; readonly text: string };
   } | null;
 }
 
 /**
  * The goals for taking a condition's missed way: `wanted` is the condition value of that way. A subject that applies
- * `length` to a source turns a length into a text of that length; `toInteger` and the like keep the number.
+ * `length` to a source turns a length into a text of that length; `toInteger` and the like keep the number. With the
+ * condition's instruction `at`, a stored key read through a key template is the one key it names there, if it names
+ * one ({@link DataFlow.keyAt}).
  */
-export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): Goal[] {
+export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at?: number): Goal[] {
   const goals: Goal[] = [];
-  for (const atom of atomsFor(condition, wanted)) {
+  const keyed = (source: Source, expression: unknown): Source =>
+    source.kind === "storage" && at !== undefined
+      ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
+      : source;
+  for (const atom of atomsFor(condition, wanted, true)) {
+    if (atom.against !== undefined) {
+      const goal = differenceGoal(flow, atom);
+      if (goal !== null) goals.push(goal);
+      continue;
+    }
     const values = solve(atom);
     const subject = record(atom.subject);
     const lengthOf = subject.kind === "property" && subject.name === "length";
     const holds = atom.wanted ? atom.operator : negate(atom.operator);
-    for (const source of flow.sourcesOf(atom.subject)) {
+    // A key template that names one key may name a key the condition also reads by its text: one goal for both.
+    const keys = new Set<string>();
+    for (const found of flow.sourcesOf(atom.subject)) {
+      const source = keyed(found, atom.subject);
+      if (source.kind === "storage" && keys.has(source.key)) continue;
+      if (source.kind === "storage") keys.add(source.key);
       const candidates =
         source.kind === "ask"
           ? values
@@ -906,7 +1134,8 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     }
   }
   // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`.
-  for (const source of flow.sourcesOf(condition)) {
+  for (const found of flow.sourcesOf(condition)) {
+    const source = keyed(found, condition);
     if (source.kind !== "storage" && source.kind !== "clock") continue;
     const known = goals.some(
       (goal) =>
@@ -917,6 +1146,43 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     if (!known) goals.push({ source, candidates: [], comparison: null });
   }
   return goals;
+}
+
+/**
+ * The goal of a comparison of two values (`reps >= target`): a variable of one side that the code counts, measured by
+ * its difference from the other side, a variable or a stored value with a literal key. Only a counter, which holds a
+ * number, as directed search measures few comparisons at once, and two texts (`typed == line`) have no difference. No
+ * value is solved for, as it depends on the other side. Null when neither side is such a pair.
+ */
+function differenceGoal(flow: DataFlow, atom: Atom): Goal | null {
+  const holds = atom.wanted ? atom.operator : negate(atom.operator);
+  const sides: [unknown, unknown, string][] = [
+    [atom.subject, atom.against, holds],
+    [atom.against, atom.subject, FLIP[holds]!],
+  ];
+  for (const [side, other, operator] of sides) {
+    const name = record(side).kind === "identifier" ? record(side).name : null;
+    const text = valueText(other);
+    if (typeof name !== "string" || text === null || text === name) continue;
+    const source = flow
+      .sourcesOf(side)
+      .find((found) => found.kind === "variable" && found.name === name && found.counter);
+    if (source !== undefined)
+      return {
+        source,
+        candidates: [],
+        comparison: { operator, constant: 0, shown: 0, against: { subject: other, text } },
+      };
+  }
+  return null;
+}
+
+/** How a value a state holds is named: a variable by its name, a stored value with a literal key as `stored key`. */
+function valueText(expression: unknown): string | null {
+  const value = record(expression);
+  if (value.kind === "identifier" && typeof value.name === "string") return value.name;
+  const key = value.kind === "storageLoad" ? literalText(value.key) : null;
+  return key === null ? null : `stored ${key}`;
 }
 
 /**
@@ -1436,11 +1702,20 @@ export function conjunctive(condition: unknown, wanted: boolean): boolean {
   );
 }
 
+/** `left - right` for two numbers, or two booleans as 0 and 1; undefined for other values or no finite difference. */
+export function difference(left: unknown, right: unknown): number | undefined {
+  if (typeof left !== typeof right || (typeof left !== "number" && typeof left !== "boolean"))
+    return undefined;
+  const gap = Number(left) - Number(right);
+  return Number.isFinite(gap) ? gap : undefined;
+}
+
 /**
  * The branch distance of a condition from coming out `wanted`, with each atom's value read by `read`: an `and` that
  * needs all of its parts sums them, one that needs any takes the nearest (fewest atoms unsatisfied, then least
  * distance); an atom compared with a literal counts 0 when it holds, else its numeric {@link distance}, or 1 for
- * another value. An atom that cannot be read counts as neither.
+ * another value; one that compares two values counts as their {@link difference} compared with 0. An atom that cannot
+ * be read counts as neither.
  */
 export function conditionDistance(
   condition: unknown,
@@ -1478,9 +1753,12 @@ export function conditionDistance(
       ? none
       : { unsatisfied: 1, sum: 1 };
   }
-  const [atom] = atomsFor(condition, wanted);
+  const [atom] = atomsFor(condition, wanted, true);
   if (atom === undefined) return none;
-  const actual = read(atom.subject);
+  const actual =
+    atom.against === undefined
+      ? read(atom.subject)
+      : difference(read(atom.subject), read(atom.against));
   if (actual === undefined) return none;
   const holds = atom.wanted ? atom.operator : negate(atom.operator);
   // Whether it holds, as the runtime compares (`1` is not `true`), then how far it is when it does not: at least
