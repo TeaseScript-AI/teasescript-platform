@@ -126,21 +126,28 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
-  for (const [source, call] of [
-    ["say chance(101)\nexit", "chance(101)"],
+  for (const [source, call, code] of [
+    ["say chance(101)\nexit", "chance(101)", "TSR039"],
     // A fractional bound the compiler cannot know reaches the runtime; a literal one is rejected statically below.
     [
       "function draw(low) {\n    return randomInteger(low..=3)\n}\nsay draw(1.5)\nexit",
       "randomInteger(low..=3)",
+      "TSR045",
     ],
-    ["say randomInteger(3..3)\nexit", "randomInteger(3..3)"],
+    ["say randomInteger(3..3)\nexit", "randomInteger(3..3)", "TSR041"],
+    [
+      "function draw(bounds) {\n    return randomInteger(bounds)\n}\nsay draw(6)\nexit",
+      "randomInteger(bounds)",
+      "TSR040",
+    ],
   ] as const) {
     const compiled = plan(source);
     const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
     const start = source.indexOf(call);
     assert.equal(result.snapshot.status, "failed", source);
     assert.equal(result.events.at(-1)?.kind, "runtimeFailure", source);
-    assert.equal(result.snapshot.failure?.code, "TSR012", source);
+    // The built-in's own code, not a wrapping one.
+    assert.equal(result.snapshot.failure?.code, code, source);
     assert.deepEqual(
       [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
       [start, start + call.length],

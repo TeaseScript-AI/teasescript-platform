@@ -244,8 +244,8 @@ test("retains earlier argument RNG progress when a later argument faults", () =>
   const advancedOnce = run(control, createFreshRuntimeSnapshot(control, { seed }));
 
   assert.equal(failed.snapshot.status, "failed");
-  assert.equal(failed.snapshot.failure?.code, "TSR012");
-  // A core built-in's own failure is the message, without a built-in prefix.
+  // A core built-in's own failure keeps its code and message.
+  assert.equal(failed.snapshot.failure?.code, "TSR041");
   assert.equal(
     failed.snapshot.failure?.message,
     "randomInteger(range) needs a range that holds at least one whole number, but 1..1 holds none. Check that the range is not empty first.",
@@ -446,7 +446,7 @@ test("fails an earlier ordinary expression before a later user-call side effect"
   const call = source.indexOf("randomInteger(1..1)");
 
   assert.equal(result.snapshot.status, "failed");
-  assert.equal(result.snapshot.failure?.code, "TSR012");
+  assert.equal(result.snapshot.failure?.code, "TSR041");
   assert.deepEqual(
     [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
     [call, call + "randomInteger(1..1)".length],
