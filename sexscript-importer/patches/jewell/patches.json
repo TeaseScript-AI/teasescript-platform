@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "Two failure branches announce a 72 h and a 24 h orgasm denial but save true under jewell.deny_Orgasm, whose readers (trainStrapon.groovy and others) compare it with getTime() as an expiry time, so the next read failed (legacy loadInteger parsed \"true\" and threw). Save the expiry times, getTime()+72*3600 and getTime()+24*3600, as trainStrapon.groovy's own failure branches do.",
       "diff": "deny-orgasm-time.diff"
+    },
+    {
+      "id": "storage-key-typos",
+      "layer": "source",
+      "category": "e",
+      "reason": "Five read storage keys are saved by nothing, so the branches that need them never ran: confessions loads and clears jewell.permit_Orgasm and jewell.permit_Masturbation, which permissions saves as cybermistress.permit_Orgasm and cybermistress.permit_Masturbation (cybermistress. plus the flag name), so a granted permission was always reported as not allowed; cumPermission tests toys.ringgag, which the toy chest saves as toys.ring_gag (trainTorture reads that), and buttplug_On, which cumPermission itself saves as cumpermission.buttplug_On; ritualNight tests clothes.spreader_bar, which the toy chest saves as toys.spreader_bar. Read the keys the scripts save.",
+      "diff": "storage-key-typos.diff"
     }
   ]
 }

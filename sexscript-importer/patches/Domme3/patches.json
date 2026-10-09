@@ -55,6 +55,13 @@
       "category": "e",
       "reason": "In reminder mode the loop keeps the saved assignment (dassignmentid) instead of picking one, and some assignments end only when a condition holds, such as assignment 45 when domme3.sissy is on; after settings turned that off, no case set endReached and the loop ran forever, in Groovy too. When a reminded assignment did not end the loop, leave reminder mode so that the next pass picks another assignment.",
       "diff": "reminder-loop.diff"
+    },
+    {
+      "id": "spreader-bar-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "The bedtime spreader-bar choice tests clothes.spreader_bar, which nothing saves; the toy chest saves the spreader bar as toys.spreader_bar, so the choice always went back to picking a toy. Read toys.spreader_bar.",
+      "diff": "spreader-bar-key.diff"
     }
   ]
 }
