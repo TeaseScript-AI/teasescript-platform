@@ -203,7 +203,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -1435,8 +1435,26 @@ async function keptSessionScenario(cdp, origin, profile) {
 
   await reloadOnceKept("One point");
   await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
-  await physicalClick(cdp, start);
-  await waitFor(cdp, `!!${choice("One point")}`);
+  // The choice appears as soon as Continue leaves the page. On a touch device the composer takes no focus then, so no
+  // software keyboard opens. (A desktop with a mouse gives it focus, but this headless browser reports no hover.)
+  const point = await value(
+    cdp,
+    `(() => { const rect = document.querySelector('${start}').getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+  );
+  await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  try {
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await waitFor(cdp, `!!${choice("One point")}`);
+    await delay(300);
+    assertEqual(
+      await value(cdp, `!!document.activeElement?.matches('[data-composer-input]')`),
+      false,
+      "The composer took focus after Continue on a device without hover",
+    );
+  } finally {
+    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
+  }
   assertEqual(
     await value(
       cdp,
