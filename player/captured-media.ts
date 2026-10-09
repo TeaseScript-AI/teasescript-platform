@@ -70,7 +70,7 @@ function isKind(value: unknown): value is CapturedMediaKind {
  * A random version 4 UUID. `crypto.randomUUID()` exists only in secure contexts, and the Player also runs over plain
  * HTTP on a local network; `crypto.getRandomValues()` exists everywhere.
  */
-function randomUuid(): string {
+export function randomUuid(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
