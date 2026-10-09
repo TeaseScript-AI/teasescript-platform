@@ -547,6 +547,12 @@ test("an operation that throws ends its session, and argument errors leave it us
     () => createRuntimeSession(plan, snapshot, { capabilities: { random: noNext } }),
     TypeError,
   );
+  // EVIDENCE: fixture: a builtin that is not a function is a deliberately malformed argument.
+  const notAFunction = { answer: 42 } as never;
+  assert.throws(
+    () => createRuntimeSession(plan, snapshot, { capabilities: { builtins: notAFunction } }),
+    { name: "TypeError", message: "capabilities.builtins.answer must be a function." },
+  );
   snapshot = run(plan, snapshot).snapshot;
   assert.deepEqual(
     usable.run().events,
@@ -662,6 +668,32 @@ test("a fork keeps each of its parent's capabilities that its options do not giv
     "7 first",
   ]);
   assert.deepEqual(said(parent.fork({ capabilities: { random: fixed(0.99) } })), ["42 last"]);
+});
+
+test("a fork admits only functions as builtins, and a session keeps the builtins it admitted", () => {
+  const plan = compileValidPlan('say "${answer()}", instant\nexit', { builtins: ["answer"] });
+  const builtins = { answer: () => 42 };
+  const parent = createRuntimeSession(plan, createImmediatePacingRuntimeSnapshot(plan), {
+    capabilities: { builtins },
+  });
+  // The session checked the function it uses, so a later change to the host's record does not reach it.
+  builtins.answer = () => 7;
+  const said = (session: RuntimeSession) =>
+    session.run().events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  // EVIDENCE: fixture: a builtin that is not a function is a deliberately malformed fork option.
+  const notAFunction = { answer: 42 } as never;
+  assert.throws(() => parent.fork({ capabilities: { builtins: notAFunction } }), {
+    name: "TypeError",
+    message: "capabilities.builtins.answer must be a function.",
+  });
+  // EVIDENCE: fixture: an explicit undefined, which an untyped caller may pass, gives no builtin.
+  const explicitlyNone = { answer: undefined } as never;
+  const withoutAnswer = parent.fork({ capabilities: { builtins: explicitlyNone } });
+  withoutAnswer.run();
+  assert.equal(withoutAnswer.view().failure?.code, "TSR011");
+  // The refused fork left the parent usable.
+  assert.deepEqual(said(parent.fork()), ["42"]);
+  assert.deepEqual(said(parent), ["42"]);
 });
 
 test("the other host operations, projections, and inspection give the snapshot API's results", () => {
