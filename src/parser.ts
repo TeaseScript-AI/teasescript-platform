@@ -1926,7 +1926,7 @@ class Parser {
     }
     this.#reportSpan(
       parserDiagnosticCode.invalidMediaForm,
-      "stopAudio takes no arguments; to stop one sound, keep its handle and call stop() on it.",
+      "stopAudio takes no arguments. To stop one sound, keep its handle and call stop() on it.",
       spanFrom(first.span, last.span),
     );
     return null;

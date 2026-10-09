@@ -280,7 +280,10 @@ test("media parse errors recover at the end of the line and keep enclosing block
   );
   // stopAudio names the fix: one sound stops through its handle.
   const stopOne = compileSource('let m = playAudio async "a.mp3"\nstopAudio m\nexit');
-  assert.match(stopOne.diagnostics[0]?.message ?? "", /keep its handle and call stop\(\)/u);
+  assert.equal(
+    stopOne.diagnostics[0]?.message,
+    "stopAudio takes no arguments. To stop one sound, keep its handle and call stop() on it.",
+  );
   const inBlock = compileSource('if true { stopAudio { a: 1 } }\nsay "next"\nexit');
   assert.deepEqual(
     inBlock.diagnostics.map((diagnostic) => diagnostic.code),

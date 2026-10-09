@@ -2858,7 +2858,7 @@ playAudio async "sounds/rain.mp3"
 stopAudio                    // stops both
 ```
 
-`stopAudio` takes no arguments; to stop one sound, keep its handle and call `stop()`. It stops every running or paused
+`stopAudio` takes no arguments. To stop one sound, keep its handle and call `stop()`. It stops every running or paused
 sound of the session, including sounds started in another file, in the order they started, as `stop()` on each handle
 would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
 A blocking `playAudio` stopped this way from a timer or cue block continues once that block returns. Video, the Stage
