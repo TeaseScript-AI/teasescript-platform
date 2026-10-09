@@ -163,13 +163,13 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   than a script limit, while the `×N` counts count all.
 - **Code** shows the draw's whole file, coloured by the compiler's own lexer with the theme's `syntax-*` roles: 7 lines
   by default, with the draw's line highlighted in the middle and the draw itself underlined. A file the lexer rejects
-  shows plain. **Show whole function**, **Show whole block** for a top-level statement of several lines, or **Show whole
-  file** fits that range together with the lines already shown, and **Show less** returns. Both blocks have **Copy
-  visible lines**, **Wrap long lines**, and **Expand** in their top-right corner, shown while the pointer is over the
-  block or one of them has keyboard focus, and always where the pointer cannot hover. A corner grip, also by arrow keys,
-  resizes a block by whole lines, keeping the draw's line in the middle. Expand shows the block large over the dimmed
-  page, at most 80% of the view's height, with the breadcrumb as its title; its X, Escape, or a click beside it closes
-  it.
+  shows plain. **Show whole function**, **Show whole block** for the smallest statement or block around the draw that
+  those lines do not show whole, or **Show whole file** fits that range together with the lines already shown, and
+  **Show less** returns. Both blocks have **Copy visible lines**, **Wrap long lines**, and **Expand** in their top-right
+  corner, shown while the pointer is over the block or one of them has keyboard focus, and always where the pointer
+  cannot hover. A corner grip, also by arrow keys, resizes a block by whole lines, keeping the draw's line in the
+  middle. Expand shows the block large over the dimmed page, at most 80% of the view's height, with the breadcrumb as
+  its title; its X, Escape, or a click beside it closes it.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
   (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
   controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools

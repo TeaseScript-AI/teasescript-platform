@@ -423,6 +423,38 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
   assert.deepEqual(presentation.randomDrawCode(source, site), code);
 });
 
+test("Show whole block fits the smallest statement or block around the draw that the default lines do not show whole", () => {
+  const say = (count: number, indent = "  ") =>
+    Array.from({ length: count }, (_, index) => `${indent}say "Step ${index + 1}", instant`);
+  const enclosing = (lines: readonly string[]) => {
+    const source = [...lines, "exit"].join("\n");
+    return presentation.randomDrawCode(source, listRandomSites(compiled(source))[0]!)!.enclosing;
+  };
+  // A draw in an `if` block of lines 9–19, inside a `repeat` of lines 1–32.
+  const nested = (inside: number) => [
+    "repeat 3 {",
+    ...say(7),
+    "  if true {",
+    ...say(inside, "    "),
+    "    let hit = chance(50)",
+    ...say(inside, "    "),
+    "  }",
+    ...say(12),
+    "}",
+  ];
+  assert.deepEqual(enclosing(nested(4)), { kind: "block", from: 9, to: 19 });
+  // An `if` block of lines 9–13 shows whole in the default lines 8–14, so the `repeat` around it is next.
+  assert.deepEqual(enclosing(nested(1)), { kind: "block", from: 1, to: 26 });
+  // A block the default lines show whole, with none around it, leaves nothing to show.
+  assert.equal(enclosing(["if true {", "  let hit = chance(50)", "}"]), null);
+  // A draw in a statement of one line, outside any block, fits the whole file.
+  assert.deepEqual(enclosing([...say(10, ""), "let hit = chance(50)", ...say(10, "")]), {
+    kind: "file",
+    from: 1,
+    to: 22,
+  });
+});
+
 test("earlier outcomes read like code, and each kind of draw offers its outcomes as its support allows", () => {
   const [order] = presentation.outcomeLines(['["red", "blue"]']);
   assert.deepEqual(
