@@ -23,7 +23,7 @@ const emit = defineEmits<{
     <ScrollArea data-form-fields class="-my-1.5 w-full">
       <div class="flex w-full min-w-0 flex-wrap justify-center gap-2 py-1.5">
         <template v-for="field in form.fields" :key="field.id">
-          <!-- A toggle is a pressed button; its mark and the announced state, not its look, show whether it is on. -->
+          <!-- A toggle button (aria-pressed): its mark and announced state, not its fill, show whether it is on. -->
           <Toggle
             v-if="field.kind === 'toggle'"
             as-child
@@ -87,9 +87,8 @@ const emit = defineEmits<{
   gap: 8px;
   padding-block-start: var(--player-entry-gap);
 }
-/* The edited field stays pressed in, besides its text and announced state. A toggle looks pressed in only while it is
-   pressed, as any action button does; its mark and announced state alone show whether it is on (owner decision,
-   2026-10-09). */
+/* The edited field stays pressed in, besides its text and announced state. A toggle does not: like any action button,
+   it looks pressed in only while held (Owner decision on #512, 2026-10-09). */
 [data-form-controls] [data-editing] {
   background: var(--story-choice-pressed);
   box-shadow: inset 0 1px 3px #00000030;
