@@ -603,10 +603,15 @@ export function unitNeedsStateCopy(
 /* ---------------------------------------------------------------------------------------------------------------- */
 
 /** `outcome` as a detached outcome when `support` admits it, otherwise why it does not. */
-export function checkedOutcome(support: RandomSupport, outcome: unknown): RandomOutcome | string {
+/** `outcome` checked for a draw of `support`; `keysOf` is the object whose own keys the outcome's shape counts. */
+export function checkedOutcome(
+  support: RandomSupport,
+  outcome: unknown,
+  keysOf: unknown = outcome,
+): RandomOutcome | string {
   const problem = outcomeProblem(support, outcome);
   if (problem !== null) return problem;
-  return isOutcomeShape(outcome)
+  return isOutcomeShape(outcome, keysOf)
     ? canonicalOutcome(outcome)
     : "An outcome holds only its kind and its value, index, or order.";
 }
@@ -693,29 +698,34 @@ function outcomeProblem(support: RandomSupport, outcome: unknown): string | null
 }
 
 /**
- * The outcome a host chose for a draw of `support`, with each of its own fields read once, so that the outcome the engine
- * checks is the one it uses, whatever the host's object does on later reads. The items of an `order` are read by index,
- * only when its length, read once, is the shuffle's; any other `order` is refused on its length, as before. Other
- * arrays are only tested for their type, which reads nothing from them.
+ * The fields of an outcome a host chose for a draw of `support`, each read once, so that the outcome the engine checks is
+ * the one it uses, whatever the host's object does on later reads: its `kind` and the one field that kind holds, which
+ * are all the check reads. The items of an `order` are read by index, only when its length, read once, is the
+ * shuffle's; any other `order` is refused on its length. The object's own keys are counted only once these pass.
  */
-function readOnce(
-  outcome: Record<string, unknown>,
-  support: RandomSupport,
-): Record<string, unknown> {
-  // Without a prototype, a field named `__proto__` stays a field.
-  const copy: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(outcome)) {
-    const value = outcome[key];
-    if (key !== "order" || !Array.isArray(value)) copy[key] = value;
-    else {
-      const length = value.length;
-      copy[key] =
-        support.kind === "order" && length === support.items.length
-          ? Array.from({ length }, (_, index) => value[index])
-          : null;
-    }
-  }
-  return copy;
+function readOnce(outcome: Record<string, unknown>, support: RandomSupport): ReadOutcome {
+  const kind = outcome.kind;
+  if (kind === "number" || kind === "boolean") return { kind, value: outcome.value };
+  if (kind === "index") return { kind, index: outcome.index };
+  if (kind !== "order") return { kind };
+  const order = outcome.order;
+  if (!Array.isArray(order)) return { kind, order };
+  const length = order.length;
+  return {
+    kind,
+    order:
+      support.kind === "order" && length === support.items.length
+        ? Array.from({ length }, (_, index) => order[index])
+        : null,
+  };
+}
+
+/** The fields of a chosen outcome that its check reads, each read once. */
+interface ReadOutcome {
+  readonly kind: unknown;
+  readonly value?: unknown;
+  readonly index?: unknown;
+  readonly order?: unknown;
 }
 
 /** A detached copy of an outcome the engine checked, holding only its own fields. */
@@ -1010,18 +1020,20 @@ export function validateRandomControl(
     errors.push("A pending random draw in an instruction needs a runnable script.");
 }
 
-function isOutcomeShape(value: unknown): value is RandomOutcome {
-  if (!isRecord(value)) return false;
+function isOutcomeShape(value: unknown, keysOf: unknown = value): value is RandomOutcome {
+  if (!isRecord(value) || !isRecord(keysOf)) return false;
   switch (value.kind) {
     case "number":
-      return hasExactKeys(value, ["kind", "value"]) && finite(value.value);
+      return hasExactKeys(keysOf, ["kind", "value"]) && finite(value.value);
     case "boolean":
-      return hasExactKeys(value, ["kind", "value"]) && typeof value.value === "boolean";
+      return hasExactKeys(keysOf, ["kind", "value"]) && typeof value.value === "boolean";
     case "index":
-      return hasExactKeys(value, ["kind", "index"]) && safeInteger(value.index) && value.index >= 0;
+      return (
+        hasExactKeys(keysOf, ["kind", "index"]) && safeInteger(value.index) && value.index >= 0
+      );
     case "order":
       return (
-        hasExactKeys(value, ["kind", "order"]) &&
+        hasExactKeys(keysOf, ["kind", "order"]) &&
         Array.isArray(value.order) &&
         value.order.every((index: unknown) => safeInteger(index) && index >= 0)
       );
@@ -1363,6 +1375,7 @@ export class RandomControl {
         const outcome = checkedOutcome(
           view.support,
           isRecord(chosen) ? readOnce(chosen, view.support) : chosen,
+          chosen,
         );
         answer = typeof outcome === "string" ? { refusal: outcome } : outcome;
       } else

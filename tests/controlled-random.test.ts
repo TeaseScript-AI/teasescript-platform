@@ -840,7 +840,8 @@ test("a chosen order is read item by item once, and only when its length fits th
   );
   assert.doesNotThrow(() => restoreRuntimeSession(chosen.exportCheckpoint()));
   // An order of another length is refused on its length without reading its items, however long it claims to be.
-  for (const wrong of [new Array(2 ** 32 - 1), [0, 1]]) {
+  // The short order first: if the length rule broke, the long one would exhaust memory rather than fail here.
+  for (const wrong of [[0, 1], new Array(2 ** 32 - 1)]) {
     let itemReads = 0;
     Object.defineProperty(wrong, 0, {
       enumerable: true,
@@ -861,6 +862,32 @@ test("a chosen order is read item by item once, and only when its length fits th
     assert.match(refused.run().randomRefusal?.message ?? "", /an order of all 3 items/);
     assert.equal(itemReads, 0);
   }
+});
+
+test("a chosen outcome's keys are counted only after the fields its kind holds pass", () => {
+  let keyLists = 0;
+  // An object whose key list could be as long as a typed array's; only its `kind` is read before it is refused.
+  const outcome = new Proxy<Record<string, unknown>>(
+    {},
+    {
+      ownKeys(target) {
+        keyLists += 1;
+        return Reflect.ownKeys(target);
+      },
+    },
+  );
+  const decision: RandomDecision = {
+    kind: "choose",
+    // EVIDENCE: fixture: a malformed outcome object, which the engine must refuse.
+    outcome: outcome as RandomOutcome,
+  };
+  const session = createFreshRuntimeSession(
+    compileValidPlan("let a = random()\nexit"),
+    {},
+    { randomControl: { decide: () => decision } },
+  );
+  assert.match(session.run().randomRefusal?.message ?? "", /random\(\) takes a number/);
+  assert.equal(keyLists, 0);
 });
 
 test("a run keeps its instruction budget across pauses", () => {
