@@ -137,7 +137,8 @@ async function copyText() {
   const current = preparation;
   let copied: boolean;
   try {
-    // Unavailable outside secure contexts and refusable; selecting the text then still lets the player copy it.
+    // Unavailable outside secure contexts and refusable; the selected text then copies the older way where the browser
+    // allows it, and otherwise stays selected so the player copies it with the browser.
     await navigator.clipboard.writeText(text.value);
     copied = true;
   } catch {
@@ -145,8 +146,13 @@ async function copyText() {
   }
   // A copy that settles after the dialog closed or the choice changed says nothing about the current export.
   if (current !== preparation) return;
+  if (!copied) {
+    const focused = document.activeElement;
+    selectText();
+    copied = document.execCommand("copy");
+    if (copied && focused instanceof HTMLElement) focused.focus();
+  }
   copyStatus.value = copied ? "copied" : "failed";
-  if (!copied) selectText();
 }
 
 function label(saved: SavedScript): string {

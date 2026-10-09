@@ -116,45 +116,70 @@ function resizeKey(event: KeyboardEvent) {
   setRows(rows.value + step);
 }
 
-// The lines at least partly in view, as text.
-function shownText(): string {
+// The lines at least partly in view, with their elements.
+function shownLines(): { line: CodeLine; element: HTMLElement }[] {
   const container = scroller.value;
-  if (container === null) return "";
+  if (container === null) return [];
   const top = container.scrollTop;
   const bottom = top + container.clientHeight;
-  return props.lines
-    .filter((line) => {
-      const element = lineElement(line.number);
-      return (
-        element !== null &&
-        element.offsetTop + element.offsetHeight > top &&
-        element.offsetTop < bottom
-      );
-    })
-    .map((line) => line.segments.map((segment) => segment.text).join(""))
-    .join("\n");
+  return props.lines.flatMap((line) => {
+    const element = lineElement(line.number);
+    return element !== null &&
+      element.offsetTop + element.offsetHeight > top &&
+      element.offsetTop < bottom
+      ? [{ line, element }]
+      : [];
+  });
 }
-const copied = ref(false);
+// Outside a secure context the clipboard API is missing; the selection route copies where the browser allows it, and
+// focus returns to where it was.
+function copyBySelection(text: string): boolean {
+  const focused = document.activeElement;
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
+  return copied;
+}
+// Where the browser refuses both routes, the lines in view are selected, so the player copies them with the browser.
+function selectLines(elements: readonly HTMLElement[]) {
+  const [first, last] = [elements[0], elements.at(-1)];
+  const selection = document.getSelection();
+  if (first === undefined || last === undefined || selection === null) return;
+  const range = document.createRange();
+  range.setStartBefore(first);
+  range.setEndAfter(last);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+const copyStatus = ref<"" | "copied" | "failed">("");
+const copyLabel = computed(() =>
+  copyStatus.value === "copied"
+    ? "Copied"
+    : copyStatus.value === "failed"
+      ? "Copying is not available here; the lines are selected, so copy them with the browser."
+      : "Copy visible lines",
+);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 async function copy() {
-  const text = shownText();
+  const shown = shownLines();
+  const text = shown.map(({ line }) => line.segments.map((segment) => segment.text).join("")).join("\n");
+  let copied = true;
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    // Outside a secure context the clipboard API is missing; the selection route still copies.
-    const area = document.createElement("textarea");
-    area.value = text;
-    area.setAttribute("readonly", "");
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.append(area);
-    area.select();
-    document.execCommand("copy");
-    area.remove();
+    copied = copyBySelection(text);
   }
-  copied.value = true;
+  if (!copied) selectLines(shown.map(({ element }) => element));
+  copyStatus.value = copied ? "copied" : "failed";
   clearTimeout(copiedTimer);
-  copiedTimer = setTimeout(() => (copied.value = false), 1500);
+  copiedTimer = setTimeout(() => (copyStatus.value = ""), 1500);
 }
 </script>
 
@@ -188,14 +213,14 @@ async function copy() {
           <Button
             variant="ghost"
             size="icon-sm"
-            :aria-label="copied ? 'Copied' : 'Copy visible lines'"
+            :aria-label="copyLabel"
             data-code-block-copy
             @click="copy"
           >
-            <component :is="copied ? Check : Copy" />
+            <component :is="copyStatus === 'copied' ? Check : Copy" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{{ copied ? "Copied" : "Copy visible lines" }}</TooltipContent>
+        <TooltipContent>{{ copyLabel }}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger as-child>

@@ -1643,6 +1643,45 @@ async function randomPickerScenario(cdp, origin) {
     await cdp.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: block.x, y: block.y });
     await waitFor(cdp, `${tools} === "1"`, 5_000, "The code's tools did not show on hover");
   } else assertEqual(await value(cdp, tools), "1", "The code's tools hid without hover");
+  // Without the clipboard API, as over plain HTTP, Copy copies the lines in view the older way and keeps focus; where
+  // the browser refuses that too, it selects them instead of claiming a copy.
+  const copyButton = `document.querySelector('[data-random-draw-source] [data-code-block-copy]')`;
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
+  );
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
+  await waitFor(
+    cdp,
+    `${copyButton}.getAttribute('aria-label') === "Copied"`,
+    5_000,
+    "Copy without the clipboard API did not copy",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `window.__copied?.includes("chance(25)") && document.activeElement === ${copyButton}`,
+    ),
+    true,
+    "Copy without the clipboard API lost the lines in view or the focus",
+  );
+  await evaluate(cdp, `document.execCommand = () => false;`);
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
+  await waitFor(
+    cdp,
+    `${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
+    5_000,
+    "A refused copy claimed to copy",
+  );
+  assertEqual(
+    await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
+    true,
+    "A refused copy did not select the lines in view",
+  );
+  await evaluate(
+    cdp,
+    `delete document.execCommand; delete navigator.clipboard; document.getSelection().removeAllRanges();`,
+  );
   await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
   await waitFor(
     cdp,
@@ -3729,10 +3768,11 @@ async function savedDataExportScenario(cdp, origin, profile) {
     gunzipSync(downloaded).toString("utf8"),
     "The text holds the same export as the file",
   );
-  // Refused clipboard access leaves the text selected for copying by hand.
+  // Refused clipboard access, where the browser also refuses copying the selection, leaves the text selected for
+  // copying by hand.
   await evaluate(
     cdp,
-    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) } });`,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) } }); document.execCommand = () => false;`,
   );
   await physicalClick(cdp, "[data-export-copy]");
   await waitFor(
@@ -3746,6 +3786,24 @@ async function savedDataExportScenario(cdp, origin, profile) {
     ),
     true,
     "The refused copy did not select the text",
+  );
+  // Without the clipboard API, as over plain HTTP, the selected text copies the older way, and focus stays on Copy.
+  await evaluate(
+    cdp,
+    `delete document.execCommand; window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
+  );
+  await physicalClick(cdp, "[data-export-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `window.__copied === document.querySelector('[data-export-text]').value && document.activeElement === document.querySelector('[data-export-copy]')`,
+    ),
+    true,
+    "Copy without the clipboard API did not copy the text or lost the focus",
   );
   await evaluate(
     cdp,
