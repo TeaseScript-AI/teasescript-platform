@@ -40,10 +40,10 @@ say "Points ${points}"
 // A Date reads its milliseconds as a number, so a variable it sets starts at 0.
 let started = 0
 function mark {
-  started = getTimestamp().toMilliseconds()
+  started = getAbsoluteDateTime().toMilliseconds()
 }
 mark()
-say "Took ${getTimestamp().toMilliseconds() - started}"
+say "Took ${getAbsoluteDateTime().toMilliseconds() - started}"
 // A function's own counter starts at 0 too, also where another function names a text the same.
 function fill(n) {
   let i = 0

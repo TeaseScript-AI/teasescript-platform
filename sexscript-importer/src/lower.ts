@@ -62,7 +62,6 @@ import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
-import { timeName } from "./time-model.ts";
 import {
   BOOLEAN,
   inferType,
@@ -2791,7 +2790,7 @@ function withNestedStatements(
 }
 
 /**
- * A loop that only redraws a countdown until `waited = getTimestamp().toSeconds() - start` reaches a limit kept the
+ * A loop that only redraws a countdown until `waited = getAbsoluteDateTime().toSeconds() - start` reaches a limit kept the
  * legacy player busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
  * body that only shows text and sets its own locals before recomputing `waited`, it becomes a visible timer over the
  * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text; a limit not above 0 runs no timer, as
@@ -2938,7 +2937,7 @@ function isRepeatableBound(value: IrExpression): boolean {
   }
 }
 
-/** The start variable of `waited = getTimestamp().toSeconds() - start` (declaration or assignment), or null. */
+/** The start variable of `waited = getAbsoluteDateTime().toSeconds() - start` (declaration or assignment), or null. */
 function elapsedStart(statement: IrStatement, waited: string): string | null {
   const value =
     statement.kind === "let" && statement.name === waited
@@ -2961,13 +2960,13 @@ function elapsedStart(statement: IrStatement, waited: string): string | null {
 }
 
 /**
- * The current Unix time in seconds, which legacy code used for elapsed time and "how long ago": a `timestamp` is the
+ * The current Unix time in seconds, which legacy code used for elapsed time and "how long ago": an `absoluteDateTime` is the
  * fixed moment for that, while local date and time values have no zone (#532).
  */
 function currentSeconds(): IrExpression {
   return {
     kind: "methodCall",
-    target: { kind: "call", name: "getTimestamp", positional: [], named: {} },
+    target: { kind: "call", name: "getAbsoluteDateTime", positional: [], named: {} },
     name: "toSeconds",
     arguments: [],
   };
@@ -2979,7 +2978,7 @@ function isCurrentSeconds(value: IrExpression): boolean {
     value.name === "toSeconds" &&
     value.arguments.length === 0 &&
     value.target.kind === "call" &&
-    value.target.name === "getTimestamp" &&
+    value.target.name === "getAbsoluteDateTime" &&
     value.target.positional.length === 0
   );
 }
@@ -13990,7 +13989,7 @@ function dateFormat(
         context,
         "SX_DATE_FROM_SECONDS",
         "warning",
-        `Workaround: TeaseScript builds no ${timeName("timestamp")} from a Unix number (#532), so the moment is the current ${timeName("timestamp")} minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
+        `Workaround: TeaseScript builds no absoluteDateTime from a Unix number (#532), so the moment is the current absoluteDateTime minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
         node.span,
       );
       return {
@@ -14006,7 +14005,7 @@ function dateFormat(
       context,
       node,
       "SX_DATE_FORMAT",
-      `This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no ${timeName("timestamp")} or date from a number (#532). Store and load the ${timeName("timestamp")} or datetime itself, then format it.`,
+      `This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no absoluteDateTime or date from a number (#532). Store and load the absoluteDateTime or datetime itself, then format it.`,
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
@@ -14042,8 +14041,8 @@ function dateFormat(
 }
 
 /**
- * `new Date(milliseconds)` as a timestamp: the current timestamp minus the exact seconds since that moment, since
- * TeaseScript builds no timestamp from a number (#532). Null for another receiver, undefined after a diagnostic.
+ * `new Date(milliseconds)` as an absoluteDateTime: the current one minus the exact seconds since that moment, since
+ * TeaseScript builds no absoluteDateTime from a number (#532). Null for another receiver, undefined after a diagnostic.
  */
 function unixDate(node: AstNode, context: LowerContext): IrExpression | null | undefined {
   const args = nodeArray(asNode(node.arguments)?.items);
@@ -14074,7 +14073,12 @@ function unixDate(node: AstNode, context: LowerContext): IrExpression | null | u
     secondsNode !== null
       ? value
       : { kind: "binary", operator: "/", left: value, right: { kind: "literal", value: 1000 } };
-  const now: IrExpression = { kind: "call", name: "getTimestamp", positional: [], named: {} };
+  const now: IrExpression = {
+    kind: "call",
+    name: "getAbsoluteDateTime",
+    positional: [],
+    named: {},
+  };
   return {
     kind: "binary",
     operator: "-",
@@ -15053,7 +15057,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_POPUP_ELAPSED",
         "warning",
-        `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with ${timeName("getTimestamp")}().toSeconds(), in whole seconds.`,
+        `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.`,
         node.span,
       );
       // Legacy timing started once the message was computed.

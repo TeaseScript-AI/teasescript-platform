@@ -168,7 +168,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `show(x)` | `say x` | `show` replaced the text area; `show(null)`/`show()` only cleared it and are dropped. |
 | `showButton(label)` | `showButton label` | Legacy default timeout was 30 days. |
 | `showButton(label, n)` / its result | `showButton label, timeout: n s` / `(showButton label, timeout: n s) / 1 s` | Compact timeout form (#531, implemented in #534); the elapsed result is a duration, legacy returned seconds. The timeout names its unit: `timeout: 30 s` for a number, `timeout: t * 1 s` for a value known at runtime (#512). |
-| `showPopup(x)` | `showPopup x` | Accepted, not implemented yet; a used elapsed result is measured with `getTimestamp().toSeconds()`. |
+| `showPopup(x)` | `showPopup x` | Accepted, not implemented yet; a used elapsed result is measured with `getAbsoluteDateTime().toSeconds()`. |
 | `getBoolean(text[, yes, no])` | `say text` + `(choose yes: ..., no: ...) == "yes"` | First button means true; default labels Yes/No. |
 | `getSelectedValue(text, [a, b])` | `say text` + `choose 0: a, 1: b` | Numeric values return the zero-based index. A runtime list becomes `{ value, text }` choice objects (PR #515). |
 | `getString` / `getFloat` | `say text` + `askText default: d` / `askNumber default: d` | A null or blank default opens the input without a prefill (#618); legacy showed it. Cancel-to-null is lost. |
@@ -176,7 +176,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `getImage(text)` | `takePhoto()` | Camera only (V30 §33, not implemented yet); the legacy file-chooser fallback is dropped. |
 | `getBooleans(t, values, defaults)` | `askBooleans(message:, texts:, defaults:)` | Native (#668); with `cancel:` where the script tests the answers for null, as the dialog's Cancel gave null. |
 | `getRandom(max)` | `randomInteger(0..max)` | Exclusive upper bound; `list[getRandom(list.size())]` becomes `list.random`. |
-| `getTime()` | `getTimestamp().toSeconds()` | Unix seconds (#532); TeaseScript `getTime()` is a time-of-day value. |
+| `getTime()` | `getAbsoluteDateTime().toSeconds()` | Unix seconds (#532, #759); TeaseScript `getTime()` is a time-of-day value. |
 | `wait(n)`, `sleep(ms)` | `wait n s`, `wait ms ms` | The unit applies to the whole expression, which is parenthesized where it ends with a number: `wait (randomInteger(0..5) + 2) s` (#512). |
 | `waitWithGauge(n)` | `timer n s` | Gauge styling is presentation. |
 | `save(k, v)` / `save(k, null)` | `save v as k` / `delete k` | Legacy `save` also removed dotted sub-keys `k.*`. |

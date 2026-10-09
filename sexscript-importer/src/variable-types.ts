@@ -1,7 +1,6 @@
 import { isRecord } from "./ast.ts";
 import { helperCall } from "./helpers.ts";
 import type { IrExpression, IrFunctionParameter, IrStatement } from "./ir.ts";
-import { timeName } from "./time-model.ts";
 
 /**
  * A TeaseScript variable keeps its declared or inferred type (V30 §12, #519): an `integer` may receive a `number`
@@ -23,8 +22,8 @@ export type TeaseType =
   /** A declared union of writable types (ADR 0021 §3), none of them null, optional, or itself a union. */
   | { kind: "union"; members: TeaseType[] }
   | { kind: "object" | "range" | "dict" }
-  /** A local date, time, or datetime, or a fixed timestamp (#532). */
-  | { kind: "temporal"; name: "date" | "time" | "datetime" | "timestamp" };
+  /** A local date, time, or datetime, or a fixed moment (#532, #759). */
+  | { kind: "temporal"; name: "date" | "time" | "datetime" | "absoluteDateTime" };
 
 const SCALAR_NAMES = ["string", "integer", "number", "boolean", "duration"] as const;
 type ScalarName = (typeof SCALAR_NAMES)[number];
@@ -1911,7 +1910,7 @@ function typeName(type: TeaseType): string {
     case "union":
       return type.members.map(typeName).join(" | ");
     case "temporal":
-      return timeName(type.name);
+      return type.name;
     default:
       return type.kind;
   }
@@ -2075,11 +2074,11 @@ const TEXT_RESULTS = new Map<string, TeaseType>([
 ]);
 
 /** The current-time getters of #532 and what they return. */
-const TEMPORAL_GETTERS = new Map<string, "date" | "time" | "datetime" | "timestamp">([
+const TEMPORAL_GETTERS = new Map<string, "date" | "time" | "datetime" | "absoluteDateTime">([
   ["getDate", "date"],
   ["getTime", "time"],
   ["getDateTime", "datetime"],
-  ["getTimestamp", "timestamp"],
+  ["getAbsoluteDateTime", "absoluteDateTime"],
 ]);
 
 /** Members of a dict (#536). */

@@ -66,7 +66,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "getDate",
   "getDateTime",
   "getTime",
-  "getTimestamp",
+  "getAbsoluteDateTime",
   "max",
   "min",
   "openUrl",
@@ -85,7 +85,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "toNumber",
   "toString",
   "toTime",
-  "toTimestamp",
+  "toAbsoluteDateTime",
 ]);
 
 export interface PackageOptions {
@@ -160,7 +160,7 @@ function withLaunchMarkers(
   if (![first, last, count].some((name) => texts.has(name!))) return program;
   const now: IrExpression = {
     kind: "methodCall",
-    target: { kind: "call", name: "getTimestamp", positional: [], named: {} },
+    target: { kind: "call", name: "getAbsoluteDateTime", positional: [], named: {} },
     name: "toSeconds",
     arguments: [],
   };

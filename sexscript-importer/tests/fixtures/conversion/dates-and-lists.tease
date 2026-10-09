@@ -43,8 +43,8 @@ let stamp = getDate().toISO()
 say "Status of ${stamp} at ${getTime().formatTime()}, day ${dayOfYear} ${sameDay}"
 // A date built from Unix seconds is the current moment minus the seconds since then, shown in the local date form.
 let lockedSince = load "training.lockedSince", default: 1790000000
-// NOTE SX_DATE_FROM_SECONDS line 24: Workaround: TeaseScript builds no timestamp from a Unix number (#532), so the moment is the current timestamp minus the seconds since then; Java's pattern "dd, MMM, yyyy" becomes the player's local date form.
-say "Locked since ${(getTimestamp() - (getTimestamp().toSeconds() - toInteger(lockedSince)) * 1 s).formatDate()}"
+// NOTE SX_DATE_FROM_SECONDS line 24: Workaround: TeaseScript builds no absoluteDateTime from a Unix number (#532), so the moment is the current absoluteDateTime minus the seconds since then; Java's pattern "dd, MMM, yyyy" becomes the player's local date form.
+say "Locked since ${(getAbsoluteDateTime() - (getAbsoluteDateTime().toSeconds() - toInteger(lockedSince)) * 1 s).formatDate()}"
 // A list + a value that may be a list or one element appends at runtime what Groovy appended.
 function pickAll(impl) {
   return ([] + sexscriptLegacyListPart(impl)).length

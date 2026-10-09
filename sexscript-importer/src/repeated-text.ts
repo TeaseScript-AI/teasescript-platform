@@ -546,7 +546,7 @@ const PURE_CALLS: ReadonlySet<string> = new Set([
   "max",
   "randomInteger",
   "abs",
-  "getTimestamp",
+  "getAbsoluteDateTime",
   "sexscriptLegacyLoadFloat",
   "sexscriptLegacyLoadInteger",
   "sexscriptLegacyValue",

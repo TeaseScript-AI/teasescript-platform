@@ -2,7 +2,7 @@
  * java.util.Calendar and java.util.Date as TeaseScript date and time values (#532). Like the rest of the importer, a
  * Calendar or Date becomes a `datetime`, the player's local date and time: fields read its properties (months from
  * 1, Monday-based weekdays), `add` adds an exact duration for time fields and a calendar duration for day, month, and
- * year fields, `before`/`after` compare, and Unix milliseconds go through `toTimestamp()`. A Java Date was a moment, so
+ * year fields, `before`/`after` compare, and Unix milliseconds go through `toAbsoluteDateTime()`. A Java Date was a moment, so
  * the operations that read it as one carry a note: a local date and time names two moments in the hour that the
  * autumn daylight-saving change repeats.
  *
@@ -333,13 +333,13 @@ const method = (target: IrExpression, name: string): IrExpression => ({
 });
 
 /** The moment of Unix time 0, from which a number of milliseconds counts. */
-const EPOCH = call("toTimestamp", literal("1970-01-01T00:00:00Z"));
+const EPOCH = call("toAbsoluteDateTime", literal("1970-01-01T00:00:00Z"));
 
 /** Unix milliseconds of a local date and time. */
 function milliseconds(value: IrExpression): IrExpression {
   return {
     kind: "methodCall",
-    target: { kind: "methodCall", target: value, name: "toTimestamp", arguments: [] },
+    target: { kind: "methodCall", target: value, name: "toAbsoluteDateTime", arguments: [] },
     name: "toMilliseconds",
     arguments: [],
   };
@@ -428,7 +428,7 @@ export function temporalCall(
   if (owner === "System" && name === "currentTimeMillis" && args.length === 0)
     return {
       kind: "methodCall",
-      target: call("getTimestamp"),
+      target: call("getAbsoluteDateTime"),
       name: "toMilliseconds",
       arguments: [],
     };
@@ -438,7 +438,7 @@ export function temporalCall(
   if (args.length === 0 && currentMilliseconds(receiver, name))
     return {
       kind: "methodCall",
-      target: call("getTimestamp"),
+      target: call("getAbsoluteDateTime"),
       name: "toMilliseconds",
       arguments: [],
     };
@@ -665,7 +665,7 @@ export function temporalStatement(
           : binary("+", base, binary("*", whole(amount), duration));
       // Time model 2 adds elapsed time to a moment only, so the date and time goes through its moment and back.
       if (!calendar && timeModel() === 2)
-        return assign(method(step(method(target, "toTimestamp")), "toDateTime"));
+        return assign(method(step(method(target, "toAbsoluteDateTime")), "toDateTime"));
       return assign(step(target));
     }
     case "set": {
