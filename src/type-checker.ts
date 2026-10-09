@@ -83,7 +83,9 @@ import {
   builtinShapeProblems,
   COLLECTION_CHANGES,
   COLLECTION_METHODS,
+  noteSharing,
   rootName,
+  type Sharing,
   collectionMethodProblems,
   expressionLabel,
   memberProblems,
@@ -219,8 +221,11 @@ export interface TypeCheckOptions {
     readonly path: string;
     readonly tags: readonly PlanTag[] | null;
   }[];
-  /** The declarations of the variables that a timer, media, or button block shares and assigns, from name checking. */
-  readonly sharedWrites?: ReadonlySet<VariableSite>;
+  /**
+   * The declarations of the variables that a timer, media, or button block shares and assigns or changes in place, with
+   * how, from name checking.
+   */
+  readonly sharedWrites?: ReadonlyMap<VariableSite, Sharing>;
 }
 
 export interface TypeCheckResult {
@@ -580,8 +585,11 @@ interface Variable {
   readonly declaration?: Declaration | undefined;
   /** Whether a type is written for the variable: a `let` or parameter with a type annotation. */
   readonly annotated?: boolean;
-  /** Whether a function or a timer or media block may assign it, so a call or suspension cancels its narrowing. */
-  readonly shared: boolean;
+  /**
+   * Whether a function or a timer or media block may assign it or change its value in place, so a call or suspension
+   * cancels its narrowing, or for a change in place only the narrowing that the change can undo.
+   */
+  readonly shared: Sharing | false;
 }
 
 /**
@@ -803,13 +811,13 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
-  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
+  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Map(), loops: new Map() };
 
-  /** The declarations of the variables that a block shares and assigns (see {@link VariableSite}). */
-  readonly #sharedWrites: ReadonlySet<VariableSite>;
+  /** The declarations of the variables that a block shares and assigns or changes in place (see {@link VariableSite}). */
+  readonly #sharedWrites: ReadonlyMap<VariableSite, Sharing>;
 
-  /** The globals that a function or a timer or media block of any file assigns. */
-  #sharedGlobals: ReadonlySet<string> = new Set();
+  /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
+  #sharedGlobals: ReadonlyMap<string, Sharing> = new Map();
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
@@ -996,7 +1004,7 @@ class TypeChecker {
     this.#decided = decided;
     this.#copies = copies;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
-    this.#sharedWrites = options.sharedWrites ?? new Set();
+    this.#sharedWrites = options.sharedWrites ?? new Map();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
@@ -1050,13 +1058,13 @@ class TypeChecker {
   public check(programs: readonly Program[]): void {
     const effects = programs.map(programEffects);
     const loops = new Map(effects.flatMap((fileEffects) => [...fileEffects.loops]));
-    const sharedGlobals = new Set<string>();
+    const sharedGlobals = new Map<string, Sharing>();
     for (const fileEffects of effects)
-      for (const name of fileEffects.shared) sharedGlobals.add(name);
+      for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
     // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
     if (effects.some((fileEffects) => fileEffects.callsFiles))
       for (const fileEffects of effects)
-        for (const name of fileEffects.rootAssigned) sharedGlobals.add(name);
+        for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
     this.#sharedGlobals = sharedGlobals;
     const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
     for (const [file, program] of programs.entries())
@@ -1066,7 +1074,7 @@ class TypeChecker {
             statement,
             this.#declareFunction(statement, file, this.#project),
           );
-    this.#effects = { shared: new Set(), loops };
+    this.#effects = { shared: new Map(), loops };
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -1780,9 +1788,9 @@ class TypeChecker {
       type,
       shared:
         statement.kind === "globalStatement"
-          ? this.#sharedGlobals.has(name)
+          ? (this.#sharedGlobals.get(name) ?? false)
           : scope === this.#root
-            ? this.#effects.shared.has(name)
+            ? (this.#effects.shared.get(name) ?? false)
             : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
@@ -1793,11 +1801,11 @@ class TypeChecker {
   }
 
   /**
-   * Whether a timer, media, or button block shares and assigns the variable of this declaration, so that a suspension
-   * may change it (rule 5.5, V30 §14).
+   * Whether a timer, media, or button block shares and assigns the variable of this declaration or changes it in place,
+   * so that a suspension may change it (rule 5.5, V30 §14).
    */
-  #sharedLocal(site: VariableSite): boolean {
-    return this.#sharedWrites.has(site);
+  #sharedLocal(site: VariableSite): Sharing | false {
+    return this.#sharedWrites.get(site) ?? false;
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -1813,18 +1821,21 @@ class TypeChecker {
 
   /**
    * A wait, interaction, call, or other point where a handler or function may run: forget what is known about variables
-   * that they may assign (rule 5.5).
+   * that they may assign, or that a change they may make in place may undo (rule 5.5).
    */
   #suspend(): void {
-    this.#flow.forget(sharedVariable);
+    this.#flow.forgetShared((variable, type) => undoneBy(variable, type, variable.shared));
   }
 
   /** At the start of a loop: forget what its body (or a call or suspension in it) may change on an earlier iteration. */
   #widen(body: Block): void {
-    const effects = this.#effects.loops.get(body) ?? { assigned: new Set(), suspends: true };
-    this.#flow.forget(
-      (variable) => effects.assigned.has(variable.name) || (effects.suspends && variable.shared),
-    );
+    const effects = this.#effects.loops.get(body) ?? { writes: new Map(), suspends: true };
+    this.#flow.forget((variable, type) => {
+      const written = effects.writes.get(variable.name) ?? false;
+      const shared = effects.suspends ? variable.shared : false;
+      const how = written === "assigns" || shared === "assigns" ? "assigns" : written || shared;
+      return undoneBy(variable, type, how);
+    });
   }
 
   /**
@@ -6630,9 +6641,16 @@ class Flow {
     return changes;
   }
 
-  forget(test: (variable: Variable) => boolean): void {
-    for (const fact of allFacts(test === sharedVariable ? this.#shared : this.#facts))
-      if (test(fact.variable)) this.set(fact.variable, undefined);
+  /** Forgets what is known about the variables where `test` holds. */
+  forget(test: (variable: Variable, type: StaticType) => boolean): void {
+    for (const fact of allFacts(this.#facts))
+      if (test(fact.variable, fact.type)) this.set(fact.variable, undefined);
+  }
+
+  /** Forgets what is known about variables that other code may change, where `test` holds. */
+  forgetShared(test: (variable: Variable, type: StaticType) => boolean): void {
+    for (const fact of allFacts(this.#shared))
+      if (test(fact.variable, fact.type)) this.set(fact.variable, undefined);
   }
 
   /**
@@ -6733,13 +6751,37 @@ function allFacts(root: FactNode | undefined): Fact[] {
   return facts;
 }
 
-function sharedVariable(variable: Variable): boolean {
-  return variable.shared;
+/**
+ * Whether a change of the kind `how` may undo what is known about a variable: its narrowed `type`. An assignment may
+ * undo anything. A change in place keeps the variable on the same list, set, dict, or object, so it is never null after
+ * it, but it may change which type that value has: an empty list that both `integer[]` and `string[]` hold may take a
+ * text, and a list that `xs is integer[]` found among the lists of a `list` may too. So only a declared member itself,
+ * the only one of its kind, stays known.
+ */
+function undoneBy(variable: Variable, type: StaticType, how: Sharing | false): boolean {
+  if (how !== "changes") return how === "assigns";
+  const declared = members(variable.type).map(resolved);
+  if (declared.some((member) => member.kind === "unknown" || member.kind === "open")) return true;
+  return members(type).some((member) => {
+    const value = resolved(member);
+    if (
+      value.kind !== "list" &&
+      value.kind !== "set" &&
+      value.kind !== "dict" &&
+      value.kind !== "object"
+    )
+      return false;
+    const sameKind = declared.filter((other) => other.kind === value.kind);
+    return sameKind.length !== 1 || sameKind[0] !== value;
+  });
 }
 
-/** What one iteration of a loop may do before the next test: the variables it assigns, and whether it may suspend. */
+/**
+ * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
+ * may suspend.
+ */
 interface LoopEffects {
-  readonly assigned: ReadonlySet<string>;
+  readonly writes: ReadonlyMap<string, Sharing>;
   readonly suspends: boolean;
 }
 
@@ -6762,10 +6804,10 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
 
 /** What a program's loops and functions may change (ADR 0021 rule 5.5). */
 interface ProgramEffects {
-  /** Names that function bodies and timer or media blocks assign. */
-  readonly shared: ReadonlySet<string>;
-  /** Names that the file's top level assigns, which another file's `call` may run (ADR 0022 §5). */
-  readonly rootAssigned: ReadonlySet<string>;
+  /** Names that function bodies and timer or media blocks assign or change in place. */
+  readonly shared: ReadonlyMap<string, Sharing>;
+  /** Names that the file's top level assigns or changes, which another file's `call` may run (ADR 0022 §5). */
+  readonly rootAssigned: ReadonlyMap<string, Sharing>;
   /** Whether the file calls a file, so another file's top level may run during the call. */
   readonly callsFiles: boolean;
   /** Whether the file enters `main.tease` again at its top, after the start values have run. */
@@ -6777,7 +6819,7 @@ interface ProgramEffects {
 interface LoopNode {
   readonly body: Block;
   readonly parent: LoopNode | null;
-  readonly assigned: Set<string>;
+  readonly writes: Map<string, Sharing>;
   suspends: boolean;
 }
 
@@ -6790,8 +6832,12 @@ type EffectWork =
  * include those of the loops inside it, but not those of timer or media blocks it starts, which run later.
  */
 function programEffects(program: Program): ProgramEffects {
-  const shared = new Set<string>();
-  const rootAssigned = new Set<string>();
+  const shared = new Map<string, Sharing>();
+  const rootAssigned = new Map<string, Sharing>();
+  const write = (name: string, how: Sharing, loop: LoopNode | null, inside: boolean): void => {
+    noteSharing(inside ? shared : rootAssigned, name, how);
+    if (loop !== null) noteSharing(loop.writes, name, how);
+  };
   let callsFiles = false;
   let entersMain = false;
   const nodes: LoopNode[] = [];
@@ -6805,7 +6851,7 @@ function programEffects(program: Program): ProgramEffects {
       work.push({ statement: statements[index]!, loop, inside });
   };
   const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
-    const node: LoopNode = { body, parent, assigned: new Set(), suspends: false };
+    const node: LoopNode = { body, parent, writes: new Map(), suspends: false };
     nodes.push(node);
     return node;
   };
@@ -6836,11 +6882,7 @@ function programEffects(program: Program): ProgramEffects {
         COLLECTION_CHANGES.has(callee.property.name)
       ) {
         const root = rootName(callee.object);
-        if (root !== null) {
-          if (inside) shared.add(root);
-          else rootAssigned.add(root);
-          loop?.assigned.add(root);
-        }
+        if (root !== null) write(root, "changes", loop, inside);
       }
       handlers(expression);
       for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
@@ -6859,15 +6901,11 @@ function programEffects(program: Program): ProgramEffects {
       entersMain = true;
     // The `default:` form of a global assigns it where the declaration runs.
     if (statement.kind === "globalStatement" && statement.assignment !== null)
-      (inside ? shared : rootAssigned).add(statement.name.name);
+      noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it, too.
       const root = rootName(statement.target);
-      if (root !== null) {
-        if (inside) shared.add(root);
-        else rootAssigned.add(root);
-        loop?.assigned.add(root);
-      }
+      if (root !== null) write(root, "assigns", loop, inside);
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }
@@ -6900,7 +6938,7 @@ function programEffects(program: Program): ProgramEffects {
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const node = nodes[index]!;
     if (node.parent === null) continue;
-    for (const name of node.assigned) node.parent.assigned.add(name);
+    for (const [name, how] of node.writes) noteSharing(node.parent.writes, name, how);
     node.parent.suspends ||= node.suspends;
   }
   return {
@@ -6909,7 +6947,7 @@ function programEffects(program: Program): ProgramEffects {
     callsFiles,
     entersMain,
     loops: new Map(
-      nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
+      nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
     ),
   };
 }

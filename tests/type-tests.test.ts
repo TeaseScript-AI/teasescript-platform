@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/script-storage.js";
@@ -252,6 +253,46 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
       `${list}repeat 2 {\n    if xs is integer[] {\n        let n: integer = xs[0]\n    }\n    xs[0] = "x"\n}\nexit`,
     ).snapshot.failure,
     null,
+  );
+});
+
+test("a change in place keeps a null check, but not a test the change may undo", () => {
+  // The check cannot be decided at compile time, so only what the change keeps is tested.
+  const pick =
+    "function pick(n: integer): integer[]? {\n    if n > 0 {\n        return [1]\n    }\n    return null\n}\n";
+  const values = `${pick}let values: integer[]? = pick(1)\n`;
+  // A timer adds to the list, which stays a list: after the wait, the check still holds.
+  const added = `${values}timer async 1 s {\n    if values != null {\n        values.add(3)\n    }\n}\nif values != null {\n    wait 2 s\n    values.add(4)\n    say "${"${values.length}"}"\n}\nexit`;
+  assert.deepEqual(errors(added), []);
+  const plan = compileValidPlan(added);
+  let step = run(plan, createFreshRuntimeSnapshot(plan, { baseDelayMs: 0 }));
+  step = run(plan, observeTime(plan, step.snapshot, 2_000).snapshot);
+  assert.deepEqual(
+    step.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["3"],
+  );
+  // So does a list that a loop adds to, also one that clears it.
+  for (const change of ["names.add(name)", "names.clear()"])
+    assert.deepEqual(
+      sayTexts(
+        `let names: string[] | null = []\nfor name in ["a", "b"] {\n    ${change}\n}\nsay "${"${names.length}"}"\nexit`,
+      ),
+      [change.endsWith("clear()") ? "0" : "2"],
+      change,
+    );
+  // An assignment may make it null.
+  assert.deepEqual(
+    errors(
+      `${values}timer async 1 s {\n    values = null\n}\nif values != null {\n    wait 2 s\n    say "${"${values.length}"}"\n}\nexit`,
+    ),
+    [["TSV043", "values"]],
+  );
+  // An empty list is both a list of integers and a list of text, so a timer may add text to it.
+  assert.deepEqual(
+    errors(
+      'let items: integer[] | string[] = []\ntimer async 1 s {\n    if items is string[] {\n        items.add("x")\n    }\n}\nif items is integer[] {\n    wait 2 s\n    let n: integer = items[0]\n}\nexit',
+    ),
+    [["TSV041", "items[0]"]],
   );
 });
 
