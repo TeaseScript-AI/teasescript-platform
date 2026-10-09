@@ -933,7 +933,9 @@ specification defines dedent.
 
 Unterminated nested content remains structured: `TSL003` reports an unterminated single-line string, `TSL004` reports
 an unterminated block string, and `TSL005` reports an unterminated interpolation. A quote at a valid expression-start
-position begins a nested string. A quote that cannot begin an expression remains the outer string's recovery boundary.
+position begins a nested string. In a single-line string, so does a quote inside a bracket, parenthesis, or brace that
+the interpolation opened when two more quotes follow on its line, such as the label of a command in a list or the text
+of a `say` in a block. Any other quote remains the outer string's recovery boundary.
 
 ### Canonical source-to-runtime route
 

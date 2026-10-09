@@ -185,6 +185,11 @@ interface SharedParse {
    * the program; where only text written out in quotes is allowed, they count as failed, without a further error.
    */
   readonly recoveredStrings: WeakSet<StringLiteral>;
+  /**
+   * For each newline token, the index of the first newline of its run and of the token after the run, so that skipping
+   * a run, or giving it back after a missing closer, costs the same at every level of nesting.
+   */
+  readonly newlineRuns: { readonly starts: Int32Array; readonly ends: Int32Array };
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -304,6 +309,7 @@ class Parser {
       closers: null,
       sayValues: new Map(),
       recoveredStrings: new WeakSet(),
+      newlineRuns: newlineRuns(tokens),
     },
   ) {
     this.#shared = shared;
@@ -846,7 +852,7 @@ class Parser {
       this.#skipNewlines();
     }
     if (!this.#match(TokenKind.RightParenthesis)) {
-      this.#reportInsertion(
+      this.#reportMissingCloser(
         parserDiagnosticCode.expectedDelimiter,
         "Expected ')' after the text and pacing of 'say'.",
       );
@@ -936,7 +942,7 @@ class Parser {
       }
       if (this.#match(TokenKind.RightParenthesis)) endSpan = this.#previous().span;
       else
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedExpression,
           "Expected ')' after presentation options.",
         );
@@ -2141,7 +2147,7 @@ class Parser {
       }
     }
     if (!this.#match(TokenKind.RightParenthesis)) {
-      this.#reportInsertion(
+      this.#reportMissingCloser(
         parserDiagnosticCode.expectedDelimiter,
         `Expected ')' after the ${command.lexeme} arguments.`,
       );
@@ -2470,7 +2476,7 @@ class Parser {
       if (inner === null) return null;
       this.#skipContinuationNewlines();
       if (!this.#match(TokenKind.RightParenthesis)) {
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedDelimiter,
           "Expected ')' after the grouped type.",
         );
@@ -2923,7 +2929,7 @@ class Parser {
         }
       }
       if (!this.#match(TokenKind.RightParenthesis)) {
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedDelimiter,
           "Expected ')' after the function parameters.",
         );
@@ -3629,7 +3635,7 @@ class Parser {
     let end = left.span;
     if (this.#match(TokenKind.RightParenthesis)) end = this.#previous().span;
     else {
-      this.#reportInsertion(
+      this.#reportMissingCloser(
         parserDiagnosticCode.expectedDelimiter,
         "Expected ')' after the function arguments.",
       );
@@ -4340,7 +4346,7 @@ class Parser {
     this.#skipNewlines();
     if (expression === null || !this.#match(TokenKind.RightParenthesis)) {
       if (expression !== null) {
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedDelimiter,
           "Expected ')' after the expression.",
         );
@@ -4682,8 +4688,21 @@ class Parser {
   #consumeClosingDelimiter(kind: TokenKind, message: string): SourceSpan {
     this.#skipNewlines();
     if (this.#match(kind)) return this.#previous().span;
-    this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, message);
+    this.#reportMissingCloser(parserDiagnosticCode.expectedDelimiter, message);
     return this.#previous().span;
+  }
+
+  /**
+   * Reports a missing closing delimiter where its line ends: the newlines skipped while looking for it are given back,
+   * so the statement on the next line still parses, as after `f("a"`.
+   */
+  #reportMissingCloser(
+    code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
+    message: string,
+  ): void {
+    if (this.#current > 0 && this.#previous().kind === TokenKind.Newline)
+      this.#current = this.#shared.newlineRuns.starts[this.#current - 1]!;
+    this.#reportInsertion(code, message);
   }
 
   #finishStatement(inBlock: boolean): void {
@@ -4799,10 +4818,10 @@ class Parser {
     );
   }
 
+  /** Newline tokens delimit statements unless a caller explicitly skips them. */
   #skipNewlines(): void {
-    while (this.#match(TokenKind.Newline)) {
-      // Newline tokens delimit statements unless a caller explicitly skips them.
-    }
+    if (this.#check(TokenKind.Newline))
+      this.#current = this.#shared.newlineRuns.ends[this.#current]!;
   }
 
   #skipContinuationNewlines(): void {
@@ -5127,6 +5146,17 @@ function delimiterClosers(tokens: readonly Token[]): Map<number, number> {
     }
   });
   return closers;
+}
+
+function newlineRuns(tokens: readonly Token[]): SharedParse["newlineRuns"] {
+  const starts = new Int32Array(tokens.length);
+  const ends = new Int32Array(tokens.length);
+  const newline = (index: number) => tokens[index]?.kind === TokenKind.Newline;
+  for (let index = 0; index < tokens.length; index += 1)
+    starts[index] = newline(index) && newline(index - 1) ? starts[index - 1]! : index;
+  for (let index = tokens.length - 1; index >= 0; index -= 1)
+    ends[index] = !newline(index) ? index : newline(index + 1) ? ends[index + 1]! : index + 1;
+  return { starts, ends };
 }
 
 function bracketContexts(tokens: readonly Token[]): boolean[] {

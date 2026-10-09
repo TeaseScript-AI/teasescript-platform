@@ -121,6 +121,35 @@ test("keeps structured recovery at an outer quote boundary", () => {
   );
 });
 
+test("a quote inside brackets or a block of an interpolation starts a nested string", () => {
+  const source =
+    'say "${[showPermanentButton "Hint" { say "y" }].length} ${[timer async 5 s "Label" { say "z" }].length}"\nexit';
+  const compiled = compileSource(source);
+  assert.deepEqual(compiled.diagnostics, []);
+  const execution = run(compiled.plan!, createFreshRuntimeSnapshot(compiled.plan!));
+  assert.deepEqual(
+    execution.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["1 1"],
+  );
+  // Without the quotes that would close a nested string, a quote after a value inside brackets ends the outer string.
+  const recovered = lex('say "${[1, 2"\nexit');
+  assert.deepEqual(
+    recovered.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL005"],
+  );
+  assert.deepEqual(
+    recovered.tokens.slice(-4).map((token) => token.kind),
+    [TokenKind.StringEnd, TokenKind.Newline, TokenKind.KeywordExit, TokenKind.EndOfFile],
+  );
+  // A block string ends only at `"""`, which inside brackets also keeps ending it, so the next line still parses.
+  const block = parse('say """${[1, 2"""\nlet = 5\nexit');
+  assert.deepEqual(
+    block.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL005", "TSP017", "TSP013"],
+  );
+  assert.equal(block.program.statements.at(-1)?.kind, "exitStatement");
+});
+
 test("keeps exact ordered diagnostics for malformed nested strings", () => {
   const cases = [
     [
