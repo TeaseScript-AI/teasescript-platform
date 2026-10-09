@@ -263,6 +263,18 @@ export interface LoadAlias {
 /** Stands for a computed part of a storage key pattern. */
 export const KEY_PLACEHOLDER = "\u0000";
 
+/**
+ * A function's own code: its loads with a key template, its calls of functions, the variables it reads and those it
+ * assigns, declares, or loops over, and the literal keys it loads.
+ */
+interface Code {
+  readonly loads: Data[];
+  readonly calls: Data[];
+  readonly names: Set<string>;
+  readonly bound: Set<string>;
+  readonly keys: Set<string>;
+}
+
 /** How many helper calls deep a key template's parts are followed to the arguments of the call a condition reads. */
 const HELPER_DEPTH = 3;
 
@@ -331,8 +343,8 @@ export class DataFlow {
   readonly #instructions: readonly Data[];
   /** The instructions a jump, condition, or loop goes to. */
   readonly #jumpTargets = new Set<number>();
-  /** Each function's own code, by its ID: its template loads and its calls; made when first needed. */
-  #code: Map<number, { loads: Data[]; calls: Data[] }> | null = null;
+  /** Each function's own code, by its ID ({@link Code}); made when first needed. */
+  #code: Map<number, Code> | null = null;
 
   /**
    * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
@@ -437,9 +449,10 @@ export class DataFlow {
   /**
    * The one stored key that a key pattern a condition at instruction `at` reads stands for, when every read of it there
    * names that key with constants: a load whose template's computed parts are literals or variables that only ever hold
-   * one literal, or a load in a helper whose result the condition reads, with the helper's parameters as the arguments
-   * of the call that gave that result right before (also in the helpers it calls, a few calls deep). The pattern
-   * otherwise.
+   * one literal, or a load in a helper whose result the condition reads, with the helper's parameters that its code
+   * does not assign as the arguments of the call that gave that result right before (also in the helpers it calls, a
+   * few calls deep). The pattern otherwise, also when the pattern can come another way: through a variable, a stored
+   * value, or a helper call that names no key.
    */
   keyAt(pattern: string, condition: unknown, at: number): string {
     if (!pattern.includes(KEY_PLACEHOLDER)) return pattern;
@@ -449,7 +462,9 @@ export class DataFlow {
       if (!isRecord(value)) return;
       if (value.kind === "storageLoad" && keyText(value.key) === pattern)
         keys.add(this.#keyNamed(value.key, new Map()));
-      else if (value.kind === "identifier" && typeof value.name === "string") {
+      else if (value.kind === "storageLoad") {
+        if (this.#stored.get(keyText(value.key) ?? "")?.keys.has(pattern) === true) keys.add(null);
+      } else if (value.kind === "identifier" && typeof value.name === "string") {
         if (this.#variables.get(value.name)?.keys.has(pattern) === true) keys.add(null);
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
         if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
@@ -466,9 +481,10 @@ export class DataFlow {
   }
 
   /**
-   * The keys of a key pattern that a helper call loads: in the helper's own code, with its parameters as the call's
-   * arguments (`passed` gives the caller's own parameters theirs), and in the helpers it calls, `depth` calls deep; null
-   * for a load that names no one key.
+   * The keys of a key pattern that a helper call loads: in the helper's own code, with its parameters that the code
+   * does not assign as the call's arguments (`passed` gives the caller's own parameters theirs), and in the helpers it
+   * calls, `depth` calls deep; null for a load that names no one key, and for the pattern coming another way: through a
+   * variable the code does not assign, a stored value, or a call that names no key.
    */
   #keysCalled(
     call: Data,
@@ -476,22 +492,28 @@ export class DataFlow {
     passed: ReadonlyMap<unknown, unknown>,
     depth: number,
   ): (string | null)[] {
-    const helper = Number(call.functionId);
+    const code = this.#codeOf(Number(call.functionId));
     const parameters = new Map(
-      list(call.arguments).map((argument) => {
-        const value = record(argument.value);
-        const outer = value.kind === "identifier" && passed.has(value.name);
-        return [argument.parameterName, outer ? passed.get(value.name) : argument.value];
-      }),
+      list(call.arguments)
+        .filter((argument) => !code.bound.has(String(argument.parameterName)))
+        .map((argument) => {
+          const value = record(argument.value);
+          const outer = value.kind === "identifier" && passed.has(value.name);
+          return [argument.parameterName, outer ? passed.get(value.name) : argument.value];
+        }),
     );
-    const code = this.#codeOf(helper);
     const keys = code.loads
       .filter((load) => keyText(load.key) === pattern)
       .map((load) => this.#keyNamed(load.key, parameters));
+    for (const name of code.names)
+      if (!code.bound.has(name) && this.#variables.get(name)?.keys.has(pattern) === true)
+        keys.push(null);
+    for (const key of code.keys)
+      if (this.#stored.get(key)?.keys.has(pattern) === true) keys.push(null);
     for (const inner of code.calls) {
       if (this.#functions.get(Number(inner.functionId))?.keys.has(pattern) !== true) continue;
-      if (depth === 0) keys.push(null);
-      else keys.push(...this.#keysCalled(inner, pattern, parameters, depth - 1));
+      const named = depth === 0 ? [] : this.#keysCalled(inner, pattern, parameters, depth - 1);
+      keys.push(...(named.length === 0 ? [null] : named));
     }
     return keys;
   }
@@ -538,27 +560,46 @@ export class DataFlow {
     return null;
   }
 
-  /** A function's own code: its loads with a key template, and its calls of functions. */
-  #codeOf(functionId: number): { loads: Data[]; calls: Data[] } {
+  /** A function's own code ({@link Code}). */
+  #codeOf(functionId: number): Code {
+    const empty = (): Code => ({
+      loads: [],
+      calls: [],
+      names: new Set(),
+      bound: new Set(),
+      keys: new Set(),
+    });
     if (this.#code === null) {
-      const found = new Map<number, { loads: Data[]; calls: Data[] }>();
-      const walk = (value: unknown, code: { loads: Data[]; calls: Data[] }): void => {
+      const found = new Map<number, Code>();
+      const walk = (value: unknown, code: Code): void => {
         if (Array.isArray(value)) value.forEach((item) => walk(item, code));
         if (!isRecord(value)) return;
-        if (value.kind === "storageLoad" && record(value.key).kind === "template")
-          code.loads.push(value);
-        for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item, code);
+        const key = value.kind === "storageLoad" ? record(value.key) : null;
+        if (key?.kind === "template") code.loads.push(value);
+        else if (key?.kind === "literal" && typeof key.value === "string") code.keys.add(key.value);
+        if (value.kind === "identifier" && typeof value.name === "string")
+          code.names.add(value.name);
+        for (const [field, item] of Object.entries(value)) if (field !== "span") walk(item, code);
       };
       this.#instructions.forEach((instruction, index) => {
         const owner = this.functionAt(index);
-        const code = found.get(owner) ?? { loads: [], calls: [] };
+        const code = found.get(owner) ?? empty();
         found.set(owner, code);
         if (instruction.kind === "callFunction") code.calls.push(instruction);
+        const bound =
+          instruction.kind === "assign"
+            ? [targetName(instruction.target)]
+            : instruction.kind === "declareBinding" || instruction.kind === "declareGlobal"
+              ? [instruction.name]
+              : instruction.kind === "loopStart"
+                ? [instruction.variable, instruction.valueVariable]
+                : [];
+        for (const name of bound) if (typeof name === "string") code.bound.add(name);
         walk(instruction, code);
       });
       this.#code = found;
     }
-    return this.#code.get(functionId) ?? { loads: [], calls: [] };
+    return this.#code.get(functionId) ?? empty();
   }
 
   /** The asks, stored keys, and clock reads an expression's value comes from. */

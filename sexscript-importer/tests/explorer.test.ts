@@ -1320,6 +1320,34 @@ test(
 );
 
 test(
+  "a key template stays a pattern where a helper rebinds the parameter that names its key, or where its result also reads the template another way",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'global KNIFE = "knife"\nlet kind = choose rope: "Rope", saw: "Saw"\n' +
+      'let spare = load("gear.${kind}", default: false)\n' +
+      'function owns(item) {\n  return load("gear.${item}", default: false) == true\n}\n' +
+      'function plural(item) {\n  item = "${item}s"\n  return load("gear.${item}", default: false) == true\n}\n' +
+      "function either(item) {\n  return owns(item) or spare == true\n}\n" +
+      'showButton "Go"\nif owns(KNIFE) {\n  say "One."\n}\nif plural(KNIFE) {\n  say "Two."\n}\n' +
+      'if either(KNIFE) {\n  say "Three."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const flow = new DataFlow(plan, instructions);
+    const keys = instructions.flatMap((instruction, index) =>
+      instruction.kind === "jumpIfFalse" && flow.functionAt(index) === 0
+        ? [flow.keyAt("gear.\u0000", instruction.condition, index).replaceAll("\u0000", "*")]
+        : [],
+    );
+    // `owns` names its key; `plural` rebinds `item` first; `either` also reads `spare`, which any key of it may be.
+    assert.deepEqual(keys, ["gear.knife", "gear.*", "gear.*"]);
+  },
+);
+
+test(
   "with progress leads, a loop that runs until one variable reaches another is followed to its end beside a wide tree of choices",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
