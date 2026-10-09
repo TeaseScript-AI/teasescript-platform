@@ -61,6 +61,11 @@ export function describeShownValue(value: SerializableRuntimeValue): string {
   return describeValue(value);
 }
 
+/** A value where a message lists the texts it accepts: text as it is quoted, and any other value as `describeShownValue`. */
+export function shownChoice(value: SerializableRuntimeValue): string {
+  return typeof value === "string" ? quotedText(messageText(value)) : describeShownValue(value);
+}
+
 /** How to make the part that does not fit fit: round a fraction, convert text, or check for null. */
 function typeFix({ value, type }: TypeMismatch): string {
   const kinds = new Set(
@@ -100,7 +105,7 @@ export function storedValueMismatch(
     mismatch.path === ""
       ? `is ${describeValue(value)}`
       : `has ${describeValue(mismatch.value)} at ${mismatch.path}`;
-  return `Storage key ${JSON.stringify(key)} is loaded as ${describeType(type)} here, but the saved value ${saved}. This load uses its default; the saved value is kept.`;
+  return `Storage key ${JSON.stringify(key)} is loaded as ${describeType(type)} here, but the saved value ${saved}. This load uses its default, and the saved value is kept.`;
 }
 
 interface TypeMismatch {

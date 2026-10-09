@@ -624,7 +624,7 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   const errors = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
   assert.deepEqual(errors('let a = askBooleans(texts: ["A", "B"], prefill: [true])'), [
-    "askBooleans has 2 texts but 1 prefill values; give one for each text.",
+    "askBooleans has 2 texts but 1 prefill value. Give one prefill value for each text.",
   ]);
   assert.deepEqual(errors('let a = askBooleans("Q", texts: ["A"])'), [
     `askBooleans needs prefill:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
@@ -644,7 +644,10 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   const failure = run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure;
   assert.deepEqual(
     [failure?.code, failure?.message],
-    ["TSR058", "askBooleans has 2 texts but 1 prefill values; give one for each text."],
+    [
+      "TSR058",
+      "askBooleans has 2 texts but 1 prefill value. Give one prefill value for each text.",
+    ],
   );
   // A host cannot configure the engine's name as its own.
   for (const option of ["builtins", "globals"] as const)

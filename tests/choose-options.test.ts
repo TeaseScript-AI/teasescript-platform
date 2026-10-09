@@ -377,9 +377,13 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose [{ text: "A", color: "red" }]',
       "TSV029",
-      "Choice objects support value, text, and background only.",
+      "A choice object can only have 'value', 'text', and 'background', but this one has 'color'. Remove it.",
     ],
-    ["let x = choose [{ value: 1 }]", "TSV029", "A choice object requires text."],
+    [
+      "let x = choose [{ value: 1 }]",
+      "TSV029",
+      "A choice object needs a 'text' property to label its button.",
+    ],
     [
       'let x = choose [{ text: "A", value: 1..2 }]\nexit',
       "TSV029",
@@ -393,7 +397,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose [{ text: "A", background: ["red"] }]\nexit',
       "TSV029",
-      "Expected an opaque CSS button background colour.",
+      'A button background must be an opaque CSS colour, such as "#336699".',
     ],
     [
       "let x = choose [1..2]\nexit",
@@ -433,12 +437,12 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose { text: "A", background: 1 second }',
       "TSV029",
-      "Expected an opaque CSS button background colour.",
+      'A button background must be an opaque CSS colour, such as "#336699".',
     ],
     [
       'let shade: duration? = 1 s\nshowButton "Go", background: shade\nexit',
       "TSV029",
-      "Expected an opaque CSS button background colour.",
+      'A button background must be an opaque CSS colour, such as "#336699".',
     ],
     [
       'speaker vera {}\nlet x = choose as vera speaker, "B"\nexit',
@@ -495,7 +499,10 @@ test("choice options known only at runtime are checked before the choice opens",
       'function options {\n    return [{ text: "A", value: "a" }]\n}\nlet x = choose k: options()\nexit',
       "Keep one.",
     ],
-    ['let o = [{ value: "a" }]\nlet x = choose o\nexit', "A choice object requires text."],
+    [
+      'let o = [{ value: "a" }]\nlet x = choose o\nexit',
+      "A choice object needs a 'text' property to label its button.",
+    ],
     ['let o = [{ text: "A", value: ["a"] }]\nlet x = choose o\nexit', "or a date or time value."],
     // The compiler rejects a known set or range element itself; `dynamic` hides it until the choice opens.
     [

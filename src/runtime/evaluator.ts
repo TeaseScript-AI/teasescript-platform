@@ -116,12 +116,7 @@ import {
   stringLength,
 } from "./string-operations.js";
 import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
-import {
-  LOAD_KEY_MESSAGE,
-  findScriptStorageEntry,
-  storageKey,
-  storageKeyPlace,
-} from "./script-storage.js";
+import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
   addSerializableSetValue,
   clearSerializableSet,
@@ -182,6 +177,7 @@ import {
 import {
   assertValueType,
   describeShownValue,
+  shownChoice,
   describeValue as describeTypedValue,
   matchesValueType,
   storedValueMismatch,
@@ -1101,7 +1097,7 @@ export class Evaluator {
             continue;
           }
           if (frame.stage === 1) {
-            const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
+            const key = storageKey(result.value, "load", expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
             if (
               entry !== undefined &&
@@ -1185,7 +1181,11 @@ export class Evaluator {
         );
       }
       if (isSpeakerReference(location.binding.value)) {
-        throw fault("TSR034", `Cannot replace speaker '${target.name}'.`, target.span);
+        throw fault(
+          "TSR034",
+          `Cannot replace speaker '${target.name}': a speaker stays the same for the whole session. Change its properties instead, such as '${target.name}.name'.`,
+          target.span,
+        );
       }
       detachPreparedReferencesForMutation(this.snapshot, {
         rootFrameId: location.frame.id,
@@ -1561,7 +1561,7 @@ export class Evaluator {
     if (value.items.length === 0)
       throw fault(
         "TSR019",
-        "An interpolated list must contain at least one element to select from.",
+        "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
         span,
       );
     if (!value.items.every(isVisibleScalar))
@@ -2358,7 +2358,11 @@ export class Evaluator {
       warning = setTimerDisplay(timer, timerDisplayValue(value, span));
     } else if (name === "remaining" || name === "repeatDuration") {
       if (!isDuration(value)) {
-        throw fault("TSR050", `Timer ${name} must be assigned a duration such as 10 s.`, span);
+        throw fault(
+          "TSR050",
+          `Timer ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
+          span,
+        );
       }
       exactDurationMilliseconds(value, `Timer ${name}`, span);
       if (name === "remaining") {
@@ -2374,7 +2378,7 @@ export class Evaluator {
         ) {
           throw fault(
             "TSR050",
-            "Timer repeatDuration must be a positive representable duration.",
+            `Timer repeatDuration must be longer than zero and short enough for scene time to reach, but this is ${describeShownValue(value)}.`,
             span,
           );
         }
@@ -2449,7 +2453,11 @@ export class Evaluator {
     const media = this.#media(handle, span);
     if (name === "volume") {
       if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
-        throw fault("TSR050", "Media volume must be a number from 0 through 1.", span);
+        throw fault(
+          "TSR050",
+          `Media volume must be a number from 0 through 1, but this is ${describeShownValue(value)}.`,
+          span,
+        );
       }
       this.#mediaWarning(setMediaVolume(media, value), span);
       return;
@@ -2462,7 +2470,11 @@ export class Evaluator {
       );
     }
     if (!isDuration(value) || !Number.isFinite(value.milliseconds)) {
-      throw fault("TSR050", `Media ${name} must be assigned a duration such as 10 s.`, span);
+      throw fault(
+        "TSR050",
+        `Media ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
+        span,
+      );
     }
     exactDurationMilliseconds(value, `Media ${name}`, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
@@ -2493,10 +2505,18 @@ export class Evaluator {
         span,
       );
     if (value !== "window" && value !== "stage")
-      throw fault("TSR050", 'Camera placement must be "window" or "stage".', span);
+      throw fault(
+        "TSR050",
+        `Camera placement must be "window" or "stage", but this is ${shownChoice(value)}.`,
+        span,
+      );
     const view = this.#cameraView();
     if (!view.shown) {
-      this.#warn("TSW010", "This camera view is hidden; showCamera shows it again.", span);
+      this.#warn(
+        "TSW010",
+        "This camera view is hidden, so its placement is not visible until showCamera shows it again.",
+        span,
+      );
       return;
     }
     view.placement = value;
@@ -2536,7 +2556,7 @@ export class Evaluator {
     if (typeof value !== "string")
       throw fault(
         "TSR050",
-        `Message text must be text (string), not ${describeRuntimeValue(value)}.`,
+        `Message property 'text' must be text (string), but this is ${describeShownValue(value)}. Convert it with toString(...) first.`,
         span,
       );
     const index = this.#liveMessage(handle, span);
@@ -3778,7 +3798,7 @@ function assertRepresentableRound(nowMs: number, remainingMs: number, span: Sour
   if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
     throw fault(
       "TSR050",
-      "Timer remaining time is outside the supported session-time range.",
+      `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }
@@ -3789,7 +3809,11 @@ function timerDisplayValue(
   span: SourceSpan,
 ): "visible" | "mystery" | "hidden" {
   if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
+  throw fault(
+    "TSR050",
+    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
+    span,
+  );
 }
 
 function optionalSpeakerString(
@@ -3806,7 +3830,11 @@ function optionalSpeakerString(
       span,
     );
   if (typeof value !== "string")
-    throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
+    throw fault(
+      "TSR030",
+      `Speaker property '${name}' must be text (string), but this is ${describeShownValue(value)}.`,
+      span,
+    );
   return value;
 }
 
@@ -3817,7 +3845,11 @@ function setSpeakerProperty(
   span: SourceSpan,
 ): void {
   if (name === "defaultSaySkippable" && typeof value !== "boolean") {
-    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+    throw fault(
+      "TSR050",
+      `Speaker property 'defaultSaySkippable' must be true or false (boolean), but this is ${describeShownValue(value)}.`,
+      span,
+    );
   }
   const property = speaker.properties.find((item) => item.name === name);
   if (property === undefined)

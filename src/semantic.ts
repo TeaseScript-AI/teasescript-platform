@@ -948,7 +948,7 @@ class SemanticValidator {
       if (!media.async) {
         this.#report(
           semanticCode.invalidMedia,
-          `Blocking media cannot repeat indefinitely; use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
+          `Blocking media cannot repeat indefinitely. Use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
           repeat.span,
         );
       }
@@ -1029,7 +1029,7 @@ class SemanticValidator {
           if (media.repeat?.kind === "indefinite" || isIndefiniteRepeatValue(media.repeat)) {
             this.#report(
               semanticCode.invalidMedia,
-              "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+              "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.",
               cue.keywordSpan,
             );
           }
@@ -2259,7 +2259,7 @@ class SemanticValidator {
     if (text !== undefined && normalizeOpaqueColor(text) === null)
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "Expected an opaque CSS button background colour.",
+        'A button background must be an opaque CSS colour, such as "#336699".',
         expression.span,
       );
   }
@@ -2315,7 +2315,7 @@ class SemanticValidator {
     if (!entry.properties.some((property) => property.name.name === "text"))
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "A choice object requires text.",
+        "A choice object needs a 'text' property to label its button.",
         entry.span,
       );
     for (const property of entry.properties) {
@@ -2331,7 +2331,7 @@ class SemanticValidator {
       else if (name !== "value")
         this.#report(
           semanticCode.invalidInteractionChoice,
-          "Choice objects support value, text, and background only.",
+          `A choice object can only have 'value', 'text', and 'background', but this one has '${name}'. Remove it.`,
           property.name.span,
         );
     }

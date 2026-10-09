@@ -28,11 +28,11 @@ export function presentationPropertyDiagnostics(
   if (text === undefined || expression.kind === "nullLiteral") return [];
   let message: string | null = null;
   if ((name === "color" || name === "background") && normalizeColor(text) === null)
-    message = "Invalid authored colour.";
+    message = `A message's ${name} must be a CSS colour, such as "#336699".`;
   if ((name === "position" || name === "align") && !["left", "center", "right"].includes(text))
-    message = `Invalid ${name}; expected left, center or right.`;
+    message = `A message's ${name} must be "left", "center", or "right".`;
   if ((name === "presentation" || name === "kind") && text !== "bubble" && text !== "prose")
-    message = "Invalid presentation; expected bubble or prose.";
+    message = `A message's presentation must be "bubble" or "prose".`;
   return message === null
     ? []
     : [createDiagnostic(DiagnosticSeverity.Error, "TSC008", message, expression.span)];

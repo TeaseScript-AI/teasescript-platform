@@ -3644,7 +3644,7 @@ class TypeChecker {
     )
       this.#report(
         typeCode.invalidOperand,
-        `askBooleans has ${textsList.elements.length} texts but ${prefillList.elements.length} prefill values; give one for each text.`,
+        `askBooleans has ${textsList.elements.length} texts but ${prefillList.elements.length} prefill ${prefillList.elements.length === 1 ? "value" : "values"}. Give one prefill value for each text.`,
         prefillList.span,
       );
     const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
@@ -5539,7 +5539,7 @@ class TypeChecker {
     if (value.elements.length === 0)
       this.#report(
         typeCode.unshowableValue,
-        "An interpolated list must contain at least one element to select from.",
+        "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
         value.span,
       );
     for (const element of value.elements)
@@ -5580,7 +5580,7 @@ class TypeChecker {
     if (isKnown(nonNullType(type)) && !isScalar(nonNullType(type), "string"))
       this.#report(
         typeCode.invalidInteractionChoice,
-        "Expected an opaque CSS button background colour.",
+        'A button background must be an opaque CSS colour, such as "#336699".',
         expression.span,
       );
   }

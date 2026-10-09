@@ -246,7 +246,7 @@ test("a timeout the compiler cannot know fails at runtime before the button appe
       source: 'function pick(value) {\n  return value\n}\nlet limit = pick("5")',
       message: "greater than zero",
     },
-    { source: "let limit = 1e300", message: "outside the supported session-time range" },
+    { source: "let limit = 1e300", message: "too long for scene time to reach" },
   ]) {
     const plan = compileValidPlan(`${source}\nlet elapsed = showButton "Go", timeout: limit\nexit`);
     const result = run(plan, createFreshRuntimeSnapshot(plan));
