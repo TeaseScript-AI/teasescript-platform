@@ -349,7 +349,7 @@ export function temporalBinary(
       if (isCalendar(duration))
         throw fault(
           "TSR009",
-          "An absolute date and time has no calendar. Convert it first, as in '(moment.toDateTime() + 1 calendar month).toAbsoluteDateTime()'.",
+          "An absolute date and time has no calendar. Convert it first, as in '(value.toDateTime() + 1 calendar day).toAbsoluteDateTime()'.",
           span,
         );
       return absoluteDateTime(

@@ -7696,7 +7696,7 @@ function operatorMessage(
     return `'${operator}' compares two numbers, two texts, two durations, or two calendar durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
   if (operator === "/" && mixedDurations)
-    return "'/' cannot divide a calendar duration and a duration by each other. A calendar day or month has no fixed length.";
+    return "'/' cannot divide a calendar duration and a duration by each other. A calendar day or month has no fixed length. Divide two calendar durations, or two durations.";
   const joined =
     operator === "+" && expression.kind === "binaryExpression"
       ? joinMessage(expression, left!, right!)
