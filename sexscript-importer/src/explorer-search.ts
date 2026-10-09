@@ -635,10 +635,21 @@ export interface ExploreResult {
     /** With quit-anywhere next visits: those started from the storage of a state a session did not complete. */
     quitVisits?: number;
     /**
-     * By session number (the first session first): the sessions started, and the explored states that completed one,
-     * such as how often a long first session came to its end, which later sessions need.
+     * By session number, the depth of a session (the first session of a new player first): the sessions started; the
+     * explored states that completed one, such as how often a long first session came to its end, which later sessions
+     * need; the runtime operations its sessions ran; the coverable lines its sessions reached first, and those of them
+     * reached in the last quarter of those operations, its marginal gain; the condition ways it took first; and its
+     * states (or stored values) that came closer to what a missed way needs.
      */
-    bySession: { started: number[]; completed: number[] };
+    bySession: {
+      started: number[];
+      completed: number[];
+      operations: number[];
+      linesFirst: number[];
+      linesFirstLastQuarter: number[];
+      waysFirst: number[];
+      closer: number[];
+    };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -657,6 +668,16 @@ export interface ExploreResult {
     staticContradictions: number;
     files: FileCoverage[];
     unvisitedBranches: UnvisitedBranch[];
+    /**
+     * Lines play reached, by the session numbers that ran them, as observed (a line no first session ran may still not
+     * need a later one): those only a new player's first session ran, such as an intro; by the smallest session number
+     * that ran them; and per file, those only the first session ran and those it never ran.
+     */
+    bySession: {
+      onlyFirst: number;
+      least: number[];
+      files: { path: string; onlyFirst: number; notFirst: number }[];
+    };
   };
   directed: {
     /** Condition ways steps had left one way when directed search looked at them. */
@@ -1834,6 +1855,48 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     sinceProgress.clear();
   };
   const waysTaken = new Uint8Array(instructions.length * 2);
+  /**
+   * What each session number (each depth: 1 for a new player's first session) did, indexed by it: the runtime
+   * operations its steps ran, the condition ways it took first, and its states that came closer to what a missed way
+   * needs. Operations go to the session whose runtime runs them ({@link working}).
+   */
+  const depthWork: number[] = [0, 0];
+  const depthWays: number[] = [];
+  const depthCloser: number[] = [];
+  let depthNow = 1;
+  let depthMark = 0;
+  /** Charges the operations run since the last call to the session that ran them; the next ones run in `depth`. */
+  const working = (depth: number): void => {
+    depthWork[depthNow] = (depthWork[depthNow] ?? 0) + session.operations - depthMark;
+    depthMark = session.operations;
+    depthNow = depth;
+  };
+  /**
+   * Coverable lines (a file's line that an instruction starts on), by instruction (-1 for none): per line, the session
+   * that reached it first and the operations that session had run by then, the smallest session that ran it, and
+   * whether a session after the first did. Play with or without chosen random outcomes, as line coverage counts it.
+   */
+  const lineIds = new Int32Array(instructions.length).fill(-1);
+  const lineFiles: string[] = [];
+  {
+    const known = new Map<string, number>();
+    instructions.forEach((instruction, index) => {
+      const line = compactSpan(instruction.span)?.line;
+      if (line == null) return;
+      const key = `${files[index]}\u0000${line}`;
+      let id = known.get(key);
+      if (id === undefined) {
+        id = lineFiles.length;
+        known.set(key, id);
+        lineFiles.push(files[index]!);
+      }
+      lineIds[index] = id;
+    });
+  }
+  const lineFirst = new Uint16Array(lineFiles.length);
+  const lineFirstWork = new Float64Array(lineFiles.length);
+  const lineLeast = new Uint16Array(lineFiles.length);
+  const lineLater = new Uint8Array(lineFiles.length);
   // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
   /**
@@ -1975,6 +2038,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ? null
       : (lead ?? (parent !== null && active(parent.lead) ? parent.lead : null));
     const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
+    // The lines the step ran, for the session that ran them; its operations go to that session too.
+    const depth = start.session;
+    working(depth);
+    if (!clock)
+      for (const instruction of step.instructions) {
+        const line = lineIds[instruction] ?? -1;
+        if (line < 0) continue;
+        if (lineFirst[line] === 0) {
+          lineFirst[line] = depth;
+          lineFirstWork[line] = depthWork[depth] ?? 0;
+          lineLeast[line] = depth;
+        } else if (depth < lineLeast[line]!) lineLeast[line] = depth;
+        if (depth > 1) lineLater[line] = 1;
+      }
     const stepItems = items === null ? NO_ITEMS : items.of(step, clock);
     let first = false;
     for (const item of stepItems) {
@@ -2035,6 +2112,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
     const newWay = step.ways.some((way) => waysTaken[way] === 0);
+    if (newWay) depthWays[depth] = (depthWays[depth] ?? 0) + 1;
     for (const way of step.ways) waysTaken[way] = 1;
     if (step.newInstructions > 0) progressed("code");
     else if (newWay) progressed("ways");
@@ -2187,6 +2265,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * the explorer or the runtime, counted with the engine errors; null then.
    */
   const restore = (node: Node, snapshot: TaggedSnapshot): Runtime | null => {
+    working(starts[node.start]!.session);
     try {
       return session.restoreTagged(snapshot);
     } catch (error) {
@@ -2203,6 +2282,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * way.
    */
   const step = (node: Node, runtime: Runtime, input: ExplorerInput): Step | null => {
+    working(starts[node.start]!.session);
     try {
       const next = session.apply(runtime, input, node.clock, node.chosen);
       if (next === null) rejectedInputs += 1;
@@ -2264,6 +2344,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     lead: Lead | null,
   ): { node: Node; runtime: Runtime | null; first: Step } => {
     starts.push(start);
+    working(start.session);
     const first = session.start(start, chosenStart(start));
     const node = transition(null, null, first, starts.length - 1, lead);
     firstNodeOf.set(starts.length - 1, node.id);
@@ -2312,8 +2393,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           entry.closest !== null &&
           away < entry.closest.distance &&
           !settled(targets.get(entry.target))
-        )
+        ) {
           progressed("closer");
+          depthCloser[number] = (depthCloser[number] ?? 0) + 1;
+        }
         if (entry.closest === null || away < entry.closest.distance)
           entry.closest = {
             value,
@@ -2727,7 +2810,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       queue.push(fromBest(pathTo(nodes, nodes[route?.node ?? best.left.node]!), choice?.route));
     };
     // A storage closer than the chain's best so far (not its first measure) is progress.
-    if (best.distance < found.best && Number.isFinite(found.best)) progressed("closer");
+    if (best.distance < found.best && Number.isFinite(found.best)) {
+      progressed("closer");
+      depthCloser[best.left.sessions] = (depthCloser[best.left.sessions] ?? 0) + 1;
+    }
     if (best.distance === 0) {
       if (found.best === 0) {
         target.note = `needs ${need}; a session from storage that has it did not reach the condition`;
@@ -3597,13 +3683,44 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
   const sessionCount = Math.max(0, ...starts.map((start) => start.session));
+  working(depthNow);
+  const bySessionNumber = (value: (depth: number) => number) =>
+    Array.from({ length: sessionCount }, (_, index) => value(index + 1));
   const bySession = {
-    started: Array.from({ length: sessionCount }, () => 0),
-    completed: Array.from({ length: sessionCount }, () => 0),
+    started: bySessionNumber(() => 0),
+    completed: bySessionNumber(() => 0),
+    operations: bySessionNumber((depth) => depthWork[depth] ?? 0),
+    linesFirst: bySessionNumber(() => 0),
+    linesFirstLastQuarter: bySessionNumber(() => 0),
+    waysFirst: bySessionNumber((depth) => depthWays[depth] ?? 0),
+    closer: bySessionNumber((depth) => depthCloser[depth] ?? 0),
   };
   for (const start of starts) bySession.started[start.session - 1]! += 1;
   for (const node of nodes)
     if (node.status === "completed") bySession.completed[starts[node.start]!.session - 1]! += 1;
+  // Lines by the sessions that ran them: the one that reached each first (in the last quarter of its work or before),
+  // and per file, those only the first session ran and those it never ran, by the smallest session that did.
+  const linesBySession = {
+    onlyFirst: 0,
+    least: bySessionNumber(() => 0),
+    files: new Map<string, { onlyFirst: number; notFirst: number }>(),
+  };
+  lineFirst.forEach((depth, line) => {
+    if (depth === 0) return;
+    bySession.linesFirst[depth - 1]! += 1;
+    if (lineFirstWork[line]! * 4 >= (depthWork[depth] ?? 0) * 3)
+      bySession.linesFirstLastQuarter[depth - 1]! += 1;
+    const least = lineLeast[line]!;
+    linesBySession.least[least - 1]! += 1;
+    const onlyFirst = least === 1 && lineLater[line] === 0;
+    if (onlyFirst) linesBySession.onlyFirst += 1;
+    if (!onlyFirst && least === 1) return;
+    const file = lineFiles[line]!;
+    const counts = linesBySession.files.get(file) ?? { onlyFirst: 0, notFirst: 0 };
+    if (onlyFirst) counts.onlyFirst += 1;
+    else counts.notFirst += 1;
+    linesBySession.files.set(file, counts);
+  });
   const traps = findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start));
 
   /**
@@ -3754,7 +3871,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       stuck: count("stuck"),
       open: count("open") + count("partial"),
     },
-    coverage,
+    coverage: {
+      ...coverage,
+      bySession: {
+        onlyFirst: linesBySession.onlyFirst,
+        least: linesBySession.least,
+        files: [...linesBySession.files]
+          .sort(([left], [right]) => (left < right ? -1 : 1))
+          .map(([path, counts]) => ({ path, ...counts })),
+      },
+    },
     directed,
     crashes: [...crashes.values()],
     traps: traps.map((trap) => trap.report),
@@ -4232,7 +4358,7 @@ function lineCoverage(
   watched: ReadonlyMap<string, readonly Watch[]>,
   routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
-): ExploreResult["coverage"] {
+): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
   instructions.forEach((_, index) => {

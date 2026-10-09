@@ -854,6 +854,9 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
           `(and ${count(progress.cells)} new cells, which do not hold a run up)`,
       );
     }
+    lines.push(
+      ...sessionDepths(fields(fields(report.search).bySession), fields(coverage.bySession)),
+    );
     lines.push(...workingToward(records(coverage.unvisitedBranches)));
     lines.push(
       ...sessionChains([
@@ -870,6 +873,75 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** Session numbers shown one by one; the later ones are shown together. */
+const SESSION_ROWS = 10;
+
+/**
+ * What each session number added: its sessions, its share of the operations, the lines and ways it reached first, its
+ * marginal gain (lines first reached in the last quarter of its operations, per 1,000 of them), and its states that came
+ * closer to what a missed way needs; then the lines only a first session ran and those it never ran, as observed.
+ */
+function sessionDepths(
+  bySession: Readonly<Record<string, unknown>>,
+  lines: Readonly<Record<string, unknown>>,
+): string[] {
+  const column = (name: string): number[] =>
+    Array.isArray(bySession[name]) ? bySession[name].map(count) : [];
+  const operations = column("operations");
+  if (operations.length < 2) return [];
+  const [started, completed, first, lastQuarter, ways, closer] = [
+    "started",
+    "completed",
+    "linesFirst",
+    "linesFirstLastQuarter",
+    "waysFirst",
+    "closer",
+  ].map(column);
+  const total = operations.reduce((sum, value) => sum + value, 0);
+  const sum = (values: number[] | undefined, from: number, to: number) =>
+    (values ?? []).slice(from, to).reduce((all, value) => all + value, 0);
+  const row = (label: string, from: number, to: number): string => {
+    const work = sum(operations, from, to);
+    const gain = sum(lastQuarter, from, to);
+    return (
+      `  - ${label}: ${sum(started, from, to)} started, ${sum(completed, from, to)} completed, ` +
+      `${work} operations (${total === 0 ? 0 : Math.round((work / total) * 100)}%); ` +
+      `${sum(first, from, to)} lines first, ${gain} of them in its last quarter ` +
+      `(${work === 0 ? 0 : Number(((gain / (work / 4)) * 1000).toPrecision(3))} per 1,000 operations); ` +
+      `${sum(ways, from, to)} ways first, ${sum(closer, from, to)} closer`
+    );
+  };
+  const rows = operations
+    .slice(0, SESSION_ROWS)
+    .map((_, index) => row(`Session ${index + 1}`, index, index + 1));
+  if (operations.length > SESSION_ROWS)
+    rows.push(row(`Sessions ${SESSION_ROWS + 1}+`, SESSION_ROWS, operations.length));
+  const least = Array.isArray(lines.least) ? lines.least.map(count) : [];
+  const later = least
+    .map((lineCount, index) => ({ session: index + 1, lineCount }))
+    .filter(({ session, lineCount }) => session > 1 && lineCount > 0);
+  const files = records(lines.files)
+    .filter((file) => count(file.notFirst) > 0)
+    .sort((left, right) => count(right.notFirst) - count(left.notFirst))
+    .slice(0, 5);
+  return [
+    "- By session number (1 is a new player's first session):",
+    ...rows,
+    `  - Lines only a first session ran: ${count(lines.onlyFirst)}; lines no first session ran: ` +
+      `${sum(
+        later.map(({ lineCount }) => lineCount),
+        0,
+        later.length,
+      )}` +
+      (later.length === 0
+        ? ""
+        : ` (by the smallest session number that ran them: ${later.map(({ session, lineCount }) => `${session}: ${lineCount}`).join(", ")})`) +
+      (files.length === 0
+        ? ""
+        : `; most in ${files.map((file) => `\`${text(file.path)}\` ${count(file.notFirst)}`).join(", ")}`),
+  ];
 }
 
 /**

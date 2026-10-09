@@ -936,6 +936,43 @@ test(
 );
 
 test(
+  "the report gives what each session number added: its operations, the lines it reached first, the lines only a first session ran, and those it never ran",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // A greeting only a new player gets; one from the second visit on; one from the third on.
+    const source =
+      'let visits = load "fixture.visits", default: 0\nif visits == 0 {\n  say "Welcome, new player."\n}\n' +
+      'if visits >= 1 {\n  say "Welcome back."\n}\nif visits >= 2 {\n  say "Third time."\n}\n' +
+      'save visits + 1 as "fixture.visits"\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const { bySession } = result.search;
+    const sum = (values: readonly number[]) => values.reduce((all, value) => all + value, 0);
+    // Every operation went to a session number, and every line play reached to the one that reached it first.
+    assert.equal(sum(bySession.operations), result.search.operations);
+    assert.equal(sum(bySession.linesFirst), result.coverage.visitedLines);
+    // The second and third visits each reached their greeting first; only the new player's greeting is first-only.
+    const firstSession = result.coverage.visitedLines - 2;
+    assert.deepEqual(bySession.linesFirst.slice(0, 3), [firstSession, 1, 1]);
+    assert.deepEqual(result.coverage.bySession.least.slice(0, 3), [firstSession, 1, 1]);
+    assert.equal(result.coverage.bySession.onlyFirst, 1);
+    assert.deepEqual(result.coverage.bySession.files, [
+      { path: "main.tease", onlyFirst: 1, notFirst: 2 },
+    ]);
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
