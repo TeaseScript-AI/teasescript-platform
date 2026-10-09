@@ -350,15 +350,17 @@ test("a call the recorder cannot copy still runs exactly as without it", () => {
 
 test("a media store that throws during a recorded call leaves the recording incomplete", () => {
   const recorder = new DebugRecorder();
-  const session = createPlayerRuntimeSession(
-    'let picture = askImage("Picture", allowCamera: false)\nexit',
-    { recorder },
-  );
+  const source = 'let picture = askImage("Picture", allowCamera: false)\nexit';
+  // The recorder moves on to the second session; a call of the first no longer reaches the recording.
+  const stale = createPlayerRuntimeSession(source, { recorder });
+  const session = createPlayerRuntimeSession(source, { recorder });
   const failing = {
     holds: (): boolean => {
       throw new Error("store unavailable");
     },
   };
+  assert.throws(() => answerPlayerRuntimeImage(stale, reference, failing), /store unavailable/);
+  assert.deepEqual([recorder.recording()!.complete, recorder.recording()!.reason], [true, null]);
   assert.throws(() => answerPlayerRuntimeImage(session, reference, failing), /store unavailable/);
   assert.deepEqual(
     [recorder.recording()!.complete, recorder.recording()!.reason],
