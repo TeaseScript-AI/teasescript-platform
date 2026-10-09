@@ -1509,8 +1509,9 @@ class Parser {
   }
 
   /**
-   * The source of the tokens from `start` up to `end` on one line, with one space where the source separates two of
-   * them. A line break inside brackets separates too, but not right after an opening one or before a closing one.
+   * The source of the tokens from `start` up to `end`, with one space where the source separates two of them. A line
+   * break between tokens separates them too, but not right after an opening bracket or before a closing one; one inside
+   * a token, as in a block string, stays.
    */
   #sourceText(start: number, end: number): string {
     let text = "";
