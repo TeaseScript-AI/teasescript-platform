@@ -208,11 +208,13 @@ function focusRandom(event: Event) {
         </Button>
       </div>
 
+      <!-- The list scrolls, so it clips: its 4px inner gutter keeps an outcome's 2px focus outline and 2px separation
+           inside, also where focus scrolls an outcome into view, and the negative margin keeps the layout as it was. -->
       <div
         v-if="choices.kind === 'buttons'"
         role="group"
         aria-label="Outcomes"
-        class="flex max-h-72 flex-wrap gap-2 overflow-y-auto"
+        class="-m-1 flex max-h-74 scroll-py-1 flex-wrap gap-2 overflow-y-auto p-1"
         data-random-draw-outcomes
       >
         <button

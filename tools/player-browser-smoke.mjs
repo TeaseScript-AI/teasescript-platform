@@ -1782,6 +1782,31 @@ async function randomPickerScenario(cdp, origin) {
     "Ctrl+B changed the sidebar while the picker asked",
   );
 
+  // Tab from the grip onto the first outcome: the outcome list, which clips because it scrolls, keeps room for the
+  // outcome's 2px focus outline and its 2px separation.
+  for (let presses = 0; presses < 5; presses += 1) {
+    if (await value(cdp, `!!document.activeElement.closest('[data-random-draw-outcomes]')`)) break;
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Tab",
+        code: "Tab",
+        windowsVirtualKeyCode: 9,
+      });
+  }
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const list = document.querySelector('[data-random-draw-outcomes]').getBoundingClientRect();
+        const outcome = document.activeElement.closest('[data-random-draw-outcome]')?.getBoundingClientRect();
+        return !!outcome && Math.min(outcome.top - list.top, list.bottom - outcome.bottom, outcome.left - list.left, list.right - outcome.right) >= 4;
+      })()`,
+    ),
+    true,
+    "The outcome list clipped a focused outcome's outline",
+  );
+
   await physicalClick(cdp, "[data-random-draw-outcome]");
   await waitFor(
     cdp,
