@@ -837,11 +837,17 @@ test(
       JSON.stringify(far),
     );
     // Keys of one pattern that two parts name are each that key.
-    const both = gated('load("pack.${item}", default: 0) > 2 or packed("gun")').at(-1);
-    assert.deepEqual(
-      [...(both?.dependsOn ?? [])].filter((key) => key.startsWith("stored pack")).sort(),
-      ["stored pack.gun", "stored pack.knife"],
-    );
+    for (const condition of [
+      'load("pack.${item}", default: 0) > 2 or packed("gun")',
+      'not (load("pack.${item}", default: 0) > 2 or packed("gun")) and ready(0)',
+    ]) {
+      const both = gated(condition).at(-1);
+      assert.deepEqual(
+        [...(both?.dependsOn ?? [])].filter((key) => key.startsWith("stored pack")).sort(),
+        ["stored pack.gun", "stored pack.knife"],
+        condition,
+      );
+    }
     const keyed = gated('ready(0) and load("gear.${item}", default: false)');
     assert.ok(
       keyed.every(

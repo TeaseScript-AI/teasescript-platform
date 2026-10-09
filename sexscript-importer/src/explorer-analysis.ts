@@ -1194,7 +1194,7 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
   // there: no stored value to make true, so it is left out and what it reads stays a dependency (below). A value the code
   // tests (`load(...) and f()`), or a call's result, is an atom's subject instead. A temporary copied further than
   // followed is left out too, and stays a dependency as it is.
-  const read = new Map<number, Data[]>();
+  let readThrough = false;
   const leaves = (temporaryId: number, before: number, depth: number): Data[] | "deep" | null => {
     if (depth === 0) return "deep";
     const held = flow.heldAt(temporaryId, before);
@@ -1224,7 +1224,7 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     const found = leaves(subject.temporaryId, at, 8);
     if (found === null) return [atom];
     if (found === "deep") return [];
-    read.set(subject.temporaryId, found);
+    readThrough = true;
     return found
       .filter((value) => !comparesTruth(value))
       .map((value) => ({ ...atom, subject: value }));
@@ -1279,26 +1279,36 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       goals.push({ source, candidates, comparison });
     }
   }
-  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`; of a temporary's
-  // truth read through, of what it was read through to, each value apart, so that keys one names are not taken for keys
-  // another names.
-  const masked = (value: Data): Data =>
-    value.kind === "temporary" && read.has(Number(value.temporaryId))
-      ? { kind: "literal", value: null }
-      : Object.fromEntries(
-          Object.entries(value).map(([key, item]) => [
-            key,
-            Array.isArray(item)
-              ? item.map((each: unknown) => (isRecord(each) ? masked(each) : each))
-              : isRecord(item)
-                ? masked(item)
-                : item,
-          ]),
-        );
-  const parts: unknown[] =
-    read.size === 0 || !isRecord(condition)
-      ? [condition]
-      : [masked(condition), ...[...read.values()].flat()];
+  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`. Of a condition
+  // whose truth was read through: of what its temporaries hold, also nested ones (`not (a or f())`), each value apart,
+  // so that keys one names are not taken for keys another names.
+  const parts: unknown[] = [];
+  const split = (value: Data, before: number, depth: number): void => {
+    const inner: { value: Data; index: number }[] = [];
+    const masked = (item: Data): Data => {
+      const held =
+        item.kind === "temporary" && typeof item.temporaryId === "number" && depth > 0
+          ? flow.heldAt(item.temporaryId, before)
+          : null;
+      if (held !== null) inner.push(...held);
+      return held !== null
+        ? { kind: "literal", value: null }
+        : Object.fromEntries(
+            Object.entries(item).map(([key, each]) => [
+              key,
+              Array.isArray(each)
+                ? each.map((one: unknown) => (isRecord(one) ? masked(one) : one))
+                : isRecord(each)
+                  ? masked(each)
+                  : each,
+            ]),
+          );
+    };
+    parts.push(masked(value));
+    for (const store of inner) split(store.value, store.index, depth - 1);
+  };
+  if (!readThrough || !isRecord(condition) || at === undefined) parts.push(condition);
+  else split(condition, at, 8);
   for (const [found, expression] of parts.flatMap((part) =>
     flow.sourcesOf(part).map((found) => [found, part] as const),
   )) {
