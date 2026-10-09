@@ -42,6 +42,8 @@ const SPANS: Readonly<Record<string, string>> = {
 };
 
 const HTML_TAG = /<\/?([a-z][a-z0-9]*)\b[^<>]*>/giu;
+// The block markers of message markup, which only count at the start of a line.
+const BLOCK_MARKER = /^(?:#{1,3} |> |- |[1-9]\d*\. )/u;
 const ENTITY = /&(?:#(\d{1,6});?|#x([0-9a-f]{1,6});?|(nbsp|quot|amp|lt|gt|apos);?)/giu;
 
 /**
@@ -167,9 +169,10 @@ function closer(mark: string): string {
  * Markup spans need text right inside their delimiters, end at a line break, and cannot cross, so spaces inside move
  * out, a span closes before each line break and opens again on the next line that has text, a span that closes while
  * one opened inside it is still open closes that one first and opens it again before the next text, and an empty span
- * disappears; a line without text, such as the blank line between paragraphs, gets no delimiters. A bold, italic,
- * strikethrough, or underline span inside one of its own kind adds nothing, as in HTML, so only the outer one has
- * delimiters, also where a legacy text never closed it; a colour or size inside another changes it.
+ * disappears; a line without text, such as the blank line between paragraphs, gets no delimiters, and a span carried
+ * over a line break opens again after the block marker that starts the next line, such as the `- ` of a list item. A
+ * bold, italic, strikethrough, or underline span inside one of its own kind adds nothing, as in HTML, so only the outer
+ * one has delimiters, also where a legacy text never closed it; a colour or size inside another changes it.
  */
 function settleSpans(text: string): string {
   const pattern = new RegExp(
@@ -189,6 +192,8 @@ function settleSpans(text: string): string {
   const stack: string[] = [];
   let pending: string[] = [];
   const written = (): string[] => stack.slice(0, stack.length - pending.length);
+  // How many of the pending spans were open at the last line break.
+  let carried = 0;
   // The output with the given spans closed, innermost first, before its trailing spaces.
   const closed = (spans: readonly string[]): string => {
     const trailing = /\s*$/u.exec(output)![0];
@@ -208,12 +213,16 @@ function settleSpans(text: string): string {
           // Close the spans this line opened at the line break and reopen them on the next line with text.
           output = closed(written()) + "\n";
           pending = [...stack];
+          carried = pending.length;
         }
         const leading = /^\s*/u.exec(line)![0];
         output += leading;
         if (leading === line) return;
-        output += pending.join("") + line.slice(leading.length);
+        const marker =
+          carried > 0 && output.endsWith("\n") ? (BLOCK_MARKER.exec(line)?.[0] ?? "") : "";
+        output += marker + pending.join("") + line.slice(leading.length + marker.length);
         pending = [];
+        carried = 0;
       });
       continue;
     }
@@ -238,6 +247,7 @@ function settleSpans(text: string): string {
       // The span held no text.
       stack.splice(index, 1);
       pending.splice(unwritten, 1);
+      if (unwritten < carried) carried -= 1;
       continue;
     }
     // The spans opened inside it close with it and open again before the next text.

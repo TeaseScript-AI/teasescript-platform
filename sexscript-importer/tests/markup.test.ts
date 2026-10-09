@@ -106,6 +106,11 @@ test("a colour or underline span settles on each line and nests inside the spans
     "# [color=red]**Kneel**[/color]",
   );
   assert.equal(converted("<u>first<br>second</u>"), "[u]first[/u]\n[u]second[/u]");
+  // SissyPlaytimeExposure: a colour that a list item never closed opens again after the next item's marker.
+  assert.equal(
+    converted('<ul><li><b><font color="pink">Contact</b>: mail</li><li>Time</li></ul>'),
+    "- **[color=pink]Contact[/color]**[color=pink]: mail[/color]\n- [color=pink]Time[/color]",
+  );
   // A span that opens again after the one around it closed waits for the next text.
   assert.equal(
     converted("<b>one <font color=red>two</b> three</font>"),
