@@ -899,6 +899,9 @@ class TypeChecker {
    */
   readonly #loadReceivers = new Map<Expression, StaticType>();
 
+  /** Loads whose default cannot be saved, which a store does not check again. */
+  readonly #rejectedDefaults = new Set<Expression>();
+
   /** One origin for each element or property inside a variable, so equal parts are one origin. */
   readonly #parts = new Map<Declaration, Map<string, PartOrigin>>();
 
@@ -1273,15 +1276,11 @@ class TypeChecker {
         return true;
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-        const unsaveable = containsType(value, (part) =>
-          ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(
-            part.kind,
-          ),
-        );
+        const unsaveable = holdsSessionValue(value);
         if (unsaveable)
           this.#report(
             typeCode.invalidOperand,
-            `Speakers, camera views, permanent buttons, and timer, media, or message handles cannot be saved, but this is ${describeValue(value)}.${containsType(value, (part) => part.kind === "messageHandle") ? " Save a message's text with its text property, as in 'save line.text as \"status\"'." : ""}`,
+            `${SESSION_VALUES} cannot be saved, but this is ${describeValue(value)}.${containsType(value, (part) => part.kind === "messageHandle") ? " Save a message's text with its text property, as in 'save line.text as \"status\"'." : ""}`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
@@ -1690,7 +1689,7 @@ class TypeChecker {
         verb: "start as",
         fix: (rejected, expression) => typeFix(name, type, rejected, expression, keyword),
       };
-      const checked = checkedValue(written);
+      const checked = this.#checkedValue(written);
       yield* compileChild(
         this.#storeTask(place, checked, checked === written ? value : this.#typeOf(checked)),
       );
@@ -1808,7 +1807,7 @@ class TypeChecker {
         if (statement.operator === "=") {
           const value = yield* compileChild(this.#expressionTask(statement.value, scope));
           const receiver = this.#elementReceiver(target.object, scope, object, value);
-          const checked = checkedValue(statement.value);
+          const checked = this.#checkedValue(statement.value);
           yield* compileChild(
             this.#storeElementTask(
               receiver,
@@ -1926,7 +1925,7 @@ class TypeChecker {
     // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
-      const checked = checkedValue(statement.value);
+      const checked = this.#checkedValue(statement.value);
       yield* compileChild(
         this.#storeTask(
           place,
@@ -3113,6 +3112,21 @@ class TypeChecker {
           fallback = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
           const changes = this.#flow.undo(start);
           this.#flow.apply(this.#flow.join([new Map(), changes]));
+          if (holdsSessionValue(fallback)) {
+            const given = unwrap(expression.defaultValue);
+            const fix = !containsType(fallback, (part) => part.kind === "messageHandle")
+              ? "Give a default such as a number, a text, or a list of numbers or texts."
+              : given.kind === "identifier"
+                ? `Use the message's text instead, as in 'default: ${given.name}.text'.`
+                : "Use the message's text instead.";
+            this.#report(
+              typeCode.invalidOperand,
+              `A load's default must be a value that can be saved, because 'load' gives the default in place of a saved value. This default is ${describeValue(fallback)}. ${SESSION_VALUES} cannot be saved. ${fix}`,
+              expression.defaultValue.span,
+            );
+            this.#rejectedDefaults.add(expression);
+            return UNKNOWN_TYPE;
+          }
         }
         // A key computed at runtime has no type: its load gives a value the compiler cannot know (rule 6.2).
         const key = staticText(expression.key);
@@ -5998,6 +6012,19 @@ class TypeChecker {
   }
 
   /**
+   * What a store checks at compile time: for a load, its default, unless that default cannot be saved and was reported
+   * already. The loaded value itself is checked at runtime.
+   */
+  #checkedValue(expression: Expression): Expression {
+    const value = unwrap(expression);
+    return value.kind === "loadExpression" &&
+      value.defaultValue !== null &&
+      !this.#rejectedDefaults.has(value)
+      ? value.defaultValue
+      : expression;
+  }
+
+  /**
    * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7). The
    * place's type is read after the whole check, because a later value can still decide it.
    */
@@ -6827,12 +6854,15 @@ function isPureBuiltinCall(expression: CallExpression): boolean {
 
 // Places -------------------------------------------------------------------------------------------------------------
 
-/** What a store checks at compile time: for a load, its default; the loaded value itself is checked at runtime. */
-function checkedValue(expression: Expression): Expression {
-  const value = unwrap(expression);
-  return value.kind === "loadExpression" && value.defaultValue !== null
-    ? value.defaultValue
-    : expression;
+/** The values that exist only in the current session, as a diagnostic names them. */
+const SESSION_VALUES =
+  "Speakers, camera views, permanent buttons, and timer, media, or message handles";
+
+/** Whether a value of this type is or holds one that exists only in the current session and cannot be saved. */
+function holdsSessionValue(type: StaticType): boolean {
+  return containsType(type, (part) =>
+    ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(part.kind),
+  );
 }
 
 /** A storage key as the place that a saved value must fit: the type every load of the key reads (ADR 0021 §6). */
