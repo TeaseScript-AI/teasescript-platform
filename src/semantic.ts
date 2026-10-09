@@ -35,6 +35,7 @@ import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   RENAMED_BUILTINS,
+  RENAMED_METHODS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
 import {
@@ -2079,6 +2080,14 @@ class SemanticValidator {
           yield* compileChild(
             this.#validateExpressionTask(method.object, scope, contextualSpeaker),
           );
+          // No value has a method by an earlier name, so its call names the fix whatever the value is.
+          const renamed = RENAMED_METHODS.get(method.property.name);
+          if (renamed !== undefined)
+            this.#report(
+              semanticCode.unknownFunction,
+              `Unknown method '${method.property.name}'. Use '${renamed}()'.`,
+              method.property.span,
+            );
           this.#validateTimerHandleMember(
             method.object,
             method.property,

@@ -61,13 +61,17 @@ test("the earlier timestamp names are compile errors that name the fix", () => {
       ["TSV018", "Unknown function 'toTimestamp'. Use 'toAbsoluteDateTime'.", "toTimestamp"],
     ],
   );
-  assert.deepEqual(diagnostics('let moment = toDateTime("2026-10-04T18:00").toTimestamp()\nexit'), [
-    [
-      "TSV043",
-      "A date and time has no method 'toTimestamp'. Use 'toAbsoluteDateTime()'.",
-      "toTimestamp",
-    ],
-  ]);
+  // The earlier method name is an error on any value, also one whose type the compiler does not know.
+  for (const source of [
+    'let moment = toDateTime("2026-10-04T18:00").toTimestamp()\nexit',
+    "function identity(value) {\n    return value\n}\nlet t = identity(getDateTime()).toTimestamp()\nexit",
+    "function f(v: datetime | absoluteDateTime) {\n    return v.toTimestamp()\n}\nexit",
+  ])
+    assert.deepEqual(
+      diagnostics(source),
+      [["TSV018", "Unknown method 'toTimestamp'. Use 'toAbsoluteDateTime()'.", "toTimestamp"]],
+      source,
+    );
   // The earlier names stay protected, so an author's own declaration cannot hide the fix.
   assert.deepEqual(codes("let timestamp = 1\nlet getTimestamp = 2"), [
     ["TSV001", "timestamp"],

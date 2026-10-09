@@ -121,9 +121,7 @@ export function memberProblems(
   const fix =
     type.kind === "scalar" && TEXT_MEMBERS.has(name)
       ? " Convert it to text first with toString(...)."
-      : isScalar(type, "datetime") && name === "toTimestamp" && call !== null
-        ? " Use 'toAbsoluteDateTime()'."
-        : "";
+      : "";
   return problem(
     `${capitalized(describeValue(type))} has no ${call === null ? "property" : "method"} '${name}'.${fix}`,
   );

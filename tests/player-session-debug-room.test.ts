@@ -34,6 +34,7 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 interface RoomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  readonly notices: Readonly<Ref<readonly { readonly key: string; readonly message: string }[]>>;
   readonly rooms: {
     readonly current: Readonly<Ref<"normal" | "debug">>;
     readonly debugHasData: Readonly<Ref<boolean>>;
@@ -228,6 +229,54 @@ test("Debug on during a normal session goes on with a copy in the debug room, an
   const restored = restorePlayerRuntimeSessionAt(SCRIPT, normal.snapshotJson, normal.events);
   assert.deepEqual(said(restored), ["Hello"]);
   assert.equal(restored.state.debugMode, false);
+});
+
+test("a session kept in an older format shows Start with a notice, and its record stays", async (context) => {
+  stubBrowser(context);
+  const kept = memoryKeptSessionStore();
+  const first = mountHost(context, { own: savedData([]), kept, rooms: memoryKeptRoomStore() });
+  await prepare(context, first, SCRIPT);
+  await first.activate();
+  await settle(context);
+  const current = keptSession((await kept.session("test"))!)!;
+  const older = (json: string) => {
+    const value: { version: number } = JSON.parse(json);
+    return JSON.stringify({ ...value, version: value.version - 1 });
+  };
+  const reopen = async (planJson: string, snapshotJson: string) => {
+    await kept.publish("test", {
+      planJson,
+      snapshotJson,
+      eventsFrom: 0,
+      events: current.events,
+      marks: current.marks,
+    });
+    const host = mountHost(context, { own: savedData([]), kept, rooms: memoryKeptRoomStore() });
+    await prepare(context, host, SCRIPT);
+    return host;
+  };
+  const notice = (host: RoomHost) =>
+    host.notices.value
+      .filter((entry) => entry.key === "older-kept-session")
+      .map((entry) => entry.message);
+  const message =
+    "The last session comes from an older Player version and cannot be continued. Start begins a new one, and saved progress stays.";
+  const plan = current.planJson;
+  const snapshot = current.snapshotJson;
+  // The current formats continue, without the notice.
+  const same = await reopen(plan, snapshot);
+  assert.equal(same.activation.value, "continue");
+  assert.deepEqual(notice(same), []);
+  for (const [planJson, snapshotJson] of [
+    [older(plan), snapshot],
+    [plan, older(snapshot)],
+  ] as const) {
+    const host = await reopen(planJson, snapshotJson);
+    assert.equal(host.activation.value, "start");
+    assert.deepEqual(notice(host), [message]);
+    const stored = (await kept.session("test"))!;
+    assert.deepEqual([stored.planJson, stored.snapshotJson], [planJson, snapshotJson]);
+  }
 });
 
 test("while Debug on switches to the debug room, Start waits, and then starts with the debug room's saved data", async (context) => {

@@ -60,6 +60,7 @@ export const playerNoticeKeys = {
   imageNeedsCamera: "image-needs-camera",
   sessionError: "session-error",
   rewindNotAdopted: "rewind-not-adopted",
+  olderKeptSession: "older-kept-session",
 } as const;
 
 const mediaNames = { image: "Image", audio: "Audio", video: "Video" } as const;
@@ -92,6 +93,13 @@ export const playerNotices = {
     level: "warning",
     message:
       "The saved data of this earlier state could not be restored in this browser, so the session did not go on from it.",
+  }),
+  /** The kept session has an older plan or snapshot format, which this Player cannot continue. */
+  olderKeptSession: (): PlayerNotice => ({
+    key: playerNoticeKeys.olderKeptSession,
+    level: "info",
+    message:
+      "The last session comes from an older Player version and cannot be continued. Start begins a new one, and saved progress stays.",
   }),
   imageNeedsCamera: (): PlayerNotice => ({
     key: playerNoticeKeys.imageNeedsCamera,

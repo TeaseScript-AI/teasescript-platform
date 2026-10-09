@@ -222,6 +222,11 @@ export const RENAMED_BUILTINS: ReadonlyMap<string, string> = new Map([
   ["toTimestamp", "toAbsoluteDateTime"],
 ]);
 
+/** The earlier names of methods, whose calls are compile errors that name the fix on any value (ADR 0026). */
+export const RENAMED_METHODS: ReadonlyMap<string, string> = new Map([
+  ["toTimestamp", "toAbsoluteDateTime"],
+]);
+
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
 export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);
 
