@@ -639,6 +639,63 @@ test("values the compiler cannot know are not rejected at compile time", () => {
   );
 });
 
+test("an operation on a value the compiler cannot know is rejected where no result fits a written type", () => {
+  const inFunction = (...body: string[]): string =>
+    ["function f(x, z) {", ...body.map((line) => `    ${line}`), "}", "f(8, 2)", "exit"].join("\n");
+  // '/' gives a number, a duration, or a calendar duration, whatever 'x' holds, and never text.
+  assert.deepEqual(mismatches(inFunction("let y: string = x / 4", "say y")), [
+    [
+      "TSV041",
+      "'y' is declared as string, so it cannot start as the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+      "x / 4",
+    ],
+  ]);
+  for (const body of [
+    ['let y: string = "a"', "y = x / z", "say y"],
+    ["let y: string? = -x", "say y"],
+    ["let y: boolean = x % 4", "say y"],
+    ["let items: string[] = []", "items.add(x * 4)"],
+    ["g(x - 4)"],
+    ["let y: string = (x / 4) + 1", "say y"],
+  ])
+    assert.deepEqual(
+      mismatches(`function g(s: string) {\n    say s\n}\n${inFunction(...body)}`).map(
+        ([code]) => code,
+      ),
+      ["TSV041"],
+      body.join("; "),
+    );
+  // A longer calculation is named in words, and another place is offered the type '/' gives for numbers.
+  assert.match(
+    mismatches(inFunction("let y: string = (x / 4) + 1", "say y"))[0]?.[1] ?? "",
+    /which is a number\. To show it as text, put the whole calculation inside "\$\{" and "\}"\.$/u,
+  );
+  assert.match(
+    mismatches(inFunction("let y: boolean = x / 4", "say y"))[0]?.[1] ?? "",
+    /To allow both, declare it as 'let y: boolean \| number = \.\.\.'\.$/u,
+  );
+  assert.equal(
+    mismatches("function f(x): string {\n    return x / 4\n}\nsay f(8)\nexit")[0]?.[1],
+    "'f' returns string, so it cannot return the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+  );
+  // A result that may fit is checked when the script runs: a number may be whole, and '+' joins texts or lists.
+  assert.deepEqual(
+    mismatches(
+      inFunction(
+        "let whole: integer = x / 4",
+        "let ratio: number = x / z",
+        "let span: duration = x * 2",
+        'let text: string = x + "!"',
+        "let joined: list = x + [1]",
+        "let day: date = x + 1 calendar day",
+        "let either: string | number = x / 4",
+        "say ratio",
+      ),
+    ),
+    [],
+  );
+});
+
 test("type inference handles deeply nested expressions without native recursion", () => {
   const source = `let total = ${Array.from({ length: 20_000 }, () => "1").join(" + ")}\ntotal = 2\nexit`;
   assert.deepEqual(compileSource(source).diagnostics, []);

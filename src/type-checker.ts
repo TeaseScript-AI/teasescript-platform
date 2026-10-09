@@ -727,6 +727,18 @@ class TypeChecker {
   /** Numbers and durations known at compile time, folded once per expression (see `#known`). */
   readonly #knownValues = new Map<Expression, StaticScalar | undefined>();
 
+  /**
+   * Each operation that gives a value of unknown type because an operand's type is unknown, with its operand types and
+   * result rule, so a place with a written type can tell when no result could fit it, as `/` never gives text.
+   */
+  readonly #unknownOperations = new Map<
+    Expression,
+    {
+      readonly operands: readonly StaticType[];
+      readonly result: (...values: StaticType[]) => StaticType | undefined;
+    }
+  >();
+
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
 
@@ -2098,6 +2110,24 @@ class TypeChecker {
       if (decides && fits) for (const [name, type] of added) properties.set(name, type);
       if (decides && fits && added.length > 0 && place.widening !== undefined)
         this.#rewiden(place.widening.root);
+      return;
+    }
+    const unfit =
+      place.inferred === undefined ? this.#unfitResults(expression, value, place.type) : undefined;
+    if (unfit !== undefined) {
+      const text = operationText(expression);
+      // Another place suggests the type the operator gives for numbers, which is what such a value usually holds.
+      const results = members(unfit.results);
+      const fix = members(kept).some((member) => isScalar(member, "string"))
+        ? text === null
+          ? ' To show it as text, put the whole calculation inside "${" and "}".'
+          : ` To show it as text, write "\${${text}}".`
+        : place.fix(results.find((result) => isNumeric(result)) ?? results[0]!, expression);
+      this.#report(
+        typeCode.typeMismatch,
+        `${place.subject}, so it cannot ${place.verb} the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${fix}`,
+        expression.span,
+      );
       return;
     }
     if (isAssignable(place.type, value)) {
@@ -4354,6 +4384,7 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
     result: (...values: StaticType[]) => StaticType | undefined,
   ): StaticType {
+    const reported = this.diagnostics.length;
     const outcome = this.#memberOperation(
       operands,
       expression.kind === "binaryExpression"
@@ -4361,7 +4392,11 @@ class TypeChecker {
         : [expression.operand],
       result,
     );
-    if ("type" in outcome) return outcome.type;
+    if ("type" in outcome) {
+      if (!isKnown(outcome.type) && this.diagnostics.length === reported)
+        this.#unknownOperations.set(expression, { operands, result });
+      return outcome.type;
+    }
     const command = this.#timeOperands.get(expression);
     this.#report(
       typeCode.invalidOperand,
@@ -4370,6 +4405,42 @@ class TypeChecker {
       expression.span,
     );
     return UNKNOWN_TYPE;
+  }
+
+  /**
+   * For a value of unknown type from an operation, the types the operation could give when none of them fits a place of
+   * type `type`, as text never comes from `/`. An operand of unknown type stands for every type an operator takes.
+   */
+  #unfitResults(
+    expression: Expression,
+    value: StaticType,
+    type: StaticType,
+  ): { readonly operator: string; readonly results: StaticType } | undefined {
+    const operated = unwrap(expression);
+    if (isKnown(value) || !isKnown(type)) return undefined;
+    if (operated.kind !== "binaryExpression" && operated.kind !== "unaryExpression")
+      return undefined;
+    const operation = this.#unknownOperations.get(operated);
+    if (operation === undefined) return undefined;
+    const [lefts, rights] = operation.operands.map((operand) =>
+      members(resolved(nonNullTypeForUse(operand))).flatMap((member) =>
+        isKnown(member) ? [member] : OPERAND_KINDS,
+      ),
+    );
+    const results: StaticType[] = [];
+    for (const left of lefts!)
+      for (const right of rights ?? [undefined]) {
+        const result = right === undefined ? operation.result(left) : operation.result(left, right);
+        if (result !== undefined) results.push(result);
+      }
+    // A number may be whole when the script runs, and then it fits a whole number (integer).
+    const fits = (result: StaticType): boolean =>
+      isAssignable(type, result) ||
+      (isScalar(result, "number") &&
+        members(resolved(type)).some((member) => isScalar(member, "integer")));
+    return results.length > 0 && !results.some(fits)
+      ? { operator: operated.operator, results: union(results) }
+      : undefined;
   }
 
   /**
@@ -8197,6 +8268,19 @@ function conversionFix(
     return ` To show it as text, write "\${${label ?? "value"}}".`;
   }
   return undefined;
+}
+
+/** The source of an operation on variables, properties, or numbers, such as `x / 4`; `null` for anything longer. */
+function operationText(expression: Expression): string | null {
+  const operation = unwrap(expression);
+  const operand = (part: Expression): string | null => expressionLabel(part) ?? literalText(part);
+  if (operation.kind === "unaryExpression") {
+    const text = operand(operation.operand);
+    return text === null ? null : `${operation.operator}${text}`;
+  }
+  if (operation.kind !== "binaryExpression") return null;
+  const [left, right] = [operand(operation.left), operand(operation.right)];
+  return left === null || right === null ? null : `${left} ${operation.operator} ${right}`;
 }
 
 function literalText(expression: Expression): string | null {

@@ -1024,6 +1024,8 @@ picks.add("three")    // compile error
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time. Where a place of known type takes it, also through a place that
   no other value decided, such as `let box = { t: null }` set only from such a parameter, it is checked when it runs.
+  An operator on such a value also gives a value of unknown type. A place with a written type still rejects it at
+  compile time when no result of that operator could fit, as in `let y: string = x / 4`, because `/` never gives text.
 
 ### Global variables
 
