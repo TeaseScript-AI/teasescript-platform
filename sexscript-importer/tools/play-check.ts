@@ -586,6 +586,15 @@ async function playOnce(
       } else if (kind === "form" && state.options.length > 0) {
         // A form, such as the legacy profile's toggles of owned toys and clothes: every other run switches all toggles
         // on, the others keep them as offered; then it is submitted, the first of the form's actions.
+        // A typed field the form requires and the check would have to fill, or an open field editor, is not handled.
+        const blocked = await page.evaluate(
+          () =>
+            document.querySelector("[data-form-fields] [data-editing]") !== null ||
+            [...document.querySelectorAll("[data-form-fields] button")].some(
+              (button) => button.textContent?.trim().endsWith("Set…") === true,
+            ),
+        );
+        if (blocked) return finish("unsupported", "a form with a required typed field", step);
         const allOn = run % 2 === 1;
         if (allOn) {
           const off = await page.evaluate(
