@@ -14,7 +14,7 @@ import {
   validateScriptStorageEntries,
   type SerializableRuntimeValue,
 } from "../../../src/index.js";
-import { serializeValidatedRuntimeJson } from "../../../src/runtime/checkpoint.js";
+import { CheckpointError, serializeValidatedRuntimeJson } from "../../../src/runtime/checkpoint.js";
 import type { PlayerSessionHost, SavedDataEditResult } from "./usePlayerSession";
 
 // Debug's editor for one saved value (DEBUGGER.md "Player Debug"): change it with its type, add a key, or delete one.
@@ -65,8 +65,16 @@ watch(
     const value = edit.kind === "add" ? "" : edit.value;
     type.value = typeOf(value);
     shownType = type.value;
-    text.value = textFor(value, type.value);
     flag.value = value === true;
+    text.value = "";
+    if (edit.kind === "delete") return;
+    // A value whose stored form is longer than a text can be is not shown, but it can still be replaced or deleted.
+    try {
+      text.value = textFor(value, type.value);
+    } catch (error) {
+      if (!(error instanceof CheckpointError) || error.info.code !== "TSK004") throw error;
+      problem.value = "This value is too large to show as text. Enter a new value to replace it, or delete it.";
+    }
   },
   { immediate: true },
 );

@@ -102,7 +102,7 @@ import {
   type SerializableRuntimeValue,
   type TemporalContext,
 } from "../../../src/index.js";
-import { serializeValidatedRuntimeJson } from "../../../src/runtime/checkpoint.js";
+import { serializableEquals } from "../../../src/runtime/serializable-values.js";
 import { silence } from "./generatedAudio";
 import { useImageCapture } from "./useImageCapture";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
@@ -2083,11 +2083,14 @@ export type SavedDataEditResult =
   | { readonly kind: "changed" }
   | { readonly kind: "failed"; readonly message: string };
 
-/** Whether two saved values are the same, comparing their stored form; `undefined` is an absent key. */
+/**
+ * Whether two saved values are the same, as the script's `==` compares them; `undefined` is an absent key. A value too
+ * large to write as text compares too.
+ */
 function sameSavedValue(
   left: SerializableRuntimeValue | undefined,
   right: SerializableRuntimeValue | undefined,
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
-  return serializeValidatedRuntimeJson(left) === serializeValidatedRuntimeJson(right);
+  return serializableEquals(left, right);
 }
