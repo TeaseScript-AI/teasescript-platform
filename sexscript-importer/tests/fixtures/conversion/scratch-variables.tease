@@ -35,4 +35,14 @@ function debugImages {
   // NOTE SX_UNDEFINED_VARIABLE line 20: missingCount is never assigned in this script or its package; SexScript failed with a missing property whenever this ran. Nothing in the program references this function, so Groovy never ran this code.
   // | for (int n = 1; n <= missingCount; n++) show("Image ${n}")
 }
+// A 0 placeholder that later holds lists starts as an empty list too (Banjo).
+// NOTE SX_PLACEHOLDER_TYPE line 23: Groovy started 'actions' as 0 and later stored a list (string[]); TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where 0 was read.
+let actions: string[] = []
+function offer {
+  actions = ["Nothing"]
+  // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  actions += ["Use Torch"]
+}
+offer()
+say actions[1]
 exit

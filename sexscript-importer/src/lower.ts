@@ -2350,15 +2350,17 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   const isStale = (statement: IrStatement): boolean =>
     statement.kind === "comment" && [...staleText].some((text) => statement.text.startsWith(text));
   const replaced = new Map<IrStatement, IrStatement[]>();
-  for (const { statement, name, type, first } of result.placeholders) {
+  for (const { statement, name, type, first, start } of result.placeholders) {
     const span = statement.span;
+    const started = start ?? "empty text";
+    const read = start ?? "the empty text";
     const diagnostic: MigrationDiagnostic = {
       code: "SX_PLACEHOLDER_TYPE",
       severity: "warning",
       message:
         first === undefined
-          ? `Groovy started '${name}' as empty text and later stored ${type}; TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where the empty text was read.`
-          : `Groovy started '${name}' as empty text and later stored ${type}; the TeaseScript variable keeps these types in a union and starts as the empty value of the first, ${first}, which differs only where the empty text was read.`,
+          ? `Groovy started '${name}' as ${started} and later stored ${type}; TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where ${read} was read.`
+          : `Groovy started '${name}' as ${started} and later stored ${type}; the TeaseScript variable keeps these types in a union and starts as the empty value of the first, ${first}, which differs only where ${read} was read.`,
       span,
     };
     context.diagnostics.push(diagnostic);

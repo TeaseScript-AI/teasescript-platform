@@ -19,3 +19,8 @@ show("Rounds ${rounds.size()}")
 def debugImages = { ->
 	for (int n = 1; n <= missingCount; n++) show("Image ${n}")
 }
+// A 0 placeholder that later holds lists starts as an empty list too (Banjo).
+def actions = 0
+def offer = { -> actions = ["Nothing"]; actions = actions + ["Use Torch"] }
+offer()
+show(actions[1])
