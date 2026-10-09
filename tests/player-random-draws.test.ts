@@ -409,6 +409,15 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
   // A file the lexer has problems with shows as plain text.
   const broken = presentation.randomDrawCode(`${source}\n"unterminated`, site)!;
   assert.ok(broken.lines.every((line) => line.segments.every((segment) => segment.kind === null)));
+  // Each draw marks only itself, also in a file drawn in before, and leaves the code shown for another draw as it was.
+  const second = listRandomSites(plan)[1]!;
+  const markedLines = (shown: { readonly lines: readonly CodeLine[] }) =>
+    shown.lines
+      .filter((line) => line.segments.some((segment) => segment.mark))
+      .map((line) => line.number);
+  assert.deepEqual(markedLines(presentation.randomDrawCode(source, second)!), [second.line]);
+  assert.deepEqual(markedLines(code), [site.line]);
+  assert.deepEqual(presentation.randomDrawCode(source, site), code);
 });
 
 test("earlier outcomes read like code, and each kind of draw offers its outcomes as its support allows", () => {
