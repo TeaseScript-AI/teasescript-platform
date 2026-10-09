@@ -58,7 +58,7 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
-import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
+import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
@@ -1752,7 +1752,7 @@ function withLegacyMarkup(
   };
   const converted = convert(statements, new Map());
   if (dropped === 0) return converted;
-  const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
+  const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, ALIGN, and FONT FACE with the size an editor writes beside it (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
   context.diagnostics.push({ code: "SX_HTML_LAYOUT", severity: "warning", message, span: null });
   return [
     { kind: "comment", text: `// NOTE SX_HTML_LAYOUT: ${message}`, trailing: false, span: null },
@@ -1809,10 +1809,22 @@ function withFoldedSpanValues(
 ): TextPart[] {
   if (constants.size === 0) return [...parts];
   let depth = 0;
+  // Whether each open FONT sets a size, which is a span too.
+  const fonts: boolean[] = [];
   return parts.map((part) => {
     if ("text" in part) {
-      for (const match of part.text.matchAll(/<(\/?)(b|strong|i|em|strike|s|del)\b[^<>]*>/giu))
-        depth = Math.max(0, depth + (match[1] === "/" ? -1 : 1));
+      for (const match of part.text.matchAll(
+        /<(\/?)(b|strong|i|em|strike|s|del|font)\b[^<>]*>/giu,
+      )) {
+        const closing = match[1] === "/";
+        if (match[2]!.toLowerCase() === "font") {
+          const size = closing ? null : fontSize(match[0]);
+          const sized = closing ? (fonts.pop() ?? false) : size !== null && size !== "normal";
+          if (!closing) fonts.push(sized);
+          if (!sized) continue;
+        }
+        depth = Math.max(0, depth + (closing ? -1 : 1));
+      }
       return part;
     }
     const name = part.value.kind === "variable" ? part.value.name : "";
@@ -1826,25 +1838,35 @@ function withFoldedSpanValues(
 /**
  * A function's variable that every read shows as the whole of a span, `say "**${message}**"`, gets its span from those
  * reads, so an assignment of the same span around one value, `message = "**${dialog}**"` from legacy HTML that wrapped
- * the text in `<b>` twice, keeps only the value: nested delimiters would show as written.
+ * the text in `<b>` twice, keeps only the value: nested delimiters would show as written. The span may have sizes
+ * around its mark, `[size=x-large]**${message}**[/size]` from `<font size='10'><b>`.
  */
 function withoutNestedSpans(
   statements: IrStatement[],
   fn: Extract<IrStatement, { kind: "function" }>,
   fileVariables: ReadonlySet<string>,
 ): IrStatement[] {
-  // The span mark around each variable at every read: a mark, or null where a read is anything else.
+  // The span opening around each variable at every read, such as `**` or `[size=x-large]**`, or null where a read is
+  // anything else.
   const marks = new Map<string, string | null>();
   const note = (name: string, mark: string | null): void => {
     marks.set(name, marks.has(name) && marks.get(name) !== mark ? null : mark);
   };
+  // The closing of a span opening: its mark, then a `[/size]` for each size.
+  const closing = (mark: string): string =>
+    /(?:\*\*|\*|~~)?$/u.exec(mark)![0] + "[/size]".repeat(mark.split("[size=").length - 1);
   const wrapped = (parts: readonly TextPart[], at: number): string | null => {
     const before = parts[at - 1];
     const after = parts[at + 1];
     if (before === undefined || after === undefined || !("text" in before) || !("text" in after))
       return null;
-    const mark = /(?:^|[^*~])(\*\*|\*|~~)$/u.exec(before.text)?.[1];
-    if (mark === undefined || !after.text.startsWith(mark) || after.text.startsWith(`${mark}*`))
+    const mark = /(?:^|[^*~])((?:\[size=[a-z-]+\])*(?:\*\*|\*|~~)?)$/u.exec(before.text)?.[1];
+    if (
+      mark === undefined ||
+      mark === "" ||
+      !after.text.startsWith(closing(mark)) ||
+      after.text.startsWith(`${closing(mark)}*`)
+    )
       return null;
     return mark;
   };
@@ -1899,17 +1921,24 @@ function withoutNestedSpans(
     if (!("text" in first) || !("text" in last)) return null;
     const texts = parts.flatMap((part) => ("text" in part ? [part.text] : []));
     const inside = texts.join("\u{F0000}");
+    const close = closing(mark);
     const span = new RegExp(
-      `^${escapeRegExp(mark)}(?![*~])([^\\n]*?)(?<![*~])${escapeRegExp(mark)}$`,
+      `^${escapeRegExp(mark)}(?![*~])([^\\n]*?)(?<![*~])${escapeRegExp(close)}$`,
       "u",
     );
     const body = span.exec(inside)?.[1];
-    if (body === undefined || body.includes(mark)) return null;
+    const emphasis = /(?:\*\*|\*|~~)?$/u.exec(mark)![0];
+    if (
+      body === undefined ||
+      (emphasis !== "" && body.includes(emphasis)) ||
+      body.includes("[size=")
+    )
+      return null;
     const trimmed = parts.map((part, at) => {
       if (!("text" in part)) return part;
       let text = part.text;
       if (at === 0) text = text.slice(mark.length);
-      if (at === parts.length - 1) text = text.slice(0, text.length - mark.length);
+      if (at === parts.length - 1) text = text.slice(0, text.length - close.length);
       return { text };
     });
     return value.kind === "template"

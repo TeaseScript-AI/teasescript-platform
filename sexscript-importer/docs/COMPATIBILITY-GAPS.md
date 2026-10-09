@@ -173,25 +173,35 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   becomes a list of each alternative's paragraphs said one message each, `let dialogs = [["…", "…"], ["…"]]` and
   `for line in dialogs.random { say line }`, which draws the same alternative (owner decision 2026-10-08;
   `SX_PARAGRAPH_PICK`, `picks`). It stays whole where the list or the picked text has another use: read again later,
-  also as a leftover after the function that picked it returns (DisciplineClinic asks some questions with the last
-  picked `dialog`), or used before the pick other than for its length (`SX_PARAGRAPH_PICK_KEPT`, `picksKept`); 217
-  lists in 13 units are said this way, and 232 in 14 units stay whole.
+  also as a leftover after the function that picked it returns, or used before the pick other than for its length
+  (`SX_PARAGRAPH_PICK_KEPT`, `picksKept`). DisciplineClinic asked three questions with a `dialog` left from an earlier
+  pick, which showed that older text again; a unit patch asks them without a question, as their author meant, so its
+  lists split. 304 lists in 13 units are said this way, and 145 in 14 units stay whole.
   Corpus: 10,635 says split in 172 units,
   172 questions in 50 units (71 that ask, 49 with remarks after them, 52 by the fallback), 263 single paragraphs
   trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
   outros (no form question in the corpus has a literal blank line); report counter `paragraphs`.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
-- Legacy `show()` rendered HTML, whose bold, italic, and strikethrough become markup spans (markup.ts). A span ends at a
-  line break, so it closes before each one and opens again on the next line with text, and the blank line between
-  paragraphs gets no delimiters, so the paragraph rule still splits them; a span inside one of its own kind adds
-  nothing, as in HTML (spinthebottle's second `<i>` where `</i>` was meant). Inside a span, a function's text variable
-  that never changes joins the span's own text first (DisciplineClinic's `dots = "\n\n....... "`), and a variable that
-  every show wraps in the same span again keeps no span of its own (DisciplineClinic's `message`, which legacy wrapped
-  in `<b>` twice). A value built at runtime with line breaks inside a span still crosses them (DisciplineClinic's
-  "Keep counting!" variant of a long spanking), which only a span per line at runtime would mend. Corpus: 214 lines of
-  stray delimiters gone from texts in 21 units, 12 nested spans settled in 3 units, 3 constant texts folded in 2 units,
-  and 1 nested variable span (DisciplineClinic).
+- Legacy `show()` rendered HTML, whose bold, italic, strikethrough, and font sizes become markup spans (markup.ts). A
+  FONT SIZE becomes `[size=…]` (owner decision 2026-10-09): 1 and 2 `small`, 3 none, 4 `large`, and 5 or more
+  `x-large`, as legacy showed sizes above 7 as 7 (DisciplineClinic's `size='10'`), nested as legacy nested it:
+  `[size=x-large]**Right cheek**[/size]`; a size the text around it already has adds nothing. A FONT that names a FACE
+  is a rich-text editor's text format, whose size is no emphasis: the Flash editor's htmlText (Countdown Game,
+  Milovana) wraps every paragraph in FACE and SIZE 6. A size that is no whole number, such as SissyPlaytimeExposure's
+  `34px`, which legacy ignored, or one computed at runtime goes with its tag, and so does a value inside a dropped tag
+  (catwoman's size, ShockQuiz's and fight_arena's colours), which used to take the place of the values after it. A span
+  ends at a line break, so it closes before each one and opens again on the next line with text, and the blank line
+  between paragraphs gets no delimiters, so the paragraph rule still splits them (its layout check ignores size tags);
+  a bold, italic, or strikethrough span inside one of its own kind adds nothing, as in HTML (spinthebottle's second
+  `<i>` where `</i>` was meant). Inside a span, a function's text variable that never changes joins the span's own text
+  first (DisciplineClinic's `dots = "\n\n....... "`), and a variable that every show wraps in the same span again keeps
+  no span of its own (DisciplineClinic's `message`, which legacy wrapped in its size and `<b>` twice). A value built at
+  runtime with line breaks inside a span still crosses them, which only a span per line at runtime would mend; the
+  corpus's one case, DisciplineClinic's "Keep counting!" line in a long counted series, has a unit patch that shows
+  that line after the span. Corpus: 214 lines of stray delimiters gone from texts in 21 units, 12 nested spans settled
+  in 3 units, 3 constant texts folded in 2 units, 1 nested variable span (DisciplineClinic), and 121 lines with a size
+  span in 13 units.
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
   or empty. TeaseScript prefills with `prefill:` (#713), and a null or blank default at runtime opens the input without a
   prefill (#618), so such a default converts as written; a literal empty or null default, which TeaseScript rejects

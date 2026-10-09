@@ -4,7 +4,7 @@ def counting = false
 def spank = { message, spot ->
 	def dots = "\n\n....... "
 	show("<font size='10'><b>"+message + dots+"</b></font>")
-	// A variable that every show wraps in <b> again keeps no <b> of its own.
+	// A variable that every show wraps in its size and <b> again keeps neither of its own.
 	if (spot != "cheek") {
 		def dialog = "Center cheek, Alternate sides"
 		message = "<font size='10'><b>"+dialog+"</b></font>"
@@ -13,3 +13,5 @@ def spank = { message, spot ->
 	else show("<font size='10'><b>"+message+"\n.1.</b></font>")
 }
 spank("Right cheek", "cheek")
+// Milovana: the Flash editor wraps every paragraph in a FONT with its FACE and default size, which is no emphasis.
+show("<TEXTFORMAT LEADING=\"2\"><P ALIGN=\"CENTER\"><FONT FACE=\"FontSans\" SIZE=\"6\" COLOR=\"#000000\" LETTERSPACING=\"0\" KERNING=\"0\">You think I have all day to wait for you?</FONT></P></TEXTFORMAT>")

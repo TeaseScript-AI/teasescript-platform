@@ -1,4 +1,3 @@
-// NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (2 texts in this file).
 // A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
 // button; a wait that timed the reading goes, also in milliseconds.
 showButton "Start"
@@ -90,11 +89,11 @@ let counting = false
 let tempTime = 0.5
 for tempSpankCount in 1..=3 {
   if counting {
-    say "**${message}**", instant
+    say "[size=x-large]**${message}**[/size]", instant
   } else {
     say """
-      **${message}**
-      **.${tempSpankCount}.**
+      [size=x-large]**${message}**[/size]
+      [size=x-large]**.${tempSpankCount}.**[/size]
     """, instant
   }
   playAudio async "DisciplinePack/hand${1 + randomInteger(0..3)}.wav"
