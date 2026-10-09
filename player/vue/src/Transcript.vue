@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { ScrollAreaRoot, ScrollAreaViewport } from "reka-ui";
 import ScrollBar from "@/components/ui/scroll-area/ScrollBar.vue";
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  queuePostFlushCb,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import {
   elementScroll,
   measureElement,
@@ -183,9 +193,22 @@ watch(
   { flush: "post" },
 );
 onMounted(() => showControls(false));
+// Vue calls a row's ref as it inserts that row, before the next; a measurement there lays out the page once per row. The
+// rows an update rendered are measured together once Vue has inserted them all, and only then start their entrances.
+const renderedRows = new Map<HTMLElement, string>();
 function measureRow(element: HTMLElement | null, id: string) {
-  virtualizer.value.measureElement(element);
-  if (element !== null) entrances.play(id, element);
+  if (element === null) virtualizer.value.measureElement(null);
+  else {
+    if (renderedRows.size === 0) queuePostFlushCb(measureRenderedRows);
+    renderedRows.set(element, id);
+  }
+}
+function measureRenderedRows() {
+  // A row a later render of the same update replaced is no longer in the document.
+  const rows = [...renderedRows].filter(([element]) => element.isConnected);
+  renderedRows.clear();
+  for (const [element] of rows) virtualizer.value.measureElement(element);
+  for (const [element, id] of rows) entrances.play(id, element);
 }
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   computed(() => {
