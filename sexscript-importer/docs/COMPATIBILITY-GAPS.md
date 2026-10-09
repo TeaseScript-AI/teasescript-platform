@@ -729,8 +729,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   a missing script becomes `exit` (`SX_UNREACHABLE_BRANCH`). A chain to a script of the legacy desktop player
   (`system/...`, `welcome`, `exit`) ends the session (`SX_DESKTOP_SCRIPT`).
 - The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
-  clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
-  of `main.tease`, with the distribution's questions (the owned items as one `askForm` of toggles keyed by their
+  clothes the player owns; a package that reads such keys and never saves them, or saves a toy or a garment only to
+  correct the answer (jewell), asks the missing ones once at the start of `main.tease`, with the distribution's questions (the owned items as one `askForm` of toggles keyed by their
   storage keys, asked as the system speaker), and saves them under the legacy keys; storage is per package, so each
   package asks once (`SX_LEGACY_PROFILE`, 141 selected units).
 - `show("")` only cleared the legacy text area and is dropped, as is any other empty text, such as a question in a

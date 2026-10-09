@@ -5,9 +5,9 @@ import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 /**
  * The legacy desktop player's profile: the distribution's intro asked the player's name and gender once, and its
  * `toys`, `womensclothes`, and `mensclothes` scripts which toys and clothes the player owns, and every script read
- * them from storage. A converted package that reads such a key but never saves it asks it once, with the
- * distribution's own questions, and saves the answer under the legacy key, so later packages and sessions reuse it
- * (owner decision 2026-10-05).
+ * them from storage. A converted package that reads such a key but never saves it, or saves a toy or a garment only
+ * to correct the answer, asks it once, with the distribution's own questions, and saves the answer under the legacy
+ * key, so later packages and sessions reuse it (owner decision 2026-10-05).
  */
 
 /** The distribution's toy names (`toys.groovy`), by item. */
@@ -138,7 +138,7 @@ const ifMissing = (key: string, body: IrStatement[]): IrStatement => ({
 });
 
 /**
- * The statements that start a package's `main.tease` when a script reads a profile key that no script saves: a
+ * The statements that start a package's `main.tease` when a script reads a profile key that no script answers: a
  * helper that asks only the keys the package reads and the player has not answered yet, and its call. Empty when the
  * package needs no prompt; `main` is the entry program, whose helpers are not repeated.
  */
@@ -149,7 +149,15 @@ export function legacyProfilePrompt(
   const reads = new Set<string>();
   const saves = new Set<string>();
   for (const program of [...programs, main]) collectKeys(program.statements, reads, saves);
-  const asked = [...reads].filter((key) => !saves.has(key) && isProfileKey(key)).sort();
+  // A script's save of a toy or a garment corrects what the player owns, as jewell's training saves that the player
+  // has no panties after all; it asks nothing, so the item is still asked.
+  const asked = [...reads]
+    .filter(
+      (key) =>
+        isProfileKey(key) &&
+        (key.startsWith("toys.") || key.startsWith("clothes.") || !saves.has(key)),
+    )
+    .sort();
   if (asked.length === 0) return [];
   const body: IrStatement[] = [];
   if (asked.includes("intro.name"))
