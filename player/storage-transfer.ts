@@ -1,5 +1,4 @@
 import {
-  upgradeStoredScriptValues,
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
@@ -267,7 +266,6 @@ function parseScript(script: unknown, scopes: Set<string>): StorageBundleScript 
     throw new StorageTransferError(`The name of ${scope} is not text.`);
   if (scopes.has(scope)) throw new StorageTransferError(`${scope} is listed twice.`);
   scopes.add(scope);
-  upgradeStoredScriptValues(entries);
   const failure = validateScriptStorageEntries(entries, "entries");
   if (failure !== null)
     throw new StorageTransferError(`A saved value of ${name ?? scope} is invalid: ${failure}`);

@@ -91,8 +91,6 @@ import {
   type PlayerNotice,
 } from "../../notices.js";
 import {
-  INSTRUCTION_PLAN_VERSION,
-  RUNTIME_SNAPSHOT_VERSION,
   validateScriptStorageEntries,
   type CapturedMediaAdmission,
   type InstructionPlan,
@@ -189,20 +187,9 @@ export type PlayerSessionStart = (recording: {
   readonly randomControl?: RandomControlOptions;
 }) => PlayerRuntimeSession;
 
-/**
- * The format revision of a stored plan or snapshot, read from its start, where the serializer writes it after the
- * format name, so a large snapshot is not parsed for it; `Infinity` when the text names none.
- */
-function formatVersion(json: unknown): number {
-  if (typeof json !== "string") return Infinity;
-  const match = /^\{"format":"[^"\\]*","version":(\d+)[,}]/u.exec(json.slice(0, 200));
-  return match === null ? Infinity : Number(match[1]);
-}
-
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
-
 export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolvePackageAsset = options.resolveAsset ?? (() => null);
   const diagnostics = shallowRef<readonly PlayerDiagnostic[]>([]);
@@ -1214,16 +1201,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     await storageRoute;
     const store = keptStore();
     const stored = await store.session(keptScope).catch(() => null);
-    if (stored === null) return null;
-    // A session kept in an older format is refused before its events are read, which that format may hold otherwise.
-    if (
-      formatVersion(stored.planJson) < INSTRUCTION_PLAN_VERSION ||
-      formatVersion(stored.snapshotJson) < RUNTIME_SNAPSHOT_VERSION
-    ) {
-      notices.publish(playerNotices.olderKeptSession());
-      return null;
-    }
-    const found = keptSession(stored);
+    const found = stored === null ? null : keptSession(stored);
     if (found === null || found.planJson !== JSON.stringify(plan)) return null;
     let restored: PlayerRuntimeSession;
     try {

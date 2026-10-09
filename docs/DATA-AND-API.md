@@ -133,9 +133,7 @@ which an export never takes. Script storage is separate from the session the Pla
 persistence (#469).
 
 The browser-local provider keeps one local-storage item per key, holding `{ v: 1, value }`; it validates items as
-external input and skips unreadable ones. A value saved before a change of the value format is upgraded when it is read,
-here, from the debug room, and from a saved-data import, so it keeps its meaning: a `timestamp` reads as an
-`absoluteDateTime` ([ADR 0026](decisions/0026-unified-time-semantics.md#6-stored-values)). Items are named `player-storage:` plus the JSON array `[scope, key]` until
+external input and skips unreadable ones. Items are named `player-storage:` plus the JSON array `[scope, key]` until
 the scope is first replaced or cleared. A provider can replace all values of its scope at once, and clearing is an
 empty replacement: the browser-local provider stages the new values as a generation, named
 `player-storage-generation:` plus `[scope, generation, key]`, then publishes it by writing the head item

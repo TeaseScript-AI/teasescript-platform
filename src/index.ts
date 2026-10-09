@@ -136,7 +136,6 @@ export type {
   ScriptStorageEditedEvent,
 } from "./runtime/events.js";
 export {
-  upgradeStoredScriptValues,
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
 } from "./runtime/script-storage.js";

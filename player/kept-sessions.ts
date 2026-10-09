@@ -1,6 +1,5 @@
 import {
   isMessageMarkup,
-  upgradeStoredScriptValues,
   validateScriptStorageEntries,
   type InterpreterEvent,
   type RuntimeScriptStorageEntrySnapshot,
@@ -287,7 +286,6 @@ function writtenEntries(
 
 /** Stored values when they are valid script storage; they come from storage, so they are checked on every read. */
 function loadedEntries(values: unknown): readonly RuntimeScriptStorageEntrySnapshot[] {
-  upgradeStoredScriptValues(values);
   if (validateScriptStorageEntries(values, "values") !== null)
     throw new Error("The debug room's saved data is unreadable.");
   // EVIDENCE: validation: validateScriptStorageEntries accepted the stored values above.

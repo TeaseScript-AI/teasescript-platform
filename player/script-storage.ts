@@ -1,5 +1,4 @@
 import {
-  upgradeStoredScriptValues,
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
@@ -249,7 +248,6 @@ function parsePayload(raw: string | null): SerializableRuntimeValue | undefined 
   // EVIDENCE: validation: the guard above proved a plain object with exactly own v and value fields.
   const { v, value } = payload as { v: unknown; value: unknown };
   if (v !== PAYLOAD_VERSION) return undefined;
-  upgradeStoredScriptValues(value);
   if (validateScriptStorageEntries([{ key: "", value }], "value") !== null) return undefined;
   // EVIDENCE: validation: validateScriptStorageEntries accepted this value as a storable, non-null entry value.
   return value as SerializableRuntimeValue;
