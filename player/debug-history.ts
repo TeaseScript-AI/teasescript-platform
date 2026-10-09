@@ -1,4 +1,4 @@
-import type { InstructionPlan, InterpreterEvent } from "../src/index.js";
+import { CheckpointError, type InstructionPlan, type InterpreterEvent } from "../src/index.js";
 import type { DebugEditedWhileDebugging, DebugRewoundWhileDebugging } from "./debug-export.js";
 import type {
   PlayerForegroundPresentation,
@@ -271,7 +271,9 @@ export class DebugHistory {
     const foreground = playerRuntimeForeground(session);
     if (foreground === null) return;
     const id = this.#nextId++;
-    if (!this.#store.add(id, playerRuntimeSnapshotJson(session))) {
+    // A state too large to save ends the history, as a store that is full does.
+    const snapshotJson = stateJsonOrNull(session);
+    if (snapshotJson === null || !this.#store.add(id, snapshotJson)) {
       this.#complete = false;
       return;
     }
@@ -462,4 +464,14 @@ export function rewindFutureTranscript(
       ),
     speakers: later.speakers,
   };
+}
+
+/** The session's state as JSON, or `null` when it is too large to save (`TSK004`). */
+function stateJsonOrNull(session: PlayerRuntimeSession): string | null {
+  try {
+    return playerRuntimeSnapshotJson(session);
+  } catch (error) {
+    if (error instanceof CheckpointError && error.info.code === "TSK004") return null;
+    throw error;
+  }
 }

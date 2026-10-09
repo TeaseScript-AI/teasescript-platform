@@ -80,7 +80,9 @@ path writes the validated data with native `JSON.stringify`, and with an iterati
 host stack is exhausted or an inherited `toJSON` hook could apply, preserving JSON wire ordering and scalar
 representation without introducing a depth rejection policy. Callers using native `JSON.stringify` themselves remain
 outside that guarantee. Constrained-stack list and object regressions verify the complete public JSON
-checkpoint/resume route.
+checkpoint/resume route. JSON longer than a text can be (`runtime.text-length`) fails with structured `CheckpointError`
+`TSK004` in every host, also for `exportTaggedSnapshot` and the Player's own saves, rather than with V8's raw
+`RangeError`.
 
 ## Non-rejecting scale diagnostics
 

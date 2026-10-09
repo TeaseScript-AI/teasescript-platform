@@ -18,6 +18,7 @@ import {
   restorePlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import { serializeValidatedRuntimeJsonWithin } from "../src/runtime/checkpoint.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 /**
@@ -180,6 +181,33 @@ test("serialization retains checkpoint validation and rejects malformed data bef
     });
     assert.throws(() => serializeCheckpoint({ ...checkpoint, snapshot }), CheckpointError);
   }
+});
+
+test("JSON longer than a text can be fails with TSK004 from either writer, in every host", (context) => {
+  const plan = compileValidPlan('let items = ["a", "b"]\nlet pick = choose "One", "Two"\nexit');
+  const checkpoint = createCheckpoint(plan, run(plan, createFreshRuntimeSnapshot(plan)).snapshot);
+  const json = serializeCheckpoint(checkpoint);
+  const tooLarge = (error: unknown) =>
+    error instanceof CheckpointError &&
+    error.info.code === "TSK004" &&
+    error.info.path === "$" &&
+    error.message ===
+      "The state is too large to save: as text it would be longer than the limit of 536,870,888 characters.";
+  // A limit one shorter than the JSON: the native writer checks the text it wrote, the iterative one counts as it goes.
+  assert.equal(serializeValidatedRuntimeJsonWithin(checkpoint, json.length), json);
+  assert.throws(() => serializeValidatedRuntimeJsonWithin(checkpoint, json.length - 1), tooLarge);
+  const iterative = (limit: number) =>
+    withInheritedToJson(() => serializeValidatedRuntimeJsonWithin(checkpoint, limit)).result;
+  assert.equal(iterative(json.length), json);
+  assert.throws(() => iterative(json.length - 1), tooLarge);
+  // V8 cannot build such a text at all; its own error becomes TSK004 too.
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (value: unknown, ...rest: []) => {
+    if (typeof value === "object" && value !== null && "format" in value)
+      throw new RangeError("Invalid string length");
+    return stringify(value, ...rest);
+  });
+  assert.throws(() => serializeCheckpoint(checkpoint), tooLarge);
 });
 
 test("deep source-produced lists and objects serialize and resume with a constrained stack", () => {
