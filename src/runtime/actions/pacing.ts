@@ -46,6 +46,12 @@ export function calculatePacingDeadlineMs(
     );
   }
   if (durationMs === 0) return currentSessionTimeMs;
+  // At the last scene time, no positive pause has a later deadline.
+  if (currentSessionTimeMs === MAX_RUNTIME_SESSION_TIME_MS) {
+    throw new RangeError(
+      "Scene time has reached its limit, so this say cannot pause. Use 'instant' instead.",
+    );
+  }
 
   const deadlineMs = currentSessionTimeMs + durationMs;
   if (!isSessionTime(deadlineMs) || deadlineMs <= currentSessionTimeMs) {
