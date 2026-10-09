@@ -1,4 +1,4 @@
-import { durationParts, formatDuration } from "../src/duration.js";
+import { formatDuration } from "../src/duration.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import {
   formatIsoDate,
@@ -73,7 +73,9 @@ export function storagePreview(value: SerializableRuntimeValue): StoragePreview 
         `${value.start} to ${value.end}${value.inclusive ? "" : ", end excluded"}`,
       );
     case "duration":
-      return preview("Duration", formatDuration(durationParts(value)));
+      return preview("Duration", formatDuration(value));
+    case "calendarDuration":
+      return preview("Calendar duration", formatDuration(value));
     case "date":
       return preview("Date", formatIsoDate(value));
     case "time":

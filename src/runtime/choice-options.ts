@@ -17,7 +17,7 @@ import {
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import {
-  isDuration,
+  isAnyDuration,
   isList,
   isObject,
   isScriptReference,
@@ -140,7 +140,7 @@ function choiceButton(
 
 /** A scalar that `isVisibleScalar` accepted, as a choice value; a script reference is shown but not returned. */
 function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): InteractionChoiceValue {
-  if (isDuration(value)) return { ...value };
+  if (isAnyDuration(value)) return { ...value };
   if (isTemporal(value)) return { ...value };
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
   if (typeof value === "string" || typeof value === "boolean" || value === null) return value;

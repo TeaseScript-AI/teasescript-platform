@@ -120,7 +120,7 @@ export interface ShowButtonExpression extends ShowButtonParts {
 export interface WaitStatement {
   readonly kind: "waitStatement";
   readonly duration: Expression;
-  readonly unit: "ms" | "s" | "min" | "h" | null;
+  readonly unit: TrailingDurationUnit | null;
   readonly span: SourceSpan;
 }
 
@@ -136,7 +136,7 @@ export interface TimerParts {
   /** A short-form modifier is a static display; the named form may use any expression. */
   readonly display: TimerDisplay | Expression | null;
   readonly duration: Expression;
-  readonly unit: DurationUnit | null;
+  readonly unit: TrailingDurationUnit | null;
   readonly label: Expression | null;
   readonly repeat: boolean;
   readonly persist: boolean;
@@ -435,6 +435,7 @@ export type ScalarTypeName =
   | "datetime"
   | "absoluteDateTime"
   | "duration"
+  | "calendarDuration"
   | "script";
 
 /**
@@ -714,19 +715,28 @@ export interface NumberLiteral {
   readonly span: SourceSpan;
 }
 
-export type DurationUnit = "ms" | "s" | "min" | "h";
+/** Exact units (ADR 0026): a day is 24 hours and a week 168 hours. */
+export type DurationUnit = "ms" | "s" | "min" | "h" | "d" | "w";
 
-/** Calendar units: days, weeks, months, and years (V30 §35). They only appear in duration literals. */
+/** The unit after a whole `wait` or short `timer` duration expression. */
+export type TrailingDurationUnit = "ms" | "s" | "min" | "h";
+
+/** Calendar units after `calendar`: days, weeks, months, and years (ADR 0026). They only appear in duration literals. */
 export type CalendarDurationUnit = "d" | "w" | "mo" | "y";
 
-/** A V30 exact elapsed-duration literal such as `30 s` or `2 minutes`. */
-export interface DurationLiteral {
+/**
+ * A duration literal: an exact one such as `30 s` or `2 days`, or with `calendar` a calendar one such as
+ * `1 calendar month`, whose unit is then a calendar unit.
+ */
+export type DurationLiteral = {
   readonly kind: "durationLiteral";
   readonly amount: NumberLiteral;
-  readonly unit: DurationUnit | CalendarDurationUnit;
   readonly unitSpan: SourceSpan;
   readonly span: SourceSpan;
-}
+} & (
+  | { readonly calendar: false; readonly unit: DurationUnit }
+  | { readonly calendar: true; readonly unit: CalendarDurationUnit }
+);
 
 export interface StringLiteral {
   readonly kind: "stringLiteral";

@@ -1,6 +1,7 @@
 import type {
   SerializableRuntimeDate,
   SerializableRuntimeDateTime,
+  SerializableRuntimeCalendarDuration,
   SerializableRuntimeDuration,
   SerializableRuntimeTemporal,
   SerializableRuntimeTime,
@@ -48,6 +49,19 @@ export function isSpeakerReference(
 
 export function isDuration(value: SerializableRuntimeValue): value is SerializableRuntimeDuration {
   return typeof value === "object" && value !== null && value.kind === "duration";
+}
+
+export function isCalendarDuration(
+  value: SerializableRuntimeValue,
+): value is SerializableRuntimeCalendarDuration {
+  return typeof value === "object" && value !== null && value.kind === "calendarDuration";
+}
+
+/** An exact or a calendar duration. */
+export function isAnyDuration(
+  value: SerializableRuntimeValue,
+): value is SerializableRuntimeDuration | SerializableRuntimeCalendarDuration {
+  return isDuration(value) || isCalendarDuration(value);
 }
 
 export function isTimerHandle(value: SerializableRuntimeValue): value is SerializableTimerHandle {
@@ -107,6 +121,8 @@ export function describeRuntimeValue(value: SerializableRuntimeValue): string {
       return "a date and time";
     case "absoluteDateTime":
       return "an absolute date and time";
+    case "calendarDuration":
+      return "a calendar duration";
     case "script":
       return "a script reference";
     default:

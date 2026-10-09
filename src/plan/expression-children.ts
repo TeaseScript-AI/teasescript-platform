@@ -3,6 +3,7 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
   switch (expression.kind) {
     case "literal":
     case "duration":
+    case "calendarDuration":
     case "identifier":
     case "debugMode":
     case "temporary":

@@ -1,10 +1,5 @@
 import type { Expression, SwitchStatement } from "./ast.js";
-import {
-  durationLiteralParts,
-  durationParts,
-  negateDurationParts,
-  storedDuration,
-} from "./duration.js";
+import { durationLiteralValue, durationParts, isCalendar, negateDuration } from "./duration.js";
 import type { SourceSpan } from "./source.js";
 import {
   describeValue,
@@ -158,14 +153,16 @@ function literalValue(
 ): Omit<Extract<CaseValue, { kind: "literal" }>, "kind" | "span"> | undefined {
   const { negative, operand } = signed(expression);
   if (operand.kind === "durationLiteral") {
-    const text = `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`;
-    const literal = durationLiteralParts(operand);
+    const text = `${negative ? "-" : ""}${operand.amount.raw} ${operand.calendar ? "calendar " : ""}${operand.unit}`;
+    const literal = durationLiteralValue(operand);
     // A calendar amount that is not whole is reported where the literal is typed.
     if (typeof literal === "string") return { key: `duration:${text}`, number: undefined, text };
-    // `==` compares durations by their parts, so `1 d` and `24 h` are different cases.
-    const parts = durationParts(storedDuration(negative ? negateDurationParts(literal) : literal));
+    // `==` compares a calendar duration by its parts and never equals an exact one, so `1 calendar day` and `24 h` are
+    // different cases, while `1 d` and `24 h` are the same.
+    const value = negative ? negateDuration(literal) : literal;
+    const parts = durationParts(value);
     return {
-      key: `duration:${parts.months}:${parts.days}:${parts.milliseconds}`,
+      key: `${isCalendar(value) ? "calendarDuration" : "duration"}:${parts.months}:${parts.days}:${parts.milliseconds}`,
       number: undefined,
       text,
     };

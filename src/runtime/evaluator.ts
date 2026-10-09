@@ -94,19 +94,21 @@ import {
   sortOrder,
 } from "./collection-operations.js";
 import {
-  addDurationParts,
-  compareDurationParts,
-  divideDurationParts,
+  addDurations,
+  calendarDuration,
+  compareDurations,
+  divideDuration,
   durationFamily,
   durationParts,
-  durationRatio,
+  durationPropertyMessage,
+  durationQuotient,
+  exactDuration,
   formatDuration,
-  isExactDuration,
-  negateDurationParts,
-  scaleDurationParts,
-  storedDuration,
+  isCalendar,
+  negateDuration,
+  scaleDuration,
   ZERO_DIVISOR,
-  type DurationParts,
+  type AnyDuration,
 } from "../duration.js";
 import {
   callStringMethod,
@@ -136,7 +138,6 @@ import {
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
   type SerializableRuntimeDict,
-  type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
@@ -156,9 +157,12 @@ import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
+  MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import {
   describeRuntimeValue,
+  isAnyDuration,
+  isCalendarDuration,
   isDict,
   isDuration,
   isList,
@@ -353,7 +357,13 @@ export class Evaluator {
       ExpressionPlan,
       {
         kind:
-          "literal" | "duration" | "identifier" | "debugMode" | "temporary" | "preparedReference";
+          | "literal"
+          | "duration"
+          | "calendarDuration"
+          | "identifier"
+          | "debugMode"
+          | "temporary"
+          | "preparedReference";
       }
     >,
   ): SerializableRuntimeValue {
@@ -371,7 +381,9 @@ export class Evaluator {
         );
         return this.snapshot.debugMode;
       case "duration":
-        return storedDuration(durationParts(expression));
+        return exactDuration(expression.milliseconds);
+      case "calendarDuration":
+        return calendarDuration(expression);
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
@@ -756,6 +768,7 @@ export class Evaluator {
       switch (expression.kind) {
         case "literal":
         case "duration":
+        case "calendarDuration":
         case "identifier":
         case "debugMode":
         case "temporary":
@@ -958,11 +971,8 @@ export class Evaluator {
                 expression.operand.span,
               );
             value = !result.value;
-          } else if (isDuration(result.value)) {
-            const parts = durationParts(result.value);
-            value = storedDuration(
-              expression.operator === "+" ? parts : negateDurationParts(parts),
-            );
+          } else if (isAnyDuration(result.value)) {
+            value = expression.operator === "+" ? result.value : negateDuration(result.value);
           } else {
             if (typeof result.value !== "number") {
               const operand = operandLabel(expression.operand);
@@ -1722,15 +1732,10 @@ export class Evaluator {
       (typeof left === "string" || typeof right === "string" || isList(left) || isList(right))
     )
       return this.#joined(expression, left, right);
-    const temporal = temporalBinary(
-      expression.operator,
-      left,
-      right,
-      currentTemporalContext(this.snapshot),
-      expression.span,
-    );
+    const temporal = temporalBinary(expression.operator, left, right, expression.span);
     if (temporal !== undefined) return temporal;
-    if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
+    if (isAnyDuration(left) || isAnyDuration(right))
+      return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
       if (
         (typeof left !== "number" || typeof right !== "number") &&
@@ -1796,8 +1801,9 @@ export class Evaluator {
   }
 
   /**
-   * V30 §35 duration arithmetic and comparison; mixing with plain numbers is explicit only. Exact durations keep their
-   * elapsed arithmetic; calendar parts stay whole, and durations compare and divide only within one family.
+   * Duration arithmetic and comparison (ADR 0026); mixing with plain numbers is explicit only. A calendar duration stays
+   * one, its months and days stay whole, and calendar durations compare and divide only within one family, never with
+   * an exact duration.
    */
   #durationBinary(
     expression: BinaryExpressionPlan,
@@ -1806,34 +1812,41 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     const span = expression.span;
     const operator = expression.operator;
-    const result = (parts: DurationParts | string): SerializableRuntimeDuration => {
-      if (parts === ZERO_DIVISOR) throw noArithmeticResult(expression, left, right, "TSR009");
-      if (typeof parts === "string")
-        throw fault("TSR009", `Operator '${operator}': ${parts}.`, span);
+    const result = (duration: AnyDuration | string): AnyDuration => {
+      // An exact duration divided by zero has no result like a number; a calendar one keeps its parts' error code.
+      if (duration === ZERO_DIVISOR)
+        throw isAnyDuration(left) && isCalendar(left)
+          ? noArithmeticResult(expression, left, right, "TSR009")
+          : noArithmeticResult(expression, left, right);
+      if (typeof duration === "string")
+        throw fault("TSR009", `Operator '${operator}': ${duration}.`, span);
       // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+      const parts = durationParts(duration);
       if (
         !Number.isSafeInteger(parts.months) ||
         !Number.isSafeInteger(parts.days) ||
         !Number.isFinite(parts.milliseconds)
       )
         throw noArithmeticResult(expression, left, right);
-      return storedDuration(parts);
+      return duration;
     };
-    if (isDuration(left) && isDuration(right)) {
-      const [a, b] = [durationParts(left), durationParts(right)];
-      const exact = isExactDuration(a) && isExactDuration(b);
+    if (isAnyDuration(left) && isAnyDuration(right)) {
       switch (operator) {
         case "+":
-          return result(addDurationParts(a, b));
+          return result(addDurations(left, right));
         case "-":
-          return result(addDurationParts(a, b, -1));
+          return result(addDurations(left, right, -1));
         case "/": {
-          const ratio = exact ? a.milliseconds / b.milliseconds : durationRatio(a, b);
-          if (ratio === ZERO_DIVISOR) throw noArithmeticResult(expression, left, right, "TSR009");
+          const ratio = durationQuotient(left, right);
+          // An exact zero divisor has no result like a number's; a calendar one has no family to divide in.
+          if (ratio === ZERO_DIVISOR)
+            throw isCalendar(left)
+              ? noArithmeticResult(expression, left, right, "TSR009")
+              : noArithmeticResult(expression, left, right);
           if (typeof ratio === "string")
             throw fault(
               "TSR009",
-              `${formatDuration(a)} cannot be divided by ${formatDuration(b)}: ${ratio}.`,
+              `${formatDuration(left)} cannot be divided by ${formatDuration(right)}: ${ratio}.`,
               span,
             );
           if (!Number.isFinite(ratio)) throw noArithmeticResult(expression, left, right);
@@ -1843,11 +1856,11 @@ export class Evaluator {
         case "<=":
         case ">":
         case ">=": {
-          const order = compareDurationParts(a, b);
+          const order = compareDurations(left, right);
           if (typeof order === "string")
             throw fault(
               "TSR009",
-              `${formatDuration(a)} and ${formatDuration(b)} cannot be compared: ${order}.`,
+              `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${order}.`,
               span,
             );
           if (operator === "<") return order < 0;
@@ -1856,15 +1869,11 @@ export class Evaluator {
           return order >= 0;
         }
       }
-    } else if (isDuration(left) && typeof right === "number") {
-      const parts = durationParts(left);
-      if (operator === "*") return result(scaleDurationParts(parts, right));
-      if (operator === "/")
-        return isExactDuration(parts)
-          ? result({ ...parts, milliseconds: parts.milliseconds / right })
-          : result(divideDurationParts(parts, right));
-    } else if (typeof left === "number" && isDuration(right) && operator === "*") {
-      return result(scaleDurationParts(durationParts(right), left));
+    } else if (isAnyDuration(left) && typeof right === "number") {
+      if (operator === "*") return result(scaleDuration(left, right));
+      if (operator === "/") return result(divideDuration(left, right));
+    } else if (typeof left === "number" && isAnyDuration(right) && operator === "*") {
+      return result(scaleDuration(right, left));
     }
     throw fault(
       "TSR009",
@@ -2384,7 +2393,7 @@ export class Evaluator {
       return null;
     }
     if (name === "resume" && timer.state === "paused") {
-      assertRepresentableRound(now, timer.remainingMs!, span);
+      assertRepresentableRound(now, timer.remainingMs!, timer.repeat, span);
     }
     const warning = name === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
     if (warning !== null) this.#warn(warning.code, warning.message, span);
@@ -2408,7 +2417,7 @@ export class Evaluator {
     if (name === "display") {
       warning = setTimerDisplay(timer, timerDisplayValue(value, span));
     } else if (name === "remaining" || name === "repeatDuration") {
-      if (!isDuration(value)) {
+      if (!isAnyDuration(value)) {
         throw fault(
           "TSR050",
           `Timer ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
@@ -2418,7 +2427,7 @@ export class Evaluator {
       exactDurationMilliseconds(value, `Timer ${name}`, span);
       if (name === "remaining") {
         if (timer.state === "running" || timer.state === "paused") {
-          assertRepresentableRound(now, Math.max(0, value.milliseconds), span);
+          assertRepresentableRound(now, Math.max(0, value.milliseconds), timer.repeat, span);
         }
         warning = setTimerRemaining(timer, value.milliseconds, now);
       } else {
@@ -2525,7 +2534,7 @@ export class Evaluator {
         span,
       );
     }
-    if (!isDuration(value) || !Number.isFinite(value.milliseconds)) {
+    if (!isAnyDuration(value) || !Number.isFinite(value.milliseconds)) {
       throw fault(
         "TSR050",
         `Media ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
@@ -3074,14 +3083,15 @@ export class Evaluator {
       (value): value is SerializableRuntimeTemporal =>
         isTemporal(value) && isTemporal(first) && value.kind === first.kind,
     );
-    if (!numbers && !positional.every(isDuration) && temporals.length !== positional.length) {
+    const durations = positional.every(isDuration) || positional.every(isCalendarDuration);
+    if (!numbers && !durations && temporals.length !== positional.length) {
       const other = positional.find(
-        (value) => typeof value !== "number" && !isDuration(value) && !isTemporal(value),
+        (value) => typeof value !== "number" && !isAnyDuration(value) && !isTemporal(value),
       );
       throw fault(
         "TSR059",
         other === undefined
-          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times.`
+          ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, or all dates, times, datetimes, or absolute dates and times.`
           : `${name}(...) needs numbers, durations, or date and time values, not ${describeRuntimeValue(other)}.`,
         span,
       );
@@ -3102,20 +3112,20 @@ export class Evaluator {
         if (name === "min" ? candidate < best : candidate > best) best = candidate;
       return withoutNegativeZero(best);
     }
-    // Durations order only within one family (V30 §35), also those that do not win; zero belongs to every family. The
-    // result keeps its own parts.
-    const durations = positional.filter(isDuration);
-    const families = new Set(durations.map((item) => durationFamily(durationParts(item))));
+    // Calendar durations order only within one family (ADR 0026), also those that do not win; zero belongs to every
+    // family. The result keeps its own parts.
+    const values = positional.filter(isAnyDuration);
+    const families = new Set(values.map((item) => durationFamily(durationParts(item))));
     families.delete("zero");
-    if (families.size > 1 || families.has("mixed"))
+    if (values.some(isCalendar) && (families.size > 1 || families.has("mixed")))
       throw fault(
         "TSR059",
-        `${name}(...) compares durations of one kind only: exact time, days and weeks, or months and years.`,
+        `${name}(...) compares calendar durations of one kind only: months, days, or exact time.`,
         span,
       );
-    let best = durations[0]!;
-    for (const candidate of durations) {
-      const order = compareDurationParts(durationParts(candidate), durationParts(best));
+    let best = values[0]!;
+    for (const candidate of values) {
+      const order = compareDurations(candidate, best);
       if (typeof order === "string")
         throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
       if (name === "min" ? order < 0 : order > 0) best = candidate;
@@ -3339,19 +3349,18 @@ export class Evaluator {
         throw fault("TSR017", `Media handles have no property '${name}'.`, span);
       return property;
     }
-    if (isDuration(value)) {
-      const parts = durationParts(value);
-      const family = durationFamily(parts);
-      if (name === "days" && (family === "days" || family === "zero")) return parts.days;
-      if (name === "months" && (family === "months" || family === "zero")) return parts.months;
+    if (isCalendarDuration(value)) {
+      // The components of a calendar duration (ADR 0026); `.days` counts calendar days and is not a length.
+      if (name === "months") return value.months;
+      if (name === "days") return value.days;
+      if (name === "exactOffset") return exactDuration(value.milliseconds);
       throw fault(
         "TSR017",
-        name === "days" || name === "months"
-          ? `Only a duration of whole ${name === "days" ? "days or weeks" : "months or years"} has .${name}, but this is ${formatDuration(parts)}.`
-          : `Durations have no property '${name}'.`,
+        `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
         span,
       );
     }
+    if (isDuration(value)) throw fault("TSR017", durationPropertyMessage(name), span);
     if (isTemporal(value)) {
       const property = temporalProperty(value, name);
       if (property === undefined)
@@ -3777,8 +3786,8 @@ function noArithmeticResult(
   }
   // A duration divided by a duration is a number, and any other step with a duration gives a duration.
   const what =
-    (isDuration(left) || isDuration(right)) &&
-    !(operator === "/" && isDuration(left) && isDuration(right))
+    (isAnyDuration(left) || isAnyDuration(right)) &&
+    !(operator === "/" && isAnyDuration(left) && isAnyDuration(right))
       ? "a duration too long"
       : "a number too large";
   return fault(
@@ -3790,7 +3799,7 @@ function noArithmeticResult(
 
 /** An operand's kind, with the value of a number or duration, such as `a duration (1 s)`. */
 function kindAndValue(value: SerializableRuntimeValue): string {
-  return typeof value === "number" || isDuration(value)
+  return typeof value === "number" || isAnyDuration(value)
     ? `${describeRuntimeValue(value)} (${operandText(value)})`
     : describeRuntimeValue(value);
 }
@@ -3798,11 +3807,11 @@ function kindAndValue(value: SerializableRuntimeValue): string {
 /** A number or duration operand as a message shows it. */
 function operandText(value: SerializableRuntimeValue): string {
   if (typeof value === "number") return String(withoutNegativeZero(value));
-  return isDuration(value) ? formatDuration(durationParts(value)) : describeRuntimeValue(value);
+  return isAnyDuration(value) ? formatDuration(value) : describeRuntimeValue(value);
 }
 
 function isZero(value: SerializableRuntimeValue): boolean {
-  return value === 0 || (isDuration(value) && durationFamily(durationParts(value)) === "zero");
+  return value === 0 || (isAnyDuration(value) && durationFamily(durationParts(value)) === "zero");
 }
 
 /** `TSR013` or `TSR031`: the host built-in `name` returned a value that a script cannot hold, for `reason`. */
@@ -3872,7 +3881,20 @@ export function planLabel(plan: ExpressionPlan): string | null {
 }
 
 /** A running round must end at a supported session time strictly after a positive remaining time starts. */
-function assertRepresentableRound(nowMs: number, remainingMs: number, span: SourceSpan): void {
+function assertRepresentableRound(
+  nowMs: number,
+  remainingMs: number,
+  repeat: boolean,
+  span: SourceSpan,
+): void {
+  // A repeating timer whose remaining time becomes 0 s starts another positive round.
+  if (remainingMs > 0 && nowMs === MAX_RUNTIME_SESSION_TIME_MS) {
+    throw fault(
+      "TSR050",
+      `Scene time has reached its limit, so this timer cannot continue. ${repeat ? "Stop it." : "Stop it, or set its remaining time to 0 s."}`,
+      span,
+    );
+  }
   const deadlineMs = nowMs + remainingMs;
   if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
     throw fault(

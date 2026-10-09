@@ -5,9 +5,9 @@
 - **Use when:** Designing calendar recurrence and timezone-sensitive scheduling
 - **Do not use for:** The current V30 duration syntax, exact countdown timers, or implemented capability status
 
-V30 section 35 defines and the runtime implements exact elapsed-time units and calendar units (days, weeks, months,
-and years), including clamping to the final valid day when month or year addition would otherwise produce an invalid
-date. This note covers only what remains open: recurrence and scheduling.
+V30 section 35 and ADR 0026 define, and the runtime implements, exact units up to days and weeks and calendar units
+after `calendar` (days, weeks, months, and years), including clamping to the final valid day when month or year addition
+would otherwise produce an invalid date. This note covers only what remains open: recurrence and scheduling.
 
 ## Future calendar recurrence
 

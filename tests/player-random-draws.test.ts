@@ -292,8 +292,11 @@ test("a picker answer counts before the draws it lets run, so they decide from i
   const site = random.draw.value!.site;
   // An answer the engine refuses counts nothing, and the draw still waits.
   assert.equal(random.resolve({ kind: "number", value: 123 }), false);
-  assert.deepEqual(random.tried(site).history, []);
-  assert.equal(random.tried(site).counts.size, 0);
+  const before = random.tried(site);
+  assert.deepEqual(before.history, []);
+  assert.equal(before.counts.size, 0);
+  // Until the history changes, the picker gets the same object, so it does not render all its outcomes again.
+  assert.equal(random.tried(site), before);
   random.setNext(site, "untried");
   assert.equal(random.resolve({ kind: "boolean", value: false }), true);
   assert.deepEqual(said(host), ["false", "true"], "the next draw takes the outcome not taken yet");
@@ -409,6 +412,15 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
   // A file the lexer has problems with shows as plain text.
   const broken = presentation.randomDrawCode(`${source}\n"unterminated`, site)!;
   assert.ok(broken.lines.every((line) => line.segments.every((segment) => segment.kind === null)));
+  // Each draw marks only itself, also in a file drawn in before, and leaves the code shown for another draw as it was.
+  const second = listRandomSites(plan)[1]!;
+  const markedLines = (shown: { readonly lines: readonly CodeLine[] }) =>
+    shown.lines
+      .filter((line) => line.segments.some((segment) => segment.mark))
+      .map((line) => line.number);
+  assert.deepEqual(markedLines(presentation.randomDrawCode(source, second)!), [second.line]);
+  assert.deepEqual(markedLines(code), [site.line]);
+  assert.deepEqual(presentation.randomDrawCode(source, site), code);
 });
 
 test("earlier outcomes read like code, and each kind of draw offers its outcomes as its support allows", () => {

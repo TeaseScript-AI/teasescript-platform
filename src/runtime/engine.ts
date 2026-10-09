@@ -147,6 +147,7 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
   currentTemporalContext,
+  MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import type {
   RuntimeCaptureActionSnapshot,
@@ -208,6 +209,7 @@ import {
   isDate,
   isDateTime,
   isDict,
+  isAnyDuration,
   isDuration,
   isList,
   isObject,
@@ -2598,6 +2600,12 @@ function cloneInteractionAction(
  */
 /** A form's time limit, whose deadline must be a representable later scene time. */
 function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: SourceSpan): number {
+  if (snapshot.currentSessionTimeMs === MAX_RUNTIME_SESSION_TIME_MS)
+    throw fault(
+      "TSR052",
+      "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
+      span,
+    );
   const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs)
     throw fault(
@@ -2615,13 +2623,20 @@ function buttonTimeoutMs(
   snapshot: RuntimeSnapshot,
   span: SourceSpan,
 ): number {
-  // A calendar duration has no fixed length (V30 §35).
-  if (isDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
+  // A calendar duration has no fixed length (ADR 0026).
+  if (isAnyDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
   const timeoutMs = buttonTimeoutMilliseconds(value);
   if (timeoutMs === null) {
     throw fault(
       "TSR050",
       `The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms', but this is ${describeShownValue(value)}.`,
+      span,
+    );
+  }
+  if (snapshot.currentSessionTimeMs === MAX_RUNTIME_SESSION_TIME_MS) {
+    throw fault(
+      "TSR050",
+      "Scene time has reached its limit, so this showButton timeout cannot run. Remove 'timeout:' to wait without a time limit.",
       span,
     );
   }
@@ -3259,7 +3274,7 @@ export function timerDurationMs(
       ? value
       : evaluator.randomIntegerInRange(range, span, "A timer", "duration");
   const amount =
-    isDuration(drawn) && unit === null
+    isAnyDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
       : drawn;
   if (command === "timer" && isRange(drawn))
@@ -3296,7 +3311,17 @@ export function futureDeadline(
   durationMs: number,
   command: "wait" | "timer",
   span: SourceSpan,
+  repeat = false,
 ): number {
+  // At the last scene time, no positive duration has a later deadline. A timer of 0 s keeps its handle, but a
+  // repeating timer cannot have one.
+  if (durationMs > 0 && snapshot.currentSessionTimeMs === MAX_RUNTIME_SESSION_TIME_MS) {
+    throw fault(
+      "TSR050",
+      `Scene time has reached its limit, so this ${command} cannot run. ${command === "wait" || repeat ? "Remove it." : "Remove it, or set its duration to 0 s."}`,
+      span,
+    );
+  }
   const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
   if (!isValidSessionTime(deadlineMs)) {
     throw fault(
@@ -3381,7 +3406,13 @@ function startTimer(
     instruction.duration.span,
   );
   if (instruction.repeat && roundDurationMs <= 0) throw zeroRoundFault();
-  const deadlineMs = futureDeadline(snapshot, roundDurationMs, "timer", instruction.duration.span);
+  const deadlineMs = futureDeadline(
+    snapshot,
+    roundDurationMs,
+    "timer",
+    instruction.duration.span,
+    instruction.repeat,
+  );
   if (
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
@@ -3579,7 +3610,7 @@ function mediaMilliseconds(
   subject: string,
   span: SourceSpan,
 ): number {
-  const milliseconds = isDuration(value)
+  const milliseconds = isAnyDuration(value)
     ? exactDurationMilliseconds(value, subject, span)
     : typeof value === "number"
       ? value * 1_000
@@ -3612,8 +3643,8 @@ function mediaRepeat(
   }
   if (value === true) return { kind: "indefinite" };
   if (value === false) return { kind: "once" };
-  if (isDuration(value)) {
-    // A calendar duration has no fixed length (V30 §35), whatever its exact part.
+  if (isAnyDuration(value)) {
+    // A calendar duration has no fixed length (ADR 0026), whatever its parts.
     const milliseconds = exactDurationMilliseconds(value, "A repeat budget", repeat.value.span);
     if (Number.isFinite(milliseconds) && milliseconds > 0) return { kind: "budget", milliseconds };
   }

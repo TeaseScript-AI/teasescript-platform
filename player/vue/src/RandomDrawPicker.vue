@@ -3,13 +3,14 @@ import { computed, ref, useId, watch } from "vue";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, GripVertical } from "@lucide/vue";
 import { RadioGroupItem, RadioGroupRoot } from "reka-ui";
 import Sortable from "sortablejs";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
 import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import type { RandomDrawView, RandomOutcome, RandomSite } from "../../../src/index.js";
 import CodeBlock from "./CodeBlock.vue";
 import PathBreadcrumb from "./PathBreadcrumb.vue";
@@ -46,6 +47,11 @@ const history = computed(() => outcomeLines(props.tried.history, props.tried.fir
 const historyRows = ref(Math.min(4, Math.max(1, props.tried.history.length)));
 
 const choices = computed(() => randomDrawChoices(props.draw));
+// Each outcome is an outline Button as a plain element: thousands of components take seconds to mount and update.
+const outcomeClass = cn(
+  buttonVariants({ variant: "outline" }),
+  "h-auto min-h-11 min-w-11 max-w-full whitespace-normal break-words text-start",
+);
 const code = computed(() =>
   props.source === null || props.site === null ? null : randomDrawCode(props.source, props.site),
 );
@@ -209,11 +215,13 @@ function focusRandom(event: Event) {
         class="flex max-h-72 flex-wrap gap-2 overflow-y-auto"
         data-random-draw-outcomes
       >
-        <Button
+        <button
           v-for="(choice, index) in choices.outcomes"
           :key="index"
-          variant="outline"
-          class="h-auto min-h-11 min-w-11 max-w-full whitespace-normal break-words text-start"
+          data-slot="button"
+          data-button
+          data-variant="outline"
+          :class="outcomeClass"
           data-random-draw-outcome
           @click="emit('resolve', choice.outcome)"
         >
@@ -226,7 +234,7 @@ function focusRandom(event: Event) {
               >, {{ tried.counts.get(outcomeKey(choice.outcome)) }} times before</span
             >
           </template>
-        </Button>
+        </button>
       </div>
       <form
         v-else-if="choices.kind === 'number'"

@@ -95,10 +95,7 @@ export default [
     },
   },
   {
-    files: [
-      "player/vue/src/components/ui/toggle/index.ts",
-      "player/vue/src/components/ui/badge/index.ts",
-    ],
+    files: ["player/vue/src/components/ui/badge/index.ts"],
     rules: {
       "shadcn/no-arbitrary-values": [
         "error",
