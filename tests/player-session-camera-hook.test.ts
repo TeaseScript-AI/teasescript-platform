@@ -20,6 +20,7 @@ interface CameraHost {
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
   readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
+  readonly hostError: Readonly<Ref<string | null>>;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -184,4 +185,18 @@ test("the script's camera view previews the session camera where it places it, a
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, "stage");
   assert.equal(host.viewfinder.value, tracks[2]);
+});
+
+test("a Start that throws after the camera opened releases the camera", async (context) => {
+  const { grant, tracks } = stubBrowser(context);
+  context.mock.method(console, "error", () => {});
+  grant();
+  const host = mount(context, { capabilities: { camera: true } });
+  host.prepare(() => {
+    throw new TypeError("The script could not start.");
+  });
+  await host.activate();
+  assert.equal(host.hostError.value, "TypeError");
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0]?.readyState, "ended");
 });

@@ -201,7 +201,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const recorder = new DebugRecorder();
   // Rewind histories that pages which ended without deleting theirs left behind go now.
   if (options.debugHistorySpill === undefined) void sweepDebugHistories();
-  // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start.
+  // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
+  // exception stops the session where it stands (see `stopped`).
   const hostError = ref<string | null>(null);
   function reportHostError(error: unknown) {
     hostError.value = error instanceof Error ? error.name : "Error";
@@ -353,7 +354,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // While the session is paused at a random draw (DEBUGGER.md "Random draws"), it holds like an inspected state until
   // the draw is resolved.
   const drawPending = computed(() => session.value?.state.randomDraw != null);
-  const held = computed(() => inspecting.value || drawPending.value);
+  // An exception of the Player itself stops the session where it stands (PLAYER-UI "Session end and failure"): nothing
+  // of it runs, observes time, or takes input any more, and late answers, reports, and writes are dropped. Its
+  // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start.
+  const stopped = computed(() => hostError.value !== null);
+  const held = computed(() => inspecting.value || drawPending.value || stopped.value);
   // Which random draws Debug decides or pauses at; every session of the Player gets it.
   let randomControl: RandomControlOptions | null = null;
   // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
@@ -435,6 +440,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
   const clock = useRuntimeSceneClock(session, () => device.sample(), held);
+  // Input and the work that continues it take their session from here when they run: a session a Player error stopped
+  // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
+  // cause the error, so the stop is checked again after it.
+  const observeForInput = () => {
+    if (stopped.value) return null;
+    const current = clock.observe();
+    return stopped.value ? null : current;
+  };
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -455,7 +468,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   watch(
     [session, held],
     ([current, paused]) => {
-      const media = current ? playerRuntimeMedia(current.state).media : [];
+      // A stopped session keeps no media.
+      const media = current && !stopped.value ? playerRuntimeMedia(current.state).media : [];
       // An inspected state, and a draw that waits, show their media where they were, without playing them.
       device.reconcile(
         paused ? media.map((projection) => ({ ...projection, state: "paused" as const })) : media,
@@ -476,7 +490,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const captures = new CaptureService(() => camera.answer(), {
     session: () => servicedSession.value,
     generation: () => generation.value,
-    observe: () => clock.observe(),
+    observe: observeForInput,
     publish: (next) => (session.value = next),
     capturedMedia,
     diagnostic: reportDiagnostic,
@@ -518,7 +532,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     cameraRevision,
     media: capturedMedia,
     offered: cameraOffered,
-    observe: () => clock.observe(),
+    observe: observeForInput,
     publish: (next) => (session.value = next),
   });
   // An image request that allows only the camera cannot be answered where no camera can be used. Each such request, of
@@ -534,6 +548,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       cameraOnlyRequest === null
         ? notices.dismiss(playerNoticeKeys.imageNeedsCamera)
         : notices.publish(playerNotices.imageNeedsCamera()),
+  );
+  // A stopped session's captures and cameras end; its media goes with the media watcher above.
+  watch(
+    stopped,
+    (stop) => {
+      if (!stop) return;
+      captures.reset();
+      camera.release();
+      captureCamera.release();
+      loads.clear();
+      pendingLoadCount.value = 0;
+    },
+    { flush: "sync" },
   );
   const decodeImage = options.decodeImage ?? browserImageDecoder;
   // The runtime accepts an image answer only when the store vouches for it.
@@ -631,7 +658,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session,
     (current) => {
       const write = current && pendingPlayerRuntimeStorageWrite(current.state);
-      if (!scriptStorage || !write) return;
+      // A stopped session issues no more writes, also when it is published again, such as by Debug's value trace.
+      if (!scriptStorage || !write || stopped.value) return;
       const sessionGeneration = generation.value;
       const flight = `${sessionGeneration}:${write.actionId}`;
       if (writesInFlight.has(flight)) return;
@@ -649,8 +677,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // A write that settles after unmount must not continue the session.
         if (disposed) return;
         const latest = session.value;
-        // The report must belong to the session that requested it.
-        if (generation.value !== sessionGeneration || latest === null) return;
+        // The report must belong to the session that requested it, which has not stopped.
+        if (generation.value !== sessionGeneration || latest === null || stopped.value) return;
         if (pendingPlayerRuntimeStorageWrite(latest.state)?.actionId !== write!.actionId) return;
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else {
@@ -690,6 +718,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Whether a running or waiting session takes an edit now; one that waits for Continue or the camera does not. */
   const liveSession = () =>
     session.value !== null &&
+    !stopped.value &&
     (session.value.state.status === "running" || session.value.state.status === "waiting") &&
     activation.value === null &&
     !openingCamera.value;
@@ -698,7 +727,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.state) !== null;
   // Edits that wait for the session's write to settle; each published session or new run wakes them to look again.
   const writeSettledWaiters = new Set<() => void>();
-  watch([session, generation], () => {
+  // A stop wakes them too: the write they wait for is never acknowledged then.
+  watch([session, generation, stopped], () => {
     for (const resolve of writeSettledWaiters) resolve();
     writeSettledWaiters.clear();
   });
@@ -780,6 +810,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       savedDataRevision.value++;
       while (
         !retired() &&
+        !stopped.value &&
         session.value !== null &&
         pendingPlayerRuntimeStorageWrite(session.value.state) !== null
       )
@@ -787,7 +818,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } finally {
       scriptWritesStored.delete(stored);
     }
-    if (retired()) return { kind: "saved", live: false };
+    if (retired() || stopped.value) return { kind: "saved", live: false };
     if (stored.has(key)) return { kind: "overtaken" };
     if (!liveSession()) return { kind: "saved", live: false };
     const latest = session.value!;
@@ -1252,6 +1283,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (
       current === null ||
       inspecting.value ||
+      stopped.value ||
       activation.value !== null ||
       (current.state.status !== "running" && current.state.status !== "waiting") ||
       current.state.debugMode === debugMode
@@ -1292,7 +1324,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     drawId: number,
     outcome: "natural" | RandomOutcome,
   ): RandomDrawResolutionOutcome | null {
-    const current = session.value;
+    // Paused at the draw, the session observes no time; a stopped session gives none.
+    const current = observeForInput();
     if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
       return null;
     const result = resumePlayerRuntimeRandomDraw(current, { drawId, outcome });
@@ -1486,7 +1519,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * saved data cannot be replaced, the state stays inspected and nothing changes. Resolves to whether it was adopted.
    */
   function adoptRewound(): Promise<boolean> {
-    if (!inspecting.value || rewindWork.value !== null || session.value === null)
+    // A stopped session is not adopted: its saved data are not replaced either.
+    if (stopped.value || !inspecting.value || rewindWork.value !== null || session.value === null)
       return Promise.resolve(false);
     adoption = adoptShown(session.value).finally(() => (adoption = null));
     return adoption;
@@ -1506,7 +1540,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       rewindWork.value = null;
     }
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
-    if (disposed || generation.value !== owner || !inspecting.value) return false;
+    if (disposed || generation.value !== owner || !inspecting.value || stopped.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
     savedDataRevision.value++;
     rewindAdopted?.();
@@ -1533,7 +1567,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
   async function pressPermanentButton(buttonId: number) {
     if (!(await prepareInput())) return;
-    const current = clock.observe();
+    const current = observeForInput();
     if (current === null) return;
     const result = pressPlayerRuntimePermanentButton(current, buttonId);
     if (result.outcome.kind === "pressed") update(result.session);
@@ -1775,6 +1809,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     debugRecording: () => recorder.recording(),
     /** The error name of an exception of the Player itself, or `null`. */
     hostError: computed(() => hostError.value),
+    /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */
+    stopped,
     reportHostError,
     /**
      * What a debug export can contain now, frozen: the session, its recording, and the photos it used. `shown` adds
@@ -1898,8 +1934,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** The permanent buttons the script shows, in creation order; a busy one is inactive until its block ends. */
     permanentButtons,
     pressPermanentButton,
-    /** Observes elapsed time and media progress, runs the session, and returns the published session. */
-    observe: clock.observe,
+    /**
+     * Observes elapsed time and media progress, runs the session, and returns the published session; `null` once a Player
+     * error stopped it, so input and its continuations take none.
+     */
+    observe: observeForInput,
     publishJump,
     start,
     update,
