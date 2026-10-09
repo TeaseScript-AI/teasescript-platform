@@ -1,0 +1,11 @@
+--- a/scripts/BeggarMyNeighbour.groovy
++++ b/scripts/BeggarMyNeighbour.groovy
+@@ -59,7 +59,7 @@
+ 			setImage("Bcards/"+DeckNames[i]+"/"+getRandom(52)+".png")
+ 			if(getBoolean(Title+DeckNames[i], "select deck", "next ->")){
+ 				DeckName = DeckNames[i]
+-				save("Baccarat.DeckName", DeckName)
++				save("StripJackNaked.DeckName", DeckName)
+ 				i = DeckNames.size
+ 			}else{
+ 				i++
