@@ -2346,13 +2346,22 @@ async function lateImageScenario(cdp, origin) {
     if (Date.now() > deadline) throw new Error("The Stage did not request the late image");
     await delay(50);
   }
+  // The image element that waits for the held response, kept so that it lives to fail, reports its failure after the
+  // Stage's own handler has seen it.
+  await value(
+    cdp,
+    `(() => {
+      window.lateImage = { element: document.querySelector('.stage-media'), failed: false };
+      window.lateImage.element.addEventListener('error', () => { window.lateImage.failed = true; });
+      return true;
+    })()`,
+  );
   await press("Hide");
   await press("Show");
   await waitFor(cdp, validShown, 5_000, "The valid image was not shown");
   lateImage.release();
   lateImage.release = null;
-  // Give the late response time to arrive and fail.
-  await delay(500);
+  await waitFor(cdp, "window.lateImage.failed", 5_000, "The late image did not report its failure");
   assertEqual(
     await value(cdp, validShown),
     true,
