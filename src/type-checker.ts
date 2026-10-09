@@ -4171,9 +4171,9 @@ class TypeChecker {
   }
 
   /**
-   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different
-   * families, moving an absolute date and time by calendar parts or a date by exact time, and calendar parts that would not stay whole.
-   * Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
+   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different families,
+   * moving an absolute date and time by calendar parts or a date by exact time, and calendar parts that would not stay
+   * whole. Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
    */
   #checkKnownDurations(
     expression: Extract<Expression, { kind: "binaryExpression" }>,

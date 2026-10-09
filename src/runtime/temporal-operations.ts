@@ -90,8 +90,8 @@ export const TEMPORAL_GETTERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * `getDate()`, `getTime()`, `getDateTime()`, or `getAbsoluteDateTime()` (V30 §35) at scene time `atMs`: the wall clock of the
- * capture in force, read through its zone for local values.
+ * `getDate()`, `getTime()`, `getDateTime()`, or `getAbsoluteDateTime()` (V30 §35) at scene time `atMs`: the wall clock
+ * of the capture in force, read through its zone for local values.
  */
 export function temporalNow(
   name: string,
@@ -293,7 +293,8 @@ export function temporalMethod(
 
 /**
  * Ordering and arithmetic with a date or time operand (V30 §35), or `undefined` when neither operand is one. Exact
- * durations apply to an absolute date and time as elapsed time, and to a datetime as elapsed time through the player's zone.
+ * durations apply to an absolute date and time as elapsed time, and to a datetime as elapsed time through the player's
+ * zone.
  */
 export function temporalBinary(
   operator: string,
@@ -336,8 +337,8 @@ export function temporalBinary(
   );
 
   /**
-   * A date, datetime, or absolute date and time moved by a duration's months, then days, then exact time (V30 §35). Calendar parts
-   * keep the local clock time; exact time is elapsed, through the player's zone for a datetime.
+   * A date, datetime, or absolute date and time moved by a duration's months, then days, then exact time (V30 §35).
+   * Calendar parts keep the local clock time; exact time is elapsed, through the player's zone for a datetime.
    */
   function moved(
     value:

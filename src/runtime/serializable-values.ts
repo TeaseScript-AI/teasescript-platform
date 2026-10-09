@@ -1064,8 +1064,8 @@ const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
 ]);
 
 /**
- * Why a duration, date, time, datetime, or absolute date and time record is malformed, as a phrase such as "a malformed date", or
- * `null` when it is valid.
+ * Why a duration, date, time, datetime, or absolute date and time record is malformed, as a phrase such as "a malformed
+ * date", or `null` when it is valid.
  */
 function timeRecordProblem(value: Record<string, unknown>): string | null {
   if (value.kind === "duration")

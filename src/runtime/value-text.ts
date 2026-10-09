@@ -47,8 +47,8 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
  * Scalar visible text: strings, finite numbers, booleans, `null`, durations, date and time values, and script
- * references. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows as the local
- * date and time it is.
+ * references. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows
+ * as the local date and time it is.
  */
 export function visibleText(
   value: SerializableRuntimeValue,

@@ -498,7 +498,10 @@ function candidateConversionProblem(
   return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : ""}`;
 }
 
-/** A local date and time and an absolute date and time convert into each other with a method, through the player's zone (V30 §35). */
+/**
+ * A local date and time and an absolute date and time convert into each other with a method, through the player's zone
+ * (V30 §35).
+ */
 function zoneMethodFix(result: ConversionResult, type: StaticType, value: Expression): string {
   const method =
     result === "absoluteDateTime" && isScalar(type, "datetime")
