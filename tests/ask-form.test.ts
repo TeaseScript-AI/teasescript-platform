@@ -446,23 +446,27 @@ test("fields the compiler cannot know open the form with the shape of their valu
   const restored = (plan: InstructionPlan, snapshot: RuntimeSnapshot) =>
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot;
 
-  // A dict opens a dict form, whose answers a loop goes through, also after a restore.
-  const dict = ask(
-    'dict { "rope": false, "gag": true }',
-    "for key in answers { say key, instant }",
-  );
-  const { snapshot, ui } = opened(dict);
-  assert.equal(ui.shape, "dict");
-  const { finished } = submitted(dict, restored(dict, snapshot));
-  assert.deepEqual(
-    finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["rope", "gag"],
-  );
-  restored(dict, finished.snapshot);
-
-  // An object still opens an object form.
-  const object = ask("{ rope: true }", "say answers.rope, instant");
-  assert.equal(opened(object).ui.shape, "object");
+  // A dict opens a dict form, whose answers a loop goes through, and an object still opens an object form, also when
+  // the open form and the settled one are restored.
+  for (const [argument, use, shape, said] of [
+    [
+      'dict { "rope": false, "gag": true }',
+      "for key in answers { say key, instant }",
+      "dict",
+      ["rope", "gag"],
+    ],
+    ["{ rope: true }", "say answers.rope, instant", "object", ["true"]],
+  ] as const) {
+    const plan = ask(argument, use);
+    const { snapshot, ui } = opened(plan);
+    assert.equal(ui.shape, shape);
+    const { finished } = submitted(plan, restored(plan, snapshot));
+    assert.deepEqual(
+      finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      said,
+    );
+    restored(plan, finished.snapshot);
+  }
 
   // Any other value fails when the form would open.
   const number = ask("5", "say answers, instant");
