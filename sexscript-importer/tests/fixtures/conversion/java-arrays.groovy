@@ -17,6 +17,7 @@ def review = { key ->
   if (record == null) record = "20,1,Mandy"
   def parts = record.split(",")
   if (parts[0] == "20") parts[0] = (parts.size() - 6)
+  if (parts[1] == "null") parts[1] = 0
   show("Progress " + parts[0])
 }
 review("mandy.record")

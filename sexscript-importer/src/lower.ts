@@ -6235,7 +6235,13 @@ function lowerAssignment(
         kind: "assign",
         target,
         operator: "=",
-        value: { kind: "template", parts: [{ value }] },
+        // A whole number or a flag written as it is reads as its text, `"0"`.
+        value:
+          value.kind === "literal" &&
+          (typeof value.value === "boolean" ||
+            (typeof value.value === "number" && Number.isInteger(value.value) && !value.decimal))
+            ? { kind: "literal", value: String(value.value) }
+            : { kind: "template", parts: [{ value }] },
         span,
       },
     ];

@@ -55,4 +55,16 @@ function offer {
 }
 offer()
 say actions[1]
+// A 0 that later holds lists and whole numbers was a value, and stays (SlideLadderDare's squimage).
+// NOTE SX_UNION_TYPE line 28: Groovy let 'squareImage' hold values of several types; TeaseScript declares it 'integer | integer[]' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if squareImage is integer { ... }
+let squareImage: integer | integer[] = 0
+function pickImage(n) {
+  if n > 1 {
+    squareImage = [1, 2, 3]
+  } else {
+    squareImage = 999
+  }
+}
+pickImage(2)
+say "Image ${squareImage}"
 exit

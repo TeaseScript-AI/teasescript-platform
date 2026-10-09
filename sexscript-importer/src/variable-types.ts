@@ -910,13 +910,17 @@ function analyse(
     const merged =
       declared && target.fixed === undefined && !target.integer ? unionOf(type, value) : null;
     if (merged !== null && target.placeholder !== undefined) {
-      const text = scalar("string");
-      // Groovy stored text too, so the empty text it started with was a value rather than a placeholder.
-      if (isAssignable(merged, text))
+      // Groovy stored text too, so the empty text it started with was a value rather than a placeholder; so was a 0
+      // where it stored whole numbers too (SlideLadderDare's `squimage`).
+      const start =
+        target.declaration?.value.kind === "literal" && target.declaration.value.value === 0
+          ? scalar("integer")
+          : scalar("string");
+      if (isAssignable(merged, start))
         return change(() => {
           delete target.placeholder;
-          target.initial = text;
-          target.union = unionOf(text, merged) ?? merged;
+          target.initial = start;
+          target.union = unionOf(start, merged) ?? merged;
         });
       return change(() => (target.union = merged));
     }
