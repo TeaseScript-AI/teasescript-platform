@@ -815,6 +815,54 @@ test("a chosen outcome is read once, so the outcome the engine checks is the one
   assert.doesNotThrow(() => restoreRuntimeSession(session.exportCheckpoint()));
 });
 
+test("a chosen order is read item by item once, and only when its length fits the shuffle", () => {
+  const shuffle = compileValidPlan("let items = [1, 2, 3]\nlet s = items.shuffle()\nexit");
+  let reads = 0;
+  const order = [2, 1, 0];
+  // The first item reads 2 once; a later read would give 0, which would name an item twice.
+  Object.defineProperty(order, 0, {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return reads === 1 ? 2 : 0;
+    },
+  });
+  const chosen = createFreshRuntimeSession(
+    shuffle,
+    {},
+    { randomControl: { decide: () => ({ kind: "choose", outcome: { kind: "order", order } }) } },
+  );
+  const result = chosen.run();
+  assert.equal(reads, 1);
+  assert.deepEqual(
+    result.randomChoices?.map((choice) => choice.outcome),
+    [{ kind: "order", order: [2, 1, 0] }],
+  );
+  assert.doesNotThrow(() => restoreRuntimeSession(chosen.exportCheckpoint()));
+  // An order of another length is refused on its length without reading its items, however long it claims to be.
+  for (const wrong of [new Array(2 ** 32 - 1), [0, 1]]) {
+    let itemReads = 0;
+    Object.defineProperty(wrong, 0, {
+      enumerable: true,
+      get() {
+        itemReads += 1;
+        return 0;
+      },
+    });
+    const refused = createFreshRuntimeSession(
+      shuffle,
+      {},
+      {
+        randomControl: {
+          decide: () => ({ kind: "choose", outcome: { kind: "order", order: wrong } }),
+        },
+      },
+    );
+    assert.match(refused.run().randomRefusal?.message ?? "", /an order of all 3 items/);
+    assert.equal(itemReads, 0);
+  }
+});
+
 test("a run keeps its instruction budget across pauses", () => {
   const plan = compileValidPlan(
     "let n = 0\nwhile n < 1000 {\n  n += randomInteger(1..=2)\n}\nexit",

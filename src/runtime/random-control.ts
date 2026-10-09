@@ -692,21 +692,33 @@ function outcomeProblem(support: RandomSupport, outcome: unknown): string | null
   }
 }
 
-/** A detached copy of an outcome the engine checked, holding only its own fields. */
 /**
- * The outcome a host chose, with each of its own fields read once, also the items of an `order` list, so that the
- * outcome the engine checks is the one it uses, whatever the host's object does on later reads.
+ * The outcome a host chose for a draw of `support`, with each of its own fields read once, so that the outcome the engine
+ * checks is the one it uses, whatever the host's object does on later reads. The items of an `order` are read by index,
+ * only when its length, read once, is the shuffle's; any other `order` is refused on its length, as before. Other
+ * arrays are only tested for their type, which reads nothing from them.
  */
-function readOnce(outcome: Record<string, unknown>): Record<string, unknown> {
+function readOnce(
+  outcome: Record<string, unknown>,
+  support: RandomSupport,
+): Record<string, unknown> {
   // Without a prototype, a field named `__proto__` stays a field.
   const copy: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(outcome)) {
     const value = outcome[key];
-    copy[key] = Array.isArray(value) ? Array.from(value) : value;
+    if (key !== "order" || !Array.isArray(value)) copy[key] = value;
+    else {
+      const length = value.length;
+      copy[key] =
+        support.kind === "order" && length === support.items.length
+          ? Array.from({ length }, (_, index) => value[index])
+          : null;
+    }
   }
   return copy;
 }
 
+/** A detached copy of an outcome the engine checked, holding only its own fields. */
 function canonicalOutcome(outcome: RandomOutcome): RandomOutcome {
   switch (outcome.kind) {
     case "number":
@@ -1348,7 +1360,10 @@ export class RandomControl {
       if (decided === "natural" || decided === "suspend") answer = decided;
       else if (isRecord(decision) && decided === "choose") {
         const chosen = decision.outcome;
-        const outcome = checkedOutcome(view.support, isRecord(chosen) ? readOnce(chosen) : chosen);
+        const outcome = checkedOutcome(
+          view.support,
+          isRecord(chosen) ? readOnce(chosen, view.support) : chosen,
+        );
         answer = typeof outcome === "string" ? { refusal: outcome } : outcome;
       } else
         answer = {

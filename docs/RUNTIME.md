@@ -1070,9 +1070,9 @@ not language; without it every draw is natural and costs one more check.
   `{ kind: "natural" }`, `{ kind: "choose", outcome }`, or `{ kind: "suspend" }`; without it every selected draw pauses.
   It gets a deeply frozen draw view and must not call the session. An exception from it, or from reading the decision it
   returns, ends the operation as a `RandomDecisionError` with that cause, also at a built-in draw such as `random()`,
-  where other host exceptions become script failures. The engine reads each field of a chosen outcome once and checks
-  and uses that copy. An outcome the draw cannot produce pauses the draw instead, and the result's `randomRefusal` says
-  why.
+  where other host exceptions become script failures. The engine reads each own field of a chosen outcome once, into a
+  copy, and checks and uses only that copy. An outcome the draw cannot produce pauses the draw instead, and the result's
+  `randomRefusal` says why.
 - **Outcomes.** A draw view holds `drawId`, `site`, `kind`, its `support`, and its `natural` result, as outcomes, not
   generator numbers. The support is one of: `unit`, `[0, 1)`; `chance` with its percent, where 0 gives only `false` and
   100 only `true`; `integer`, `min` through `max`, also a timer's seconds; `candidates`, chosen by index, where equal
