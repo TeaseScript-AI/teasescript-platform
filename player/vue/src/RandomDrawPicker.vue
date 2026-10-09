@@ -212,7 +212,7 @@ function focusRandom(event: Event) {
         v-if="choices.kind === 'buttons'"
         role="group"
         aria-label="Outcomes"
-        class="flex max-h-72 flex-wrap gap-2 overflow-y-auto"
+        class="flex flex-wrap gap-2 overflow-y-auto"
         data-random-draw-outcomes
       >
         <button

@@ -1732,10 +1732,38 @@ async function randomPickerScenario(cdp, origin) {
     5_000,
     "A refused copy claimed to copy",
   );
+  // After the mouse click, the tooltip says why nothing was copied.
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-slot="tooltip-content"]')?.textContent.trim().startsWith("Copying is not available here") === true`,
+    5_000,
+    "A refused copy did not say why in its tooltip",
+  );
   assertEqual(
     await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
     true,
     "A refused copy did not select the lines in view",
+  );
+  // Escape and at once Enter on Copy, which still has focus, refuse again: the label still says why.
+  for (const [key, code] of [
+    ["Escape", 27],
+    ["Enter", 13],
+  ])
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key,
+        code: key,
+        windowsVirtualKeyCode: code,
+      });
+  await delay(40);
+  assertEqual(
+    await value(
+      cdp,
+      `document.activeElement === ${copyButton} && ${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
+    ),
+    true,
+    "A refused copy retried at once by key lost its explanation",
   );
   await evaluate(
     cdp,
@@ -1798,6 +1826,31 @@ async function randomPickerScenario(cdp, origin) {
     await value(cdp, `${sidebar} + ' ' + ${picker("chance")}`),
     `${shown} true`,
     "Ctrl+B changed the sidebar while the picker asked",
+  );
+
+  // Tab from the grip onto the first outcome: the outcome list, which clips because it scrolls, keeps room for the
+  // outcome's 2px focus outline and its 2px separation.
+  for (let presses = 0; presses < 5; presses += 1) {
+    if (await value(cdp, `!!document.activeElement.closest('[data-random-draw-outcomes]')`)) break;
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Tab",
+        code: "Tab",
+        windowsVirtualKeyCode: 9,
+      });
+  }
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const list = document.querySelector('[data-random-draw-outcomes]').getBoundingClientRect();
+        const outcome = document.activeElement.closest('[data-random-draw-outcome]')?.getBoundingClientRect();
+        return !!outcome && Math.min(outcome.top - list.top, list.bottom - outcome.bottom, outcome.left - list.left, list.right - outcome.right) >= 4;
+      })()`,
+    ),
+    true,
+    "The outcome list clipped a focused outcome's outline",
   );
 
   await physicalClick(cdp, "[data-random-draw-outcome]");
