@@ -3793,7 +3793,9 @@ export function assertIntegerRange(
       "TSR045",
       !Number.isInteger(range.start) || !Number.isInteger(range.end)
         ? `${subject} needs a range of whole numbers, but this range is ${rangeText(range)}. Round its bounds with floor(...), round(...), or ceil(...) first.`
-        : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
+        : Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end)
+          ? `${subject} needs a range it can count, but ${rangeText(range)} holds too many numbers. Use a smaller range.`
+          : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
       span,
     );
   }

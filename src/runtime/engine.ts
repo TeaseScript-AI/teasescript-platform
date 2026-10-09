@@ -2374,8 +2374,16 @@ function badRepeatCount(plan: ExpressionPlan, value: SerializableRuntimeValue): 
       : value < 0
         ? " Check that it is at least 0 first."
         : " Use a smaller count.";
-  else if (typeof value === "string" && numberFromText(value) !== undefined)
-    fix = " Convert the text with toInteger(...) first.";
+  else if (typeof value === "string" && numberFromText(value) !== undefined) {
+    // Converting the text gives the count it holds, which may still be too small or too large.
+    const count = Math.trunc(numberFromText(value)!);
+    fix =
+      count < 0
+        ? " Convert the text with toInteger(...), and check that it is at least 0 first."
+        : Number.isSafeInteger(count)
+          ? " Convert the text with toInteger(...) first."
+          : " Use a smaller count.";
+  }
   return fault(
     "TSR043",
     `A repeat count must be a whole number (integer) of at least 0, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.${fix}`,
