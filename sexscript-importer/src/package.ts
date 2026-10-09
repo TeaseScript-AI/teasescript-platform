@@ -150,7 +150,8 @@ function launchKey(sourceName: string): string {
 
 /**
  * The legacy player saved `<key>.launch.firsttime`, `.lasttime` (Unix seconds), and `.nb` (the number of starts) when
- * a script started. Where the package reads one of them, the script saves them first, after its leading comments.
+ * a script started. Where the package reads one of them, the script saves them first, after its leading comments. The
+ * count is saved as a whole number, so a script's text read of it, as ScarlettsBlackmail's loadString(), reads its text.
  */
 function withLaunchMarkers(
   program: MigrationProgram,
@@ -193,6 +194,7 @@ function withLaunchMarkers(
         left: { kind: "load", key: literal(count!), defaultValue: { kind: "literal", value: 0 } },
         right: { kind: "literal", value: 1 },
       },
+      valueType: "integer",
       span: null,
     },
   ];
