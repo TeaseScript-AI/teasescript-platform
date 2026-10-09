@@ -416,4 +416,27 @@ function checkAny(item = load("game.anyText", default: null)) {
   return item == ""
 }
 say "Any ${checkAny(anyValue)}"
+// A read in a branch takes the default after the branch, which goes where nothing else gives the variable null
+// (shockblackjack); a branch under a flag the script declares false and never sets does not see the read
+// (jackoffrace).
+let debug = false
+let lives = 6
+if load("game.resume", default: false) == true {
+  lives = load "game.lives", default: 6
+}
+let moved = false
+let score = 0
+function fetch {
+  // NOTE SX_ONLINE_STORAGE line 226: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+  score = load "game.score", default: 0
+  if debug {
+    say "Score ${score}"
+  }
+}
+fetch()
+function lifeCount {
+  // NOTE SX_PLUS_OPERAND_TYPE line 231: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  say "Lives ${lives - 1}, score ${score + 1}"
+}
+lifeCount()
 exit

@@ -2741,6 +2741,7 @@ function lowerStatementList(
         later < 0 ? null : readThenDefault(statements[index]!, statements[later], context, false);
       if (merged !== null) consumed.add(later);
     }
+    merged ??= branchReadDefaults(statements, index, consumed, context);
     const statement = merged ?? statements[index]!;
     const span = statementSpan(statement);
     emitComments(takeCommentsBefore(context, span));
@@ -11217,54 +11218,140 @@ function laterReadDefault(
 ): number {
   const read = typedReadAssignment(statements[index]!, context);
   if (read === null) return -1;
-  // Whether code between could see the variable before its default, or skip the default.
-  const interferes = (statement: AstNode): boolean => {
-    let found = false;
-    walkAst(statement, (child) => {
-      if (child.kind === "variable" && variableName(child) === read.name) found = true;
-      else if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
-      else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
-        found ||= legacyApiCall(child, context) === null;
-    });
-    return found;
-  };
   for (let later = index + 1; later < statements.length; later += 1) {
     if (consumed.has(later)) continue;
     const statement = statements[later]!;
     const found = nullDefault(statement);
-    if (found?.name === read.name) {
+    if (found?.name === read.name)
       // The default moves up to the read, before the code between, which must not declare or set what it reads.
-      const reads = new Set<string>();
-      walkAst(found.fallback, (child) => {
-        const name = child.kind === "variable" ? variableName(child) : null;
-        if (name !== null) reads.add(name);
-      });
-      const sets = (between: AstNode): boolean => {
-        let found = false;
-        walkAst(between, (child) => {
-          const assigns =
-            child.kind === "declaration" ||
-            (child.kind === "binary" &&
-              typeof child.operator === "string" &&
-              /=$/u.test(child.operator) &&
-              !["==", "!=", "<=", ">="].includes(child.operator));
-          const name = assigns ? variableName(child.left) : null;
-          if (name !== null && reads.has(name)) found = true;
-        });
-        return found;
-      };
-      return statements.slice(index + 1, later).some(sets) ? -1 : later;
-    }
-    if (interferes(statement)) return -1;
+      return statements
+        .slice(index + 1, later)
+        .some((between) => setsFallback(between, found.fallback))
+        ? -1
+        : later;
+    if (seesBeforeDefault(statement, read.name, context)) return -1;
   }
   return -1;
+}
+
+/**
+ * Typed reads in the branch of an `if` that the null default after the `if` completes, as shockblackjack's
+ * `if (...) { lives = loadInteger(k) }` and then `if (lives == null) lives = 6`: the default joins each read in the
+ * branch, where readThenDefault merges them, under laterReadDefault's conditions on the code between. The default after
+ * the `if` goes too where nothing else gives the variable null; it stays where it still sees such a value. Null when
+ * the `if` has no such reads.
+ */
+function branchReadDefaults(
+  statements: readonly AstNode[],
+  index: number,
+  consumed: Set<number>,
+  context: LowerContext,
+): AstNode | null {
+  const statement = statements[index]!;
+  const otherwise = asNode(statement.else);
+  if (statement.kind !== "if" || (otherwise !== null && otherwise.kind !== "empty")) return null;
+  const branch = [...branchStatements(statement.then)];
+  let changed = false;
+  for (let position = branch.length - 1; position >= 0; position -= 1) {
+    const read = typedReadAssignment(branch[position]!, context);
+    const rest = branch.slice(position + 1);
+    if (read === null || rest.some((after) => seesBeforeDefault(after, read.name, context)))
+      continue;
+    for (let later = index + 1; later < statements.length; later += 1) {
+      if (consumed.has(later)) continue;
+      const found = nullDefault(statements[later]!);
+      if (found?.name !== read.name) {
+        if (seesBeforeDefault(statements[later]!, read.name, context)) break;
+        continue;
+      }
+      const between = [...rest, ...statements.slice(index + 1, later)];
+      if (between.some((other) => setsFallback(other, found.fallback))) break;
+      // The copy carries no position, so that the merged read keeps its own lines.
+      branch.splice(position + 1, 0, { ...statements[later]!, span: null });
+      changed = true;
+      if (onlyNonNullOtherwise(read, context)) consumed.add(later);
+      break;
+    }
+  }
+  if (!changed) return null;
+  const block = asNode(statement.then);
+  return {
+    ...statement,
+    then: { kind: "block", span: block?.span ?? statement.span, statements: branch },
+  };
+}
+
+/** Whether every value the variable of a typed read gets elsewhere is one of a known type without null. */
+function onlyNonNullOtherwise(
+  read: { name: string; read: AstNode; target: AstNode },
+  context: LowerContext,
+): boolean {
+  const key = bindingKey(read.target, context.bindings);
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  return (
+    values !== undefined &&
+    values.every((value) => {
+      if (value === read.read) return true;
+      const type = inferType(value, context.types);
+      return type !== 0 && type !== UNKNOWN && (type & NULL) === 0;
+    })
+  );
+}
+
+/**
+ * Whether code between a read and its null default could see the variable before its default, or skip the default:
+ * it uses the variable, leaves the block, or calls script code. A branch that never runs, `if (debug)` with a flag the
+ * script declares false and never sets (jackoffrace), sees nothing.
+ */
+function seesBeforeDefault(statement: AstNode, name: string, context: LowerContext): boolean {
+  if (neverRuns(statement, context)) return false;
+  let found = false;
+  walkAst(statement, (child) => {
+    if (child.kind === "variable" && variableName(child) === name) found = true;
+    else if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
+    else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
+      found ||= legacyApiCall(child, context) === null;
+  });
+  return found;
+}
+
+/** `if (flag) { ... }` without an else, where the script declares the flag false and never sets it again. */
+function neverRuns(statement: AstNode, context: LowerContext): boolean {
+  const otherwise = asNode(statement.else);
+  if (statement.kind !== "if" || (otherwise !== null && otherwise.kind !== "empty")) return false;
+  const condition = asNode(statement.condition);
+  const tested = condition?.kind === "boolean" ? asNode(condition.value) : condition;
+  const key = tested?.kind === "variable" ? bindingKey(tested, context.bindings) : null;
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  return values?.length === 1 && constantValue(values[0]!) === false;
+}
+
+/** Whether a statement declares or sets a variable that a null default's value reads. */
+function setsFallback(statement: AstNode, fallback: AstNode): boolean {
+  const reads = new Set<string>();
+  walkAst(fallback, (child) => {
+    const name = child.kind === "variable" ? variableName(child) : null;
+    if (name !== null) reads.add(name);
+  });
+  let found = false;
+  walkAst(statement, (child) => {
+    const assigns =
+      child.kind === "declaration" ||
+      (child.kind === "binary" &&
+        typeof child.operator === "string" &&
+        /=$/u.test(child.operator) &&
+        !["==", "!=", "<=", ">="].includes(child.operator));
+    const name = assigns ? variableName(child.left) : null;
+    if (name !== null && reads.has(name)) found = true;
+  });
+  return found;
 }
 
 /** `x = loadInteger(k)` and the other typed storage and online reads, as the variable and the read; else null. */
 function typedReadAssignment(
   statement: AstNode,
   context: LowerContext,
-): { name: string; read: AstNode } | null {
+): { name: string; read: AstNode; target: AstNode } | null {
   const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
   if (
     expression === null ||
@@ -11274,11 +11361,14 @@ function typedReadAssignment(
     )
   )
     return null;
-  const name = variableName(expression.left);
+  const target = asNode(expression.left);
+  const name = variableName(target);
   const read = asNode(expression.right);
   const call = read === null ? null : (legacyApiCall(read, context)?.name ?? null);
-  if (name === null || read === null || call === null) return null;
-  return TYPED_STORAGE_LOADS.has(call) || TYPED_ONLINE_LOADS.has(call) ? { name, read } : null;
+  if (target === null || name === null || read === null || call === null) return null;
+  return TYPED_STORAGE_LOADS.has(call) || TYPED_ONLINE_LOADS.has(call)
+    ? { name, read, target }
+    : null;
 }
 
 /** `if (x == null) x = d` without an else, as the variable and the default; else null. */
