@@ -11,7 +11,8 @@ worldTown = { loadroom ->
 }
 worldEnd = { reason -> show("The end: " + reason) }
 enterWorld("gates")
-// A variable that the script may call before it is set keeps the dispatcher, which finds it null there.
+// A variable set up after the script ran its own code keeps the dispatcher: that code could have called it while it
+// was still null.
 def worldCave
 enterWorld("end")
 worldCave = { -> show("Cave") }
