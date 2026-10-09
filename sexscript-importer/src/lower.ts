@@ -10155,20 +10155,46 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
 
 /**
  * `save("k", count++)` uses the old value and then increments. When nothing else in the statement can observe the
- * variable, the value is the variable itself and the increment follows the statement.
+ * variable, the value is the variable itself and the increment follows the statement. Where a function the statement
+ * calls afterwards may read it, as Domme2's `showDynamically(rules[i++])`, the old value is kept first and the
+ * increment comes before the statement, as Groovy made it before the call.
  */
 function lowerPostfixValue(node: AstNode, context: LowerContext): IrExpression | null {
   const name = variableName(asNode(node.value));
   const operator = node.operator === "++" ? "+=" : node.operator === "--" ? "-=" : null;
   const root = context.statementRoot;
+  const after =
+    name !== null &&
+    operator !== null &&
+    root !== null &&
+    root === context.postludeRoot &&
+    root.kind === "expressionStatement" &&
+    incrementsAfterStatement(root, node, name, context);
   if (
-    name === null ||
-    operator === null ||
-    root === null ||
-    root !== context.postludeRoot ||
-    root.kind !== "expressionStatement" ||
-    !incrementsAfterStatement(root, node, name, context)
+    !after &&
+    name !== null &&
+    operator !== null &&
+    root !== null &&
+    onlyRead(root, node, name) &&
+    isHoistable(root, node, context)
   ) {
+    const old = freshName(`${name}Before`, context);
+    const variables = new Map(context.types.variables);
+    variables.set(old, inferType(asNode(node.value)!, context.types));
+    context.types = { ...context.types, variables };
+    context.prelude.push(
+      { kind: "let", name: old, value: { kind: "variable", name }, span: node.span },
+      {
+        kind: "assign",
+        target: { kind: "variable", name },
+        operator,
+        value: { kind: "literal", value: 1 },
+        span: node.span,
+      },
+    );
+    return { kind: "variable", name: old };
+  }
+  if (!after || name === null || operator === null) {
     return unsupportedExpression(
       context,
       node,
@@ -10191,12 +10217,11 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
   const name = variableName(asNode(node.value));
   const operator = node.operator === "++" ? "+=" : node.operator === "--" ? "-=" : null;
   const root = context.statementRoot;
-  // The change may move before the statement when nothing else in it reads the variable or calls a local function.
-  let uses = 0;
+  // The change may move before the statement when nothing else in it reads the variable or calls a local function;
+  // the variable a plain assignment sets, as ShockReflex's `powerLevel = Math.min(++powerLevel, max)`, is written last.
   let localCalls = false;
   if (root !== null)
     walkAst(root, (child) => {
-      if (variableName(child) === name && child.kind === "variable") uses += 1;
       if (child.kind === "methodCall" && child.implicitThis === true)
         localCalls ||= context.functions.has(constantString(child.method) ?? "");
     });
@@ -10204,7 +10229,7 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
     name === null ||
     operator === null ||
     root === null ||
-    uses !== 1 ||
+    !onlyRead(root, node, name) ||
     localCalls ||
     !isHoistable(root, node, context)
   ) {
@@ -10259,6 +10284,32 @@ function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression 
   if (statements.some((statement) => statement.kind === "unsupported")) return null;
   context.prelude.push(...statements);
   return { kind: "variable", name };
+}
+
+/**
+ * Whether the variable `name` occurs in statement `root` only as the operand of `target`, apart from the variable that
+ * a plain assignment or declaration as the statement sets, which Groovy writes after computing the value.
+ */
+function onlyRead(root: AstNode, target: AstNode, name: string): boolean {
+  const expression = root.kind === "expressionStatement" ? asNode(root.expression) : root;
+  const assigned =
+    expression !== null &&
+    (expression.kind === "declaration" ||
+      (expression.kind === "binary" && expression.operator === "="))
+      ? asNode(expression.left)
+      : null;
+  const operand = asNode(target.value);
+  let others = 0;
+  walkAst(root, (child) => {
+    if (
+      child.kind === "variable" &&
+      variableName(child) === name &&
+      child !== operand &&
+      child !== assigned
+    )
+      others += 1;
+  });
+  return others === 0;
 }
 
 function incrementsAfterStatement(

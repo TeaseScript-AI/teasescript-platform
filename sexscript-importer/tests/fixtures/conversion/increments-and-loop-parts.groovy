@@ -39,3 +39,12 @@ show("Score: " + score)
 def swats = 17
 def perCheek = swats / 2
 for (swat in 1..perCheek) show("Swat " + swat)
+// An increment in an argument of a function that reads the counter keeps the old value first and counts before the
+// call, as Groovy did (Domme2's rules); one that the statement assigns over counts first (ShockReflex's power level).
+def rules = ["Kneel", "Wait"]
+def ruleNumber = 0
+def showRule = { text -> show("Rule " + ruleNumber + ": " + text) }
+rules.each { showRule(rules[ruleNumber++]) }
+int powerLevel = 4
+powerLevel = Math.min(++powerLevel, 5)
+show("Power " + powerLevel)
