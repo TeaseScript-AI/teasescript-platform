@@ -107,7 +107,18 @@ export function withReadingTimes(
       }
       if (milliseconds === null || after?.kind === "wait") {
         if (sound !== -1) report("SX_WAIT_SOUND_BEAT", SOUND_BEAT, statement);
-        result[index] = sound === -1 ? { ...statement, instant: true } : soundBeat(statement);
+        // The waits set the text's timing, an author's pause; a first wait shorter than the text's reading time would
+        // add none of it (TSV060), so the text is a beat, said at once wherever it stands, and the texts whose reading
+        // time it would end keep their legacy waits.
+        const timed = milliseconds !== null && milliseconds < shortestReadingTime(statement.value);
+        if (timed && sound === -1)
+          report(
+            "SX_WAIT_TIMED",
+            "The legacy waits after this text set its timing, and the first is shorter than the text's reading time, so the text is said at once as a beat and the waits follow, as legacy timed it.",
+            statement,
+          );
+        result[index] =
+          sound !== -1 || timed ? soundBeat(statement) : { ...statement, instant: true };
         return;
       }
       if (milliseconds > READING_WAIT_RATIO * shortestReadingTime(statement.value)) {
@@ -439,8 +450,20 @@ function withRestoredWaits(
           "The legacy wait after this text stays, and the text is said at once again: a beat that follows, which keeps its timing, would cut its reading time short.",
         span: item.span,
       });
-      // Said at once again, the text keeps that as a beat does, and the texts before it keep their waits in turn.
-      return [pieces.get(wait) === 1 ? { ...text, instant: true, beat: true } : text, wait];
+      // Said at once again, the text keeps that as a beat does, and the texts before it keep their waits in turn. The
+      // last paragraph of a split text is said at once where its reading time would outlast the wait (TSV060), as the
+      // wait sets the timing before the beat: the end of the text shows whole, then the wait.
+      if (pieces.get(wait) === 1) return [{ ...text, instant: true, beat: true }, wait];
+      const outlasts = (literalMilliseconds(wait) ?? Infinity) < shortestReadingTime(text.value);
+      if (outlasts)
+        diagnostics.push({
+          code: "SX_PARAGRAPH_WAIT_BEAT",
+          severity: "info",
+          message:
+            "The last paragraph's reading time would outlast the legacy wait kept before the beat, which sets the timing, so the paragraph is said at once and the wait follows.",
+          span: item.span,
+        });
+      return [outlasts ? { ...text, instant: true } : text, wait];
     });
   };
   return block(statements);

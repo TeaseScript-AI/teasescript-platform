@@ -1,4 +1,4 @@
-import type { HostFunction, RuntimeValue } from "./runtime-check.ts";
+import type { HostFunction } from "./runtime-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { isRecord } from "./ast.ts";
@@ -11,8 +11,6 @@ import type { MediaFile } from "./workarounds.ts";
  * packages never contain the shims.
  */
 const PENDING_CALLS = new Map<string, string>([
-  ["askBoolean", "askBoolean()"],
-  ["askBooleans", "askBooleans()"],
   ["openUrl", "openUrl()"],
   ["chooseFile", "chooseFile()"],
   ["showBackgroundImage", "layered scene"],
@@ -21,21 +19,13 @@ const PENDING_CALLS = new Map<string, string>([
 
 const SHIM_PREFIX = "sxPending";
 
-/**
- * Stand-ins whose accepted result is never null, by the conversion that gives the placeholder's untyped result that
- * type, so that the compiler checks and narrows its uses as it will the accepted operation's.
- */
-const TYPED_RESULTS = new Map<string, "toInteger" | "toString" | "toBoolean">([
-  ["askBoolean", "toBoolean"],
-]);
-
 export interface PendingShim {
   program: MigrationProgram;
   /** The shimmed program as TeaseScript. */
   source: string;
   /** Placeholder names to register as host builtins when compiling the shimmed program. */
   builtins: string[];
-  /** Placeholder name to the TeaseScript operation it stands for (`save`, `askBooleans`, ...). */
+  /** Placeholder name to the TeaseScript operation it stands for (`openUrl`, `chooseFile`, ...). */
   operations: Map<string, string>;
   /** Accepted-but-unimplemented capabilities the program uses, by display name. */
   capabilities: Set<string>;
@@ -73,11 +63,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
     );
     operations.set(shim, name);
     builtins.add(shim);
-    const placeholder: IrExpression = { kind: "call", name: shim, positional, named };
-    const conversion = TYPED_RESULTS.get(name);
-    return conversion === undefined
-      ? placeholder
-      : { kind: "call", name: conversion, positional: [placeholder], named: {} };
+    return { kind: "call", name: shim, positional, named };
   };
 
   const expression = (value: IrExpression): IrExpression => {
@@ -300,24 +286,12 @@ function collectNames(value: unknown, names: Set<string>): void {
 
 export type { MediaFile } from "./workarounds.ts";
 
-/** Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only; inputs answer in turn. */
-export function pendingHostFunctions(
-  shim: PendingShim,
-  /** How often each input was answered, shared by the files of one run so that answers rotate across them. */
-  answers: Map<string, number> = new Map(),
-): Record<string, HostFunction> {
-  const next = <T>(operation: string, choices: readonly T[]): T => {
-    const visit = answers.get(operation) ?? 0;
-    answers.set(operation, visit + 1);
-    return choices[visit % choices.length]!;
-  };
-  const emptyList = { kind: "list", items: [] };
+/** Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only. */
+export function pendingHostFunctions(shim: PendingShim): Record<string, HostFunction> {
   const implementations = new Map<string, HostFunction>([
     ["showPopup", () => null],
     ["showBackgroundImage", () => null],
     ["showOverlayImage", () => null],
-    ["askBoolean", () => next("askBoolean", [true, false])],
-    ["askBooleans", (_, named) => named.prefill ?? emptyList],
     ["openUrl", () => null],
     // As when the player cancels the file chooser.
     ["chooseFile", () => null],
