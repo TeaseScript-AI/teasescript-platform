@@ -1815,10 +1815,10 @@ async function randomPickerScenario(cdp, origin) {
   );
 }
 
-// In a file of a few thousand lines the picker's code renders only the lines in and near view, and shows like a short
-// file's: the draw's line in the middle from the first frame and through Wrap, Copy copies the lines in view, it scrolls
-// sideways as far as its widest line, its large view opens on the draw, Show whole function starts at the function's
-// first line, the file's end scrolls into view, and Show less returns to the draw.
+// In a file of a few thousand lines the picker's unwrapped code renders only the lines in and near view, and shows like
+// a short file's: the draw's line in the middle from the first frame and through Wrap, Copy copies the lines in view,
+// it scrolls sideways as far as its widest line, its large view opens on the draw, Show whole function starts at the
+// function's first line, the file's end scrolls into view, and Show less returns to the draw.
 async function largeRandomPickerScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const block = `document.querySelector('[data-random-draw-source] [data-code-block]')`;
@@ -1827,8 +1827,9 @@ async function largeRandomPickerScenario(cdp, origin) {
     `(() => { const line = ${block}.querySelector('[data-code-line="${number}"]'); return !!line && line.offsetTop >= ${block}.scrollTop && line.offsetTop + line.offsetHeight <= ${block}.scrollTop + ${block}.clientHeight; })()`;
   const centred = `(() => { const line = ${block}?.querySelector('[data-code-highlight]'); return line?.dataset.codeLine === '1500' && line.offsetTop - ${block}.scrollTop === 3 * line.offsetHeight; })()`;
   // Where the draw's line is in each of the next frames once the code shows: 0 in its place, null when not rendered.
-  const sampleFrames = (count) =>
-    `window.__frames = []; (function sample() { const block = ${block}; if (block) { const line = block.querySelector('[data-code-highlight]'); window.__frames.push(line ? line.offsetTop - block.scrollTop - 3 * line.offsetHeight : null); } if (window.__frames.length < ${count}) requestAnimationFrame(sample); })();`;
+  // Sampling starts at once, or with the next click.
+  const sampleFrames = (count, onClick = false) =>
+    `window.__frames = []; const sample = () => { const block = ${block}; if (block) { const line = block.querySelector('[data-code-highlight]'); window.__frames.push(line ? line.offsetTop - block.scrollTop - 3 * line.offsetHeight : null); } if (window.__frames.length < ${count}) requestAnimationFrame(sample); }; ${onClick ? "addEventListener('click', () => requestAnimationFrame(sample), { capture: true, once: true });" : "sample();"}`;
   const stayed = async (message) => {
     await waitFor(cdp, `window.__frames.length >= 8`, 20_000);
     assertEqual(
@@ -1874,9 +1875,11 @@ async function largeRandomPickerScenario(cdp, origin) {
     true,
     "The code scrolled sideways only as far as the lines near view",
   );
-  // Wrapping the lines above the draw's keeps the draw's line in place in every frame, and so does unwrapping them.
+  // Wrapping the lines above the draw's keeps the draw's line in place in every frame from the click, and so does
+  // unwrapping them, also after scrolling the wrapped lines.
   for (const state of ["on", "off"]) {
-    await evaluate(cdp, sampleFrames(8));
+    if (state === "off") await evaluate(cdp, `${block}.scrollTop -= 600`);
+    await evaluate(cdp, sampleFrames(8, true));
     await physicalClick(cdp, "[data-random-draw-source] [data-code-block-wrap]");
     await stayed(`Wrap ${state} moved the draw's line`);
   }
