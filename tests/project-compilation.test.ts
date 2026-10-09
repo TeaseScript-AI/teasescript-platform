@@ -160,22 +160,22 @@ test("the file list needs main.tease and unique package paths", () => {
       [
         "../up.tease",
         "TSC009",
-        "'../up.tease' is not a package file path: paths start at the package root and use no . or ...",
+        "'../up.tease' is not a package file path: paths start at the package root and use no '.' or '..'.",
       ],
       [
         "./main.tease",
         "TSC009",
-        "'./main.tease' is not a package file path: paths start at the package root and use no . or ...",
+        "'./main.tease' is not a package file path: paths start at the package root and use no '.' or '..'.",
       ],
       [
         "a\\b.tease",
         "TSC009",
-        "'a\\b.tease' is not a package file path: folders are separated with /, not \\.",
+        "'a\\b.tease' is not a package file path: folders are separated with '/', not '\\'.",
       ],
       [
         "star*.tease",
         "TSC009",
-        "'star*.tease' is not a package file path: * is only allowed in a glob.",
+        "'star*.tease' is not a package file path: '*' is only allowed in a glob.",
       ],
       [
         "notes.txt",

@@ -170,7 +170,7 @@ function shape(
         message:
           names.length === 0
             ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${names.map((one) => `'${one}:'`).join(" and ")}.`,
+            : `${name}(...) has no parameter '${argument.name.name}'. ${names.length === 1 ? "Its only named argument is" : "Its named arguments are"} ${names.map((one) => `'${one}:'`).join(" and ")}.`,
         span: argument.name.span,
       });
   const count = call.arguments.filter((argument) => argument.kind === "positionalArgument").length;

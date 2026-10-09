@@ -109,7 +109,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     ],
   ]);
   assert.deepEqual(diagnostics("say sum([1, 2], scale: 2)\nexit"), [
-    ["TSV022", "sum(...) has no parameter 'scale'. Its named arguments are 'by:'.", "scale"],
+    ["TSV022", "sum(...) has no parameter 'scale'. Its only named argument is 'by:'.", "scale"],
   ]);
   const cases: [string, string, string][] = [
     [
