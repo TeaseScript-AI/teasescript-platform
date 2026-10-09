@@ -456,6 +456,29 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const failedStageSource = shallowRef<string | null>(null);
   // The Stage source the browser has loaded and decoded, as the Stage reports it, or `null`; for Debug's Now view.
   const loadedStageSource = shallowRef<string | null>(null);
+  // A speaker's avatar image that is no package file is reported as a Stage image is; the glyph shows instead. The
+  // session adds its messages and speakers in place, so each published session's new messages are read, and a speaker
+  // is checked when a message first shows it.
+  let readEntries: PlayerRuntimeSession["transcriptEntries"] | null = null;
+  let readCount = 0;
+  const checkedSpeakers = new Set<string>();
+  watch(session, (current) => {
+    const entries = current?.transcriptEntries ?? null;
+    if (entries !== readEntries) {
+      readEntries = entries;
+      readCount = 0;
+      checkedSpeakers.clear();
+    }
+    if (current === null || entries === null) return;
+    for (; readCount < entries.length; readCount++) {
+      const entry = entries[readCount]!;
+      if (entry.kind !== "message" || checkedSpeakers.has(entry.speakerId)) continue;
+      checkedSpeakers.add(entry.speakerId);
+      const image = current.speakers[entry.speakerId]?.avatarImage;
+      if (image !== undefined && resolvePackageAsset(image) === null)
+        reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
+    }
+  });
   // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
   watch([generation, stageImage], ([, image]) => {
     if (image === null) return;
@@ -1875,6 +1898,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
+    /** Reports a speaker's avatar image that the browser could not load or decode, as a Stage image is reported. */
+    avatarFailed(path: string) {
+      if (resolvePackageAsset(path) !== null)
+        reportUnusableMedia(path, playerNotices.unusableMedia("image", path, "failed"));
+    },
     /** The authored Stage image of the session, or `null` for an empty Stage. */
     stageImage,
     /** What the Stage reports about the source it shows: loaded and decoded, or failed; for Debug's Now view. */

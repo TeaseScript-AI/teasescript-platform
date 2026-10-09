@@ -732,9 +732,9 @@ The POC's letter-glyph avatars use twelve fixed colour families, with a light fi
 inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
 ties follow a fixed, perceptually spaced palette order. Later messages increase that colour's count, and the speaker
 keeps the assignment. Authored text and bubble colours do not choose avatar colours. An authored V30 speaker `avatar`
-image replaces the glyph and is decorative beside the visible speaker name; while it is unavailable or fails to load,
-the glyph remains. Like Stage media, the reference is package-relative and resolved by the trusted host; an
-unresolvable avatar keeps the glyph.
+image replaces the glyph and is decorative beside the visible speaker name. Like Stage media, the reference is
+package-relative and resolved by the trusted host. An avatar that does not resolve or does not load keeps the glyph and,
+like a Stage image, is a warning [player notice](#player-notices).
 
 ## Composer and foreground interactions
 

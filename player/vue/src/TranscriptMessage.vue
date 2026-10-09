@@ -8,7 +8,7 @@ import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/compone
 import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { nameOf, resolveAppearance } from "./transcriptPresentation";
-import { speakerAvatarColors, speakerAvatarSource } from "./speakerAvatar";
+import { speakerAvatarColors, speakerAvatarFailure, speakerAvatarSource } from "./speakerAvatar";
 import { explainValues } from "./explainValues";
 import { rewindRows } from "./rewindPresentation";
 
@@ -24,6 +24,11 @@ const player = props.entry.kind === "message" && props.entry.speakerId === "user
 const speaker = props.entry.kind === "message" ? props.speakers[props.entry.speakerId] : undefined;
 const resolveAvatar = inject(speakerAvatarSource, () => null);
 const avatarImage = speaker?.avatarImage === undefined ? null : resolveAvatar(speaker.avatarImage);
+// An avatar image the browser cannot load is reported, like a Stage image, while the glyph stays.
+const reportAvatarFailure = inject(speakerAvatarFailure, () => {});
+function avatarLoadingStatus(status: string) {
+  if (status === "error" && speaker?.avatarImage !== undefined) reportAvatarFailure(speaker.avatarImage);
+}
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
 // While Debug runs, a script's message offers Explain values beside it, by click, tap or keyboard.
 const explain = inject(explainValues, null);
@@ -84,7 +89,12 @@ const avatarStyle = computed(() => ({
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
       <!-- The visible speaker name identifies the message; the avatar is decorative. -->
       <Avatar aria-hidden="true">
-        <AvatarImage v-if="avatarImage" :src="avatarImage" alt="" />
+        <AvatarImage
+          v-if="avatarImage"
+          :src="avatarImage"
+          alt=""
+          @loading-status-change="avatarLoadingStatus"
+        />
         <AvatarFallback data-speaker-avatar class="text-xs font-semibold" :style="avatarStyle">
           {{ speaker?.avatar }}
         </AvatarFallback>
