@@ -422,7 +422,7 @@ test("a type test inside parentheses or brackets continues before '|', and 'is' 
     assert.deepEqual(errors(source), [], source);
   assert.notDeepEqual(errors('let t = (timer async 0 """${1 is integer\n    | string}""")'), []);
   assert.deepEqual(diagnostics("let x = set[1]\nlet passed = x is set[1]"), [
-    ["error", "TSP021", "'is' checks a type; use '==' to compare values.", "set[1]"],
+    ["error", "TSP021", "'is' checks a type. Use '==' to compare values.", "set[1]"],
   ]);
 });
 
@@ -498,7 +498,7 @@ exit`;
 
 test("is checks a type, and a provably constant test is a warning", () => {
   // Also for a value in an interpolation or in parentheses; '||' after a test is the symbolic 'or'.
-  const valueTest = "'is' checks a type; use '==' to compare values.";
+  const valueTest = "'is' checks a type. Use '==' to compare values.";
   assert.deepEqual(
     diagnostics(
       'let mood = "happy"\nif mood is "happy" {\n    say "x"\n}\nsay "${mood is "happy"}"\nlet same = mood is ("happy")\nlet both = mood is string || false',

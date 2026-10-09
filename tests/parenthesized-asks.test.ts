@@ -177,11 +177,11 @@ test("a parenthesized ask takes one question and the options 'hint:' and 'prefil
   for (const [source, error] of [
     [
       'let v = askText("a", "b")',
-      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'prefill:'.",
+      "TSP032 0:21 askText(...) takes one unnamed value. Name the others, such as 'prefill:'.",
     ],
     [
       'let v = askNumber("a", help: "b")',
-      "TSP032 0:23 Unknown askNumber option 'help'; use 'prefill:' or 'hint:'.",
+      "TSP032 0:23 Unknown askNumber option 'help'. Use 'prefill:' or 'hint:'.",
     ],
     [
       'let v = askDate("a", prefill: 1, prefill: 2)',

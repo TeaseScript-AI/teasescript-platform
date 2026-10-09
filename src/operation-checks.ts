@@ -85,15 +85,15 @@ export function memberProblems(
     if (member.parameters === null)
       return call === null
         ? []
-        : problem("length is a property, not a method; write .length without parentheses.");
+        : problem("'length' is a property, not a method. Write .length without parentheses.");
     if (call === null)
       return problem(
-        `${name} is a method; write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
+        `'${name}' is a method. Write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
       );
     return argumentProblems(member, call, typeOf, staticVisibleText(receiver));
   }
   if (type.kind === "list" && name === "join") {
-    if (call === null) return problem("join is a method; write .join() with parentheses.");
+    if (call === null) return problem("'join' is a method. Write .join() with parentheses.");
     const problems = argumentProblems(LIST_JOIN, call, typeOf, undefined);
     const element = unshowableElement(receiver, type.element, typeOf);
     if (element !== undefined)
@@ -258,7 +258,7 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments; remove '${named.name.name}:'.`,
+        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -299,7 +299,7 @@ export function builtinCallProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'; its only named argument is default:.`,
+        message: `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
         span: argument.name.span,
       });
   }
@@ -354,8 +354,8 @@ function numericFunctionProblems(
         kind: "unknownNamedArgument",
         message:
           named.length === 0
-            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'; its only named argument is ${named[0]}:.`,
+            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
+            : `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is '${named[0]}:'.`,
         span: argument.name.span,
       });
   }
@@ -392,7 +392,7 @@ function minMaxProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments; remove '${named.name.name}:'.`,
+        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -701,7 +701,7 @@ function takeProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its count without a name; remove '${named.name.name}:'.`,
+        message: `${name}() takes its count without a name. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];

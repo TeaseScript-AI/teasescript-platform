@@ -189,19 +189,19 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "let tags = set[1]\nsay tags.union([{ n: 1 }])\nexit",
       "TSV044",
-      "union() would mix a whole number (integer) and an object. A set holds one type; to keep both, declare a union type, as in 'let tags: (integer | object) set = ...'.",
+      "union() would mix a whole number (integer) and an object. A set holds one type. To keep both, declare a union type, as in 'let tags: (integer | object) set = ...'.",
       "tags.union([{ n: 1 }])",
     ],
     [
       'let items = [1]\nsay items.union(["x"])\nexit',
       "TSV044",
-      "union() would mix a whole number (integer) and text (string). A list holds one type; to keep both, declare a union type, as in 'let items: (integer | string)[] = ...'.",
+      "union() would mix a whole number (integer) and text (string). A list holds one type. To keep both, declare a union type, as in 'let items: (integer | string)[] = ...'.",
       'items.union(["x"])',
     ],
     [
       'say set[1].union(set["x"])\nexit',
       "TSV044",
-      "union() would mix a whole number (integer) and text (string). A set holds one type; to keep both, declare a union type, as in 'let values: (integer | string) set = ...'.",
+      "union() would mix a whole number (integer) and text (string). A set holds one type. To keep both, declare a union type, as in 'let values: (integer | string) set = ...'.",
       'set[1].union(set["x"])',
     ],
   ];

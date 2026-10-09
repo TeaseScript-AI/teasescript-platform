@@ -574,13 +574,13 @@ test("a choice that returns text and numbers needs a place declared with a union
   assert.deepEqual(message('let rounds = choose "None", [5, 10]\nexit'), [
     [
       "TSV044",
-      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare a union type, as in 'let rounds: string | integer = choose ...'.",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare a union type, as in 'let rounds: string | integer = choose ...'.",
     ],
   ]);
   assert.deepEqual(message('function pick {\n    return choose "None", 5\n}\nexit'), [
     [
       "TSV044",
-      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare the result type, as in 'function pick(...): string | integer'.",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the result type, as in 'function pick(...): string | integer'.",
     ],
   ]);
   assert.deepEqual(
@@ -588,7 +588,7 @@ test("a choice that returns text and numbers needs a place declared with a union
     [
       [
         "TSV044",
-        "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare the parameter as 'value: string | integer'.",
+        "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the parameter as 'value: string | integer'.",
       ],
     ],
   );
@@ -624,7 +624,7 @@ test("a choice that returns text and numbers needs a place declared with a union
   assert.deepEqual(message(`${answer}let copied = answer\ncopied = choose "b", 2\nexit`), [
     [
       "TSV044",
-      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare it as 'let copied: string | integer = ...'.",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare it as 'let copied: string | integer = ...'.",
     ],
   ]);
   // A parameter without a type, also where a test narrowed it, a value of unknown type, and a property of an `object`
@@ -671,7 +671,7 @@ test("a choice that returns text and numbers needs a place declared with a union
       [
         [
           "TSV044",
-          "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare a union type, as in 'let answer: string | integer = choose ...'.",
+          "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare a union type, as in 'let answer: string | integer = choose ...'.",
         ],
       ],
       options,

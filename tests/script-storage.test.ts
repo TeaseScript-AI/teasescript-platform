@@ -653,11 +653,11 @@ test("a bounded load takes one key and the option 'default:', and names what is 
     ],
     [
       'let v = load("k", "j")',
-      "TSP040 0:18 load(...) takes one unnamed value; name the others, such as 'default:'.",
+      "TSP040 0:18 load(...) takes one unnamed value. Name the others, such as 'default:'.",
     ],
     [
       'let v = load("k", fallback: 1)',
-      "TSP040 0:18 Unknown load option 'fallback'; use 'default:'.",
+      "TSP040 0:18 Unknown load option 'fallback'. Use 'default:'.",
     ],
     ['let v = load("k", default: 1, default: 2)', "TSP040 0:30 Duplicate load option 'default'."],
     // The earlier grouped-key fallback is now a bounded load followed by a stray option.
@@ -992,7 +992,7 @@ test("a ', default:' belongs to the nearest load before it, and is an error afte
     parse('let v = load askText "Key?", default: "x"').diagnostics.map(
       (diagnostic) => diagnostic.message,
     ),
-    ["askText has no 'default:'; use 'prefill:'."],
+    ["askText has no 'default:'. Use 'prefill:'."],
   );
   const askKey = initializer('let v = load((askText "Key?"), default: "x")');
   assert.ok(askKey.kind === "loadExpression" && askKey.defaultValue !== null);

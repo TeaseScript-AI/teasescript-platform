@@ -390,7 +390,7 @@ class HeaderReader {
         if (valid) {
           this.#report(
             headerDiagnosticCode.interpolation,
-            "A header is written as it is shown; it cannot use ${…}.",
+            "A header is written as it is shown. It cannot use ${…}.",
             token.span,
           );
         }

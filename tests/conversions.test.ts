@@ -196,7 +196,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say toNumber("5", fallback: 0)\nexit',
       "TSV022",
-      "toNumber(...) has no parameter 'fallback'; its only named argument is default:.",
+      "toNumber(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
       "fallback",
     ],
     [
@@ -220,7 +220,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say ceil(2, to: 1)\nexit",
       "TSV022",
-      "ceil(...) takes no named arguments; remove 'to:'.",
+      "ceil(...) takes no named arguments. Remove 'to:'.",
       "to",
     ],
   ];

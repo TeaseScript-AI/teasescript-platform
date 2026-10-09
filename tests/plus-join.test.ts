@@ -98,7 +98,7 @@ test("joined and appended elements keep the list's element type", () => {
     [
       [
         "TSV044",
-        "'+' would mix a whole number (integer) and text (string). A list holds one type; to keep both, declare a union type, as in 'let numbers: (integer | string)[] = ...'.",
+        "'+' would mix a whole number (integer) and text (string). A list holds one type. To keep both, declare a union type, as in 'let numbers: (integer | string)[] = ...'.",
         "numbers + words",
       ],
     ],
@@ -106,7 +106,7 @@ test("joined and appended elements keep the list's element type", () => {
   assert.deepEqual(diagnostics('let numbers = [1]\nnumbers += ["a"]\nexit'), [
     [
       "TSV044",
-      "'+=' would mix a whole number (integer) and text (string). A list holds one type; to keep both, declare a union type, as in 'let numbers: (integer | string)[] = ...'.",
+      "'+=' would mix a whole number (integer) and text (string). A list holds one type. To keep both, declare a union type, as in 'let numbers: (integer | string)[] = ...'.",
       '["a"]',
     ],
   ]);
