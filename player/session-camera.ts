@@ -118,7 +118,10 @@ export interface CaptureServiceHost {
   session(): PlayerRuntimeSession | null;
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
-  /** Observes the current time, publishes the result, and returns the published session. */
+  /**
+   * Observes the current time, publishes the result, and returns the published session; `null` when the session takes
+   * no input, as once a Player error stopped it.
+   */
   observe(): PlayerRuntimeSession | null;
   publish(session: PlayerRuntimeSession): void;
   readonly capturedMedia: CapturedMediaAdmission;
@@ -188,7 +191,7 @@ export class CaptureService {
       const answer = await this.#pending;
       if (this.#stopped || this.#key !== key || this.#host.generation() !== generation) return;
       // Input happens at the observed time.
-      const observed = this.#host.observe() ?? this.#host.session();
+      const observed = this.#host.observe();
       if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== action.actionId) {
         this.#settled(key);
         return;

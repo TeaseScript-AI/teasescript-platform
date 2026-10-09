@@ -440,6 +440,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
   const clock = useRuntimeSceneClock(session, () => device.sample(), held);
+  // Input and the work that continues it take their session from here when they run: a session a Player error stopped
+  // gives none, so what was admitted before the stop and runs only now does nothing.
+  const observeForInput = () => (stopped.value ? null : clock.observe());
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -482,7 +485,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const captures = new CaptureService(() => camera.answer(), {
     session: () => servicedSession.value,
     generation: () => generation.value,
-    observe: () => clock.observe(),
+    observe: observeForInput,
     publish: (next) => (session.value = next),
     capturedMedia,
     diagnostic: reportDiagnostic,
@@ -524,7 +527,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     cameraRevision,
     media: capturedMedia,
     offered: cameraOffered,
-    observe: () => clock.observe(),
+    observe: observeForInput,
     publish: (next) => (session.value = next),
   });
   // An image request that allows only the camera cannot be answered where no camera can be used. Each such request, of
@@ -1316,13 +1319,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     drawId: number,
     outcome: "natural" | RandomOutcome,
   ): RandomDrawResolutionOutcome | null {
-    const current = session.value;
-    if (
-      current === null ||
-      inspecting.value ||
-      stopped.value ||
-      current.state.randomDraw?.drawId !== drawId
-    )
+    // Paused at the draw, the session observes no time; a stopped session gives none.
+    const current = observeForInput();
+    if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
       return null;
     const result = resumePlayerRuntimeRandomDraw(current, { drawId, outcome });
     session.value = result.session;
@@ -1457,10 +1456,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /**
    * Readies the session for input before the input is evaluated: an inspected state Debug's rewind restored is adopted
    * first. `true` when input may go ahead at once, else whether it may once the state is adopted; a state that could
-   * not be adopted, or one being adopted for other input, takes none, and stays as it was. A stopped session takes none.
+   * not be adopted, or one being adopted for other input, takes none, and stays as it was.
    */
   function prepareInput(): true | Promise<boolean> {
-    if (stopped.value) return Promise.resolve(false);
     return inspecting.value ? adoptRewound() : true;
   }
 
@@ -1516,7 +1514,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * saved data cannot be replaced, the state stays inspected and nothing changes. Resolves to whether it was adopted.
    */
   function adoptRewound(): Promise<boolean> {
-    if (!inspecting.value || rewindWork.value !== null || session.value === null)
+    // A stopped session is not adopted: its saved data are not replaced either.
+    if (stopped.value || !inspecting.value || rewindWork.value !== null || session.value === null)
       return Promise.resolve(false);
     adoption = adoptShown(session.value).finally(() => (adoption = null));
     return adoption;
@@ -1551,7 +1550,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * progress the jumps reported, and the scene clock continues from the new observed time.
    */
   function publishJump(next: PlayerRuntimeSession) {
-    if (inspecting.value || stopped.value) return;
+    if (inspecting.value) return;
     jumpedRevision.value = next.transcriptRevision;
     session.value = next;
     device.jumped(playerRuntimeMedia(next.state).media);
@@ -1562,9 +1561,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   );
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
   async function pressPermanentButton(buttonId: number) {
-    // The session may stop while input waits to go ahead.
-    if (!(await prepareInput()) || stopped.value) return;
-    const current = clock.observe();
+    if (!(await prepareInput())) return;
+    const current = observeForInput();
     if (current === null) return;
     const result = pressPlayerRuntimePermanentButton(current, buttonId);
     if (result.outcome.kind === "pressed") update(result.session);
@@ -1931,8 +1929,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** The permanent buttons the script shows, in creation order; a busy one is inactive until its block ends. */
     permanentButtons,
     pressPermanentButton,
-    /** Observes elapsed time and media progress, runs the session, and returns the published session. */
-    observe: clock.observe,
+    /**
+     * Observes elapsed time and media progress, runs the session, and returns the published session; `null` once a Player
+     * error stopped it, so input and its continuations take none.
+     */
+    observe: observeForInput,
     publishJump,
     start,
     update,

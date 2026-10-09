@@ -58,10 +58,10 @@ export function useDevelopmentTime(
     if (skippedMs > 0) log(`⏩ ${durationText(skippedMs)} skipped`);
   }
 
-  // A jump that waits for the host continues with the next published session.
+  // A jump that waits for the host continues with the next published session, or ends when the session stopped.
   let wake: (() => void) | null = null;
   let disposed = false;
-  watch(player.session, () => {
+  watch([player.session, player.stopped], () => {
     wake?.();
     wake = null;
   });
@@ -72,8 +72,9 @@ export function useDevelopmentTime(
     try {
       // Skipping is input to a state Debug's rewind restored: it adopts the state first.
       if (!(await player.prepareInput())) return;
-      if (disposed || player.generation.value !== generation || player.stopped.value) return;
-      // Time that really elapsed is observed first, with the media progress actually played.
+      if (disposed || player.generation.value !== generation) return;
+      // Time that really elapsed is observed first, with the media progress actually played; a stopped session gives
+      // nothing to jump.
       const start = player.observe();
       const targetMs = start === null ? null : target(start);
       if (start === null || targetMs === null) return;
@@ -97,6 +98,8 @@ export function useDevelopmentTime(
           await new Promise<void>((resolve) => (wake = resolve));
         else if (current !== published) await new Promise((resolve) => setTimeout(resolve, 0));
         else break;
+        // The jump goes on from the published session without observing it: an observation would sample media the jump
+        // just moved, and publishing it would wake the jump again. A stop ends the jump, as it gives input no session.
         if (disposed || player.generation.value !== generation || player.stopped.value) break;
         current = player.session.value ?? current;
       }

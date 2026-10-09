@@ -58,7 +58,10 @@ const props = defineProps<{
   /** The revision through which the transcript shows directly, like history (`PlayerSessionHost.jumpedRevision`). */
   jumpedRevision?: number;
   transcriptKey: string;
-  /** Brings scene time up to date before input and returns the published session. */
+  /**
+   * Brings scene time up to date before input and returns the published session; `null` when the session takes no
+   * input, as once a Player error stopped it.
+   */
   observeTime?: () => PlayerRuntimeSession | null;
   /**
    * Readies the session before input is evaluated, such as by adopting a state Debug's rewind restored; input goes
@@ -422,7 +425,7 @@ async function complete(
     // Ordinary input is evaluated at once; a session that must be readied first is evaluated once it is.
     const ready = props.prepareInput?.() ?? true;
     if (ready !== true && !(await ready)) return;
-    const session = props.observeTime?.() ?? props.session;
+    const session = props.observeTime ? props.observeTime() : props.session;
     if (!session) return;
     // Elapsed time may have ended or replaced the presented action; input never targets another action.
     if (targetId(session) !== presented) {
