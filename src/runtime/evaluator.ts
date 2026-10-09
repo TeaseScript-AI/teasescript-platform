@@ -3359,13 +3359,18 @@ export class Evaluator {
     use: "read" | "assign" | "remove",
     span: SourceSpan = indexPlan!.span,
   ): number {
+    const whole = typeof value === "number" && Number.isInteger(value);
+    if (whole && value >= 0 && value < list.items.length) return value;
+    // A label is only written for the failure.
     const indexLabel =
       indexPlan === null
         ? null
-        : indexPlan.kind === "literal" && typeof indexPlan.value === "number"
-          ? String(indexPlan.value)
+        : indexPlan.kind === "literal"
+          ? typeof indexPlan.value === "number"
+            ? String(indexPlan.value)
+            : null
           : planLabel(indexPlan);
-    if (typeof value !== "number" || !Number.isInteger(value)) {
+    if (!whole) {
       const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
       const fix =
         typeof value === "number"
@@ -3382,7 +3387,6 @@ export class Evaluator {
       );
     }
     const length = list.items.length;
-    if (value >= 0 && value < length) return value;
     const owner = this.#receiverLabel(receiver);
     const named = owner === null ? "the list" : `'${owner}'`;
     const action = `Cannot ${use === "assign" ? "assign to" : use} ${owner === null || indexLabel === null ? `index ${value}` : `'${owner}[${indexLabel}]'`}`;
