@@ -424,27 +424,12 @@ export function validateMediaState(
     media.finishFunctionId === functionId ||
     (Array.isArray(media.cues) &&
       media.cues.some((cue) => isPlainRecord(cue) && cue.functionId === functionId));
-  let blockPlays: Map<unknown, PlayMediaInstruction> | undefined;
-  const playOfBlock = (functionId: unknown): PlayMediaInstruction | undefined => {
-    if (plan === undefined) return undefined;
-    if (blockPlays === undefined) {
-      blockPlays = new Map();
-      for (const instruction of plan.instructions) {
-        if (instruction?.kind !== "playMedia") continue;
-        for (const cue of instruction.cues) blockPlays.set(cue.functionId, instruction);
-        if (instruction.finishFunctionId !== null)
-          blockPlays.set(instruction.finishFunctionId, instruction);
-      }
-    }
-    return blockPlays.get(functionId);
-  };
-  // The play, activation root, and variables of the first block seen of each settled media.
-  const settledOwners = new Map<
-    number,
-    { play: PlayMediaInstruction | undefined; rootScopeId: unknown; captures: unknown }
+  // Blocks of active media must be listed by their record; `finish` runs only once the media finished, when it settled.
+  // The blocks of settled media, whose record no longer lists them, are collected and checked together below.
+  const settledBlocks = new Map<
+    Record<string, unknown>,
+    { functionId: unknown; count: number; rootScopeId: unknown; captures: unknown }[]
   >();
-  // Cue blocks exist only for loaded media; `finish` runs once, after the media finished.
-  const finishRuns = new Map<number, number>();
   const validOwner = (
     media: Record<string, unknown> | undefined,
     functionId: unknown,
@@ -452,33 +437,22 @@ export function validateMediaState(
     rootScopeId: unknown,
     captures: unknown,
   ) => {
-    if (media === undefined || !positiveSafeInteger(media.mediaId)) return false;
-    let finishFunctionId: unknown;
+    if (media === undefined) return false;
     if (settledRecords.has(media)) {
-      const play = playOfBlock(functionId);
-      if (media.durationMs === null || (plan !== undefined && play === undefined)) return false;
-      const owner = settledOwners.get(media.mediaId);
-      if (owner === undefined) settledOwners.set(media.mediaId, { play, rootScopeId, captures });
-      else if (
-        owner.play !== play ||
-        owner.rootScopeId !== rootScopeId ||
-        !sameCaptures(captures, owner.captures)
-      )
-        return false;
-      finishFunctionId = play?.finishFunctionId;
-    } else {
-      if (
-        !ownsHandler(media, functionId) ||
-        media.loaded !== true ||
-        rootScopeId !== media.handlerRootScopeId ||
-        !sameCaptures(captures, media.captures)
-      )
-        return false;
-      finishFunctionId = media.finishFunctionId;
+      // Cue blocks exist only for loaded media.
+      if (media.durationMs === null) return false;
+      const blocks = settledBlocks.get(media) ?? [];
+      blocks.push({ functionId, count, rootScopeId, captures });
+      settledBlocks.set(media, blocks);
+      return true;
     }
-    if (functionId !== finishFunctionId) return true;
-    finishRuns.set(media.mediaId, (finishRuns.get(media.mediaId) ?? 0) + count);
-    return media.state === "finished";
+    return (
+      ownsHandler(media, functionId) &&
+      functionId !== media.finishFunctionId &&
+      media.loaded === true &&
+      rootScopeId === media.handlerRootScopeId &&
+      sameCaptures(captures, media.captures)
+    );
   };
   const invocations = new Map<unknown, Map<unknown, number>>();
   const countInvocation = (mediaId: unknown, functionId: unknown, count: unknown): void => {
@@ -535,8 +509,49 @@ export function validateMediaState(
       }
     }
   }
-  if ([...finishRuns.values()].some((count) => count > 1)) {
-    errors.push("Runtime media finish block runs more than once.");
+  // The blocks of one settled media share one activation root and its variables and are blocks of one play, under which
+  // `finish` runs at most once and only after the media finished. Plays may share block functions, so the candidates are
+  // the plays that use every one of them.
+  let blockPlays: Map<unknown, Set<PlayMediaInstruction>> | undefined;
+  const playsUsing = (functionId: unknown): ReadonlySet<PlayMediaInstruction> => {
+    if (blockPlays === undefined) {
+      blockPlays = new Map();
+      for (const instruction of plan?.instructions ?? []) {
+        if (instruction?.kind !== "playMedia") continue;
+        const uses = [...instruction.cues.map((cue) => cue.functionId)];
+        if (instruction.finishFunctionId !== null) uses.push(instruction.finishFunctionId);
+        for (const used of uses) {
+          const plays = blockPlays.get(used) ?? new Set<PlayMediaInstruction>();
+          plays.add(instruction);
+          blockPlays.set(used, plays);
+        }
+      }
+    }
+    return blockPlays.get(functionId) ?? new Set();
+  };
+  for (const [media, blocks] of settledBlocks) {
+    const first = blocks[0]!;
+    const runs = new Map<unknown, number>();
+    for (const block of blocks)
+      runs.set(block.functionId, (runs.get(block.functionId) ?? 0) + block.count);
+    let candidates = [...playsUsing(first.functionId)];
+    for (const functionId of runs.keys()) {
+      const plays = playsUsing(functionId);
+      candidates = candidates.filter((play) => plays.has(play));
+    }
+    const finishFits = (play: PlayMediaInstruction): boolean => {
+      const finishRuns = runs.get(play.finishFunctionId) ?? 0;
+      return finishRuns === 0 || (finishRuns === 1 && media.state === "finished");
+    };
+    if (
+      blocks.some(
+        (block) =>
+          block.rootScopeId !== first.rootScopeId || !sameCaptures(block.captures, first.captures),
+      ) ||
+      (plan !== undefined && !candidates.some(finishFits))
+    ) {
+      errors.push("Runtime settled media blocks do not belong to one play.");
+    }
   }
   for (const [mediaId, media] of records) {
     if (

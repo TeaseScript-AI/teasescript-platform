@@ -36,9 +36,9 @@ export interface RuntimeMediaPointSnapshot {
 
 export interface RuntimeMediaSnapshot {
   readonly mediaId: number;
-  /** The activation root its cue and finish blocks run in, kept after it settles; `null` without blocks. */
+  /** The activation root its cue and finish blocks run in; `null` without blocks. */
   readonly handlerRootScopeId: number | null;
-  /** The variables its blocks share with the code that played it; kept after it settles, owning nothing. */
+  /** The variables its blocks share with the code that played it. */
   readonly captures: readonly RuntimeCaptureSnapshot[];
   readonly media: "audio" | "video";
   readonly source: string;

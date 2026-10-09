@@ -630,10 +630,11 @@ kind is dropped as soon as nothing names it: when a block returns, a resource se
 Settled timer records keep their list as history without owning its scopes; settled media records drop it. `exit`
 clears everything. Prepared references keep addressing a scope by its ID wherever it is.
 
-Restore validation requires every list to name, in order, the plan's `captures` of its block's instruction, a queued
-or running block to carry its resource's list, every scope that a live list names to be a non-root scope that holds the
-name and is marked (for a running block one below its own scopes), and every retained non-root scope to be named by a
-live list.
+Restore validation requires every list to name, in order, the plan's `captures` of its block's instruction, a queued or
+running block to carry its resource's list where the resource's record keeps one (see [Stage image and media
+playback](#stage-image-and-media-playback) for settled media), every scope that a live list names to be a non-root scope
+that holds the name and is marked (for a running block one below its own scopes), and every retained non-root scope to
+be named by a live list.
 
 ## Timers and scene time
 
