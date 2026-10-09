@@ -62,6 +62,8 @@ import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
+import { timeName } from "./time-model.ts";
+import { wholeDays } from "./java-time.ts";
 import {
   BOOLEAN,
   inferType,
@@ -13989,7 +13991,7 @@ function dateFormat(
         context,
         "SX_DATE_FROM_SECONDS",
         "warning",
-        `Workaround: TeaseScript builds no timestamp from a Unix number (#532), so the moment is the current timestamp minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
+        `Workaround: TeaseScript builds no ${timeName("timestamp")} from a Unix number (#532), so the moment is the current ${timeName("timestamp")} minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
         node.span,
       );
       return {
@@ -14005,7 +14007,7 @@ function dateFormat(
       context,
       node,
       "SX_DATE_FORMAT",
-      "This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no timestamp or date from a number (#532). Store and load the timestamp or datetime itself, then format it.",
+      `This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no ${timeName("timestamp")} or date from a number (#532). Store and load the ${timeName("timestamp")} or datetime itself, then format it.`,
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
@@ -14180,11 +14182,7 @@ function dateTimeField(
       return {
         kind: "binary",
         operator: "+",
-        left: {
-          kind: "property",
-          target: { kind: "binary", operator: "-", left: date, right: newYear },
-          name: "days",
-        },
+        left: wholeDays({ kind: "binary", operator: "-", left: date, right: newYear }),
         right: literal(1),
       };
     }
@@ -15052,7 +15050,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_POPUP_ELAPSED",
         "warning",
-        "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.",
+        `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with ${timeName("getTimestamp")}().toSeconds(), in whole seconds.`,
         node.span,
       );
       // Legacy timing started once the message was computed.

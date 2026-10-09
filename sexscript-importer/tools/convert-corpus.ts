@@ -40,6 +40,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONVERTED_VIDEO_EXTENSIONS } from "../src/lower.ts";
+import { selectTimeModel } from "../src/time-model.ts";
 import {
   applyOutputPatches,
   applySourcePatches,
@@ -132,11 +133,13 @@ async function main(rawArgs: string[]): Promise<void> {
       only = new Set([...(only ?? []), ...(await readUnitsFile(rawArgs[++index] ?? ""))]);
     else if (arg === "--report-only") reportOnly = true;
     else if (arg === "--patches") patchesRoot = path.resolve(rawArgs[++index] ?? "");
+    // The conversions this starts inherit the time model (time-model.ts).
+    else if (arg === "--time-model") selectTimeModel(rawArgs[++index]);
     else args.push(arg);
   }
   if (args.length !== 2 || !Number.isInteger(jobs) || jobs < 1) {
     process.stderr.write(
-      "Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--units-file file] [--report-only] [--patches dir] <corpus-root> <converted-root>\n",
+      "Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--units-file file] [--report-only] [--patches dir] [--time-model 1|2] <corpus-root> <converted-root>\n",
     );
     process.exit(2);
   }

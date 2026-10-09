@@ -1,5 +1,6 @@
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import { timeModel, timeName } from "./time-model.ts";
 
 export function emitTease(program: MigrationProgram): string {
   const lines: string[] = [];
@@ -314,7 +315,11 @@ export function emitExpression(expression: IrExpression): string {
           ? `${expression.value}.0`
           : String(expression.value);
     case "duration":
-      return `${expression.value} ${expression.unit}`;
+      // Time model 2 writes calendar steps with `calendar`, as every month and year is one (time-model.ts).
+      return timeModel() === 2 &&
+        (expression.calendar === true || expression.unit === "month" || expression.unit === "year")
+        ? `${expression.value} calendar ${expression.unit}`
+        : `${expression.value} ${expression.unit}`;
     case "template": {
       const flat = flatParts(expression.parts);
       if (flat.every((part) => "text" in part))
@@ -382,7 +387,7 @@ export function emitExpression(expression: IrExpression): string {
       // A dict read with a default (#536).
       if (expression.dict === true && expression.name === "get" && args.length === 2)
         return `${operand(expression.target, POSTFIX)}.get(${args[0]}, default: ${args[1]})`;
-      return `${operand(expression.target, POSTFIX)}.${expression.name}(${args.join(", ")})`;
+      return `${operand(expression.target, POSTFIX)}.${timeName(expression.name)}(${args.join(", ")})`;
     }
     case "load":
       // Inside a larger expression a read takes its bounded form, `load("k", default: null) == null` (V30 §25); a
@@ -439,7 +444,7 @@ export function emitExpression(expression: IrExpression): string {
       const named = Object.entries(expression.named).map(
         ([name, value]) => `${name}: ${emitExpression(value)}`,
       );
-      return `${expression.name}(${[...positional, ...named].join(", ")})`;
+      return `${timeName(expression.name)}(${[...positional, ...named].join(", ")})`;
     }
   }
 }

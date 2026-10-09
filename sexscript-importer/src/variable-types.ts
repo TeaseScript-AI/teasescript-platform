@@ -1,6 +1,7 @@
 import { isRecord } from "./ast.ts";
 import { helperCall } from "./helpers.ts";
 import type { IrExpression, IrFunctionParameter, IrStatement } from "./ir.ts";
+import { timeName } from "./time-model.ts";
 
 /**
  * A TeaseScript variable keeps its declared or inferred type (V30 §12, #519): an `integer` may receive a `number`
@@ -1910,7 +1911,7 @@ function typeName(type: TeaseType): string {
     case "union":
       return type.members.map(typeName).join(" | ");
     case "temporal":
-      return type.name;
+      return timeName(type.name);
     default:
       return type.kind;
   }

@@ -341,11 +341,16 @@ export type IrExpression =
     }
   /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }
-  /** A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). */
+  /**
+   * A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). `calendar`
+   * marks a calendar step, the same clock time a number of days later, which time model 2 writes `1 calendar day`,
+   * where its plain `day` and `week` are exact (time-model.ts).
+   */
   | {
       kind: "duration";
       value: number;
       unit: "s" | "ms" | "min" | "h" | "day" | "week" | "month" | "year";
+      calendar?: true;
     }
   /**
    * A `say` used as a value: it shows its text as a `say` statement does and gives the message's handle, whose `text`
