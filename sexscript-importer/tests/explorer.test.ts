@@ -797,6 +797,37 @@ test(
 );
 
 test(
+  "a key a helper loads by a template is the one key its argument names at the condition, so other keys of the template are no closest storage",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'global ROPE = "rope"\nglobal KNIFE = "knife"\nfunction owns(item) {\n' +
+      '  return load("gear.${item}", default: false) == true\n}\n' +
+      'let pick = choose rope: "Rope", knife: "Knife"\nif pick == "rope" {\n  save true as "gear.${ROPE}"\n' +
+      '} else {\n  save false as "gear.${KNIFE}"\n}\nshowButton "Next"\nif owns(KNIFE) {\n' +
+      '  say "Sharp."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+    });
+    const sharp = result.coverage.unvisitedBranches.find((entry) => entry.line === 13);
+    assert.deepEqual(sharp?.dependsOn, ["stored gear.knife"]);
+    assert.deepEqual(
+      sharp?.parts.map((part) => [part.needs, part.status, part.closest?.value]),
+      [["stored gear.knife == true", "unmet", "gear.knife = false"]],
+    );
+  },
+);
+
+test(
   "until stalled, a run ends complete when nothing is left to try, as a spiral when one place took the work since the last progress, and capped while a counter still comes closer",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

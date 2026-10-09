@@ -323,6 +323,13 @@ export class DataFlow {
   readonly #loads = new Map<string, LoadAlias | null>();
   /** The function each instruction of a function body belongs to, by its ID. */
   readonly #functionOf = new Map<number, number>();
+  /** Variables whose every assignment is the same literal, by name; null for any other variable. */
+  readonly #literals = new Map<string, SavedScalar | null>();
+  readonly #instructions: readonly Data[];
+  /** The instructions a jump, condition, or loop goes to. */
+  readonly #jumpTargets = new Set<number>();
+  /** The loads with a key template in each function's code, by its ID; made when first needed. */
+  #templateLoads: Map<number, Data[]> | null = null;
 
   /**
    * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
@@ -333,6 +340,7 @@ export class DataFlow {
     instructions: readonly Data[],
     settings: { computedPrompts?: boolean } = {},
   ) {
+    this.#instructions = instructions;
     const functions = list(plan.functions);
     const functionOf = this.#functionOf;
     for (const definition of functions) {
@@ -340,6 +348,9 @@ export class DataFlow {
       for (let index = Number(definition.entryInstruction); index <= end; index += 1)
         functionOf.set(index, Number(definition.id));
     }
+    for (const instruction of instructions)
+      for (const target of [instruction.target, instruction.continueTarget])
+        if (typeof target === "number") this.#jumpTargets.add(target);
     instructions.forEach((instruction, index) => {
       if (
         instruction.kind !== "interaction" ||
@@ -418,6 +429,105 @@ export class DataFlow {
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
   functionAt(index: number): number {
     return this.#functionOf.get(index) ?? 0;
+  }
+
+  /**
+   * The one stored key that a key pattern a condition at instruction `at` reads stands for, when every read of it there
+   * names that key with constants: a load whose template's computed parts are literals or variables that only ever hold
+   * one literal, or a load in a helper whose result the condition reads, with the helper's parameters as the arguments
+   * of the call that gave that result right before. The pattern otherwise.
+   */
+  keyAt(pattern: string, condition: unknown, at: number): string {
+    if (!pattern.includes(KEY_PLACEHOLDER)) return pattern;
+    const keys = new Set<string | null>();
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(walk);
+      if (!isRecord(value)) return;
+      if (value.kind === "storageLoad" && keyText(value.key) === pattern)
+        keys.add(this.#keyNamed(value.key, new Map()));
+      else if (value.kind === "identifier" && typeof value.name === "string") {
+        if (this.#variables.get(value.name)?.keys.has(pattern) === true) keys.add(null);
+      } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
+        if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
+        const call = this.#callBefore(value.temporaryId, at);
+        const loads = call === null ? [] : this.#loadsIn(Number(call.functionId), pattern);
+        if (call === null || loads.length === 0) keys.add(null);
+        else {
+          const passed = new Map(
+            list(call.arguments).map((argument) => [argument.parameterName, argument.value]),
+          );
+          for (const load of loads) keys.add(this.#keyNamed(load.key, passed));
+        }
+      }
+      for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+    };
+    walk(condition);
+    const [key] = keys;
+    return keys.size === 1 && typeof key === "string" ? key : pattern;
+  }
+
+  /**
+   * The key a load's template names, with `passed` giving the helper's parameters their call's arguments; null when a
+   * computed part is not a constant: a literal text or whole number, or a variable that only ever holds one.
+   */
+  #keyNamed(key: unknown, passed: ReadonlyMap<unknown, unknown>): string | null {
+    let text = "";
+    for (const part of list(record(key).parts)) {
+      if (part.kind === "text" && typeof part.value === "string") {
+        text += part.value;
+        continue;
+      }
+      const expression = record(part.expression);
+      const parameter = expression.kind === "identifier" && passed.has(expression.name);
+      const value = record(parameter ? passed.get(expression.name) : expression);
+      const constant =
+        value.kind === "literal"
+          ? value.value
+          : value.kind === "identifier" && typeof value.name === "string"
+            ? this.#literals.get(value.name)
+            : undefined;
+      if (typeof constant !== "string" && !Number.isSafeInteger(constant)) return null;
+      text += String(constant);
+    }
+    return text;
+  }
+
+  /**
+   * The helper call that gives temporary `id` its value for instruction `at`: the write of it right before, in the same
+   * code with no jump going between; null when that is no call, or there is none.
+   */
+  #callBefore(id: number, at: number): Data | null {
+    const owner = this.functionAt(at);
+    for (let index = at - 1; index >= 0 && this.functionAt(index) === owner; index -= 1) {
+      if (this.#jumpTargets.has(index + 1)) return null;
+      const instruction = this.#instructions[index]!;
+      if (instruction.destinationTemporary === id)
+        return instruction.kind === "callFunction" ? instruction : null;
+      if (instruction.temporaryId === id) return null;
+    }
+    return null;
+  }
+
+  /** The loads of a key pattern in a function's own code. */
+  #loadsIn(functionId: number, pattern: string): Data[] {
+    if (this.#templateLoads === null) {
+      const found = new Map<number, Data[]>();
+      const walk = (value: unknown, owner: number): void => {
+        if (Array.isArray(value)) value.forEach((item) => walk(item, owner));
+        if (!isRecord(value)) return;
+        if (value.kind === "storageLoad" && record(value.key).kind === "template") {
+          const loads = found.get(owner) ?? [];
+          loads.push(value);
+          found.set(owner, loads);
+        }
+        for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item, owner);
+      };
+      this.#instructions.forEach((instruction, index) => walk(instruction, this.functionAt(index)));
+      this.#templateLoads = found;
+    }
+    return (this.#templateLoads.get(functionId) ?? []).filter(
+      (load) => keyText(load.key) === pattern,
+    );
   }
 
   /** The asks, stored keys, and clock reads an expression's value comes from. */
@@ -659,6 +769,9 @@ export class DataFlow {
         literal === undefined
           ? null
           : { key, fallback: literal };
+      const only = expression.kind === "literal" ? (scalar(expression.value) ?? null) : null;
+      const fixed = this.#literals.get(name);
+      this.#literals.set(name, fixed === undefined || fixed === only ? only : null);
       const known = this.#loads.get(name);
       if (known === undefined) this.#loads.set(name, load);
       else if (
@@ -670,10 +783,15 @@ export class DataFlow {
     // Parameters and loop variables get their values elsewhere.
     for (const definition of list(plan.functions))
       for (const parameter of list(definition.parameters))
-        if (typeof parameter.name === "string") this.#loads.set(parameter.name, null);
+        if (typeof parameter.name === "string") {
+          this.#loads.set(parameter.name, null);
+          this.#literals.set(parameter.name, null);
+        }
     for (const instruction of instructions) {
-      if (instruction.kind === "loopStart" && typeof instruction.variable === "string")
+      if (instruction.kind === "loopStart" && typeof instruction.variable === "string") {
         this.#loads.set(instruction.variable, null);
+        this.#literals.set(instruction.variable, null);
+      }
       if (
         (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
         typeof instruction.name === "string"
@@ -684,7 +802,10 @@ export class DataFlow {
         const name = targetName(instruction.target);
         if (name === null) continue;
         if (target.kind === "identifier") assign(name, instruction.value);
-        else this.#loads.set(name, null);
+        else {
+          this.#loads.set(name, null);
+          this.#literals.set(name, null);
+        }
       }
     }
   }
@@ -880,10 +1001,16 @@ export interface Goal {
 
 /**
  * The goals for taking a condition's missed way: `wanted` is the condition value of that way. A subject that applies
- * `length` to a source turns a length into a text of that length; `toInteger` and the like keep the number.
+ * `length` to a source turns a length into a text of that length; `toInteger` and the like keep the number. With the
+ * condition's instruction `at`, a stored key read through a key template is the one key it names there, if it names
+ * one ({@link DataFlow.keyAt}).
  */
-export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): Goal[] {
+export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at?: number): Goal[] {
   const goals: Goal[] = [];
+  const keyed = (source: Source, expression: unknown): Source =>
+    source.kind === "storage" && at !== undefined
+      ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
+      : source;
   for (const atom of atomsFor(condition, wanted, true)) {
     if (atom.against !== undefined) {
       const goal = differenceGoal(flow, atom);
@@ -894,7 +1021,8 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     const subject = record(atom.subject);
     const lengthOf = subject.kind === "property" && subject.name === "length";
     const holds = atom.wanted ? atom.operator : negate(atom.operator);
-    for (const source of flow.sourcesOf(atom.subject)) {
+    for (const found of flow.sourcesOf(atom.subject)) {
+      const source = keyed(found, atom.subject);
       const candidates =
         source.kind === "ask"
           ? values
@@ -930,7 +1058,8 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     }
   }
   // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`.
-  for (const source of flow.sourcesOf(condition)) {
+  for (const found of flow.sourcesOf(condition)) {
+    const source = keyed(found, condition);
     if (source.kind !== "storage" && source.kind !== "clock") continue;
     const known = goals.some(
       (goal) =>

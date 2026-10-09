@@ -2909,7 +2909,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const alias = flow.loadAlias(name);
       if (alias !== null) aliases.set(name, alias);
     }
-    const guard = { condition: before, aliases, goals: goalsFor(flow, before, false) };
+    const guard = { condition: before, aliases, goals: goalsFor(flow, before, false, earlier) };
     guardsByCondition.set(earlier, guard);
     return guard;
   };
@@ -2934,7 +2934,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
       const guards = options.realign === true ? (elseIfs.get(index) ?? []).map(guardOf) : [];
       const goals = [
-        ...(conditional ? goalsFor(flow, condition, way === 0) : []),
+        ...(conditional ? goalsFor(flow, condition, way === 0, index) : []),
         ...guards.flatMap((guard) => guard.goals),
       ];
       const witness = chosenWays.get(code);

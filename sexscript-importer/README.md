@@ -344,10 +344,11 @@ a run's length and result then do not depend on the machine's load.
 
 Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
-stored value (also by a key template such as `"script${i}.time"`), the clock, or a variable the code assigns. Its
-comparisons with constants give the values that take the missed way. An ask is answered again with them on the path of
-the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
-that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
+stored value (also by a key template such as `"script${i}.time"`; one whose computed parts are constants at the
+condition, such as the argument of `has(KNIFE)` for a helper `has(name)` that loads `"toys.${name}"`, is the one key it
+names), the clock, or a variable the code assigns. Its comparisons with constants give the values that take the missed
+way. An ask is answered again with them on the path of the step that first evaluated the condition, and the rest of
+that path is replayed; the values also become answers of that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
 that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
 storage closest to it and replays a route: the inputs of a session seen to bring the value closer from storage that
 already had it (up to 1,000 inputs; sessions with the same inputs are one route). The goal is the way with the least
