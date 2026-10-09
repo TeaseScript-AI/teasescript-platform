@@ -1120,11 +1120,11 @@ test("timer ranges and handle members are checked by type, wherever the value co
       "function make {\n    return timer async 1\n}\nlet t = make()\nt.nope()\nt.elapsed = 1 s\nsay t.colour\nexit",
     ).map(([code, message, text]) => [code, text, message]),
     [
-      ["TSV043", "nope", "Timer handles have no method 'nope'; use pause(), resume(), or stop()."],
+      ["TSV043", "nope", "Timer handles have no method 'nope'. Use pause(), resume(), or stop()."],
       [
         "TSV043",
         "elapsed",
-        "Timer handle property 'elapsed' cannot be assigned; assign remaining, display, or repeatDuration.",
+        "Timer handle property 'elapsed' cannot be assigned. You can assign remaining, display, or repeatDuration.",
       ],
       ["TSV043", "colour", "Timer handles have no property 'colour'."],
     ],
@@ -1478,11 +1478,14 @@ test("a message handle has one text property, takes text, and stays out of text,
     ["TSV041", "'line.text' holds text (string), so text (string) cannot be subtracted from it."],
   ]);
   for (const [source, message] of [
-    ['line.color = "red"', "Message handles have no property 'color'; use text."] as const,
-    ["say line.speaker", "Message handles have no property 'speaker'; use text."],
+    [
+      'line.color = "red"',
+      "Message handles have no property 'color'. Use the text property.",
+    ] as const,
+    ["say line.speaker", "Message handles have no property 'speaker'. Use the text property."],
     [
       "line.stop()",
-      "Message handles have no method 'stop'; change the message with its text property.",
+      "Message handles have no method 'stop'. Change the message with its text property.",
     ],
   ] as const)
     assert.deepEqual(codes(source), [["TSV043", message]], source);

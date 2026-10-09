@@ -4611,8 +4611,8 @@ class TypeChecker {
           ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
           : failing.kind === "dict"
             ? method === "add"
-              ? "Dicts have no method 'add'; store a value by its key, as in dict[key] = value."
-              : `Dicts have no method '${method}'; use contains, remove, clear, or get.`
+              ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
+              : `Dicts have no method '${method}'. Use contains, remove, clear, or get.`
             : failing.kind === "timer" ||
                 failing.kind === "media" ||
                 failing.kind === "camera" ||
@@ -5111,9 +5111,9 @@ class TypeChecker {
     this.#report(
       typeCode.invalidOperand,
       value.kind === "list" || value.kind === "set"
-        ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
+        ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`
         : value.kind === "dict"
-          ? `Dicts have no property '${name}'; use length, keys, or values, or read a value by its key, as in ${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}].`
+          ? `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}]'.`
           : value.kind === "timer" ||
               value.kind === "media" ||
               value.kind === "camera" ||
@@ -7638,19 +7638,19 @@ function handleMemberMessage(
 ): string {
   if (handle === "messageHandle")
     return use === "call"
-      ? `Message handles have no method '${name}'; change the message with its text property.`
-      : `Message handles have no property '${name}'; use text.`;
+      ? `Message handles have no method '${name}'. Change the message with its text property.`
+      : `Message handles have no property '${name}'. Use the text property.`;
   if (handle === "camera")
     return use === "call"
-      ? `Camera views have no method '${name}'; hide them with hideCamera.`
-      : `Camera views have no property '${name}'; use placement.`;
+      ? `Camera views have no method '${name}'. Hide them with hideCamera.`
+      : `Camera views have no property '${name}'. Use the placement property.`;
   const kind = handle === "timer" ? "Timer" : "Media";
   if (use === "call")
-    return `${kind} handles have no method '${name}'; use pause(), resume(), or stop().`;
+    return `${kind} handles have no method '${name}'. Use pause(), resume(), or stop().`;
   if (use === "read") return `${kind} handles have no property '${name}'.`;
   return handle === "timer"
-    ? `Timer handle property '${name}' cannot be assigned; assign remaining, display, or repeatDuration.`
-    : `Media handle property '${name}' cannot be assigned; assign position, remaining, or volume.`;
+    ? `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
+    : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
 }
 
 function operatorMessage(

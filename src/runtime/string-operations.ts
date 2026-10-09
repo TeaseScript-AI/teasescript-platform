@@ -52,7 +52,7 @@ export function missingMemberMessage(
     : value === null
       ? " Check that it is not null first."
       : typeof value === "number" || typeof value === "boolean" || isDuration(value)
-        ? " Text operations need text; convert the value first with toString(...)."
+        ? " Convert it to text first with toString(...)."
         : "";
   return `${description} has no ${use} '${name}'.${fix}`;
 }

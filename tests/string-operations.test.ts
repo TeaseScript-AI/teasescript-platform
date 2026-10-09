@@ -161,7 +161,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       "let count = 5\nsay count.uppercase()\nexit",
       "TSV043",
-      "A whole number (integer) has no method 'uppercase'. Text operations need text; convert the value first with toString(...).",
+      "A whole number (integer) has no method 'uppercase'. Convert it to text first with toString(...).",
       "uppercase",
     ],
     [
@@ -263,7 +263,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let t = "abc"\nsay t.padStart(length: 5, fill: "0")\nexit',
       "TSV022",
-      "padStart() takes its arguments without names; remove 'length:'.",
+      "padStart() takes its arguments without names. Remove 'length:'.",
       "length",
     ],
     [
@@ -385,7 +385,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say value.trim()\nexit",
       { value: 5 },
       "TSR016",
-      "A number has no method 'trim'. Text operations need text; convert the value first with toString(...).",
+      "A number has no method 'trim'. Convert it to text first with toString(...).",
     ],
     [
       "say value.length\nexit",
@@ -510,7 +510,7 @@ test("text operations are checkpoint and resume equivalent", () => {
 test("an operation that would make a text longer than any text can be fails with TSR084", () => {
   // The limit is what V8 can hold, here and in every other host.
   assert.equal(MAX_TEXT_LENGTH, constants.MAX_STRING_LENGTH);
-  const limit = "a text can hold at most about 536 million.";
+  const limit = "but a text can hold at most about 536 million.";
   // Doubling builds long texts without copying them.
   const doubled = (times: number, text = "x") =>
     [`let s = "${text}"`, `repeat ${times} {`, "    s = s + s", "}"].join("\n");
@@ -520,79 +520,79 @@ test("an operation that would make a text longer than any text can be fails with
     [
       'let s = "x".repeat(9007199254740991)\nexit',
       1,
-      `Text too long: repeat(9007199254740991) would make a text of about 9,007,199,254,740,991 characters; ${limit}`,
+      `Text too long: repeat(9007199254740991) would make about 9,007,199,254,740,991 characters, ${limit}`,
     ],
     [
       `let s = "x".repeat(${MAX_TEXT_LENGTH + 1})\nexit`,
       1,
-      `Text too long: repeat(536870889) would make a text of about 536,870,889 characters; ${limit}`,
+      `Text too long: repeat(536870889) would make about 536,870,889 characters, ${limit}`,
     ],
     [
       'let s = "x".padStart(600000000, "x")\nexit',
       1,
-      `Text too long: padStart(600000000) would make a text of about 600,000,000 characters; ${limit}`,
+      `Text too long: padStart(600000000) would make about 600,000,000 characters, ${limit}`,
     ],
     [
       'let s = "x".padEnd(600000000, "ab")\nexit',
       1,
-      `Text too long: padEnd(600000000) would make a text of about 600,000,000 characters; ${limit}`,
+      `Text too long: padEnd(600000000) would make about 600,000,000 characters, ${limit}`,
     ],
     // Lone surrogates join while padding, so the length the text would reach is not known.
     [
       `let s = "${high}".padEnd(536870889, "${low}")\nexit`,
       1,
-      `Text too long: padEnd(536870889) would make a text; ${limit}`,
+      `Text too long: padEnd(536870889) would make a text longer than a text can hold, which is about 536 million characters.`,
     ],
     [
       `${doubled(30)}\nexit`,
       3,
-      `Text too long: joining with + would make a text of about 536,870,912 characters; ${limit}`,
+      `Text too long: joining with + would make about 536,870,912 characters, ${limit}`,
     ],
     [
       'let s = "x"\nrepeat 30 {\n    s = "${s}${s}"\n}\nexit',
       3,
-      `Text too long: \${…} would make a text; ${limit}`,
+      `Text too long: \${…} would make a text longer than a text can hold, which is about 536 million characters.`,
     ],
     [
       `${doubled(27)}\nlet joined = [s, s, s, s, s].join("")\nexit`,
       5,
-      `Text too long: join would make a text of about 671,088,640 characters; ${limit}`,
+      `Text too long: join would make about 671,088,640 characters, ${limit}`,
     ],
     [
       `${doubled(27)}\nlet grown = "aaaaa".replace("a", s)\nexit`,
       5,
-      `Text too long: replace would make a text of about 671,088,640 characters; ${limit}`,
+      `Text too long: replace would make about 671,088,640 characters, ${limit}`,
     ],
     [
       'let s = "ß".repeat(268435445).uppercase()\nexit',
       1,
-      `Text too long: uppercase would make a text of about 536,870,890 characters; ${limit}`,
+      `Text too long: uppercase would make about 536,870,890 characters, ${limit}`,
     ],
     [
       'let s = escapeMarkup("-".repeat(268435445))\nexit',
       1,
-      `Text too long: escapeMarkup would make a text of about 536,870,890 characters; ${limit}`,
+      `Text too long: escapeMarkup would make about 536,870,890 characters, ${limit}`,
     ],
     [
       'let s = "x".repeat(268435444)\nlet answers = askForm fields: { a: { value: true, description: s }, b: { value: true, description: s } }\nexit',
       2,
-      `Text too long: askForm would make a text of about 536,870,897 characters; ${limit}`,
+      `Text too long: askForm would make about 536,870,897 characters, ${limit}`,
     ],
     // Quoting doubles each line break, so the notation of one text is too long.
     [
       `${doubled(28, "\\n")}\nsay [s], instant\nexit`,
       5,
-      `Text too long: say would make a text; ${limit}`,
+      `Text too long: say would make a text longer than a text can hold, which is about 536 million characters.`,
     ],
     [
       `${doubled(28, "\\n")}\nlet t = "\${script("main.tease", label: s)}"\nexit`,
       5,
-      `Text too long: script(…) would make a text of about 536,870,943 characters; ${limit}`,
+      `Text too long: script(…) would make about 536,870,943 characters, ${limit}`,
     ],
     [
       `${doubled(28, "\\n")}\nlet t = timer(duration: 1 s, async: true, label: s)\nsay t, instant\nexit`,
       6,
-      `Text too long: say would make a text of about 536,870,932 characters; ${limit}`,
+      `Text too long: say would make about 536,870,932 characters, ${limit}`,
     ],
   ] as const) {
     const failure = runValidSource(source).snapshot.failure;
@@ -645,7 +645,7 @@ test("an error message cuts the script's text it quotes, and a text no check for
     [
       "TSR084",
       2,
-      "Text too long: this line would make a text; a text can hold at most about 536 million.",
+      "Text too long: this line would make a text longer than a text can hold, which is about 536 million characters.",
     ],
   );
 });

@@ -619,12 +619,12 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
     [
       [
         "TSV043",
-        "Dicts have no method 'add'; store a value by its key, as in dict[key] = value.",
+        "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value.",
         "add",
       ],
       [
         "TSV043",
-        "Dicts have no property 'first'; use length, keys, or values, or read a value by its key, as in toys[\"first\"].",
+        "Dicts have no property 'first'. Use length, keys, or values. To read a value by its key, write 'toys[\"first\"]'.",
         "first",
       ],
       [
