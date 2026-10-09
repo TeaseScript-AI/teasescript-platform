@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CapturedMediaNotStoredError, CapturedMediaStore } from "../player/captured-media.js";
+import {
+  CapturedMediaNotStoredError,
+  CapturedMediaStore,
+  storableCapturedMedia,
+} from "../player/captured-media.js";
 import {
   capturedMediaReferences,
   capturedMediaStorage,
@@ -380,6 +384,20 @@ test("without durable storage a stored reference is missing at once, so presenta
   assert.deepEqual(media.resolve(reference), { state: "missing" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(changes, 0);
+});
+
+test("a photo stored with its bytes as an ArrayBuffer, as IndexedDB keeps it, reads back as the same image", async () => {
+  const earlier = new CapturedMediaStore(null, urls, "package");
+  const photo = earlier.add("image", png("the photo"), { width: 4, height: 3 });
+  const record = await earlier.read(photo.reference);
+  assert.ok(record !== null);
+  const repository = new FakeMediaRepository();
+  repository.records.set(`package ${photo.reference}`, await storableCapturedMedia(record));
+  const read = await new CapturedMediaStore(repository, urls, "package").read(photo.reference);
+  assert.ok(read?.data instanceof Blob);
+  assert.equal(read.data.type, "image/png");
+  assert.equal(await read.data.text(), "the photo");
+  assert.deepEqual({ ...read, data: null }, { ...record, data: null });
 });
 
 test("without the live lease even an already stored photo cannot be saved again", async () => {

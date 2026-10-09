@@ -27,6 +27,16 @@ export interface CapturedMediaRecord extends CapturedMediaEntry {
 export type StoredCapturedMedia = { readonly [Field in keyof CapturedMediaRecord]?: unknown };
 
 /**
+ * The record as IndexedDB stores it, with its bytes as an `ArrayBuffer`: WebKit refuses a `Blob` in an ephemeral session,
+ * such as Safari's Private Browsing. Records stored before keep their `Blob`; reading accepts both.
+ */
+export async function storableCapturedMedia(
+  record: CapturedMediaRecord,
+): Promise<Omit<CapturedMediaRecord, "data"> & { readonly data: ArrayBuffer }> {
+  return { ...record, data: await record.data.arrayBuffer() };
+}
+
+/**
  * Durable backing storage for captured media, keyed by namespace and reference. The browser implementation is
  * IndexedDB; a later server-backed store can replace or complement it without changing the references scripts hold.
  */
@@ -331,18 +341,18 @@ function validRecord(
   reference: string,
 ): CapturedMediaRecord | null {
   if (stored === null || typeof stored !== "object") return null;
-  const { kind, mimeType, size, data, durationMs } = stored;
+  const { kind, mimeType, size, durationMs } = stored;
   if (
     stored.namespace !== namespace ||
     stored.reference !== reference ||
     !isKind(kind) ||
     typeof mimeType !== "string" ||
-    !mimeType.startsWith(`${kind}/`) ||
-    !(data instanceof Blob) ||
-    data.type !== mimeType ||
-    data.size !== size
+    !mimeType.startsWith(`${kind}/`)
   )
     return null;
+  const data =
+    stored.data instanceof ArrayBuffer ? new Blob([stored.data], { type: mimeType }) : stored.data;
+  if (!(data instanceof Blob) || data.type !== mimeType || data.size !== size) return null;
   const width = optionalPositiveInteger(stored.width);
   const height = optionalPositiveInteger(stored.height);
   if (width === null || height === null) return null;

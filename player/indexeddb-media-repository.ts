@@ -1,4 +1,8 @@
-import type { CapturedMediaRecord, CapturedMediaRepository } from "./captured-media.js";
+import {
+  storableCapturedMedia,
+  type CapturedMediaRecord,
+  type CapturedMediaRepository,
+} from "./captured-media.js";
 
 const DATABASE_VERSION = 1;
 const STORE = "media";
@@ -42,9 +46,11 @@ function repository(database: IDBDatabase): CapturedMediaRepository {
         request.onsuccess = () => resolve(request.result ?? null);
         request.onerror = () => reject(request.error);
       }),
-    add: (record: CapturedMediaRecord) =>
+    add: async (record: CapturedMediaRecord) => {
+      const stored = await storableCapturedMedia(record);
       // `add`, unlike `put`, fails instead of overwriting an existing record.
-      committed(database, (store) => store.add(record)),
+      return committed(database, (store) => store.add(stored));
+    },
     delete: (namespace, reference) =>
       committed(database, (store) => store.delete([namespace, reference])),
     listReferences: (namespace) =>
