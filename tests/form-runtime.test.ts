@@ -21,6 +21,7 @@ import {
 } from "../src/runtime/state.js";
 import type { RuntimeFormStateSnapshot } from "../src/runtime/actions/model.js";
 import { formSummaryOf } from "../src/runtime/actions/form.js";
+import { cloneCapturedRuntimeSnapshot } from "../src/runtime/state.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
@@ -634,6 +635,8 @@ test("restore rejects form answers that its definition cannot hold", () => {
     ]),
   ).snapshot;
   assert.equal(validateRuntimeSnapshot(submitted, plan).valid, true);
+  // A copy of the state keeps the settlement's shown options.
+  assert.equal(validateRuntimeSnapshot(cloneCapturedRuntimeSnapshot(submitted), plan).valid, true);
   const wrongResult = structuredClone(submitted);
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
   (wrongResult.lastSettlement as any).result.properties[4].value = 40;

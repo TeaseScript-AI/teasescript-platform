@@ -1026,6 +1026,9 @@ function cloneSettlement(
     result: cloneInteractionResult(settlement.result),
     transcriptText: settlement.transcriptText,
     ui: cloneInteractionUi(settlement.ui),
+    ...(settlement.shownOptions === undefined
+      ? {}
+      : { shownOptions: settlement.shownOptions && [...settlement.shownOptions] }),
   };
 }
 
