@@ -1284,6 +1284,9 @@ test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds,
     mismatches("let n = 17 / 2\ntimer (1..=n) s\nexit")[0]?.[1].startsWith("A timer range bound"),
     true,
   );
+  // As for `for`, the type decides, not the value it holds when the script runs (V30 §6).
+  for (const use of ['for i in 1..=n {\n    say "${i}"\n}', "wait (1..=n) s"])
+    assert.deepEqual(codes(`let n: number = 2\n${use}\nexit`), [["TSV043", "n"]], use);
   // Rounded bounds run; a switch case range matches a fraction; a bound the compiler cannot know is checked at runtime.
   assert.deepEqual(
     sayTexts('let count = 5\nfor i in 1..=floor(count / 2) {\n    say "${i}"\n}\nexit'),
