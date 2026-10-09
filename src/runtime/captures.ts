@@ -82,13 +82,16 @@ function addCaptures(
   }
 }
 
-/** Drops the variables of a retained scope that nothing shares, keeping the others in their order. */
-function keepShared(scope: RuntimeScopeFrameSnapshot, names: ReadonlySet<string>): void {
-  let kept = 0;
-  for (const binding of scope.bindings) {
-    if (names.has(binding.name)) scope.bindings[kept++] = binding;
-  }
-  scope.bindings.length = kept;
+/**
+ * The scope with only the variables that something shares, in their order. A scope that loses variables gets a new
+ * bindings list: the evaluator's name index of a list assumes that it only grows.
+ */
+function keepShared(
+  scope: RuntimeScopeFrameSnapshot,
+  names: ReadonlySet<string>,
+): RuntimeScopeFrameSnapshot {
+  if (scope.bindings.every((binding) => names.has(binding.name))) return scope;
+  return { ...scope, bindings: scope.bindings.filter((binding) => names.has(binding.name)) };
 }
 
 /**
@@ -104,9 +107,7 @@ export function leaveScopes(snapshot: RuntimeSnapshot, depth: number): void {
     if (frame.shared !== true) continue;
     shared ??= resourceCaptures(snapshot);
     const names = shared.get(frame.id);
-    if (names === undefined) continue;
-    keepShared(frame, names);
-    snapshot.retainedScopes.push(frame);
+    if (names !== undefined) snapshot.retainedScopes.push(keepShared(frame, names));
   }
   snapshot.frames.length = Math.min(depth, snapshot.frames.length);
 }
@@ -148,9 +149,7 @@ export function sweepRetainedScopes(snapshot: RuntimeSnapshot, roots: boolean): 
       continue;
     }
     const names = shared.get(scope.id);
-    if (names === undefined) continue;
-    keepShared(scope, names);
-    snapshot.retainedScopes[kept++] = scope;
+    if (names !== undefined) snapshot.retainedScopes[kept++] = keepShared(scope, names);
   }
   snapshot.retainedScopes.length = kept;
 }
