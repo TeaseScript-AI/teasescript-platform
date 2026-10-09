@@ -178,6 +178,11 @@ interface SharedParse {
    * `say` values nested there, so each is parsed once per context; parsed again at every level, nesting is exponential.
    */
   readonly sayValues: Map<number, ParsedSayValue[]>;
+  /**
+   * Strings with an interpolation that reported an error. They keep what parsed, so that what they belong to stays in
+   * the program; where only text written out in quotes is allowed, they count as failed, without a further error.
+   */
+  readonly recoveredStrings: WeakSet<StringLiteral>;
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -296,6 +301,7 @@ class Parser {
       bracketed: bracketContexts(tokens),
       closers: null,
       sayValues: new Map(),
+      recoveredStrings: new WeakSet(),
     },
   ) {
     this.#shared = shared;
@@ -1072,7 +1078,7 @@ class Parser {
       return null;
     }
     const literal = yield* parseChild(this.#parseStringLiteral(start));
-    if (literal === null) return null;
+    if (literal === null || this.#shared.recoveredStrings.has(literal)) return null;
     if (literal.form !== "singleLine" || literal.parts.some((part) => part.kind !== "stringText")) {
       this.#reportSpan(
         parserDiagnosticCode.expectedLabelName,
@@ -1647,6 +1653,7 @@ class Parser {
       return null;
     }
     options.add("from");
+    if (value.kind === "stringLiteral" && this.#shared.recoveredStrings.has(value)) return null;
     if (
       value.kind !== "stringLiteral" ||
       value.form !== "singleLine" ||
@@ -1666,8 +1673,10 @@ class Parser {
   }
 
   #tagPredicate(predicate: Expression): TagQueryStep[] | null {
-    return tagPredicateSteps(predicate, (message, span) =>
-      this.#reportSpan(parserDiagnosticCode.invalidTagQuery, message, span),
+    return tagPredicateSteps(
+      predicate,
+      (message, span) => this.#reportSpan(parserDiagnosticCode.invalidTagQuery, message, span),
+      (literal) => this.#shared.recoveredStrings.has(literal),
     );
   }
 
@@ -4410,15 +4419,22 @@ class Parser {
   *#parseStringLiteral(start: Token): ParseTask<StringLiteral | null> {
     const parts: StringPart[] = [];
     let valid = true;
+    let recovered = false;
     while (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
       if (this.#match(TokenKind.StringText)) {
         parts.push(this.#stringText(this.#previous()));
         continue;
       }
       if (this.#match(TokenKind.InterpolationStart)) {
+        const diagnosticCount = this.#diagnostics.length;
+        // An interpolation without an expression is left out.
         const interpolation = yield* parseChild(this.#parseStringInterpolation(this.#previous()));
-        if (interpolation === null) valid = false;
-        else parts.push(interpolation);
+        if (interpolation !== null) parts.push(interpolation);
+        // Also when only the lexer reported a missing `}`.
+        recovered ||=
+          interpolation === null ||
+          this.#diagnostics.length !== diagnosticCount ||
+          this.#previous().kind !== TokenKind.InterpolationEnd;
         continue;
       }
       this.#reportToken(
@@ -4431,12 +4447,14 @@ class Parser {
     }
     if (!this.#match(TokenKind.StringEnd)) return null;
     if (!valid) return null;
-    return Object.freeze({
+    const literal: StringLiteral = Object.freeze({
       kind: "stringLiteral",
       form: start.lexeme.length === 3 ? "block" : "singleLine",
       parts: Object.freeze(parts),
       span: spanFrom(start.span, this.#previous().span),
     });
+    if (recovered) this.#shared.recoveredStrings.add(literal);
+    return literal;
   }
 
   *#parseStringInterpolation(start: Token): ParseTask<StringInterpolation | null> {
@@ -4454,9 +4472,10 @@ class Parser {
     }
     const diagnosticCount = this.#diagnostics.length;
     const expression = yield* parseChild(this.#parseOr());
-    if (expression === null || this.#diagnostics.length !== diagnosticCount) {
-      // Only a failure that reported nothing itself gets this generic error.
-      if (this.#diagnostics.length === diagnosticCount) {
+    // Only a failure that reported nothing itself gets an error here.
+    const reported = this.#diagnostics.length !== diagnosticCount;
+    if (expression === null) {
+      if (!reported) {
         this.#reportToken(
           parserDiagnosticCode.unsupportedStringExpression,
           "Expected a supported expression inside the string interpolation.",
@@ -4469,7 +4488,7 @@ class Parser {
     }
     this.#skipNewlines();
     if (!this.#match(TokenKind.InterpolationEnd)) {
-      if (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
+      if (!reported && !this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
         const message = this.#check(TokenKind.Colon)
           ? "Only identifiers and chained property access are supported in string interpolation."
           : "Only one complete expression is allowed in string interpolation.";
@@ -4477,8 +4496,8 @@ class Parser {
       }
       this.#synchronizeInterpolation();
       this.#match(TokenKind.InterpolationEnd);
-      return null;
     }
+    // An expression that reported an error, or that more follows, stays as written so far: the error is reported once.
     return Object.freeze({
       kind: "stringInterpolation",
       expression,
