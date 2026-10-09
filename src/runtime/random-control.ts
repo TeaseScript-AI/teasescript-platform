@@ -301,10 +301,13 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
             if (part.kind === "expression") add(file, part.expression.span, "interpolation");
       });
     }
-    if (drawsTimerDuration(instruction)) add(file, instruction.duration.span, "duration");
-    // Every repeating timer's rounds draw where its duration stands once its record holds a range.
-    if (instruction.kind === "startTimer" && instruction.repeat)
-      add(file, instruction.duration.span, "timerRepeat");
+    if (drawsTimerDuration(instruction)) {
+      add(file, instruction.duration.span, "duration");
+      // Each round of a repeating ranged timer draws where its duration stands. Restore refuses a range on a timer whose
+      // duration is written as a number or duration, so other repeating timers never draw a round.
+      if (instruction.kind === "startTimer" && instruction.repeat)
+        add(file, instruction.duration.span, "timerRepeat");
+    }
     if (instruction.kind === "transfer" && "pick" in instruction.destination)
       add(file, instruction.span, "glob");
     if (instruction.kind === "end" && globFallback) add(file, instruction.span, "glob");

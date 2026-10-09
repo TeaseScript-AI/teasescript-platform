@@ -858,27 +858,50 @@ test("an earlier chosen outcome restored outside its draw's support fails cleanl
   );
 });
 
-test("a repeating timer's rounds draw at a listed site, also from a restored record that holds a range", () => {
+test("a repeating timer lists round draws only when its duration can be a range, and restore holds to that", () => {
+  const rangeOn = (plan: InstructionPlan) => {
+    const session = createFreshRuntimeSession(plan, { seed: 123 });
+    session.run();
+    // EVIDENCE: JSON serialization preserves the exported checkpoint's plain-data shape; the case gives the timer a range.
+    const checkpoint = JSON.parse(JSON.stringify(session.exportCheckpoint()));
+    const timer = checkpoint.snapshot.backgroundActions.find(
+      (action: { kind: string }) => action.kind === "timer",
+    ).timer;
+    Object.assign(timer, {
+      range: { start: 1, end: 3, inclusive: true },
+      repeatDurationMs: null,
+      anchoredRounds: null,
+    });
+    return checkpoint;
+  };
+  // A duration written as a number or duration never evaluates to a range, so its rounds never draw. The same record
+  // restores when the duration is a variable, which may hold a range.
+  for (const written of ["2", "2 s", "d"]) {
+    const plan = project(
+      `let d = 2\nlet t = timer(duration: ${written}, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit`,
+    );
+    if (written === "d") {
+      assert.doesNotThrow(() => restoreRuntimeSession(rangeOn(plan)));
+      continue;
+    }
+    assert.deepEqual(listRandomSites(plan), [], written);
+    assertCheckpointRejected(rangeOn(plan), "TSK002");
+  }
+  // A ranged repeat draws each round at its listed site, also from a restored record.
   const plan = project(
-    "let t = timer(duration: 2, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit",
+    "let t = timer(duration: 1..=3, async: true, repeat: true)\nwait 5 s\nt.stop()\nexit",
+  );
+  assert.deepEqual(
+    listRandomSites(plan).map((site) => site.kinds),
+    [["timerRepeat", "duration"]],
   );
   const session = createFreshRuntimeSession(plan, { seed: 123 });
   session.run();
-  // Restore admits a repeating timer record with a range whatever its duration was written as.
-  const checkpoint = JSON.parse(JSON.stringify(session.exportCheckpoint()));
-  const timer = checkpoint.snapshot.backgroundActions.find(
-    (action: { kind: string }) => action.kind === "timer",
-  ).timer;
-  Object.assign(timer, {
-    range: { start: 1, end: 3, inclusive: true },
-    repeatDurationMs: null,
-    anchoredRounds: null,
-  });
-  const restored = restoreRuntimeSession(checkpoint, { randomControl: {} });
-  restored.observeTime(2000);
+  const restored = restoreRuntimeSession(session.exportCheckpoint(), { randomControl: {} });
+  restored.observeTime(3000);
   const draw = restored.view().randomDraw!;
   assert.equal(draw.kind, "timerRepeat");
-  assert.ok(listRandomSites(plan).some((site) => site.id === draw.site));
+  assert.equal(draw.site, listRandomSites(plan)[0]!.id);
   assert.doesNotThrow(() => restoreRuntimeSession(restored.exportCheckpoint()));
   assert.equal(
     restored.resumeRandomDraw({ drawId: draw.drawId, outcome: "natural" }).outcome.kind,

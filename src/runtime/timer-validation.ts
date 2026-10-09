@@ -83,7 +83,10 @@ export function validTimerAction(
     owner.repeat === timer.repeat &&
     owner.persist === timer.persist &&
     owner.handlerFunctionId === timer.handlerFunctionId &&
-    (owner.label === null) === (timer.label === null)
+    (owner.label === null) === (timer.label === null) &&
+    // A duration written as a number or duration never evaluates to a range.
+    (timer.range === null ||
+      (owner.duration.kind !== "literal" && owner.duration.kind !== "duration"))
   );
 }
 
