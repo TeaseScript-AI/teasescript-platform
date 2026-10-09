@@ -673,6 +673,39 @@ test(
   },
 );
 
+test(
+  "a condition that ands a stored value's test with a call is read through the truth the code computes: no stored value is asked to be true",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      "function later(stamp) {\n  return stamp - 100\n}\n" +
+      'let pick = choose keep: "Keep", drop: "Drop"\nif pick == "keep" {\n  save 500 as "pass.until"\n}\n' +
+      'showButton "Check"\nif load("pass.until", default: 0) != 0 and later(load("pass.until", default: 0)) > 1000 {\n' +
+      '  say "Still valid."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const missed = result.coverage.unvisitedBranches.filter((entry) => entry.line === 9);
+    assert.ok(missed.length > 0);
+    for (const entry of missed) {
+      assert.ok(!(entry.reason ?? "").includes("== true"), entry.reason);
+      assert.ok(
+        entry.parts.every((part) => !part.needs.includes("== true")),
+        JSON.stringify(entry.parts),
+      );
+    }
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

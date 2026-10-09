@@ -219,6 +219,8 @@ export type Source =
   /** A variable the code assigns; `counter` when an assignment adds to or subtracts from its own value. */
   | { readonly kind: "variable"; readonly name: string; readonly counter: boolean };
 
+/** Instructions looked back over for the store of a temporary a condition reads ({@link DataFlow.heldAt}). */
+const HELD_WINDOW = 200;
 /** Getters of the current date and time. */
 // getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
 const CLOCK_GETTERS = new Set([
@@ -466,6 +468,24 @@ export class DataFlow {
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
   functionAt(index: number): number {
     return this.#functionOf.get(index) ?? 0;
+  }
+
+  /**
+   * What a temporary holds at an instruction: the expression the nearest store before it in the same function put
+   * there (a condition `a and b` lowers to a temporary that holds `a`, then `b`); null when the nearest is the result of a
+   * call, or none is found within a short way back.
+   */
+  heldAt(temporaryId: number, at: number): unknown {
+    const owner = this.functionAt(at);
+    for (let index = at - 1; index >= 0 && index >= at - HELD_WINDOW; index -= 1) {
+      if (this.functionAt(index) !== owner) return null;
+      const instruction = record(this.#instructions[index]);
+      if (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId)
+        return instruction.value;
+      if (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId)
+        return null;
+    }
+    return null;
   }
 
   /**
@@ -966,6 +986,21 @@ const FLIP: Readonly<Record<string, string>> = {
 };
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
 
+/** Whether an expression is a truth the code computes: a comparison, a text test, or `and`, `or`, or `not` of such. */
+function comparesTruth(expression: unknown): boolean {
+  const value = record(expression);
+  if (value.kind === "group") return comparesTruth(value.expression);
+  if (value.kind === "unary") return value.operator === "not";
+  if (value.kind === "binary")
+    return (
+      String(value.operator) in FLIP ||
+      value.operator === "and" ||
+      value.operator === "or" ||
+      value.operator === "in"
+    );
+  return value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "");
+}
+
 /**
  * The comparisons a condition must make for it to have the value `wanted`, as alternatives: each one alone is a way to
  * get there (for `and` wanted true, all of its parts are listed, and a value is checked against the whole condition).
@@ -1105,7 +1140,23 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     source.kind === "storage" && at !== undefined
       ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
       : source;
-  for (const atom of atomsFor(condition, wanted, true)) {
+  // A temporary that holds a comparison (as `a and b` lowers) is read through: what it compares, not the truth of a
+  // stored value.
+  const atoms = atomsFor(condition, wanted, true).flatMap((atom): Atom[] => {
+    const subject = record(atom.subject);
+    if (
+      at === undefined ||
+      atom.against !== undefined ||
+      atom.operator !== "==" ||
+      atom.constant !== true ||
+      subject.kind !== "temporary" ||
+      typeof subject.temporaryId !== "number"
+    )
+      return [atom];
+    const held = flow.heldAt(subject.temporaryId, at);
+    return comparesTruth(held) ? atomsFor(held, atom.wanted, true) : [atom];
+  });
+  for (const atom of atoms) {
     if (atom.against !== undefined) {
       const goal = differenceGoal(flow, atom);
       if (goal !== null) goals.push(goal);
