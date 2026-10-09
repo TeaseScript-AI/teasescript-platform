@@ -139,24 +139,44 @@ export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaI
 }
 
 /**
- * The captured-media references in session data, such as photos a session shows or holds in variables: in its texts,
- * which may be serialized state, and in the texts of its records and lists, found one text at a time. A reference never
- * spans two texts, so this finds what a search of the data as one JSON text would, without building a text that long.
+ * The captured-media references in session data, such as photos a session shows or holds in variables: the references in
+ * its JSON, written one field of a record and one element of a list at a time rather than as one text. JSON decides
+ * everything else, as for the whole: a value it leaves out has none, and one it cannot write, such as a cycle, throws.
+ * A text is searched as it is, since a reference has no character JSON escapes.
  */
 export function capturedMediaReferencesIn(...data: readonly unknown[]): Set<string> {
   const found = new Set<string>();
-  const pending = [...data];
-  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
-    if (typeof current === "string") {
-      for (const [reference] of current.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
-    } else if (Array.isArray(current)) {
-      // Item by item: a long list of events must not hit the native argument limit of a spread.
-      for (const item of current) pending.push(item);
-    } else if (isRecord(current)) {
-      for (const [key, value] of Object.entries(current)) pending.push(key, value);
-    }
+  const search = (value: unknown): void => {
+    const json = typeof value === "string" ? value : JSON.stringify(value);
+    if (json !== undefined)
+      for (const [reference] of json.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
+  };
+  const searchElements = (value: unknown): void => {
+    if (!Array.isArray(value)) search(value);
+    // JSON writes a hole or a value it leaves out of a list as null, which has none.
+    else for (let index = 0; index < value.length; index += 1) search(value[index]);
+  };
+  for (const value of data) {
+    if (!isPlainRecord(value)) searchElements(value);
+    else
+      for (const [key, field] of Object.entries(value)) {
+        // JSON leaves out a field whose value it cannot write, and with it its key.
+        if (field === undefined || typeof field === "function" || typeof field === "symbol")
+          continue;
+        search(key);
+        searchElements(field);
+      }
   }
   return found;
+}
+
+/** A record JSON writes field by field: a plain object, not a list or a boxed value such as `new String()`. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    typeof value["toJSON"] !== "function"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

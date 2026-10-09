@@ -421,8 +421,11 @@ function* pieces(bundle: StorageBundle): Generator<string> {
   yield `{"format":${JSON.stringify(FORMAT)},"version":${VERSION},\n"scripts":[`;
   for (const [index, script] of bundle.scripts.entries()) {
     yield `${index === 0 ? "\n" : ",\n"}{"scope":${JSON.stringify(script.scope)},"name":${JSON.stringify(script.name)},"photos":${JSON.stringify(script.photos)},"entries":[`;
-    for (const [entryIndex, entry] of script.entries.entries())
-      yield `${entryIndex === 0 ? "\n" : ",\n"}${serializeValidatedRuntimeJson({ key: entry.key, value: entry.value })}`;
+    // An entry's JSON is a piece of its own, which may be as long as a text can be.
+    for (const [entryIndex, entry] of script.entries.entries()) {
+      yield entryIndex === 0 ? "\n" : ",\n";
+      yield serializeValidatedRuntimeJson({ key: entry.key, value: entry.value });
+    }
     yield "\n]}";
   }
   yield `\n],\n"images":[`;
