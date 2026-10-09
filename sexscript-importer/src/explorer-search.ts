@@ -317,16 +317,16 @@ export interface ExploreOptions {
    */
   readonly quitAnywhere?: boolean;
   /**
-   * Depth phases: the search decides how its play work goes to session numbers (depths) by their gain per operation,
-   * new lines and condition ways, instead of fixed shares. A new player's first session goes first; the next depth opens
-   * when the deepest open one levels off (in the last quarter of its play work, under half its average gain per
-   * operation) and left storage of completed sessions to start from, and then gets a quarter of that depth's work first.
-   * States whose step reached new code go first in any open depth, as without phases. Otherwise the open depth with the
-   * most gain per operation in the last quarter of its own work gets play, and an
-   * eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets
-   * work back when it gains again. A depth starts a next session (from the storage with the most compared values no
-   * session of that depth started from had) when none of its open states reached new code. Directed work and random
-   * outcomes keep their shares. Off by default.
+   * Depth phases: the search decides how its play work goes to session numbers (depths) by their gain per operation
+   * (new lines and condition ways any of a depth's steps reach, over all its work), instead of fixed shares. A new
+   * player's first session goes first; the next depth opens when the deepest open one levels off (in the last quarter of
+   * its work and in the quarter before, at most half its average gain per operation) or has nothing left, and left
+   * storage to start from, and then gets an eighth of that depth's play work first. States whose step reached new code
+   * go first in any open depth, as without phases. Otherwise the open depth with the most gain per operation in the last
+   * quarter of its work gets play, and an eighth of play goes to the other open depths in turn, the one explored least
+   * first, so that an earlier depth gets work back when it gains again. A depth starts a next session (from the storage
+   * with the most compared values no session of that depth started from had) when none of its open states reached new
+   * code. Directed work and random outcomes keep their shares. Off by default (see the README for why).
    */
   readonly depthPhases?: boolean;
   /**
@@ -3150,12 +3150,25 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     nextWork += session.operations - work;
   };
 
-  /** With depth phases: a depth's gain per operation in the last quarter of its own play work (as marked). */
-  const recentRate = (depth: number): number => {
+  /**
+   * With depth phases: all a depth did, its play and directed work and the new lines and ways any of its steps reached,
+   * which the rates compare; its gain per operation in the last quarter of that work (as marked).
+   */
+  const totalOf = (depth: number) => ({ work: depthWork[depth] ?? 0, gain: depthNew[depth] ?? 0 });
+  const recentRate = (depth: number): number => windowRate(depth, 0.75, 1) ?? Infinity;
+  /**
+   * A depth's gain per operation between two fractions of all its work (as marked: from the last mark at or before the
+   * first to the last at or before the second); null when no work lies between them.
+   */
+  const windowRate = (depth: number, from: number, to: number): number | null => {
     const known = depthOf(depth);
-    if (known.work === 0) return Infinity;
-    const from = known.marks.findLast((mark) => mark.work <= known.work * 0.75) ?? known.marks[0]!;
-    return (known.gain - from.gain) / (known.work - from.work);
+    const total = totalOf(depth);
+    const end =
+      to >= 1
+        ? total
+        : (known.marks.findLast((mark) => mark.work <= total.work * to) ?? known.marks[0]!);
+    const start = known.marks.findLast((mark) => mark.work <= total.work * from) ?? known.marks[0]!;
+    return end.work > start.work ? (end.gain - start.gain) / (end.work - start.work) : null;
   };
   /** Opens the depths down to `depth`; the deepest gets `owed` play work first. */
   const openDepth = (depth: number, owed: number): void => {
@@ -3165,12 +3178,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /**
    * At each analysis pass: marks each depth's work and gain, and opens the next depth when the deepest open one levels
-   * off (in the last quarter of its work, at most half its average gain per operation) and storage to start from is left.
+   * off and storage to start from is left. Levelling off holds over two windows, not one lull: in the last quarter of
+   * its work and in the quarter before, its gain per operation is at most half its average. The new depth first gets an
+   * eighth of the work of the one before.
    */
   const markDepths = (): void => {
-    for (const known of depths)
-      if (known !== undefined && known.work > known.marks.at(-1)!.work)
-        known.marks.push({ work: known.work, gain: known.gain });
+    working(depthNow);
+    for (let depth = 1; depth < depthWork.length; depth += 1) {
+      const known = depthOf(depth);
+      const total = totalOf(depth);
+      if (total.work > known.marks.at(-1)!.work) known.marks.push(total);
+    }
     // A depth with nothing left to expand or start from has levelled off too; one that reached nothing new opens none.
     const deepest = depthOf(deepestOpen);
     const idle = depthFrontier!.sizeOf(deepestOpen) === 0 && (pendingSeeds[deepestOpen] ?? 0) === 0;
@@ -3179,10 +3197,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       (pendingSeeds[deepestOpen + 1] ?? 0) > 0 &&
       (idle ||
         (deepest.owed <= 0 &&
-          deepest.work > 0 &&
-          recentRate(deepestOpen) <= deepest.gain / deepest.work / 2))
+          totalOf(deepestOpen).work > 0 &&
+          [windowRate(deepestOpen, 0.75, 1), windowRate(deepestOpen, 0.5, 0.75)].every(
+            (rate) =>
+              rate !== null && rate <= totalOf(deepestOpen).gain / totalOf(deepestOpen).work / 2,
+          )))
     )
-      openDepth(deepestOpen + 1, deepest.work / 4);
+      openDepth(deepestOpen + 1, deepest.work / 8);
   };
   const charge = (depth: number, work: number, gain: number, exploring: boolean): void => {
     const known = depthOf(depth);

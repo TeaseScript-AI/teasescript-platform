@@ -403,22 +403,37 @@ of what steps cost. Without depth phases, starting next visits takes at most ano
 storage of the first ten completed sessions, and a session number goes before the next one in the search order.
 
 Depth phases (`--depth-phases`, opt-in) let the search decide how play work goes to session numbers, the depth of a
-session from a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the
-lines and condition ways those reach first) are measured as the run goes. The first session goes first. The next depth
-opens when the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its
-average, or has nothing left; only a depth that reached something new opens another, and only when a session of it left
-storage to start from (a completed one's; with `--quit-anywhere`, any). States whose step reached new code go first in
-any open depth, as without phases. Apart from those, a newly opened depth first gets a quarter of the work of the depth
-before it; then the open depth with the most gain per operation in the last quarter of its work gets play, and an
-eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets work
-back when it gains again. A depth starts a next session when none of its open states reached new code, from storage a
-session of the depth before left: the one with the most compared values (each compared key's value bucket, as cells
-read them) no session of that depth started from yet, and while the depth has open states only one that adds such a
-value. Directed work and random outcomes keep their shares. The report gives, per session number, when it opened and
-its play work, gain, and next sessions (`search.phases`). They are opt-in because on the 13-unit gate (3 seeds, gate
-budgets) they gained where a first session levels off early (DisciplineClinic +4.5 points, BreatheAcademy +3.2) but cost
-units whose first session still gains: the second session opens on an early lull in the first, so jewell lost its trap
-loops and 2.3 points, and Domme3 and ToyExpanded 0.8.
+session from a new player's first. Each depth's work (its play and directed work, and the next sessions it starts) and
+gain (the lines and condition ways any of its steps reach first) are measured as the run goes. The first session goes
+first. The next depth opens when the deepest open one levels off, its gain per operation in the last quarter of its own
+work and in the quarter before both at most half its average, or has nothing left; only a depth that reached something
+new opens another, and only when a session of it left storage to start from (a completed one's; with
+`--quit-anywhere`, any). States whose step reached new code go first in any open depth, as without phases. Apart from
+those, a newly opened depth first gets an eighth of the play work of the depth before it; then the open depth with the
+most gain per operation in the last quarter of its work gets play, and an eighth of play goes to the other open depths
+in turn, the one explored least first, so that an earlier depth gets work back when it gains again. A depth starts a
+next session when none of its open states reached new code, from storage a session of the depth before left: the one
+with the most compared values (each compared key's value bucket, as cells read them) no session of that depth started
+from yet, and while the depth has open states only one that adds such a value. Directed work and random outcomes keep
+their shares. The report gives, per session number, when it opened and its play work, gain, and next sessions
+(`search.phases`).
+
+They are opt-in because they cost units whose first session still gains at gate budgets. On the 13-unit gate (3 seeds,
+gate budgets), the first version gained where a first session levels off early (DisciplineClinic +4.5 points,
+BreatheAcademy +3.2), but its second session opened on an early lull in the first: jewell lost its trap loops and 2.3
+points, and Domme3 and ToyExpanded 0.8. Two tuning rounds followed, on a focused gate of those four units (3 seeds;
+jewell 6), measured against the explorer without phases (DisciplineClinic 20.8%, Domme3 50.1%, ToyExpanded 40.8%, jewell
+47.0% with a trap loop found in 5 of 6 seeds):
+
+- Levelling off over two quarter-windows instead of one, and an eighth of the work for a newly opened depth instead of
+  a quarter: DisciplineClinic 23.6% (one seed lost the gain, as its second session opened late), Domme3 50.1%,
+  ToyExpanded 40.0%, jewell 46.0% with a trap loop in 2 of 6 seeds. The second session's play now gained well in jewell,
+  but its first session lost more, also through directed search, which the rates did not count.
+- Rates from all of a depth's work and gain, directed search included, as described above: DisciplineClinic 25.2%,
+  Domme3 50.1%, ToyExpanded 39.4%, jewell 46.5% with a trap loop in 2 of 6 seeds.
+
+The second round keeps DisciplineClinic's gain and Domme3's coverage, but jewell still finds its trap loops less often,
+so phases stay opt-in.
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
