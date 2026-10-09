@@ -1085,11 +1085,11 @@ not language; without it every draw is natural and costs one more check.
 - **Resume.** `resumeRandomDraw({ drawId, outcome })`, with `"natural"` or a chosen outcome, refuses a request that does
   not fit the paused draw with `noPendingDraw`, `staleDraw`, or `invalidOutcome`, which change nothing. Otherwise it
   executes the unit again from its start: its earlier draws take their recorded outcomes without asking the host, its
-  builtins return their recorded results without being called, and the paused draw takes the resolution. The
-  interrupted operation then finishes within its own budget: `run` runs on, `stepToEvent` stops at its event,
-  `executeInstruction` stops after its instruction and catch-up, and catch-up continues to the observed time. The outcome
-  is `{ kind: "resolved", forced }`. A paused draw resumes on the session generator, so this throws with an injected
-  `capabilities.random`.
+  builtins return their recorded results without being called, so a restored session need not register them, and the
+  paused draw takes the resolution. The interrupted operation then finishes within its own budget: `run` runs on,
+  `stepToEvent` stops at its event, `executeInstruction` stops after its instruction and catch-up, and catch-up
+  continues to the observed time. The outcome is `{ kind: "resolved", forced }`. A paused draw resumes on the session
+  generator, so this throws with an injected `capabilities.random`.
 - **Exploring.** A host branches by forking a session at a paused draw and resolving the draw differently on each
   fork. `randomDrawAlternatives(draw, limit = 16)` gives the outcomes to try besides the natural result, which
   `"natural"` tries without recording an input: a finite support in order up to `limit`, otherwise representative
