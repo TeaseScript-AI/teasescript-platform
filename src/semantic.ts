@@ -3138,8 +3138,10 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    // `askBooleans` returns a list of booleans.
-    (expression.kind === "interactionExpression" && expression.interactionKind !== "booleans") ||
+    // `askBooleans` returns a list of booleans, and `askForm` a dict when its fields are a dict; its type tells.
+    (expression.kind === "interactionExpression" &&
+      expression.interactionKind !== "booleans" &&
+      expression.interactionKind !== "form") ||
     expression.kind === "showButtonExpression"
   );
 }

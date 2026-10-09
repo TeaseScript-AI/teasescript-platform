@@ -414,6 +414,30 @@ test("a dict of fields keeps its keys and order, labels its buttons by text, and
   assert.equal(binding(rated, "pain"), 7);
 });
 
+test("a loop goes through the answers of a dict of fields where the form is asked, as through any dict", () => {
+  const plan = compileValidPlan(
+    [
+      'for id, owned in askForm "Which toys do you own?", fields: dict { "rope": false, "gag": false } {',
+      '  say "${id}: ${owned}"',
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  const first = opened(plan);
+  const { finished } = submitted(plan, select(plan, first.snapshot, "gag", 1));
+  assert.deepEqual(said(finished.events), [
+    "bubble nobody: rope: false",
+    "bubble nobody: gag: true",
+  ]);
+  // A form of object fields returns an object, which a loop does not go through.
+  assert.deepEqual(
+    compileSource(
+      'for id in askForm("Which?", fields: { rope: false }) { say id }\nexit',
+    ).diagnostics.map((diagnostic) => diagnostic.message),
+    ["A for-loop goes through a list, a set, a dict, or a range, but this is an object."],
+  );
+});
+
 test("a dict of fields of different kinds says each type, and answers in the union to narrow", () => {
   const menu = [
     'let settingId = "impact"',
