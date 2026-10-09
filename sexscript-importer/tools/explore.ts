@@ -873,8 +873,8 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
 }
 
 /**
- * The session chains toward stored values with the most sessions: the route each repeats (its work per unit of
- * progress), the other routes it replayed, and its last switch between routes, with why.
+ * The session chains toward stored values with the most sessions: their result, the route each repeats (its progress
+ * per operation), the other routes it replayed, and its last switch between routes, with why.
  */
 function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): string[] {
   const chains = ways
@@ -891,7 +891,8 @@ function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): stri
       const others = records(chain.routes).filter((other) => text(other.at) !== text(route.at));
       const last = records(chain.switches).at(-1);
       return (
-        `  - \`${at}\` \`${text(chain.key)}\`: ${count(chain.sessions)} sessions, closest ${text(chain.closest)}; ` +
+        `  - \`${at}\` \`${text(chain.key)}\`: ${CHAIN_RESULTS[text(chain.result)] ?? text(chain.result)} after ` +
+        `${count(chain.sessions)} sessions, closest ${text(chain.closest)}; ` +
         (chain.route === null || chain.route === undefined
           ? "no session from a storage that has the key brought it closer"
           : `route ${routeText(route)}`) +
@@ -906,15 +907,21 @@ function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): stri
   ];
 }
 
-/** A chain's route: where it goes, its inputs, and its work per unit of progress over its replays. */
+/** A chain's result, in words. */
+const CHAIN_RESULTS: Readonly<Record<string, string>> = {
+  reached: "reached",
+  holds: "storage holds the value, the way not reached",
+  queued: "still going at the end",
+  limit: "stopped at the session limit",
+  stopped: "stopped, no route came closer",
+};
+
+/** A chain's route: where it goes, its inputs, and its progress per operation over its replays. */
 function routeText(route: Readonly<Record<string, unknown>>): string {
-  const cost =
-    typeof route.workPerUnit === "number"
-      ? `${count(route.workPerUnit)} operations per unit`
-      : "no measured progress";
   const replays = count(route.sessions);
   return (
-    `${text(route.at)} (${count(route.inputs)} inputs, ${cost}` +
+    `${text(route.at)} (${count(route.inputs)} inputs, ` +
+    `${count(route.progressPer1000Operations)} progress per 1,000 operations` +
     (replays === 0
       ? " in the session it comes from)"
       : ` over ${replays} replays, ${count(route.failures)} no closer)`)

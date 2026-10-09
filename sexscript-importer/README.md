@@ -350,18 +350,21 @@ the step that first evaluated the condition, and the rest of that path is replay
 that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
 that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
 storage closest to it and replays a route: the inputs of a session seen to bring the value closer from storage that
-already had it (up to 1,000 inputs; sessions with the same inputs are one route), the one with the least work per unit
-of progress, as the session it comes from took it and then as its replays measure it. Every eighth session replays
-another of the routes kept (eight at most) instead, each in turn in the order they were found, as effects depend on the
-state and a route that was worse can become better. Each session is real play from the storage the one before it left,
-and the next starts at once while sessions get closer (100 sessions at most). After one that does not, the routes not
-replayed since the last closer value are tried, the cheapest first; a route that twice in a row brings the value no
-closer is dropped. The chain then waits until play leaves a closer storage. A session from storage without the value
-is no route, as repeating it cannot bring the value further. When no explored session gets there, the way stays
-`unknown` with the reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. The report gives
-each chain that started sessions with its way (`chains`): its sessions, the closest value, the route it repeats, the
-routes it replayed (for each its first inputs and end, its inputs, its replays and those that came no closer, and its
-operations per unit of progress, `null` when none came closer), and its last switches between routes, with why;
+already had it (up to 1,000 inputs; sessions with the same inputs are one route). The goal is the way with the least
+work in all, the sessions it takes times their work, so the route repeated is the one with the most progress per
+runtime operation over whole sessions, their starts included: as the session it comes from did, then as its replays
+measure it. A long session that moves the value by five can beat a short one that moves it by one. Every eighth session
+replays another of the routes kept (eight at most) instead, each in turn in the order they were found, as effects
+depend on the state and a route that was worse can become better. Each session is real play from the storage the one
+before it left, and the next starts at once while sessions get closer (100 sessions at most). After one that does not,
+the routes not replayed since the last closer value are tried, the best first; a route that twice in a row brings the
+value no closer is dropped. The chain then waits until play leaves a closer storage. A session from storage without
+the value is no route, as repeating it cannot bring the value further. When no explored session gets there, the way
+stays `unknown` with the reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. The report
+gives each chain that started sessions with its way (`chains`): its sessions, the closest value, its result (`reached`,
+storage that `holds` the value without the way reached, `queued` at the run's end, the session `limit`, or `stopped`),
+the route it repeats, the routes it replayed (for each its first inputs and end, its inputs, its replays and those that
+came no closer, and its progress per 1,000 operations), and its last switches between routes, with why;
 `summary.md` lists the chains with the most sessions. For the clock, without forward time
 (below), the player continues at other wall clock times (times of day, weekdays, later dates) before that step, as a
 real player's time varies; a step after that is a clock step. An answer attempt's states share the first place for 20

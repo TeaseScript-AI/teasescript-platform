@@ -461,14 +461,17 @@ export interface Part {
 }
 
 /**
- * A session chain toward a stored value: the sessions it started, the closest value it reached, the route it replays,
- * the routes it replayed (that one too, the least work per unit of progress first), and its last switches between
- * routes, with why.
+ * A session chain toward a stored value: the sessions it started, the closest value it reached, its result (`reached`
+ * the way; storage `holds` what the way needs but a session from it did not reach it; its next session still `queued`
+ * when the run ended; stopped at the session `limit`; or `stopped` as no route left brought the value closer), the
+ * route it repeats, the routes it replayed (that one too, the most progress per operation first), and its last switches
+ * between routes, with why.
  */
 export interface ChainReport {
   key: string;
   sessions: number;
   closest: string;
+  result: "reached" | "holds" | "queued" | "limit" | "stopped";
   route: RouteReport | null;
   routes: RouteReport[];
   switches: { sessions: number; from: string | null; to: string; reason: string }[];
@@ -476,15 +479,15 @@ export interface ChainReport {
 
 /**
  * A route of a session chain: its first inputs and where its session ended, how many inputs its replay takes, the
- * sessions that replayed it and those of them that brought the value no closer, and its runtime operations per unit of
- * progress: over those sessions, or the session it comes from before any; null when none brought the value closer.
+ * sessions that replayed it and those of them that brought the value no closer, and its progress per 1,000 runtime
+ * operations over whole sessions: over those sessions, or the session it comes from before any.
  */
 export interface RouteReport {
   at: string;
   inputs: number;
   sessions: number;
   failures: number;
-  workPerUnit: number | null;
+  progressPer1000Operations: number;
 }
 
 /** The closest an explored state, or a storage one left, came to a part of what a missed way needs. */
@@ -1244,28 +1247,35 @@ function chainReports(
   return [...(target?.chains ?? [])]
     .filter(([, chain]) => chain.started > 0)
     .map(([key, chain]) => {
-      const report = (route: Route): RouteReport => {
-        const cost = routeCostOf(route);
-        return {
-          ...routeOf(route.node),
-          sessions: route.tries,
-          failures: route.failures,
-          workPerUnit: Number.isFinite(cost) ? Math.round(cost) : null,
-        };
-      };
-      // The route the chain repeats: the usable one with the least work per unit of progress, not one an exploration
-      // turn replayed last.
+      const report = (route: Route): RouteReport => ({
+        ...routeOf(route.node),
+        sessions: route.tries,
+        failures: route.failures,
+        progressPer1000Operations: Number((routeRateOf(route) * 1000).toPrecision(3)),
+      });
+      // The route the chain repeats: the usable one with the most progress per operation, not one an exploration turn
+      // replayed last.
       const [route] = [...chain.routes.values()]
         .filter((known) => known.fails < 2)
-        .sort((left, right) => routeCostOf(left) - routeCostOf(right));
+        .sort((left, right) => routeRateOf(right) - routeRateOf(left));
       return {
         key: key.replaceAll(KEY_PLACEHOLDER, "*"),
         sessions: chain.started,
         closest: chain.value,
+        result:
+          target?.reach != null && target.reach.label !== "chosen"
+            ? "reached"
+            : chain.best === 0
+              ? "holds"
+              : chain.queued
+                ? "queued"
+                : chain.started >= MAX_CHAIN
+                  ? "limit"
+                  : "stopped",
         route: route === undefined ? null : report(route),
         routes: [...chain.routes.values()]
           .filter((known) => known.tries > 0)
-          .sort((left, right) => routeCostOf(left) - routeCostOf(right))
+          .sort((left, right) => routeRateOf(right) - routeRateOf(left))
           .map(report),
         switches: chain.switches
           .slice(-5)
@@ -1279,13 +1289,15 @@ function chainReports(
     });
 }
 
-/** A route's work per unit of progress: as its replays measured it, or as the session it comes from did. */
-function routeCostOf(route: Route): number {
+/**
+ * A route's progress per runtime operation over whole sessions, their starts included: as its replays measured it, or
+ * as the session it comes from did before any. The work to get there is the distance left over this, so the route with
+ * the most is the one with the least work in all, however long its sessions are.
+ */
+function routeRateOf(route: Route): number {
   return route.tries === 0
-    ? route.work / route.progress
-    : route.progressSum > 0
-      ? route.workSum / route.progressSum
-      : Infinity;
+    ? route.progress / Math.max(1, route.work)
+    : route.progressSum / Math.max(1, route.workSum);
 }
 
 /** How the comparisons of a condition combine to take a way: all needed, any one enough, both, or one comparison. */
@@ -2565,47 +2577,45 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return measured;
   };
 
-  const routeCost = routeCostOf;
+  const routeRate = routeRateOf;
 
   /**
-   * The route a chain's next session replays. After a closer value: the one with the least work per unit of progress,
-   * except every {@link ROUTE_EXPLORE_EVERY}th session, which replays another usable route, each in turn in the order
-   * they were found. After a session that came no closer (`stale`): the usable route with the least work per unit of
-   * progress not replayed since the last closer value; none when every one was. A route stays usable until two replays
-   * in a row bring the value no closer.
+   * The route a chain's next session replays. After a closer value: the one with the most progress per operation
+   * (see {@link routeRateOf}), except every {@link ROUTE_EXPLORE_EVERY}th session, which replays another usable route,
+   * each in turn in the order they were found. After a session that came no closer (`stale`): the usable route with the
+   * most progress per operation not replayed since the last closer value; none when every one was. A route stays
+   * usable until two replays in a row bring the value no closer.
    */
   const chooseRoute = (chain: Chain, stale: boolean): { route: string; reason: string } | null => {
     const usable = [...chain.routes].filter(
       ([id, route]) => route.fails < 2 && !(stale && chain.tried.has(id)),
     );
-    const [cheapest] = [...usable].sort(
-      ([, left], [, right]) => routeCost(left) - routeCost(right),
-    );
-    if (cheapest === undefined) return null;
+    const [best] = [...usable].sort(([, left], [, right]) => routeRate(right) - routeRate(left));
+    if (best === undefined) return null;
     if (stale)
       return {
-        route: cheapest[0],
-        reason: "no closer value: the cheapest route not replayed since the last closer one",
+        route: best[0],
+        reason: "no closer value: the best route not replayed since the last closer one",
       };
-    const others = usable.filter(([id]) => id !== cheapest[0]);
+    const others = usable.filter(([id]) => id !== best[0]);
     if (others.length > 0 && chain.started % ROUTE_EXPLORE_EVERY === ROUTE_EXPLORE_EVERY - 1) {
       const [route] = others[chain.turns % others.length]!;
       chain.turns += 1;
       return { route, reason: "another route, measured again" };
     }
     return {
-      route: cheapest[0],
+      route: best[0],
       reason:
-        cheapest[1].tries === 0
-          ? "least work per unit of progress seen"
-          : "least work per unit of progress measured",
+        best[1].tries === 0
+          ? "most progress per operation seen"
+          : "most progress per operation measured",
     };
   };
 
   /**
    * One step of a session chain toward a stored value: from the closest storage an explored play state left, a
    * session that replays the witness path when that storage satisfies the condition, or else a route that brought the
-   * value closer before, to get closer still: the one with the least work per unit of progress, now and then another
+   * value closer before, to get closer still: the one with the most progress per operation, now and then another
    * (see {@link chooseRoute}); the storage's own session when no route is known. After a session that came no closer,
    * the other routes in turn; then the chain waits until play leaves a closer storage. `repeat`: right after a session
    * of the chain, whose next one then goes first.
@@ -2670,7 +2680,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (found.routes.size > MAX_ROUTES) {
         const [worst] = [...found.routes]
           .filter(([known]) => known !== found.route)
-          .sort(([, a], [, b]) => routeCost(b) - routeCost(a));
+          .sort(([, a], [, b]) => routeRate(a) - routeRate(b));
         if (worst !== undefined) found.routes.delete(worst[0]);
       }
     }

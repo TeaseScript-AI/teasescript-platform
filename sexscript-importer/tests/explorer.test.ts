@@ -850,12 +850,12 @@ test(
 );
 
 test(
-  "a chain toward a stored count repeats the route with the least work per unit of progress, session after session, measures the others now and then, tries another when one stops helping, and reports its routes",
+  "a chain toward a stored count repeats the route with the most progress per operation over whole sessions, whether its sessions are short or long, measures the others now and then, tries another when one stops helping, and reports its routes",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    const run = (source: string) => {
+    const run = (source: string, need = "visits >= 40") => {
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       const result = explore(engine, plan, {
@@ -868,19 +868,20 @@ test(
       });
       const way = [...result.directed.ways, ...result.coverage.unvisitedBranches].find(
         (entry) =>
-          (typeof entry.condition === "string" ? entry.condition : entry.condition?.text) ===
-          "visits >= 40",
+          (typeof entry.condition === "string" ? entry.condition : entry.condition?.text) === need,
       );
       return { way, chain: way?.chains?.[0] };
     };
-    // The long way adds two visits after twenty presses; the short way adds one after one press: less work per visit.
-    const twoWays = run(
+    // The short way adds one visit after one press; the long way adds `gain` after `presses` presses.
+    const ways = (presses: number, gain: number, need: number) =>
       'let visits = load "fixture.visits", default: 0\n' +
-        'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
-        'if pick == "long" {\n  for step in 1..=20 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\n' +
-        'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
-        'if visits >= 40 {\n  say "Regular."\n}\nexit\n',
-    );
+      'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
+      `if pick == "long" {\n  for step in 1..=${presses} {\n    showButton "Step"\n  }\n` +
+      `  save visits + ${gain} as "fixture.visits"\n}\n` +
+      'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
+      `if visits >= ${need} {\n  say "Regular."\n}\nexit\n`;
+    // Two visits for twenty presses: the short way does more per operation, though less per session.
+    const twoWays = run(ways(20, 2, 40));
     assert.equal(twoWays.way?.reach, "play");
     assert.equal(twoWays.chain?.key, "fixture.visits");
     assert.ok((twoWays.chain?.sessions ?? 0) >= 30);
@@ -898,6 +899,16 @@ test(
     assert.ok(
       twoWays.chain?.switches.some((change) => change.reason === "another route, measured again"),
     );
+    assert.equal(twoWays.chain?.result, "reached");
+    // Five visits for four presses: now the long way does more per operation, and it is the one repeated.
+    const fiveWays = run(ways(4, 5, 100), "visits >= 100");
+    assert.equal(fiveWays.way?.reach, "play");
+    assert.ok(fiveWays.chain?.route?.at.startsWith("Long way"));
+    const [long, short] = ["Long way", "Short way"].map((name) =>
+      fiveWays.chain?.routes.find((route) => route.at.startsWith(name)),
+    );
+    assert.ok(short !== undefined && long !== undefined && short.sessions > 0);
+    assert.ok(long.progressPer1000Operations > short.progressPer1000Operations);
     // The cheap way stops adding at fifteen; the other way, fifteen presses for two, still adds: once the cheap way brings
     // the count no closer, the other way is replayed, and the chain goes on with it.
     const cheapStops = run(
