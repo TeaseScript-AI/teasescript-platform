@@ -2182,7 +2182,8 @@ async function entrancesScenario(cdp, origin) {
   const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
   // Records, every frame, which parts of the conversation an animation moves, and how far the controls are from the
   // entry above them while the conversation glides. Each of them also rises in its own entrance, which under load
-  // starts at a different frame for each, so the distance leaves those rises out.
+  // starts at a different frame for each, so the distance leaves those rises out. Under load a glide can also end
+  // before a frame samples it, so the distance is also measured as each glide starts.
   const start = async () => {
     await navigate(cdp, `${origin}/player/?package=entrances`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -2191,6 +2192,21 @@ async function entrancesScenario(cdp, origin) {
       `window.smokeEntrances = new Set();
       window.smokeControlGaps = new Set();
       const rise = (element) => Number.parseFloat(getComputedStyle(element).translate.split(' ')[1] ?? 0) || 0;
+      const measureGap = () => {
+        const controls = document.querySelector('[data-foreground-controls]');
+        const above = document.querySelector('.transcript-entry[data-index="2"]');
+        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
+          window.smokeControlGaps.add(
+            Math.round(controls.getBoundingClientRect().top - rise(controls) - (above.getBoundingClientRect().bottom - rise(above))),
+          );
+      };
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...parameters) {
+        const animation = animate.apply(this, parameters);
+        // Once every animation the glide starts together exists.
+        if (this.matches('.transcript-history')) queueMicrotask(measureGap);
+        return animation;
+      };
       const record = () => {
         for (const animation of document.getAnimations()) {
           const target = animation.effect?.target;
@@ -2198,12 +2214,7 @@ async function entrancesScenario(cdp, origin) {
           else if (target?.matches?.('.transcript-history')) window.smokeEntrances.add('glide');
           else if (target?.matches?.('[data-foreground-controls]')) window.smokeEntrances.add('controls');
         }
-        const controls = document.querySelector('[data-foreground-controls]');
-        const above = document.querySelector('.transcript-entry[data-index="2"]');
-        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
-          window.smokeControlGaps.add(
-            Math.round(controls.getBoundingClientRect().top - rise(controls) - (above.getBoundingClientRect().bottom - rise(above))),
-          );
+        measureGap();
         requestAnimationFrame(record);
       };
       requestAnimationFrame(record);`,
