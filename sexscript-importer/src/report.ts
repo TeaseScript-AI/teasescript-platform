@@ -208,11 +208,11 @@ export interface FeasibilityReport {
    * again before a beat (`keptForBeats`); `keptPaced` texts that keep their reading time where a replaced
    * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`. A sound that
    * starts between a text and its wait makes the text a beat where the wait stays (`soundBeats`), and starts before
-   * its text where the wait goes (`soundsWithText`). A text whose legacy waits set its timing and whose first wait its
-   * reading time would outlast (TSV060) is a beat (`timed`). A split text whose last paragraph would outlast a kept
-   * wait keeps that paragraph said at once before a beat (`paragraphsBeforeBeat`), shows whole with the wait whole
-   * before a statement that would cut it (`paragraphsWhole`), and otherwise drops the rest of the wait, which the
-   * reading time covers (`paragraphWaitsRead`).
+   * its text where the wait goes (`soundsWithText`). A split text whose last paragraph's reading time would outlast
+   * the wait after it (TSV060) shows whole at once, each paragraph said at once, where waits that another wait or a
+   * timer follows set its timing (`timed`), where a long kept wait leaves less before a statement that the reading time
+   * does not cover (`paragraphsWhole`), and where a wait restored before a beat follows it (`paragraphsBeforeBeat`, part
+   * of `keptForBeats`); before a statement that it covers, the rest of the long kept wait goes (`paragraphWaitsRead`).
    */
   readingWaits: {
     replaced: number;

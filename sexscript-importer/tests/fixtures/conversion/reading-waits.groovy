@@ -94,7 +94,7 @@ for (int tempSpankCount = 1; tempSpankCount <= 3; tempSpankCount++) {
 show("You've created a bunch of paperwork for me to document this.\n\nSo you can expect me to be extra strict this time")
 wait(4)
 wait(3)
-// Domme3 maintenance: the rest of the wait after the earlier paragraphs is reading time, which covers it.
+// Domme3 maintenance: the rest of the wait after the earlier paragraphs is reading time, which goes before a button.
 show("You did well. \n\nI'm proud of you! \n\nGet dressed.")
 wait(7)
 showButton("Thanks, Miss.")

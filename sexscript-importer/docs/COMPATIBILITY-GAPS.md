@@ -146,16 +146,17 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it. The wait
   started when the whole text appeared, so a kept wait after the last piece keeps only what the reading time of the
   earlier pieces leaves, in whole seconds, and goes when nothing is left (owner decision 2026-10-07;
-  `readingWaits.shortened` and `dropped`). A wait shorter than the last piece's reading time adds no time (`TSV060`,
-  #714), so, by the rules above, where the legacy wait set the timing the piece is said at once, and where it was
-  reading time the wait goes: a text kept `instant` because its waits set its timing (a wait that another wait or a
-  timer follows) whose first wait is shorter than its reading time is a beat, so it and all its pieces are said at once
-  wherever it stands, the waits follow, and a text before it whose reading time it would cut keeps its legacy wait
-  (`SX_WAIT_TIMED`, `timed`); a wait kept before a beat leaves the last piece said at once (`paragraphsBeforeBeat`); the
-  rest of a long kept wait goes where the last piece's reading time covers it and the next statement waits for it, a
-  text, button, media, or wait (`paragraphWaitsRead`), and before anything else, such as a call that may say a text at
-  once and cut that reading time, every piece is said at once and the wait stays whole (`paragraphsWhole`). An ask's
-  question (also `askImage`'s message) is the last paragraph that ends with a
+  `readingWaits.shortened` and `dropped`). Where the last piece's reading time would outlast the wait after it, the
+  compiler warns that the wait adds no time (`TSV060`, #714), which holds before a text or media, which wait for that
+  reading time; before a wait or a timer, which run alongside it, a button or an ask, which end it, or a text said at
+  once, the wait adds its time. So, by the rules above, where the legacy wait set the timing the text shows whole at
+  once, each piece said at once, and the waits follow: where another wait or a timer follows its wait (`SX_WAIT_TIMED`,
+  `timed`), before a wait restored for a beat (`SX_PARAGRAPH_WAIT_BEAT`, `paragraphsBeforeBeat`), and where the rest of
+  a long kept wait is shorter than the last piece's reading time before a statement that this reading time does not
+  cover (`SX_PARAGRAPH_WAIT_WHOLE`, `paragraphsWhole`); before a text, media, a button, or an ask, where a reading wait
+  goes, that rest is reading time and goes (`SX_PARAGRAPH_WAIT_READ`, `paragraphWaitsRead`). A text that was not split
+  keeps its timing as below; where it waits for a reading time before it, the warning stays, and its waits still add
+  their time. An ask's question (also `askImage`'s message) is the last paragraph that ends with a
   question mark, ignoring closing brackets, quotes, and markup, or else the last that starts with an instruction or
   question word (Enter, Type, Choose, Select, Pick, Write, Tell, Give, Name, How, What, Which, Please, Input, Insert,
   Answer, Click, Press, Set); the paragraphs before it are said before the ask, and the remarks after it, such as
