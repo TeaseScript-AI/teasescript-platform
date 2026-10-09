@@ -285,6 +285,48 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('say ["Hello", "there"]'), "text");
 });
 
+test("editor help reads only the statement the parser finds at the cursor", () => {
+  // The signature slot and the context help's command; hover finds the command as context help does. `after` follows
+  // the cursor.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    const hover = languageHover(document, position);
+    assert.equal(
+      hover?.contents[0] ?? null,
+      signature === null ? null : `**${signature.label.split(" ")[0]}**`,
+    );
+    return [
+      signature === null ? null : signature.parameters[signature.activeParameter],
+      languageContextHelp(document, position)?.command ?? null,
+    ];
+  };
+  const ask = 'let answer = askText "Q", hint: 1';
+  // A later statement, or a line between statements, is not part of an earlier command.
+  assert.deepEqual(help(`${ask}\nlet y = `), [null, null]);
+  assert.deepEqual(help(`${ask}\n`), [null, null]);
+  assert.deepEqual(help(`if true {\n  ${ask}\n  let y = `, "\n}"), [null, null]);
+  assert.deepEqual(help(`timer 5 s {\n  ${ask}\n  `, "\n}"), [null, null]);
+  assert.deepEqual(help('let answer = askText "Q", hint:\nlet y = '), [null, null]);
+  // The rest of the command's line, and every line the command continues on, keep its help.
+  assert.deepEqual(help(`${ask} `), ["hint", "askText"]);
+  assert.deepEqual(help('let answer = askText "Q", hint: (\n"a"\n) + '), ["hint", "askText"]);
+  assert.deepEqual(help('let answer = askText "Q", hint: [\n"a"\n][0] + '), ["hint", "askText"]);
+  assert.deepEqual(help('let answer = askText("Q"\n, prefill: "A"\n, hint: '), ["hint", "askText"]);
+  assert.deepEqual(help("let answer = askText {\ntext: "), ["question", "askText"]);
+  assert.deepEqual(
+    help(
+      'speaker narrator { alias: "A" }\nlet answer = askText as narrator "Q", hint: (\n speaker.alias + ',
+      ")",
+    ),
+    ["hint", "askText"],
+  );
+  // An unfinished command also holds the line breaks after it, where the author completes it.
+  assert.deepEqual(help('let answer = askText "Q", hint:\n  ', "\nexit"), ["hint", "askText"]);
+  assert.deepEqual(help('let pick = choose [\n  "a",\n  '), ["options", "choose"]);
+});
+
 test("editor tooling handles deeply nested media blocks without native recursion", () => {
   const depth = 2_500;
   assertDeepSayTooling(

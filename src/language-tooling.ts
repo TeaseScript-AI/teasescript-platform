@@ -10,7 +10,7 @@ import type {
   TimerParts,
   ShowPermanentButtonParts,
 } from "./ast.js";
-import { compileProject, compileSource } from "./compiler.js";
+import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
 import {
   askOperands,
   sayOperands,
@@ -22,6 +22,7 @@ import {
 import type { Diagnostic } from "./diagnostics.js";
 import type { ProjectImageFile } from "./image-catalog.js";
 import { lex } from "./lexer.js";
+import { parse, type ParseResult, type StatementRange } from "./parser.js";
 import { compareProjectPaths } from "./project-paths.js";
 import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
@@ -495,9 +496,9 @@ function locateCompactCommand(
   document: LanguageDocument,
   offset: number,
 ): { command: CompactCommand; range: LanguageRange } | null {
-  const compilation = compileSource(document.text);
+  const parsed = parseDocument(document.text);
   let best: { command: CompactCommand; range: LanguageRange } | null = null;
-  visitProgram(compilation.program, {
+  visitProgram(parsed.program, {
     showButton(node) {
       if (containsOffset(node.span, offset))
         best = { command: "showButton", range: node.commandSpan };
@@ -534,14 +535,47 @@ function locateCompactCommand(
       return { command, range: token.span };
     }
   }
+  // Only the statement at the cursor is read: a command of an earlier statement does not apply.
+  const start = statementStartAt(parsed.statementRanges, offset);
+  if (start === null) return null;
   // A token that starts at the cursor, such as the `)` an editor adds when it closes a bracket, is after it.
   const before = tokens.filter(
     (token) =>
+      token.span.start.offset >= start &&
       token.span.start.offset < offset &&
       token.kind !== TokenKind.Newline &&
       token.kind !== TokenKind.EndOfFile,
   );
-  return nearestOpenCompactCommand(tokensAfterLastNewline(before));
+  return nearestOpenCompactCommand(before);
+}
+
+/** The syntax of a document, or none when parsing it exhausted the call stack, which the compiler reports. */
+function parseDocument(text: string): ParseResult {
+  try {
+    return parse(text);
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    return parse("");
+  }
+}
+
+/**
+ * Where the statement at `offset` starts: the innermost statement range around it. `null` when that is a statement
+ * block, or there is none, so the offset lies between statements.
+ */
+function statementStartAt(ranges: readonly StatementRange[], offset: number): number | null {
+  let innermost: StatementRange | null = null;
+  for (const range of ranges) {
+    if (range.start > offset || offset > range.end) continue;
+    // A statement at the very start of a block is inside it.
+    if (
+      innermost === null ||
+      range.start > innermost.start ||
+      (range.start === innermost.start && range.kind === "statement")
+    )
+      innermost = range;
+  }
+  return innermost?.kind === "statement" ? innermost.start : null;
 }
 
 /**

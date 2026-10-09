@@ -471,7 +471,7 @@ function completeSourceSpan(source: string) {
   );
 }
 
-function isNativeStackExhaustion(error: unknown): boolean {
+export function isNativeStackExhaustion(error: unknown): boolean {
   if (!(error instanceof RangeError) && !(error instanceof SyntaxError)) return false;
   const message = error.message.toLowerCase();
   if (error instanceof RangeError) {

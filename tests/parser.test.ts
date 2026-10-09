@@ -276,6 +276,22 @@ test("accepts multiple statements separated by LF or CRLF", () => {
   assert.deepEqual(result.program.span, sourceSpan(source, 0, source.length));
 });
 
+test("gives the range of every statement up to its line break, and of every block inside its braces", () => {
+  const source = 'say "a"\nif true {\n  say "b"\n}\nlet answer = askText "Q", hint:\n\nexit\n';
+  const ranges = [...parse(source).statementRanges]
+    .sort((left, right) => left.start - right.start)
+    .map((range) => [range.kind, source.slice(range.start, range.end)]);
+  assert.deepEqual(ranges, [
+    ["statement", 'say "a"'],
+    ["statement", 'if true {\n  say "b"\n}'],
+    ["block", '\n  say "b"\n'],
+    ["statement", 'say "b"'],
+    // A statement that misses something at its end holds the line breaks after it.
+    ["statement", 'let answer = askText "Q", hint:\n\n'],
+    ["statement", "exit"],
+  ]);
+});
+
 test("preserves decoded block values and forms", () => {
   const source = 'say """\n  one\n    two\n"""\nsay "three\\nfour"';
   const result = parse(source);
