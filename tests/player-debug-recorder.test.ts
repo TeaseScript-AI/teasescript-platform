@@ -402,6 +402,55 @@ test("a random decision that throws during a recorded call leaves the recording 
   }
 });
 
+test("a random decision that calls its session is refused there, and the call it decides goes on", async () => {
+  for (const rethrow of [false, true]) {
+    const recorder = new DebugRecorder();
+    let session = createPlayerRuntimeSession(
+      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      { recorder },
+    );
+    session = observePlayerRuntimeTime(session, 500).session;
+    const shown = JSON.stringify(playerRuntimeSnapshot(session));
+    let refused: unknown = null;
+    setPlayerRuntimeRandomControl(session, {
+      decide: () => {
+        try {
+          observePlayerRuntimeTime(session, 600);
+        } catch (error) {
+          refused = error;
+          if (rethrow) throw error;
+        }
+        return { kind: "natural" };
+      },
+    });
+    if (rethrow) {
+      assert.throws(
+        () => observePlayerRuntimeTime(session, 1_000),
+        (error: unknown) =>
+          error instanceof Error && error.name === "RandomDecisionError" && error.cause === refused,
+      );
+      // The Player goes on from the state it showed. The nested call left no record, so the failed decision marks the
+      // recording incomplete.
+      assert.equal(JSON.stringify(playerRuntimeSnapshot(session)), shown);
+      assert.equal(
+        recorder.recording()!.reason,
+        "The random decision callback failed during a recorded call.",
+      );
+      assert.equal((await replay(recorder)).kind, "incomplete");
+    } else {
+      // The decided call finishes as it would without the nested call, which left no record.
+      const observed = observePlayerRuntimeTime(session, 1_000).session;
+      assert.equal(playerRuntimeSnapshot(observed).status, "halted");
+      assert.deepEqual(
+        recorder.recording()!.operations.map((operation) => operation.kind),
+        ["run", "observeTime", "run", "observeTime", "run"],
+      );
+      assert.equal((await replay(recorder)).kind, "reproduced");
+    }
+    assert.ok(refused instanceof Error && refused.name === "RuntimeSessionError");
+  }
+});
+
 test("a media store or random decision that throws after the record froze leaves the frozen record as it was", () => {
   // With the scope IDs used up, a timer block throws in its middle, which freezes the record.
   const source = [
