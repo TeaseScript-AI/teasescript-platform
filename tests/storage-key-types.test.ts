@@ -293,7 +293,7 @@ test("a stored value of another type is ignored with a warning, kept, and replac
     scriptStorage: [{ key: "level", value: "high" }],
   });
   const warning =
-    'Storage key "level" is loaded as a whole number (integer) here, but the saved value is text (string). This load uses its default; the saved value is kept.';
+    'Storage key "level" is loaded as a whole number (integer) here, but the saved value is text (string). This load uses its default, and the saved value is kept.';
   // A load through a computed key has no type, so it returns the stored value as it is.
   assert.deepEqual(warnings(result.events), [
     ["TSW016", warning],
@@ -333,7 +333,7 @@ test("a stored value of another type is ignored with a warning, kept, and replac
   assert.deepEqual(warnings(kept.events), [
     [
       "TSW016",
-      'Storage key "scores" is loaded as a list (integer[]) here, but the saved value has text (string) at [1]. This load uses its default; the saved value is kept.',
+      'Storage key "scores" is loaded as a list (integer[]) here, but the saved value has text (string) at [1]. This load uses its default, and the saved value is kept.',
     ],
   ]);
   assert.deepEqual(binding(kept.finalSnapshot, "scores"), { kind: "list", items: [0] });

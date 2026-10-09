@@ -6,9 +6,12 @@ import { copySpan } from "./operations/support.js";
 import {
   cloneCapturedSerializableValue,
   containsRuntimeIdentity,
+  findRuntimeIdentity,
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import { describeRuntimeValue, isMessageHandle } from "./value-predicates.js";
+import { describeShownValue } from "./value-types.js";
 
 /** One key of the session's view of script storage; the stored value is never `null`. */
 export interface RuntimeScriptStorageEntrySnapshot {
@@ -21,17 +24,24 @@ interface ScriptStorageView {
   readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
 }
 
-export const LOAD_KEY_MESSAGE =
-  "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
-export const WRITE_KEY_MESSAGE = "Storage key must be a string.";
-
+/** `value` as the key that `use` loads, saves, or deletes: `TSR054` unless it is text. */
 export function storageKey(
   value: SerializableRuntimeValue,
-  message: string,
+  use: "load" | "save" | "delete",
   span: SourceSpan | PlanSourceLocation,
 ): string {
-  if (typeof value !== "string") throw fault("TSR054", message, span);
-  return value;
+  if (typeof value === "string") return value;
+  const fix =
+    typeof value === "number"
+      ? ` Use "${value}" as the key, or convert it with toString(...).`
+      : use === "load" && typeof value === "boolean"
+        ? ` If you meant to compare the loaded value, write 'load("k", default: null) == null'.`
+        : " Use text as the key.";
+  throw fault(
+    "TSR054",
+    `Cannot ${use} with key ${typeof value === "boolean" ? value : describeShownValue(value)}: storage keys must be text (string).${fix}`,
+    span,
+  );
 }
 
 /**
@@ -105,10 +115,17 @@ export function assertPersistable(
   value: SerializableRuntimeValue,
   span: SourceSpan | PlanSourceLocation,
 ): void {
-  if (containsRuntimeIdentity(value)) {
+  const identity = findRuntimeIdentity(value);
+  if (identity !== null) {
+    const kind = describeRuntimeValue(identity);
+    const fix = isMessageHandle(identity)
+      ? " Save the message's text instead."
+      : " Save values such as text, numbers, or lists instead.";
     throw fault(
       "TSR055",
-      "save cannot store a timer, media, or message handle or a speaker reference; they exist only in the current session.",
+      identity === value
+        ? `save cannot store ${kind}: it exists only in the current session.${fix}`
+        : `save cannot store this value: it holds ${kind}, which exists only in the current session.${fix}`,
       span,
     );
   }

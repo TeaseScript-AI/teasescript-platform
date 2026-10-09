@@ -122,7 +122,6 @@ import type {
 import {
   assertPersistable,
   storageKey,
-  WRITE_KEY_MESSAGE,
   storageKeyPlace,
   storageKeyType,
   writeScriptStorage,
@@ -202,7 +201,7 @@ import {
 import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
-import { assertValueType, describeShownValue } from "./value-types.js";
+import { assertValueType, describeShownValue, shownChoice } from "./value-types.js";
 import { numberFromText } from "../conversions.js";
 import {
   describeRuntimeValue,
@@ -222,7 +221,7 @@ import {
 import { fieldText } from "./value-text.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
-import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
+import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -796,11 +795,7 @@ function executePlannedInstruction(
             stagedEvaluator.evaluateStartValue(property.value),
           );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-            throw fault(
-              "TSR050",
-              "Speaker property 'defaultSaySkippable' must be a boolean.",
-              property.span,
-            );
+            throw fault("TSR050", notSkippableFlag(propertyValue), property.span);
           }
           speaker.properties.push({ name: property.name, value: propertyValue });
         }
@@ -1513,7 +1508,11 @@ function materializeInteractionUi(
   const backgroundColor = (value: SerializableRuntimeValue): string => {
     const normalized = normalizeOpaqueColor(value);
     if (normalized === null)
-      throw fault("TSR052", "Expected an opaque CSS button background colour.", span);
+      throw fault(
+        "TSR052",
+        `A button background must be an opaque CSS colour, such as "#336699", but this is ${describeShownValue(value)}.`,
+        span,
+      );
     return normalized;
   };
 
@@ -1835,7 +1834,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its labels, hints, prefill or choice values, or file filters.`,
         span,
       );
     aggregate += bytes;
@@ -2485,7 +2484,13 @@ function cloneInteractionAction(
 function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: SourceSpan): number {
   const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs)
-    throw fault("TSR052", "The askForm timeout is outside the supported session-time range.", span);
+    throw fault(
+      "TSR052",
+      isValidSessionTime(deadlineMs)
+        ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        : "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+      span,
+    );
   return timeoutMs;
 }
 
@@ -2500,7 +2505,7 @@ function buttonTimeoutMs(
   if (timeoutMs === null) {
     throw fault(
       "TSR050",
-      "The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms'.",
+      `The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms', but this is ${describeShownValue(value)}.`,
       span,
     );
   }
@@ -2508,7 +2513,9 @@ function buttonTimeoutMs(
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      "The showButton timeout is outside the supported session-time range.",
+      isValidSessionTime(deadlineMs)
+        ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        : "This showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
       span,
     );
   }
@@ -2931,7 +2938,7 @@ function effectiveSaySkippable(
   );
   if (configured === undefined) return true;
   if (typeof configured.value !== "boolean") {
-    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+    throw fault("TSR050", notSkippableFlag(configured.value), span);
   }
   return configured.value;
 }
@@ -3137,12 +3144,20 @@ export function timerDurationMs(
     isDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
       : drawn;
+  if (command === "timer" && isRange(drawn))
+    throw fault(
+      "TSR050",
+      unit !== null && unit !== "s"
+        ? "A timer range counts whole seconds. Other units are not supported for ranges yet."
+        : `A timer range must not start below zero seconds, but this range is ${drawn.start}${drawn.inclusive ? "..=" : ".."}${drawn.end}.`,
+      span,
+    );
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     throw fault(
       "TSR050",
-      command === "timer"
-        ? "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds."
-        : "Wait duration must be a non-negative duration or finite number.",
+      typeof amount === "number" && amount < 0
+        ? `${commandName(command)} duration must not be negative, but this is ${describeShownValue(drawn)}.`
+        : `A ${command} duration is a duration such as '30 s'${command === "timer" ? ", a number of seconds, or a range of whole seconds" : " or a number of seconds"}, but this is ${describeShownValue(drawn)}.`,
       span,
     );
   }
@@ -3150,7 +3165,7 @@ export function timerDurationMs(
   if (!Number.isFinite(durationMs)) {
     throw fault(
       "TSR050",
-      `${commandName(command)} duration is outside the supported session-time range.`,
+      `This ${command} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }
@@ -3168,18 +3183,23 @@ export function futureDeadline(
   if (!isValidSessionTime(deadlineMs)) {
     throw fault(
       "TSR050",
-      `${commandName(command)} duration is outside the supported session-time range.`,
+      `This ${command} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }
   if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      `${commandName(command)} duration cannot produce a representable future deadline.`,
+      `This ${command} of ${formatDuration(durationMs)} is too short to measure this late in the scene. Use a longer duration.`,
       span,
     );
   }
   return deadlineMs;
+}
+
+/** `defaultSaySkippable` holds `value`, which is not true or false. */
+function notSkippableFlag(value: SerializableRuntimeValue): string {
+  return `Speaker property 'defaultSaySkippable' must be true or false (boolean), but this is ${describeShownValue(value)}.`;
 }
 
 function commandName(command: "wait" | "timer"): string {
@@ -3193,7 +3213,12 @@ export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): s
       'A list cannot be a timer label. Select one element with "${list}" or list.random.',
       span,
     );
-  if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
+  if (typeof value !== "string")
+    throw fault(
+      "TSR050",
+      `A timer label must be text (string), but this is ${describeShownValue(value)}. Convert it with toString(...) first.`,
+      span,
+    );
   return value;
 }
 
@@ -3225,7 +3250,7 @@ function startTimer(
   const zeroRoundFault = () =>
     fault(
       "TSR050",
-      "A repeating timer needs every round to last longer than zero.",
+      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : `${range.start} s`}. Use a duration of at least 1 s.`,
       instruction.duration.span,
     );
   // A range that allows a zero-length round is rejected before its first round is drawn.
@@ -3329,14 +3354,18 @@ function showImage(
 ): void {
   const image = instruction.image === null ? null : evaluator.evaluate(instruction.image);
   if (image !== null && typeof image !== "string") {
-    throw fault("TSR050", "showImage needs an image file reference or null.", instruction.span);
+    throw fault(
+      "TSR050",
+      `showImage needs an image file reference or null, but this is ${describeShownValue(image)}.`,
+      instruction.span,
+    );
   }
   if (instruction.image !== null && image === null) {
     emitDeveloperWarning(
       snapshot,
       events,
       "TSW011",
-      "showImage received null; the Stage shows no image.",
+      "showImage received null, so the Stage shows no image.",
       instruction.span,
     );
   }
@@ -3364,7 +3393,7 @@ function writeStorage(
       : cloneCapturedSerializableValue(evaluator.evaluate(instruction.value));
   const key = storageKey(
     evaluator.evaluate(instruction.key),
-    WRITE_KEY_MESSAGE,
+    instruction.value === null ? "delete" : "save",
     instruction.key.span,
   );
   assertPersistable(value, instruction.span);
@@ -3432,7 +3461,7 @@ function mediaMilliseconds(
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     throw fault(
       "TSR050",
-      `Media ${subject} must be a non-negative duration or number of seconds.`,
+      `Media ${subject} must be a duration or a number of seconds of at least 0, but this is ${describeShownValue(value)}.`,
       span,
     );
   }
@@ -3449,7 +3478,7 @@ function mediaRepeat(
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
       throw fault(
         "TSR050",
-        "A media repeat count must be a whole number of at least 1.",
+        `A repeat count must be a whole number of at least 1, such as '3 times', but this is ${describeShownValue(value)}.`,
         repeat.count.span,
       );
     }
@@ -3464,7 +3493,7 @@ function mediaRepeat(
   }
   throw fault(
     "TSR050",
-    "Media repeat must be true, false, a count such as '3 times', or a positive duration.",
+    `Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is ${describeShownValue(value)}.`,
     repeat.value.span,
   );
 }
@@ -3493,16 +3522,24 @@ function startMedia(
   const volume = instruction.volume === null ? null : evaluator.evaluate(instruction.volume);
   const offsets = instruction.cues.map((cue) => evaluator.evaluate(cue.offset));
   if (file !== null && typeof file !== "string") {
-    throw fault("TSR050", "Media file must be a file reference or null.", instruction.file.span);
+    throw fault(
+      "TSR050",
+      `Media file must be a file reference or null, but this is ${describeShownValue(file)}.`,
+      instruction.file.span,
+    );
   }
   const repeat = mediaRepeat(instruction, repeatValue);
   if (!instruction.async && repeat.kind === "indefinite") {
-    throw fault("TSR050", "Blocking media cannot repeat indefinitely.", instruction.span);
+    throw fault(
+      "TSR050",
+      `Blocking media cannot repeat indefinitely. Use '${instruction.media === "audio" ? "playAudio" : "playVideo"} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
+      instruction.span,
+    );
   }
   if (repeat.kind === "indefinite" && instruction.finishFunctionId !== null) {
     throw fault(
       "TSR050",
-      "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+      "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.",
       instruction.span,
     );
   }
@@ -3514,7 +3551,11 @@ function startMedia(
   const endAtMs =
     instruction.endAt === null ? null : mediaMilliseconds(endAt, "endAt", instruction.endAt.span);
   if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
-    throw fault("TSR050", "Media endAt must be later than startAt.", instruction.endAt.span);
+    throw fault(
+      "TSR050",
+      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? "0 s" : describeShownValue(startAt)}.`,
+      instruction.endAt.span,
+    );
   }
   if (
     instruction.volume !== null &&
@@ -3522,7 +3563,7 @@ function startMedia(
   ) {
     throw fault(
       "TSR050",
-      "Media volume must be a number from 0 through 1.",
+      `Media volume must be a number from 0 through 1, but this is ${describeShownValue(volume)}.`,
       instruction.volume.span,
     );
   }
@@ -3609,7 +3650,7 @@ function startMedia(
       snapshot,
       events,
       "TSW011",
-      `${instruction.media === "audio" ? "playAudio" : "playVideo"} received null; nothing plays.`,
+      `${instruction.media === "audio" ? "playAudio" : "playVideo"} received null, so nothing plays.`,
       instruction.span,
     );
     stopMediaAction(plan, snapshot, action, events, instruction.span);
@@ -3747,7 +3788,11 @@ function isPacedHandle(value: SerializableRuntimeValue): boolean {
 
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {
   if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
+  throw fault(
+    "TSR050",
+    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
+    span,
+  );
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
@@ -3779,7 +3824,7 @@ function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonl
     if (addTag(tags, tag) === "conflict") {
       throw fault(
         "TSR083",
-        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers.`,
+        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers. Keep one number for each tag.`,
         span,
       );
     }

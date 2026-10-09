@@ -312,6 +312,13 @@ function isComposite(value: SerializableRuntimeValue): value is CompositeValue {
  * dicts are checked iteratively at every depth.
  */
 export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolean {
+  return findRuntimeIdentity(value) !== null;
+}
+
+/** The first handle, camera view, permanent button, or speaker reference in `value`, which exist only in the session. */
+export function findRuntimeIdentity(
+  value: SerializableRuntimeValue,
+): SerializableRuntimeValue | null {
   const work: SerializableRuntimeValue[] = [value];
   while (work.length > 0) {
     const current = work.pop()!;
@@ -323,7 +330,7 @@ export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolea
       case "messageHandle":
       case "cameraView":
       case "speakerReference":
-        return true;
+        return current;
       case "list":
       case "set":
         for (const item of current.items) work.push(item);
@@ -338,7 +345,7 @@ export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolea
         break;
     }
   }
-  return false;
+  return null;
 }
 
 function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRuntimeValue {

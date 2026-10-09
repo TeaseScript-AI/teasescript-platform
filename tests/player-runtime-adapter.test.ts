@@ -836,7 +836,12 @@ test("runtime adapter retains the previous value and emits TSW014 after a failed
     completed.session.events
       .filter((event) => event.kind === "developerWarning")
       .map(({ code, message }) => ({ code, message })),
-    [{ code: "TSW014", message: 'save could not persist "answer"; the previous value is kept.' }],
+    [
+      {
+        code: "TSW014",
+        message: 'save could not persist "answer", so the previous value is kept.',
+      },
+    ],
   );
 });
 

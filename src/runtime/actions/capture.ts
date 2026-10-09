@@ -18,13 +18,13 @@ export type CaptureCompletion =
   | { readonly ok: false; readonly message: string };
 
 const UNAVAILABLE_MESSAGES: Readonly<Record<CaptureUnavailableReason, string>> = {
-  unconfigured: "No camera is configured for this session; takePhoto() returned null.",
-  denied: "Camera access was denied; takePhoto() returned null.",
-  notFound: "No camera was found; takePhoto() returned null.",
-  busy: "The camera is in use or could not be started; takePhoto() returned null.",
-  unsupported: "This browser does not support camera capture; takePhoto() returned null.",
-  revoked: "The camera was disconnected or access was revoked; takePhoto() returned null.",
-  failed: "The camera could not capture a photo; takePhoto() returned null.",
+  unconfigured: "No camera is configured for this session, so takePhoto() returned null.",
+  denied: "Camera access was denied, so takePhoto() returned null.",
+  notFound: "No camera was found, so takePhoto() returned null.",
+  busy: "The camera is in use or could not be started, so takePhoto() returned null.",
+  unsupported: "This browser does not support camera capture, so takePhoto() returned null.",
+  revoked: "The camera was disconnected or access was revoked, so takePhoto() returned null.",
+  failed: "The camera could not capture a photo, so takePhoto() returned null.",
 };
 
 export function captureUnavailableMessage(reason: CaptureUnavailableReason): string {

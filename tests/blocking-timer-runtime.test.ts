@@ -368,6 +368,11 @@ test("invalid dynamic timer durations fail deterministically before any action",
       );
     }
   }
+  // A range below zero names its own rule, not the kinds a duration may be.
+  assert.equal(
+    start("let a = -3\ntimer a..3\nexit").snapshot.failure?.message,
+    "A timer range must not start below zero seconds, but this range is -3..3.",
+  );
 });
 
 test("restored timer display data is validated against its owning instruction", () => {
