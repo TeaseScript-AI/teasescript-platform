@@ -89,15 +89,25 @@ export type IrStatement =
   /**
    * `visible` shows a countdown (`timer`). `afterText` marks a literal wait right after a text that is longer than 1.5
    * times the text's reading time and stays (withReadingTimes), which withParagraphs shortens when it splits the text.
+   * `unit` is that of the number `duration`, or null where `duration` is a duration value (withElapsedDurations).
    */
   | (IrBase & {
       kind: "wait";
       duration: IrExpression;
       visible: boolean;
-      unit: "s" | "ms";
+      unit: "s" | "ms" | null;
       afterText?: true;
     })
-  | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
+  /**
+   * `timeout` is a number of seconds, or a duration where it is a duration literal or `durationTimeout` marks it
+   * (withElapsedDurations).
+   */
+  | (IrBase & {
+      kind: "showButton";
+      label: IrExpression;
+      timeout: IrExpression | null;
+      durationTimeout?: true;
+    })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   /**
    * `target = showPermanentButton label { }` (V30 §28): a button without an action, its ID kept in `target`; `persist`

@@ -20,5 +20,5 @@ say "Count: ${lines.length}"
 // getRandom(0) returned 0; randomInteger() rejects the empty range.
 let packs = 1
 let pack = sexscriptLegacyRandom(packs - 1)
-wait randomInteger(0..5) + 2
+wait (randomInteger(0..5) + 2) s
 exit

@@ -7,11 +7,11 @@ if askBoolean "Do you accept?" {
 }
 // Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
 let line = say "Deciding.", instant
-wait 1
+wait 1 s
 line.text += "."
-wait 1
+wait 1 s
 line.text += "."
-wait 1
+wait 1 s
 // A question that repeats the text before it asks without saying it again.
 let days = askInteger "How many days?", prefill: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.
@@ -33,5 +33,5 @@ let pickedColor = choose 0: "Red", 1: "Blue"
 say "Color ${pickedColor}"
 // An exact repeat between waits goes, and the waits around it join.
 say "Processing.", instant
-wait 10
+wait 10 s
 exit

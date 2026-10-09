@@ -19,11 +19,11 @@ let repetitions = toInteger(ceil(stime / 10))
 if repetitions >= 1 {
   playAudio(file: "shock.mp3", async: true, repeat: repetitions times)
 }
-wait stime
+wait stime s
 stopAudio
 // playSound(null) stopped every background sound too (FirstTimeCuckold).
 playAudio async "orgasm.mp3"
-wait 10
+wait 10 s
 showButton "Continue when you heard enough"
 stopAudio
 // show() returns nothing, so Groovy discarded the appended text.

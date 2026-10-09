@@ -7,7 +7,7 @@ let pause = 2
 if true {
   let shown = "Hold still"
   say shown
-  wait pause
+  wait pause s
 }
 say "Relax"
 // A try block that parses a number keeps its catch as manual work.

@@ -3,7 +3,7 @@ function sexscriptLegacyShowButton(text, timeout) {
     showButton text, timeout: 10 ms
     return 0
   }
-  return (showButton text, timeout: timeout) / 1 s
+  return (showButton text, timeout: timeout * 1 s) / 1 s
 }
 function sexscriptLegacyTruth(value) {
   if value is boolean {
@@ -27,7 +27,7 @@ function sexscriptLegacyTruth(value) {
   return value != null
 }
 // A button's seconds compared with a number stay its duration, compared with seconds.
-if (showButton "Done", timeout: 30) >= 30 s {
+if (showButton "Done", timeout: 30 s) >= 30 s {
   say "Too slow."
 }
 // A variable that holds only a button's seconds, compared with numbers or waited for, holds the duration.
@@ -48,7 +48,7 @@ let took = (showButton "Finished") / 1 s
 say "You took ${took} seconds."
 let total = (showButton "Next") / 1 s + 10
 let limit = 20
-let stopped = (showButton "Stop", timeout: limit) / 1 s
+let stopped = (showButton "Stop", timeout: limit * 1 s) / 1 s
 if stopped < limit {
   say "Stopped early."
 }

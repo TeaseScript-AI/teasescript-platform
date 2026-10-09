@@ -665,7 +665,7 @@ test(
       writeFileSync(sourcePath, '// header\rwait(2)\rshow("done") // trailing\r');
       assert.equal(
         emitTease(await convert(sourcePath)),
-        '// header\nwait 2\nsay "done" // trailing\nexit\n',
+        '// header\nwait 2 s\nsay "done" // trailing\nexit\n',
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });

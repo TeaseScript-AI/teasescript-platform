@@ -2,22 +2,22 @@
 // step changes in place; the waits between the steps stay as they are, also short ones.
 showButton "Start"
 let line = say "Wait.", instant
-wait 1
+wait 1 s
 line.text += " ."
-wait 1
+wait 1 s
 line.text += " ."
-wait 1
+wait 1 s
 // A text that repeats the animation's last step says only what it adds.
 say "Now begin."
 // A text with a value computed anew, such as a random draw, is no step of an animation.
 say "Pick ${randomInteger(0..100)}.", instant
-wait 1
+wait 1 s
 say "Pick ${randomInteger(0..100)}..", instant
-wait 1
+wait 1 s
 let line2 = say "Thinking .", instant
-wait 0.5
+wait 0.5 s
 line2.text = "Thinking  .."
-wait 0.5
+wait 0.5 s
 // A loop that shows the line said before it again with a new count changes that line in place.
 let message = "Count them."
 let x = 0
@@ -41,7 +41,7 @@ let counter2 = say "20 jerks", instant
 let i = 19
 while i > 17 {
   counter2.text = "${i} jerks"
-  wait 1
+  wait 1 s
   i -= 1
 }
 // A loop whose text is no new count of the line before it, or that follows a call, says each text as a message of its
@@ -49,13 +49,13 @@ while i > 17 {
 say "Get ready!"
 for s in 1..=2 {
   say "Shock ${s} of 2"
-  wait 5
+  wait 5 s
 }
 let questions = ["Ready?", "Sure?"]
 say "Question 1"
 for q in 1..=2 {
   say "Question ${q}: ${questions[q - 1]}"
-  wait 5
+  wait 5 s
 }
 function countdown {
   say "Get set"
@@ -64,14 +64,14 @@ say "Round 0"
 countdown()
 for r in 1..=2 {
   say "Round ${r}"
-  wait 5
+  wait 5 s
 }
 let n = 0
 say n
 for k in 1..=2 {
   n += 1
   say n
-  wait 5
+  wait 5 s
 }
 // Nor does a loop whose text grows by text, or whose other values the loop, its condition, or the statements before it
 // change, nor an animation whose wait runs script code.
@@ -80,21 +80,21 @@ say "Story: ${story}"
 for p in 1..=2 {
   story += " next"
   say "Story: ${story}"
-  wait 5
+  wait 5 s
 }
 let title = "One"
 say "Chapter ${title}: 0"
 for c in 1..=2 {
   title = "Two"
   say "Chapter ${title}: ${c}"
-  wait 5
+  wait 5 s
 }
 let words = ["First", "Second", "Third"]
 say "Word ${words[0]} count 0"
 for w in 1..=2 {
   let dropped = words.removeAt(0)
   say "Word ${words[0]} count ${w}"
-  wait 5
+  wait 5 s
 }
 let chapter = "First"
 function advance {
@@ -104,14 +104,14 @@ say "Chapter ${chapter}: 0"
 for a in 1..=2 {
   advance()
   say "Chapter ${chapter}: ${a}"
-  wait 5
+  wait 5 s
 }
 let part = "First"
 say "Part ${part}: 0"
 part = "Second"
 for p in 1..=2 {
   say "Part ${part}: ${p}"
-  wait 5
+  wait 5 s
 }
 let step = 0
 function ready {
@@ -122,20 +122,20 @@ say "Part ${part}: ${step}"
 while ready() {
   step += 1
   say "Part ${part}: ${step}"
-  wait 5
+  wait 5 s
 }
 function pause {
   part = "Third"
   return 1
 }
 say "${part}."
-wait pause()
+wait pause() s
 say "${part}.."
 function floorValue {
   part = "Fourth"
   return 1
 }
 say "${part}.", instant
-wait floorValue()
+wait floorValue() s
 say "${part}.."
 exit

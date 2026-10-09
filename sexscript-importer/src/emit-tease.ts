@@ -93,14 +93,24 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       lines.push(`${pad}}`);
       return;
     case "wait": {
-      const unit = statement.unit === "ms" ? " ms" : "";
-      lines.push(
-        `${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}${unit}`,
-      );
+      // Every duration names its unit (#512). The unit after `wait` and `timer` applies to the whole expression, unless
+      // the expression ends with a number, which takes it itself: `a + 2 s` is `a + (2 s)`.
+      const duration = emitExpression(statement.duration);
+      const command = statement.visible ? "timer" : "wait";
+      if (statement.unit === null) lines.push(`${pad}${command} ${duration}`);
+      else {
+        const whole =
+          statement.duration.kind !== "literal" && /(^|[^\w.])\d+(\.\d+)?$/u.test(duration)
+            ? `(${duration})`
+            : duration;
+        lines.push(`${pad}${command} ${whole} ${statement.unit}`);
+      }
       return;
     }
     case "showButton":
-      lines.push(`${pad}${emitButton(statement.label, statement.timeout)}`);
+      lines.push(
+        `${pad}${emitButton(statement.label, statement.timeout, statement.durationTimeout === true)}`,
+      );
       return;
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
@@ -661,9 +671,28 @@ function menuOptions(options: ReadonlyArray<() => string>): string {
   return [first, ...rest.map((option) => `${inner}${option}`)].join(",\n");
 }
 
-/** Compact `showButton` with its optional timeout option (#531). */
-function emitButton(label: IrExpression, timeout: IrExpression | null): string {
-  return `showButton ${emitExpression(label)}${timeout === null ? "" : `, timeout: ${emitExpression(timeout)}`}`;
+/** Compact `showButton` with its optional timeout option (#531), a legacy number of seconds with its unit (#512). */
+function emitButton(
+  label: IrExpression,
+  timeout: IrExpression | null,
+  durationTimeout = false,
+): string {
+  if (timeout === null) return `showButton ${emitExpression(label)}`;
+  const value = durationTimeout ? timeout : inSeconds(timeout);
+  return `showButton ${emitExpression(label)}, timeout: ${emitExpression(value)}`;
+}
+
+/** A number of seconds as a duration: `30 s`, or `t * 1 s` for a value known at runtime. */
+function inSeconds(value: IrExpression): IrExpression {
+  if (value.kind === "duration") return value;
+  if (value.kind === "literal" && typeof value.value === "number")
+    return { kind: "duration", value: value.value, unit: "s" };
+  return {
+    kind: "binary",
+    operator: "*",
+    left: value,
+    right: { kind: "duration", value: 1, unit: "s" },
+  };
 }
 
 /** A complete statement value, where a compact choice, button, read, or ask needs no parentheses. */
