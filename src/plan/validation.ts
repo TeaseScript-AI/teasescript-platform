@@ -1,4 +1,4 @@
-import { isStoredDurationRecord } from "../duration.js";
+import { isStoredCalendarDurationRecord, isStoredDurationRecord } from "../duration.js";
 import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
@@ -2125,6 +2125,7 @@ const TYPE_PLAN_NAMES = [
   "integer",
   "number",
   "duration",
+  "calendarDuration",
   "date",
   "time",
   "datetime",
@@ -2170,6 +2171,11 @@ function validateExpressionNode(
     case "duration":
       if (!isStoredDurationRecord(value, ["span"])) {
         errors.push(planError("TSC002", "Duration literal plan is invalid.", path));
+      }
+      return;
+    case "calendarDuration":
+      if (!isStoredCalendarDurationRecord(value, ["span"])) {
+        errors.push(planError("TSC002", "Calendar duration literal plan is invalid.", path));
       }
       return;
     case "identifier":

@@ -19,3 +19,13 @@ show("Rounds ${rounds.size()}")
 def debugImages = { ->
 	for (int n = 1; n <= missingCount; n++) show("Image ${n}")
 }
+// A 0 placeholder that later holds lists starts as an empty list too (Banjo).
+def actions = 0
+def offer = { -> actions = ["Nothing", "Work"]; actions = actions + ["Use Torch"]; actions = actions - ["Work"] }
+offer()
+show(actions[1])
+// A 0 that later holds lists and whole numbers was a value, and stays (SlideLadderDare's squimage).
+def squareImage = 0
+def pickImage = { n -> if (n > 1) squareImage = [1, 2, 3] else squareImage = 999 }
+pickImage(2)
+show("Image " + squareImage)

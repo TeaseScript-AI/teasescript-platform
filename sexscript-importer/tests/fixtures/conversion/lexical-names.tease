@@ -79,4 +79,17 @@ if askBoolean {
   bonus = 2
 }
 say "Total ${total}, bonus ${bonus}"
+// A declaration is local to its block, so another block's assignment of the same name writes the binding.
+let slots = [0, 0]
+say "First slot?"
+// NOTE SX_BINDING_VARIABLE: Groovy kept slot, which the script assigns without a declaration, in the script's binding; it is declared here with an empty value.
+let slot = 0
+if askBoolean {
+  let slotValue = 0
+  slots[slotValue] = 1
+} else {
+  slot = 1
+  slots[slot] = 2
+}
+say "Slots [${slots.join(", ")}]"
 exit

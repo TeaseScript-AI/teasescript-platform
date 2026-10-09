@@ -164,9 +164,12 @@ test(
           'def count = new File("images/Mistress/Pack ${pack}/").listFiles().size()',
           'def fixed = new File("images/Mistress/Pack 1/").listFiles().size()',
           'def photos = new File("images/Mistress/Pack 1/").listFiles().findAll { it.name ==~ /(?i).*\\.jpg/ }.size()',
+          // fapioh: the pattern interpolates the folder's own value.
+          'def cards = { deck -> return new File(sprintf("images/cards/%s/", [ deck ])).listFiles().findAll { it.name ==~ /$deck-(\\d+).jpg/ }.size() }',
           "def one = [1]",
           // Each count is right only if the tags match: a wrong one reads outside the list.
           'show("Pack ${pack}: ${one[count - 1]} ${one[fixed - 2]} ${one[photos - 1]}")',
+          'show("Cards: ${one[cards("A") - 2]} ${one[cards("B") - 1]} ${one[cards("W")]}")',
           "",
         ].join("\n"),
       );
@@ -175,6 +178,10 @@ test(
         "Mistress/Pack 1/b.png",
         "Mistress/Pack 2/c.JPG",
         "Other/d.jpg",
+        "cards/A/A-001.jpg",
+        "cards/A/A-002.jpg",
+        "cards/A/B-003.jpg",
+        "cards/B/B-001.jpg",
       ].map((file) => ({ path: file }));
       const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
       const source = emitTease(program!);
@@ -187,6 +194,10 @@ test(
         /^let fixed = findImages\(all: \["images-mistress-pack-1"\]\)\.length$/mu,
       );
       assert.match(source, /^let photos = 1$/mu);
+      assert.match(
+        source,
+        /return dict\{ "cards\/a": 2, "cards\/b": 1 \}\.get\("cards\/\$\{deck\}"\.lowercase\(\), default: 0\)/u,
+      );
       assert.match(source, /NOTE SX_IMAGE_TAGS/u);
       assert.match(source, /NOTE SX_IMAGE_COUNT_WORKAROUND/u);
       const result = projectResult.runner(

@@ -61,3 +61,14 @@ show("Positions ${positions.size()}")
 def rows = []
 rows.add("a,b".split(",").collect())
 show("Rows ${rows.size()}")
+// A list of positions sets each of them to the one value (campdrain), and reads the list of their elements
+// (Concentration).
+def stages = ["warm", "warm", "warm", "warm"]
+stages[1, 3] = "slow"
+def paces = [240, 240, 240]
+paces[[0, 2]] = 100 + getRandom(20)
+def firstPaces = { all -> all[0, 1] }
+show("Stages " + stages + " " + paces + " " + firstPaces(paces).size())
+// A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
+def replies = new java.util.concurrent.LinkedBlockingQueue<String>()
+if (replies.size() == 0) show("No replies yet")

@@ -41,7 +41,12 @@ import {
   type PackageResources,
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
+import {
+  withAskQuestions,
+  withNestedBlocks,
+  withoutBlankText,
+  withoutRepeatedText,
+} from "./repeated-text.ts";
 import { withParagraphPicks } from "./paragraph-picks.ts";
 import { withParagraphs } from "./paragraphs.ts";
 import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
@@ -62,6 +67,7 @@ import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
+import { menuIndexes } from "./menu-indexes.ts";
 import {
   BOOLEAN,
   inferType,
@@ -240,6 +246,8 @@ interface LowerContext {
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
   /** Bindings declared with a value, and those something else may change too (declaredWrites). */
   declaredWrites: DeclaredWrites;
+  /** List reads by a menu position that are certainly in range (menu-indexes.ts). */
+  menuIndexes: ReadonlySet<AstNode>;
   /** Lists whose elements the code compares with null (nullElementLists), by binding. */
   nullElementLists: ReadonlySet<string>;
   /** Set while a getBooleans whose null result the next statement tests is lowered (cancelledBooleans). */
@@ -1461,6 +1469,7 @@ export function lowerParsedFile(
     assignedValues: new Map(),
     compoundValues: new Map(),
     declaredWrites: { initialized: new Set(), other: new Set() },
+    menuIndexes: new Set(),
     nullElementLists: new Set(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
@@ -1559,6 +1568,7 @@ export function lowerParsedFile(
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
     context.declaredWrites = declaredWrites(body, context.bindings);
+    context.menuIndexes = menuIndexes(body);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
     context.constantInitializers = declarationInitializers(body, context.types);
@@ -1619,12 +1629,15 @@ export function lowerParsedFile(
       : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
-      withDirectClosureCalls(
-        withPlacedBindings(
-          bindingDeclarations(body, context, members),
-          withPlacedFunctions(
-            context.closureFunctions,
-            withScriptBindings(authoredStatements, body, context, members),
+      withSetUpActions(
+        withDirectClosureCalls(
+          withPlacedBindings(
+            bindingDeclarations(body, context, members),
+            withPlacedFunctions(
+              context.closureFunctions,
+              withScriptBindings(authoredStatements, body, context, members),
+            ),
+            context,
           ),
           context,
         ),
@@ -2350,15 +2363,17 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   const isStale = (statement: IrStatement): boolean =>
     statement.kind === "comment" && [...staleText].some((text) => statement.text.startsWith(text));
   const replaced = new Map<IrStatement, IrStatement[]>();
-  for (const { statement, name, type, first } of result.placeholders) {
+  for (const { statement, name, type, first, start } of result.placeholders) {
     const span = statement.span;
+    const started = start ?? "empty text";
+    const read = start ?? "the empty text";
     const diagnostic: MigrationDiagnostic = {
       code: "SX_PLACEHOLDER_TYPE",
       severity: "warning",
       message:
         first === undefined
-          ? `Groovy started '${name}' as empty text and later stored ${type}; TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where the empty text was read.`
-          : `Groovy started '${name}' as empty text and later stored ${type}; the TeaseScript variable keeps these types in a union and starts as the empty value of the first, ${first}, which differs only where the empty text was read.`,
+          ? `Groovy started '${name}' as ${started} and later stored ${type}; TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where ${read} was read.`
+          : `Groovy started '${name}' as ${started} and later stored ${type}; the TeaseScript variable keeps these types in a union and starts as the empty value of the first, ${first}, which differs only where ${read} was read.`,
       span,
     };
     context.diagnostics.push(diagnostic);
@@ -2602,6 +2617,7 @@ function lowerHelperMethod(
     assignedValues: assignedValues(body, new Map()),
     compoundValues: compoundValues(body, new Map()),
     declaredWrites: declaredWrites(body, new Map()),
+    menuIndexes: menuIndexes(body),
     nullElementLists: new Set(),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
@@ -2741,6 +2757,7 @@ function lowerStatementList(
         later < 0 ? null : readThenDefault(statements[index]!, statements[later], context, false);
       if (merged !== null) consumed.add(later);
     }
+    merged ??= branchReadDefaults(statements, index, consumed, context);
     const statement = merged ?? statements[index]!;
     const span = statementSpan(statement);
     emitComments(takeCommentsBefore(context, span));
@@ -4936,7 +4953,7 @@ function pixelCheck(body: AstNode, node: AstNode, context: LowerContext): IrStat
  * A function that makes a request to an online service, `new URL(address)` with `openStream()` or `openConnection()`,
  * such as a download into a file or a chat with a language model: a package cannot reach the service (owner decision),
  * so the function shows the request as a system notice, with its method and secret values hidden, and returns false,
- * or null, as when the request failed. Null for any other body.
+ * or null, as when the request failed, or the empty text where it answered with text. Null for any other body.
  */
 function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): IrStatement[] | null {
   let address: AstNode | null = null;
@@ -4944,6 +4961,9 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
   let writes = false;
   let answers = true;
   let method = "GET";
+  const returned: Array<AstNode | null> = [];
+  // The values the body sets each of its variables to, to tell what a returned variable holds.
+  const bodyValues = new Map<string, AstNode[]>();
   walkAst(body, (child) => {
     if (
       child.kind === "constructorCall" &&
@@ -4966,9 +4986,38 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     if (child.kind === "return") {
       const value = constantValue(asNode(child.value) ?? undefined);
       if (typeof value !== "boolean") answers = false;
+      returned.push(asNode(child.value));
     }
+    const assignedName =
+      child.kind === "declaration" || (child.kind === "binary" && child.operator === "=")
+        ? variableName(child.left)
+        : null;
+    const assignedValue = assignedName === null ? null : asNode(child.right);
+    if (assignedName !== null && assignedValue !== null)
+      bodyValues.set(assignedName, [...(bodyValues.get(assignedName) ?? []), assignedValue]);
   });
   if (address === null || !opens) return null;
+  // A function that answers with the response's text, as MandysBlackmail's `doSend` with `new String(buffer)`, reads
+  // empty: its callers go on with the text, such as `doSend(...).trim()`.
+  const isText = (value: AstNode | null, depth = 0): boolean => {
+    if (value === null) return false;
+    if (
+      value.kind === "constructorCall" &&
+      (value.type === "String" || value.type === "java.lang.String")
+    )
+      return true;
+    const type = inferType(value, context.types);
+    if (type !== 0 && onlyOf(type, STRING)) return true;
+    const values =
+      value.kind === "variable" ? bodyValues.get(variableName(value) ?? "") : undefined;
+    return (
+      depth < 2 &&
+      values !== undefined &&
+      values.length > 0 &&
+      values.every((other) => isText(other, depth + 1))
+    );
+  };
+  const readsText = !answers && returned.length > 0 && returned.every((value) => isText(value));
   // The body that declared a local address goes, so the notice shows its literal value, or no address.
   const addressName = variableName(address);
   let declared: AstNode | null | undefined;
@@ -4996,7 +5045,7 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     context,
     "SX_ONLINE_REQUEST",
     "warning",
-    `This function ${writes ? "downloaded a web address into a file" : "made a request to an online service"}, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.`,
+    `This function ${writes ? "downloaded a web address into a file" : "made a request to an online service"}, which a package cannot do; a system notice shows the request, with secret values hidden, and the function ${readsText ? "returns the empty text, as a request that read nothing" : "returns as when the request failed"}.`,
     node.span,
   );
   const shown =
@@ -5024,7 +5073,11 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
       node.span,
       context,
     ),
-    { kind: "return", value: { kind: "literal", value: answers ? false : null }, span: node.span },
+    {
+      kind: "return",
+      value: { kind: "literal", value: answers ? false : readsText ? "" : null },
+      span: node.span,
+    },
   ];
 }
 
@@ -5661,6 +5714,162 @@ function withDirectClosureCalls(statements: IrStatement[], context: LowerContext
   return rewritten;
 }
 
+/**
+ * A script variable that starts as null and that one statement of the script's own code later sets to a closure, as
+ * BanjoRPG's world (`def worldTown`, then `worldTown = { ... }`), names that closure's function wherever it is
+ * called once the statement ran: before it the script's own code calls nothing, so no call can find the variable
+ * still null. Such calls call the function directly, and where nothing else reads the variable, the function takes its
+ * name and the variable goes.
+ */
+function withSetUpActions(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  const functions = new Map(
+    statements.flatMap((statement): Array<[string, Extract<IrStatement, { kind: "function" }>]> =>
+      statement.kind === "function" ? [[statement.name, statement]] : [],
+    ),
+  );
+  if (functions.size === 0) return statements;
+  // Every declaration and assignment of a name anywhere, and every variable name the code reads or binds.
+  const declared = new Map<string, number>();
+  const assigned = new Map<string, number>();
+  const bound = new Set<string>();
+  const count = (map: Map<string, number>, name: string): void => {
+    map.set(name, (map.get(name) ?? 0) + 1);
+  };
+  const scan = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(scan);
+    if (!isRecord(value)) return;
+    if (value.kind === "let" && typeof value.name === "string") count(declared, value.name);
+    if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+      count(assigned, String(value.target.name));
+    if (value.kind === "for" && typeof value.variable === "string") bound.add(value.variable);
+    if (value.kind === "function" && Array.isArray(value.parameters))
+      for (const parameter of value.parameters)
+        if (isRecord(parameter) && typeof parameter.name === "string") bound.add(parameter.name);
+    Object.values(value).forEach(scan);
+  };
+  scan(statements);
+  const calls = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(calls);
+    if (!isRecord(value)) return false;
+    if (
+      value.kind === "call" &&
+      (value.name === ACTION_DISPATCHER || functions.has(String(value.name)))
+    )
+      return true;
+    return Object.values(value).some(calls);
+  };
+  // The variables, by the action their one assignment gives them, where the script's own code ran nothing before it.
+  const actions = new Map<string, string>();
+  let ran = false;
+  for (const statement of statements) {
+    if (statement.kind === "function") continue;
+    if (
+      !ran &&
+      statement.kind === "assign" &&
+      statement.operator === "=" &&
+      statement.target.kind === "variable" &&
+      statement.value.kind === "literal" &&
+      statement.value.action === true &&
+      typeof statement.value.value === "string" &&
+      functions.has(statement.value.value)
+    ) {
+      const name = statement.target.name;
+      const start = statements.find(
+        (item) => item.kind === "let" && item.name === name && item.global !== true,
+      );
+      if (
+        start?.kind === "let" &&
+        start.value.kind === "literal" &&
+        start.value.value === null &&
+        declared.get(name) === 1 &&
+        assigned.get(name) === 1 &&
+        !bound.has(name)
+      )
+        actions.set(name, statement.value.value);
+    }
+    ran ||= calls(statement);
+  }
+  if (actions.size === 0) return statements;
+  // Each call passes a number of arguments the function takes.
+  const direct = (value: IrExpression): IrExpression => {
+    const mapped = mapChildren(value, direct);
+    if (
+      mapped.kind !== "call" ||
+      mapped.name !== ACTION_DISPATCHER ||
+      mapped.positional[0]?.kind !== "variable" ||
+      mapped.positional[1]?.kind !== "list"
+    )
+      return mapped;
+    const action = actions.get(mapped.positional[0].name);
+    const target = action === undefined ? undefined : functions.get(action);
+    const args = mapped.positional[1].items;
+    if (
+      action === undefined ||
+      target === undefined ||
+      args.length > target.parameters.length ||
+      args.length < target.parameters.filter((parameter) => parameter.defaultValue === null).length
+    )
+      return mapped;
+    return { kind: "call", name: action, positional: args, named: {}, local: true };
+  };
+  let rewritten = everywhere(statements, direct);
+  // A variable that nothing reads any more goes, and its function takes its name, where nothing else names the
+  // function and the name is free.
+  const read = new Set<string>();
+  const named = new Set<string>();
+  let dispatched = false;
+  const uses = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(uses);
+    if (!isRecord(value)) return;
+    if (value.kind === "variable" && typeof value.name === "string") read.add(value.name);
+    if (value.kind === "literal" && value.action === true && typeof value.value === "string")
+      named.add(value.value);
+    if (value.kind === "call" && value.name === ACTION_DISPATCHER) dispatched = true;
+    Object.values(value).forEach(uses);
+  };
+  const setUp = (item: IrStatement): boolean =>
+    (item.kind === "let" && actions.has(item.name)) ||
+    (item.kind === "assign" && item.target.kind === "variable" && actions.has(item.target.name));
+  uses(rewritten.filter((item) => !setUp(item)));
+  const renamed = new Map<string, string>();
+  for (const [name, action] of actions)
+    if (!read.has(name) && !named.has(action) && !functions.has(name)) renamed.set(action, name);
+  const gone = new Set([...renamed.values()]);
+  rewritten = rewritten.filter(
+    (item) =>
+      !(item.kind === "let" && gone.has(item.name)) &&
+      !(item.kind === "assign" && item.target.kind === "variable" && gone.has(item.target.name)),
+  );
+  if (renamed.size > 0) {
+    const call = (value: IrExpression): IrExpression => {
+      const mapped = mapChildren(value, call);
+      const name = mapped.kind === "call" ? renamed.get(mapped.name) : undefined;
+      return mapped.kind === "call" && name !== undefined ? { ...mapped, name } : mapped;
+    };
+    rewritten = everywhere(rewritten, call).map((item) =>
+      item.kind === "function" && renamed.has(item.name)
+        ? { ...item, name: renamed.get(item.name)! }
+        : item,
+    );
+    for (const action of renamed.keys()) context.actions.delete(action);
+  }
+  if (!dispatched) context.actions.delete(ACTION_DISPATCHER_MARKER);
+  return rewritten;
+}
+
+/** The statements with every expression in them, also in function bodies and other blocks, mapped by `map`. */
+function everywhere(
+  statements: IrStatement[],
+  map: (value: IrExpression) => IrExpression,
+): IrStatement[] {
+  return statements.map((item) =>
+    mapOwnExpressions(
+      withNestedBlocks(item, (body) => everywhere(body, map)),
+      map,
+    ),
+  );
+}
+
 /** The function a closure body only forwards to, passing its own parameters unchanged. */
 function forwardedFunction(
   body: AstNode,
@@ -5899,10 +6108,14 @@ function lowerAssignment(
     ];
   }
   const removesElement = context.elementRemovals.has(node);
+  const targetType = inferType(targetNode, context.types);
   if (
     operator === "-=" &&
     variableTarget !== null &&
-    (removesElement || isListType(inferType(targetNode, context.types)))
+    (removesElement ||
+      isListType(targetType) ||
+      // A list literal is taken only from a list (lowerBinaryExpression).
+      (right.kind === "list" && (targetType & LIST) !== 0 && (targetType & STRING) === 0))
   ) {
     const difference = lowerListDifference(
       { kind: "binary", span: node.span, operator: "-", left: targetNode, right },
@@ -5912,6 +6125,16 @@ function lowerAssignment(
     return difference === null
       ? []
       : [{ kind: "assign", target, operator: "=", value: difference, span }];
+  }
+  // Groovy `text -= part` dropped the first occurrence of the part, as `text - part` does (Banjo's gear).
+  if (operator === "-=" && variableTarget !== null) {
+    const removal = textRemoval(
+      { kind: "binary", span: node.span, operator: "-", left: targetNode, right },
+      context,
+    );
+    if (removal === null) return [];
+    if (removal !== undefined)
+      return [{ kind: "assign", target, operator: "=", value: removal, span }];
   }
   const value =
     right.kind === "map" && variableTarget !== null && operator === "="
@@ -5960,6 +6183,68 @@ function lowerAssignment(
       },
     ];
   }
+  // Groovy `list[[1, 3]] = value`, also written `list[1, 3] = value`, set each of those positions to the one value, as
+  // campdrain's rounds do; those positions had to exist.
+  if (
+    operator === "=" &&
+    target.kind === "index" &&
+    target.dict !== true &&
+    target.index.kind === "list" &&
+    target.index.items.length > 0
+  ) {
+    const once = isPure(right, context) ? null : freshName("value", context);
+    const position = freshName("position", context);
+    return [
+      ...(once === null ? [] : [{ kind: "let" as const, name: once, value, span }]),
+      {
+        kind: "for",
+        variable: position,
+        collection: target.index,
+        body: [
+          {
+            kind: "assign",
+            target: { ...target, index: { kind: "variable", name: position } },
+            operator: "=",
+            value: once === null ? value : { kind: "variable", name: once },
+            span,
+          },
+        ],
+        span,
+      },
+    ];
+  }
+  // A Java array of texts, as `split()` gives, kept the text of a number written into it: `bm2[0] = bm2.size() - 6`.
+  const arrayKey =
+    targetNode.kind === "binary" && targetNode.operator === "["
+      ? bindingKey(asNode(targetNode.left), context.bindings)
+      : null;
+  const arrayValues = arrayKey === null ? [] : (context.assignedValues.get(arrayKey) ?? []);
+  const valueType = inferType(right, context.types);
+  if (
+    operator === "=" &&
+    target.kind === "index" &&
+    arrayValues.length > 0 &&
+    arrayValues.every(
+      (assigned) => assigned.kind === "methodCall" && constantString(assigned.method) === "split",
+    ) &&
+    valueType !== 0 &&
+    onlyOf(valueType, NUMBER | BOOLEAN)
+  )
+    return [
+      {
+        kind: "assign",
+        target,
+        operator: "=",
+        // A whole number or a flag written as it is reads as its text, `"0"`.
+        value:
+          value.kind === "literal" &&
+          (typeof value.value === "boolean" ||
+            (typeof value.value === "number" && Number.isInteger(value.value) && !value.decimal))
+            ? { kind: "literal", value: String(value.value) }
+            : { kind: "template", parts: [{ value }] },
+        span,
+      },
+    ];
   const grown =
     operator === "=" ? growingListWrite(targetNode, right, target, value, span, context) : null;
   if (grown !== null) return grown;
@@ -10253,6 +10538,30 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       const part = slice();
       if (part !== null) return part;
     }
+    // Groovy `list[[0, 2]]` is the list of the elements at those positions, as Concentration's `allScores[[0, 1, 2, 3]]`.
+    const listed = indexNode.kind === "list" ? nodeArray(indexNode.items).map(constantValue) : [];
+    const positions = listed.filter(
+      (position): position is number =>
+        typeof position === "number" && Number.isInteger(position) && position >= 0,
+    );
+    if (
+      targetNode !== null &&
+      !context.writeTargets.has(node) &&
+      positions.length > 0 &&
+      positions.length === listed.length &&
+      // A parameter of unknown type, as Concentration's, was given a list.
+      (isKnownListExpression(targetNode, context) ||
+        inferType(targetNode, context.types) === UNKNOWN) &&
+      isRepeatableExpression(targetNode)
+    )
+      return {
+        kind: "list",
+        items: positions.map((position) => ({
+          kind: "index",
+          target,
+          index: { kind: "literal", value: position },
+        })),
+      };
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
     if (
       targetNode !== null &&
@@ -10370,6 +10679,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const index = lowerExpression(indexNode, context);
     if (index === null) return null;
+    // A menu position that names an element of the list the menu offered reads it as it is (menu-indexes.ts).
+    if (context.menuIndexes.has(node)) return { kind: "index", target, index };
     // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on, or that tests a
     // position for null.
     if (
@@ -10419,6 +10730,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "+") return lowerPlus(node, context);
   if (context.elementRemovals.has(node)) return lowerListDifference(node, context, true);
   if (operator === "-" && isListType(inferType(asNode(node.left), context.types)))
+    return lowerListDifference(node, context);
+  // Groovy took a list literal only from a list, so a left side that may be a list is one: a variable that starts as a
+  // 0 placeholder (Banjo's `locationActions - ["Work"]`).
+  const leftType = operator === "-" ? inferType(asNode(node.left), context.types) : 0;
+  if (
+    operator === "-" &&
+    asNode(node.right)?.kind === "list" &&
+    (leftType & LIST) !== 0 &&
+    (leftType & STRING) === 0
+  )
     return lowerListDifference(node, context);
   if (operator === "-") {
     const removed = textRemoval(node, context);
@@ -11102,54 +11423,143 @@ function laterReadDefault(
 ): number {
   const read = typedReadAssignment(statements[index]!, context);
   if (read === null) return -1;
-  // Whether code between could see the variable before its default, or skip the default.
-  const interferes = (statement: AstNode): boolean => {
-    let found = false;
-    walkAst(statement, (child) => {
-      if (child.kind === "variable" && variableName(child) === read.name) found = true;
-      else if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
-      else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
-        found ||= legacyApiCall(child, context) === null;
-    });
-    return found;
-  };
   for (let later = index + 1; later < statements.length; later += 1) {
     if (consumed.has(later)) continue;
     const statement = statements[later]!;
     const found = nullDefault(statement);
-    if (found?.name === read.name) {
+    if (found?.name === read.name)
       // The default moves up to the read, before the code between, which must not declare or set what it reads.
-      const reads = new Set<string>();
-      walkAst(found.fallback, (child) => {
-        const name = child.kind === "variable" ? variableName(child) : null;
-        if (name !== null) reads.add(name);
-      });
-      const sets = (between: AstNode): boolean => {
-        let found = false;
-        walkAst(between, (child) => {
-          const assigns =
-            child.kind === "declaration" ||
-            (child.kind === "binary" &&
-              typeof child.operator === "string" &&
-              /=$/u.test(child.operator) &&
-              !["==", "!=", "<=", ">="].includes(child.operator));
-          const name = assigns ? variableName(child.left) : null;
-          if (name !== null && reads.has(name)) found = true;
-        });
-        return found;
-      };
-      return statements.slice(index + 1, later).some(sets) ? -1 : later;
-    }
-    if (interferes(statement)) return -1;
+      return statements
+        .slice(index + 1, later)
+        .some((between) => setsFallback(between, found.fallback))
+        ? -1
+        : later;
+    if (seesBeforeDefault(statement, read.name, context)) return -1;
   }
   return -1;
+}
+
+/**
+ * Typed reads in the branch of an `if` that the null default after the `if` completes, as shockblackjack's
+ * `if (...) { lives = loadInteger(k) }` and then `if (lives == null) lives = 6`: a fixed default joins each read in the
+ * branch, where readThenDefault merges them, under laterReadDefault's conditions on the code between. The default after
+ * the `if` goes too where nothing else gives the variable null; it stays where it still sees such a value. Null when
+ * the `if` has no such reads.
+ */
+function branchReadDefaults(
+  statements: readonly AstNode[],
+  index: number,
+  consumed: Set<number>,
+  context: LowerContext,
+): AstNode | null {
+  const statement = statements[index]!;
+  const otherwise = asNode(statement.else);
+  if (statement.kind !== "if" || (otherwise !== null && otherwise.kind !== "empty")) return null;
+  const branch = [...branchStatements(statement.then)];
+  let changed = false;
+  for (let position = branch.length - 1; position >= 0; position -= 1) {
+    const read = typedReadAssignment(branch[position]!, context);
+    const rest = branch.slice(position + 1);
+    if (read === null || rest.some((after) => seesBeforeDefault(after, read.name, context)))
+      continue;
+    for (let later = index + 1; later < statements.length; later += 1) {
+      if (consumed.has(later)) continue;
+      const found = nullDefault(statements[later]!);
+      if (found?.name !== read.name) {
+        if (seesBeforeDefault(statements[later]!, read.name, context)) break;
+        continue;
+      }
+      // Only a fixed default moves into the branch; another read, as tutorial's chain of loads, stays where it is.
+      const fixed = constantValue(found.fallback);
+      if (fixed === undefined || fixed === null) break;
+      const between = [...rest, ...statements.slice(index + 1, later)];
+      if (between.some((other) => setsFallback(other, found.fallback))) break;
+      // The copy carries no position, so that the merged read keeps its own lines.
+      branch.splice(position + 1, 0, { ...statements[later]!, span: null });
+      changed = true;
+      if (onlyNonNullOtherwise(read, context)) consumed.add(later);
+      break;
+    }
+  }
+  if (!changed) return null;
+  const block = asNode(statement.then);
+  return {
+    ...statement,
+    then: { kind: "block", span: block?.span ?? statement.span, statements: branch },
+  };
+}
+
+/** Whether every value the variable of a typed read gets elsewhere is one of a known type without null. */
+function onlyNonNullOtherwise(
+  read: { name: string; read: AstNode; target: AstNode },
+  context: LowerContext,
+): boolean {
+  const key = bindingKey(read.target, context.bindings);
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  return (
+    values !== undefined &&
+    values.every((value) => {
+      if (value === read.read) return true;
+      const type = inferType(value, context.types);
+      return type !== 0 && type !== UNKNOWN && (type & NULL) === 0;
+    })
+  );
+}
+
+/**
+ * Whether code between a read and its null default could see the variable before its default, or skip the default:
+ * it uses the variable, leaves the block, or calls script code. A branch that never runs, `if (debug)` with a flag the
+ * script declares false and never sets (jackoffrace), sees nothing.
+ */
+function seesBeforeDefault(statement: AstNode, name: string, context: LowerContext): boolean {
+  if (neverRuns(statement, context)) return false;
+  let found = false;
+  walkAst(statement, (child) => {
+    if (child.kind === "variable" && variableName(child) === name) found = true;
+    else if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
+    else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
+      found ||= legacyApiCall(child, context) === null;
+  });
+  return found;
+}
+
+/** `if (flag) { ... }` without an else, where the script declares the flag false and never sets it again. */
+function neverRuns(statement: AstNode, context: LowerContext): boolean {
+  const otherwise = asNode(statement.else);
+  if (statement.kind !== "if" || (otherwise !== null && otherwise.kind !== "empty")) return false;
+  const condition = asNode(statement.condition);
+  const tested = condition?.kind === "boolean" ? asNode(condition.value) : condition;
+  const key = tested?.kind === "variable" ? bindingKey(tested, context.bindings) : null;
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  return values?.length === 1 && constantValue(values[0]!) === false;
+}
+
+/** Whether a statement declares or sets a variable that a null default's value reads. */
+function setsFallback(statement: AstNode, fallback: AstNode): boolean {
+  const reads = new Set<string>();
+  walkAst(fallback, (child) => {
+    const name = child.kind === "variable" ? variableName(child) : null;
+    if (name !== null) reads.add(name);
+  });
+  let found = false;
+  walkAst(statement, (child) => {
+    const assigns =
+      child.kind === "declaration" ||
+      (child.kind === "binary" &&
+        typeof child.operator === "string" &&
+        /=$/u.test(child.operator) &&
+        !["==", "!=", "<=", ">="].includes(child.operator));
+    const name = assigns ? variableName(child.left) : null;
+    if (name !== null && reads.has(name)) found = true;
+  });
+  return found;
 }
 
 /** `x = loadInteger(k)` and the other typed storage and online reads, as the variable and the read; else null. */
 function typedReadAssignment(
   statement: AstNode,
   context: LowerContext,
-): { name: string; read: AstNode } | null {
+): { name: string; read: AstNode; target: AstNode } | null {
   const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
   if (
     expression === null ||
@@ -11159,11 +11569,14 @@ function typedReadAssignment(
     )
   )
     return null;
-  const name = variableName(expression.left);
+  const target = asNode(expression.left);
+  const name = variableName(target);
   const read = asNode(expression.right);
   const call = read === null ? null : (legacyApiCall(read, context)?.name ?? null);
-  if (name === null || read === null || call === null) return null;
-  return TYPED_STORAGE_LOADS.has(call) || TYPED_ONLINE_LOADS.has(call) ? { name, read } : null;
+  if (target === null || name === null || read === null || call === null) return null;
+  return TYPED_STORAGE_LOADS.has(call) || TYPED_ONLINE_LOADS.has(call)
+    ? { name, read, target }
+    : null;
 }
 
 /** `if (x == null) x = d` without an else, as the variable and the default; else null. */
@@ -11446,7 +11859,8 @@ function textRemoval(node: AstNode, context: LowerContext): IrExpression | null 
   const rightNode = asNode(node.right);
   if (leftNode === null || rightNode === null) return undefined;
   const left = inferType(leftNode, context.types);
-  if (!onlyOf(left, STRING) || left === 0) return undefined;
+  // A null left side failed in Groovy, so text or null is text (Banjo's `gear` after a loadString).
+  if (!onlyOf(left, STRING | NULL) || (left & STRING) === 0) return undefined;
   const text = lowerExpression(leftNode, context);
   const part = lowerExpression(rightNode, context);
   if (text === null || part === null) return null;
@@ -14506,8 +14920,8 @@ function imageCount(
 /**
  * A legacy image count (imageListing) with a name filter as the number of the package's images whose names match,
  * counted when it is converted, since tags do not filter by file name: a number for a fixed folder, and for a folder
- * that depends on values, a dict of the matching folders' counts read with the folder's lower-case path. Only a
- * pattern of literal text applies.
+ * that depends on values, a dict of the matching folders' counts read with the folder's lower-case path. The pattern
+ * is literal text, or interpolates variables of the folder's path (folderNamePattern).
  */
 function conversionTimeImageCount(
   listing: NonNullable<ReturnType<typeof imageListing>>,
@@ -14515,13 +14929,20 @@ function conversionTimeImageCount(
   context: LowerContext,
   media: readonly MediaFile[],
 ): IrExpression | undefined {
-  const pattern =
-    listing.nameFilter === null ? null : namePattern(asNode(listing.nameFilter.right));
-  if (listing.nameFilter !== null && pattern === null) return undefined;
+  const filter = listing.nameFilter === null ? null : asNode(listing.nameFilter.right);
+  const fixedPattern = namePattern(filter);
+  const folderValues = listing.segments.flatMap((parts) =>
+    parts.flatMap((part) => ("value" in part ? [part.value] : [])),
+  );
+  const patternOf =
+    fixedPattern !== null ? () => fixedPattern : folderNamePattern(filter, folderValues);
+  if (listing.nameFilter !== null && patternOf === null) return undefined;
   const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const folderPattern = new RegExp(
     `^${listing.segments
-      .map((parts) => parts.map((part) => ("text" in part ? escape(part.text) : "[^/]*")).join(""))
+      .map((parts) =>
+        parts.map((part) => ("text" in part ? escape(part.text) : "([^/]*)")).join(""),
+      )
       .join("/")}$`,
     "iu",
   );
@@ -14530,7 +14951,9 @@ function conversionTimeImageCount(
     const slash = file.path.replaceAll("\\", "/").lastIndexOf("/");
     const folder = slash < 0 ? "" : file.path.replaceAll("\\", "/").slice(0, slash);
     const fileName = file.path.replaceAll("\\", "/").slice(slash + 1);
-    if (!folderPattern.test(folder)) continue;
+    const match = folderPattern.exec(folder);
+    if (match === null) continue;
+    const pattern = patternOf === null ? null : patternOf(match.slice(1));
     const key = folder.toLowerCase();
     counts.set(key, (counts.get(key) ?? 0) + (pattern === null || pattern.test(fileName) ? 1 : 0));
   }
@@ -14584,6 +15007,44 @@ function namePattern(node: AstNode | null): RegExp | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A Groovy name pattern that interpolates variables of the counted folder's path, as fapioh's `/$cardDeck-(\d+).jpg/`
+ * for `sprintf("images/fapioh/cards/%s/", [cardDeck])`: given the text each value of the path has in one folder, the
+ * pattern with that text in place of the variable, which Groovy inserted into the expression as it was. Null for
+ * other patterns.
+ */
+function folderNamePattern(
+  node: AstNode | null,
+  folderValues: readonly IrExpression[],
+): ((folderTexts: readonly string[]) => RegExp | null) | null {
+  if (node?.kind !== "gstring") return null;
+  const parts: unknown[] = Array.isArray(node.strings) ? node.strings : [];
+  const strings = parts.filter((part): part is string => typeof part === "string");
+  const positions = nodeArray(node.values).map((value) => {
+    const name = variableName(value);
+    return folderValues.findIndex((part) => part.kind === "variable" && part.name === name);
+  });
+  if (positions.length === 0 || positions.includes(-1) || strings.length !== parts.length)
+    return null;
+  return (folderTexts) => {
+    const source = strings
+      .map((part, index) =>
+        index < positions.length ? `${part}${folderTexts[positions[index]!] ?? ""}` : part,
+      )
+      .join("");
+    const insensitive = source.startsWith("(?i)");
+    try {
+      return new RegExp(
+        `^(?:${insensitive ? source.slice(4) : source})$`,
+        insensitive ? "iu" : "u",
+      );
+    } catch {
+      // Groovy failed on a pattern that is no regular expression; no name matches it here.
+      return /(?!)/u;
+    }
+  };
 }
 
 /**
@@ -17999,26 +18460,37 @@ function withScriptBindings(
   members: ReadonlySet<string> = new Set(),
 ): IrStatement[] {
   if (body === null || context.functionDepth > 0) return statements;
-  const declared = new Set<string>();
+  // A `def` is local to its block, so an assignment where no enclosing block has declared the name writes the binding,
+  // also when a sibling block declares a local of that name (SecretSexScript's `Slot1`).
   const assigned = new Set<string>();
-  const collect = (node: AstNode): void => {
+  const collect = (node: AstNode, scopes: ReadonlyArray<Set<string>>): void => {
     if (node.kind === "closure") return;
-    if (node.kind === "declaration") {
-      const name = variableName(node.left);
-      if (name !== null) declared.add(name);
-    } else if (node.kind === "for") {
-      const name = text(node.variable);
-      if (name !== null) declared.add(name);
-    } else if (node.kind === "binary" && node.operator === "=") {
-      const name = variableName(node.left);
-      if (name !== null) assigned.add(name);
+    if (node.kind === "block" || node.kind === "for") {
+      const scope = new Set<string>();
+      const loopVariable = node.kind === "for" ? text(node.variable) : null;
+      if (loopVariable !== null) scope.add(loopVariable);
+      for (const child of nodeChildren(node)) collect(child, [...scopes, scope]);
+      return;
     }
-    for (const child of nodeChildren(node)) collect(child);
+    if (node.kind === "declaration") {
+      const right = asNode(node.right);
+      if (right !== null) collect(right, scopes);
+      const left = asNode(node.left);
+      for (const target of left?.kind === "arguments" ? nodeArray(left.items) : [left]) {
+        const name = variableName(target);
+        if (name !== null) scopes.at(-1)!.add(name);
+      }
+      return;
+    }
+    if (node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null && !scopes.some((scope) => scope.has(name))) assigned.add(name);
+    }
+    for (const child of nodeChildren(node)) collect(child, scopes);
   };
-  collect(body);
+  collect(body, [new Set()]);
   const names = [...assigned].filter(
     (name) =>
-      !declared.has(name) &&
       !members.has(name) &&
       !context.functions.has(name) &&
       !context.packageFunctions.has(name) &&
@@ -18031,16 +18503,11 @@ function withScriptBindings(
     if (value.kind === "variable" && value.name === name) return true;
     return Object.values(value).some((child) => mentions(child, name));
   };
-  // A name the conversion already declares, such as a destructured variable, keeps its declaration.
-  const lets = new Set<string>();
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(visit);
-    else if (isRecord(value)) {
-      if (value.kind === "let" && typeof value.name === "string") lets.add(value.name);
-      Object.values(value).forEach(visit);
-    }
-  };
-  visit(statements);
+  // A name the conversion already declares at the top, such as a destructured variable, keeps its declaration; a
+  // declaration inside a block is a local of that block, which the binding's declaration renames.
+  const lets = new Set(
+    statements.flatMap((statement) => (statement.kind === "let" ? [statement.name] : [])),
+  );
   const before = new Map<number, string[]>();
   const replaced = new Map<number, IrStatement>();
   for (const name of names) {

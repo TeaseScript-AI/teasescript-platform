@@ -1,4 +1,4 @@
-import { durationParts, formatDuration } from "../duration.js";
+import { formatDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
@@ -27,8 +27,8 @@ import type {
 } from "./serializable-values.js";
 import {
   describeRuntimeValue,
+  isAnyDuration,
   isDict,
-  isDuration,
   isList,
   isMediaHandle,
   isMessageHandle,
@@ -102,7 +102,7 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (isFiniteNumber(value)) return String(Object.is(value, -0) ? 0 : value);
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
-  if (isDuration(value)) return formatDuration(durationParts(value));
+  if (isAnyDuration(value)) return formatDuration(value);
   if (isScriptReference(value)) return scriptNotation(value, span);
   throw fault(
     "TSR021",
@@ -146,7 +146,7 @@ export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
     isFiniteNumber(value) ||
     typeof value === "boolean" ||
     value === null ||
-    isDuration(value) ||
+    isAnyDuration(value) ||
     isTemporal(value) ||
     isScriptReference(value)
   );

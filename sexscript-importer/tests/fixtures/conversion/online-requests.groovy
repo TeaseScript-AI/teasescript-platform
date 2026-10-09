@@ -18,3 +18,13 @@ show("Reply: " + ask("Hello"))
 // A request whose address the function declared shows that address.
 def ping = { -> def address = "http://localhost:1234/ping"; def c = new URL(address).openConnection(); return c.responseCode == 200 }
 show("Ping " + ping())
+// A function that answers with the response's text reads empty, so that its caller goes on with the text.
+def send = { data ->
+  def connection = new java.net.URL("http://example.org/proxy.php").openConnection()
+  connection.setRequestMethod("POST")
+  def buffer = new byte[1024]
+  connection.getInputStream().read(buffer, 0, 1024)
+  def response = new String(buffer)
+  return response
+}
+if (!send(["action": "test"]).trim().equals("ok")) show("Your connection to the internet is down.")

@@ -213,3 +213,20 @@ if (shelves[0][0] == null || shelves[0][1] == null) show("Empty shelf.")
 def anyValue = load("game.any" + slot)
 def checkAny = { item = loadString("game.anyText") -> return item == "" }
 show("Any " + checkAny(anyValue))
+// A read in a branch takes the default after the branch, which goes where nothing else gives the variable null
+// (shockblackjack); a branch under a flag the script declares false and never sets does not see the read
+// (jackoffrace).
+def debug = false
+def lives = 6
+if (loadBoolean("game.resume")) lives = loadInteger("game.lives")
+def moved = false
+if (lives == null) lives = 6
+def score = 0
+def fetch = {
+  score = receiveInteger("game.score")
+  if (debug) show("Score " + score)
+  if (score == null) score = 0
+}
+fetch()
+def lifeCount = { show("Lives " + (lives - 1) + ", score " + (score + 1)) }
+lifeCount()

@@ -52,3 +52,18 @@ while (picked) {
   picked = resets[getSelectedValue("Again?", resets.collect { it.lbl })].ID
   if (picked) show("Reset " + picked)
 }
+// simpletimer: a menu over a list a loop built with one option for each saved timer after "New" names a timer where
+// its position is above 0.
+def timers = [[name: "Short"], [name: "Long"]]
+def timerNames = ["*** New ***"]
+for (timer in timers) timerNames.add(timer.name)
+def timerChoice = getSelectedValue("Which timer?", timerNames)
+if (timerChoice != 0) show("Timer " + timers[timerChoice - 1].name)
+// DisciplineClinic's pending offenses: a counter from 0 that only grows reads the list while it is below its size.
+def pendingOffenses = ["late", "rude"]
+def p = pendingOffenses.size()
+p = 0
+while (p < pendingOffenses.size()) {
+	if (loadBoolean("pending." + pendingOffenses[p])) show("Pending: " + pendingOffenses[p])
+	p++
+}

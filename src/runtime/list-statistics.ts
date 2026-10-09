@@ -1,4 +1,4 @@
-import { durationFamily, durationParts, storedDuration, type DurationParts } from "../duration.js";
+import { exactDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
@@ -26,6 +26,7 @@ import {
 import {
   describeRuntimeValue,
   isDict,
+  isCalendarDuration,
   isDuration,
   isList,
   isObject,
@@ -93,48 +94,39 @@ function propertyValue(
   return found.value;
 }
 
-/** Numbers, or durations of one family as their amounts in that family. */
+/** Numbers, or exact durations as their milliseconds. */
 type Amounts =
   | { readonly kind: "numbers"; readonly values: readonly number[] }
-  | { readonly kind: "durations"; readonly values: readonly DurationParts[] };
+  | { readonly kind: "durations"; readonly values: readonly number[] };
 
 /**
- * `values` as numbers or as durations of one family. `exact` requires durations of exact time, because days, weeks,
- * months, and years have no fixed length to average or interpolate.
+ * `values` as numbers or as exact durations. A calendar duration has no fixed length to add, average, or interpolate
+ * (ADR 0026).
  */
 function amountsOf(
   name: string,
   values: readonly SerializableRuntimeValue[],
-  exact: boolean,
   span: SourceSpan,
 ): Amounts {
   const numbers = values.filter((value) => typeof value === "number");
   if (numbers.length === values.length) return { kind: "numbers", values: numbers };
   const other = values.find((value) => typeof value !== "number" && !isDuration(value));
-  if (other !== undefined || !values.every(isDuration))
+  if (other !== undefined)
     throw fault(
       "TSR060",
-      other === undefined
-        ? `${name}(...) needs values of one kind: all numbers or all durations.`
-        : `${name}(...) needs numbers or durations, not ${describeRuntimeValue(other)}.`,
+      `${name}(...) needs numbers or durations, not ${describeRuntimeValue(other)}.${isCalendarDuration(other) ? " A calendar day or month has no fixed length." : ""}`,
       span,
     );
-  const parts = values.map((value) => durationParts(value));
-  const families = new Set(parts.map(durationFamily));
-  families.delete("zero");
-  if (families.size > 1 || families.has("mixed"))
+  if (!values.every(isDuration))
     throw fault(
       "TSR060",
-      `${name}(...) needs durations of one kind: exact time, days and weeks, or months and years.`,
+      `${name}(...) needs values of one kind: all numbers or all durations.`,
       span,
     );
-  if (exact && families.size === 1 && !families.has("exact"))
-    throw fault(
-      "TSR060",
-      `${name}(...) needs exact durations, such as minutes or hours: days, weeks, months, and years have no fixed length.`,
-      span,
-    );
-  return { kind: "durations", values: parts };
+  return {
+    kind: "durations",
+    values: values.filter(isDuration).map((value) => value.milliseconds),
+  };
 }
 
 /** `sum`, `average`, `median`, `percentile`, or `stddev` of a list of numbers or durations (V30 §16). */
@@ -162,36 +154,19 @@ export function listStatistic(
       span,
     );
   const share = percentile ? percentage(positional[1]!, span) : 0;
-  const amounts = amountsOf(name, values, name !== "sum", span);
+  const amounts = amountsOf(name, values, span);
   if (amounts.kind === "durations" && name === "sum") {
-    // Exact like the other statistics: months and days as whole numbers, and milliseconds rounded once.
-    let months = 0n;
-    let days = 0n;
-    for (const parts of amounts.values) {
-      months += BigInt(parts.months);
-      days += BigInt(parts.days);
-    }
-    const milliseconds = quotient(
-      sum(amounts.values.map((parts) => exact(parts.milliseconds))),
-      ONE,
-    );
-    const limit = BigInt(Number.MAX_SAFE_INTEGER);
-    if (
-      !Number.isFinite(milliseconds) ||
-      months > limit ||
-      months < -limit ||
-      days > limit ||
-      days < -limit
-    )
+    // Exact like the other statistics: milliseconds rounded once.
+    const milliseconds = quotient(sum(amounts.values.map((value) => exact(value))), ONE);
+    if (!Number.isFinite(milliseconds))
       throw fault(
         "TSR036",
         `${name}(...) gives a duration too long to represent. Use shorter durations.`,
         span,
       );
-    return storedDuration({ months: Number(months), days: Number(days), milliseconds });
+    return exactDuration(milliseconds);
   }
-  const numbers =
-    amounts.kind === "numbers" ? amounts.values : amounts.values.map((parts) => parts.milliseconds);
+  const numbers = amounts.values;
   const result = statistic(name, numbers, share);
   if (!Number.isFinite(result))
     throw fault(
@@ -199,11 +174,7 @@ export function listStatistic(
       `${name}(...) gives a number too large to represent. Use smaller values.`,
       span,
     );
-  return amounts.kind === "numbers"
-    ? result === 0
-      ? 0
-      : result
-    : storedDuration({ months: 0, days: 0, milliseconds: result });
+  return amounts.kind === "numbers" ? (result === 0 ? 0 : result) : exactDuration(result);
 }
 
 /** A percentage from 0 through 100, as `percentile` and `chance` take it. */
@@ -321,9 +292,8 @@ export function linearRegression(
       ? undefined
       : items.map((item) => propertyValue(name, item, "x", named.x!, span));
   const positions = positionsOf(xs, ys.length, span);
-  const amounts = amountsOf(name, ys, true, span);
-  const values =
-    amounts.kind === "numbers" ? amounts.values : amounts.values.map((parts) => parts.milliseconds);
+  const amounts = amountsOf(name, ys, span);
+  const values = amounts.values;
   if (positions.offsets.every((offset) => offset.n === 0n))
     throw fault(
       "TSR036",
@@ -338,11 +308,7 @@ export function linearRegression(
       span,
     );
   const amount = (value: number): SerializableRuntimeValue =>
-    amounts.kind === "numbers"
-      ? value === 0
-        ? 0
-        : value
-      : storedDuration({ months: 0, days: 0, milliseconds: value });
+    amounts.kind === "numbers" ? (value === 0 ? 0 : value) : exactDuration(value);
   return createSerializableObject([
     { name: "slope", value: amount(slope) },
     { name: "intercept", value: amount(intercept) },
@@ -459,14 +425,11 @@ export function predict(
   const slope = property("slope");
   const intercept = property("intercept");
   const start = property("start");
-  // The amounts of a line: numbers, or durations of exact time.
+  // The amounts of a line: numbers, or exact durations.
   const amount = (value: SerializableRuntimeValue | undefined): number | undefined =>
     typeof value === "number"
       ? value
-      : value !== undefined &&
-          isDuration(value) &&
-          (value.months ?? 0) === 0 &&
-          (value.days ?? 0) === 0
+      : value !== undefined && isDuration(value)
         ? value.milliseconds
         : undefined;
   const slopeAmount = amount(slope);
@@ -514,11 +477,7 @@ export function predict(
       "predict(...) gives a number too large to represent. Use smaller values.",
       span,
     );
-  return durations
-    ? storedDuration({ months: 0, days: 0, milliseconds: value })
-    : value === 0
-      ? 0
-      : value;
+  return durations ? exactDuration(value) : value === 0 ? 0 : value;
 }
 
 /**

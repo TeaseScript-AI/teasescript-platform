@@ -287,7 +287,16 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   Toy 1). A package with a call whose method name is computed keeps them blocking, since such a call could reach any
   function.
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
-  arguments and returns null for an unknown action; Groovy failed in both cases.
+  arguments and returns null for an unknown action; Groovy failed in both cases. A script variable that starts as null
+  and that one later statement sets to a closure, before which the script's own code calls nothing, is called
+  directly instead, and its function takes the variable's name where nothing else reads it (BanjoRPG's world:
+  `worldEnd("quitmenu")`).
+- A list position that may be negative, which Groovy counted from the end, or past the end, where Groovy read null,
+  goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
+  names an element: a menu position, after a test that rules out the menu's written options, of a menu over
+  `["Back"] + list` or over a list that a loop built with one option for each element of the read list, and a counter
+  that started at 0 or more, only grew since, and is tested below the list's size, with nothing in between that may
+  change the position, the list's length, or anything else (a call of the script's own functions).
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
   scalars, membership for lists, bounds for number ranges (tested in both directions when a bound is known only at
   runtime). A text range holds only the texts its iteration reaches (`"a".."c"` holds `"b"` but not `"ba"`), so a
@@ -489,8 +498,14 @@ Concrete points the migration surfaced in TeaseScript itself:
   `absoluteDateTime` from `getAbsoluteDateTime()` (#759, formerly `timestamp`) is the fixed moment for "how long ago".
   Legacy code measured elapsed time in Unix seconds (`getTime()`, 18 scripts), so it uses
   `getAbsoluteDateTime().toSeconds()`, while fields and formats keep the local
-  getters. `day` and `week` are calendar units like `month` and `year` (`1 day` is tomorrow's same local clock time),
-  so legacy arithmetic in seconds stays exact: the importer keeps such values as numbers and emits no `day` or `week`.
+  getters. Legacy arithmetic in seconds stays exact numbers. A legacy calendar step, Groovy's `date + n` or
+  `Calendar.add` of a day, month, or year field, keeps the same local clock time across a daylight-saving change, so it
+  becomes `n * 1 calendar day` (or a `calendar` month or year; #763), also on a `date`, which moves by calendar units
+  only; `Calendar.add` of a time field was elapsed time, which moves the moment:
+  `c = (c.toAbsoluteDateTime() + n * 1 min).toDateTime()`. A difference of dates counts calendar days, `(a - b).days`.
+  One step differs: a calendar step that lands in the hour the spring change skips. Java moved it back by that hour
+  (02:30 a day before the change, plus one day, gave 01:30), while TeaseScript keeps 02:30, a local time no moment has,
+  which becomes 03:30 where it is made a moment (ChastityRoulette's `today + Total` days from the current time).
 - **No absoluteDateTime from a number (#532).** Domme3 stores the chastity start as Unix seconds
   (`save("domme3.chastitystart", getTime())`) and later formats it (`new Date((long)chastitystart * 1000)`, 3 sites).
   #532 converts an absoluteDateTime to seconds but builds none from a number, because seconds and milliseconds would be

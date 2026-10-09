@@ -9,6 +9,7 @@ import {
 /** The kinds of record a choice value may be besides a scalar. */
 const CHOICE_VALUE_KINDS: ReadonlySet<string> = new Set([
   "duration",
+  "calendarDuration",
   "date",
   "time",
   "datetime",

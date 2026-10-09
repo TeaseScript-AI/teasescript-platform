@@ -1,18 +1,16 @@
 import type { Expression, Program } from "./ast.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
-  addDurationParts,
-  divideDurationParts,
+  addDurations,
+  divideDuration,
   durationFamily,
-  durationLiteralParts,
+  durationLiteralValue,
   durationParts,
-  durationRatio,
+  durationQuotient,
   formatDuration,
-  negateDurationParts,
-  scaleDurationParts,
-  storedDuration,
-  type DurationParts,
-  type StoredDuration,
+  negateDuration,
+  scaleDuration,
+  type AnyDuration,
 } from "./duration.js";
 import type { SourceSpan } from "./source.js";
 import { recordValidationTestWork } from "./validation-testing.js";
@@ -77,8 +75,8 @@ function* staticNumberTask(expression: Expression): CompileTask<number | undefin
   return negate ? -value : value;
 }
 
-/** A scalar known at compile time: text, a finite number, a boolean, `null`, or a duration. */
-export type StaticScalar = string | number | boolean | null | StoredDuration;
+/** A scalar known at compile time: text, a finite number, a boolean, `null`, or an exact or calendar duration. */
+export type StaticScalar = string | number | boolean | null | AnyDuration;
 
 /**
  * The value of a literal, of interpolated text whose parts are known, or of number and duration arithmetic on known
@@ -92,7 +90,7 @@ function staticScalar(expression: Expression): { readonly value: StaticScalar } 
  * A known finite number or duration, with the runtime's operations; anything else is `undefined`. A step that overflows
  * is reported by `findVisibleOverflows`, so callers check only the finite result.
  */
-export function staticQuantity(expression: Expression): number | StoredDuration | undefined {
+export function staticQuantity(expression: Expression): number | AnyDuration | undefined {
   const known = staticScalar(expression)?.value;
   return typeof known === "number" || isStaticDuration(known) ? known : undefined;
 }
@@ -103,7 +101,7 @@ function scalarText(value: StaticScalar): string {
   if (typeof value === "number") return String(Object.is(value, -0) ? 0 : value);
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
-  return formatDuration(durationParts(value));
+  return formatDuration(value);
 }
 
 function* staticScalarTask(
@@ -132,8 +130,8 @@ function* staticScalarTask(
     case "nullLiteral":
       return { value: null };
     case "durationLiteral": {
-      const parts = durationLiteralParts(expression);
-      return typeof parts === "string" ? undefined : finite(storedDuration(parts));
+      const value = durationLiteralValue(expression);
+      return typeof value === "string" ? undefined : finite(value);
     }
     case "unaryExpression": {
       if (expression.operator !== "+" && expression.operator !== "-") return undefined;
@@ -141,9 +139,7 @@ function* staticScalarTask(
       const value = known?.value;
       if (typeof value === "number") return { value: expression.operator === "+" ? value : -value };
       if (!isStaticDuration(value)) return undefined;
-      return expression.operator === "+"
-        ? { value }
-        : { value: storedDuration(negateDurationParts(durationParts(value))) };
+      return expression.operator === "+" ? { value } : { value: negateDuration(value) };
     }
     case "binaryExpression": {
       const left = yield* compileChild(staticScalarTask(expression.left));
@@ -182,29 +178,28 @@ function arithmetic(
         return undefined;
     }
   }
-  const known = (parts: DurationParts | string) =>
-    typeof parts === "string" ? undefined : storedDuration(parts);
+  const known = (duration: AnyDuration | string) =>
+    typeof duration === "string" ? undefined : duration;
   if (isStaticDuration(left) && isStaticDuration(right)) {
-    const [a, b] = [durationParts(left), durationParts(right)];
-    if (operator === "+") return storedDuration(addDurationParts(a, b));
-    if (operator === "-") return storedDuration(addDurationParts(a, b, -1));
+    if (operator === "+") return addDurations(left, right);
+    if (operator === "-") return addDurations(left, right, -1);
     if (operator === "/") {
-      const ratio = durationRatio(a, b);
+      const ratio = durationQuotient(left, right);
       return typeof ratio === "string" ? undefined : ratio;
     }
     return undefined;
   }
   if (isStaticDuration(left) && typeof right === "number") {
-    if (operator === "*") return known(scaleDurationParts(durationParts(left), right));
-    if (operator === "/") return known(divideDurationParts(durationParts(left), right));
+    if (operator === "*") return known(scaleDuration(left, right));
+    if (operator === "/") return known(divideDuration(left, right));
     return undefined;
   }
   if (typeof left === "number" && isStaticDuration(right) && operator === "*")
-    return known(scaleDurationParts(durationParts(right), left));
+    return known(scaleDuration(right, left));
   return undefined;
 }
 
-function isStaticDuration(value: StaticScalar | undefined): value is StoredDuration {
+function isStaticDuration(value: StaticScalar | undefined): value is AnyDuration {
   return typeof value === "object" && value !== null;
 }
 
@@ -212,12 +207,14 @@ function finite(value: StaticScalar | undefined): { readonly value: StaticScalar
   if (value === undefined) return undefined;
   if (typeof value === "number") return Number.isFinite(value) ? { value } : undefined;
   // Calendar parts stay whole numbers of days and months that a value can store.
-  if (isStaticDuration(value))
-    return Number.isFinite(value.milliseconds) &&
-      Number.isSafeInteger(value.months ?? 0) &&
-      Number.isSafeInteger(value.days ?? 0)
+  if (isStaticDuration(value)) {
+    const parts = durationParts(value);
+    return Number.isFinite(parts.milliseconds) &&
+      Number.isSafeInteger(parts.months) &&
+      Number.isSafeInteger(parts.days)
       ? { value }
       : undefined;
+  }
   return { value };
 }
 
@@ -326,18 +323,15 @@ function knownValue(
     case "numberLiteral":
       return Number.isFinite(expression.value) ? expression.value : undefined;
     case "durationLiteral": {
-      const parts = durationLiteralParts(expression);
-      return typeof parts === "string" || !Number.isFinite(parts.milliseconds)
-        ? undefined
-        : storedDuration(parts);
+      const value = durationLiteralValue(expression);
+      return typeof value === "string" || !Number.isFinite(value.milliseconds) ? undefined : value;
     }
     case "parenthesizedExpression":
       return known.get(expression.expression);
     case "unaryExpression": {
       const value = known.get(expression.operand);
       if (expression.operator === "-" && typeof value === "number") return -value;
-      if (expression.operator === "-" && isStaticDuration(value))
-        return storedDuration(negateDurationParts(durationParts(value)));
+      if (expression.operator === "-" && isStaticDuration(value)) return negateDuration(value);
       return expression.operator === "+" ? value : undefined;
     }
     case "binaryExpression": {

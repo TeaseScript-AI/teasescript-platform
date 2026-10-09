@@ -193,4 +193,25 @@ for item in "a,b".split(",") {
 }
 rows.add(collectResult)
 say "Rows ${rows.length}"
+// A list of positions sets each of them to the one value (campdrain), and reads the list of their elements
+// (Concentration).
+let stages = ["warm", "warm", "warm", "warm"]
+for position in [1, 3] {
+  stages[position] = "slow"
+}
+let paces = [240, 240, 240]
+let value = 100 + randomInteger(0..20)
+for position2 in [0, 2] {
+  paces[position2] = value
+}
+function firstPaces(all) {
+  return [all[0], all[1]]
+}
+// NOTE SX_LENGTH_RECEIVER line 71: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces(paces).length}"
+// A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
+let replies = []
+if replies.length == 0 {
+  say "No replies yet"
+}
 exit

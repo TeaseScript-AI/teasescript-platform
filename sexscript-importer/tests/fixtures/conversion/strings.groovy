@@ -31,3 +31,9 @@ show(code[0..2] + code[-2..-1] + code[1..<cut] + code[cut..-1] + (code - "O") + 
 // Groovy iterated null zero times.
 def picked = getSelectedValue("Pick one?", ["none", "red"]) == "none" ? null : "red"
 for (c in picked) show(c)
+// Removing a part from text in place drops its first occurrence (Banjo's gear).
+def gear = " Torch. Rope. Torch. "
+def loadGear = { -> gear = loadString("game.gear") }
+gear -= " Torch. "
+gear = gear - " Rope. "
+show("Gear:" + gear)

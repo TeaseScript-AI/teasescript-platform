@@ -1,3 +1,12 @@
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
 // A variable reused in straight-line code for values of several types, each assigned before it is read, splits by
 // type.
 let responseBoolean = false
@@ -35,4 +44,27 @@ function debugImages {
   // NOTE SX_UNDEFINED_VARIABLE line 20: missingCount is never assigned in this script or its package; SexScript failed with a missing property whenever this ran. Nothing in the program references this function, so Groovy never ran this code.
   // | for (int n = 1; n <= missingCount; n++) show("Image ${n}")
 }
+// A 0 placeholder that later holds lists starts as an empty list too (Banjo).
+// NOTE SX_PLACEHOLDER_TYPE line 23: Groovy started 'actions' as 0 and later stored a list (string[]); TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where 0 was read.
+let actions: string[] = []
+function offer {
+  actions = ["Nothing", "Work"]
+  // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  actions += ["Use Torch"]
+  actions = sexscriptLegacyListMinus(actions, ["Work"])
+}
+offer()
+say actions[1]
+// A 0 that later holds lists and whole numbers was a value, and stays (SlideLadderDare's squimage).
+// NOTE SX_UNION_TYPE line 28: Groovy let 'squareImage' hold values of several types; TeaseScript declares it 'integer | integer[]' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if squareImage is integer { ... }
+let squareImage: integer | integer[] = 0
+function pickImage(n) {
+  if n > 1 {
+    squareImage = [1, 2, 3]
+  } else {
+    squareImage = 999
+  }
+}
+pickImage(2)
+say "Image ${squareImage}"
 exit

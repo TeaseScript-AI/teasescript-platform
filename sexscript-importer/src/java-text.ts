@@ -44,6 +44,9 @@ const LIST_TYPES = new Set([
   "java.util.LinkedList",
   "Vector",
   "java.util.Vector",
+  // A queue starts as an empty list too; its size reads as a list's (LLM_Mistress).
+  "LinkedBlockingQueue",
+  "java.util.concurrent.LinkedBlockingQueue",
 ]);
 const SET_TYPES = new Set([
   "HashSet",

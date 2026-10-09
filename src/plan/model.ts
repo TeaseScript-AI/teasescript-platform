@@ -1,8 +1,8 @@
-import type { StoredDuration } from "../duration.js";
+import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 76;
+export const INSTRUCTION_PLAN_VERSION = 77;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -572,6 +572,7 @@ export type InteractionChoiceValue =
   | boolean
   | null
   | StoredDuration
+  | StoredCalendarDuration
   | ({ readonly kind: "date" } & DateFields)
   | ({ readonly kind: "time" } & TimeFields)
   | ({ readonly kind: "datetime" } & DateTimeFields)
@@ -923,6 +924,7 @@ export type AssignmentTargetPlan =
 export type ExpressionPlan =
   | LiteralExpressionPlan
   | DurationExpressionPlan
+  | CalendarDurationExpressionPlan
   | IdentifierExpressionPlan
   | DebugModeExpressionPlan
   | ListExpressionPlan
@@ -952,15 +954,18 @@ export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly value: string | number | boolean | null;
 }
 
-/**
- * A duration literal, already normalized: exact milliseconds, and whole calendar `months` and `days`, present only when
- * they are not zero.
- */
+/** An exact duration literal, in milliseconds. */
 export interface DurationExpressionPlan extends ExpressionPlanBase {
   readonly kind: "duration";
   readonly milliseconds: number;
-  readonly months?: number;
-  readonly days?: number;
+}
+
+/** A calendar duration literal, already normalized: whole calendar months and days, and exact milliseconds. */
+export interface CalendarDurationExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "calendarDuration";
+  readonly months: number;
+  readonly days: number;
+  readonly milliseconds: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {
@@ -1043,6 +1048,7 @@ export type TypePlanName =
   | "integer"
   | "number"
   | "duration"
+  | "calendarDuration"
   | "date"
   | "time"
   | "datetime"

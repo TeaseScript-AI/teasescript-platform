@@ -53,7 +53,14 @@ export interface VariableTypeResult {
    * Declarations whose empty-text placeholder became the empty value of the type the variable later holds; `first`
    * describes the type whose empty value it is when the variable holds a union.
    */
-  placeholders: Array<{ statement: IrStatement; name: string; type: string; first?: string }>;
+  placeholders: Array<{
+    statement: IrStatement;
+    name: string;
+    type: string;
+    first?: string;
+    /** The placeholder Groovy started with, where it is no empty text. */
+    start?: string;
+  }>;
   /** Declarations of variables that Groovy gave values of several types, now declared with a union type. */
   unions: Array<{
     statement: IrStatement;
@@ -466,6 +473,9 @@ export function enforceVariableTypes(
               type: describeValue(type),
               ...(nonNull(type).kind === "union" && binding.placeholder !== undefined
                 ? { first: describeValue(binding.placeholder) }
+                : {}),
+              ...(statement.value.kind === "literal" && statement.value.value === 0
+                ? { start: "0" }
                 : {}),
             });
           return rewritten;
@@ -900,17 +910,22 @@ function analyse(
     const merged =
       declared && target.fixed === undefined && !target.integer ? unionOf(type, value) : null;
     if (merged !== null && target.placeholder !== undefined) {
-      const text = scalar("string");
-      // Groovy stored text too, so the empty text it started with was a value rather than a placeholder.
-      if (isAssignable(merged, text))
+      // Groovy stored text too, so the empty text it started with was a value rather than a placeholder; so was a 0
+      // where it stored whole numbers too (SlideLadderDare's `squimage`).
+      const start =
+        target.declaration?.value.kind === "literal" && target.declaration.value.value === 0
+          ? scalar("integer")
+          : scalar("string");
+      if (isAssignable(merged, start))
         return change(() => {
           delete target.placeholder;
-          target.initial = text;
-          target.union = unionOf(text, merged) ?? merged;
+          target.initial = start;
+          target.union = unionOf(start, merged) ?? merged;
         });
       return change(() => (target.union = merged));
     }
-    // An empty-text placeholder that later holds values of one other type starts with that type's empty value.
+    // An empty-text placeholder that later holds values of one other type starts with that type's empty value, as
+    // does a 0 that later holds lists (Banjo's `locationActions`).
     const declaration = target.declaration;
     if (
       declaration !== null &&
@@ -918,7 +933,8 @@ function analyse(
       target.fixed === undefined &&
       !target.integer &&
       declaration.value.kind === "literal" &&
-      declaration.value.value === "" &&
+      (declaration.value.value === "" ||
+        (declaration.value.value === 0 && nonNull(value).kind === "list")) &&
       emptyValue(nonNull(value)) !== null
     ) {
       return change(() => {
