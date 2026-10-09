@@ -1512,6 +1512,18 @@ export class Evaluator {
     return this.#evaluateMachine(expression, true).descriptor!;
   }
 
+  /**
+   * The value a reference that `prepareReference` just gave selects, for the debug trace: Debug shows that value, not
+   * how the engine keeps the reference.
+   */
+  public preparedReferenceValue(
+    serialized: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    // EVIDENCE: invariant: prepareReference stores only a reference that resolves, or fails before storing it.
+    return this.#resolveDescriptor(readPreparedReference(serialized, span), span);
+  }
+
   #resolvePreparedReference(
     serialized: SerializableRuntimeValue,
     span: SourceSpan,

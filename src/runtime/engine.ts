@@ -897,11 +897,25 @@ function executePlannedInstruction(
         ) === true,
       );
       setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
-      evaluator.trace?.writeTemporary(
-        evaluator.callFrameId(),
-        instruction.destinationTemporary,
-        reference,
-      );
+      if (evaluator.trace !== null) {
+        // Debug explains the value the reference selects, as it explains a temporary that holds that value.
+        const value = evaluator.preparedReferenceValue(reference, instruction.expression.span);
+        if (
+          instruction.expression.kind === "temporary" ||
+          instruction.expression.kind === "identifier"
+        )
+          evaluator.trace.copyTemporary(
+            evaluator.callFrameId(),
+            instruction.destinationTemporary,
+            value,
+          );
+        else
+          evaluator.trace.writeTemporary(
+            evaluator.callFrameId(),
+            instruction.destinationTemporary,
+            value,
+          );
+      }
       advance(snapshot);
       return;
     }
