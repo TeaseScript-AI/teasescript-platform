@@ -11,6 +11,7 @@ import {
   conjunctive,
   constantConditions,
   DataFlow,
+  difference,
   distance,
   goalsFor,
   KEY_PLACEHOLDER,
@@ -494,7 +495,10 @@ export interface RouteReport {
 export interface Closest {
   /** The part's comparison, as in {@link Part.needs}. */
   needs: string;
-  /** A boolean variable's value is a boolean; a stored value is its JSON text. */
+  /**
+   * A boolean variable's value is a boolean; for two values compared, their difference; a stored value is its JSON
+   * text.
+   */
   value: number | boolean | string;
   /** How far `value` is from the comparison holding, as directed search measures it. */
   distance: number;
@@ -1235,7 +1239,10 @@ interface Route {
   progressSum: number;
 }
 
-/** A comparison of a variable with a constant that a target's missed way needs, and the closest state so far. */
+/**
+ * A comparison of a variable with a constant, or with another value by their difference, that a target's missed way
+ * needs, and the closest state so far.
+ */
 interface Watch {
   readonly target: number;
   readonly goal: Goal;
@@ -1245,7 +1252,9 @@ interface Watch {
   readonly operator: string;
   readonly constant: number;
   readonly shown: number | boolean;
-  /** `closer` once a state came closer than the first one watched. */
+  /** The other value of a comparison of two values ({@link Goal.comparison}); undefined for a constant. */
+  readonly against: unknown;
+  /** `closer` once a state came closer than the first one watched; `value` is the difference for two values. */
   closest: {
     value: number | boolean;
     distance: number;
@@ -1418,8 +1427,9 @@ interface Attempt {
 }
 
 /**
- * What steers the search toward a target by closeness: a variable's to a comparison, or, for a way that needs all parts
- * of its condition, the condition's branch distance (`conditionDistance`).
+ * What steers the search toward a target by closeness: a variable's to a comparison (with `against`, its difference from
+ * another value, see {@link Goal.comparison}), or, for a way that needs all parts of its condition, the condition's
+ * branch distance (`conditionDistance`).
  */
 type DistanceTarget =
   | {
@@ -1428,6 +1438,7 @@ type DistanceTarget =
       readonly name: string;
       readonly operator: string;
       readonly constant: number;
+      readonly against: unknown;
     }
   | {
       readonly kind: "condition";
@@ -1478,7 +1489,8 @@ interface Left {
  *   starts from it and replays the witness path; otherwise a session starts from the storage closest to it and
  *   replays the path that led to that storage, as long as each session gets closer ({@link MAX_CHAIN} at most);
  * - the clock: the player continues at other wall clock times before the witness step (`clock`);
- * - a variable the code counts or sets: states closer to the comparison, by `distance`, take the first place.
+ * - a variable the code counts or sets: states closer to the comparison, by `distance` (compared with another value,
+ *   of their `difference`), take the first place.
  *
  * An answer attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target
  * is reached (a session chain goes on from the storage it reached instead), and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
@@ -2380,12 +2392,35 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const globals = new Map(
       list(snapshot.globals).map((binding) => [binding.name, binding.value] as const),
     );
+    let stored: ((subject: unknown) => AtomValue) | null = null;
     for (const [name, watches] of watched) {
       for (const entry of watches) {
         // A function's variables only while it runs; a value of another type than the constant compares as no value.
         const variables = scopes.get(entry.scope);
         if (variables === undefined) continue;
-        const value = variables.has(name) ? variables.get(name) : globals.get(name);
+        const read = (variable: string) =>
+          variables.has(variable) ? variables.get(variable) : globals.get(variable);
+        let value = read(name);
+        if (entry.against !== undefined) {
+          // Two values: their difference, when the other one can be read too, as a variable there, or else a stored
+          // value or a variable that only holds one load; both numbers, or both booleans.
+          const other = record(entry.against);
+          const known =
+            other.kind === "identifier" &&
+            typeof other.name === "string" &&
+            (variables.has(other.name) || globals.has(other.name));
+          const gap = difference(
+            value,
+            known
+              ? read(String(other.name))
+              : (stored ??= atomReader(
+                  new Map(),
+                  new Map(storageOf(snapshot).map((item) => [item.key, item.value])),
+                ))(entry.against),
+          );
+          if (gap === undefined) continue;
+          value = gap;
+        }
         if (
           typeof value !== typeof entry.shown ||
           (typeof value !== "number" && typeof value !== "boolean")
@@ -2467,6 +2502,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           new Map(storageOf(snapshot).map((entry) => [entry.key, entry.value])),
         );
         return branchDistance(conditionDistance(goal.condition, goal.wanted, read));
+      }
+      if (goal.against !== undefined) {
+        read ??= atomReader(
+          variablesOf(snapshot),
+          new Map(storageOf(snapshot).map((entry) => [entry.key, entry.value])),
+        );
+        const gap = difference(read({ kind: "identifier", name: goal.name }), read(goal.against));
+        return gap === undefined ? Infinity : distance(gap, goal.operator, goal.constant);
       }
       const value = values.get(goal.name);
       return value === undefined ? Infinity : distance(value, goal.operator, goal.constant);
@@ -2932,6 +2975,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             operator,
             constant,
             shown,
+            against: goal.comparison.against?.subject,
             closest: null,
           });
       }
@@ -3180,6 +3224,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             name: source.name,
             operator: goal.comparison.operator,
             constant: goal.comparison.constant,
+            against: goal.comparison.against?.subject,
           });
       }
     }
@@ -4513,7 +4558,9 @@ function lineCoverage(
     for (const goal of target.goals) {
       const { source, comparison } = goal;
       const compared =
-        comparison === null ? "" : ` ${comparison.operator} ${String(comparison.shown)}`;
+        comparison === null
+          ? ""
+          : `${comparison.against === undefined ? "" : ` - ${comparison.against.text}`} ${comparison.operator} ${String(comparison.shown)}`;
       const needs =
         source.kind === "variable"
           ? `${source.name}${compared}`

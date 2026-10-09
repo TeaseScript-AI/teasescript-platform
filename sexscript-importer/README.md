@@ -369,8 +369,9 @@ came no closer, and its progress per 1,000 operations), and its last switches be
 (below), the player continues at other wall clock times (times of day, weekdays, later dates) before that step, as a
 real player's time varies; a step after that is a clock step. An answer attempt's states share the first place for 20
 expansions in all, until the condition takes the missed way (a session chain goes on from the storage it reached
-instead), and play states that bring a variable the code counts or sets closer to the comparison share it for 40 (with
-progress leads, on by default and off with `--no-progress-leads`, an expansion in that first place that brings a state
+instead), and play states that bring a variable the code counts or sets closer to the comparison share it for 40 (a
+comparison of two values, such as `reps >= target`, measures the variable's difference from the other side, a variable
+or a stored value with a literal key, against 0; with progress leads, on by default and off with `--no-progress-leads`, an expansion in that first place that brings a state
 closer again does not count, so a loop that needs many rounds is followed to the constant, while one that gets no
 closer uses its 40 up); clock states take only their attempt's own steps and otherwise come after all play states.
 With conjunctive steering (on by default, off with `--no-conjunctive`), a way that needs all parts of its condition
@@ -484,10 +485,11 @@ The report `<out>/<unit>.json` has these parts:
   far as measured: of the condition's own unmet parts, the furthest from holding when the way needs all of them, the
   nearest when any one would do, and none when they combine both ways; and `case` for a `switch` case, whose condition
   text is its pattern. A variable is read in the innermost running call of the condition's function, over the
-  top-level variables of its file, as a value of the compared constant's type; its closest state counts from when the
-  condition became a target, with its value, its session, the operations done when a state first came that close, and
-  `trend` (`improving` when a state beat the first one watched and did so in the last quarter of the run's
-  operations, else `flat`). For a stored value, it is the closest storage a state left;
+  top-level variables of its file, as a value of the compared constant's type; for two values, `needs` shows their
+  difference (`reps - target >= 0`), read there when both sides are numbers, or both booleans; its closest state
+  counts from when the condition became a target, with its value (for two values, the difference), its session, the
+  operations done when a state first came that close, and `trend` (`improving` when a state beat the first one watched
+  and did so in the last quarter of the run's operations, else `flat`). For a stored value, it is the closest storage a state left;
 - `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
   directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when

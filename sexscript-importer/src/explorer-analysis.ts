@@ -729,12 +729,16 @@ export class DataFlow {
 /** A value directed search tries for a source: a JSON-safe value, or `absent` for a key that is not stored. */
 export type Candidate = string | number | boolean | { readonly absent: true };
 
-/** One comparison in a condition between a source expression and a constant, wanted true or false. */
+/**
+ * One comparison in a condition between a source expression and a constant, wanted true or false; or, with `against`,
+ * between two expressions, `subject operator against`, with 0 as the constant.
+ */
 interface Atom {
   readonly subject: unknown;
   readonly operator: string;
   readonly constant: string | number | boolean | null;
   readonly wanted: boolean;
+  readonly against?: unknown;
 }
 
 const FLIP: Readonly<Record<string, string>> = {
@@ -750,13 +754,15 @@ const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equ
 /**
  * The comparisons a condition must make for it to have the value `wanted`, as alternatives: each one alone is a way to
  * get there (for `and` wanted true, all of its parts are listed, and a value is checked against the whole condition).
+ * With `pairs`, a comparison of two expressions neither of which is a constant is listed too.
  */
-function atomsFor(expression: unknown, wanted: boolean): Atom[] {
+function atomsFor(expression: unknown, wanted: boolean, pairs = false): Atom[] {
   const value = record(expression);
-  if (value.kind === "group") return atomsFor(value.expression, wanted);
-  if (value.kind === "unary" && value.operator === "not") return atomsFor(value.operand, !wanted);
+  if (value.kind === "group") return atomsFor(value.expression, wanted, pairs);
+  if (value.kind === "unary" && value.operator === "not")
+    return atomsFor(value.operand, !wanted, pairs);
   if (value.kind === "binary" && (value.operator === "and" || value.operator === "or"))
-    return [...atomsFor(value.left, wanted), ...atomsFor(value.right, wanted)];
+    return [...atomsFor(value.left, wanted, pairs), ...atomsFor(value.right, wanted, pairs)];
   if (value.kind === "binary" && typeof value.operator === "string" && value.operator in FLIP) {
     const left = record(value.left);
     const right = record(value.right);
@@ -784,7 +790,17 @@ function atomsFor(expression: unknown, wanted: boolean): Atom[] {
           wanted,
         },
       ];
-    return [];
+    return pairs
+      ? [
+          {
+            subject: value.left,
+            operator: value.operator,
+            constant: 0,
+            wanted,
+            against: value.right,
+          },
+        ]
+      : [];
   }
   if (value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "")) {
     const text = list(value.arguments)
@@ -850,12 +866,15 @@ export interface Goal {
   readonly candidates: readonly Candidate[];
   /**
    * For a variable: the comparison that takes the missed way, for measuring how close a state is to it. A boolean
-   * constant is measured as 0 or 1; `shown` keeps the constant as the condition writes it, for notes.
+   * constant is measured as 0 or 1; `shown` keeps the constant as the condition writes it, for notes. With `against`,
+   * the variable is compared with another value instead, a variable or a stored value (`text` names it), and their
+   * difference, the variable's value less that value, is measured against `constant` 0.
    */
   readonly comparison: {
     readonly operator: string;
     readonly constant: number;
     readonly shown: number | boolean;
+    readonly against?: { readonly subject: unknown; readonly text: string };
   } | null;
 }
 
@@ -865,7 +884,12 @@ export interface Goal {
  */
 export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): Goal[] {
   const goals: Goal[] = [];
-  for (const atom of atomsFor(condition, wanted)) {
+  for (const atom of atomsFor(condition, wanted, true)) {
+    if (atom.against !== undefined) {
+      const goal = differenceGoal(flow, atom);
+      if (goal !== null) goals.push(goal);
+      continue;
+    }
     const values = solve(atom);
     const subject = record(atom.subject);
     const lengthOf = subject.kind === "property" && subject.name === "length";
@@ -917,6 +941,42 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean): G
     if (!known) goals.push({ source, candidates: [], comparison: null });
   }
   return goals;
+}
+
+/**
+ * The goal of a comparison of two values (`reps >= target`): a variable of one side that the code assigns, measured by
+ * its difference from the other side, a variable or a stored value with a literal key. No value is solved for, as it
+ * depends on the other side. Null when neither side is such a pair.
+ */
+function differenceGoal(flow: DataFlow, atom: Atom): Goal | null {
+  const holds = atom.wanted ? atom.operator : negate(atom.operator);
+  const sides: [unknown, unknown, string][] = [
+    [atom.subject, atom.against, holds],
+    [atom.against, atom.subject, FLIP[holds]!],
+  ];
+  for (const [side, other, operator] of sides) {
+    const name = record(side).kind === "identifier" ? record(side).name : null;
+    const text = valueText(other);
+    if (typeof name !== "string" || text === null || text === name) continue;
+    const source = flow
+      .sourcesOf(side)
+      .find((found) => found.kind === "variable" && found.name === name);
+    if (source !== undefined)
+      return {
+        source,
+        candidates: [],
+        comparison: { operator, constant: 0, shown: 0, against: { subject: other, text } },
+      };
+  }
+  return null;
+}
+
+/** How a value a state holds is named: a variable by its name, a stored value with a literal key as `stored key`. */
+function valueText(expression: unknown): string | null {
+  const value = record(expression);
+  if (value.kind === "identifier" && typeof value.name === "string") return value.name;
+  const key = value.kind === "storageLoad" ? literalText(value.key) : null;
+  return key === null ? null : `stored ${key}`;
 }
 
 /**
@@ -1436,11 +1496,20 @@ export function conjunctive(condition: unknown, wanted: boolean): boolean {
   );
 }
 
+/** `left - right` for two numbers, or two booleans as 0 and 1; undefined for other values or no finite difference. */
+export function difference(left: unknown, right: unknown): number | undefined {
+  if (typeof left !== typeof right || (typeof left !== "number" && typeof left !== "boolean"))
+    return undefined;
+  const gap = Number(left) - Number(right);
+  return Number.isFinite(gap) ? gap : undefined;
+}
+
 /**
  * The branch distance of a condition from coming out `wanted`, with each atom's value read by `read`: an `and` that
  * needs all of its parts sums them, one that needs any takes the nearest (fewest atoms unsatisfied, then least
  * distance); an atom compared with a literal counts 0 when it holds, else its numeric {@link distance}, or 1 for
- * another value. An atom that cannot be read counts as neither.
+ * another value; one that compares two values counts as their {@link difference} compared with 0. An atom that cannot
+ * be read counts as neither.
  */
 export function conditionDistance(
   condition: unknown,
@@ -1478,9 +1547,12 @@ export function conditionDistance(
       ? none
       : { unsatisfied: 1, sum: 1 };
   }
-  const [atom] = atomsFor(condition, wanted);
+  const [atom] = atomsFor(condition, wanted, true);
   if (atom === undefined) return none;
-  const actual = read(atom.subject);
+  const actual =
+    atom.against === undefined
+      ? read(atom.subject)
+      : difference(read(atom.subject), read(atom.against));
   if (actual === undefined) return none;
   const holds = atom.wanted ? atom.operator : negate(atom.operator);
   // Whether it holds, as the runtime compares (`1` is not `true`), then how far it is when it does not: at least
