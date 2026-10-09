@@ -14506,8 +14506,8 @@ function imageCount(
 /**
  * A legacy image count (imageListing) with a name filter as the number of the package's images whose names match,
  * counted when it is converted, since tags do not filter by file name: a number for a fixed folder, and for a folder
- * that depends on values, a dict of the matching folders' counts read with the folder's lower-case path. Only a
- * pattern of literal text applies.
+ * that depends on values, a dict of the matching folders' counts read with the folder's lower-case path. The pattern
+ * is literal text, or interpolates variables of the folder's path (folderNamePattern).
  */
 function conversionTimeImageCount(
   listing: NonNullable<ReturnType<typeof imageListing>>,
@@ -14515,13 +14515,20 @@ function conversionTimeImageCount(
   context: LowerContext,
   media: readonly MediaFile[],
 ): IrExpression | undefined {
-  const pattern =
-    listing.nameFilter === null ? null : namePattern(asNode(listing.nameFilter.right));
-  if (listing.nameFilter !== null && pattern === null) return undefined;
+  const filter = listing.nameFilter === null ? null : asNode(listing.nameFilter.right);
+  const fixedPattern = namePattern(filter);
+  const folderValues = listing.segments.flatMap((parts) =>
+    parts.flatMap((part) => ("value" in part ? [part.value] : [])),
+  );
+  const patternOf =
+    fixedPattern !== null ? () => fixedPattern : folderNamePattern(filter, folderValues);
+  if (listing.nameFilter !== null && patternOf === null) return undefined;
   const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const folderPattern = new RegExp(
     `^${listing.segments
-      .map((parts) => parts.map((part) => ("text" in part ? escape(part.text) : "[^/]*")).join(""))
+      .map((parts) =>
+        parts.map((part) => ("text" in part ? escape(part.text) : "([^/]*)")).join(""),
+      )
       .join("/")}$`,
     "iu",
   );
@@ -14530,7 +14537,9 @@ function conversionTimeImageCount(
     const slash = file.path.replaceAll("\\", "/").lastIndexOf("/");
     const folder = slash < 0 ? "" : file.path.replaceAll("\\", "/").slice(0, slash);
     const fileName = file.path.replaceAll("\\", "/").slice(slash + 1);
-    if (!folderPattern.test(folder)) continue;
+    const match = folderPattern.exec(folder);
+    if (match === null) continue;
+    const pattern = patternOf === null ? null : patternOf(match.slice(1));
     const key = folder.toLowerCase();
     counts.set(key, (counts.get(key) ?? 0) + (pattern === null || pattern.test(fileName) ? 1 : 0));
   }
@@ -14584,6 +14593,47 @@ function namePattern(node: AstNode | null): RegExp | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A Groovy name pattern that interpolates variables of the counted folder's path, as fapioh's `/$cardDeck-(\d+).jpg/`
+ * for `sprintf("images/fapioh/cards/%s/", [cardDeck])`: given the text each value of the path has in one folder, the
+ * pattern with that text in place of the variable, which Groovy inserted into the expression as it was. Null for
+ * other patterns.
+ */
+function folderNamePattern(
+  node: AstNode | null,
+  folderValues: readonly IrExpression[],
+): ((folderTexts: readonly string[]) => RegExp | null) | null {
+  if (node?.kind !== "gstring") return null;
+  const strings: unknown[] = Array.isArray(node.strings) ? node.strings : [];
+  const positions = nodeArray(node.values).map((value) => {
+    const name = variableName(value);
+    return folderValues.findIndex((part) => part.kind === "variable" && part.name === name);
+  });
+  if (
+    positions.length === 0 ||
+    positions.includes(-1) ||
+    !strings.every((part) => typeof part === "string")
+  )
+    return null;
+  return (folderTexts) => {
+    const source = (strings as string[])
+      .map((part, index) =>
+        index < positions.length ? `${part}${folderTexts[positions[index]!] ?? ""}` : part,
+      )
+      .join("");
+    const insensitive = source.startsWith("(?i)");
+    try {
+      return new RegExp(
+        `^(?:${insensitive ? source.slice(4) : source})$`,
+        insensitive ? "iu" : "u",
+      );
+    } catch {
+      // Groovy failed on a pattern that is no regular expression; no name matches it here.
+      return /(?!)/u;
+    }
+  };
 }
 
 /**
