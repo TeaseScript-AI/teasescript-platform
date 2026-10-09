@@ -134,14 +134,14 @@ test("statistics report empty lists, values they cannot read, and percentages ou
       "average(...) needs values of one kind: all numbers or all durations.",
     ],
     [
-      "average(dynamic([1 day, 2 days]))",
+      "average(dynamic([1 calendar day, 2 calendar days]))",
       "TSR060",
-      "average(...) needs exact durations, such as minutes or hours: days, weeks, months, and years have no fixed length.",
+      "average(...) needs numbers or durations, not a calendar duration. A calendar day or month has no fixed length.",
     ],
     [
-      "sum(dynamic([1 day, 2 h]))",
+      "sum([dynamic(2), dynamic(1 s)])",
       "TSR060",
-      "sum(...) needs durations of one kind: exact time, days and weeks, or months and years.",
+      "sum(...) needs values of one kind: all numbers or all durations.",
     ],
     [
       'sum(dynamic([{ n: 1 }]), by: "count")',

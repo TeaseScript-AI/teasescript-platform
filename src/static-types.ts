@@ -311,6 +311,7 @@ export const BOOLEAN_TYPE = scalar("boolean");
 export const INTEGER_TYPE = scalar("integer");
 export const NUMBER_TYPE = scalar("number");
 export const DURATION_TYPE = scalar("duration");
+export const CALENDAR_DURATION_TYPE = scalar("calendarDuration");
 export const DATE_TYPE = scalar("date");
 export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
@@ -1535,6 +1536,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   number: "a number",
   boolean: "true or false (boolean)",
   duration: "a duration",
+  calendarDuration: "a calendar duration",
   date: "a date",
   time: "a time",
   datetime: "a date and time",
@@ -1582,9 +1584,9 @@ export function describeValue(type: StaticType): string {
 
 /**
  * The result type of arithmetic on known operand types, or `undefined` when the operator does not support them. Integer
- * arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to an
- * absolute date and time or a date and time after it, not before it. `+` also joins two texts, and two lists into a new
- * list whose element types join as in a list literal of both; lists that would mix types give `undefined` (V30 §4).
+ * arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to a date
+ * or time value after it, not before it. `+` also joins two texts, and two lists into a new list whose element types
+ * join as in a list literal of both; lists that would mix types give `undefined` (V30 §4).
  */
 export function arithmeticType(
   operator: string,
@@ -1610,20 +1612,30 @@ export function arithmeticType(
       mergedOrigins(left.origins, right.origins),
     );
   }
-  if (left.name === "duration" && right.name === "duration") {
-    if (operator === "+" || operator === "-") return DURATION_TYPE;
-    if (operator === "/") return NUMBER_TYPE;
+  // A calendar duration stays one in every sum with a duration (ADR 0026); only two of one kind have a ratio.
+  const duration = (name: ScalarTypeName): boolean =>
+    name === "duration" || name === "calendarDuration";
+  if (duration(left.name) && duration(right.name)) {
+    if (operator === "+" || operator === "-")
+      return left.name === "duration" && right.name === "duration"
+        ? DURATION_TYPE
+        : CALENDAR_DURATION_TYPE;
+    if (operator === "/" && left.name === right.name) return NUMBER_TYPE;
     return undefined;
   }
-  if (left.name === "duration" && numeric(right.name) && (operator === "*" || operator === "/"))
-    return DURATION_TYPE;
-  if (numeric(left.name) && right.name === "duration" && operator === "*") return DURATION_TYPE;
-  // A date, absolute date and time, or local date and time moves by a duration, and two of one kind differ by one
-  // (V30 §35).
-  if (left.name === "absoluteDateTime" || left.name === "datetime" || left.name === "date") {
-    if (right.name === "duration" && (operator === "+" || operator === "-"))
+  if (duration(left.name) && numeric(right.name) && (operator === "*" || operator === "/"))
+    return scalar(left.name);
+  if (numeric(left.name) && duration(right.name) && operator === "*") return scalar(right.name);
+  // No operator reads a zone (ADR 0026): an absolute date and time moves by a duration, and a date or a date and time
+  // by a calendar duration. Two dates differ by a calendar duration, two absolute dates and times by a duration.
+  if (operator === "+" || operator === "-") {
+    if (left.name === "absoluteDateTime" && right.name === "duration") return scalar(left.name);
+    if ((left.name === "date" || left.name === "datetime") && right.name === "calendarDuration")
       return scalar(left.name);
-    if (right.name === left.name && operator === "-") return DURATION_TYPE;
   }
+  if (operator === "-" && left.name === "date" && right.name === "date")
+    return CALENDAR_DURATION_TYPE;
+  if (operator === "-" && left.name === "absoluteDateTime" && right.name === "absoluteDateTime")
+    return DURATION_TYPE;
   return undefined;
 }

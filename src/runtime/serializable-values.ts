@@ -1,4 +1,9 @@
-import { isStoredDurationRecord, type StoredDuration } from "../duration.js";
+import {
+  isStoredCalendarDurationRecord,
+  isStoredDurationRecord,
+  type StoredCalendarDuration,
+  type StoredDuration,
+} from "../duration.js";
 import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
 import {
   isValidDate,
@@ -51,8 +56,11 @@ export interface SerializableRuntimeRange {
   readonly inclusive: boolean;
 }
 
-/** A duration: exact milliseconds, and whole calendar `months` and `days` present only when they are not zero. */
+/** An exact duration in milliseconds (ADR 0026). */
 export type SerializableRuntimeDuration = StoredDuration;
+
+/** A calendar duration: whole calendar months and days, and an exact offset in milliseconds (ADR 0026). */
+export type SerializableRuntimeCalendarDuration = StoredCalendarDuration;
 
 /** A local calendar date without a zone (V30 §35). */
 export interface SerializableRuntimeDate extends DateFields {
@@ -137,6 +145,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeDict
   | SerializableRuntimeRange
   | SerializableRuntimeDuration
+  | SerializableRuntimeCalendarDuration
   | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
@@ -355,6 +364,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
       return { ...value };
     case "speakerReference":
     case "duration":
+    case "calendarDuration":
     case "date":
     case "time":
     case "datetime":
@@ -605,7 +615,9 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
   if (typeof value === "boolean") return value ? "t" : "f";
   switch (value.kind) {
     case "duration":
-      return `u${numberText(value.months ?? 0)}:${numberText(value.days ?? 0)}:${numberText(value.milliseconds)};`;
+      return `u${numberText(value.milliseconds)};`;
+    case "calendarDuration":
+      return `U${numberText(value.months)}:${numberText(value.days)}:${numberText(value.milliseconds)};`;
     case "date":
       return `d${value.year}-${value.month}-${value.day};`;
     case "time":
@@ -746,11 +758,13 @@ function equalsOrDefer(
         right.inclusive === left.inclusive
       );
     case "duration":
+      return right.kind === "duration" && right.milliseconds === left.milliseconds;
+    case "calendarDuration":
       return (
-        right.kind === "duration" &&
+        right.kind === "calendarDuration" &&
         right.milliseconds === left.milliseconds &&
-        (right.months ?? 0) === (left.months ?? 0) &&
-        (right.days ?? 0) === (left.days ?? 0)
+        right.months === left.months &&
+        right.days === left.days
       );
     case "date":
     case "time":
@@ -938,7 +952,11 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         return `${path()} contains a malformed speaker reference.`;
       continue;
     }
-    if (current.kind === "duration" || TEMPORAL_KEYS.has(current.kind)) {
+    if (
+      current.kind === "duration" ||
+      current.kind === "calendarDuration" ||
+      TEMPORAL_KEYS.has(current.kind)
+    ) {
       const problem = timeRecordProblem(current);
       if (problem !== null) return `${path()} contains ${problem}.`;
       continue;
@@ -1064,12 +1082,14 @@ const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
 ]);
 
 /**
- * Why a duration, date, time, datetime, or absolute date and time record is malformed, as a phrase such as "a malformed
+ * Why a duration, calendar duration, date, time, datetime, or absolute date and time record is malformed, as a phrase such as "a malformed
  * date", or `null` when it is valid.
  */
 function timeRecordProblem(value: Record<string, unknown>): string | null {
   if (value.kind === "duration")
     return isStoredDurationRecord(value) ? null : "a malformed duration";
+  if (value.kind === "calendarDuration")
+    return isStoredCalendarDurationRecord(value) ? null : "a malformed calendar duration";
   const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;
   if (keys === undefined)
     return typeof value.kind === "string" ? `a ${value.kind} value` : "a value without a kind";

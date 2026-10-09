@@ -213,9 +213,9 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
     },
     { source: 'showButton "Go", timeout: [5]\nexit', code: "TSV043", fix: "a number of seconds" },
     {
-      source: 'showButton "Go", timeout: 2 days\nexit',
+      source: 'showButton "Go", timeout: 2 calendar days\nexit',
       code: "TSV043",
-      fix: "needs an exact duration such as 24 h",
+      fix: "A calendar day or month has no fixed length",
     },
     { source: 'showButton "Go", timeout: 1, timeout: 2', code: "TSP032", fix: "one timeout:" },
     { source: 'showButton "Go", 5', code: "TSP032", fix: "background: and timeout:" },
