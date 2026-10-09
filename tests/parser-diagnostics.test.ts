@@ -139,6 +139,12 @@ test("a statement keeps a string whose interpolation failed, so nothing around i
     ['save "key ${1 +}" as 1\nexit', "TSP012", ["saveStatement", "exitStatement"]],
     // The bounded say form is told by the comma after its text, also when the text recovered from an error.
     ['say("Hi ${player.}", instant)\nexit', "TSP010", ["sayStatement", "exitStatement"]],
+    // A say of a call to a function named bubble, whose argument recovered from an error.
+    [
+      'function bubble(text) {\n  return text\n}\nsay bubble ("Hi ${player.}")\nexit',
+      "TSP010",
+      ["functionDeclaration", "sayStatement", "exitStatement"],
+    ],
     // What follows an expression that already reported its error is skipped without another one.
     ['let value = "${1 < 2 < 3 x}"\nexit', "TSP020", ["letStatement", "exitStatement"]],
   ] as const) {

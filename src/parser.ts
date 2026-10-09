@@ -945,21 +945,23 @@ class Parser {
   /**
    * `skippable` and `unskippable` predate their modifier meaning as ordinary
    * identifiers. Keep that interpretation whenever the existing say grammar
-   * can consume a complete value (and optional pacing) from this position.
+   * can consume a complete value (and optional pacing) from this position,
+   * also one that recovered from an error, such as a string with a failed
+   * interpolation.
    */
   *#canParseCompleteSayValue(statement: boolean): ParseTask<boolean> {
     const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current;
 
     const value = yield* parseChild(speculative.#parseOr());
-    if (value === null || speculative.#diagnostics.length > 0) return false;
+    if (value === null) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
       if (speculative.#canParseInstantPacingAlias(statement)) {
         speculative.#advance();
       } else {
         const pacing = yield* parseChild(speculative.#parseOr());
-        if (pacing === null || speculative.#diagnostics.length > 0) return false;
+        if (pacing === null) return false;
       }
     }
 
