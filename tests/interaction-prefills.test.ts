@@ -142,23 +142,23 @@ test("a prefill the compiler knows is wrong is a compile error that names the fi
     [
       'let answer = askText "Name?", default: "Ada"',
       "TSP032",
-      "askText has no 'default:'; use 'prefill:'.",
+      "askText has no 'default:'. Use 'prefill:'.",
     ],
-    ['let answer = askText default: "Ada"', "TSP032", "askText has no 'default:'; use 'prefill:'."],
+    ['let answer = askText default: "Ada"', "TSP032", "askText has no 'default:'. Use 'prefill:'."],
     [
       'let answer = askBooleans defaults: [true], texts: ["A"]',
       "TSP032",
-      "askBooleans has no 'defaults:'; use 'prefill:'.",
+      "askBooleans has no 'defaults:'. Use 'prefill:'.",
     ],
     [
       "let answer = askNumber(default: 3)",
       "TSP032",
-      "askNumber has no 'default:'; use 'prefill:'.",
+      "askNumber has no 'default:'. Use 'prefill:'.",
     ],
     [
       'let answer = askBooleans "Which?", texts: ["A"], defaults: [true]',
       "TSP032",
-      "askBooleans has no 'defaults:'; use 'prefill:'.",
+      "askBooleans has no 'defaults:'. Use 'prefill:'.",
     ],
     [
       'let count = 3\nlet answer = askText "Code?", prefill: count\nexit',

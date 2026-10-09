@@ -190,7 +190,7 @@ test("a script(...) with literal text is checked like a file target, and a compu
   assert.deepEqual(check('let next = script("/rooms/hall.tease")\nexit'), [
     [
       "TSV057",
-      "'/rooms/hall.tease' is not a package file path: it has an empty folder name; separate folders with a single /.",
+      "'/rooms/hall.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
     ],
   ]);
   assert.deepEqual(check('let next = script("rooms/hall.tease", label: "finish")\nexit'), [

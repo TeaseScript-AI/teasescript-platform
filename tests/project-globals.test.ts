@@ -580,8 +580,8 @@ test("a global function is callable from every file and sees only globals, its p
       { path: "other.tease", source: "function punish { }" },
     ]),
     [
-      "The global function 'punish' has the same name as the function on line 1 of other.tease. Globals, global functions, and speakers need a name of their own in the whole project; rename one of them.",
-      "'punish' is already the name of the global function on line 1 of main.tease. Globals, global functions, and speakers need a name of their own in the whole project; rename one of them.",
+      "The global function 'punish' has the same name as the function on line 1 of other.tease. Globals, global functions, and speakers need a name of their own in the whole project. Rename one of them.",
+      "'punish' is already the name of the global function on line 1 of main.tease. Globals, global functions, and speakers need a name of their own in the whole project. Rename one of them.",
     ],
   );
 });

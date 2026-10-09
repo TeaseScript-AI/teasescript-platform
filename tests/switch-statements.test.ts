@@ -388,7 +388,7 @@ test("rejects repeated and overlapping case values on the later value", () => {
   const message = compileSource(source).diagnostics.find((item) => item.span.start.line === 6);
   assert.equal(
     message?.message,
-    "The case value 4 overlaps 1..5 on line 6. Each value may match only one case; change or remove one of them.",
+    "The case value 4 overlaps 1..5 on line 6. Each value may match only one case. Change or remove one of them.",
   );
 });
 

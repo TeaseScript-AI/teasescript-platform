@@ -1116,7 +1116,7 @@ class Parser {
     ) {
       this.#reportToken(
         parserDiagnosticCode.expectedExpression,
-        "Wait uses command syntax; write 'wait 1' rather than 'wait(1)'.",
+        "Wait uses command syntax. Write 'wait 1' rather than 'wait(1)'.",
         this.#peek(),
       );
       this.#synchronizeStatement();
@@ -1277,7 +1277,7 @@ class Parser {
         default:
           this.#reportSpan(
             parserDiagnosticCode.invalidTimerForm,
-            `Unknown timer argument '${name}'; use duration, async, display, label, repeat, or persist.`,
+            `Unknown timer argument '${name}'. Use duration, async, display, label, repeat, or persist.`,
             argument.name.span,
           );
           valid = false;
@@ -1403,7 +1403,7 @@ class Parser {
       } else if (name.lexeme !== "persist") {
         this.#reportSpan(
           parserDiagnosticCode.invalidMediaForm,
-          `Unknown showPermanentButton option '${name.lexeme}'; the only option is 'persist'.`,
+          `Unknown showPermanentButton option '${name.lexeme}'. The only option is 'persist'.`,
           name.span,
         );
         valid = false;
@@ -1612,7 +1612,7 @@ class Parser {
         if (options.has(option)) {
           this.#reportSpan(
             parserDiagnosticCode.invalidTagQuery,
-            "The option 'where' appears more than once; combine the tags with and.",
+            "The option 'where' appears more than once. Combine the tags with 'and'.",
             argument.name.span,
           );
           return call;
@@ -1868,7 +1868,7 @@ class Parser {
         if (!sawNamed && value !== null) {
           this.#reportSpan(
             code,
-            `${command.lexeme}(...) takes one unnamed value; name the others, such as '${names[0]}:'.`,
+            `${command.lexeme}(...) takes one unnamed value. Name the others, such as '${names[0]}:'.`,
             argument.span,
           );
         }
@@ -1881,7 +1881,7 @@ class Parser {
       if (!names.includes(name)) {
         this.#reportSpan(
           code,
-          `Unknown ${command.lexeme} option '${name}'; use ${names.map((known) => `'${known}:'`).join(" or ")}.`,
+          `Unknown ${command.lexeme} option '${name}'. Use ${names.map((known) => `'${known}:'`).join(" or ")}.`,
           argument.name.span,
         );
         valid = false;
@@ -1901,7 +1901,7 @@ class Parser {
     if (
       this.#rejectAdjacentParenthesis(
         command,
-        "showCamera uses command syntax; write 'showCamera' or 'showCamera stage'.",
+        "showCamera uses command syntax. Write 'showCamera' or 'showCamera stage'.",
       )
     )
       return null;
@@ -1914,7 +1914,7 @@ class Parser {
   #parseHideCameraStatement(): HideCameraStatement | null {
     const command = this.#advance();
     if (
-      this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments; write 'hideCamera'.")
+      this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments. Write 'hideCamera'.")
     )
       return null;
     return Object.freeze({ kind: "hideCameraStatement", span: copySpan(command.span) });
@@ -1923,7 +1923,7 @@ class Parser {
   #parseHideImageStatement(): HideImageStatement | null {
     const command = this.#advance();
     if (
-      this.#rejectAdjacentParenthesis(command, "hideImage takes no arguments; write 'hideImage'.")
+      this.#rejectAdjacentParenthesis(command, "hideImage takes no arguments. Write 'hideImage'.")
     )
       return null;
     return Object.freeze({ kind: "hideImageStatement", span: copySpan(command.span) });
@@ -2057,7 +2057,7 @@ class Parser {
         if (argument === undefined) {
           this.#reportSpan(
             parserDiagnosticCode.invalidMediaForm,
-            `Unknown ${command.lexeme} argument '${name.name}'; use ${MEDIA_ARGUMENTS.join(", ")}.`,
+            `Unknown ${command.lexeme} argument '${name.name}'. Use ${MEDIA_ARGUMENTS.join(", ")}.`,
             name.span,
           );
           valid = false;
@@ -2705,7 +2705,7 @@ class Parser {
     if (this.#atComparedValue()) {
       this.#reportToken(
         parserDiagnosticCode.invalidType,
-        "'case is' checks a type; to compare with a value, write the value itself, as in 'case \"open\"'.",
+        "'case is' checks a type. To compare with a value, write the value itself, as in 'case \"open\"'.",
         this.#peek(),
       );
       return null;
@@ -3281,7 +3281,7 @@ class Parser {
       const compared = yield* parseChild(this.#parseRange());
       this.#reportSpan(
         parserDiagnosticCode.invalidType,
-        "'is' checks a type; use '==' to compare values.",
+        "'is' checks a type. Use '==' to compare values.",
         compared?.span ?? first.span,
       );
       return value;
@@ -3773,7 +3773,7 @@ class Parser {
           ) {
             this.#reportSpan(
               parserDiagnosticCode.unsupportedInteractionForm,
-              `Unknown ${command.lexeme} option '${unknown.lexeme}'; use ${names.map((known) => `'${known}:'`).join(", ")}.`,
+              `Unknown ${command.lexeme} option '${unknown.lexeme}'. Use ${names.map((known) => `'${known}:'`).join(", ")}.`,
               unknown.span,
             );
             this.#synchronizeStatement();
@@ -4050,7 +4050,7 @@ class Parser {
     if (name.name !== removedPrefillName(interactionKind)) return name;
     this.#reportSpan(
       parserDiagnosticCode.unsupportedInteractionForm,
-      `${command.lexeme} has no '${name.name}:'; use 'prefill:'.`,
+      `${command.lexeme} has no '${name.name}:'. Use 'prefill:'.`,
       name.span,
     );
     return Object.freeze({ ...name, name: "prefill" });
@@ -4096,7 +4096,7 @@ class Parser {
     if (question !== null && has("message"))
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
-        `${command.lexeme} has a question and 'message:'; keep one.`,
+        `${command.lexeme} has a question and 'message:'. Keep one.`,
         named.find((argument) => argument.name.name === "message")!.name.span,
       );
     const option = (name: string) =>

@@ -150,12 +150,12 @@ test("the file list needs main.tease and unique package paths", () => {
       [
         "/abs.tease",
         "TSC009",
-        "'/abs.tease' is not a package file path: it has an empty folder name; separate folders with a single /.",
+        "'/abs.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
       ],
       [
         "a//b.tease",
         "TSC009",
-        "'a//b.tease' is not a package file path: it has an empty folder name; separate folders with a single /.",
+        "'a//b.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
       ],
       [
         "../up.tease",
@@ -192,7 +192,7 @@ test("the file list needs main.tease and unique package paths", () => {
         "TSC009",
         "'bad\u0007.tease' is not a package file path: it contains a control character.",
       ],
-      ["main.tease", "TSC009", "The project has no main.tease; every session starts there."],
+      ["main.tease", "TSC009", "The project has no main.tease. Every session starts there."],
     ],
   );
   // The remaining valid file is still checked.

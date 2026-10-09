@@ -55,7 +55,7 @@ export function imageCatalog(images: readonly ProjectImageFile[]): {
             image.path,
             DiagnosticSeverity.Error,
             imageDiagnosticCode.conflictingTagValue,
-            `The image '${image.path}' has two different numbers for the tag '${tag.name}'; keep one keyword such as '${tag.name}: ${tag.value}'.`,
+            `The image '${image.path}' has two different numbers for the tag '${tag.name}'. Keep one keyword such as '${tag.name}: ${tag.value}'.`,
           ),
         );
       }
