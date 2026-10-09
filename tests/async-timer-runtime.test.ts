@@ -543,6 +543,41 @@ test("an expiry block interrupts an unanswered ask and the prompt returns afterw
   assert.equal(session.snapshot.status, "halted");
 });
 
+test("an expiry block that changes the default speaker leaves the interrupted ask's speaker", () => {
+  // Every step round-trips through checkpoint JSON: while the block waits with the ask suspended, then with it back.
+  const session = new Session(
+    [
+      "speaker mistress {}",
+      "speaker guide {}",
+      "speaker mistress",
+      "let t = timer async 5 {",
+      "  speaker guide",
+      "  wait 2",
+      "}",
+      'let name = askText "Name?"',
+      'say "Hello ${name}"',
+      "exit",
+    ].join("\n"),
+  );
+  const prompt = session.snapshot.foregroundAction;
+  assert.ok(prompt?.kind === "interaction");
+  const speakerId = (identifier: string) =>
+    session.snapshot.speakers.find((speaker) => speaker.identifier === identifier)?.id;
+  assert.equal(prompt.speakerId, speakerId("mistress"));
+  session.at(5_000);
+  assert.equal(session.snapshot.foregroundAction?.kind, "delay", "the block now waits");
+  session.at(7_000);
+  assert.deepEqual(session.snapshot.foregroundAction, prompt, "the same prompt is re-presented");
+  assert.equal(session.snapshot.defaultSpeaker, speakerId("guide"));
+  assert.equal(session.answer("Ada"), "completed");
+  assert.deepEqual(
+    session.events.flatMap((event) =>
+      event.kind === "say" ? [`${event.speaker?.identifier}: ${event.text}`] : [],
+    ),
+    ["mistress: Name?", "guide: Hello Ada"],
+  );
+});
+
 test("exit in an expiry block cancels the interrupted ask without assigning it", () => {
   const session = new Session(
     [

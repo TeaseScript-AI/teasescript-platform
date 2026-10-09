@@ -1373,7 +1373,8 @@ function validInteractionAction(
     return validPreparedInteractionAction(instruction, action, snapshot, speakers);
   }
   if (!interactionUiEqual(instruction.ui, action.ui) || action.timeoutMs !== null) return false;
-  if (instruction.speaker === null) return action.speakerId === snapshot.defaultSpeaker;
+  // The action keeps the default speaker of its request; an interrupt block may have changed the default since.
+  if (instruction.speaker === null) return true;
   const explicitSpeaker = speakerGlobalValue(snapshot, instruction.speaker);
   if (
     !isPlainRecord(explicitSpeaker) ||
