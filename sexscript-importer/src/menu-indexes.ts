@@ -25,6 +25,9 @@ interface Facts {
   options: Map<string, { prefix: number; list: string | null }>;
 }
 
+/** The operator with the position on the left: `0 < position` is `position > 0`. */
+const MIRRORED: Readonly<Record<string, string>> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=" };
+
 /** Methods that only read a list. */
 const READING_METHODS = new Set([
   "any",
@@ -316,11 +319,7 @@ function guarded(facts: Facts, condition: AstNode, holds: boolean): Facts {
     const name = left ?? right;
     if (name === null || !inside.least.has(name)) continue;
     // `0 < position` reads as `position > 0`.
-    const relation =
-      left !== null
-        ? operator
-        : (({ "<": ">", "<=": ">=", ">": "<", ">=": "<=" } as Record<string, string>)[operator] ??
-          operator);
+    const relation = left !== null ? operator : (MIRRORED[operator] ?? operator);
     const other = asNode(left !== null ? test.right : test.left);
     const sized = other === null ? null : sizeOf(other);
     if (sized !== null) {

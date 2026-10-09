@@ -41,7 +41,12 @@ import {
   type PackageResources,
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
+import {
+  withAskQuestions,
+  withNestedBlocks,
+  withoutBlankText,
+  withoutRepeatedText,
+} from "./repeated-text.ts";
 import { withParagraphPicks } from "./paragraph-picks.ts";
 import { withParagraphs } from "./paragraphs.ts";
 import { withoutCutReadingTimes, withReadingTimes } from "./reading-time.ts";
@@ -5747,30 +5752,28 @@ function withSetUpActions(statements: IrStatement[], context: LowerContext): IrS
   }
   if (actions.size === 0) return statements;
   // Each call passes a number of arguments the function takes.
-  let rewritten = deepMapped(statements, (value) => {
+  const direct = (value: IrExpression): IrExpression => {
+    const mapped = mapChildren(value, direct);
     if (
-      value.kind !== "call" ||
-      value.name !== ACTION_DISPATCHER ||
-      !Array.isArray(value.positional) ||
-      !isRecord(value.positional[0]) ||
-      value.positional[0].kind !== "variable" ||
-      !isRecord(value.positional[1]) ||
-      value.positional[1].kind !== "list" ||
-      !Array.isArray(value.positional[1].items)
+      mapped.kind !== "call" ||
+      mapped.name !== ACTION_DISPATCHER ||
+      mapped.positional[0]?.kind !== "variable" ||
+      mapped.positional[1]?.kind !== "list"
     )
-      return value;
-    const action = actions.get(String(value.positional[0].name));
+      return mapped;
+    const action = actions.get(mapped.positional[0].name);
     const target = action === undefined ? undefined : functions.get(action);
-    const args = value.positional[1].items;
+    const args = mapped.positional[1].items;
     if (
       action === undefined ||
       target === undefined ||
       args.length > target.parameters.length ||
       args.length < target.parameters.filter((parameter) => parameter.defaultValue === null).length
     )
-      return value;
+      return mapped;
     return { kind: "call", name: action, positional: args, named: {}, local: true };
-  });
+  };
+  let rewritten = everywhere(statements, direct);
   // A variable that nothing reads any more goes, and its function takes its name, where nothing else names the
   // function and the name is free.
   const read = new Set<string>();
@@ -5799,12 +5802,15 @@ function withSetUpActions(statements: IrStatement[], context: LowerContext): IrS
       !(item.kind === "assign" && item.target.kind === "variable" && gone.has(item.target.name)),
   );
   if (renamed.size > 0) {
-    rewritten = deepMapped(rewritten, (value) =>
-      (value.kind === "call" || value.kind === "function") &&
-      typeof value.name === "string" &&
-      renamed.has(value.name)
-        ? { ...value, name: renamed.get(value.name)! }
-        : value,
+    const call = (value: IrExpression): IrExpression => {
+      const mapped = mapChildren(value, call);
+      const name = mapped.kind === "call" ? renamed.get(mapped.name) : undefined;
+      return mapped.kind === "call" && name !== undefined ? { ...mapped, name } : mapped;
+    };
+    rewritten = everywhere(rewritten, call).map((item) =>
+      item.kind === "function" && renamed.has(item.name)
+        ? { ...item, name: renamed.get(item.name)! }
+        : item,
     );
     for (const action of renamed.keys()) context.actions.delete(action);
   }
@@ -5812,23 +5818,17 @@ function withSetUpActions(statements: IrStatement[], context: LowerContext): IrS
   return rewritten;
 }
 
-/**
- * The value with every record in it mapped by `map`, children first; what `map` leaves as it is stays the same object.
- */
-function deepMapped<T>(value: T, map: (record: Record<string, unknown>) => unknown): T {
-  if (Array.isArray(value)) {
-    const items = value.map((item) => deepMapped(item, map));
-    return (items.some((item, index) => item !== value[index]) ? items : value) as T;
-  }
-  if (!isRecord(value)) return value;
-  let changed = false;
-  const children: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
-    const mapped = deepMapped(child, map);
-    changed ||= mapped !== child;
-    children[key] = mapped;
-  }
-  return map(changed ? children : value) as T;
+/** The statements with every expression in them, also in function bodies and other blocks, mapped by `map`. */
+function everywhere(
+  statements: IrStatement[],
+  map: (value: IrExpression) => IrExpression,
+): IrStatement[] {
+  return statements.map((item) =>
+    mapOwnExpressions(
+      withNestedBlocks(item, (body) => everywhere(body, map)),
+      map,
+    ),
+  );
 }
 
 /** The function a closure body only forwards to, passing its own parameters unchanged. */
