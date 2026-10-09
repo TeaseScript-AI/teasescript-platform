@@ -32,11 +32,15 @@ export function useDevelopmentTime(
   const jumping = ref(false);
 
   const state = computed(() => player.session.value?.state ?? null);
-  const canSkip = computed(() => !jumping.value && state.value !== null && skippable(state.value));
+  // A session that a Player error stopped takes no time any more.
+  const canSkip = computed(
+    () => !jumping.value && !player.stopped.value && state.value !== null && skippable(state.value),
+  );
   // A session that ended has no scene time left to advance.
   const canAdvance = computed(
     () =>
       !jumping.value &&
+      !player.stopped.value &&
       state.value !== null &&
       state.value.status !== "halted" &&
       state.value.status !== "failed",
@@ -93,7 +97,7 @@ export function useDevelopmentTime(
           await new Promise<void>((resolve) => (wake = resolve));
         else if (current !== published) await new Promise((resolve) => setTimeout(resolve, 0));
         else break;
-        if (disposed || player.generation.value !== generation) break;
+        if (disposed || player.generation.value !== generation || player.stopped.value) break;
         current = player.session.value ?? current;
       }
       if (player.generation.value === generation) record(skippedMs);

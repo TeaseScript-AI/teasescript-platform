@@ -167,6 +167,7 @@ export class CaptureService {
     this.#pending = null;
   }
 
+  /** Forgets the answer being taken, as for a new or stopped session; one still in flight is dropped. */
   reset(): void {
     this.#key = null;
     this.#pending = null;
@@ -185,7 +186,7 @@ export class CaptureService {
         this.#pending = this.#answer();
       }
       const answer = await this.#pending;
-      if (this.#stopped || this.#host.generation() !== generation) return;
+      if (this.#stopped || this.#key !== key || this.#host.generation() !== generation) return;
       // Input happens at the observed time.
       const observed = this.#host.observe() ?? this.#host.session();
       if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== action.actionId) {

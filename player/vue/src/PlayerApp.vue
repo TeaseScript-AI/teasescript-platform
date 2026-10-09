@@ -610,8 +610,9 @@ async function toggleFullscreen() {
           </slot>
         </template>
 
+        <!-- A session a Player error stopped takes no input; its transcript stays. -->
         <RuntimeInteraction
-          :session="session"
+          :session="player.stopped.value ? null : session"
           :reset="player.interactionReset.value"
           :transcript-key="transcript.key"
           :entries="transcript.entries"

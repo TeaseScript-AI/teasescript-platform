@@ -474,7 +474,9 @@ with Close or Escape, returns to the [start page](#session-start-and-user-activa
 and takes focus.
 
 When a script error stops the session, a line above the composer says "The script stopped because of an error." and
-offers **Details**; after an exception of the Player itself it says "The Player ran into an error." An error notice with
+offers **Details**. An exception of the Player itself stops the session too: nothing of it runs, observes time, or takes
+input any more, its captures, cameras, and media end, and late answers, reports, and saves are dropped until the next
+Start; the line then says "The Player ran into an error." An error notice with
 **Details** supplements the line until a new session starts. Both open one error dialog, which never opens by itself. It
 shows "Script error" and "In rules.tease, line 3.", then **Technical details**, collapsed, with the error code and the
 runtime's message ("TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0

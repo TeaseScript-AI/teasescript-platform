@@ -20,6 +20,10 @@ interface CameraHost {
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
   readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
+  readonly hostError: Readonly<Ref<string | null>>;
+  readonly stopped: Readonly<Ref<boolean>>;
+  reportHostError(error: unknown): void;
+  prepareInput(): true | Promise<boolean>;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -184,4 +188,65 @@ test("the script's camera view previews the session camera where it places it, a
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, "stage");
   assert.equal(host.viewfinder.value, tracks[2]);
+});
+
+test("a Player exception stops the session where it stands, and late writes do not continue it", async (context) => {
+  stubBrowser(context);
+  context.mock.method(console, "error", () => {});
+  let finishWrite!: () => void;
+  const provider: ScriptStorageProvider = {
+    scope: "test",
+    load: async () => [],
+    write: () => new Promise<void>((resolve) => (finishWrite = resolve)),
+    replace: async () => {},
+    clear: async () => {},
+  };
+  const host = mount(context, { scriptStorage: provider, capabilities: { camera: false } });
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    createPlayerRuntimeSession(
+      'say "first", instant\nwait 0.1 s\nsave 1 as "count"\nsay "second", instant\nexit',
+      { persistentScriptStorage: true },
+    ),
+  );
+  await host.activate();
+  const said = () => host.session.value?.transcriptEntries.map((entry) => entry.text);
+  assert.deepEqual(said(), ["first"]);
+  host.reportHostError(new TypeError("A component failed."));
+  assert.equal(host.hostError.value, "TypeError");
+  assert.equal(host.stopped.value, true);
+  // The wait ends and its save would be written, but nothing of the stopped session runs.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.deepEqual(said(), ["first"]);
+  assert.equal(host.session.value?.state.status, "waiting");
+  assert.equal(await host.prepareInput(), false);
+
+  // A save written before the stop does not continue the session when it settles.
+  host.prepare(() =>
+    createPlayerRuntimeSession('save 1 as "count"\nsay "saved", instant\nexit', {
+      persistentScriptStorage: true,
+    }),
+  );
+  await host.activate();
+  assert.equal(host.stopped.value, false, "a new Start runs again");
+  assert.ok(host.session.value && pendingPlayerRuntimeStorageWrite(host.session.value.state));
+  host.reportHostError(new TypeError("A component failed."));
+  finishWrite();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(said(), []);
+  assert.ok(host.session.value && pendingPlayerRuntimeStorageWrite(host.session.value.state));
+});
+
+test("a Start that throws after the camera opened releases the camera", async (context) => {
+  const { grant, tracks } = stubBrowser(context);
+  context.mock.method(console, "error", () => {});
+  grant();
+  const host = mount(context, { capabilities: { camera: true } });
+  host.prepare(() => {
+    throw new TypeError("The script could not start.");
+  });
+  await host.activate();
+  assert.equal(host.hostError.value, "TypeError");
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0]?.readyState, "ended");
 });
