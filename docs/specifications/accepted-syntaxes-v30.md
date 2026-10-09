@@ -568,11 +568,12 @@ may produce `5`, `6`, `7`, `8`, or `9`.
 
 may also produce `10`.
 
-`for` ([§23](#23-loops)) and `randomInteger` ([Randomness](#randomness)) give the whole numbers of a range, so a range
-written as their source or argument needs whole-number bounds: a bound of type `number`, such as `count / 2`, is a
-compile error. Round it with `floor(...)`, `round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other
-bounds, such as one whose type the compiler cannot know or one of a range kept in a variable, are checked when the range
-is used. A `switch` case range matches any number within its bounds ([§32](#32-switch-statements)).
+`for` ([§23](#23-loops)) and `randomInteger` ([Randomness](#randomness)) give the whole numbers of a range, and `wait`
+and `timer` ([§27](#27-timers)) pick a whole number of units from one, so a range written in any of them needs
+whole-number bounds: a bound of type `number`, such as `count / 2`, is a compile error. Round it with `floor(...)`,
+`round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other bounds, such as one whose type the compiler
+cannot know or one of a range kept in a variable, are checked when the range is used. A `switch` case range matches any
+number within its bounds ([§32](#32-switch-statements)).
 
 Ranges may also be used in `switch` cases:
 

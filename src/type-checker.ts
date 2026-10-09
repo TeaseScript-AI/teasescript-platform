@@ -2970,8 +2970,9 @@ class TypeChecker {
   }
 
   /**
-   * A range that `for` goes through or `randomInteger` draws from has whole-number bounds (V30 §6): a bound of type
-   * `number` is an error rather than a truncation. A bound the compiler cannot know is checked at runtime.
+   * A range that `for` goes through, `randomInteger` draws from, or a wait or timer counts in units has whole-number
+   * bounds (V30 §6): a bound of type `number` is an error rather than a truncation. A bound the compiler cannot know is
+   * checked at runtime.
    */
   #checkWholeRangeBounds(expression: Expression, bound: string): void {
     const range = unwrap(expression);
@@ -6016,6 +6017,12 @@ class TypeChecker {
         expression,
         "A time before a unit is a number",
       );
+      // A range counts whole units, as `for` counts whole numbers.
+      if (command !== "media")
+        this.#checkWholeRangeBounds(
+          expression,
+          command === "wait" ? "A wait range bound" : "A timer range bound",
+        );
       return;
     }
     const range = resolved(nonNullTypeForUse(type)).kind === "range";
