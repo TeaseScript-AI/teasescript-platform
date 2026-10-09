@@ -1073,9 +1073,10 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
 }
 
 /**
- * The goal of a comparison of two values (`reps >= target`): a variable of one side that the code assigns, measured by
- * its difference from the other side, a variable or a stored value with a literal key. No value is solved for, as it
- * depends on the other side. Null when neither side is such a pair.
+ * The goal of a comparison of two values (`reps >= target`): a variable of one side that the code counts, measured by
+ * its difference from the other side, a variable or a stored value with a literal key. Only a counter, which holds a
+ * number, as directed search measures few comparisons at once, and two texts (`typed == line`) have no difference. No
+ * value is solved for, as it depends on the other side. Null when neither side is such a pair.
  */
 function differenceGoal(flow: DataFlow, atom: Atom): Goal | null {
   const holds = atom.wanted ? atom.operator : negate(atom.operator);
@@ -1089,7 +1090,7 @@ function differenceGoal(flow: DataFlow, atom: Atom): Goal | null {
     if (typeof name !== "string" || text === null || text === name) continue;
     const source = flow
       .sourcesOf(side)
-      .find((found) => found.kind === "variable" && found.name === name);
+      .find((found) => found.kind === "variable" && found.name === name && found.counter);
     if (source !== undefined)
       return {
         source,
