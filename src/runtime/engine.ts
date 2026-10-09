@@ -2602,7 +2602,7 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
   if (snapshot.currentSessionTimeMs === MAX_RUNTIME_SESSION_TIME_MS)
     throw fault(
       "TSR052",
-      "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' to wait without a time limit.",
+      "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
       span,
     );
   const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;

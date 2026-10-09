@@ -201,7 +201,7 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
     [
       'let answers = askForm fields: { n: { type: "integer", value: 1 } }, timeout: 1, onTimeout: "submit"\nexit',
       "TSR052",
-      "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' to wait without a time limit.",
+      "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
     ],
     ["let t = timer async 5\nt.pause()\nwait 10\nt.resume()\nexit", "TSR050", round, last - 10_000],
     [
@@ -210,14 +210,37 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
       round,
       last - 10_000,
     ],
+    [
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10\nt.resume()\nexit",
+      "TSR050",
+      "Scene time has reached its limit, so this timer cannot continue. Stop it.",
+      last - 10_000,
+    ],
   ] as const) {
     const failed = failure(source, initialSessionTimeMs);
     assert.equal(failed?.code, code, source);
     assert.equal(failed?.message, message, source);
   }
-  // The advice works: no wait, a timer of 0 s, and a timer whose remaining time is zero.
+  // The advice works: no wait, a timer of 0 s, a form without a time limit, a stopped repeating timer, and a timer
+  // whose remaining time is zero.
   assert.equal(failure("wait 0\nexit"), null);
   assert.equal(failure("let t = timer async 0 s\nt.stop()\nexit"), null);
+  const untimed = compileValidPlan(
+    'let answers = askForm fields: { n: { type: "integer", value: 1 } }\nexit',
+  );
+  const opened = run(
+    untimed,
+    createImmediatePacingRuntimeSnapshot(untimed, { initialSessionTimeMs: last }),
+  ).snapshot;
+  assert.equal(opened.failure, null);
+  assert.equal(opened.foregroundAction?.kind, "interaction");
+  assert.equal(
+    failure(
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10\nt.stop()\nexit",
+      last - 10_000,
+    ),
+    null,
+  );
   assert.equal(
     failure(
       "let t = timer async 5\nt.pause()\nwait 10\nt.remaining = 0 s\nt.resume()\nexit",
