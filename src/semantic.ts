@@ -2049,6 +2049,12 @@ class SemanticValidator {
               `'${name}' is a ${binding.kind}, not a callable function.`,
               expression.callee.span,
             );
+          } else if (unboundValue(name, contextualSpeaker) !== null) {
+            this.#report(
+              semanticCode.nonCallable,
+              `'${name}' is ${unboundValue(name, contextualSpeaker)}, not a callable function.`,
+              expression.callee.span,
+            );
           } else if (!this.#reportFileName(name, expression.callee.span)) {
             // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text.
             const hint =
@@ -2083,13 +2089,8 @@ class SemanticValidator {
           if (method.kind === "identifier") {
             const binding = scope.resolve(method.name);
             const kind =
-              method.name === "speaker" && contextualSpeaker !== null
-                ? "the current speaker"
-                : method.name === "debugMode"
-                  ? "a read-only value"
-                  : binding !== undefined && binding.kind !== "function"
-                    ? `a ${binding.kind}`
-                    : null;
+              unboundValue(method.name, contextualSpeaker) ??
+              (binding !== undefined && binding.kind !== "function" ? `a ${binding.kind}` : null);
             if (kind !== null)
               this.#report(
                 semanticCode.nonCallable,
@@ -3089,6 +3090,12 @@ function findFirstInteraction(
 function unwrapParentheses(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
+}
+
+/** What `speaker` is where a speaker is current, or what `debugMode` is: names that are values without a binding. */
+function unboundValue(name: string, contextualSpeaker: string | null): string | null {
+  if (name === "speaker" && contextualSpeaker !== null) return "the current speaker";
+  return name === "debugMode" ? "a read-only value" : null;
 }
 
 function isDefinitelyNonNumeric(expression: Expression): boolean {
