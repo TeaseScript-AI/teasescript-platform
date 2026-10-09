@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, triggerRef, watch } from "vue";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { Check, Copy, Maximize2, TextWrap } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -74,8 +74,9 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     count: props.lines.length,
     getScrollElement: () => scroller.value,
     estimateSize: () => lineHeight,
-    // A line measures when its ResizeObserver reports it, after layout, unrounded so the spacers add up to the lines
-    // they stand for. Measuring each line as Vue inserts it would lay out the whole page once per line.
+    // A line measures when its ResizeObserver reports it, after layout, or `keepInView` reads it, unrounded so the
+    // spacers add up to the lines they stand for. Measuring each line as Vue inserts it would lay out the whole page
+    // once per line.
     measureElement: (element, entry, instance) =>
       entry?.borderBoxSize[0]?.blockSize ??
       instance.itemSizeCache.get(instance.options.getItemKey(instance.indexFromElement(element))) ??
@@ -83,6 +84,9 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     overscan: 20,
   })),
 );
+// As lines above the view render or change height, the browser keeps what is in view in place, as it does for a block
+// rendered whole; the virtualizer moving it as well would move it twice, and away from where `keepInView` put it.
+virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = () => false;
 // The lines rendered, and the room the others take above and below them.
 const shown = computed(() =>
   windowed.value
@@ -97,8 +101,6 @@ const spacers = computed(() => {
 function measure(element: unknown) {
   if (windowed.value) virtualizer.value.measureElement(element as HTMLElement | null);
 }
-// Each line measures anew in the other wrap or for other lines.
-watch([wrap, () => props.lines], () => virtualizer.value.measure());
 // The widest line, by its columns, a wide character as two and a tab to its next stop, unseen under a windowed block's
 // lines, so the block scrolls sideways as far as its widest line wherever it scrolls to.
 const widest = computed(() => {
@@ -122,7 +124,7 @@ function lineElement(number: number) {
   return scroller.value?.querySelector<HTMLElement>(`[data-code-line="${number}"]`) ?? null;
 }
 // Where the block scrolls to keep its focus in view, from the line itself, or, for a line a windowed block has not
-// rendered, from where its lines' heights put it.
+// rendered, from where its lines' heights put it, in whole pixels as the line's own offsets are.
 function focusTop(container: HTMLElement): number | null {
   const focus = props.focus;
   if (focus === null) return container.scrollHeight - container.clientHeight;
@@ -132,8 +134,8 @@ function focusTop(container: HTMLElement): number | null {
   const item = virtualizer.value.measurementsCache[index];
   const top =
     element?.offsetTop ??
-    (item?.start ?? 0) + parseFloat(getComputedStyle(container).paddingBlockStart);
-  const height = element?.offsetHeight ?? item?.size ?? 0;
+    Math.round((item?.start ?? 0) + parseFloat(getComputedStyle(container).paddingBlockStart));
+  const height = element?.offsetHeight ?? Math.round(item?.size ?? 0);
   // Whole lines above it: half the others, the odd one below, so each added line alternates below and above. The large
   // view has no line count, so it centres the line.
   return focus.top
@@ -150,14 +152,30 @@ async function keepInView() {
   for (let attempt = 0; attempt < 3 && pass === keeping; attempt += 1) {
     const container = scroller.value;
     if (container === null) return;
+    // A windowed block first takes the heights its lines have now, as right after Wrap, before their observer reports
+    // them; as computed, not as shown, which the dialogs' zoom scales.
+    if (windowed.value)
+      for (const element of container.querySelectorAll<HTMLElement>("[data-code-line]"))
+        virtualizer.value.resizeItem(
+          Number(element.dataset.index),
+          parseFloat(getComputedStyle(element).height),
+        );
     const top = focusTop(container);
     if (top === null || (attempt > 0 && Math.abs(top - container.scrollTop) < 1)) return;
     container.scrollTop = top;
     if (!windowed.value) return;
+    // The virtualizer otherwise learns the new place only from the next scroll event, and renders lines that measure
+    // before it, as after Wrap, around the old one.
+    virtualizer.value.scrollOffset = container.scrollTop;
+    triggerRef(virtualizer);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }
 }
-onMounted(() => void keepInView());
+// After the virtualizer takes the block, which scrolls it to the top.
+onMounted(async () => {
+  await nextTick();
+  void keepInView();
+});
 watch(
   [rows, wrap, () => props.focus, () => props.lines],
   async () => {
@@ -266,7 +284,7 @@ async function copy() {
     <pre
       ref="scroller"
       class="code-block"
-      :class="{ 'code-block-wrap': wrap, 'code-block-windowed': windowed }"
+      :class="{ 'code-block-wrap': wrap }"
       :style="{ '--gutter': gutter, '--rows': rows }"
       tabindex="0"
       role="region"
@@ -421,10 +439,6 @@ async function copy() {
 .code-block-wrap .code-block-line {
   grid-template-columns: var(--gutter) minmax(0, 1fr);
   width: auto;
-}
-/* A windowed block keeps its place itself while lines above the view render or change height. */
-.code-block-windowed {
-  overflow-anchor: none;
 }
 .code-block-spacer {
   display: block;

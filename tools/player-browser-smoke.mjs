@@ -35,8 +35,12 @@ const MODEL_PATHS_CATALOG = {
 };
 
 // A file of a few thousand lines with a draw deep inside a long function, for the random draw picker's code; generated,
-// as only its length and one long line far from the draw matter.
-const LARGE_FILE_LINES = Array.from({ length: 2_000 }, (_, index) => `// Line ${index + 1}.`);
+// as only its length, one long line far from the draw, and the lines above the draw that wrap matter.
+const LARGE_FILE_LINES = Array.from({ length: 2_000 }, (_, index) =>
+  index >= 1_200 && index % 3 === 0
+    ? `// Line ${index + 1}. ${"Words that wrap. ".repeat(10)}`
+    : `// Line ${index + 1}.`,
+);
 LARGE_FILE_LINES[0] = "let hit = false";
 LARGE_FILE_LINES[1] = `// ${"A long line. ".repeat(20)}`;
 LARGE_FILE_LINES[1_199] = "function flip {";
@@ -1812,9 +1816,9 @@ async function randomPickerScenario(cdp, origin) {
 }
 
 // In a file of a few thousand lines the picker's code renders only the lines in and near view, and shows like a short
-// file's: the draw's line in the middle, Copy copies the lines in view, it scrolls sideways as far as its widest line,
-// its large view opens on the draw, Show whole function starts at the function's first line, the file's end scrolls
-// into view, and Show less returns to the draw.
+// file's: the draw's line in the middle from the first frame and through Wrap, Copy copies the lines in view, it scrolls
+// sideways as far as its widest line, its large view opens on the draw, Show whole function starts at the function's
+// first line, the file's end scrolls into view, and Show less returns to the draw.
 async function largeRandomPickerScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const block = `document.querySelector('[data-random-draw-source] [data-code-block]')`;
@@ -1822,15 +1826,27 @@ async function largeRandomPickerScenario(cdp, origin) {
   const inView = (number) =>
     `(() => { const line = ${block}.querySelector('[data-code-line="${number}"]'); return !!line && line.offsetTop >= ${block}.scrollTop && line.offsetTop + line.offsetHeight <= ${block}.scrollTop + ${block}.clientHeight; })()`;
   const centred = `(() => { const line = ${block}?.querySelector('[data-code-highlight]'); return line?.dataset.codeLine === '1500' && line.offsetTop - ${block}.scrollTop === 3 * line.offsetHeight; })()`;
+  // Where the draw's line is in each of the next frames once the code shows: 0 in its place, null when not rendered.
+  const sampleFrames = (count) =>
+    `window.__frames = []; (function sample() { const block = ${block}; if (block) { const line = block.querySelector('[data-code-highlight]'); window.__frames.push(line ? line.offsetTop - block.scrollTop - 3 * line.offsetHeight : null); } if (window.__frames.length < ${count}) requestAnimationFrame(sample); })();`;
+  const stayed = async (message) => {
+    await waitFor(cdp, `window.__frames.length >= 8`, 20_000);
+    assertEqual(
+      await value(cdp, `JSON.stringify(window.__frames)`),
+      JSON.stringify(Array(8).fill(0)),
+      message,
+    );
+  };
   await navigate(cdp, `${origin}/player/?package=large-file&room=debug`);
   await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
   if (!(await value(cdp, `!!document.querySelector('[data-debug-random-active]')`)))
     await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
   await waitFor(cdp, `!!document.querySelector('[data-debug-random-active]')`);
   await physicalClick(cdp, "[data-debug-random-active]");
+  await evaluate(cdp, sampleFrames(8));
   await physicalClick(cdp, "[data-session-start]");
-  // The draw's line has three lines above it, like a short file's.
-  await waitFor(cdp, centred, 20_000, "The draw's line was not in the middle of the code");
+  // The draw's line has three lines above it, like a short file's, from the first frame the code shows.
+  await stayed("The code did not open with the draw's line in the middle");
   assertEqual(
     await value(
       cdp,
@@ -1858,12 +1874,18 @@ async function largeRandomPickerScenario(cdp, origin) {
     true,
     "The code scrolled sideways only as far as the lines near view",
   );
+  // Wrapping the lines above the draw's keeps the draw's line in place in every frame, and so does unwrapping them.
+  for (const state of ["on", "off"]) {
+    await evaluate(cdp, sampleFrames(8));
+    await physicalClick(cdp, "[data-random-draw-source] [data-code-block-wrap]");
+    await stayed(`Wrap ${state} moved the draw's line`);
+  }
   await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
   await waitFor(
     cdp,
-    `[...document.querySelectorAll('[data-code-block-lightbox] [data-code-mark]')].map((node) => node.textContent).join('') === 'chance(25)'`,
+    `[...document.querySelectorAll('[data-code-block-lightbox] [data-code-mark]')].map((node) => node.textContent).join('') === 'chance(25)' && (() => { const block = document.querySelector('[data-code-block-lightbox] [data-code-block]'); const line = block.querySelector('[data-code-highlight]'); return Math.abs(line.offsetTop - block.scrollTop + line.offsetHeight / 2 - block.clientHeight / 2) <= 1; })()`,
     5_000,
-    "The large view did not open on the draw",
+    "The large view did not open with the draw's line in the middle",
   );
   if ((await value(cdp, rendered("[data-code-block-lightbox]"))) > 200)
     throw new Error("The large view rendered most of a file of thousands of lines");
