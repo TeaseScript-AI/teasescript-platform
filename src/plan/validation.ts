@@ -1165,6 +1165,11 @@ function validateInstruction(
     case "playMedia":
       validatePlayMediaInstruction(value, path, temporaryCount, functionIds, errors);
       return;
+    case "stopAudio":
+      if (!hasExactKeys(value, ["kind", "span"])) {
+        errors.push(planError("TSC002", "Stop-audio instruction has an invalid shape.", path));
+      }
+      return;
     case "interaction":
       validateInteractionInstruction(value, path, temporaryCount, errors);
       return;

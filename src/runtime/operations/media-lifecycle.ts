@@ -145,6 +145,26 @@ export function stopMediaAction(
   settleMediaAction(plan, snapshot, action, events, span);
 }
 
+/**
+ * `stopAudio` stops every running or paused audio in start order, as `stop()` on its handle does; video plays on.
+ * Returns the IDs of the audio it found running or paused.
+ */
+export function stopAllAudio(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  span: SourceSpan | PlanSourceLocation,
+): number[] {
+  const audio = snapshot.backgroundActions
+    .filter(
+      (action): action is RuntimeMediaActionSnapshot =>
+        action.kind === "media" && action.media.media === "audio",
+    )
+    .sort((left, right) => left.media.mediaId - right.media.mediaId);
+  for (const action of audio) stopMediaAction(plan, snapshot, action, events, span);
+  return audio.map((action) => action.media.mediaId);
+}
+
 /** A new Stage image or video replaces an active Stage video, which stops. */
 export function stopStageVideo(
   plan: InstructionPlan | null,

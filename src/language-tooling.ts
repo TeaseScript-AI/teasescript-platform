@@ -825,6 +825,7 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "hideImageStatement":
     case "showCameraStatement":
     case "hideCameraStatement":
+    case "stopAudioStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":

@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 71;
+export const INSTRUCTION_PLAN_VERSION = 72;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -161,6 +161,7 @@ export type Instruction =
   | ShowPermanentButtonInstruction
   | StorageWriteInstruction
   | PlayMediaInstruction
+  | StopAudioInstruction
   | InteractionInstruction
   | CaptureInstruction
   | GotoInstruction
@@ -541,6 +542,11 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly captures: HandlerCaptures;
   /** Receives the handle when async playback is used as a value. */
   readonly destinationTemporary: number | null;
+}
+
+/** `stopAudio`: stops every running or paused audio in start order, as `stop()` on each handle does. */
+export interface StopAudioInstruction extends InstructionBase {
+  readonly kind: "stopAudio";
 }
 
 export type InteractionKind =

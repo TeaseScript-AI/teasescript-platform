@@ -2739,11 +2739,11 @@ A count is a whole number of at least one and a duration is exact and greater th
 `repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
 indefinite repetition.
 
-On the ordinary story path, `showImage`, `hideImage`, `showCamera`, `hideCamera`, `playAudio`, `playVideo`, and
-statement-level media handle operations such as `music.pause()` or `music.position = 2 min`, and camera placement
-writes, wait until the previous message's pacing has completed or been skipped, like a following `say`. `wait` and
-`timer` keep overlapping message pacing ([§27](#27-timers)). Timer and cue blocks keep the canonical interrupt pacing
-and add no media wait.
+On the ordinary story path, `showImage`, `hideImage`, `showCamera`, `hideCamera`, `playAudio`, `playVideo`,
+`stopAudio`, and statement-level media handle operations such as `music.pause()` or `music.position = 2 min`, and
+camera placement writes, wait until the previous message's pacing has completed or been skipped, like a following
+`say`. `wait` and `timer` keep overlapping message pacing ([§27](#27-timers)). Timer and cue blocks keep the canonical
+interrupt pacing and add no media wait.
 
 ### Camera view
 
@@ -2847,6 +2847,23 @@ playAudio async repeat "music/beat.mp3" {
   ([§14](#variables-in-timer-media-and-button-blocks)), all blocks of one media the same ones, across its repeats. In
   `let NAME = playAudio async ... { ... }` every block also sees `NAME` as its own handle, including inside a function.
 
+### Stopping all audio
+
+**Status:** Accepted (Owner decision on [#512](https://github.com/TeaseScript-AI/teasescript-platform/issues/512),
+2026-10-09) and implemented.
+
+```text
+playAudio async repeat "music/beat.mp3"
+playAudio async "sounds/rain.mp3"
+stopAudio                    // stops both
+```
+
+`stopAudio` takes no arguments; to stop one sound, keep its handle and call `stop()`. It stops every running or paused
+sound of the session, including sounds started in another file, in the order they started, as `stop()` on each handle
+would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
+A blocking `playAudio` stopped this way from a timer or cue block continues once that block returns. Video, the Stage
+image, the camera view, and timers are unaffected; without a running or paused sound, `stopAudio` does nothing.
+
 ### Failures, cleanup, and restore
 
 - When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
@@ -2857,22 +2874,12 @@ playAudio async repeat "music/beat.mp3" {
 - Checkpoint and restore preserve the Stage image and media state; playback resumes from the persisted position, and
   time without a running Player does not advance media. Restore does not imply cross-device handoff.
 
-### Superseded V30 media forms
-
-| V30 form | Replacement |
-| --- | --- |
-| `playSound x` | `playAudio x` |
-| `playBackgroundSound(x)` and `stopBackgroundSound(id)` | `let s = playAudio async x` and `s.stop()` |
-| `stopVideo()` | `v.stop()` on an async video, or `showImage` / `hideImage` |
-| `showBackgroundVideo(x, loop: true)` | `playVideo async repeat x` |
-| positioned or timed top-level `showImage(...)` and `hideImage(ref)` | `showImage <file>` and `hideImage` for the Stage image |
-
 ### Future layered scene
 **Status:** Accepted V30 direction, extended with [pixels and image size](#pixels-and-image-size) (Owner decision on
 [#617](https://github.com/TeaseScript-AI/teasescript-platform/issues/617)); not implemented. Background and overlay
 layers, their coordinate space, movement, blur, drawings, edited copies, and transitions remain separate from the Stage
-image and media foundation above, which supersedes the old positioned and timed top-level image. Points affected by the
-Stage image model must be reconciled before the layered scene is implemented.
+image and media foundation above. Points affected by the Stage image model must be reconciled before the layered scene
+is implemented.
 
 ```text
 showBackgroundImage backgroundFile
@@ -4946,6 +4953,7 @@ showPermanentButton
 removePermanentButton
 playAudio
 playVideo
+stopAudio
 showBackgroundColor
 showBackgroundImage
 showOverlayImage
@@ -5259,7 +5267,7 @@ Resolved in this revision:
   `imageSize(image)` returns an image's width and height in pixels (accepted future direction; not implemented; see
   [§22](#pixels-and-image-size));
 - overlays use `hideOverlay`, asynchronous `moveOverlay` and `animateOverlay`, optional blocking behavior, and keyframe hold durations;
-- `showImage <file>` and `hideImage` control the persistent Stage image; `showCamera [stage]` and `hideCamera` show and hide the camera's view; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
+- `showImage <file>` and `hideImage` control the persistent Stage image; `showCamera [stage]` and `hideCamera` show and hide the camera's view; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, `stopAudio` stops every sound, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
 - initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));

@@ -13,7 +13,7 @@ import {
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 85;
+export const CHECKPOINT_VERSION = 86;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;

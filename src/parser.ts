@@ -50,6 +50,7 @@ import type {
   MediaParts,
   MediaRepeat,
   PlayMediaStatement,
+  StopAudioStatement,
   DeleteStatement,
   LoadExpression,
   SaveStatement,
@@ -103,6 +104,7 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showImage",
   "hideImage",
   "hideCamera",
+  "stopAudio",
   "save",
   "delete",
   "switch",
@@ -346,6 +348,9 @@ class Parser {
     }
     if (this.#checkIdentifier("hideCamera")) {
       return this.#parseHideCameraStatement();
+    }
+    if (this.#checkIdentifier("stopAudio")) {
+      return this.#parseStopAudioStatement();
     }
     if (this.#checkIdentifier("save")) {
       return this.#parseSaveStatement();
@@ -1898,6 +1903,33 @@ class Parser {
     )
       return null;
     return Object.freeze({ kind: "hideImageStatement", span: copySpan(command.span) });
+  }
+
+  /**
+   * `stopAudio` stops every sound and takes no arguments. Anything after it on the line is reported and skipped; an
+   * enclosing block keeps its closing brace.
+   */
+  #parseStopAudioStatement(): StopAudioStatement | null {
+    const command = this.#advance();
+    let braces = 0;
+    const atEnd = () =>
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.EndOfFile) ||
+      (braces === 0 && this.#check(TokenKind.RightBrace));
+    if (atEnd()) return Object.freeze({ kind: "stopAudioStatement", span: copySpan(command.span) });
+    const first = this.#peek();
+    let last = first;
+    while (!atEnd()) {
+      last = this.#advance();
+      if (last.kind === TokenKind.LeftBrace) braces += 1;
+      else if (last.kind === TokenKind.RightBrace) braces -= 1;
+    }
+    this.#reportSpan(
+      parserDiagnosticCode.invalidMediaForm,
+      "stopAudio takes no arguments; to stop one sound, keep its handle and call stop() on it.",
+      spanFrom(first.span, last.span),
+    );
+    return null;
   }
 
   /**

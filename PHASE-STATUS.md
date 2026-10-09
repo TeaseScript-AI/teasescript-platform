@@ -45,9 +45,9 @@ accept syntax, architecture, or implementation details.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
   and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and selection of files by
   their header tags (`goto tagged`, `call tagged`, `findScripts`), and blocking or asynchronous `playAudio`/`playVideo`
-  with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
-  checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
-  audio after explicit Start; browser video playback remains deferred.
+  with playback ranges, repetition, volume, handles, seeks, timeline cues, `stopAudio`, Player load/progress
+  observations, and checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image
+  and plays audio after explicit Start; browser video playback remains deferred.
 - **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
   unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
   session camera after Start and captures silently; a photo saved through script storage is stored in the browser and

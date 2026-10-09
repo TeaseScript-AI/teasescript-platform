@@ -279,8 +279,8 @@ limits are defined in specification [§27](specifications/accepted-syntaxes-v30.
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
 `playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,
-and checkpoint restore. Player load and progress reports drive playback state; browser integration is tracked in #446
-and browser video playback is not implemented. Accepted forms are defined in specification
+`stopAudio` for every sound at once, and checkpoint restore. Player load and progress reports drive playback state;
+browser integration is tracked in #446 and browser video playback is not implemented. Accepted forms are defined in specification
 [§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video).
 
 The current function subset includes:
