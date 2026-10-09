@@ -536,13 +536,64 @@ function locateCompactCommand(
   }
   // A token that starts at the cursor, such as the `)` an editor adds when it closes a bracket, is after it.
   const before = tokens.filter(
-    (token) =>
-      token.span.start.offset < offset &&
-      token.kind !== TokenKind.Newline &&
-      token.kind !== TokenKind.EndOfFile,
+    (token) => token.span.start.offset < offset && token.kind !== TokenKind.EndOfFile,
   );
-  return nearestOpenCompactCommand(tokensAfterLastNewline(before));
+  return nearestOpenCompactCommand(statementTokens(before));
 }
+
+/**
+ * The tokens, without line breaks, of the statement that `tokens`, those before the cursor, end in: back to the last
+ * line break that ends a statement. A line break after a comma, a colon, an operator, or an opening `(` or `[` goes on
+ * with the statement, as in an ask whose options continue on the next line.
+ */
+function statementTokens(tokens: readonly Token[]): readonly Token[] {
+  let start = tokens.length;
+  while (start > 0) {
+    if (tokens[start - 1]!.kind !== TokenKind.Newline) {
+      start -= 1;
+      continue;
+    }
+    // The first of the line breaks here, so that blank lines are passed once.
+    let first = start - 1;
+    while (first > 0 && tokens[first - 1]!.kind === TokenKind.Newline) first -= 1;
+    if (first === 0 || !CONTINUING_TOKENS.has(tokens[first - 1]!.kind)) break;
+    start = first;
+  }
+  return tokens.slice(start).filter((token) => token.kind !== TokenKind.Newline);
+}
+
+/** The tokens after which a statement goes on past a line break. */
+const CONTINUING_TOKENS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.Comma,
+  TokenKind.Colon,
+  TokenKind.LeftParenthesis,
+  TokenKind.LeftBracket,
+  TokenKind.KeywordAs,
+  TokenKind.KeywordAnd,
+  TokenKind.KeywordOr,
+  TokenKind.KeywordNot,
+  TokenKind.KeywordIn,
+  TokenKind.KeywordIs,
+  TokenKind.Dot,
+  TokenKind.RangeExclusive,
+  TokenKind.RangeInclusive,
+  TokenKind.Question,
+  TokenKind.Pipe,
+  TokenKind.Plus,
+  TokenKind.Minus,
+  TokenKind.PlusEqual,
+  TokenKind.MinusEqual,
+  TokenKind.Star,
+  TokenKind.Slash,
+  TokenKind.Percent,
+  TokenKind.Equal,
+  TokenKind.EqualEqual,
+  TokenKind.BangEqual,
+  TokenKind.Less,
+  TokenKind.LessEqual,
+  TokenKind.Greater,
+  TokenKind.GreaterEqual,
+]);
 
 /**
  * The nearest command that no later closing delimiter has ended, found in one backward pass: a closing delimiter whose

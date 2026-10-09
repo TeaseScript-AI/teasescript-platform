@@ -266,6 +266,13 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText("Q", prefill: askText(', "))"), "question");
   assert.equal(activeSlot('askText("Q", prefill: askText("D"', "))"), "question");
   assert.equal(activeSlot('askText("Q", prefill: askText("D")', ")"), "prefill");
+  // A command ends with its statement, but its options may go on after a comma or an opening parenthesis.
+  assert.equal(activeSlot('askText "Q", hint: 1\nlet y = '), null);
+  assert.equal(activeSlot('if ready {\n    askText "Q", hint: 1\n    let y = '), null);
+  assert.equal(activeSlot('showButton "Go", timeout: 5 s {\n    let y = '), null);
+  assert.equal(activeSlot('askText "Q",\n\n    hint: '), "hint");
+  assert.equal(activeSlot('askText(\n    "Q",\n    prefill: ', "\n)"), "prefill");
+  assert.equal(activeSlot('let x = askText "Q", hint: "a" +\n    '), "hint");
   assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
   assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");
