@@ -260,7 +260,7 @@ test("a session kept in an older format shows Start with a notice, and its recor
       .filter((entry) => entry.key === "older-kept-session")
       .map((entry) => entry.message);
   const message =
-    "The last session comes from an older Player version and cannot be continued. Start begins a new one, and saved progress stays.";
+    "The last session comes from an older Player version and cannot be continued. Start begins a new session. Saved data is kept.";
   const plan = current.planJson;
   const snapshot = current.snapshotJson;
   // The current formats continue, without the notice.

@@ -447,7 +447,7 @@ goes on from the last kept point, with those photos as session media again; a st
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events lack what the Player reads from them, such as a message's markup or an answer's form, is
 not continued, and Start shows instead. A session kept in an older plan or snapshot format is not continued either: a
-notice says that it comes from an older Player version, and its record and the saved progress stay.
+notice says that it comes from an older Player version, and its record and the saved data stay.
 A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development

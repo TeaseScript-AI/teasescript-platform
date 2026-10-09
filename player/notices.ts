@@ -99,7 +99,7 @@ export const playerNotices = {
     key: playerNoticeKeys.olderKeptSession,
     level: "info",
     message:
-      "The last session comes from an older Player version and cannot be continued. Start begins a new one, and saved progress stays.",
+      "The last session comes from an older Player version and cannot be continued. Start begins a new session. Saved data is kept.",
   }),
   imageNeedsCamera: (): PlayerNotice => ({
     key: playerNoticeKeys.imageNeedsCamera,
