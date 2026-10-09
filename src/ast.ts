@@ -101,7 +101,7 @@ export interface ShowButtonParts {
   readonly speaker: Identifier | null;
   readonly label: Expression;
   readonly background: Expression | null;
-  /** A number of seconds or an elapsed duration after which the button disappears. */
+  /** The duration after which the button disappears. */
   readonly timeout: Expression | null;
   readonly span: SourceSpan;
 }
@@ -120,7 +120,8 @@ export interface ShowButtonExpression extends ShowButtonParts {
 export interface WaitStatement {
   readonly kind: "waitStatement";
   readonly duration: Expression;
-  readonly unit: TrailingDurationUnit | null;
+  /** The unit after the duration, kept apart because a wait, like a timer, may take a range with a unit. */
+  readonly unit: DurationUnit | null;
   readonly span: SourceSpan;
 }
 
@@ -136,7 +137,7 @@ export interface TimerParts {
   /** A short-form modifier is a static display; the named form may use any expression. */
   readonly display: TimerDisplay | Expression | null;
   readonly duration: Expression;
-  readonly unit: TrailingDurationUnit | null;
+  readonly unit: DurationUnit | null;
   readonly label: Expression | null;
   readonly repeat: boolean;
   readonly persist: boolean;
@@ -603,6 +604,7 @@ export type Expression =
   | NullLiteral
   | NumberLiteral
   | DurationLiteral
+  | UnitExpression
   | StringLiteral
   | ListLiteral
   | ObjectLiteral
@@ -718,9 +720,6 @@ export interface NumberLiteral {
 /** Exact units (ADR 0026): a day is 24 hours and a week 168 hours. */
 export type DurationUnit = "ms" | "s" | "min" | "h" | "d" | "w";
 
-/** The unit after a whole `wait` or short `timer` duration expression. */
-export type TrailingDurationUnit = "ms" | "s" | "min" | "h";
-
 /** Calendar units after `calendar`: days, weeks, months, and years (ADR 0026). They only appear in duration literals. */
 export type CalendarDurationUnit = "d" | "w" | "mo" | "y";
 
@@ -731,6 +730,20 @@ export type CalendarDurationUnit = "d" | "w" | "mo" | "y";
 export type DurationLiteral = {
   readonly kind: "durationLiteral";
   readonly amount: NumberLiteral;
+  readonly unitSpan: SourceSpan;
+  readonly span: SourceSpan;
+} & (
+  | { readonly calendar: false; readonly unit: DurationUnit }
+  | { readonly calendar: true; readonly unit: CalendarDurationUnit }
+);
+
+/**
+ * A unit after a name, a member, a call, or parentheses: the number before it as a duration, such as `count s` or
+ * `(count / 2) min` (ADR 0026 §8). A number literal with a unit is a {@link DurationLiteral}.
+ */
+export type UnitExpression = {
+  readonly kind: "unitExpression";
+  readonly operand: Expression;
   readonly unitSpan: SourceSpan;
   readonly span: SourceSpan;
 } & (

@@ -75,8 +75,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    `number` where an `integer` is required, such as a declared `integer` or an element of a declared `integer[]`, is an
    error that suggests `floor(...)`, `round(...)`, `ceil(...)`, or a `number` declaration; nothing truncates silently. A
    variable without a type annotation, and its elements and properties, widen instead (rule 1.2).
-3. A duration needs a unit. Bare numbers count as seconds only in commands that expect a time: `wait`, `timer`, the
-   `showButton` timeout, and media positions.
+3. A duration needs a unit, also where a command expects a time: `wait 5`, `timer 10`, `timeout: 30`, `say "x", 3`, and
+   a number as a media position are compile errors that name the fix
+   ([ADR 0026](0026-unified-time-semantics.md#8-explicit-units-for-time-quantities)).
 4. Text and numbers, numbers and booleans, and numbers and durations never convert into each other implicitly. Values
    become visible text only in `${...}` and `say`.
 

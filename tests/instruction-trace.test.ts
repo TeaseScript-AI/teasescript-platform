@@ -287,7 +287,7 @@ test("an answered ask continues in the next run, whose trace has the branch on t
 test("timer, media, and permanent button blocks are traced in the run that executes them", () => {
   const plan = compile(
     [
-      "timer async 1 {",
+      "timer async 1 s {",
       '    say "tick"',
       "}",
       'showPermanentButton "Stop" {',
@@ -298,7 +298,7 @@ test("timer, media, and permanent button blocks are traced in the run that execu
       '        say "cue"',
       "    }",
       "}",
-      "wait 5",
+      "wait 5 s",
       "exit",
     ].join("\n"),
   );
@@ -368,7 +368,7 @@ test("a failing instruction is in the trace of the run that fails", () => {
 test("an ask a timer block suspends resumes after it, also from a checkpoint restored meanwhile", () => {
   const plan = compile(
     [
-      "timer async 1 {",
+      "timer async 1 s {",
       '    let inner = choose x: "X", y: "Y"',
       '    say "inner ${inner}"',
       "}",

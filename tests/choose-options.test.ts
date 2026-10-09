@@ -276,7 +276,7 @@ test("a retained choice settlement keeps the values its plan wrote", () => {
     'let text = "Keep"',
     'let more = ["A", "B"]',
     "let pick = choose keep: text, more: more",
-    "wait 1",
+    "wait 1 s",
     "exit",
   ].join("\n");
   const { plan, pending } = start(source);

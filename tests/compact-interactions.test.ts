@@ -635,7 +635,7 @@ test("a list in a text field is a compile error when the compiler can see it", (
     ['let answer = askText ["Name?"]\nexit', "an ask question", '["Name?"]'],
     ['let answer = askNumber hint: ["Count?"]\nexit', "an input hint", '["Count?"]'],
     ['let answer = choose first: { text: ["A"] }\nexit', "the text of a choice option", '["A"]'],
-    ['timer(duration: 1, label: ["Beat"])\nexit', "a timer label", '["Beat"]'],
+    ['timer(duration: 1 s, label: ["Beat"])\nexit', "a timer label", '["Beat"]'],
     ['speaker coach { title: ["Coach"] }\nexit', "the speaker's title", '["Coach"]'],
     [
       'speaker coach {}\ncoach.displayName = ["Coach"]\nexit',

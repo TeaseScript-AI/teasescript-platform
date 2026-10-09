@@ -133,7 +133,7 @@ export function expireTimerAction(
 ): void {
   const timer = action.timer;
   expireTimerRound(timer, endedAtMs, (range) =>
-    drawWholeSeconds(snapshot, action.owningInstruction, range, trace, control),
+    drawWholeUnits(snapshot, action.owningInstruction, range, trace, control),
   );
   // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
   // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
@@ -226,7 +226,7 @@ function queueTimerHandler(
  * Draws a repeat round from the persisted session RNG. Its site is the duration of the timer's start, where its first
  * round was drawn.
  */
-function drawWholeSeconds(
+function drawWholeUnits(
   snapshot: RuntimeSnapshot,
   owningInstruction: number,
   range: RuntimeTimerRangeSnapshot,
@@ -235,13 +235,13 @@ function drawWholeSeconds(
 ): number {
   const length = range.end - range.start + (range.inclusive ? 1 : 0);
   const drawId = snapshot.rng.state;
-  let seconds = drawFromSessionGenerator(
+  let units = drawFromSessionGenerator(
     snapshot.rng,
     trace,
     "timerRepeat",
     null,
     length,
-    { kind: "range", ...range },
+    { kind: "range", start: range.start, end: range.end, inclusive: range.inclusive },
     (draw) => sampleRangeInteger(draw, range, length),
   );
   if (control !== null) {
@@ -251,15 +251,15 @@ function drawWholeSeconds(
       start.kind === "startTimer" ? start.duration.span : start.span,
       "timerRepeat",
       drawId,
-      { kind: "number", value: seconds },
+      { kind: "number", value: units },
       () => ({ kind: "integer", min: range.start, max: range.start + length - 1 }),
     );
     if (resolved.kind !== "number")
       throw new Error("A timer round resolved to another kind of outcome.");
-    seconds = resolved.value;
+    units = resolved.value;
   }
-  trace?.randomResult(seconds);
-  return seconds;
+  trace?.randomResult(units);
+  return units;
 }
 
 export function timerSpan(plan: InstructionPlan, owningInstruction: number): SourceSpan {

@@ -154,7 +154,7 @@ test("wait never measures a calendar duration; doubled units and overflow are re
   // compile error located in it, and one it cannot see fails when the wait starts.
   for (const [source, duration] of [
     ["wait 3 calendar days\nexit", "3 calendar days"],
-    ["let n = 3\nwait n calendar days", "calendar"],
+    ["let n = 3\nwait n calendar days", "n calendar days"],
     ["let n = 3\nwait n months", "months"],
     ["wait 2 calendar weeks\nexit", "2 calendar weeks"],
     ["wait 1 h + 1 calendar mo\nexit", "1 h + 1 calendar mo"],
@@ -173,7 +173,7 @@ test("wait never measures a calendar duration; doubled units and overflow are re
     );
   }
   assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 calendar mo)\nwait a\nexit`), "TSR065");
-  assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
+  assert.deepEqual(diagnostics("wait 10 s ms"), ["TSP033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });
 
@@ -190,7 +190,7 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
     ["wait 2 min\nexit", 120_000],
     ["let d = 1.5 s\nwait d\nexit", 1_500],
     ["let n = 3\nwait n ms\nexit", 3],
-    ["wait 2\nexit", 2_000],
+    ["wait 2 s\nexit", 2_000],
     // A day is exactly 24 hours (ADR 0026).
     ["wait 1 day\nexit", 86_400_000],
   ] as const) {
@@ -204,13 +204,14 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
       source,
     );
   }
-  assert.equal(runtimeFailure("wait -(1 s)\nexit"), "TSR050");
+  assert.deepEqual(diagnostics("wait -(1 s)\nexit"), ["TSV011"]);
+  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(-1 s)\nwait d\nexit`), "TSR050");
   assert.deepEqual(diagnostics("let d = 1 s\nwait d ms\nexit"), ["TSV043"]);
   assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR050");
 });
 
 test("duration values persist through checkpoint JSON and reject malformed data", () => {
-  const plan = compileValidPlan('let d = 90 s\nwait 1\nsay "${d}"\nexit');
+  const plan = compileValidPlan('let d = 90 s\nwait 1 s\nsay "${d}"\nexit');
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),

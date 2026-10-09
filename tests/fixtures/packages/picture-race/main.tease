@@ -1,5 +1,5 @@
-timer async 2 {
-  wait 1
+timer async 2 s {
+  wait 1 s
   let interrupted = askImage(hint: "Timer image")
   showImage interrupted
   say "Timer image received."
@@ -7,8 +7,8 @@ timer async 2 {
 let picture = askImage(hint: "Main image")
 showImage picture
 say "Main image received."
-timer async 2 {
-  wait 1
+timer async 2 s {
+  wait 1 s
 }
 let second = askImage(hint: "Second image")
 showImage second

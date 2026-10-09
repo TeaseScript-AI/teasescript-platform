@@ -21,7 +21,7 @@ import { runUntilExit } from "./helpers/run-until-exit.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
-  const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant\nexit');
+  const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5 s\nsay "c", instant\nexit');
   const loweredPacing = compiled.instructions.map((instruction) => {
     if (instruction.kind !== "say") return instruction.kind;
     const pacingKind =
@@ -33,7 +33,7 @@ test("say lowers smart, exact, and instant pacing with explicit skip policy", ()
 
   assert.deepEqual(loweredPacing, [
     ["skippable", "smart"],
-    ["unskippable", "literal"],
+    ["unskippable", "duration"],
     [null, "instant"],
     "exit",
     "end",
@@ -69,10 +69,10 @@ test("say lowering preserves contextual skip words as value identifiers", () => 
 test("instant remains an identifier when its pacing expression continues", () => {
   const compiled = plan(
     [
-      "let instant = [1]",
-      'say "plus", instant[0] + 1',
-      'say "index", instant[0]',
-      'say "property", instant.length',
+      "let instant = { steps: [1 s], pause: 1 s }",
+      'say "plus", instant.steps[0] + 1 s',
+      'say "index", instant.steps[0]',
+      'say "property", instant.pause',
       "exit",
     ].join("\n"),
   );
@@ -87,7 +87,7 @@ test("instant remains an identifier when its pacing expression continues", () =>
     ["binary", "index", "property"],
   );
 
-  const call = plan('function instant(value) { return value }\nsay "call", instant(2)\nexit');
+  const call = plan('function instant(value) { return value }\nsay "call", instant(2 s)\nexit');
   const callResult = runUntilExit(call, createFreshRuntimeSnapshot(call));
   const callGate = callResult.snapshot.backgroundActions[0];
   assert.equal(callGate?.kind, "chatPacingGate");
@@ -105,7 +105,7 @@ test("say preparation resumes exactly once across an instruction-call pacing che
       "}",
       "function pace {",
       '  log = "${log}pace"',
-      "  return 1",
+      "  return 1 s",
       "}",
       "say textValue(), pace()",
       "exit",
@@ -249,10 +249,10 @@ test("prepared says retain contextual speaker identity across text and pacing ca
   for (const scenario of scenarios) {
     const compiled = plan(
       [
-        'speaker vera { title: "Captain"\ndelay: 1 }',
+        'speaker vera { title: "Captain"\ndelay: 1 s }',
         "speaker vera",
         'function textValue { return "hello" }',
-        "function pace { return 1 }",
+        "function pace { return 1 s }",
         `${scenario.speaker} ${scenario.text}, ${scenario.pacing}`,
         "exit",
       ].join("\n"),
@@ -262,7 +262,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
     assert.equal(output?.kind, "say", scenario.name);
     assert.equal(output?.text, scenario.expected, scenario.name);
     assert.equal(output?.speaker?.identifier, "vera", scenario.name);
-    // Exact pacing is in seconds: vera.delay is 1 and pace() returns 1; instant creates no gate.
+    // vera.delay is 1 s and pace() returns 1 s; instant creates no gate.
     const gates = [result.snapshot.foregroundAction, ...result.snapshot.backgroundActions].filter(
       (action) => action?.kind === "chatPacingGate",
     );
@@ -280,7 +280,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       '  vera.displayName = "After"',
       '  return "hello"',
       "}",
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       'say as vera "${speaker.title} ${mutate()}", pace()',
       "exit",
     ].join("\n"),
@@ -301,12 +301,12 @@ test("prepared says retain contextual speaker identity across text and pacing ca
 test("prepared contextual speaker values survive a suspended text call checkpoint", () => {
   const compiled = plan(
     [
-      'speaker vera { title: "Captain"\ndelay: 1 }',
+      'speaker vera { title: "Captain"\ndelay: 1 s }',
       "function textValue {",
       "  wait 1 ms",
       '  return "hello"',
       "}",
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
       "exit",
     ].join("\n"),
@@ -615,7 +615,7 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
     [
       "speaker vera { }",
       'say as vera "first"',
-      "let pacing = -1",
+      "let pacing = -1 s",
       "say as vera random(), pacing",
       "exit",
     ].join("\n"),
@@ -635,7 +635,7 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
   assert.equal(result.events.filter((event) => event.kind === "developerWarning").length, 1);
 
   const noWarning = plan(
-    ["speaker ada {}", "let pacing = -1", "say as ada random(), pacing", "exit"].join("\n"),
+    ["speaker ada {}", "let pacing = -1 s", "say as ada random(), pacing", "exit"].join("\n"),
   );
   const noWarningResult = run(noWarning, createFreshRuntimeSnapshot(noWarning, { seed: 77 }));
   assert.equal(noWarningResult.snapshot.rng.state, 77);
@@ -646,7 +646,7 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
 });
 
 test("unsupported and overflowing runtime pacing leave message evaluation uncommitted", () => {
-  const unsupported = plan("say random(), 9007199254740991\nexit");
+  const unsupported = plan("say random(), 9007199254740991 s\nexit");
   const unsupportedResult = run(unsupported, createFreshRuntimeSnapshot(unsupported, { seed: 77 }));
   assert.equal(unsupportedResult.snapshot.status, "failed");
   assert.equal(unsupportedResult.snapshot.rng.state, 77);
@@ -655,7 +655,7 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     ["runtimeFailure"],
   );
 
-  const nonFinite = plan("let zero = 0\nsay random(), 1 / zero\nexit");
+  const nonFinite = plan("let zero = 0\nsay random(), 1 s / zero\nexit");
   const nonFiniteResult = run(nonFinite, createFreshRuntimeSnapshot(nonFinite, { seed: 77 }));
   assert.equal(nonFiniteResult.snapshot.status, "failed");
   assert.equal(nonFiniteResult.snapshot.rng.state, 77);
@@ -664,7 +664,7 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     ["runtimeFailure"],
   );
 
-  const overflow = plan("say random(), 1\nexit");
+  const overflow = plan("say random(), 1 s\nexit");
   const overflowResult = run(
     overflow,
     createFreshRuntimeSnapshot(overflow, {
@@ -688,11 +688,11 @@ test("collection changes and random draws of a rejected say roll back, directly 
   // Each say draws or removes before its pacing is rejected; the binding keeps its unchanged collection.
   const cases = [
     [
-      "let items = [1, 2]\nlet pacing = -1\nsay items.removeFirst(), pacing\nexit",
+      "let items = [1, 2]\nlet pacing = -1 s\nsay items.removeFirst(), pacing\nexit",
       { kind: "list", items: [1, 2] },
     ],
     [
-      'let items = dict { a: 1, b: 2 }\nlet pacing = -1\nsay items.remove("a"), pacing\nexit',
+      'let items = dict { a: 1, b: 2 }\nlet pacing = -1 s\nsay items.remove("a"), pacing\nexit',
       {
         kind: "dict",
         entries: [
@@ -701,7 +701,7 @@ test("collection changes and random draws of a rejected say roll back, directly 
         ],
       },
     ],
-    ["let pacing = -1\nsay random(), pacing\nexit", null],
+    ["let pacing = -1 s\nsay random(), pacing\nexit", null],
   ] as const;
   for (const [source, items] of cases) {
     const { events, finalSnapshot } = assertRuntimeResumeEquivalent(source, {
@@ -711,7 +711,7 @@ test("collection changes and random draws of a rejected say roll back, directly 
     assert.equal(finalSnapshot.failure?.code, "TSR050", source);
     assert.equal(
       finalSnapshot.failure?.message,
-      "Say pacing must not be negative, but this is -1.",
+      "Say pacing must be a duration of at least 0 seconds, but this is -1 second.",
       source,
     );
     assert.deepEqual(
@@ -886,7 +886,7 @@ test("a late observation replays the script at the delay deadline before later p
 });
 
 test("an observation while a settled wait's continuation is pending settles nothing until the script runs", () => {
-  const compiled = plan('say "first", 5\nwait 1 ms\nexit');
+  const compiled = plan('say "first", 5 s\nwait 1 ms\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
   const pacing = waiting.snapshot.backgroundActions[0];
@@ -926,7 +926,7 @@ test("an observation while a settled wait's continuation is pending settles noth
 });
 
 test("time release followed by explicit exit canonicalizes pacing release provenance", () => {
-  const compiled = plan('say "first", 5\nsay "second", 5\nexit');
+  const compiled = plan('say "first", 5 s\nsay "second", 5 s\nexit');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -1014,12 +1014,12 @@ test("foreground interaction consumes background pacing before its action reques
 });
 
 test("exact and zero pacing create only the required actions", () => {
-  const exact = plan('say "first", 0.5\nexit');
+  const exact = plan('say "first", 0.5 s\nexit');
   const exactResult = runUntilExit(exact, createFreshRuntimeSnapshot(exact));
   assert.equal(exactResult.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(exactResult.snapshot.backgroundActions[0]?.deadlineMs, 500);
 
-  const zero = plan('say "now", 0\nexit');
+  const zero = plan('say "now", 0 s\nexit');
   const zeroResult = run(zero, createFreshRuntimeSnapshot(zero));
   assert.deepEqual(
     zeroResult.events.map((event) => event.kind),
@@ -1198,7 +1198,7 @@ test("pacing capacity and action-ID failures do not partially commit transitions
 
 test("pacing actions reserve all mandatory future event sequences", () => {
   const max = Number.MAX_SAFE_INTEGER;
-  const pacingPlan = plan('say "first", 5\nexit');
+  const pacingPlan = plan('say "first", 5 s\nexit');
 
   const justEnough = createFreshRuntimeSnapshot(pacingPlan);
   justEnough.nextEventSequence = max - 3;
@@ -1212,7 +1212,7 @@ test("pacing actions reserve all mandatory future event sequences", () => {
   assert.equal(rejected.snapshot.status, "failed");
   assert.equal(rejected.snapshot.backgroundActions.length, 0);
 
-  const mixedPlan = plan('say "first", 5\nwait 5 s\nexit');
+  const mixedPlan = plan('say "first", 5 s\nwait 5 s\nexit');
   const beforeWait = executeInstruction(mixedPlan, createFreshRuntimeSnapshot(mixedPlan));
   const mixedJustEnough = structuredClone(beforeWait.snapshot);
   mixedJustEnough.nextEventSequence = max - 3;
@@ -1232,7 +1232,7 @@ test("pacing actions reserve all mandatory future event sequences", () => {
 test("ordinary events preserve active pacing completion capacity", () => {
   const max = Number.MAX_SAFE_INTEGER;
 
-  const warningPlan = plan('say "first", 5\nlet values = []\nvalues.remove("missing")\nexit');
+  const warningPlan = plan('say "first", 5 s\nlet values = []\nvalues.remove("missing")\nexit');
   const warningInstruction = warningPlan.instructions.findIndex(
     (instruction) => instruction.kind === "evaluate",
   );
@@ -1264,8 +1264,8 @@ test("ordinary events preserve active pacing completion capacity", () => {
     [
       'speaker ada { displayName: "Ada" }',
       "speaker vera {}",
-      'say as ada "first", 5',
-      'say as vera "second", 5',
+      'say as ada "first", 5 s',
+      'say as vera "second", 5 s',
       "exit",
     ].join("\n"),
   );
@@ -1297,7 +1297,7 @@ test("ordinary events preserve active pacing completion capacity", () => {
   );
   assert.equal(JSON.stringify(fallbackOneLess), fallbackBefore);
 
-  const failurePlan = plan('say "first", 5\nlet pacing = -1\nsay "second", pacing\nexit');
+  const failurePlan = plan('say "first", 5 s\nlet pacing = -1 s\nsay "second", pacing\nexit');
   const failingSay = failurePlan.instructions.findIndex(
     (instruction, index) => instruction.kind === "say" && index > 0,
   );
@@ -1324,7 +1324,7 @@ test("ordinary events preserve active pacing completion capacity", () => {
   );
   assert.equal(JSON.stringify(failureOneLess), failureBefore);
 
-  const budgetPlan = plan('say "first", 5\nlet value = 1\nexit');
+  const budgetPlan = plan('say "first", 5 s\nlet value = 1\nexit');
   const first = executeInstruction(budgetPlan, createFreshRuntimeSnapshot(budgetPlan));
   const budgetEnough = structuredClone(first.snapshot);
   budgetEnough.nextEventSequence = max - 2;
@@ -1364,7 +1364,7 @@ test("say transitions reserve their own and future action events atomically", ()
     error instanceof RuntimeDataError && error.code === "TSR101";
 
   // A positive pacing gate needs the say, its request, and its future completion.
-  const positive = plan('say "last", 5\nexit');
+  const positive = plan('say "last", 5 s\nexit');
   const positiveEnough = createFreshRuntimeSnapshot(positive);
   positiveEnough.nextEventSequence = max - 3;
   const positiveCompleted = executeInstruction(positive, positiveEnough);
@@ -1387,7 +1387,7 @@ test("say transitions reserve their own and future action events atomically", ()
   );
   assert.equal(validateRuntimeSnapshot(positiveRejected.snapshot, positive).valid, true);
 
-  for (const pacing of ["0", "instant"]) {
+  for (const pacing of ["0 s", "instant"]) {
     // An immediate say needs only itself; without that event no failure can be reported either.
     const immediate = plan(`say "last", ${pacing}\nexit`);
     const enough = createFreshRuntimeSnapshot(immediate);
@@ -1406,9 +1406,9 @@ test("say transitions reserve their own and future action events atomically", ()
     assert.equal(JSON.stringify(oneLess), before, pacing);
   }
 
-  for (const pacing of ["0", "instant"]) {
+  for (const pacing of ["0 s", "instant"]) {
     // Superseding an older gate settles it in the sequence reserved for its completion, then says.
-    const supersession = plan(`say "first", 5\nsay "last", ${pacing}\nexit`);
+    const supersession = plan(`say "first", 5 s\nsay "last", ${pacing}\nexit`);
     const afterFirst = executeInstruction(supersession, createFreshRuntimeSnapshot(supersession));
     const enough = structuredClone(afterFirst.snapshot);
     enough.nextEventSequence = max - 2;
@@ -1428,7 +1428,7 @@ test("say transitions reserve their own and future action events atomically", ()
     assert.equal(JSON.stringify(oneLess), before, pacing);
   }
 
-  const prepared = plan('say "first", 5\nsay "last", 5\nexit');
+  const prepared = plan('say "first", 5 s\nsay "last", 5 s\nexit');
   const promoted = run(prepared, createFreshRuntimeSnapshot(prepared));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -1486,7 +1486,7 @@ test("speaker assignment keeps defaultSaySkippable boolean", () => {
 });
 
 test("prepared output remains canonical when replacement pacing cannot meet its deadline", () => {
-  const compiled = plan('say "first", 5\nsay "second", 5\nexit');
+  const compiled = plan('say "first", 5 s\nsay "second", 5 s\nexit');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -1510,7 +1510,7 @@ test("prepared output remains canonical when replacement pacing cannot meet its 
 });
 
 test("say instruction plans and public pacing failures stay at their validation boundaries", () => {
-  const base = plan('speaker vera {}\nsay as vera skippable "text", 1\nexit');
+  const base = plan('speaker vera {}\nsay as vera skippable "text", 1 s\nexit');
   const sayIndex = base.instructions.findIndex((instruction) => instruction.kind === "say");
   const say = `$.instructions[${sayIndex}]`;
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: each callback deliberately violates a different persisted say-instruction field before runtime validation.

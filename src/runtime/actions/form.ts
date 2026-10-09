@@ -39,8 +39,8 @@ import {
 } from "../serializable-values.js";
 import {
   describeRuntimeValue,
+  isAnyDuration,
   isDate,
-  isDuration,
   isDateTime,
   isDict,
   isList,
@@ -48,7 +48,13 @@ import {
   isTime,
 } from "../value-predicates.js";
 import { fieldText } from "../value-text.js";
-import { describeType, describeValue, matchesValueType } from "../value-types.js";
+import { exactDurationMilliseconds } from "../temporal-operations.js";
+import {
+  describeShownValue,
+  describeType,
+  describeValue,
+  matchesValueType,
+} from "../value-types.js";
 import { escapedMarkupLength, escapeMarkup } from "../../message-markup.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText } from "../text-length.js";
 import {
@@ -291,8 +297,8 @@ const SAMPLE_TEMPORAL_TEXT = {
 } as const;
 
 /**
- * A form's time limit: `timeout:`, a number of seconds or an elapsed duration greater than zero, with `onTimeout:`
- * `"submit"` or `"cancel"`; each needs the other.
+ * A form's time limit: `timeout:`, an elapsed duration greater than zero, with `onTimeout:` `"submit"` or `"cancel"`;
+ * each needs the other.
  */
 function formTimeout(
   value: SerializableRuntimeValue | undefined,
@@ -308,11 +314,14 @@ function formTimeout(
   if (value === undefined)
     throw fault("askForm onTimeout: needs timeout:, such as 'timeout: 30 s'.", span);
   // A calendar duration has no fixed length.
-  const milliseconds =
-    typeof value === "number" ? value * 1_000 : isDuration(value) ? value.milliseconds : Number.NaN;
+  const milliseconds = isAnyDuration(value)
+    ? exactDurationMilliseconds(value, "An askForm timeout", span)
+    : Number.NaN;
   if (!(milliseconds > 0) || !Number.isFinite(milliseconds))
     throw fault(
-      "askForm timeout: must be a number of seconds or a duration greater than zero, such as 'timeout: 30' or 'timeout: 2 min'.",
+      typeof value === "number"
+        ? `An askForm timeout is a duration, but this is ${describeShownValue(value)}. Give the number a unit, such as '${describeShownValue(value)} s'.`
+        : `An askForm timeout must be a duration greater than zero, but this is ${describeShownValue(value)}.`,
       span,
     );
   return { milliseconds, onTimeout };

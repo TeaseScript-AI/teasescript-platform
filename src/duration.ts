@@ -1,4 +1,16 @@
-import type { CalendarDurationUnit, DurationLiteral, DurationUnit } from "./ast.js";
+import type { CalendarDurationUnit, DurationLiteral, DurationUnit, Expression } from "./ast.js";
+
+/**
+ * What a unit may follow besides a number literal: a name, a member such as `p.delay` or `list[i]`, a call, or
+ * parentheses (ADR 0026 §8).
+ */
+export const UNIT_OPERANDS: ReadonlySet<Expression["kind"]> = new Set([
+  "identifier",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+  "parenthesizedExpression",
+]);
 
 /** Exact milliseconds per exact unit (ADR 0026): a day is 24 hours and a week 168 hours. */
 export const DURATION_UNIT_MILLISECONDS: Readonly<Record<DurationUnit, number>> = Object.freeze({
@@ -155,7 +167,19 @@ export function calendarDuration(parts: DurationParts): StoredCalendarDuration {
  * months, so `0.5 calendar years` is 6 months while `1.5 calendar days` and `1.5 calendar weeks` are errors.
  */
 export function durationLiteralValue(literal: DurationLiteral): AnyDuration | string {
-  const amount = literal.amount.value;
+  return unitValue(literal.amount.value, literal);
+}
+
+/**
+ * A number with a unit after it, as a duration literal or a unit expression gives it (ADR 0026 §8), or why it has
+ * none: a calendar amount must give whole days or months.
+ */
+export function unitValue(
+  amount: number,
+  literal:
+    | { readonly calendar: false; readonly unit: DurationUnit }
+    | { readonly calendar: true; readonly unit: CalendarDurationUnit },
+): AnyDuration | string {
   if (!literal.calendar) return exactDuration(amount * DURATION_UNIT_MILLISECONDS[literal.unit]);
   switch (literal.unit) {
     case "d":

@@ -49,10 +49,10 @@ export function shortWaitWarnings(
 }
 
 function shortWait(say: SayStatement, wait: WaitStatement): Diagnostic | null {
-  // A message with `instant`, `0`, or its own pacing sets its timing itself.
+  // A message with `instant` or its own pacing sets its timing itself.
   if (say.pacing !== null) return null;
   const waitMs = knownWaitMs(wait);
-  // `wait 0` never adds time.
+  // `wait 0 s` never adds time.
   if (waitMs === undefined || waitMs === 0) return null;
   const text = staticVisibleText(say.value);
   const readingMs =
@@ -71,11 +71,13 @@ function shortWait(say: SayStatement, wait: WaitStatement): Diagnostic | null {
   );
 }
 
-/** A `wait`'s milliseconds when they are known: a number of its unit, seconds by default, or an exact duration. */
+/** A `wait`'s milliseconds when they are known: a number of the unit after it, or an exact duration. */
 function knownWaitMs(wait: WaitStatement): number | undefined {
   const known = staticQuantity(wait.duration);
   if (typeof known === "number")
-    return known < 0 ? undefined : known * DURATION_UNIT_MILLISECONDS[wait.unit ?? "s"];
+    return known < 0 || wait.unit === null
+      ? undefined
+      : known * DURATION_UNIT_MILLISECONDS[wait.unit];
   if (known === undefined || wait.unit !== null) return undefined;
   return !isCalendar(known) && known.milliseconds >= 0 ? known.milliseconds : undefined;
 }

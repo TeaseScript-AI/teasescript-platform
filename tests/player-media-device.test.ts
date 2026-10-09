@@ -85,11 +85,11 @@ test("pause, resume and a cue seek reposition the element for each new segment",
       "    music.position = 5 s",
       "  }",
       "}",
-      "wait 3",
+      "wait 3 s",
       "music.pause()",
-      "wait 1",
+      "wait 1 s",
       "music.resume()",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
@@ -131,7 +131,7 @@ test("restore reconnects a fresh element at the saved playhead without reloading
     '    say "cue", instant',
     "  }",
     "}",
-    "wait 10",
+    "wait 10 s",
     'say "done", instant',
     "exit",
   ].join("\n");
@@ -163,7 +163,7 @@ test("overlapping instances of one file each play out once, also when a seek com
       'playAudio async "swat.wav"',
       "wait 400 ms",
       'playAudio async "swat.wav"',
-      "wait 2",
+      "wait 2 s",
       'say "after", instant',
       "exit",
     ].join("\n"),
@@ -237,7 +237,7 @@ test("a stall reports unchanged progress, so a nearby cue waits for actual playb
       '    say "cue", instant',
       "  }",
       "}",
-      "wait 30",
+      "wait 30 s",
       "exit",
     ].join("\n"),
   );
@@ -252,7 +252,7 @@ test("a stall reports unchanged progress, so a nearby cue waits for actual playb
 });
 
 test("an element error after loading stalls progress instead of inventing playback or a second load report", () => {
-  const player = harness('let music = playAudio async "music.mp3"\nwait 30\nexit');
+  const player = harness('let music = playAudio async "music.mp3"\nwait 30 s\nexit');
   player.start();
   const [element] = player.elements;
   element!.metadata(10);
@@ -267,7 +267,7 @@ test("an element error after loading stalls progress instead of inventing playba
 });
 
 test("a media error clears the refused-playback state it can no longer retry", async () => {
-  const player = harness('let music = playAudio async "music.mp3"\nwait 30\nexit');
+  const player = harness('let music = playAudio async "music.mp3"\nwait 30 s\nexit');
   player.start();
   const [element] = player.elements;
   element!.refuse = true;
@@ -280,7 +280,7 @@ test("a media error clears the refused-playback state it can no longer retry", a
 
 test("a retry never plays audio the script has paused", async () => {
   const player = harness(
-    'let music = playAudio async "music.mp3"\nwait 0.1\nmusic.pause()\nwait 10\nexit',
+    'let music = playAudio async "music.mp3"\nwait 0.1 s\nmusic.pause()\nwait 10 s\nexit',
   );
   player.start();
   const [element] = player.elements;

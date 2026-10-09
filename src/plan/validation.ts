@@ -631,6 +631,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["index", "object", "index"],
   ["call", "callee", "arguments", "typeCheck"],
   ["unary", "operator", "operand"],
+  ["unit", "operand", "calendar", "unit"],
   ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
@@ -2309,6 +2310,15 @@ function validateExpressionNode(
       }
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
+    case "unit":
+      if (
+        value.calendar === true
+          ? !isOneOf(value.unit, ["d", "w", "mo", "y"])
+          : value.calendar !== false || !isOneOf(value.unit, DURATION_UNITS)
+      )
+        errors.push(planError("TSC002", "Duration unit is invalid.", `${path}.unit`));
+      pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
+      return;
     case "binary":
       if (!(typeof value.operator === "string" && binaryOperators.has(value.operator))) {
         errors.push(planError("TSC002", "Invalid binary operator.", `${path}.operator`));
@@ -2544,8 +2554,10 @@ function validateCallArguments(
   });
 }
 
+const DURATION_UNITS = ["ms", "s", "min", "h", "d", "w"] as const;
+
 function validateDurationUnit(value: unknown, path: string, errors: PlanValidationError[]): void {
-  if (value !== null && !isOneOf(value, ["ms", "s", "min", "h"])) {
+  if (value !== null && !isOneOf(value, DURATION_UNITS)) {
     errors.push(planError("TSC002", "Duration unit is invalid.", path));
   }
 }

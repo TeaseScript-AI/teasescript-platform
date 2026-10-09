@@ -96,7 +96,7 @@ test("formatting reaches a command inside a computed call target", () => {
 });
 
 test("editor help and formatting cover showButton used as a value with a timeout", () => {
-  const source = 'let elapsed = showButton   as   mistress "Go", timeout: 5';
+  const source = 'let elapsed = showButton   as   mistress "Go", timeout: 5 s';
   const document = createLanguageDocument(
     "file:///main.tease",
     `speaker mistress { name: "Mistress" }\n${source}\nexit`,
@@ -155,7 +155,7 @@ function assertDeepSayTooling(source: string): void {
 test("hover and formatting handle deeply nested source inside a timer expiry block", () => {
   const depth = 4_000;
   assertDeepSayTooling(
-    `timer async 1 {\n${"if true {\n".repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}}\nexit\n`,
+    `timer async 1 s {\n${"if true {\n".repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}}\nexit\n`,
   );
 });
 
@@ -272,11 +272,11 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot("showButton as mistress "), "label");
   assert.equal(activeSlot('showButton "Go", timeout: '), "timeout");
   assert.equal(
-    activeSlot('let elapsed = showButton "Go", background: "gold", timeout: 5'),
+    activeSlot('let elapsed = showButton "Go", background: "gold", timeout: 5 s'),
     "timeout",
   );
-  assert.equal(activeSlot('showButton "Go", timeout: 5, background: '), "background");
-  assert.equal(activeSlot('let e = { x: (showButton "A"), timeout: 3'), null);
+  assert.equal(activeSlot('showButton "Go", timeout: 5 s, background: '), "background");
+  assert.equal(activeSlot('let e = { x: (showButton "A"), timeout: 3 s'), null);
   assert.equal(
     activeSlot('showButton "A", timeout: (askNumber "Seconds"), background: '),
     "background",

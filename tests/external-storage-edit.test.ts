@@ -149,7 +149,7 @@ test("while the script's own write waits for the host, the edit waits too, and a
 
 test("an edit applies at the current instruction, also while a due timer block has not run yet", () => {
   const session = start(
-    'timer async 1 {\n  let seen = load("k", default: 0)\n  say "block ${seen}", instant\n}\nwait 5 s\nexit',
+    'timer async 1 s {\n  let seen = load("k", default: 0)\n  say "block ${seen}", instant\n}\nwait 5 s\nexit',
   );
   // The observation queues the due block; before the Player runs it, the edit applies.
   const observed = observeTime(session.plan, session.snapshot, 2_000);
@@ -177,7 +177,7 @@ test("a checkpoint after an edit restores the edited view without applying it ag
 
 test("an edit while a timer block waits reaches that block's next load", () => {
   const session = start(
-    'timer async 1 {\n  wait 5 s\n  let seen = load("k", default: 0)\n  say "block ${seen}", instant\n}\nlet go = showButton "Go"\nexit',
+    'timer async 1 s {\n  wait 5 s\n  let seen = load("k", default: 0)\n  say "block ${seen}", instant\n}\nlet go = showButton "Go"\nexit',
   );
   // At 1 s the block runs and waits inside itself, with the button suspended behind it.
   const running = run(session.plan, observeTime(session.plan, session.snapshot, 1_000).snapshot);

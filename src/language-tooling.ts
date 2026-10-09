@@ -97,7 +97,7 @@ const HELP = Object.freeze({
   showButton: Object.freeze({
     command: "showButton" as const,
     summary:
-      "Shows one foreground button and waits for activation. An optional timeout, in seconds or as a duration such as 500 ms, removes the button without a chat message when it is reached. As a value, it returns the elapsed waiting time as a duration, which equals the timeout when the timeout is reached.",
+      "Shows one foreground button and waits for activation. An optional timeout, such as 5 s or 500 ms, removes the button without a chat message when it runs out. As a value, it returns the elapsed waiting time as a duration, which equals the timeout when the timeout is reached.",
     syntax: "showButton [as speaker] label [, background: colour] [, timeout: duration]",
   }),
   askText: Object.freeze({
@@ -145,7 +145,7 @@ const HELP = Object.freeze({
   say: Object.freeze({
     command: "say" as const,
     summary:
-      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable. Used as a value, it gives the message's messageHandle, whose text property changes the message in place; inside a list or call, write say(text, pacing).",
+      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Pacing is smart by default. It can also be an exact duration of 0 seconds or more, such as 2 s, or instant. Skip policy may be skippable or unskippable. Used as a value, it gives the message's messageHandle, whose text property changes the message in place; inside a list or call, write say(text, pacing).",
     syntax:
       "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]  or  say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] (text [, pacing|instant])",
   }),
@@ -942,6 +942,7 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
         children.push({ kind: "expression", node: argument.value });
       return;
     case "unaryExpression":
+    case "unitExpression":
       children.push({ kind: "expression", node: expression.operand });
       return;
     case "binaryExpression":

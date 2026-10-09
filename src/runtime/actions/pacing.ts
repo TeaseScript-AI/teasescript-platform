@@ -1,28 +1,17 @@
+import { formatDuration } from "../../duration.js";
 import { MAX_RUNTIME_SESSION_TIME_MS } from "../state.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import { describeShownValue } from "../value-types.js";
 
 export { calculateSmartPacingDurationMs } from "../../chat-pacing.js";
 
-export function secondsToPacingMilliseconds(seconds: SerializableRuntimeValue): number {
-  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
-    const shown = describeShownValue(seconds);
-    throw new RangeError(
-      typeof seconds === "number" && seconds < 0
-        ? `Say pacing must not be negative, but this is ${shown}.`
-        : `Say pacing is a number of seconds, but this is ${shown}.`,
-    );
+/** The exact pacing of a message, from the milliseconds of its duration; zero is immediate. */
+export function exactPacingMilliseconds(milliseconds: unknown): number {
+  if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds) || milliseconds < 0) {
+    throw new RangeError(`Say pacing must be a duration of at least ${formatDuration(0)}.`);
   }
-  if (seconds === 0) return 0;
-
-  const milliseconds = seconds * 1000;
-  if (
-    !Number.isFinite(milliseconds) ||
-    milliseconds <= 0 ||
-    milliseconds > MAX_RUNTIME_SESSION_TIME_MS
-  ) {
+  if (milliseconds === 0) return 0;
+  if (milliseconds > MAX_RUNTIME_SESSION_TIME_MS) {
     throw new RangeError(
-      `This say pacing of ${seconds} seconds is too long for scene time to reach. Use a shorter pause.`,
+      `This say pacing of ${formatDuration(milliseconds)} is too long for scene time to reach. Use a shorter pause.`,
     );
   }
   return milliseconds;

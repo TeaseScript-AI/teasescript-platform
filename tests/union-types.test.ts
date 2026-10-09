@@ -58,7 +58,7 @@ test("type names cover null, any list, set, or object, and program-control value
         "let tags: set = set[1]",
         "let record: object = { a: 1 }",
         "let span: range = 1..3",
-        "let clock: timer = timer async 5",
+        "let clock: timer = timer async 5 s",
         "speaker vera {}",
         "let voice: speaker = vera",
         'let music: media = playAudio async "a.mp3"',

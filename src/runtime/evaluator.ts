@@ -107,6 +107,7 @@ import {
   isCalendar,
   negateDuration,
   scaleDuration,
+  unitValue,
   ZERO_DIVISOR,
   type AnyDuration,
 } from "../duration.js";
@@ -988,6 +989,40 @@ export class Evaluator {
             value = expression.operator === "+" ? result.value : -result.value;
           }
           break;
+        case "unit": {
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.operand));
+            continue;
+          }
+          const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
+          if (typeof result.value !== "number")
+            throw fault(
+              "TSR027",
+              `A unit follows a number, but this is ${describeShownValue(result.value)}. ${isAnyDuration(result.value) ? `Remove the '${unit}' after it.` : `Use a number before the '${unit}'.`}`,
+              expression.operand.span,
+            );
+          const duration = unitValue(result.value, expression);
+          if (typeof duration === "string")
+            throw fault(
+              "TSR009",
+              `${duration}. Use a whole number before the '${unit}'.`,
+              expression.span,
+            );
+          // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+          const parts = durationParts(duration);
+          if (
+            !Number.isSafeInteger(parts.months) ||
+            !Number.isSafeInteger(parts.days) ||
+            !Number.isFinite(parts.milliseconds)
+          )
+            throw fault(
+              "TSR036",
+              `The number ${operandText(result.value)} before the '${unit}' gives a duration too long to represent. Use a smaller number.`,
+              expression.span,
+            );
+          value = duration;
+          break;
+        }
         case "binary":
           if (frame.stage === 0) {
             frame.stage = 1;

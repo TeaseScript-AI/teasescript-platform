@@ -52,7 +52,7 @@ while rounds < 100 {
     let picked = choose "left", "right"
     rounds += 1
     say "Round \${rounds}: \${picked}", instant
-    wait 1
+    wait 1 s
 }
 exit
 `;
@@ -440,12 +440,12 @@ test("a kept settled media or timer handle does not make a session step walk unr
   });
   const separate = (count: number) =>
     Object.fromEntries(Array.from({ length: count }, (_, index) => [`value${index}`, index]));
-  for (const start of ['playAudio async "a.mp3"', "timer async 5"]) {
-    const inList = `global keeper: list = []\nkeeper.add(${start})\nkeeper[0].stop()\nwait 1000\nexit`;
+  for (const start of ['playAudio async "a.mp3"', "timer async 5 s"]) {
+    const inList = `global keeper: list = []\nkeeper.add(${start})\nkeeper[0].stop()\nwait 1000 s\nexit`;
     const narrow = work(inList, payload(4));
     assert.ok((narrow.recordReachVisits ?? 0) > 0);
     assert.deepEqual(work(inList, payload(2_000)), narrow);
-    const inVariable = `let keeper = ${start}\nkeeper.stop()\nwait 1000\nexit`;
+    const inVariable = `let keeper = ${start}\nkeeper.stop()\nwait 1000 s\nexit`;
     assert.deepEqual(work(inVariable, separate(2_000)), work(inVariable, separate(4)));
   }
   // Each pending timer keeps the scope of the call that started it.
@@ -453,7 +453,7 @@ test("a kept settled media or timer handle does not make a session step walk unr
     [
       "function register(n: integer) {",
       "  let captured = n",
-      "  timer async 1000 {",
+      "  timer async 1000 s {",
       "    let seen = captured",
       "  }",
       "}",
@@ -464,7 +464,7 @@ test("a kept settled media or timer handle does not make a session step walk unr
       "  register(i)",
       "  i += 1",
       "}",
-      "wait 1000",
+      "wait 1000 s",
       "exit",
     ].join("\n");
   assert.equal(
@@ -832,11 +832,11 @@ test("the debugger reads give the state's calls, variables, camera, queue, and d
 let names = ["a", "b"]
 let note = say "Waiting", instant
 function hold(seconds) {
-    timer async 1 {
+    timer async 1 s {
         note.text = "Tick"
-        wait 5
+        wait 5 s
     }
-    wait seconds
+    wait seconds s
     return seconds
 }
 let held = hold(10)

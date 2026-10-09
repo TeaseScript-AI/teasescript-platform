@@ -328,7 +328,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   );
 
   const prepared = plan(
-    ["function pace { return 1 }", 'say ["first", "second"], pace()', "exit"].join("\n"),
+    ["function pace { return 1 s }", 'say ["first", "second"], pace()', "exit"].join("\n"),
   );
   const sayIndex = prepared.instructions.findIndex((instruction) => instruction.kind === "say");
   const say = prepared.instructions[sayIndex];
@@ -496,7 +496,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   const contextual = plan(
     [
       'speaker vera { title: "Captain" }',
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       'say as vera "${speaker.title}", pace()',
       "exit",
     ].join("\n"),
@@ -549,7 +549,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       name: "contextual capture pair after prepared text",
       source: [
         'speaker vera { title: "Captain" }',
-        "function pace { return 1 }",
+        "function pace { return 1 s }",
         'say as vera "${speaker.title}", pace()',
         "exit",
       ].join("\n"),
@@ -569,7 +569,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       name: "contextual capture pair after prepared text short-circuit payload",
       source: [
         'speaker vera { title: "Captain" }',
-        "function pace { return 1 }",
+        "function pace { return 1 s }",
         'say as vera "${true and speaker.title}", pace()',
         "exit",
       ].join("\n"),
@@ -646,7 +646,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   const bypassable = plan(
     [
       'function textValue { return "hello" }',
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       'say false and textValue() == "hello", pace()',
       "exit",
     ].join("\n"),
@@ -672,7 +672,7 @@ test("preserves compiler-generated prepared says across control-flow regions", (
   const sources = [
     [
       'function textValue { return "hello" }',
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       "say textValue(), instant",
       'say "pacing", pace()',
       "say textValue(), pace()",
@@ -680,7 +680,7 @@ test("preserves compiler-generated prepared says across control-flow regions", (
     ].join("\n"),
     [
       'function textValue { return "hello" }',
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       "if true {",
       "  say textValue(), pace()",
       "}",
@@ -691,7 +691,7 @@ test("preserves compiler-generated prepared says across control-flow regions", (
     ].join("\n"),
     [
       'function textValue { return "hello" }',
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       "function speak {",
       "  say textValue(), pace()",
       "}",

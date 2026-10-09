@@ -237,12 +237,13 @@ test("cue positions may start with an object literal and continue like other exp
   const objectWithoutBlock = 'playAudio "a" {\n  at { say "x" }\n}';
   const atOffset = objectWithoutBlock.indexOf("at {");
   assert.deepEqual(firstError(objectWithoutBlock), ["TSP001", atOffset, atOffset + "at".length]);
-  assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}\nexit'), [
-    "at",
-  ]);
+  assert.deepEqual(
+    offsets('playAudio "a" {\n  at (askNumber """${\n    1\n  }""") * 1 s { }\n}\nexit'),
+    ["at"],
+  );
   assert.deepEqual(
     offsets(
-      'playAudio "a" {\n  beforeEnd choose 1: "One",\n\n    2: "Two" { }\n  at choose 3: "Three" { }\n}\nexit',
+      'playAudio "a" {\n  beforeEnd choose 1 s,\n\n    2 s { }\n  at choose 3 s { }\n}\nexit',
     ),
     ["beforeEnd", "at"],
   );
@@ -252,7 +253,7 @@ test("cue positions may start with an object literal and continue like other exp
   assert.deepEqual(firstError(choiceBeforeBrace), ["TSP031", choiceBrace, choiceBrace + 1]);
   // A block inside a cue position parses like any other block.
   const blockInPosition =
-    'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    let n = choose 1: "Once", 2: "Twice" { }\n  }) { }\n}';
+    'function point(x) {\n  return 1 s\n}\nplayAudio "a" {\n  at point(timer async 1 s {\n    let n = choose 1: "Once", 2: "Twice" { }\n  }) { }\n}';
   const innerBrace = blockInPosition.indexOf("{ }");
   assert.deepEqual(firstError(blockInPosition), ["TSP031", innerBrace, innerBrace + 1]);
 });

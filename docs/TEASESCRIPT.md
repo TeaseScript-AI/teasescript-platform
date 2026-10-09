@@ -72,7 +72,7 @@ customGreeting("Hello")  // ordinary package-library call
 
 A formatter formats ordinary calls according to the existing call grammar. It does not invent command syntax for a library function.
 
-The accepted boundary does not itself change accepted V30 forms such as `wait 2` or `timer 10`. ADR 0018 specifically supersedes the V30 points listed below; unrelated V30 syntax remains authoritative.
+The accepted boundary does not itself change accepted V30 forms such as `wait 2 s` or `timer 10 s`. ADR 0018 specifically supersedes the V30 points listed below; unrelated V30 syntax remains authoritative.
 
 ## Accepted first Standard Library POC syntax
 
@@ -192,17 +192,18 @@ say "Smart autoplay"
 say as mistress "Smart autoplay"
 say unskippable "Read every word."
 say as mistress skippable "You have seen this before."
-say "Exactly five seconds", 5
-say "Immediate", 0
+say "Exactly five seconds", 5 s
+say "Immediate", 0 s
 say "Immediate", instant
 ```
 
 Pacing meanings:
 
 - omitted: smart autoplay from captured account settings;
-- positive finite number: exact pacing gate in seconds, including fractional seconds;
-- `0` or `instant`: settle any earlier background gate, emit immediately, and create no new gate;
-- negative, non-finite, unsupported-magnitude, or deadline-overflow value: structured error.
+- positive exact duration: exact pacing gate, including fractional seconds such as `1.5 s`;
+- `0 s` or `instant`: settle any earlier background gate, emit immediately, and create no new gate;
+- a number without a unit: compile error that names the fix, such as `5 s` ([ADR 0026](decisions/0026-unified-time-semantics.md#8-explicit-units-for-time-quantities));
+- negative, non-finite, calendar, unsupported-magnitude, or deadline-overflow value: structured error.
 
 With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySkippable` setting and otherwise the platform default `true`.
 

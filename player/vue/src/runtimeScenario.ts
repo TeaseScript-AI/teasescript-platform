@@ -95,7 +95,7 @@ let count = 0
 showPermanentButton "Count one" {
     count += 1
     say "That makes \${count}.", instant
-    wait 2
+    wait 2 s
 }
 let hint = showPermanentButton "Give me a hint" {
     removePermanentButton(hint)

@@ -304,7 +304,7 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
     if (drawsTimerDuration(instruction)) {
       add(file, instruction.duration.span, "duration");
       // Each round of a repeating ranged timer draws where its duration stands. Restore refuses a range on a timer whose
-      // duration is written as a number or duration, so other repeating timers never draw a round.
+      // duration has no 's' after it or is written as a number, so other repeating timers never draw a round.
       if (instruction.kind === "startTimer" && instruction.repeat)
         add(file, instruction.duration.span, "timerRepeat");
     }
@@ -350,15 +350,15 @@ function randomSiteAt(
 }
 
 /**
- * Whether an instruction may draw a timer's duration from a range, after evaluating all its operands: a timer, blocking
- * or not, whose duration is not a number or duration written in the source.
+ * Whether an instruction may draw a duration from a range, after evaluating all its operands: a wait or a timer,
+ * blocking or not, whose duration has a unit after it and is not a number written in the source.
  */
 function drawsTimerDuration(
   instruction: Instruction,
 ): instruction is Extract<Instruction, { kind: "startTimer" | "wait" }> {
   return (
-    (instruction.kind === "startTimer" ||
-      (instruction.kind === "wait" && instruction.command === "timer")) &&
+    (instruction.kind === "startTimer" || instruction.kind === "wait") &&
+    instruction.unit !== null &&
     instruction.duration.kind !== "literal" &&
     instruction.duration.kind !== "duration" &&
     instruction.duration.kind !== "calendarDuration"

@@ -299,7 +299,7 @@ test("a pair loop resumes from a checkpoint at every step, and a checkpoint reje
   const source = [
     "let toys = dict{ rope: [1], cuffs: [2] }",
     "for key, value in toys {",
-    "    wait 1",
+    "    wait 1 s",
     "    value.add(3)",
     "    toys[key] = value",
     '    say "${key} ${value.length}"',

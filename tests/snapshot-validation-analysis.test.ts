@@ -33,7 +33,7 @@ const SCENARIO = [
   "fallback again",
   'let record = { total: 0, items: ["", ""] }',
   'function pause(seconds, note = "pause ${seconds}") {',
-  "  wait seconds",
+  "  wait seconds s",
   "  return note",
   "}",
   "function size(value) {",
@@ -51,7 +51,7 @@ const SCENARIO = [
   "let ticks = 0",
   "let t = timer(duration: 2500 ms, async: true, repeat: true) {",
   "  ticks += 1",
-  "  wait 1",
+  "  wait 1 s",
   "}",
   'let m = playAudio(file: "a.mp3", async: true) {',
   "  at 500 ms {",
@@ -237,7 +237,7 @@ test("a validated plan's kept analysis judges corrupted snapshots like a fresh a
 
 const LOOPS_SOURCE = [
   "function pause(seconds = 1) {",
-  "  wait seconds",
+  "  wait seconds s",
   "}",
   "repeat 3 {",
   "  pause()",
@@ -309,7 +309,7 @@ test("a mutated external plan is validated against its new content", () => {
 
 test("a malformed loop context cannot enlarge the continuation analysis", () => {
   const source = [
-    "function pause {\n  wait 1\n}",
+    "function pause {\n  wait 1 s\n}",
     "let total = 0",
     "while total < 1 {",
     "  repeat 1 {",
@@ -345,7 +345,7 @@ test("a malformed loop context cannot enlarge the continuation analysis", () => 
 
 test("impossible loop contexts of one snapshot share one continuation analysis", () => {
   const source = [
-    "function pause {\n  wait 1\n}",
+    "function pause {\n  wait 1 s\n}",
     "repeat 1 {",
     "  repeat 1 {",
     "    repeat 1 {",

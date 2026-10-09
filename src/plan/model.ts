@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 77;
+export const INSTRUCTION_PLAN_VERSION = 78;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -412,14 +412,17 @@ export interface SayInstruction extends InstructionBase {
   readonly pacing: ExpressionPlan | "smart" | "instant";
 }
 
-export type DurationUnitPlan = "ms" | "s" | "min" | "h";
+export type DurationUnitPlan = "ms" | "s" | "min" | "h" | "d" | "w";
 
 /** One foreground delay: `wait` or a blocking `timer`. */
 export interface WaitInstruction extends InstructionBase {
   readonly kind: "wait";
-  /** A `timer` also accepts an integer-second range drawn once, after its operands are evaluated. */
   readonly command: "wait" | "timer";
   readonly duration: ExpressionPlan;
+  /**
+   * The unit after the duration, which is then a number, or a range of whole units drawn once after the operands are
+   * evaluated, as in `wait (5..10) s`. `null` when the duration is a duration.
+   */
   readonly unit: DurationUnitPlan | null;
   /** Evaluated after the duration when it is an expression; always `"hidden"` for `wait`. */
   readonly display: DelayDisplay | ExpressionPlan;
@@ -444,6 +447,7 @@ export type HandlerCaptures = readonly string[];
 export interface StartTimerInstruction extends InstructionBase {
   readonly kind: "startTimer";
   readonly duration: ExpressionPlan;
+  /** As for {@link WaitInstruction.unit}. */
   readonly unit: DurationUnitPlan | null;
   readonly display: DelayDisplay | ExpressionPlan;
   readonly label: ExpressionPlan | null;
@@ -937,6 +941,7 @@ export type ExpressionPlan =
   | IndexExpressionPlan
   | CallExpressionPlan
   | UnaryExpressionPlan
+  | UnitExpressionPlan
   | BinaryExpressionPlan
   | RangeExpressionPlan
   | TemporaryExpressionPlan
@@ -1165,6 +1170,19 @@ export interface UnaryExpressionPlan extends ExpressionPlanBase {
   readonly operator: "+" | "-" | "not";
   readonly operand: ExpressionPlan;
 }
+
+/**
+ * A unit after a name, a member, a call, or parentheses: the number its operand gives, as a duration of that unit, or
+ * a calendar duration after `calendar`.
+ */
+export type UnitExpressionPlan = ExpressionPlanBase & {
+  readonly kind: "unit";
+  readonly operand: ExpressionPlan;
+} & UnitPlan;
+
+export type UnitPlan =
+  | { readonly calendar: false; readonly unit: DurationUnitPlan }
+  | { readonly calendar: true; readonly unit: "d" | "w" | "mo" | "y" };
 
 /** `in` tests whether the left value is a number within the right range; only `switch` range cases compile to it. */
 export interface BinaryExpressionPlan extends ExpressionPlanBase {

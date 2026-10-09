@@ -10,7 +10,7 @@ import {
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
-  secondsToPacingMilliseconds,
+  exactPacingMilliseconds,
 } from "../src/runtime/actions/pacing.js";
 import {
   cloneRuntimeSnapshot,
@@ -152,20 +152,19 @@ test("smart pacing duration rejects multiplication and addition overflow", () =>
   );
 });
 
-test("exact pacing seconds preserve fractional milliseconds and reject unsupported values", () => {
-  assert.equal(secondsToPacingMilliseconds(0), 0);
-  assert.equal(secondsToPacingMilliseconds(2), 2000);
-  assert.equal(secondsToPacingMilliseconds(1.5), 1500);
-  assert.equal(secondsToPacingMilliseconds(0.0005), 0.5);
+test("exact pacing preserves fractional milliseconds and rejects unsupported values", () => {
+  assert.equal(exactPacingMilliseconds(0), 0);
+  assert.equal(exactPacingMilliseconds(2000), 2000);
+  assert.equal(exactPacingMilliseconds(0.5), 0.5);
   for (const value of [
     -1,
     Number.NaN,
     Number.POSITIVE_INFINITY,
-    Number.MAX_SAFE_INTEGER,
+    Number.MAX_SAFE_INTEGER + 1,
     Number.MAX_VALUE,
     "1",
   ]) {
-    assert.throws(() => secondsToPacingMilliseconds(value));
+    assert.throws(() => exactPacingMilliseconds(value));
   }
 });
 

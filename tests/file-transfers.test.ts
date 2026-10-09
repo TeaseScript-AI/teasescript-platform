@@ -173,7 +173,7 @@ test("a block of a file the session left sees that file's variables, and its got
       project(
         [
           'let owner = "main"',
-          'let beat = timer(duration: 1, async: true, display: "hidden", persist: true) {',
+          'let beat = timer(duration: 1 s, async: true, display: "hidden", persist: true) {',
           '    say "beat for ${owner}"',
           "    goto resumed",
           "}",
@@ -182,7 +182,7 @@ test("a block of a file the session left sees that file's variables, and its got
           'say "main again with ${owner}"',
           "exit",
         ].join("\n"),
-        { "wait.tease": 'let owner = "wait"\nwait 5\nsay "never"\nexit' },
+        { "wait.tease": 'let owner = "wait"\nwait 5 s\nsay "never"\nexit' },
       ),
     ),
     ["beat for main", "main again with main", "exit"],
@@ -195,7 +195,7 @@ test("a block's goto abandons the file its activation called and keeps that acti
       project('call "middle.tease"\nsay "main continues"\nexit', {
         "middle.tease": [
           "let step = 7",
-          'let alarm = timer(duration: 1, async: true, display: "hidden", persist: true) {',
+          'let alarm = timer(duration: 1 s, async: true, display: "hidden", persist: true) {',
           "    goto interrupted",
           "}",
           'call "slow.tease"',
@@ -205,7 +205,7 @@ test("a block's goto abandons the file its activation called and keeps that acti
           'say "interrupted at ${step}"',
           "end",
         ].join("\n"),
-        "slow.tease": 'wait 5\nsay "never slow"\nend',
+        "slow.tease": 'wait 5 s\nsay "never slow"\nend',
       }),
     ),
     ["interrupted at 7", "main continues", "exit"],
@@ -219,24 +219,24 @@ test("a block's goto that leaves a called file keeps the caller's finished timer
     said(
       project(
         [
-          'timer(duration: 1, async: true, display: "hidden") { say "main a" }',
+          'timer(duration: 1 s, async: true, display: "hidden") { say "main a" }',
           'call "middle.tease"',
           'say "back in main"',
-          "wait 5",
+          "wait 5 s",
           "exit",
         ].join("\n"),
         {
           "middle.tease": [
             'timer(duration: 500 ms, async: true, display: "hidden") {',
-            "    wait 2",
+            "    wait 2 s",
             "    goto there",
             "}",
-            'timer(duration: 1, async: true, display: "hidden") { say "middle a" }',
-            "wait 10",
+            'timer(duration: 1 s, async: true, display: "hidden") { say "middle a" }',
+            "wait 10 s",
             "end",
             "label there",
             'say "middle there"',
-            "wait 5",
+            "wait 5 s",
             "end",
           ].join("\n"),
         },
@@ -273,17 +273,17 @@ test("a non-persistent timer goes when the file entry that started it is left; a
     said(
       project(
         [
-          'timer async 3 { say "main timer" }',
-          'let kept = timer(duration: 4, async: true, display: "hidden", persist: true) { say "kept" }',
+          'timer async 3 s { say "main timer" }',
+          'let kept = timer(duration: 4 s, async: true, display: "hidden", persist: true) { say "kept" }',
           'call "short.tease"',
-          "wait 5",
+          "wait 5 s",
           'goto "last.tease"',
         ].join("\n"),
         {
           // The called file's own timers go when it ends or goes elsewhere.
-          "short.tease": 'timer async 2 { say "short timer" }\nwait 1\ngoto "shorter.tease"',
-          "shorter.tease": 'timer async 1 { say "shorter timer" }\nend',
-          "last.tease": 'timer async 1 { say "last timer" }\nwait 2\nexit',
+          "short.tease": 'timer async 2 s { say "short timer" }\nwait 1 s\ngoto "shorter.tease"',
+          "shorter.tease": 'timer async 1 s { say "shorter timer" }\nend',
+          "last.tease": 'timer async 1 s { say "last timer" }\nwait 2 s\nexit',
         },
       ),
     ),
@@ -301,13 +301,13 @@ test("restore validation checks activations, file calls, retained roots, and the
   const files = project(
     [
       "fallback menu",
-      'let t = timer(duration: 9, async: true, display: "hidden", persist: true) { say "t" }',
+      'let t = timer(duration: 9 s, async: true, display: "hidden", persist: true) { say "t" }',
       'call "inner.tease"',
       "exit",
       "label menu",
       "exit",
     ].join("\n"),
-    { "inner.tease": "function pause { wait 5 }\npause()\nend" },
+    { "inner.tease": "function pause { wait 5 s }\npause()\nend" },
   );
   const plan = compiled(files);
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
@@ -533,14 +533,14 @@ test("a block changes the variables of a file the session left, also across a fi
           '    call "pause.tease"',
           "    return 9",
           "}",
-          'let t = timer(duration: 1, async: true, display: "hidden", persist: true) {',
+          'let t = timer(duration: 1 s, async: true, display: "hidden", persist: true) {',
           "    data[0] = 9",
           "    scores.first = later()",
           '    say "${data[0]} ${scores.first}"',
           "}",
           'goto "wait.tease"',
         ].join("\n"),
-        { "wait.tease": "wait 5\nexit", "pause.tease": "wait 1\nend" },
+        { "wait.tease": "wait 5 s\nexit", "pause.tease": "wait 1 s\nend" },
       ),
     ),
     ["9 9", "exit"],
@@ -558,7 +558,7 @@ test("a loop of a calling file stays with its call while the called file runs", 
 
   const plan = compiled(
     project('repeat 2 {\n    call "child.tease"\n    say "returned"\n}\nexit', {
-      "child.tease": "wait 1\nend",
+      "child.tease": "wait 1 s\nend",
     }),
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
@@ -623,13 +623,13 @@ test("a timer block may change a loop condition while a called file runs", () =>
       project(
         [
           "let x: integer? = 1",
-          "timer async 1 { x = null }",
+          "timer async 1 s { x = null }",
           "x = 1",
           'while x != null { call "delay.tease" }',
           'say "stopped"',
           "exit",
         ].join("\n"),
-        { "delay.tease": "wait 1\nend" },
+        { "delay.tease": "wait 1 s\nend" },
       ),
     ),
     ["stopped", "exit"],
@@ -655,11 +655,11 @@ test("a timer names an issued activation, also after that activation is gone", (
   const plan = compiled(
     project(
       [
-        'let kept = timer(duration: 10, async: true, display: "hidden", persist: true)',
-        "timer async 10",
+        'let kept = timer(duration: 10 s, async: true, display: "hidden", persist: true)',
+        "timer async 10 s",
         'goto "child.tease"',
       ].join("\n"),
-      { "child.tease": "wait 1\nexit" },
+      { "child.tease": "wait 1 s\nexit" },
     ),
   );
   // The persistent timer outlives main's activation, which nothing retains.
@@ -679,7 +679,7 @@ test("a transfer in a function never called or a block never started enters no l
       project(main, { "b.tease": "let x = 1\nlabel start\nsay x\nend" }),
     ).diagnostics.map((diagnostic) => diagnostic.code);
   for (const main of [
-    'if false { timer async 1 { goto "b.tease" start } }\nexit',
+    'if false { timer async 1 s { goto "b.tease" start } }\nexit',
     'function never { goto "b.tease" start }\nexit',
     'function f { call "b.tease" start }\nif false { f() }\nexit',
     'function f { fallback "b.tease" start }\nfunction g { f() }\nexit',
@@ -692,9 +692,9 @@ test("a transfer in a function never called or a block never started enters no l
 
 test("restore checks a timer's activation against its file and walks only real loop partitions", () => {
   const plan = compiled(
-    project('timer async 10\ncall "child.tease"\nexit', {
-      "child.tease": 'wait 1\ngoto "last.tease"',
-      "last.tease": "wait 1\nend",
+    project('timer async 10 s\ncall "child.tease"\nexit', {
+      "child.tease": 'wait 1 s\ngoto "last.tease"',
+      "last.tease": "wait 1 s\nend",
     }),
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
@@ -708,7 +708,7 @@ test("restore checks a timer's activation against its file and walks only real l
   assert.equal(validateRuntimeSnapshot(wrongFile, plan).valid, false);
 
   const loops = compiled(
-    project('repeat 2 { call "child.tease" }\nexit', { "child.tease": "wait 1\nend" }),
+    project('repeat 2 { call "child.tease" }\nexit', { "child.tease": "wait 1 s\nend" }),
   );
   const inLoop = run(loops, createImmediatePacingRuntimeSnapshot(loops)).snapshot;
   // EVIDENCE: structuredClone preserves the runtime snapshot shape while the fixture breaks one loop base.
@@ -808,10 +808,10 @@ test("a root retained for a block cannot bind the name of a global", () => {
       [
         "global score = 7",
         "let x = 1",
-        'let t = timer(duration: 1, async: true, display: "hidden", persist: true) { say score }',
+        'let t = timer(duration: 1 s, async: true, display: "hidden", persist: true) { say score }',
         'goto "slow.tease"',
       ].join("\n"),
-      { "slow.tease": "wait 2\nexit" },
+      { "slow.tease": "wait 2 s\nexit" },
     ),
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;

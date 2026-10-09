@@ -32,7 +32,7 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 12. Valid answers and choice/button activations become player-authored transcript messages. Exact unambiguous visible
     choice text may activate `choose`; exact visible button text may activate `showButton`. Space in the empty composer
     does not activate `showButton`.
-13. `say` uses account-configured smart autoplay by default, supports exact seconds, `0`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
+13. `say` uses account-configured smart autoplay by default, supports exact durations, `0 s`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive pacing gate is one ADR 0016 pending action. It begins as background work and may become the foreground action when it blocks a prepared later `say`.
 15. A skippable pacing gate may be completed by a primary click or tap on Player background or other unused Player space, or by Space while the focused composer is empty. Skip completes only the pacing gate.
 16. The normal Player application has no player-facing pause control. Developer mode may provide Run, Step, Pause, checkpoint, and debugger controls.
@@ -352,21 +352,23 @@ say "Normal smart autoplay"
 say as mistress "Normal smart autoplay"
 say unskippable "Read every word."
 say as mistress skippable "You have seen this before."
-say "Exactly five seconds", 5
-say as mistress unskippable "Wait five seconds before the next message.", 5
-say "Immediate", 0
+say "Exactly five seconds", 5 s
+say as mistress unskippable "Wait five seconds before the next message.", 5 s
+say "Immediate", 0 s
 say "Immediate", instant
 ```
 
 Pacing values mean:
 
 - omitted: account-configured smart autoplay;
-- positive finite number: exact pacing gate in seconds; fractional seconds are permitted;
-- `0`: immediate output with no resulting gate;
-- `instant`: readable alias for `0`;
-- negative, non-finite, unsupported-magnitude, or deadline-overflow values: structured error before partial gate creation.
+- positive exact duration: exact pacing gate; fractional seconds such as `1.5 s` are permitted;
+- `0 s`: immediate output with no resulting gate;
+- `instant`: readable alias for `0 s`;
+- a number without a unit: compile error that names the fix ([ADR 0026](0026-unified-time-semantics.md#8-explicit-units-for-time-quantities));
+- negative, non-finite, calendar, unsupported-magnitude, or deadline-overflow values: structured error before partial
+  gate creation.
 
-`0` and `instant` also settle and bypass an earlier active pacing gate so the current message is actually immediate.
+`0 s` and `instant` also settle and bypass an earlier active pacing gate so the current message is actually immediate.
 
 ## Interaction data boundaries
 
@@ -654,9 +656,9 @@ actionRequested(interaction)
 
 No checkpoint may expose an intermediate state with neither the old gate nor the new interaction.
 
-### `instant` and `0`
+### `instant` and `0 s`
 
-When `say ..., 0` or `say ..., instant` executes while a pacing gate remains active as background work, one atomic instruction transition:
+When `say ..., 0 s` or `say ..., instant` executes while a pacing gate remains active as background work, one atomic instruction transition:
 
 1. settles the old gate with a typed `supersededByInstantOutput` settlement;
 2. emits `actionCompleted` for the old gate;
@@ -681,7 +683,7 @@ For:
 
 ```tease
 say as mistress "One"
-wait 1
+wait 1 s
 say as mistress "Two"
 ```
 
@@ -772,7 +774,7 @@ This ADR accepts these scoped post-V30 changes:
 - add compact command-expression forms for `askText` and `askNumber`;
 - replace the V30 split between `choose` bodies with values and lists without them by one comma-separated compact form;
 - retain identifier and numeric values before `:` from accepted V30 capability;
-- extend `say` with `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
+- extend `say` with `skippable`, `unskippable`, exact durations, `0 s`, and `instant`;
 - define field text as Standard UI hint/label data rather than automatic transcript output (for basic asks superseded by
   [questions and hints](#ask-questions-and-hints));
 - express the V30 `showButton` timeout and elapsed-time return through the compact `timeout:` option and value form.

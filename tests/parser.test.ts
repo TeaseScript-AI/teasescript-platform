@@ -101,7 +101,7 @@ test("parses say, say as, and exit statements", () => {
 });
 
 test("parses say pacing and skip syntax with pacing spans", () => {
-  const source = 'say as vera unskippable "Read this", 1.5\nsay "Now", instant';
+  const source = 'say as vera unskippable "Read this", 1.5 s\nsay "Now", instant';
   const result = parse(source);
   const first = result.program.statements[0];
   const second = result.program.statements[1];
@@ -113,7 +113,7 @@ test("parses say pacing and skip syntax with pacing spans", () => {
     first?.kind === "sayStatement" && first.pacing !== null && first.pacing !== "instant"
       ? first.pacing.span
       : null,
-    sourceSpan(source, source.indexOf("1.5"), source.indexOf("1.5") + 3),
+    sourceSpan(source, source.indexOf("1.5 s"), source.indexOf("1.5 s") + 5),
   );
   assert.deepEqual(first?.span, sourceSpan(source, 0, source.indexOf("\n")));
   assert.equal(second?.kind === "sayStatement" ? second.pacing : null, "instant");
