@@ -3988,7 +3988,7 @@ now.second
 now.millisecond
 ```
 
-A `datetime` has all of these fields, and a `timestamp` none: convert it first, as in `started.toDateTime().hour`.
+A `datetime` has all of these fields, and an `absoluteDateTime` none: convert it first, as in `started.toDateTime().hour`.
 `weekday` is the English weekday name; comparing it with text that is not an English weekday name gives a compile
 warning. `weekNumber` and `weekYear` follow ISO 8601, not the player's locale: a week starts on Monday, and week 1 holds
 the year's first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is week 53 of 2020. The week year of
