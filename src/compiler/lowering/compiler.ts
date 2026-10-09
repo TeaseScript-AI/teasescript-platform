@@ -339,6 +339,10 @@ export class InstructionCompiler {
       case "playMediaStatement":
         yield* compileChild(this.#lowerMediaTask(statement, false));
         return;
+      case "stopAudioStatement":
+        this.#emitPacingBarrier(null, statement.span);
+        this.instructions.push({ kind: "stopAudio", span: copySpan(statement.span) });
+        return;
       case "showImageStatement": {
         this.#emitPacingBarrier(null, statement.span);
         const lowered = this.#lowerExpression(statement.image);

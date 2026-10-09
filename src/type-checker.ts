@@ -1261,6 +1261,7 @@ class TypeChecker {
       case "hideImageStatement":
       case "showCameraStatement":
       case "hideCameraStatement":
+      case "stopAudioStatement":
         this.#suspend();
         return true;
       case "saveStatement": {
@@ -6279,6 +6280,7 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "hideImageStatement",
   "showCameraStatement",
   "hideCameraStatement",
+  "stopAudioStatement",
   "saveStatement",
   "deleteStatement",
   // Blocks of the caller keep running while a called file runs.

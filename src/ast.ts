@@ -19,6 +19,7 @@ export type Statement =
   | HideCameraStatement
   | ShowPermanentButtonStatement
   | PlayMediaStatement
+  | StopAudioStatement
   | SaveStatement
   | DeleteStatement
   | ExitStatement
@@ -267,6 +268,12 @@ export interface PlayMediaStatement extends MediaParts {
 /** Asynchronous playback used as a value; it evaluates to its handle. */
 export interface PlayMediaExpression extends MediaParts {
   readonly kind: "playMediaExpression";
+}
+
+/** `stopAudio`: stops every running or paused sound of the session, like `stop()` on each handle. */
+export interface StopAudioStatement {
+  readonly kind: "stopAudioStatement";
+  readonly span: SourceSpan;
 }
 
 /** `save <value> as <key>`: stores a copy of the value in script storage; saving `null` removes the key. */

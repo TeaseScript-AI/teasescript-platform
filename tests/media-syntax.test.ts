@@ -48,15 +48,18 @@ test("accepted media forms compile, each behind a pacing barrier", () => {
       'playAudio(file: "a.mp3", repeat: 3 times)',
       'playAudio(file: "a.mp3", repeat: 60 s)',
       'playAudio(file: "a.mp3", repeat: false)',
+      "stopAudio",
       "exit",
     ].join("\n"),
   );
   const shown = kinds(compiled.instructions).filter((kind) =>
-    ["pacingBarrier", "showImage", "playMedia"].includes(kind),
+    ["pacingBarrier", "showImage", "playMedia", "stopAudio"].includes(kind),
   );
   assert.deepEqual(shown, [
     ...Array<string>(3).fill("pacingBarrier,showImage").join(",").split(","),
     ...Array<string>(9).fill("pacingBarrier,playMedia").join(",").split(","),
+    "pacingBarrier",
+    "stopAudio",
   ]);
 });
 
@@ -153,6 +156,9 @@ test("invalid media forms are rejected with focused diagnostics", () => {
     ['playAudio("a.mp3")', "TSP035", '"a.mp3"'],
     ["playAudio(async: true)", "TSP035", "(async: true)"],
     ["hideImage()", "TSP035", "("],
+    ['stopAudio "a.mp3"', "TSP035", '"a.mp3"'],
+    ["stopAudio(music)", "TSP035", "(music)"],
+    ["let stopAudio = 1", "TSV001", "stopAudio"],
     ['showImage("a.jpg")', "TSP035", "("],
     ["showImage 3", "TSV036", "3"],
     ['let m = playAudio async "a.mp3"\nm.loop = true', "TSV037", "loop"],
@@ -271,6 +277,21 @@ test("media parse errors recover at the end of the line and keep enclosing block
       ["sayStatement", 'say "next"', '"next"'],
       ["sayStatement", 'say "last"', '"last"'],
     ],
+  );
+  // stopAudio names the fix: one sound stops through its handle.
+  const stopOne = compileSource('let m = playAudio async "a.mp3"\nstopAudio m\nexit');
+  assert.equal(
+    stopOne.diagnostics[0]?.message,
+    "stopAudio takes no arguments. To stop one sound, keep its handle and call stop() on it.",
+  );
+  const inBlock = compileSource('if true { stopAudio { a: 1 } }\nsay "next"\nexit');
+  assert.deepEqual(
+    inBlock.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP035"],
+  );
+  assert.deepEqual(
+    inBlock.program.statements.map((statement) => statement.kind),
+    ["ifStatement", "sayStatement", "exitStatement"],
   );
   const trailingComma = 'playAudio(file: "a.mp3",)';
   const missingArgument = trailingComma.indexOf(")");

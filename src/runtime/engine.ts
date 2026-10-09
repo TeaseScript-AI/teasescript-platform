@@ -189,6 +189,7 @@ import {
 import { expireTimerAction, stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
 import {
   emitDeveloperWarning,
+  stopAllAudio,
   stopAllMediaForSessionEnd,
   stopMediaAction,
   stopStageVideo,
@@ -1392,6 +1393,20 @@ function executePlannedInstruction(
       return;
     case "playMedia":
       startMedia(plan, instruction, snapshot, evaluator, events);
+      return;
+    case "stopAudio":
+      for (const mediaId of stopAllAudio(plan, snapshot, events, instruction.span)) {
+        // Like stop() on the handle of each sound.
+        evaluator.trace?.writeState(
+          "mutation",
+          stateKey("media", mediaId),
+          "timed",
+          "media.stop()",
+          null,
+          instruction.span,
+        );
+      }
+      advance(snapshot);
       return;
     case "goto":
       executeGoto(instruction, snapshot, contextRootId(snapshot), events);
