@@ -1699,7 +1699,78 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   const allConstants = new Map(constants);
   for (const [index, found] of fixed) allConstants.set(index, found.value);
-  const cells = options.cells === false ? null : new Cells(comparedSlots(flow, instructions));
+  const slots = comparedSlots(flow, instructions);
+  const cells = options.cells === false ? null : new Cells(slots);
+  /**
+   * With random choices, by draw site (`path:line:column` of the call or property that draws): the numbers and texts
+   * conditions compare the variable or stored key it is assigned to with. A draw also gets those outcomes, and the
+   * numbers next to each, as other outcomes: directed random.
+   */
+  const siteConstants = new Map<string, { numbers: Set<number>; strings: Set<string> }>();
+  if (chooses)
+    instructions.forEach((instruction, index) => {
+      const target = record(instruction.target);
+      const name =
+        instruction.kind === "declareBinding" || instruction.kind === "declareGlobal"
+          ? instruction.name
+          : instruction.kind === "assign"
+            ? typeof instruction.target === "string"
+              ? instruction.target
+              : target.kind === "identifier"
+                ? target.name
+                : null
+            : null;
+      const key = instruction.kind === "storageWrite" ? keyText(instruction.key) : null;
+      if (typeof name !== "string" && key === null) return;
+      const constants = { numbers: new Set<number>(), strings: new Set<string>() };
+      for (const slot of slots) {
+        if (slot.length) continue;
+        const matches =
+          slot.kind === "binding" ? slot.name === name : key !== null && keyMatcher(slot.name)(key);
+        if (!matches) continue;
+        for (const number of slot.numbers) constants.numbers.add(number);
+        for (const text of slot.strings) constants.strings.add(text);
+      }
+      if (constants.numbers.size === 0 && constants.strings.size === 0) return;
+      const walk = (value: unknown): void => {
+        if (Array.isArray(value)) return value.forEach(walk);
+        if (!isRecord(value)) return;
+        const span = record(value.span);
+        if (
+          (value.kind === "call" || value.kind === "property") &&
+          typeof span.sl === "number" &&
+          typeof span.sc === "number"
+        )
+          siteConstants.set(`${files[index]}:${span.sl + 1}:${span.sc + 1}`, constants);
+        for (const [field, item] of Object.entries(value)) if (field !== "span") walk(item);
+      };
+      walk(instruction.value);
+    });
+  /** With directed random: the outcomes of a draw that give a compared constant, or a number next to one. */
+  const directedOutcomes = (draw: Data): Data[] => {
+    const constants = siteConstants.get(String(draw.site));
+    const support = record(draw.support);
+    if (constants === undefined) return [];
+    if (
+      support.kind === "integer" &&
+      typeof support.min === "number" &&
+      typeof support.max === "number"
+    ) {
+      const { min, max } = support;
+      const numbers = new Set<number>();
+      for (const constant of constants.numbers)
+        for (const near of [constant, constant - 1, constant + 1])
+          if (Number.isInteger(near) && near >= min && near <= max) numbers.add(near);
+      return [...numbers].map((value) => ({ kind: "number", value }));
+    }
+    const candidates: unknown[] = Array.isArray(support.candidates) ? support.candidates : [];
+    return candidates.flatMap((candidate, index) =>
+      (typeof candidate === "string" && constants.strings.has(candidate)) ||
+      (typeof candidate === "number" && constants.numbers.has(candidate))
+        ? [{ kind: "index", index }]
+        : [],
+    );
+  };
   const elseIfs =
     options.realign === true ? elseIfChains(instructions) : new Map<number, number[]>();
   // With guidance, the map of the plan, measured again from what play has not reached at each analysis.
@@ -2579,8 +2650,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     for (const draw of next.draws.slice(0, RANDOM_DRAWS_PER_STEP)) {
       if (typeof draw.drawId !== "number" || typeof draw.site !== "string") continue;
       let taken = 0;
-      for (const outcome of engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives) {
-        if (taken === RANDOM_ALTERNATIVES) break;
+      // The outcomes that give what conditions compare with come first, all of them; then representative ones.
+      const directed = directedOutcomes(draw);
+      for (const outcome of [
+        ...directed,
+        ...engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives,
+      ]) {
+        if (taken === RANDOM_ALTERNATIVES + directed.length) break;
         const tried = `${context} ${draw.site} ${JSON.stringify(outcome)}`;
         if (randomTried.has(tried)) continue;
         randomTried.add(tried);

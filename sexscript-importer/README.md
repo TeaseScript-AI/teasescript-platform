@@ -423,7 +423,10 @@ random integers, picks from a collection, weighted picks, tag queries, and glob 
 unless it chooses. A step also offers the other outcomes of
 the first four draws it made (`randomDrawAlternatives`: all of a small support, 16 representative ones of a large one;
 at most three per draw, each outcome of a draw site once per waiting place and input) as steps with the same input and
-that outcome chosen, also after directed steps. Those steps and the expansions of the states after them take at most a
+that outcome chosen, also after directed steps. A draw whose result is assigned to a variable or saved to a key that
+conditions compare with constants also offers, before those, every outcome that gives one of those constants (or a whole
+number next to one, within a random integer's range): directed random, such as `dassignment == 27` after
+`dassignment = randomInteger(0..60)`. Each outcome is tried apart, not in combination with another draw's. Those steps and the expansions of the states after them take at most a
 sixteenth of all runtime operations while other states are open, checked before each input (a state cut short goes on
 later with the inputs it has not tried), and all of them when none is; they can cost much more than other steps. Such
 states are apart from play's, also where the runtime state is the same, with their own loop keys and cell expansions,
