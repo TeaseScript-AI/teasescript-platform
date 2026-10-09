@@ -3906,7 +3906,8 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 ## 35. Date, time, durations, and timestamps
 **Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `timestamp` values, their conversions,
 fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, calendar durations,
-and date and time input ([§20](#date-and-time-input)).
+and date and time input ([§20](#date-and-time-input)). [ADR 0026](../decisions/0026-unified-time-semantics.md) changes
+parts of this section; each part moves here when it is implemented.
 
 TeaseScript has two kinds of time:
 
