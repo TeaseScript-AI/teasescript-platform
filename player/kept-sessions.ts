@@ -508,8 +508,9 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
           },
         ),
       ),
-    // The plan, which never changes while the session runs, is written only when it is given, and otherwise only checked
-    // to be there: a step rewrites the snapshot, marks, and event count, and the new events.
+    // The plan never changes while the session runs, so it is written only when it is given, which the session's first
+    // step does, and goes with the session: a later step reads and writes only the snapshot, marks, event count, and new
+    // events, and its plan is there whenever its session is.
     publish: (scope, update) =>
       transact<void>(
         database,
@@ -517,27 +518,24 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
         "readwrite",
         (transaction, _done, fail) => {
           const sessions = transaction.objectStore(SESSIONS);
-          const plans = transaction.objectStore(PLANS);
-          if (update.planJson !== null) plans.put({ scope, planJson: update.planJson });
+          if (update.planJson !== null)
+            transaction.objectStore(PLANS).put({ scope, planJson: update.planJson });
           got(sessions.get(scope), (previous: Record<string, unknown> | undefined) => {
+            if (update.planJson === null && previous === undefined) return fail(noPlan());
             const eventCount = previous?.["eventCount"] ?? 0;
             if (typeof eventCount !== "number" || update.eventsFrom > eventCount)
               return fail(eventGap());
-            const write = () => {
-              const events = transaction.objectStore(EVENTS);
-              events.delete(eventsFrom(scope, update.eventsFrom));
-              update.events.forEach((event, index) =>
-                events.put(event, [scope, update.eventsFrom + index]),
-              );
-              sessions.put({
-                scope,
-                snapshotJson: update.snapshotJson,
-                marks: update.marks,
-                eventCount: update.eventsFrom + update.events.length,
-              });
-            };
-            if (update.planJson !== null) return write();
-            got(plans.getKey(scope), (key) => (key === undefined ? fail(noPlan()) : write()));
+            const events = transaction.objectStore(EVENTS);
+            events.delete(eventsFrom(scope, update.eventsFrom));
+            update.events.forEach((event, index) =>
+              events.put(event, [scope, update.eventsFrom + index]),
+            );
+            sessions.put({
+              scope,
+              snapshotJson: update.snapshotJson,
+              marks: update.marks,
+              eventCount: update.eventsFrom + update.events.length,
+            });
           });
         },
       ),
