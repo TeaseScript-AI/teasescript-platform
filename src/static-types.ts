@@ -946,6 +946,26 @@ export function decidePath(
   return runCompileTask(decidePathTask(type, path, 0, value, at));
 }
 
+/**
+ * Whether `path` certainly leads to no part of a type, because a step names a property or element it does not have:
+ * then {@link decidePath} decides nothing there. It answers without walking a union, so `false` only means "maybe".
+ */
+export function lacksPath(type: StaticType, path: readonly string[]): boolean {
+  let part = type;
+  for (const name of path) {
+    const value = resolved(part);
+    if (value.kind === "union") return false;
+    if (name === "[]" && isCollection(value)) part = value.element;
+    else if (value.kind !== "object" || value.properties === null) return true;
+    else {
+      const kept = value.properties.get(name);
+      if (kept === undefined) return true;
+      part = kept;
+    }
+  }
+  return false;
+}
+
 function* decidePathTask(
   typeToDecide: StaticType,
   path: readonly string[],
@@ -1080,6 +1100,91 @@ function* ownPartOriginsTask(
         yield* compileChild(ownPartOriginsTask(value, origin, [...path, name])),
       );
   return type;
+}
+
+/**
+ * Like {@link ownPartOrigins}, but only for the parts at `path` inside a place's own type, such as a property that a store
+ * added or decided: the other parts already have their origins.
+ */
+export function ownPartOriginsAt(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  path: readonly string[],
+): void {
+  runCompileTask(ownPartOriginsAtTask(type, origin, path, 0));
+}
+
+function* ownPartOriginsAtTask(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  path: readonly string[],
+  step: number,
+): CompileTask<StaticType> {
+  if (step === path.length) return yield* compileChild(ownPartOriginsTask(type, origin, path));
+  if (type.kind === "open") {
+    if (type.resolved !== null)
+      type.resolved = yield* compileChild(ownPartOriginsAtTask(type.resolved, origin, path, step));
+    return type;
+  }
+  if (type.kind === "union") {
+    const parts: StaticType[] = [];
+    for (const member of type.members)
+      parts.push(yield* compileChild(ownPartOriginsAtTask(member, origin, path, step)));
+    return parts.every((part, index) => part === type.members[index]) ? type : union(parts);
+  }
+  const name = path[step]!;
+  if (name === "[]" && isCollection(type)) {
+    // EVIDENCE: invariant: a place's own collection type belongs to that place alone; values read from it are copied.
+    (type as { element: StaticType }).element = yield* compileChild(
+      ownPartOriginsAtTask(type.element, origin, path, step + 1),
+    );
+  } else if (type.kind === "object" && type.properties !== null) {
+    const kept = type.properties.get(name);
+    if (kept !== undefined)
+      type.properties.set(
+        name,
+        yield* compileChild(ownPartOriginsAtTask(kept, origin, path, step + 1)),
+      );
+  }
+  return type;
+}
+
+/**
+ * Whether the parts at `path` inside a place's own type include every part of `part` that a store can add to or
+ * decide, so that a store into `part` changed nothing outside the parts at `path`.
+ */
+export function holdsAt(type: StaticType, path: readonly string[], part: StaticType): boolean {
+  let reached = expanded(type);
+  for (const name of path) {
+    const next: StaticType[] = [];
+    for (const value of reached) {
+      const kept =
+        name === "[]" && isCollection(value)
+          ? value.element
+          : value.kind === "object" && value.properties !== null
+            ? value.properties.get(name)
+            : undefined;
+      if (kept !== undefined) for (const found of expanded(kept)) next.push(found);
+    }
+    reached = next;
+  }
+  const held = new Set(reached);
+  return expanded(part).every(
+    (value) =>
+      held.has(value) || (value.kind !== "open" && value.kind !== "object" && !isCollection(value)),
+  );
+}
+
+/** The decided types a type stands for: itself, what decided it, or the members of a union. */
+function expanded(type: StaticType): StaticType[] {
+  const found: StaticType[] = [];
+  const pending = [type];
+  while (pending.length > 0) {
+    const value = resolved(pending.pop()!);
+    if (value.kind === "union") for (const member of value.members) pending.push(member);
+    else found.push(value);
+  }
+  return found;
 }
 
 /** The type with every undecided part unknown, for a place that no later value may decide, such as a parameter. */

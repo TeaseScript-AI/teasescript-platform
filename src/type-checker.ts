@@ -180,6 +180,8 @@ import {
   widenedType,
   widenPath,
   decidePath,
+  lacksPath,
+  holdsAt,
   observe,
   placedSlots,
   nextDecision,
@@ -188,6 +190,7 @@ import {
   numberPaths,
   integerParts,
   ownPartOrigins,
+  ownPartOriginsAt,
   type Declaration,
   type Origin,
   type Origins,
@@ -503,6 +506,23 @@ function declaredName(declaration: Declaration): string {
 interface PlacePath {
   readonly root: Declaration;
   readonly path: readonly string[];
+}
+
+/**
+ * Whether a path, written as a key of {@link Widened}, is one of `keys` or lies inside one of them: whether it or one of
+ * the paths that lead to it is in `keys`, where `""` is the whole variable.
+ */
+function withinKeys(path: string, keys: ReadonlySet<string>): boolean {
+  if (keys.has("") || keys.has(path)) return true;
+  for (let end = path.indexOf("."); end !== -1; end = path.indexOf(".", end + 1))
+    if (keys.has(path.slice(0, end))) return true;
+  return false;
+}
+
+/** A part of a variable that a store added to or decided, with its path there (see `TypeChecker.#rewiden`). */
+interface ChangedPart {
+  readonly path: readonly string[];
+  readonly part: StaticType;
 }
 
 function extendPath(owner: PlacePath | undefined, step: string): PlacePath | undefined {
@@ -935,8 +955,8 @@ class TypeChecker {
 
   readonly #copies: Copies;
 
-  /** For each variable, the paths of {@link #decided} that its type does not have yet. */
-  readonly #pendingDecisions = new Map<Declaration, Set<string>>();
+  /** For each variable, the paths of {@link #decided} that its type does not have yet, with their steps. */
+  readonly #pendingDecisions = new Map<Declaration, Map<string, readonly string[]>>();
 
   /** Widens every place that follows a widened one (see {@link #followers}). */
   public widenFollowers(): void {
@@ -1959,14 +1979,15 @@ class TypeChecker {
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           this.#reportMixedChoice(statement.value, () => ONE_TYPE_FIX);
           if (statement.operator === "=") {
-            value.properties.set(
-              name,
-              decidedSlot(this.#newPlaceType(statement.value, assigned), statement.value.span),
+            const added = decidedSlot(
+              this.#newPlaceType(statement.value, assigned),
+              statement.value.span,
             );
+            value.properties.set(name, added);
             const owner = this.#pathOf(target.object, scope);
             if (owner !== undefined) {
               this.#follow(extendPath(owner, name), assigned, statement.value.span);
-              this.#rewiden(owner.root);
+              this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
             }
           }
           return;
@@ -2091,7 +2112,8 @@ class TypeChecker {
       // A joined list decides an element type that no value decided yet, as a store does.
       if (isCollection(resolved(result))) {
         settle(place.type, result, statement.value.span);
-        if (place.widening !== undefined) this.#rewiden(place.widening.root);
+        if (place.widening !== undefined)
+          this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       }
       if (variable !== undefined) this.#assigned(variable, result);
     }
@@ -2271,7 +2293,7 @@ class TypeChecker {
       // New properties join the place only when the object fits it, so one mistake does not cause more.
       if (decides && fits) for (const [name, type] of added) properties.set(name, type);
       if (decides && fits && added.length > 0 && place.widening !== undefined)
-        this.#rewiden(place.widening.root);
+        this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       return;
     }
     const unfit =
@@ -2316,7 +2338,7 @@ class TypeChecker {
         place.widening !== undefined &&
         (mayGainParts || this.#unappliedWidening.has(place.widening.root))
       )
-        this.#rewiden(place.widening.root);
+        this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       this.#follow(place.widening, value, expression.span);
       return;
     }
@@ -2419,9 +2441,11 @@ class TypeChecker {
     ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
     const decisions = this.#decided.get(declaration);
     if (decisions !== undefined) {
-      this.#pendingDecisions.set(declaration, new Set(decisions.keys()));
+      const pending = new Map<string, readonly string[]>();
+      for (const path of decisions.keys()) pending.set(path, path === "" ? [] : path.split("."));
+      this.#pendingDecisions.set(declaration, pending);
       // A decided part may bring elements or properties that earlier checks widened.
-      if (this.#decide(declaration, own)) {
+      if (this.#decide(declaration, own).length > 0) {
         for (const path of paths?.keys() ?? []) if (path !== "") widenPath(own, path.split("."));
         ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
       }
@@ -2432,31 +2456,46 @@ class TypeChecker {
   /**
    * Widens again what earlier checks widened inside a variable, and gives new parts their origins, for elements and
    * properties that a store added after the variable was created.
+   *
+   * A store names the part it changed, so only that part and what decisions change are visited: every other part got
+   * its origins and widenings when it was added, and visiting the whole variable on each store would make an object that
+   * grows one property at a time cost the square of its size. The whole variable is visited when no part is named, when
+   * a widening that this check recorded may concern any part, or when the store's path does not lead to the part it
+   * changed.
    */
-  #rewiden(root: Declaration): void {
+  #rewiden(root: Declaration, changed?: ChangedPart): void {
     const variable = this.#declared.get(root);
     if (variable === undefined) return;
+    const whole =
+      changed === undefined ||
+      this.#unappliedWidening.has(root) ||
+      !holdsAt(variable.type, changed.path, changed.part);
     this.#unappliedWidening.delete(root);
-    this.#decide(root, variable.type);
+    const decided = this.#decide(root, variable.type);
+    const parts = whole ? [[]] : [changed.path, ...decided];
+    const keys = new Set(parts.map((part) => part.join(".")));
     for (const path of this.#widened.get(root)?.keys() ?? [])
-      if (path !== "") widenPath(variable.type, path.split("."));
-    ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
+      if (path !== "" && withinKeys(path, keys)) widenPath(variable.type, path.split("."));
+    for (const part of parts)
+      ownPartOriginsAt(variable.type, (path) => this.#partOrigin(root, path), part);
   }
 
   /**
    * Decides in a variable's type what earlier checks found decided after a read (see {@link Decided}), for the parts
-   * it has: a property that a store adds later is decided when it is added.
+   * it has: a property that a store adds later is decided when it is added. Returns the paths it decided.
    */
-  #decide(root: Declaration, type: StaticType): boolean {
+  #decide(root: Declaration, type: StaticType): (readonly string[])[] {
     const pending = this.#pendingDecisions.get(root);
-    if (pending === undefined || pending.size === 0) return false;
+    if (pending === undefined || pending.size === 0) return [];
     const decisions = this.#decided.get(root)!;
-    let decided = false;
-    for (const path of pending) {
+    const decided: (readonly string[])[] = [];
+    for (const [path, steps] of pending) {
+      // Most pending paths name a property not added yet; finding that needs no walk through the type.
+      if (lacksPath(type, steps)) continue;
       const { type: value, at } = decisions.get(path)!;
-      if (decidePath(type, path === "" ? [] : path.split("."), value, at)) {
+      if (decidePath(type, steps, value, at)) {
         pending.delete(path);
-        decided = true;
+        decided.push(steps);
       }
     }
     return decided;
