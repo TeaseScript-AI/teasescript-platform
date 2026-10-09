@@ -451,6 +451,63 @@ test("a random decision that calls its session is refused there, and the call it
   }
 });
 
+test("a session a host callback starts with the same recorder keeps a recording of its own calls", async () => {
+  for (const rethrow of [false, true]) {
+    const recorder = new DebugRecorder();
+    let session = createPlayerRuntimeSession(
+      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      { recorder },
+    );
+    session = observePlayerRuntimeTime(session, 500).session;
+    let started: PlayerRuntimeSession | null = null;
+    setPlayerRuntimeRandomControl(session, {
+      decide: () => {
+        if (started === null) {
+          // Beginning its recording moves the recorder to the new session during the decided call.
+          started = createPlayerRuntimeSession('say "Other", instant\nexit', { recorder });
+          if (rethrow) throw new Error("host decision failed");
+        }
+        return { kind: "natural" };
+      },
+    });
+    if (rethrow)
+      assert.throws(() => observePlayerRuntimeTime(session, 1_000), {
+        name: "RandomDecisionError",
+      });
+    else
+      assert.equal(
+        playerRuntimeSnapshot(observePlayerRuntimeTime(session, 1_000).session).status,
+        "halted",
+      );
+    // The decided call, which may throw, stays out of the new session's recording.
+    const recording = recorder.recording()!;
+    assert.deepEqual(
+      [recording.operations.map((operation) => operation.kind), recording.complete],
+      [["run"], true],
+    );
+    assert.equal((await replay(recorder)).kind, "reproduced");
+  }
+
+  // So does a media store that starts one and then throws.
+  const recorder = new DebugRecorder();
+  const session = createPlayerRuntimeSession(
+    'let picture = askImage("Picture", allowCamera: false)\nexit',
+    { recorder },
+  );
+  const starting = {
+    holds: (): boolean => {
+      createPlayerRuntimeSession('say "Other", instant\nexit', { recorder });
+      throw new Error("store unavailable");
+    },
+  };
+  assert.throws(() => answerPlayerRuntimeImage(session, reference, starting), /store unavailable/);
+  const recording = recorder.recording()!;
+  assert.deepEqual(
+    [recording.operations.map((operation) => operation.kind), recording.complete],
+    [["run"], true],
+  );
+});
+
 test("a media store or random decision that throws after the record froze leaves the frozen record as it was", () => {
   // With the scope IDs used up, a timer block throws in its middle, which freezes the record.
   const source = [
