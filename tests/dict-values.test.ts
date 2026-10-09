@@ -686,3 +686,12 @@ test("is dict and is T dict test the values, and typed parameters take dicts", (
     [["TSV041", '"x"']],
   );
 });
+
+test("an assignment through a dict's values list keeps the list it read when a call then empties the dict", () => {
+  // `values` is a new list each time it is read: the prepared target `d.values[0]` keeps the one it read, and the
+  // assignment goes to that copy, also when the call clears, removes from, or replaces the dict.
+  for (const emptying of ["d.clear()", 'd.remove("x")', "d.clear()\n    d = dict{}"]) {
+    const source = `let d = dict{ "x": [0] }\nfunction f {\n    ${emptying}\n    return 7\n}\nd.values[0][0] = f()\nsay d\nexit`;
+    assert.deepEqual(says(source), ["dict{}"], emptying);
+  }
+});

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -409,4 +410,28 @@ test("rejected snapshots add nothing to the kept continuation requirements", () 
     assert.equal(validateRuntimeSnapshot(corrupted, plan).valid, false);
   }
   assert.deepEqual(kept(), before);
+});
+
+test("a wide list in a prepared reference is analysed without exhausting the native stack", () => {
+  // Wider than a native call can spread on this stack: as the root of a reference, and in one that extends another.
+  const moduleUrl = new URL("../src/index.js", import.meta.url).href;
+  const script = `
+    import assert from 'node:assert/strict';
+    import * as m from ${JSON.stringify(moduleUrl)};
+    const width = 40000;
+    for (const source of [
+      '[' + Array(width).fill('0').join(',') + '][0] = 7\\nexit',
+      'function k {\\n    return 0\\n}\\n[[0],' + Array(width - 1).fill('[]').join(',') + '][k()][0] = 7\\nexit',
+    ]) {
+      const compiled = m.compileSource(source);
+      assert.deepEqual(compiled.diagnostics, []);
+      assert.equal(m.run(compiled.plan, m.createFreshRuntimeSnapshot(compiled.plan)).snapshot.status, 'halted');
+    }
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--stack-size=256", "--input-type=module", "-e", script],
+    { encoding: "utf8", timeout: 60_000 },
+  );
+  assert.equal(child.status, 0, child.stderr || String(child.error));
 });

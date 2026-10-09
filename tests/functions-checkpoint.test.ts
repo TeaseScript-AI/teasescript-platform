@@ -6,6 +6,7 @@ import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_VERSION,
+  CheckpointError,
   createCheckpoint,
   deserializeCheckpoint,
   restoreCheckpoint,
@@ -702,9 +703,6 @@ test("rejects malformed prepared-reference state in active and suspended tempora
       setSerializedObjectProperty(descriptor, "rootName", null);
       setSerializedObjectProperty(descriptor, "detached", false);
     },
-    (descriptor) => {
-      setSerializedObjectProperty(descriptor, "capturedRoot", null);
-    },
   ];
 
   for (const mutate of mutations) {
@@ -714,6 +712,52 @@ test("rejects malformed prepared-reference state in active and suspended tempora
     );
     mutate(descriptor);
     assertCheckpointRejected(checkpoint, "TSK002");
+  }
+});
+
+test("a prepared reference keeps a copy of its root only where a later call in its preparation can read it", () => {
+  // `rows[pick()]` is prepared before `pick` runs. Its extension evaluates `removeFirst` after reading the root, so
+  // both keep a copy; `target.nested` in `target.nested[0] = replacement()` keeps none.
+  for (const [source, keepsRoot] of [
+    [
+      "let rows = [[[0]], [[1]]]\nfunction pick { return 0 }\nrows[pick()][rows[1][0].removeFirst() - 1][0] = 7",
+      true,
+    ],
+    [
+      "let target = { nested: [0] }\nfunction replacement { return 7 }\ntarget.nested[0] = replacement()",
+      false,
+    ],
+  ] as const) {
+    const compiled = plan(`${source}\nexit`);
+    const suspended = executeUntil(compiled, (candidate) => functionFrames(candidate).length === 1);
+    const base = mutableCheckpoint(createCheckpoint(compiled, suspended));
+    const descriptor = preparedReferenceValue(base.snapshot.callFrames.at(-1)!.callerTemporaries);
+    assert.equal(serializedObjectProperty(descriptor, "detached"), false, source);
+    assert.equal(
+      serializedObjectProperty(descriptor, "capturedRoot") !== undefined,
+      keepsRoot,
+      source,
+    );
+    if (keepsRoot) removeSerializedObjectProperty(descriptor, "capturedRoot");
+    else {
+      // The variable's own value: a root the path leads through, so only the plan's rule refuses it.
+      const root = base.snapshot.frames[0].bindings.find(
+        (binding: { name: string }) => binding.name === "target",
+      ).value;
+      descriptor.properties.splice(4, 0, { name: "capturedRoot", value: root });
+    }
+    assert.throws(
+      () => restoreCheckpoint(base),
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        error.message.includes(
+          keepsRoot
+            ? "the captured root is missing."
+            : "an attached descriptor keeps a captured root where the plan keeps none.",
+        ),
+      source,
+    );
   }
 });
 
