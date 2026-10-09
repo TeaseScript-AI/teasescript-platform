@@ -3,7 +3,7 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, watch, type Ref } from "vue";
 import { createServer } from "vite";
 
-import type { DebugRecorder } from "../player/debug-recorder.js";
+import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
@@ -31,6 +31,10 @@ interface StopHost {
     readonly expected: SerializableRuntimeValue | undefined;
   }): Promise<{ readonly kind: string; readonly live?: boolean }>;
   setDebugTracing(on: boolean): void;
+  debugRecording(): DebugRecording | null;
+  debugExportCandidate(
+    shown: Record<string, never>,
+  ): Promise<{ readonly recording: DebugRecording | null }>;
   loadScriptStorage(): Promise<void>;
   prepare(create: (options: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
@@ -443,4 +447,40 @@ test("after a Player error, a Debug edit does not wait for the dropped save, whi
     ["count", 42],
   ]);
   assert.equal(stored.get("count"), 42);
+});
+
+test("after a Player error, a debug export keeps the recording up to the error through Back, until the next Start", async (context) => {
+  stubBrowser(context);
+  const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
+  const rewind = mount(context, () => useDebugRewind(host));
+  const create = ({ recorder }: { readonly recorder: DebugRecorder }) =>
+    runtime.createPlayerRuntimeSession('showButton "First"\nshowButton "Second"\nexit', {
+      recorder,
+    });
+  host.prepare(create);
+  await host.activate();
+  await nextTick();
+  const first = host.session.value && runtime.activatePlayerRuntimeButton(host.session.value);
+  assert.ok(first);
+  host.update(first.session);
+  await settle();
+  host.reportHostError(new TypeError("A component failed."));
+  // The start, the answer, and the run that continued it.
+  const atError = host.debugRecording();
+  assert.deepEqual(
+    atError?.operations.map((operation) => operation.kind),
+    ["run", "completeAction", "run"],
+  );
+  // Back shows an earlier state, from which the recorder begins anew; the export still shows the error's recording.
+  assert.equal(await rewind.back(0), true);
+  assert.deepEqual(host.debugRecording(), atError);
+  assert.deepEqual((await host.debugExportCandidate({})).recording, atError);
+  // A new Start records its own session.
+  host.prepare(create);
+  await host.activate();
+  assert.equal(host.hostError.value, null);
+  assert.deepEqual(
+    host.debugRecording()?.operations.map((operation) => operation.kind),
+    ["run"],
+  );
 });
