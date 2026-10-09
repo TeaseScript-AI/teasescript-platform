@@ -1269,7 +1269,7 @@ test(
 );
 
 test(
-  "forward time reads an exact span, and leaves a calendar one unknown: days and months last as long as the date makes them",
+  "forward time reads an exact span, a day as 24 hours, and leaves a calendar one unknown: calendar days and months last as long as the date makes them",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -1296,8 +1296,14 @@ test(
       );
     };
     assert.deepEqual(holds("36 h"), [false, true]);
-    // Read as no time at all, a calendar span would hold an hour later.
-    assert.deepEqual(holds("2 day"), [undefined, undefined]);
+    // A day is 24 hours.
+    assert.deepEqual(holds("1 day"), [false, true]);
+    // Calendar spans, as the time model writes them and as plans before it did (`1 day` then had `days: 1` and no
+    // milliseconds): read as no time at all, they would hold at once; they are not read.
+    assert.equal(
+      exactMilliseconds({ kind: "calendarDuration", months: 0, days: 2, milliseconds: 0 }),
+      null,
+    );
     assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 0, days: 2 }), null);
     assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 0, months: 1 }), null);
     assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 129_600_000 }), 129_600_000);

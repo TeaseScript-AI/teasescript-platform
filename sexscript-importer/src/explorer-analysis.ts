@@ -16,7 +16,8 @@ function record(value: unknown): Data {
 
 /**
  * The milliseconds of an exact duration, a literal or value of kind `duration` without calendar months or days; null for
- * a calendar one (`1 month`, and `1 day` until the time model makes a day 24 hours), whose length depends on the date.
+ * a calendar one, whose length depends on the date: a `calendarDuration` (`1 calendar day`), or a `duration` with months
+ * or days, as plans wrote `1 day` and `1 month` before the time model made a day 24 hours.
  */
 export function exactMilliseconds(value: unknown): number | null {
   const duration = record(value);
