@@ -87,7 +87,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    elements are integers or strings.
 2. `T?` is shorthand for `T | null`.
 3. Type names: the scalar types `string`, `boolean`, `integer`, `number`, `date`, `time`, `datetime`,
-   `absoluteDateTime` (named `timestamp` before ADR 0026), and `duration`;
+   `absoluteDateTime` (named `timestamp` before ADR 0026), `duration`, and `calendarDuration` (ADR 0026);
    `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the program-control types
    `range`, `speaker`, `timer`, and `media`.
 4. Unions are usable everywhere a type is allowed. The compiler never infers a union; mixing types without a declared

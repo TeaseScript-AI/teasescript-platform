@@ -1,7 +1,7 @@
 import type { Program, SayStatement, Statement, WaitStatement } from "./ast.js";
 import { calculateSmartPacingDurationMs, DEFAULT_CHAT_PACING_SETTINGS } from "./chat-pacing.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { DURATION_UNIT_MILLISECONDS, durationParts, isExactDuration } from "./duration.js";
+import { DURATION_UNIT_MILLISECONDS, isCalendar } from "./duration.js";
 import { parseMessageMarkup } from "./message-markup.js";
 import { staticQuantity, staticVisibleText } from "./static-evaluation.js";
 
@@ -77,8 +77,7 @@ function knownWaitMs(wait: WaitStatement): number | undefined {
   if (typeof known === "number")
     return known < 0 ? undefined : known * DURATION_UNIT_MILLISECONDS[wait.unit ?? "s"];
   if (known === undefined || wait.unit !== null) return undefined;
-  const parts = durationParts(known);
-  return isExactDuration(parts) && parts.milliseconds >= 0 ? parts.milliseconds : undefined;
+  return !isCalendar(known) && known.milliseconds >= 0 ? known.milliseconds : undefined;
 }
 
 /** Milliseconds as seconds, to the millisecond. */

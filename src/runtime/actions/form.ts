@@ -309,11 +309,7 @@ function formTimeout(
     throw fault("askForm onTimeout: needs timeout:, such as 'timeout: 30 s'.", span);
   // A calendar duration has no fixed length.
   const milliseconds =
-    typeof value === "number"
-      ? value * 1_000
-      : isDuration(value) && value.months === undefined && value.days === undefined
-        ? value.milliseconds
-        : Number.NaN;
+    typeof value === "number" ? value * 1_000 : isDuration(value) ? value.milliseconds : Number.NaN;
   if (!(milliseconds > 0) || !Number.isFinite(milliseconds))
     throw fault(
       "askForm timeout: must be a number of seconds or a duration greater than zero, such as 'timeout: 30' or 'timeout: 2 min'.",

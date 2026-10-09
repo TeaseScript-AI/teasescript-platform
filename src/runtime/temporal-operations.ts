@@ -1,10 +1,9 @@
 import {
-  durationParts,
+  calendarDuration,
   formatDuration,
-  isExactDuration,
-  negateDurationParts,
-  storedDuration,
-  type DurationParts,
+  isCalendar,
+  negateDuration,
+  type AnyDuration,
 } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -50,7 +49,7 @@ import type {
 import {
   isDate,
   isDateTime,
-  isDuration,
+  isAnyDuration,
   isTemporal,
   isTime,
   isAbsoluteDateTime,
@@ -65,21 +64,20 @@ const TEMPORAL_FAILURE = "TSR063";
 
 /**
  * The milliseconds of a duration that a timer, `wait`, timeout, or media position measures as elapsed time. A calendar
- * day or month has no fixed length, so such a duration is a runtime error.
+ * duration has no fixed length, so it is a runtime error (ADR 0026).
  */
 export function exactDurationMilliseconds(
-  value: SerializableRuntimeDuration,
+  value: AnyDuration,
   subject: string,
   span: SourceSpan,
 ): number {
-  const parts = durationParts(value);
-  if (!isExactDuration(parts))
+  if (isCalendar(value))
     throw fault(
       "TSR065",
-      `${subject} needs an exact duration such as 24 h, but ${formatDuration(parts)} has calendar days or months, which have no fixed length.`,
+      `${subject} needs a duration such as '30 s', not a calendar duration. A calendar day or month has no fixed length. Use a fixed length such as '1 day' or '24 h'.`,
       span,
     );
-  return parts.milliseconds;
+  return value.milliseconds;
 }
 
 export const TEMPORAL_GETTERS: ReadonlySet<string> = new Set([
@@ -292,15 +290,14 @@ export function temporalMethod(
 }
 
 /**
- * Ordering and arithmetic with a date or time operand (V30 §35), or `undefined` when neither operand is one. Exact
- * durations apply to an absolute date and time as elapsed time, and to a datetime as elapsed time through the player's
- * zone.
+ * Ordering and arithmetic with a date or time operand (V30 §35, ADR 0026), or `undefined` when neither operand is one.
+ * No operator reads a zone: exact durations apply only to an absolute date and time, and whole days and calendar units
+ * to local dates.
  */
 export function temporalBinary(
   operator: string,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
-  context: TemporalContext,
   span: SourceSpan,
 ): SerializableRuntimeValue | undefined {
   if (!isTemporal(left) && !isTemporal(right)) return undefined;
@@ -319,61 +316,67 @@ export function temporalBinary(
   }
   if (operator === "+" || operator === "-") {
     // A duration is added to or subtracted from the value written first, as in `started + 1 h`.
-    if (isDuration(right) && (isDate(left) || isAbsoluteDateTime(left) || isDateTime(left))) {
-      const parts = durationParts(right);
-      return moved(left, operator === "-" ? negateDurationParts(parts) : parts);
-    }
+    if (isAnyDuration(right) && (isDate(left) || isAbsoluteDateTime(left) || isDateTime(left)))
+      return moved(left, operator === "-" ? negateDuration(right) : right);
     if (operator === "-" && isDate(left) && isDate(right))
-      return storedDuration({ months: 0, days: daysBetween(left, right), milliseconds: 0 });
+      return calendarDuration({ months: 0, days: daysBetween(left, right), milliseconds: 0 });
     if (operator === "-" && isAbsoluteDateTime(left) && isAbsoluteDateTime(right))
       return elapsed(left.epochMilliseconds, right.epochMilliseconds);
     if (operator === "-" && isDateTime(left) && isDateTime(right))
-      return elapsed(zoned(context, left, span), zoned(context, right, span));
+      throw fault(
+        "TSR009",
+        "A date and time has no time zone, so one cannot be subtracted from another. Subtract their dates with 'toDate(...)', or convert both with toAbsoluteDateTime() for the elapsed time.",
+        span,
+      );
   }
   throw fault(
     "TSR009",
-    `'${operator}' does not apply to ${describeValue(left)} and ${describeValue(right)}. A date, datetime, or absolute date and time adds or subtracts a duration, and two of one kind subtract to a duration.`,
+    `'${operator}' does not apply to ${describeValue(left)} and ${describeValue(right)}. A date or a date and time moves by calendar units, an absolute date and time by a duration, and two dates or two absolute dates and times subtract to how far apart they are.`,
     span,
   );
 
   /**
-   * A date, datetime, or absolute date and time moved by a duration's months, then days, then exact time (V30 §35).
-   * Calendar parts keep the local clock time; exact time is elapsed, through the player's zone for a datetime.
+   * A date, datetime, or absolute date and time moved by a duration (ADR 0026). Operators read no zone: an absolute
+   * date and time moves by exact time, and a date or a date and time by calendar units, keeping its clock time. A
+   * calendar duration applies its months, then its days.
    */
   function moved(
     value:
       SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeAbsoluteDateTime,
-    parts: DurationParts,
+    duration: AnyDuration,
   ): SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeAbsoluteDateTime {
     if (value.kind === "absoluteDateTime") {
-      if (!isExactDuration(parts))
+      if (isCalendar(duration))
         throw fault(
           "TSR009",
-          `An absolute date and time moves only by exact time such as 24 h, not by ${formatDuration(parts)}: the length of a day or month depends on the zone. Convert it with toDateTime() first.`,
+          "An absolute date and time has no calendar. Convert it first, as in '(moment.toDateTime() + 1 calendar month).toAbsoluteDateTime()'.",
           span,
         );
       return absoluteDateTime(
-        value.epochMilliseconds + roundToMillisecond(parts.milliseconds),
+        value.epochMilliseconds + roundToMillisecond(duration.milliseconds),
         span,
       );
     }
-    if (value.kind === "date" && parts.milliseconds !== 0)
+    if (!isCalendar(duration))
       throw fault(
         "TSR009",
-        `A date moves only by days, weeks, months, or years, not by ${formatDuration(parts)}. Use a datetime for clock time.`,
+        value.kind === "date"
+          ? `A date moves only by calendar units, such as '1 calendar day', not by ${formatDuration(duration)}.`
+          : "A date and time has no time zone, so it cannot move by elapsed time. Convert it first, as in '(value.toAbsoluteDateTime() + 2 h).toDateTime()', or use calendar units to keep the clock time.",
         span,
       );
-    const date = addCalendarParts(value, parts.months, parts.days);
+    if (duration.milliseconds !== 0)
+      throw fault(
+        "TSR009",
+        value.kind === "date"
+          ? `A date moves only by calendar units, not by ${formatDuration(duration)}. A date has no clock time, so leave out the ${formatDuration(duration.milliseconds)}.`
+          : `A date and time moves only by calendar units, not by ${formatDuration(duration)}. Convert it with toAbsoluteDateTime() for elapsed time.`,
+        span,
+      );
+    const date = addCalendarParts(value, duration.months, duration.days);
     if (date === undefined)
       throw fault(TEMPORAL_FAILURE, "The result lies outside the years 0000 to 9999.", span);
-    if (value.kind === "date") return { kind: "date", ...date };
-    const calendarMoved: SerializableRuntimeDateTime = { ...value, ...date };
-    if (parts.milliseconds === 0) return calendarMoved;
-    const end = absoluteDateTime(
-      zoned(context, calendarMoved, span) + roundToMillisecond(parts.milliseconds),
-      span,
-    );
-    return { kind: "datetime", ...local(context, end.epochMilliseconds, span) };
+    return value.kind === "date" ? { kind: "date", ...date } : { ...value, ...date };
   }
 }
 

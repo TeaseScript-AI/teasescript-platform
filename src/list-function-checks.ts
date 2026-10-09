@@ -39,7 +39,14 @@ export interface ListFunctionCheck {
 
 /** The kind of the values a list function reads, when the compiler knows it. */
 type ValueKind =
-  "integer" | "number" | "duration" | "date" | "time" | "datetime" | "absoluteDateTime";
+  | "integer"
+  | "number"
+  | "duration"
+  | "calendarDuration"
+  | "date"
+  | "time"
+  | "datetime"
+  | "absoluteDateTime";
 
 const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "absoluteDateTime"];
 
@@ -146,7 +153,9 @@ function listFunctionType(
       const kind = valueKind(
         context,
         valuesType(context, list, named(call, "by"), "by"),
-        minMax ? ["number", "duration", ...TEMPORAL_KINDS] : ["number", "duration"],
+        minMax
+          ? ["number", "duration", "calendarDuration", ...TEMPORAL_KINDS]
+          : ["number", "duration"],
         list,
       );
       if (kind === "integer" && name !== "sum" && !minMax) return NUMBER_TYPE;
@@ -280,9 +289,9 @@ function valueKind(
   if (parts.length === 0 || !parts.every(isKnown)) return undefined;
   const kinds = new Set<ValueKind>();
   for (const part of parts) {
-    const kind = (["integer", "number", "duration", ...TEMPORAL_KINDS] as const).find((one) =>
-      isScalar(part, one),
-    );
+    const kind = (
+      ["integer", "number", "duration", "calendarDuration", ...TEMPORAL_KINDS] as const
+    ).find((one) => isScalar(part, one));
     if (kind === undefined || !allowed.includes(kind === "integer" ? "number" : kind)) {
       problem(
         context,
@@ -305,11 +314,13 @@ function describeKinds(kinds: readonly ValueKind[]): string {
       ? "numbers"
       : kind === "duration"
         ? "durations"
-        : kind === "datetime"
-          ? "datetimes"
-          : kind === "absoluteDateTime"
-            ? "absolute dates and times"
-            : `${kind}s`,
+        : kind === "calendarDuration"
+          ? "calendar durations"
+          : kind === "datetime"
+            ? "datetimes"
+            : kind === "absoluteDateTime"
+              ? "absolute dates and times"
+              : `${kind}s`,
   );
   return words.length === 1
     ? words[0]!

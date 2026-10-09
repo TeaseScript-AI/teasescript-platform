@@ -105,7 +105,7 @@ test("values the compiler cannot know are checked at runtime", () => {
   const cases: [string, string][] = [
     [
       `${DYNAMIC}say max(dynamic(1), dynamic(2 s))\nexit`,
-      "max(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times.",
+      "max(...) needs values of one kind: all numbers, all durations, all calendar durations, or all dates, times, datetimes, or absolute dates and times.",
     ],
     [
       `${DYNAMIC}say min(dynamic("1"), 2)\nexit`,

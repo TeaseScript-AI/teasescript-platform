@@ -1091,6 +1091,7 @@ time
 datetime
 absoluteDateTime
 duration
+calendarDuration
 ```
 
 The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
@@ -1285,10 +1286,10 @@ ceil(-2.5)   // -2
 ```
 
 `min(...)` and `max(...)` return the smallest or largest of two or more values, or of the values of one list
-([§16](#statistics)), which are all numbers, all durations of one family, or all date and time values of one kind
-([§35](#35-date-time-and-durations)). The result is
-an `integer` when every argument is an `integer`, a `number` otherwise, and for durations and date and time values the
-chosen value itself. Mixing numbers, durations, duration families, or temporal kinds, other values, `null`, and named
+([§16](#statistics)), which are all numbers, all durations, all calendar durations of one family, or all date and time
+values of one kind ([§35](#35-date-time-and-durations)). The result is an `integer` when every argument is an `integer`,
+a `number` otherwise, and for durations and date and time values the chosen value itself. Mixing numbers, durations,
+calendar durations or their families, or temporal kinds, other values, `null`, and named
 arguments are compile errors when the types show them, and runtime errors otherwise:
 
 ```text
@@ -1707,7 +1708,8 @@ Runtime behavior:
   warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
-  together), all text, all durations of one family, or all dates, all times, all datetimes, or all absolute dates and times
+  together), all text, all durations, all calendar durations of one family, or all dates, all times, all datetimes, or all
+  absolute dates and times
   ([§35](#35-date-time-and-durations)); text is ordered by Unicode code point, independently of locale, so
   `"B"` sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime
   error otherwise.
@@ -1785,8 +1787,7 @@ max(scores)             // 18
   numbers. Durations give durations, and `min` and `max` give the chosen value.
 - The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
   on every device, also for values that cancel or are very large or very small.
-- Durations are of one family: exact time, days and weeks, or months and years. `average`, `median`, `percentile`,
-  and `stddev` need exact durations, because days, weeks, months, and years have no fixed length.
+- The statistics take durations, not calendar durations, because a calendar day or month has no fixed length.
 - An empty list, and a list of one value for `stddev`, is runtime error `TSR018`. A percentage outside 0 through 100
   is a compile error when the compiler can see it, and runtime error `TSR039` otherwise. Values of other or mixed kinds,
   and a missing `by:` property, are compile errors when the types show them, and runtime error `TSR060` otherwise.
@@ -2689,7 +2690,7 @@ Rules:
   measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
   timeout; a timeout of `5` returns `5 s`.
 - If the caller does not need the elapsed time, the return value may be ignored.
-- A zero, negative, or non-numeric timeout, or one with a calendar unit, is an error. The compiler rejects a timeout
+- A zero, negative, or non-numeric timeout, or a calendar duration, is an error. The compiler rejects a timeout
   it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime error.
 - The parenthesized forms `showButton("Continue", 5)` and `showButton(text: "Continue", timeout: 5)` are deferred
   until parenthesized interaction calls are needed.
@@ -3905,9 +3906,9 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 
 ## 35. Date, time, and durations
 **Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `absoluteDateTime` values, their conversions,
-fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, calendar durations,
-and date and time input ([§20](#date-and-time-input)). [ADR 0026](../decisions/0026-unified-time-semantics.md) changes
-parts of this section; each part moves here when it is implemented.
+fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, exact and calendar
+durations ([ADR 0026](../decisions/0026-unified-time-semantics.md)), and date and time input
+([§20](#date-and-time-input)).
 
 TeaseScript has two kinds of time:
 
@@ -3917,7 +3918,8 @@ TeaseScript has two kinds of time:
 | `time` | A local clock time without a zone, such as `14:30` |
 | `datetime` | A local date and clock time without a zone. It follows the player: tomorrow 18:00 stays 18:00 wherever the player is, also after saving, loading, and travel |
 | `absoluteDateTime` | A fixed moment in UTC, like Unix time |
-| `duration` | Months, calendar days, and exact milliseconds |
+| `duration` | Exact elapsed time in milliseconds; a day is 24 hours |
+| `calendarDuration` | Whole calendar months, whole calendar days, and an exact offset |
 
 Use local values for "what clock time" and "which day", and `absoluteDateTime` for "how long ago" and "how much time
 passed".
@@ -3927,7 +3929,7 @@ passed".
 ```text
 let today = getDate()
 let now = getTime()
-let dinner = toDateTime(getDate() + 1 day, toTime("18:00"))
+let dinner = toDateTime(getDate() + 1 calendar day, toTime("18:00"))
 let started = getAbsoluteDateTime()
 ```
 
@@ -3998,42 +4000,51 @@ the year's first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is wee
 
 | Kind | Units | Meaning |
 | --- | --- | --- |
-| Exact | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours` | Elapsed time; `24 h` is always 24 elapsed hours |
-| Calendar | `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same local clock time that many days, weeks, months, or years later, never a fixed number of hours |
+| Exact (`duration`) | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours`, `d`/`day`/`days`, `w`/`week`/`weeks` | Elapsed time: `1 day` is always 24 hours and `1 week` 168 hours |
+| Calendar (`calendarDuration`) | `calendar` before `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same clock time that many dates, weeks, months, or years later, never a fixed number of hours |
 
-Both long forms are accepted for any number: `1 seconds` and `2 day`. `m` is not a duration unit, because it would be
-ambiguous between minutes and months. A week is 7 days and a year is 12 months. Adding months or years to a day that the
-target month lacks gives that month's last day: January 31 plus one month is February 28, or 29 in a leap year, and
-February 29 plus one year is February 28. Months and days are whole after normalizing: `0.5 years` is 6 months, while
-`1.5 days`, `1.5 weeks`, and `1 month * 1.5` are errors, at compile time when the values are known. Exact time keeps
-fractions.
+Both long forms are accepted for any number: `1 seconds` and `2 day`. `month` and `year` (and `mo` and `y`) without
+`calendar` are compile errors that suggest it, and `m` is not a duration unit, because it would be ambiguous between
+minutes and months. `calendar` is a unit word only where a unit can stand; elsewhere it is an ordinary name. A calendar
+week is 7 calendar days and a calendar year 12 calendar months. Adding months or years to a day that the target month
+lacks gives that month's last day: January 31 plus one calendar month is February 28, or 29 in a leap year, and February
+29 plus one calendar year is February 28. Calendar months and days are whole after normalizing: `0.5 calendar years` is
+6 months, while `1.5 calendar days`, `1.5 calendar weeks`, and `1 calendar month * 1.5` are errors, at compile time when
+the values are known. Exact time keeps fractions: `1 day / 2` is `12 h`.
 
-A duration keeps months, days, and exact time apart, so `1 week == 7 days` but `1 day != 24 h`. Durations order and
-divide within one family: exact with exact, days and weeks with days and weeks, months and years with months and years.
-`1 week >= 7 days` is true and `18 months / 1 year` is `1.5`; `1 day >= 24 h` and `1 month >= 30 days` are errors. Zero
-belongs to every family, and dividing by any zero duration is an error. `duration.days` is the whole number of days of a
-duration made only of days and weeks, and `duration.months` the whole number of months of one made only of months and
-years: `(getDate() - locked).days`.
+A calendar duration stays one in every sum with a duration, also when it cancels to zero, so `1 calendar month -
+1 calendar month` is a zero calendar duration, and `1 calendar month + 1 day` equals `1 day + 1 calendar month`. Exact
+durations compare and divide by length: `1 week == 7 days`, `1 day == 24 h`, and `(2 days + 6 h) / 1 h` is `54`.
+Calendar durations compare as their months, days, and exact offset, and order and divide within one family: months,
+days, or exact offset. `1 calendar week == 7 calendar days` and `18 calendar months / 1 calendar year` is `1.5`;
+`1 calendar month >= 30 calendar days` is an error. A calendar duration never equals a duration, also not at zero, and
+ordering or dividing one by the other is an error. Zero belongs to every family, and dividing by any zero is an error.
+`min`, `max`, and `sort()` follow the same rules.
+
+A calendar duration has the read-only parts `.months`, `.days`, and `.exactOffset` (a duration); `.days` counts calendar
+days and is not a length. A duration has no parts: divide it by a unit, as in `elapsed / 1 day`.
 
 `wait`, timers, the `showButton` timeout, media positions and repeat budgets, and assignments to timer and media
-`remaining`, `position`, and `repeatDuration` accept exact durations only; a known calendar duration there is a compile
-error, and any other one a runtime error.
+`remaining`, `position`, and `repeatDuration` take a duration; a calendar duration there is a compile error when its type
+is known, and otherwise a runtime error.
 
 ### Arithmetic and comparison
 
+No operator reads a time zone.
+
 | Operation | Result |
 | --- | --- |
-| `date ± calendar duration` | Calendar arithmetic; `date ± exact duration` is an error |
-| `datetime ± calendar duration` | The same local clock time that many days, weeks, months, or years later |
-| `datetime ± exact duration` | Elapsed time through the player's current zone |
-| `absoluteDateTime ± exact duration` | Elapsed time; a calendar duration is an error |
-| `date - date` | Whole calendar days, such as `5 days` |
-| `datetime - datetime` | The elapsed exact duration through the player's current zone |
-| `absoluteDateTime - absoluteDateTime` | The elapsed exact duration |
+| `date ± calendar duration` with a zero exact offset | Months, then days |
+| `datetime ± calendar duration` with a zero exact offset | The same clock time on the date that many months, then days, later |
+| `absoluteDateTime ± duration` | Elapsed time |
+| `date - date` | A calendar duration of whole calendar days, such as `5 calendar days` |
+| `absoluteDateTime - absoluteDateTime` | The elapsed duration |
 
-A composed duration applies its months, then its days, then its exact time; source grouping is preserved. Across the
-spring daylight-saving night, `dinner + 24 h` is 19:00 the next day while `dinner + 1 day` is 18:00. Exact time added to
-a temporal value is rounded to whole milliseconds, with ties away from zero; `wait` and timers keep fractional
+Every other combination is an error that names a route that works: `date ± duration` uses calendar units, as in
+`getDate() + 1 calendar day`; `datetime ± duration` and `datetime - datetime` convert to `absoluteDateTime` for elapsed
+time, as in `(dinner.toAbsoluteDateTime() + 2 h).toDateTime()`, or use calendar units or `toDate(...)`;
+`absoluteDateTime ± calendar duration` converts to a `datetime` first. Exact time added to an
+`absoluteDateTime` is rounded to whole milliseconds, with ties away from zero; `wait` and timers keep fractional
 milliseconds. Arithmetic on `time` is not available.
 
 A `date` orders by calendar, a `time` by clock (without wrapping at midnight), a `datetime` by calendar and clock, and an
@@ -4042,8 +4053,8 @@ arithmetic across temporal kinds is an error, and `==` between different kinds i
 compile errors; others are runtime errors.
 
 Local comparisons can reverse after the autumn daylight-saving change or after travelling west, and a day counter counts
-calendar-date boundaries. `datetime - datetime` measures through the current zone, so `(dinner + 24 h) - dinner` is
-`23 h` when `dinner + 24 h` falls in the repeated autumn hour. Measure elapsed time with `absoluteDateTime`.
+calendar-date boundaries. Measure elapsed time with `absoluteDateTime`: across the spring daylight-saving night,
+`(dinner.toAbsoluteDateTime() + 24 h).toDateTime()` is 19:00 the next day while `dinner + 1 calendar day` is 18:00.
 
 ### Display and technical conversion
 
@@ -4051,8 +4062,10 @@ calendar-date boundaries. `datetime - datetime` measures through the current zon
 local form: date field order, separators, and 12- or 24-hour clock follow the player's locale, such as `4-10-2026, 18:30`
 in Dutch and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only when
 they are not zero, milliseconds never (`toISO()` keeps them), and no month or weekday names appear. `formatDate()`,
-`formatTime()`, and `formatDateTime()` return the same text for part or all of a value. Durations display as `1 h 2 min
-3.5 s`.
+`formatTime()`, and `formatDateTime()` return the same text for part or all of a value. A duration displays in days,
+hours, minutes, and seconds, such as `2 d 6 h` or `1 min 3.5 s`, and in milliseconds below a second. A calendar
+duration names each calendar part, with 12 months as a year and weeks as days, before any exact offset, such as
+`1 calendar month 16 calendar days` or `1 calendar day -2 h`; a zero one is `0 calendar days`.
 
 Inside a list, set, or object, temporal values use a fixed notation: `<date 2026-10-04>`, `<time 14:30>`,
 `<datetime 2026-10-04 14:30>`, and `<absoluteDateTime 2026-10-04T12:30:00Z>`.
@@ -4904,6 +4917,7 @@ time
 datetime
 absoluteDateTime
 duration
+calendarDuration
 list
 dict
 object

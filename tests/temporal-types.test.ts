@@ -276,7 +276,7 @@ test("a comparison of weekday fields with values they never have gives a warning
   );
 });
 
-test("date and time values order within one kind, and absolute and local dates and times move by durations", () => {
+test("date and time values order within one kind; local values move by calendar units, absolute values by durations", () => {
   assert.deepEqual(
     codes(
       [
@@ -284,9 +284,10 @@ test("date and time values order within one kind, and absolute and local dates a
         "    let ordered: boolean = day <= day and clock > clock and dinner < dinner and started >= later",
         "    let same: boolean = day == dinner",
         "    let deadline: absoluteDateTime = started + 1 h - 30 min",
-        "    let earlier: datetime = dinner - 90 min",
+        "    let earlier: datetime = dinner - 1 calendar day",
+        "    let tomorrow: date = day + 1 calendar day + 1 calendar month",
         "    let waited: duration = later - started",
-        "    let between: duration = dinner - earlier",
+        "    let days: calendarDuration = day - day",
         "    let moving = started",
         "    moving += 5 min",
         "}",

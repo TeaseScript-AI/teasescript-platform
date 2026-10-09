@@ -48,6 +48,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "time",
   "datetime",
   "absoluteDateTime",
+  "calendarDuration",
   // The earlier name stays reserved, so its use is a compile error that names the fix (ADR 0026).
   "timestamp",
   "duration",

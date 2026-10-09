@@ -46,7 +46,11 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
   { key: "album", value: { kind: "list", items: [photo, photo, second, null, 2.5] } },
   { key: "set", value: { kind: "set", items: ["a", 1] } },
   { key: "range", value: { kind: "range", start: 1, end: 5, inclusive: false } },
-  { key: "duration", value: { kind: "duration", milliseconds: 1_500, months: 1, days: 2 } },
+  { key: "duration", value: { kind: "duration", milliseconds: 1_500 } },
+  {
+    key: "calendarDuration",
+    value: { kind: "calendarDuration", months: 1, days: 2, milliseconds: 1_500 },
+  },
   { key: "date", value: { kind: "date", year: 2026, month: 10, day: 6 } },
   { key: "time", value: { kind: "time", hour: 23, minute: 59, second: 59, millisecond: 999 } },
   {

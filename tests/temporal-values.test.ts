@@ -281,18 +281,19 @@ test("sort, min, and max order date and time values of one kind", () => {
   );
 });
 
-test("exact durations move datetimes through the captured zone and absolute dates and times by elapsed time", () => {
+test("exact durations move absolute dates and times, and conversions go through the captured zone", () => {
   assert.deepEqual(
     runSays(
       [
         // 24 elapsed hours after 18:00 on the eve of summer time is 19:00; the difference stays 24 h.
         'let dinner = toDateTime("2026-03-28T18:00")',
-        "say (dinner + 24 h).toISO()",
-        "say (dinner + 24 h) - dinner",
+        "say (dinner.toAbsoluteDateTime() + 24 h).toDateTime().toISO()",
+        "say (dinner.toAbsoluteDateTime() + 24 h) - dinner.toAbsoluteDateTime()",
         // A result in the repeated autumn hour is read back as its earlier occurrence.
         'let late = toDateTime("2026-10-24T03:30")',
-        "say (late + 24 h).toISO()",
-        "say (late + 24 h) - late",
+        "let later = (late.toAbsoluteDateTime() + 24 h).toDateTime()",
+        "say later.toISO()",
+        "say later.toAbsoluteDateTime() - late.toAbsoluteDateTime()",
         'let start = toAbsoluteDateTime("2026-10-04T12:00:00Z")',
         "say (start + 90 min).toISO()",
         "say (start + 90 min) - start",
@@ -307,7 +308,7 @@ test("exact durations move datetimes through the captured zone and absolute date
     ),
     [
       "2026-03-29T19:00",
-      "24 h",
+      "1 d",
       "2026-10-25T02:30",
       "23 h",
       "2026-10-04T13:30:00Z",

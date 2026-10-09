@@ -93,16 +93,17 @@ import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./prot
 import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import {
-  compareDurationParts,
-  divideDurationParts,
+  compareDurations,
+  divideDuration,
   durationFamily,
-  durationLiteralParts,
+  durationLiteralValue,
   durationParts,
-  durationRatio,
+  durationPropertyMessage,
+  durationQuotient,
   formatDuration,
-  isExactDuration,
-  scaleDurationParts,
-  type DurationParts,
+  isCalendar,
+  scaleDuration,
+  type AnyDuration,
 } from "./duration.js";
 import {
   knownOperands,
@@ -126,6 +127,7 @@ import {
   DATETIME_TYPE,
   decidedType,
   describeValue,
+  CALENDAR_DURATION_TYPE,
   DURATION_TYPE,
   elementStoreType,
   elementType,
@@ -1800,14 +1802,6 @@ class TypeChecker {
       )
         this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
-      if (
-        target.kind === "propertyAccessExpression" &&
-        ["remaining", "repeatDuration", "position"].includes(target.property.name) &&
-        members(nonNullType(object)).some((member) =>
-          ["timer", "media"].includes(resolved(member).kind),
-        )
-      )
-        this.#reportCalendarTime(statement.value, `'${target.property.name}'`);
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
         this.#checkIndex(object, target.object, index, target.index);
@@ -1973,6 +1967,16 @@ class TypeChecker {
         return;
       }
       const subject = place.subject;
+      // A date and time moves by elapsed time only through an absolute date and time (ADR 0026).
+      if (isScalar(nonNullType(kept), "datetime") && isScalar(value, "duration")) {
+        const label = expressionLabel(target) ?? "value";
+        this.#report(
+          typeCode.typeMismatch,
+          `${subject}, which has no time zone, so it cannot move by elapsed time. Use calendar units, such as '1 calendar day', or write '${label} = (${label}.toAbsoluteDateTime() ${operator} ${durationText(statement.value)}).toDateTime()'.`,
+          statement.value.span,
+        );
+        return;
+      }
       this.#report(
         typeCode.typeMismatch,
         `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(kept), value, statement)}`,
@@ -2953,14 +2957,16 @@ class TypeChecker {
       case "numberLiteral":
         return expression.numericType === "integer" ? INTEGER_TYPE : NUMBER_TYPE;
       case "durationLiteral": {
-        const parts = durationLiteralParts(expression);
-        if (typeof parts === "string")
+        const value = durationLiteralValue(expression);
+        if (typeof value === "string")
           this.#report(
             typeCode.invalidOperand,
-            `${parts}. A calendar duration counts whole days or months. Write the exact time instead, as in '36 h'.`,
+            expression.calendar && (expression.unit === "d" || expression.unit === "w")
+              ? `${value}. Use whole calendar days, or exact hours such as '${formatNumberText(expression.amount.value * (expression.unit === "d" ? 24 : 168))} h'.`
+              : `${value}. Use whole calendar months.`,
             expression.span,
           );
-        return DURATION_TYPE;
+        return expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
       }
       case "stringLiteral":
         for (const part of expression.parts)
@@ -3057,7 +3063,7 @@ class TypeChecker {
           return yield* compileChild(this.#valueOfConditionTask(expression, scope));
         const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
         return this.#operation(expression.operator, [operand], expression, (value) =>
-          isNumeric(value) || isScalar(value, "duration")
+          isNumeric(value) || isScalar(value, "duration", "calendarDuration")
             ? negatedValues(resolved(value), expression.operator)
             : undefined,
         );
@@ -4137,6 +4143,7 @@ class TypeChecker {
           (isNumeric(a) && isNumeric(b)) ||
           (isScalar(a, "string") && isScalar(b, "string")) ||
           (isScalar(a, "duration") && isScalar(b, "duration")) ||
+          (isScalar(a, "calendarDuration") && isScalar(b, "calendarDuration")) ||
           // Date and time values order only within one kind (V30 §35).
           (isTemporal(a) && typeName(a) === typeName(b))
             ? BOOLEAN_TYPE
@@ -4171,60 +4178,66 @@ class TypeChecker {
   }
 
   /**
-   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different families,
-   * moving an absolute date and time by calendar parts or a date by exact time, and calendar parts that would not stay
-   * whole. Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
+   * Reports duration arithmetic that is known to fail (ADR 0026): comparing or dividing calendar durations of different
+   * families, moving a date by a part of a day or a local value by a calendar duration with exact time, and calendar
+   * parts that would not stay whole. Only the operands a check needs are folded, through `#known`, so any shape of chain
+   * stays linear.
    */
   #checkKnownDurations(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
     left: StaticType,
     right: StaticType,
   ): void {
-    const leftDuration = isScalar(left, "duration");
-    const rightDuration = isScalar(right, "duration");
+    const leftDuration = isScalar(left, "duration", "calendarDuration");
+    const rightDuration = isScalar(right, "duration", "calendarDuration");
     if (!leftDuration && !rightDuration) return;
     const operator = expression.operator;
-    const duration = (operand: Expression): DurationParts | undefined => {
+    const duration = (operand: Expression): AnyDuration | undefined => {
       const value = this.#known(operand);
-      return value !== null && typeof value === "object" ? durationParts(value) : undefined;
+      return value !== null && typeof value === "object" ? value : undefined;
     };
     const number = (operand: Expression): number | undefined => {
       const value = this.#known(operand);
       return typeof value === "number" ? value : undefined;
     };
-    let problem: string | number | DurationParts | undefined;
+    let problem: string | number | AnyDuration | undefined;
     if (operator === "+" || operator === "-") {
-      // Only an absolute date and time or a date moved by a known duration has something to check.
-      const moved = isScalar(left, "absoluteDateTime")
-        ? "absoluteDateTime"
-        : isScalar(left, "date")
-          ? "date"
+      // A local date or date and time moves by a known calendar duration only without exact time.
+      const b =
+        isScalar(left, "date", "datetime") && rightDuration
+          ? duration(expression.right)
           : undefined;
-      const b = moved !== undefined && rightDuration ? duration(expression.right) : undefined;
-      if (b !== undefined && moved === "absoluteDateTime" && !isExactDuration(b))
-        problem = `an absolute date and time moves only by exact time such as 24 h, not by ${formatDuration(b)}. Convert it with toDateTime() first`;
-      else if (b !== undefined && moved === "date" && b.milliseconds !== 0)
-        problem = `a date moves only by days, weeks, months, or years, not by ${formatDuration(b)}`;
+      if (b !== undefined && isCalendar(b) && b.milliseconds !== 0) {
+        this.#report(
+          typeCode.invalidOperand,
+          isScalar(left, "date")
+            ? `A date moves only by calendar units, not by ${formatDuration(b)}. A date has no clock time, so leave out the ${formatDuration(b.milliseconds)}.`
+            : `A date and time moves only by calendar units, not by ${formatDuration(b)}. Convert it with toAbsoluteDateTime() for elapsed time.`,
+          expression.span,
+        );
+        return;
+      }
     } else if (leftDuration && rightDuration) {
+      // A calendar duration beside an exact one is a type error of its own.
+      if (isScalar(left, "calendarDuration") !== isScalar(right, "calendarDuration")) return;
       const a = duration(expression.left);
       const b = a === undefined ? undefined : duration(expression.right);
       if (a !== undefined && b !== undefined)
         problem =
           operator === "/"
-            ? durationRatio(a, b)
+            ? durationQuotient(a, b)
             : ["<", "<=", ">", ">="].includes(operator)
-              ? compareDurationParts(a, b)
+              ? compareDurations(a, b)
               : undefined;
     } else if (operator === "*" || operator === "/") {
       // A duration times or divided by a number, or a number times a duration: calendar parts must stay whole.
-      const [parts, factor] = leftDuration
+      const [value, factor] = leftDuration
         ? [duration(expression.left), number(expression.right)]
         : operator === "*"
           ? [duration(expression.right), number(expression.left)]
           : [undefined, undefined];
-      if (parts !== undefined && factor !== undefined)
-        problem =
-          operator === "*" ? scaleDurationParts(parts, factor) : divideDurationParts(parts, factor);
+      if (value !== undefined && factor !== undefined)
+        problem = operator === "*" ? scaleDuration(value, factor) : divideDuration(value, factor);
     }
     if (typeof problem === "string")
       this.#report(typeCode.invalidOperand, `'${operator}': ${problem}.`, expression.span);
@@ -4938,9 +4951,11 @@ class TypeChecker {
             ? "numbers"
             : isScalar(member, "duration")
               ? "durations"
-              : isTemporal(member)
-                ? typeName(member)
-                : undefined;
+              : isScalar(member, "calendarDuration")
+                ? "calendar durations"
+                : isTemporal(member)
+                  ? typeName(member)
+                  : undefined;
         const families = expression.arguments.map((item) => [
           ...new Set(members(nonNullType(this.#typeOf(item.value))).map(familyOf)),
         ]);
@@ -4949,11 +4964,11 @@ class TypeChecker {
           families[0]?.find((one) => one !== undefined);
         const spans = new Set(several.map((item) => item.value.span.start.offset));
         this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
-        // Known durations must share one family, also those that would not win (V30 §35).
+        // Known calendar durations must share one family, also those that would not win (ADR 0026).
         const knownFamilies = new Set(
           expression.arguments.map((item) => {
             const value = this.#known(item.value);
-            return value !== null && typeof value === "object"
+            return value !== null && typeof value === "object" && isCalendar(value)
               ? durationFamily(durationParts(value))
               : "zero";
           }),
@@ -4962,7 +4977,7 @@ class TypeChecker {
         if (knownFamilies.size > 1 || knownFamilies.has("mixed"))
           this.#report(
             typeCode.invalidOperand,
-            `${name}(...) compares durations of one kind only: exact time, days and weeks, or months and years.`,
+            `${name}(...) compares calendar durations of one kind only: months, days, or exact time.`,
             expression.span,
           );
         for (const item of several)
@@ -4970,12 +4985,14 @@ class TypeChecker {
             this.#typeOf(item.value),
             (member) => familyOf(member) !== undefined && familyOf(member) === family,
             item.value,
-            `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times`,
+            `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, or all dates, times, datetimes, or absolute dates and times`,
           );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
         if (numbers.length < 2) return UNKNOWN_TYPE;
         if (numbers.every((number) => isScalar(number, "duration"))) return DURATION_TYPE;
+        if (numbers.every((number) => isScalar(number, "calendarDuration")))
+          return CALENDAR_DURATION_TYPE;
         // Date and time values of one kind give a value of that kind (V30 §35).
         if (
           numbers.every(
@@ -5066,20 +5083,6 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
   ): StaticType | PlaceRead {
     const name = expression.property.name;
-    // A known duration of another family has no such count (V30 §35).
-    if ((name === "days" || name === "months") && isScalar(object, "duration")) {
-      const value = this.#known(expression.object);
-      if (value !== null && typeof value === "object") {
-        const parts = durationParts(value);
-        const family = durationFamily(parts);
-        if (family !== "zero" && family !== name)
-          this.#report(
-            typeCode.invalidOperand,
-            `Only a duration of whole ${name === "days" ? "days or weeks" : "months or years"} has .${name}, but this is ${formatDuration(parts)}.`,
-            expression.property.span,
-          );
-      }
-    }
     const all = members(object);
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
@@ -5102,6 +5105,23 @@ class TypeChecker {
       this.#report(
         typeCode.invalidOperand,
         `An absolute date and time has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        expression.property.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    // An exact duration has no components: dividing it by a unit gives its number (ADR 0026).
+    if (isScalar(value, "duration")) {
+      this.#report(
+        typeCode.invalidOperand,
+        durationPropertyMessage(name, expressionLabel(expression.object) ?? "value"),
+        expression.property.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    if (isScalar(value, "calendarDuration")) {
+      this.#report(
+        typeCode.invalidOperand,
+        `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -5571,7 +5591,6 @@ class TypeChecker {
       const type = yield* compileChild(this.#expressionTask(option.value, scope));
       if (option.name === "background") this.#checkBackground(option.value, type);
       else {
-        this.#reportCalendarTime(option.value, "A showButton timeout");
         this.#reportUnless(
           type,
           (member) => isNumeric(member) || isScalar(member, "duration"),
@@ -5806,7 +5825,6 @@ class TypeChecker {
   }
 
   #reportTime(expression: Expression, type: StaticType, unit: boolean, range = false): void {
-    if (!unit) this.#reportCalendarTime(expression, "A time");
     const isRange = (member: StaticType): boolean => range && resolved(member).kind === "range";
     if (unit)
       this.#reportUnless(
@@ -5823,19 +5841,6 @@ class TypeChecker {
         range
           ? "A timer duration is a duration such as '30 s', a number of seconds, or a range of whole seconds"
           : "A time is a duration such as '30 s', or a number of seconds",
-      );
-  }
-
-  /** Reports a duration known to have calendar days or months where elapsed time is measured (V30 §35). */
-  #reportCalendarTime(expression: Expression, subject: string): void {
-    const known = staticChoiceValue(expression)?.value;
-    if (known === null || typeof known !== "object") return;
-    const parts = durationParts(known);
-    if (!isExactDuration(parts))
-      this.#report(
-        typeCode.invalidOperand,
-        `${subject} needs an exact duration such as 24 h, but ${formatDuration(parts)} has calendar days or months, which have no fixed length.`,
-        expression.span,
       );
   }
 
@@ -5912,7 +5917,6 @@ class TypeChecker {
             "Repeat is true, false, or a duration",
           ),
         );
-        this.#reportCalendarTime(operand, "A repeat budget");
       } else yield* compileChild(this.#timeTask(operand, false, scope));
     }
     for (const block of mediaHandlerBlocks(media))
@@ -6035,9 +6039,14 @@ class TypeChecker {
       );
       return;
     }
+    // Where a duration is wanted, a calendar duration needs the reason it does not fit (ADR 0026).
+    const reason =
+      isScalar(value, "calendarDuration") && rule.includes("duration")
+        ? " A calendar day or month has no fixed length. Use a fixed length such as '1 day' or '24 h'."
+        : "";
     this.#report(
       typeCode.invalidOperand,
-      `${rule}, but this is ${describeValue(value)}.${fix()}`,
+      `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`,
       expression.span,
     );
   }
@@ -6620,6 +6629,7 @@ const OPERAND_KINDS: readonly StaticType[] = [
   STRING_TYPE,
   BOOLEAN_TYPE,
   DURATION_TYPE,
+  CALENDAR_DURATION_TYPE,
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
@@ -7058,9 +7068,14 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
-      // A duration of whole days or months tells how many (V30 §35).
-      if (value.name === "duration")
-        return name === "days" || name === "months" ? INTEGER_TYPE : undefined;
+      // A calendar duration has its components; an exact duration has none (ADR 0026).
+      if (value.name === "calendarDuration")
+        return name === "days" || name === "months"
+          ? INTEGER_TYPE
+          : name === "exactOffset"
+            ? DURATION_TYPE
+            : undefined;
+      if (value.name === "duration") return undefined;
       return temporalFieldType(value.name, name);
     case "range":
     case "null":
@@ -7444,7 +7459,7 @@ function literalValue(expression: Expression): ScalarValue | null | undefined {
   // An exact duration is compared by its length, so it stands for its milliseconds in a duration type. A calendar
   // duration has no fixed length and is not tracked.
   if (known === null || typeof known !== "object") return known;
-  return isExactDuration(durationParts(known)) ? known.milliseconds : undefined;
+  return isCalendar(known) ? undefined : known.milliseconds;
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
@@ -7475,8 +7490,7 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
   const value = known.value;
-  if (value !== null && typeof value === "object" && !isExactDuration(durationParts(value)))
-    return undefined;
+  if (value !== null && typeof value === "object" && isCalendar(value)) return undefined;
   return [
     value !== null && typeof value === "object"
       ? { value: value.milliseconds, duration: true }
@@ -7668,13 +7682,21 @@ function operatorMessage(
   const [left, right] = operands;
   if (operands.length === 1)
     return `'${operator}' needs a number or a duration, but this is ${describeValue(left!)}.`;
-  const duration = (type: StaticType): boolean => isScalar(type, "duration");
+  const duration = (type: StaticType): boolean => isScalar(type, "duration", "calendarDuration");
+  // A calendar day or month has no fixed length, so it has no order or ratio against exact time (ADR 0026).
+  const mixedDurations =
+    (isScalar(left!, "calendarDuration") && isScalar(right!, "duration")) ||
+    (isScalar(left!, "duration") && isScalar(right!, "calendarDuration"));
   if (["<", "<=", ">", ">="].includes(operator)) {
+    if (mixedDurations)
+      return `'${operator}' cannot compare a calendar duration with a duration. A calendar day or month has no fixed length. Compare two calendar durations, or two durations.`;
     const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
     if (temporal !== undefined)
       return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
-    return `'${operator}' compares two numbers, two texts, or two durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
+    return `'${operator}' compares two numbers, two texts, two durations, or two calendar durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
+  if (operator === "/" && mixedDurations)
+    return "'/' cannot divide a calendar duration and a duration by each other. A calendar day or month has no fixed length.";
   const joined =
     operator === "+" && expression.kind === "binaryExpression"
       ? joinMessage(expression, left!, right!)
@@ -7692,6 +7714,22 @@ function operatorMessage(
   if (isScalar(left!, "time") || isScalar(right!, "time"))
     return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.`;
   if (expression.kind === "binaryExpression" && (operator === "+" || operator === "-")) {
+    const label = expressionLabel(expression.left) ?? "value";
+    // No operator reads a zone (ADR 0026), so local and absolute values each move only one way.
+    if (isScalar(left!, "date") && isScalar(right!, "duration")) {
+      const literal = unwrap(expression.right);
+      return literal.kind === "durationLiteral" &&
+        !literal.calendar &&
+        (literal.unit === "d" || literal.unit === "w")
+        ? `A date moves only by calendar units. Write '${literal.amount.raw} calendar ${literal.unit === "d" ? "day" : "week"}${literal.amount.raw === "1" ? "" : "s"}'.`
+        : "A date moves only by calendar units, such as '1 calendar day'.";
+    }
+    if (isScalar(left!, "datetime") && isScalar(right!, "duration"))
+      return `A date and time has no time zone, so it cannot move by elapsed time. Convert it first, as in '(${label}.toAbsoluteDateTime() ${operator} ${durationText(expression.right)}).toDateTime()', or use calendar units to keep the clock time.`;
+    if (operator === "-" && isScalar(left!, "datetime") && isScalar(right!, "datetime"))
+      return `A date and time has no time zone, so one cannot be subtracted from another. Subtract their dates with 'toDate(${label}) - toDate(${expressionLabel(expression.right) ?? "value"})', or convert both with toAbsoluteDateTime() for the elapsed time.`;
+    if (isScalar(left!, "absoluteDateTime") && isScalar(right!, "calendarDuration"))
+      return `An absolute date and time has no calendar. Convert it first, as in '(${label}.toDateTime() ${operator} ${durationText(expression.right, "1 calendar day")}).toAbsoluteDateTime()'.`;
     // An absolute date and time or a date and time moves by a duration written after it.
     if (isScalar(left!, "absoluteDateTime", "datetime")) {
       const subject = describeValue(left!);
@@ -7773,6 +7811,20 @@ function plainText(expression: Expression): string | null {
   return text;
 }
 
+/** A number as a fix shows it, without float noise. */
+function formatNumberText(value: number): string {
+  return String(Number(value.toFixed(3)));
+}
+
+/** A duration operand as a fix shows it: its name, or a duration literal with its unit, else `example`. */
+function durationText(expression: Expression, example = "2 h"): string {
+  const literal = unwrap(expression);
+  if (literal.kind !== "durationLiteral") return expressionLabel(expression) ?? example;
+  if (!literal.calendar) return `${literal.amount.raw} ${literal.unit}`;
+  const word = { d: "day", w: "week", mo: "month", y: "year" }[literal.unit];
+  return `${literal.amount.raw} calendar ${word}${literal.amount.raw === "1" ? "" : "s"}`;
+}
+
 /** What a date or time value is called after "another", such as `date and time`. */
 function temporalNoun(type: StaticType): string {
   return describeValue(type).replace(/^an? /u, "");
@@ -7816,13 +7868,18 @@ function unitFix(number: Expression | null): string {
  */
 function operandFix(operand: StaticType, type: StaticType, statement: AssignmentStatement): string {
   if (isNumeric(operand)) return " Use a number instead.";
-  // An absolute date and time or a date and time moves by a duration as well.
-  if (isScalar(operand, "duration", "absoluteDateTime", "datetime")) {
-    const literal = unwrap(statement.value);
-    return literal.kind === "numberLiteral"
-      ? ` Give the number a unit, such as '${literal.raw} s'.`
-      : " Use a duration such as '2 s' instead.";
-  }
+  const literal = unwrap(statement.value);
+  if (literal.kind === "numberLiteral" && isScalar(operand, "duration", "absoluteDateTime"))
+    return ` Give the number a unit, such as '${literal.raw} s'.`;
+  // No operator reads a zone (ADR 0026): local values move by calendar units, absolute ones by durations.
+  if (isScalar(operand, "date") && isScalar(type, "duration"))
+    return " Use calendar units, such as '1 calendar day'.";
+  if (isScalar(operand, "absoluteDateTime") && isScalar(type, "calendarDuration"))
+    return " Convert it with toDateTime() first.";
+  if (isScalar(operand, "duration", "absoluteDateTime"))
+    return " Use a duration such as '2 s' instead.";
+  if (isScalar(operand, "date", "datetime"))
+    return " Use a calendar duration such as '1 calendar day' instead.";
   const target = expressionLabel(statement.target);
   if (statement.operator !== "+=" || target === null) return "";
   const value = operandLabel(statement.value) ?? "value";

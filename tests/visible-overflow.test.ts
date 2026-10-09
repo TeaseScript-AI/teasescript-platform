@@ -103,9 +103,9 @@ test("values the compiler cannot know fail at runtime with the cause, the values
       "Division by zero: 1 s / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
     ],
     [
-      "let n = 0\nsay 1 month / n\nexit",
+      "let n = 0\nsay 1 calendar month / n\nexit",
       "TSR009",
-      "Division by zero: 1 mo / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
+      "Division by zero: 1 calendar month / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
     ],
     [
       "let n = 1e305\nsay 1 h * n\nexit",

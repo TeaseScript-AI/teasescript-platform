@@ -15,6 +15,7 @@ import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
+  CALENDAR_DURATION_TYPE,
   DATE_TYPE,
   DATETIME_TYPE,
   describeValue,
@@ -408,12 +409,17 @@ function minMaxProblems(
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
-    // Numbers, durations, or date and time values of one kind (V30 §35) compare with each other.
+    // Numbers, durations, calendar durations, or date and time values of one kind (V30 §35) compare with each other.
     const kind = isAssignable(NUMBER_TYPE, type)
       ? NUMBER_TYPE
-      : [DURATION_TYPE, DATE_TYPE, TIME_TYPE, DATETIME_TYPE, ABSOLUTE_DATE_TIME_TYPE].find(
-          (candidate) => isAssignable(candidate, type),
-        );
+      : [
+          DURATION_TYPE,
+          CALENDAR_DURATION_TYPE,
+          DATE_TYPE,
+          TIME_TYPE,
+          DATETIME_TYPE,
+          ABSOLUTE_DATE_TIME_TYPE,
+        ].find((candidate) => isAssignable(candidate, type));
     const message =
       kind === undefined
         ? `${name}(...) needs numbers, durations, or date and time values, not ${describeValue(forUse(type))}.`
@@ -741,15 +747,17 @@ function sortProblem(element: StaticType): string | undefined {
         ? "text"
         : isScalar(candidate, "duration")
           ? "durations"
-          : isScalar(candidate, "date")
-            ? "dates"
-            : isScalar(candidate, "time")
-              ? "times"
-              : isScalar(candidate, "datetime")
-                ? "dates and times"
-                : isScalar(candidate, "absoluteDateTime")
-                  ? "absolute dates and times"
-                  : undefined;
+          : isScalar(candidate, "calendarDuration")
+            ? "calendar durations"
+            : isScalar(candidate, "date")
+              ? "dates"
+              : isScalar(candidate, "time")
+                ? "times"
+                : isScalar(candidate, "datetime")
+                  ? "dates and times"
+                  : isScalar(candidate, "absoluteDateTime")
+                    ? "absolute dates and times"
+                    : undefined;
   const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
   if (unsortable !== undefined)
     return `sort() sorts numbers, text, durations, or date and time values, not ${describeValue(unsortable)}.`;

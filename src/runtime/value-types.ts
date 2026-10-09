@@ -1,13 +1,15 @@
 import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { booleanFromText, numberFromText, withoutNegativeZero } from "../conversions.js";
-import { durationParts, formatDuration } from "../duration.js";
+import { formatDuration } from "../duration.js";
 import { RuntimeFault } from "./errors.js";
 import { messageText } from "./text-length.js";
 import { quotedText } from "./value-text.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import {
+  isAnyDuration,
+  isCalendarDuration,
   isDate,
   isDateTime,
   isDict,
@@ -57,7 +59,7 @@ export function describeShownValue(value: SerializableRuntimeValue): string {
   if (typeof value === "string") return `text (string) ${quotedText(messageText(value))}`;
   if (typeof value === "number") return String(withoutNegativeZero(value));
   if (typeof value === "boolean") return `${value} (boolean)`;
-  if (isDuration(value)) return formatDuration(durationParts(value));
+  if (isAnyDuration(value)) return formatDuration(value);
   return describeValue(value);
 }
 
@@ -219,6 +221,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return value === null;
     case "duration":
       return isDuration(value);
+    case "calendarDuration":
+      return isCalendarDuration(value);
     case "range":
       return isRange(value);
     case "speaker":
@@ -255,6 +259,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   number: "a number",
   boolean: "true or false (boolean)",
   duration: "a duration",
+  calendarDuration: "a calendar duration",
   date: "a date",
   time: "a time",
   datetime: "a date and time",

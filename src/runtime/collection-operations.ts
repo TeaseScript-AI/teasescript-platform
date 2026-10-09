@@ -1,11 +1,17 @@
-import { compareDurationParts, durationFamily, durationParts } from "../duration.js";
+import { compareDurations, durationFamily, durationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { valueKey, type SerializableRuntimeValue } from "./serializable-values.js";
 import { compareTemporal } from "./temporal-operations.js";
-import { describeRuntimeValue, isDuration, isTemporal } from "./value-predicates.js";
+import {
+  describeRuntimeValue,
+  isAnyDuration,
+  isCalendarDuration,
+  isDuration,
+  isTemporal,
+} from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -27,9 +33,11 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
           ? "text"
           : isDuration(item)
             ? "duration"
-            : isTemporal(item)
-              ? item.kind
-              : undefined;
+            : isCalendarDuration(item)
+              ? "calendarDuration"
+              : isTemporal(item)
+                ? item.kind
+                : undefined;
     if (itemKind === undefined)
       throw fault(
         "TSR060",
@@ -44,24 +52,26 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
       );
     kind = itemKind;
   }
-  if (kind === "duration") {
-    // Durations order only within one family: exact time, days and weeks, or months and years (V30 §35).
+  if (kind === "calendarDuration") {
+    // Calendar durations order only within one family: months, days, or exact time (ADR 0026).
     const families = new Set(
-      items.map((item) => (isDuration(item) ? durationFamily(durationParts(item)) : "zero")),
+      items.map((item) =>
+        isCalendarDuration(item) ? durationFamily(durationParts(item)) : "zero",
+      ),
     );
     families.delete("zero");
     if (families.size > 1 || families.has("mixed"))
       throw fault(
         "TSR060",
-        "sort() orders durations of one kind only: exact time, days and weeks, or months and years.",
+        "sort() orders calendar durations of one kind only: months, days, or exact time.",
         span,
       );
   }
   const compare = (left: SerializableRuntimeValue, right: SerializableRuntimeValue): number => {
     if (typeof left === "string" && typeof right === "string")
       return compareCodePoints(left, right);
-    if (isDuration(left) && isDuration(right)) {
-      const order = compareDurationParts(durationParts(left), durationParts(right));
+    if (isAnyDuration(left) && isAnyDuration(right)) {
+      const order = compareDurations(left, right);
       return typeof order === "number" ? order : 0;
     }
     if (isTemporal(left) && isTemporal(right)) return compareTemporal(left, right);
@@ -77,6 +87,7 @@ const KIND_DESCRIPTIONS = {
   number: "numbers",
   text: "text",
   duration: "durations",
+  calendarDuration: "calendar durations",
   date: "dates",
   time: "times",
   datetime: "dates and times",
