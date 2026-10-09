@@ -94,6 +94,33 @@ test("each typed place rejects a value of another type that the compiler cannot 
   }
 });
 
+test("an arithmetic operand that is not a number names the operand, the value, and the fix", () => {
+  for (const [statements, message, span] of [
+    [
+      "function share(total, count) {\n    return total / count\n}\nsay share(10, null)",
+      "'total / count' needs a number for 'count', but received null. Check that 'count' is not null before using it.",
+      "count",
+    ],
+    [
+      'say 2 * pick("3")',
+      "'*' needs a number on its right side, but received text (string) \"3\". Convert the text with toNumber(...) first.",
+      'pick("3")',
+    ],
+    [
+      'let level = pick("high")\nsay -level',
+      "'-level' needs a number for 'level', but received text (string) \"high\". Use a number instead.",
+      "level",
+    ],
+    [
+      "let last = pick(null)\nfor step in 1..last {\n}",
+      "'1..last' needs a number for 'last', but received null. Check that 'last' is not null before using it.",
+      "last",
+    ],
+  ] as const) {
+    assert.deepEqual(failure(`${PICK}${statements}\nexit`), ["TSR027", message, span], statements);
+  }
+});
+
 test("a value with unknown parts is checked part by part", () => {
   for (const [statements, message] of [
     [

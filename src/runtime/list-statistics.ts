@@ -183,14 +183,22 @@ export function listStatistic(
       days > limit ||
       days < -limit
     )
-      throw fault("TSR036", `${name}(...) gives a duration too long to represent.`, span);
+      throw fault(
+        "TSR036",
+        `${name}(...) gives a duration too long to represent. Use shorter durations.`,
+        span,
+      );
     return storedDuration({ months: Number(months), days: Number(days), milliseconds });
   }
   const numbers =
     amounts.kind === "numbers" ? amounts.values : amounts.values.map((parts) => parts.milliseconds);
   const result = statistic(name, numbers, share);
   if (!Number.isFinite(result))
-    throw fault("TSR036", `${name}(...) gives a number too large to represent.`, span);
+    throw fault(
+      "TSR036",
+      `${name}(...) gives a number too large to represent. Use smaller values.`,
+      span,
+    );
   return amounts.kind === "numbers"
     ? result === 0
       ? 0
@@ -319,12 +327,16 @@ export function linearRegression(
   if (positions.offsets.every((offset) => offset.n === 0n))
     throw fault(
       "TSR036",
-      `${name}(...) has no result: every point has the same x, so no line fits.`,
+      `${name}(...) has no result: every point has the same x, so the line's slope cannot be determined. Use points with at least two different x values.`,
       span,
     );
   const { slope, intercept, r2 } = leastSquares(positions.offsets, positions.perDay, values);
   if (![slope, intercept].every(Number.isFinite))
-    throw fault("TSR036", `${name}(...) gives a number too large to represent.`, span);
+    throw fault(
+      "TSR036",
+      `${name}(...) gives a number too large to represent. Use smaller values.`,
+      span,
+    );
   const amount = (value: number): SerializableRuntimeValue =>
     amounts.kind === "numbers"
       ? value === 0
@@ -495,7 +507,11 @@ export function predict(
     whole(perDay),
   );
   if (!Number.isFinite(value))
-    throw fault("TSR036", "predict(...) gives a number too large to represent.", span);
+    throw fault(
+      "TSR036",
+      "predict(...) gives a number too large to represent. Use smaller values.",
+      span,
+    );
   return durations
     ? storedDuration({ months: 0, days: 0, milliseconds: value })
     : value === 0

@@ -238,8 +238,8 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
               code: "TSR039",
             }
           : undefined,
-      apply: ([mean, spread], _, draw) =>
-        sampled("randomNormal", randomNormal(mean!, spread!, draw)),
+      apply: (values, _, draw) =>
+        sampled("randomNormal", values, randomNormal(values[0]!, values[1]!, draw)),
     },
   ],
   [
@@ -255,7 +255,8 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
               failure: `randomBeta(...) needs an alpha and a beta above 0, not ${alpha} and ${beta}.`,
               code: "TSR039",
             },
-      apply: ([alpha, beta], _, draw) => sampled("randomBeta", randomBeta(alpha!, beta!, draw)),
+      apply: (values, _, draw) =>
+        sampled("randomBeta", values, randomBeta(values[0]!, values[1]!, draw)),
     },
   ],
   [
@@ -271,16 +272,22 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
               failure: `randomPert(...) needs min <= mostLikely <= max, not ${min}, ${mostLikely}, and ${max}.`,
               code: "TSR039",
             },
-      apply: ([min, mostLikely, max], _, draw) =>
-        sampled("randomPert", randomPert(min!, mostLikely!, max!, draw)),
+      apply: (values, _, draw) =>
+        sampled("randomPert", values, randomPert(values[0]!, values[1]!, values[2]!, draw)),
     },
   ],
 ]);
 
-/** A drawn value, or the failure of one that is too large to represent. */
-function sampled(name: string, value: number | undefined): number | NumericFailure {
+/** A value drawn by `name` from `values`, or the failure of one that is too large to represent. */
+function sampled(
+  name: string,
+  values: readonly number[],
+  value: number | undefined,
+): number | NumericFailure {
   return value === undefined
-    ? noResult(`${name}(...) gives a number too large to represent. Use smaller values.`)
+    ? noResult(
+        `${name}(${values.join(", ")}) gives a number too large to represent. Use smaller values.`,
+      )
     : withoutNegativeZero(value);
 }
 
