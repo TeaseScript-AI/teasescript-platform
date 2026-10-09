@@ -2952,7 +2952,7 @@ class TypeChecker {
         if (typeof parts === "string")
           this.#report(
             typeCode.invalidOperand,
-            `${parts}; a calendar duration counts whole days or months. Write the exact time instead, as in '36 h'.`,
+            `${parts}. A calendar duration counts whole days or months. Write the exact time instead, as in '36 h'.`,
             expression.span,
           );
         return DURATION_TYPE;
@@ -3116,7 +3116,7 @@ class TypeChecker {
           if (kept?.declared === true && kept.at !== expression.span && !sameType(kept.type, read))
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load; the others take it.`,
+              `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load only. The other loads use that type.`,
               expression.span,
             );
         } else if (kept?.declared === true) {
@@ -3284,7 +3284,7 @@ class TypeChecker {
         if (!finite && !toggle && (start === undefined || unwrap(start).kind === "nullLiteral"))
           this.#report(
             typeCode.invalidOperand,
-            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
+            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
             property.value.span,
           );
       }
@@ -3350,7 +3350,7 @@ class TypeChecker {
           for (const { entry } of starts)
             this.#report(
               typeCode.invalidOperand,
-              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers. Add type: "integer" or type: "number".`,
               entry.value.span,
             );
         const element = union(entries.map(({ field }) => field.result));
@@ -3777,7 +3777,7 @@ class TypeChecker {
     this.#report(
       typeCode.emptyTagQuery,
       query.catalog === "scripts"
-        ? "No file in the project that runs something has these tags; a file of declarations only is never picked."
+        ? "No file in the project that runs something has these tags. A file of declarations only is never picked."
         : candidates.length === 0
           ? "The package has no images to pick from."
           : "No image in the package has these tags.",
@@ -4195,7 +4195,7 @@ class TypeChecker {
           : undefined;
       const b = moved !== undefined && rightDuration ? duration(expression.right) : undefined;
       if (b !== undefined && moved === "timestamp" && !isExactDuration(b))
-        problem = `a timestamp moves only by exact time such as 24 h, not by ${formatDuration(b)}; convert it with toDateTime() first`;
+        problem = `a timestamp moves only by exact time such as 24 h, not by ${formatDuration(b)}. Convert it with toDateTime() first`;
       else if (b !== undefined && moved === "date" && b.milliseconds !== 0)
         problem = `a date moves only by days, weeks, months, or years, not by ${formatDuration(b)}`;
     } else if (leftDuration && rightDuration) {
@@ -4774,7 +4774,7 @@ class TypeChecker {
           `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
-      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type; ${fix}.`,
+      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type. ${capitalize(fix)}.`,
       span,
     );
   }
@@ -5033,7 +5033,7 @@ class TypeChecker {
           if (item.kind === "namedArgument" && item.name.name !== "label")
             this.#report(
               typeCode.unknownNamedArgument,
-              `script(...) has no parameter '${item.name.name}'; its only named argument is label:.`,
+              `script(...) has no parameter '${item.name.name}'. Its only named argument is 'label:'.`,
               item.name.span,
             );
           else if (item.kind === "namedArgument" || positional === 1)
@@ -5199,7 +5199,7 @@ class TypeChecker {
       this.#report(
         typeCode.unknownNamedArgument,
         method === "get"
-          ? `get(...) has no parameter '${unknown.name.name}'; its only named argument is 'default:'.`
+          ? `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`
           : `${method}(...) takes no named arguments.`,
         unknown.name.span,
       );
@@ -5417,7 +5417,7 @@ class TypeChecker {
     if (mixed === undefined) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(mixed)}. A place keeps one type; ${unnamedMixFix(mixed) ?? fix(typeName(mixed))}.`,
+      `This choose returns ${describeValue(mixed)}. A place keeps one type. ${capitalize(unnamedMixFix(mixed) ?? fix(typeName(mixed)))}.`,
       expression.span,
     );
   }
@@ -6070,7 +6070,7 @@ class TypeChecker {
             `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`);
       this.#report(
         typeCode.mixedTypes,
-        `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
+        `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type. ${capitalize(fix)}.`,
         literal.span,
       );
     }
@@ -7228,7 +7228,7 @@ function assignableProperty(
   if (member.kind === "object" && member.properties === null) return { type: null };
   if (member.kind === "scalar" && temporalFieldType(member.name, name) !== undefined)
     return {
-      problem: `Property '${name}' of ${describeValue(member)} cannot be assigned; date and time values do not change.`,
+      problem: `Property '${name}' of ${describeValue(member)} cannot be assigned. Date and time values do not change.`,
     };
   if (member.kind === "dict")
     return {
@@ -7947,7 +7947,7 @@ function returnUnionFix(
 ): string {
   const both = union([first, other]);
   if (!isAnnotatable(both))
-    return " A function returns one type; use a separate function for values of another type.";
+    return " A function returns one type. Use a separate function for values of another type.";
   const parameters = declaration.parameters.length === 0 ? "" : "(...)";
   return ` To return both, declare the result type, as in 'function ${declaration.name.name}${parameters}: ${typeName(both)}'.`;
 }

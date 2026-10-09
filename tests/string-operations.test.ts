@@ -149,13 +149,13 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let t = "abc"\nsay t.length()\nexit',
       "TSV043",
-      "length is a property, not a method; write .length without parentheses.",
+      "'length' is a property, not a method. Write .length without parentheses.",
       "length",
     ],
     [
       'let t = "abc"\nsay t.trim\nexit',
       "TSV043",
-      "trim is a method; write trim() with parentheses.",
+      "'trim' is a method. Write trim() with parentheses.",
       "trim",
     ],
     [
@@ -185,7 +185,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let items = ["a"]\nsay items.join\nexit',
       "TSV043",
-      "join is a method; write .join() with parentheses.",
+      "'join' is a method. Write .join() with parentheses.",
       "join",
     ],
     [
@@ -227,7 +227,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'say "abc".substring(2, 1)\nexit',
       "TSV043",
-      "substring() needs 'end' not before 'start'; 1 is before 2.",
+      "substring() needs 'end' not before 'start', but 1 is before 2.",
       "1",
     ],
     [
@@ -331,7 +331,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.substring(2, at)\nexit",
       { text: "abc", at: 1 },
       "TSR025",
-      "substring() needs 'end' not before 'start'; 1 is before 2.",
+      "substring() needs 'end' not before 'start', but 1 is before 2.",
     ],
     [
       "say text.substring(at)\nexit",

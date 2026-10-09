@@ -87,7 +87,7 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "say min(1, 2, to: 3)\nexit",
       "TSV022",
-      "min(...) takes no named arguments; remove 'to:'.",
+      "min(...) takes no named arguments. Remove 'to:'.",
       "to",
     ],
     [

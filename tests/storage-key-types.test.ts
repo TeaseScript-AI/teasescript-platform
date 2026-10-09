@@ -170,7 +170,7 @@ test("loads of one key agree on its type, across files", () => {
     [
       [
         "TSV041",
-        'Storage key "level" is declared as a whole number (integer) or text (string) on line 1, so it cannot be declared as a whole number (integer) here. Declare its type at one load; the others take it.',
+        'Storage key "level" is declared as a whole number (integer) or text (string) on line 1, so it cannot be declared as a whole number (integer) here. Declare its type at one load only. The other loads use that type.',
         'load("level", default: 0)',
       ],
     ],
