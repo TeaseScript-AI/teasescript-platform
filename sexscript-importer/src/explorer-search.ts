@@ -4764,8 +4764,8 @@ function storageDistance(
 
 /**
  * What keeps directed search from a way, as one note. A stored value the condition itself needs that an explored
- * session left says so, whatever keys that value was copied from before; otherwise the condition's own goals go before
- * those of its `else if` chain, and a goal with progress before one no session stored.
+ * session left says so, whatever keys that value was copied from before; otherwise a note of the condition's own goals,
+ * and only without one a note of its `else if` chain's, each a goal with progress before one no session stored.
  */
 export function noteOf(
   target:
@@ -4789,10 +4789,14 @@ export function noteOf(
     if (chain !== undefined && (chain.best === 0 || chain.closest?.distance === 0))
       return `needs ${describeNeed(goal.source.key, goal)}; a session from storage that has it did not reach the condition`;
   }
-  const noted = [...own, ...target.goals.filter((goal) => guarded.has(goal))]
-    .map((goal) => target.notes.get(goal))
-    .filter((note): note is string => note !== undefined);
-  return noted.find((note) => !note.endsWith("no explored session stored it")) ?? noted[0];
+  // The condition's own notes, if any, before its chain's; within each, one with progress first.
+  const pick = (goals: readonly Goal[]) => {
+    const noted = goals
+      .map((goal) => target.notes.get(goal))
+      .filter((note): note is string => note !== undefined);
+    return noted.find((note) => !note.endsWith("no explored session stored it")) ?? noted[0];
+  };
+  return pick(own) ?? pick(target.goals.filter((goal) => guarded.has(goal)));
 }
 
 /** What a goal needs of a stored key, in words, such as `score > 100`. */
@@ -4945,8 +4949,10 @@ function coverableLine(
   sources: ReadonlyMap<string, string>,
 ): number | null {
   const line = compactSpan(instruction.span)?.line ?? null;
-  if (line === null || instruction.kind !== "end") return line;
-  const text = sources.get(path)?.split("\n")[line - 1];
+  const source = sources.get(path);
+  // Without the file's text, an `end` the author wrote cannot be told apart: it counts.
+  if (line === null || instruction.kind !== "end" || source === undefined) return line;
+  const text = source.split("\n")[line - 1];
   return text === undefined || text.trim() === "" ? null : line;
 }
 

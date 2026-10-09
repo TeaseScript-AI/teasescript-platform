@@ -595,7 +595,7 @@ test(
         budgetMs: Infinity,
         budgetOps,
         maxStates: 5000,
-        sources: new Map(),
+        sources: new Map([["main.tease", source]]),
         diagnostics: [],
         cells: true,
       });
@@ -609,9 +609,29 @@ test(
       40,
     );
     assert.equal(spiral.search.stoppedBy, "operations");
-    // Every line of the script is reached; the compiler's own end after `exit` is no line of it.
+    // Every line of the script is reached; the compiler's own end after `exit` is no line of it. An `end` the author
+    // wrote is, also when the file's text is not at hand to tell them apart.
     const file = spiral.coverage.files[0]!;
     assert.deepEqual(file.unvisited, []);
+    const authored = "goto finish\nend\nlabel finish\nexit\n";
+    const { plan: ending } = engine.compileProject([{ path: "main.tease", source: authored }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(ending));
+    for (const sources of [new Map([["main.tease", authored]]), new Map<string, string>()]) {
+      const ended = explore(engine, ending, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 200,
+        maxStates: 100,
+        sources,
+        diagnostics: [],
+      });
+      assert.ok(
+        ended.coverage.files[0]!.unvisited.some((range) => range.lines === "2"),
+        JSON.stringify(ended.coverage.files[0]),
+      );
+    }
 
     // `n` is compared with 3 and 100: "Go" with `n` below 3, at 3, and between 3 and 100 are three cells, after the two
     // passes of "Round"; `n` changed bucket twice.
@@ -682,6 +702,19 @@ test("a missed way's note tells what the condition itself needs: a stored value 
       notes: new Map([
         [own, 'needs desk.mode = "inspect"; no explored session stored it'],
         [earlier, 'needs desk.mode = "x"; no explored session stored it'],
+      ]),
+    }),
+    'needs desk.mode = "inspect"; no explored session stored it',
+  );
+  // The condition's own note goes before its chain's, even when only the chain's has progress.
+  assert.equal(
+    noteOf({
+      goals: [own, earlier],
+      guards: [{ goals: [earlier] }],
+      chains: new Map(),
+      notes: new Map([
+        [own, 'needs desk.mode = "inspect"; no explored session stored it'],
+        [earlier, 'needs desk.mode = "x"; best reached: desk.mode = "y" after 1 session'],
       ]),
     }),
     'needs desk.mode = "inspect"; no explored session stored it',
