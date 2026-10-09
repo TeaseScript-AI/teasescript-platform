@@ -48,10 +48,12 @@ wait(20)
 show("One.\n\nTwo.\n\nThree.\n\nFour.\n\nFive.")
 wait(5)
 
-// A computed wait, and a run of waits, stay as they are.
+// A computed wait, and a run of waits, stay as they are; a sum takes parentheses before its unit.
 int n = getInteger("How long?", 3)
 show("Waiting " + n + " seconds.")
 wait(n)
+show("Hold it.")
+wait(15 + getRandom(35))
 show("Pause")
 wait(1)
 wait(2)

@@ -10,6 +10,6 @@ global function loadPauseModule {
 }
 global function pause {
   lastPause = sexscriptLegacyRandom(rounds - 2) + 1
-  wait lastPause * boost s
+  wait (lastPause * boost) s
   stopAudio
 }

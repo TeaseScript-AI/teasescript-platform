@@ -94,16 +94,13 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       lines.push(`${pad}}`);
       return;
     case "wait": {
-      // Every duration names its unit (#512). The unit after `wait` and `timer` applies to the whole expression, unless
-      // the expression ends with a number, which takes it itself: `a + 2 s` is `a + (2 s)`.
+      // Every duration names its unit (#512). A unit binds to the primary right before it, tighter than `*` and `+`
+      // (#760), so a duration of any other form, such as `15 + randomInteger(0..35)` or a range, takes parentheses.
       const duration = emitExpression(statement.duration);
       const command = statement.visible ? "timer" : "wait";
       if (statement.unit === null) lines.push(`${pad}${command} ${duration}`);
       else {
-        const whole =
-          statement.duration.kind !== "literal" && /(^|[^\w.])\d+(\.\d+)?$/u.test(duration)
-            ? `(${duration})`
-            : duration;
+        const whole = UNIT_OPERANDS.has(statement.duration.kind) ? duration : `(${duration})`;
         lines.push(`${pad}${command} ${whole} ${statement.unit}`);
       }
       return;
@@ -675,6 +672,16 @@ function menuOptions(options: ReadonlyArray<() => string>): string {
   const [first, ...rest] = within(inner, () => options.map((option) => option()));
   return [first, ...rest.map((option) => `${inner}${option}`)].join(",\n");
 }
+
+/** The expressions a unit binds to without parentheses (#760): a literal, name, member or index, or call. */
+const UNIT_OPERANDS = new Set<IrExpression["kind"]>([
+  "literal",
+  "variable",
+  "property",
+  "index",
+  "call",
+  "methodCall",
+]);
 
 /** Compact `showButton` with its optional timeout option (#531), a legacy number of seconds with its unit (#512). */
 function emitButton(

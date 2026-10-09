@@ -177,7 +177,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `getBooleans(t, values, defaults)` | `askBooleans(message:, texts:, defaults:)` | Native (#668); with `cancel:` where the script tests the answers for null, as the dialog's Cancel gave null. |
 | `getRandom(max)` | `randomInteger(0..max)` | Exclusive upper bound; `list[getRandom(list.size())]` becomes `list.random`. |
 | `getTime()` | `getAbsoluteDateTime().toSeconds()` | Unix seconds (#532, #759); TeaseScript `getTime()` is a time-of-day value. |
-| `wait(n)`, `sleep(ms)` | `wait n s`, `wait ms ms` | The unit applies to the whole expression, which is parenthesized where it ends with a number: `wait (randomInteger(0..5) + 2) s` (#512). |
+| `wait(n)`, `sleep(ms)` | `wait n s`, `wait ms ms` | A unit binds to the literal, name, member, index, or call right before it (#512, #760), so any other duration is parenthesized: `wait (15 + randomInteger(0..35)) s`. |
 | `waitWithGauge(n)` | `timer n s` | Gauge styling is presentation. |
 | `save(k, v)` / `save(k, null)` | `save v as k` / `delete k` | Legacy `save` also removed dotted sub-keys `k.*`. |
 | `loadString(k)` etc. | `load k` | Owner semantics: `null` when missing, no write. A typed read followed by `if (x == null) x = d` becomes `load k, default: d` (#541); other defaults stay explicit null checks. A condition `loadBoolean(k)` becomes `load(k) == true`; a read inside a larger expression takes the bounded `load(k)` form, as an ask there takes its parenthesized form (`askInteger(default: 0)`). |
