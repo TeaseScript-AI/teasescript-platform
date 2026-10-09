@@ -60,6 +60,33 @@ test("recovers a missing closing brace before a valid statement", () => {
   });
 });
 
+test("a missing closing delimiter is reported where its line ends, and the next line still parses", () => {
+  for (const line of [
+    'f("a"',
+    'let v = load("k"',
+    "let v = (1 + 2",
+    "let v = [1, 2",
+    'let v = dict{ "a": 1',
+    'say("a", instant',
+    "function g(a, b",
+  ]) {
+    const result = parse(`${line}\nlet = 5\nexit`);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.line,
+        diagnostic.span.start.column,
+      ]),
+      [
+        ["TSP017", 0, line.length],
+        ["TSP013", 1, 4],
+      ],
+      line,
+    );
+    assert.equal(statementKinds(result).at(-1), "exitStatement", line);
+  }
+});
+
 test("reports a missing closing brace at EOF once", () => {
   const source = 'speaker vera {\r\n  displayName: "Vera"';
   const result = parse(source);

@@ -62,6 +62,8 @@ class Lexer {
   #line = 0;
   #column = 0;
   #singleLineStringDepth = 0;
+  /** The end of the line `#quotesFollowOnLine` last searched, and the offset of the second-to-last quote before it. */
+  #quoteSearch = { lineEnd: -1, secondToLastQuote: -1 };
 
   public constructor(private readonly source: string) {}
 
@@ -369,6 +371,11 @@ class Lexer {
     outerBlock: boolean,
   ): ParseTask<"closed" | "stringEnd" | "eof"> {
     let braceDepth = 0;
+    // The brackets, parentheses, and braces still open inside the interpolation. The outer string cannot end inside
+    // one, so a quote there starts a nested string, such as `"y"` in `${[showPermanentButton "x" { say "y" }].length}`,
+    // when the line still has the quotes that close it and the outer string. Otherwise, as outside them, a quote after
+    // a value ends the outer string, as in `"${[1, 2"` and `"${name"`.
+    let openDelimiters = 0;
     while (!this.#isAtEnd()) {
       if (this.#peek() === "}" && braceDepth === 0) {
         const endOffset = this.#offset;
@@ -377,7 +384,11 @@ class Lexer {
         this.#emitToken(TokenKind.InterpolationEnd, endOffset, endStart, this.#position());
         return "closed";
       }
-      if (this.#isStringDelimiter(outerBlock) && !this.#canStartNestedString()) {
+      if (
+        this.#isStringDelimiter(outerBlock) &&
+        !(openDelimiters > 0 && (outerBlock || this.#quotesFollowOnLine())) &&
+        !this.#canStartNestedString()
+      ) {
         this.#report(
           diagnosticCodes.unterminatedInterpolation,
           "Unterminated string interpolation.",
@@ -387,8 +398,12 @@ class Lexer {
         return "stringEnd";
       }
 
-      if (this.#peek() === "{") braceDepth += 1;
-      else if (this.#peek() === "}") braceDepth -= 1;
+      const next = this.#peek();
+      if (next === "{") braceDepth += 1;
+      else if (next === "}") braceDepth -= 1;
+      if (next === "(" || next === "[" || next === "{") openDelimiters += 1;
+      else if ((next === ")" || next === "]" || next === "}") && openDelimiters > 0)
+        openDelimiters -= 1;
       yield* parseChild(this.#scanNormalToken());
     }
 
@@ -399,6 +414,22 @@ class Lexer {
       this.#position(),
     );
     return "eof";
+  }
+
+  /** Whether at least two more quotes follow the quote at the current offset on its line. */
+  #quotesFollowOnLine(): boolean {
+    if (this.#offset >= this.#quoteSearch.lineEnd) {
+      let last = -1;
+      let secondToLast = -1;
+      let index = this.#offset + 1;
+      for (; index < this.source.length && this.source[index] !== "\n"; index += 1) {
+        if (this.source[index] !== '"') continue;
+        secondToLast = last;
+        last = index;
+      }
+      this.#quoteSearch = { lineEnd: index, secondToLastQuote: secondToLast };
+    }
+    return this.#offset < this.#quoteSearch.secondToLastQuote;
   }
 
   #canStartNestedString(): boolean {

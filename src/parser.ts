@@ -846,7 +846,7 @@ class Parser {
       this.#skipNewlines();
     }
     if (!this.#match(TokenKind.RightParenthesis)) {
-      this.#reportInsertion(
+      this.#reportMissingCloser(
         parserDiagnosticCode.expectedDelimiter,
         "Expected ')' after the text and pacing of 'say'.",
       );
@@ -936,7 +936,7 @@ class Parser {
       }
       if (this.#match(TokenKind.RightParenthesis)) endSpan = this.#previous().span;
       else
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedExpression,
           "Expected ')' after presentation options.",
         );
@@ -2141,7 +2141,7 @@ class Parser {
       }
     }
     if (!this.#match(TokenKind.RightParenthesis)) {
-      this.#reportInsertion(
+      this.#reportMissingCloser(
         parserDiagnosticCode.expectedDelimiter,
         `Expected ')' after the ${command.lexeme} arguments.`,
       );
@@ -2470,7 +2470,7 @@ class Parser {
       if (inner === null) return null;
       this.#skipContinuationNewlines();
       if (!this.#match(TokenKind.RightParenthesis)) {
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedDelimiter,
           "Expected ')' after the grouped type.",
         );
@@ -2923,7 +2923,7 @@ class Parser {
         }
       }
       if (!this.#match(TokenKind.RightParenthesis)) {
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedDelimiter,
           "Expected ')' after the function parameters.",
         );
@@ -3629,7 +3629,7 @@ class Parser {
     let end = left.span;
     if (this.#match(TokenKind.RightParenthesis)) end = this.#previous().span;
     else {
-      this.#reportInsertion(
+      this.#reportMissingCloser(
         parserDiagnosticCode.expectedDelimiter,
         "Expected ')' after the function arguments.",
       );
@@ -4340,7 +4340,7 @@ class Parser {
     this.#skipNewlines();
     if (expression === null || !this.#match(TokenKind.RightParenthesis)) {
       if (expression !== null) {
-        this.#reportInsertion(
+        this.#reportMissingCloser(
           parserDiagnosticCode.expectedDelimiter,
           "Expected ')' after the expression.",
         );
@@ -4682,8 +4682,20 @@ class Parser {
   #consumeClosingDelimiter(kind: TokenKind, message: string): SourceSpan {
     this.#skipNewlines();
     if (this.#match(kind)) return this.#previous().span;
-    this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, message);
+    this.#reportMissingCloser(parserDiagnosticCode.expectedDelimiter, message);
     return this.#previous().span;
+  }
+
+  /**
+   * Reports a missing closing delimiter where its line ends: the newlines skipped while looking for it are given back,
+   * so the statement on the next line still parses, as after `f("a"`.
+   */
+  #reportMissingCloser(
+    code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
+    message: string,
+  ): void {
+    while (this.#current > 0 && this.#previous().kind === TokenKind.Newline) this.#current -= 1;
+    this.#reportInsertion(code, message);
   }
 
   #finishStatement(inBlock: boolean): void {
