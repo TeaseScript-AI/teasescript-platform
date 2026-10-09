@@ -352,7 +352,9 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   timeout known before the run is reported.
 - Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
-  player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
+  player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`; a pattern of number fields
+  that is no whole date or time, such as `dd/MM` or `HH`, is written from the current date and time's fields, exactly.
+  Of the corpus's 9
   formatting sites, 3 use `toISO()` and 3 `formatTime()`; the 3 that format a date built from stored Unix seconds stay
   reported (`SX_DATE_FORMAT`), see the observations below.
 - Legacy `getImage()` took a webcam picture without asking and returned its path, or null; only without a webcam did
