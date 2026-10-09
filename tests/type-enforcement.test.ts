@@ -1237,7 +1237,7 @@ test("timer ranges and handle members are checked by type, wherever the value co
   );
 });
 
-test("a for-loop or randomInteger range takes whole-number bounds, a switch case range any number", () => {
+test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds, a switch case range any number", () => {
   // V30 §6: a bound that may hold a fraction is an error, never truncated.
   assert.deepEqual(mismatches('let count = 5\nfor i in 1..=count / 2 {\n    say "${i}"\n}\nexit'), [
     [
@@ -1263,6 +1263,27 @@ test("a for-loop or randomInteger range takes whole-number bounds, a switch case
       ["TSV043", "low"],
     ],
   );
+  // A wait or timer range counts whole units.
+  assert.deepEqual(mismatches("let n = 17 / 2\nwait (1..n) s\nexit"), [
+    [
+      "TSV043",
+      "A wait range bound must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+      "n",
+    ],
+  ]);
+  assert.deepEqual(
+    codes(
+      'let n = 17 / 2\ntimer (1..=n) s\nlet t = timer async (n..10) min {\n    say "late"\n}\nexit',
+    ),
+    [
+      ["TSV043", "n"],
+      ["TSV043", "n"],
+    ],
+  );
+  assert.equal(
+    mismatches("let n = 17 / 2\ntimer (1..=n) s\nexit")[0]?.[1].startsWith("A timer range bound"),
+    true,
+  );
   // Rounded bounds run; a switch case range matches a fraction; a bound the compiler cannot know is checked at runtime.
   assert.deepEqual(
     sayTexts('let count = 5\nfor i in 1..=floor(count / 2) {\n    say "${i}"\n}\nexit'),
@@ -1276,7 +1297,7 @@ test("a for-loop or randomInteger range takes whole-number bounds, a switch case
   );
   assert.deepEqual(
     codes(
-      'function count(n) {\n    for i in 1..=n {\n        say "${i}"\n    }\n}\ncount(2.5)\nexit',
+      'function count(n) {\n    for i in 1..=n {\n        say "${i}"\n    }\n    wait (1..n) s\n}\ncount(2.5)\nexit',
     ),
     [],
   );
