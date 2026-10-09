@@ -8,6 +8,7 @@ import type {
   RuntimeStatus,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-capture.js";
+import { RandomDecisionError } from "../src/runtime/random-control.js";
 import {
   debugExportJson,
   rebuildRecordedSession,
@@ -76,7 +77,8 @@ const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2
  * its recording incomplete. A session that starts or is restored begins a new recording. When the recording would
  * outgrow its limits, it starts again from the state before the next call of the Player, never dropping a call in
  * between. A call that ends the session in failure, or that throws, freezes the recording, so later calls cannot evict
- * its evidence.
+ * its evidence. A host callback that throws during a recorded call, the media store or the random decision, leaves the
+ * recording incomplete, because a replay has only the answers it gave.
  *
  * A call that pauses at a random draw stays one record: each resolution that continues it adds its events to it, and a
  * chosen one also its outcome, rather than a record of its own, so many natural resolutions add no record. When the log
@@ -252,6 +254,10 @@ export class DebugRecorder {
     try {
       result = invoke(admission);
     } catch (error) {
+      // The recording keeps only the decisions the host made, so a decision callback that throws cannot be replayed. A
+      // frozen record holds no later call, so it keeps its evidence as it was.
+      if (error instanceof RandomDecisionError && this.#frozen === null)
+        this.#problem ??= "The random decision callback failed during a recorded call.";
       if (prepared !== null)
         this.#add(kind, prepared, queries, null, error instanceof Error ? error.name : "Error");
       throw error;

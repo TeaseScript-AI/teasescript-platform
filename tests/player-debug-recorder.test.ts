@@ -44,6 +44,7 @@ import {
   observeTime,
   type MediaProgressReport,
 } from "../src/index.js";
+import type { RandomDecision } from "../src/runtime/random-control.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const store = { holds: (asked: string, kind: string) => asked === reference && kind === "image" };
@@ -368,7 +369,40 @@ test("a media store that throws during a recorded call leaves the recording inco
   );
 });
 
-test("a media store that throws after the record froze leaves the frozen record as it was", () => {
+test("a random decision that throws during a recorded call leaves the recording incomplete", async () => {
+  // A decision whose field throws is read inside the engine's guard too.
+  const unreadable = (): RandomDecision =>
+    Object.defineProperty({ kind: "natural" }, "kind", {
+      get() {
+        throw new Error("host decision failed");
+      },
+    });
+  for (const decide of [
+    () => {
+      throw new Error("host decision failed");
+    },
+    unreadable,
+  ]) {
+    const recorder = new DebugRecorder();
+    let session = createPlayerRuntimeSession(
+      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      { recorder },
+    );
+    session = observePlayerRuntimeTime(session, 500).session;
+    setPlayerRuntimeRandomControl(session, { decide });
+    assert.throws(() => observePlayerRuntimeTime(session, 1_000), { name: "RandomDecisionError" });
+    const recording = recorder.recording()!;
+    assert.deepEqual(
+      [recording.complete, recording.reason],
+      [false, "The random decision callback failed during a recorded call."],
+    );
+    // The replay has no decision callback, so it could not throw where the recorded call threw.
+    assert.equal(recording.operations.at(-1)?.thrown, "RandomDecisionError");
+    assert.equal((await replay(recorder)).kind, "incomplete");
+  }
+});
+
+test("a media store or random decision that throws after the record froze leaves the frozen record as it was", () => {
   // With the scope IDs used up, a timer block throws in its middle, which freezes the record.
   const source = [
     "let go = true",
@@ -379,6 +413,7 @@ test("a media store that throws after the record froze leaves the frozen record 
     "  }",
     "}",
     'let picture = askImage("Picture", allowCamera: false)',
+    "let x = random()",
     "exit",
   ].join("\n");
   const recorder = new DebugRecorder();
@@ -393,7 +428,19 @@ test("a media store that throws after the record froze leaves the frozen record 
     },
   };
   assert.throws(() => answerPlayerRuntimeImage(session, reference, failing), /store unavailable/);
-  const recording = recorder.recording()!;
+  let recording = recorder.recording()!;
+  assert.deepEqual([recording.complete, recording.reason], [true, null]);
+  assert.deepEqual(recording.operations, frozen.operations);
+  // So does a random decision that throws.
+  setPlayerRuntimeRandomControl(session, {
+    decide: () => {
+      throw new Error("host decision failed");
+    },
+  });
+  assert.throws(() => answerPlayerRuntimeImage(session, reference, store), {
+    name: "RandomDecisionError",
+  });
+  recording = recorder.recording()!;
   assert.deepEqual([recording.complete, recording.reason], [true, null]);
   assert.deepEqual(recording.operations, frozen.operations);
 });
@@ -822,6 +869,7 @@ test("a call the recorder cannot keep while a draw is paused leaves recovery of 
   const refused = applyPlayerRuntimeStorageEdit(session, { key: "k", value: "x".repeat(200) });
   assert.equal(refused.outcome.kind, "randomDrawPending");
   session = refused.session;
+  assert.equal(recorder.recording()!.complete, true, "the refused call needed no record");
   setPlayerRuntimeRandomControl(session, {
     filter: { kinds: ["random"] },
     decide: () => {
@@ -837,7 +885,10 @@ test("a call the recorder cannot keep while a draw is paused leaves recovery of 
     { name: "RandomDecisionError" },
   );
   assert.equal(JSON.stringify(playerRuntimeSnapshot(session)), shown);
-  assert.equal(recorder.recording()!.complete, true, "the refused call needed no record");
+  assert.equal(
+    recorder.recording()!.reason,
+    "The random decision callback failed during a recorded call.",
+  );
 });
 
 test("a log that starts again at a paused state keeps the resolution exact", async () => {

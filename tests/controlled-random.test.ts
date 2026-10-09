@@ -23,6 +23,7 @@ import {
   RandomDecisionError,
   type RandomChoiceReceipt,
   type RandomControlOptions,
+  type RandomDecision,
   type RandomDrawKind,
   type RandomDrawView,
   type RandomOutcome,
@@ -750,6 +751,39 @@ test("a callback's invalid outcome pauses the draw instead, and its exception en
     (error: unknown) => error instanceof RandomDecisionError && error.cause === thrown,
   );
   assert.throws(() => failing.view(), RuntimeSessionError);
+});
+
+test("an exception from reading a decision ends the operation as one from decide does", () => {
+  const thrown = new Error("explorer bug");
+  const throwing = <T extends object>(value: T, field: string): T =>
+    Object.defineProperty(value, field, {
+      get() {
+        throw thrown;
+      },
+    });
+  // At a built-in draw and at a collection draw alike, from the decision or from its outcome.
+  for (const source of ["let a = random()\nexit", "let a = [1, 2, 3].random\nexit"]) {
+    for (const decide of [
+      (): RandomDecision => throwing({ kind: "natural" }, "kind"),
+      (): RandomDecision =>
+        throwing({ kind: "choose", outcome: { kind: "index", index: 0 } }, "outcome"),
+      (): RandomDecision => ({
+        kind: "choose",
+        outcome: throwing<RandomOutcome>({ kind: "index", index: 0 }, "kind"),
+      }),
+    ]) {
+      const session = createFreshRuntimeSession(
+        compileValidPlan(source),
+        {},
+        { randomControl: { decide } },
+      );
+      assert.throws(
+        () => session.run(),
+        (error: unknown) => error instanceof RandomDecisionError && error.cause === thrown,
+        source,
+      );
+    }
+  }
 });
 
 test("a run keeps its instruction budget across pauses", () => {
