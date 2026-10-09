@@ -116,18 +116,12 @@ const missing = (key: string): IrExpression => ({
   left: load(key),
   right: lit(null),
 });
-const yesNo = (): IrExpression => ({
-  kind: "binary",
-  operator: "==",
-  left: { kind: "choice", options: [lit("Yes"), lit("No")], labels: ["yes", "no"] },
-  right: lit("yes"),
-});
 // The desktop player asked these, not the tease, so they come from the system speaker (owner decision).
-const say = (text: string): IrStatement => ({
-  kind: "say",
-  value: lit(text),
+const yesNo = (question: string): IrExpression => ({
+  kind: "input",
+  input: "askBoolean",
+  question: lit(question),
   speaker: SYSTEM_SPEAKER,
-  span: null,
 });
 const save = (key: IrExpression, value: IrExpression): IrStatement => ({
   kind: "save",
@@ -171,7 +165,7 @@ export function legacyProfilePrompt(
       ]),
     );
   for (const [key, question] of INTRO_QUESTIONS) {
-    if (asked.includes(key)) body.push(ifMissing(key, [say(question), save(lit(key), yesNo())]));
+    if (asked.includes(key)) body.push(ifMissing(key, [save(lit(key), yesNo(question))]));
   }
   if (asked.includes("intro.likemale"))
     body.push(
@@ -185,7 +179,7 @@ export function legacyProfilePrompt(
             left: load("intro.likefemale"),
             right: lit(true),
           },
-          then: [say("Are you also attracted to men ?"), save(lit("intro.likemale"), yesNo())],
+          then: [save(lit("intro.likemale"), yesNo("Are you also attracted to men ?"))],
           else: [save(lit("intro.likemale"), lit(true))],
           span: null,
         },

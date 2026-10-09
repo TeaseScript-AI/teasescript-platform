@@ -12,7 +12,7 @@ if pick == "right" {
   say "Item ${items[5]}"
 }
 if pick == "count" {
-  let n = askInteger default: 0
+  let n = askInteger prefill: 0
   showButton "Go on"
   say "Counting 1."
   say "Counting 2."

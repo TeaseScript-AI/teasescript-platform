@@ -83,9 +83,11 @@ class Session {
       readonly pacing?: boolean;
       readonly seed?: number;
       readonly initialSessionTimeMs?: number;
+      /** The compiler warnings `source` is expected to have. */
+      readonly warnings?: readonly string[];
     } = {},
   ) {
-    this.plan = plan(source);
+    this.plan = plan(source, {}, options.warnings);
     const settings = {
       seed: options.seed ?? 0x1234_5678,
       initialSessionTimeMs: options.initialSessionTimeMs ?? 0,
@@ -447,7 +449,7 @@ test("adjusting remaining changes only the current round and zero expires it imm
       "t.remaining = 20 s",
       'say "${t.state} ${t.remaining}"',
       "t.remaining -= 1 h",
-      'say "${t.state} ${t.remaining} fired ${fired}"',
+      'say "${t.state} ${t.remaining} fired ${fired}", instant',
       "wait 1",
       'say "fired ${fired}"',
       "exit",
@@ -519,7 +521,7 @@ test("an expiry block interrupts an unanswered ask and the prompt returns afterw
   const session = new Session(
     [
       "let t = timer async 5 {",
-      '  say "Hurry up."',
+      '  say "Hurry up.", instant',
       "  wait 2",
       '  say "Still waiting."',
       "}",
@@ -539,6 +541,41 @@ test("an expiry block interrupts an unanswered ask and the prompt returns afterw
   // The question is said once; the returning field does not say it again.
   assert.deepEqual(session.said(), ["Name?", "Hurry up.", "Still waiting.", "Hello Ada"]);
   assert.equal(session.snapshot.status, "halted");
+});
+
+test("an expiry block that changes the default speaker leaves the interrupted ask's speaker", () => {
+  // Every step round-trips through checkpoint JSON: while the block waits with the ask suspended, then with it back.
+  const session = new Session(
+    [
+      "speaker mistress {}",
+      "speaker guide {}",
+      "speaker mistress",
+      "let t = timer async 5 {",
+      "  speaker guide",
+      "  wait 2",
+      "}",
+      'let name = askText "Name?"',
+      'say "Hello ${name}"',
+      "exit",
+    ].join("\n"),
+  );
+  const prompt = session.snapshot.foregroundAction;
+  assert.ok(prompt?.kind === "interaction");
+  const speakerId = (identifier: string) =>
+    session.snapshot.speakers.find((speaker) => speaker.identifier === identifier)?.id;
+  assert.equal(prompt.speakerId, speakerId("mistress"));
+  session.at(5_000);
+  assert.equal(session.snapshot.foregroundAction?.kind, "delay", "the block now waits");
+  session.at(7_000);
+  assert.deepEqual(session.snapshot.foregroundAction, prompt, "the same prompt is re-presented");
+  assert.equal(session.snapshot.defaultSpeaker, speakerId("guide"));
+  assert.equal(session.answer("Ada"), "completed");
+  assert.deepEqual(
+    session.events.flatMap((event) =>
+      event.kind === "say" ? [`${event.speaker?.identifier}: ${event.text}`] : [],
+    ),
+    ["mistress: Name?", "guide: Hello Ada"],
+  );
 });
 
 test("exit in an expiry block cancels the interrupted ask without assigning it", () => {
@@ -1013,21 +1050,25 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
   // Scene-time replay makes the complete result independent of observation cadence, not only the output.
-  const scripts = [
-    ...cases.map(([source]) => source),
-    'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
+  // The last sets its timer up while the message's pacing still runs, which the wait before it cannot outlast (TSV060).
+  const scripts: [string, string[]][] = [
+    ...cases.map(([source]): [string, string[]] => [source, []]),
+    [
+      'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
+      ["TSV060"],
+    ],
   ];
-  for (const source of scripts) {
-    const onTime = new Session(source, { pacing: true });
+  for (const [source, warnings] of scripts) {
+    const onTime = new Session(source, { pacing: true, warnings });
     for (let nowMs = 250; nowMs <= 12_000; nowMs += 250) onTime.at(nowMs);
-    const late = new Session(source, { pacing: true }).at(12_000);
+    const late = new Session(source, { pacing: true, warnings }).at(12_000);
     assert.deepEqual(late.events, onTime.events, `events: ${source}`);
     assert.deepEqual(late.snapshot, onTime.snapshot, `snapshot: ${source}`);
   }
 });
 
 test("late observations replay the script at scene time and reject an unexplained observed-time lead", () => {
-  const late = new Session('wait 1\nsay "done"\nwait 1\nsay "later"\nexit').at(5_000);
+  const late = new Session('wait 1\nsay "done", instant\nwait 1\nsay "later"\nexit').at(5_000);
   const delays = late.events.flatMap((event) =>
     event.kind === "actionCompleted" && event.settlement.actionKind === "delay"
       ? [event.settlement.completedAtMs]
@@ -1035,7 +1076,7 @@ test("late observations replay the script at scene time and reject an unexplaine
   );
   assert.deepEqual(delays, [1_000, 2_000], "every delay settles at its deadline");
   assert.deepEqual(late.said(), ["done", "later"]);
-  const onTime = new Session('wait 1\nsay "done"\nwait 1\nsay "later"\nexit');
+  const onTime = new Session('wait 1\nsay "done", instant\nwait 1\nsay "later"\nexit');
   for (const nowMs of [1_000, 2_000, 5_000]) onTime.at(nowMs);
   assert.deepEqual(late.snapshot, onTime.snapshot);
 

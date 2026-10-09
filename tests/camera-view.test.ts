@@ -124,7 +124,7 @@ test("camera view state survives a JSON checkpoint at every boundary", () => {
   assertRuntimeResumeEquivalent(
     [
       "let view = showCamera stage",
-      'say "On the Stage."',
+      'say "On the Stage.", instant',
       "wait 1",
       'view.placement = "window"',
       'say "In the window."',

@@ -81,7 +81,7 @@ With a single directory argument, the sibling `images/` folder holds the package
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
 `// NOTE` at every site, so that converted packages play natively: `showPopup` the message and an OK button, `openUrl`
 the link in the chat and a button, and an image composition its base image. Legacy `getBooleans` becomes native
-`askBooleans(message:, texts:, defaults:)`, with `cancel:` where the script tests the answers for null, as the legacy
+`askBooleans message, texts:, prefill:`, with `cancel:` where the script tests the answers for null, as the legacy
 dialog's Cancel gave null. `--accepted` (every form) or `--accepted=showPopup,openUrl,chooseFile,layeredScene`
 emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
 stand-ins.

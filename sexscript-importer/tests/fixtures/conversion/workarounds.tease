@@ -26,8 +26,7 @@ say "Words ${words.length}"
 // NOTE SX_LOCALE_WORKAROUND line 7: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
 let conditional = not ["de", "en"].contains("en")
 if conditional {
-  say "Check fonts?"
-  conditional = (choose yes: "Yes", no: "No") == "yes"
+  conditional = askBoolean "Check fonts?"
 }
 if conditional {
   say "Fonts"

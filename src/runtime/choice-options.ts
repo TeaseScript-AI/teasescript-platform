@@ -10,7 +10,11 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import type { TemporalContext } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import { getSerializableProperty, type SerializableRuntimeValue } from "./serializable-values.js";
+import {
+  getSerializableProperty,
+  serializableEquals,
+  type SerializableRuntimeValue,
+} from "./serializable-values.js";
 import {
   isDuration,
   isList,
@@ -68,6 +72,19 @@ export function expandChoiceOptions(
       span,
     );
   return buttons;
+}
+
+/**
+ * The position of the button that a `prefill:` value preselects (V30 §19): the first whose value equals it. `null`
+ * preselects none, and so does a value that no button has, for which the result is `undefined`.
+ */
+export function preselectedChoice(
+  options: readonly InteractionChoiceOption[],
+  prefill: SerializableRuntimeValue,
+): number | null | undefined {
+  if (prefill === null) return null;
+  const index = options.findIndex((option) => serializableEquals(option.value, prefill));
+  return index === -1 ? undefined : index;
 }
 
 function choiceButton(

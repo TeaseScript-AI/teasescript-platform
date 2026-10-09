@@ -79,7 +79,8 @@ export interface MaterializedForm {
 
 /**
  * Builds a form from its prepared request (V30 §20): `fields`, an object or dict of starting values and field
- * descriptors, or for `askBooleans` its parallel `texts` and `defaults`, and the optional `hint` and `submit`. Each
+ * descriptors, or for `askBooleans` its parallel `texts` and `defaults` (its `prefill:`), and the optional `hint` and
+ * `submit`. Each
  * field is checked once, here; an invalid one fails with `TSR052` and a message that names it.
  */
 export function materializeForm(
@@ -135,18 +136,18 @@ export function materializeForm(
     if (texts === undefined || defaults === undefined || fieldsValue !== undefined)
       throw fault("The prepared form request is malformed.", span);
     if (!isList(texts) || !isList(defaults))
-      throw fault("askBooleans takes a list of texts and a list of defaults.", span);
+      throw fault("askBooleans takes a list of texts and a prefill list.", span);
     if (texts.items.length !== defaults.items.length)
       throw new RuntimeFault(
         "TSR058",
-        `askBooleans has ${texts.items.length} texts but ${defaults.items.length} defaults; give one default for each text.`,
+        `askBooleans has ${texts.items.length} texts but ${defaults.items.length} prefill values; give one for each text.`,
         copySpan(span),
       );
     texts.items.forEach((text, index) => {
       const start = defaults.items[index]!;
       if (typeof start !== "boolean")
         throw fault(
-          `askBooleans default ${index} (${JSON.stringify(messageText(fieldText(text, span, context)))}): takes true or false, not ${describeRuntimeValue(start)}.`,
+          `askBooleans prefill ${index} (${JSON.stringify(messageText(fieldText(text, span, context)))}): takes true or false, not ${describeRuntimeValue(start)}.`,
           span,
         );
       add(
@@ -478,7 +479,7 @@ function scalarStart(
   field: FormScalarField,
   start: SerializableRuntimeValue,
 ): RuntimeFormValue | undefined {
-  // Like an ask's default, `null` or blank text prefills nothing.
+  // Like an ask's prefill, `null` or blank text prefills nothing.
   if (start === null || (typeof start === "string" && isBlankTextAnswer(start))) return null;
   switch (field.kind) {
     case "integer":

@@ -560,9 +560,9 @@ test("askForm with cancel: may return null, which the script checks before readi
 test("askBooleans asks with one toggle per text and returns their states in order, or null when cancelled", () => {
   const plan = compileValidPlan(
     [
-      'let selected = askBooleans(message: "Choose all that apply", texts: ["A", "B", "A"], defaults: [true, false, false])',
+      'let selected = askBooleans(message: "Choose all that apply", texts: ["A", "B", "A"], prefill: [true, false, false])',
       "let last: boolean = selected[2]",
-      'let again = askBooleans("Again?", texts: ["X"], defaults: [false], cancel: "Back")',
+      'let again = askBooleans("Again?", texts: ["X"], prefill: [false], cancel: "Back")',
       "exit",
     ].join("\n"),
   );
@@ -599,15 +599,15 @@ test("askBooleans asks with one toggle per text and returns their states in orde
 
   const errors = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
-  assert.deepEqual(errors('let a = askBooleans(texts: ["A", "B"], defaults: [true])'), [
-    "askBooleans has 2 texts but 1 defaults; give one default for each text.",
+  assert.deepEqual(errors('let a = askBooleans(texts: ["A", "B"], prefill: [true])'), [
+    "askBooleans has 2 texts but 1 prefill values; give one for each text.",
   ]);
   assert.deepEqual(errors('let a = askBooleans("Q", texts: ["A"])'), [
-    `askBooleans needs defaults:, as in 'askBooleans "Choose", texts: ["A", "B"], defaults: [true, false]'.`,
+    `askBooleans needs prefill:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
   ]);
   assert.deepEqual(
     errors(
-      'let a = askBooleans(texts: ["A"], defaults: [true], cancel: "Back")\nlet b: boolean[] = a',
+      'let a = askBooleans(texts: ["A"], prefill: [true], cancel: "Back")\nlet b: boolean[] = a',
     ),
     [
       "'b' is declared as boolean[], so it cannot start as a list (boolean[]) or null. Check it first: if a != null { ... }",
@@ -615,17 +615,17 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   );
   // Lists of different lengths that the compiler cannot see fail when the form opens.
   const computed = compileValidPlan(
-    'let texts = ["A", "B"]\nlet defaults = [true]\nlet a = askBooleans(texts: texts, defaults: defaults)\nexit',
+    'let texts = ["A", "B"]\nlet saved = [true]\nlet a = askBooleans(texts: texts, prefill: saved)\nexit',
   );
   const failure = run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure;
   assert.deepEqual(
     [failure?.code, failure?.message],
-    ["TSR058", "askBooleans has 2 texts but 1 defaults; give one default for each text."],
+    ["TSR058", "askBooleans has 2 texts but 1 prefill values; give one for each text."],
   );
   // A host cannot configure the engine's name as its own.
   for (const option of ["builtins", "globals"] as const)
     assert.ok(
-      compileSource('let a = askBooleans(texts: ["A"], defaults: [true])\nexit', {
+      compileSource('let a = askBooleans(texts: ["A"], prefill: [true])\nexit', {
         [option]: ["askBooleans"],
       }).diagnostics.some((diagnostic) => diagnostic.code === "TSV001"),
       option,

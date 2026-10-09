@@ -108,6 +108,7 @@ export type {
 export { RuntimeDataError } from "./operations/support.js";
 import type {
   ActionRequestedEvent,
+  DeveloperWarningEvent,
   ExitEvent,
   InterpreterEvent,
   OutputSpeaker,
@@ -189,6 +190,7 @@ import {
 import { expireTimerAction, stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
 import {
   emitDeveloperWarning,
+  stopAllAudio,
   stopAllMediaForSessionEnd,
   stopMediaAction,
   stopStageVideo,
@@ -213,7 +215,7 @@ import {
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
-import { expandChoiceOptions } from "./choice-options.js";
+import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 
@@ -1211,6 +1213,24 @@ function executePlannedInstruction(
           events,
         );
       }
+      if (materialized.warning !== undefined) {
+        // The pacing gate settled above took its sequence already.
+        assertEventSequenceCapacity(
+          snapshot,
+          requiredEventSequences - (backgroundGate === undefined ? 0 : 1) + 1,
+          instruction.span,
+        );
+        events.push(
+          Object.freeze({
+            kind: "developerWarning",
+            sequence: takeSequence(snapshot),
+            severity: "warning",
+            code: materialized.warning.code,
+            message: materialized.warning.message,
+            span: copySpan(instruction.span),
+          } satisfies DeveloperWarningEvent),
+        );
+      }
       // A form's descriptions and outro are said as one prose message as it opens, after its question.
       if (materialized.prose !== undefined) {
         assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
@@ -1393,6 +1413,20 @@ function executePlannedInstruction(
     case "playMedia":
       startMedia(plan, instruction, snapshot, evaluator, events);
       return;
+    case "stopAudio":
+      for (const mediaId of stopAllAudio(plan, snapshot, events, instruction.span)) {
+        // Like stop() on the handle of each sound.
+        evaluator.trace?.writeState(
+          "mutation",
+          stateKey("media", mediaId),
+          "timed",
+          "media.stop()",
+          null,
+          instruction.span,
+        );
+      }
+      advance(snapshot);
+      return;
     case "goto":
       executeGoto(instruction, snapshot, contextRootId(snapshot), events);
       return;
@@ -1429,6 +1463,8 @@ interface MaterializedInteractionUi {
   readonly form?: RuntimeFormStateSnapshot;
   /** The prose a form's speaker says as it opens. */
   readonly prose?: string;
+  /** A developer warning about how it opens, such as a `prefill:` that no button's value matches. */
+  readonly warning?: { readonly code: string; readonly message: string };
   readonly stagedWrites: readonly {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -1468,6 +1504,7 @@ function materializeInteractionUi(
   let ui: InteractionUiPayload;
   let form: RuntimeFormStateSnapshot | undefined;
   let prose: string | undefined;
+  let warning: MaterializedInteractionUi["warning"];
   if (prepared.kind === "button") {
     ui = {
       kind: "button",
@@ -1483,7 +1520,7 @@ function materializeInteractionUi(
     const integer = prepared.kind === "number" && prepared.integer === true;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      if (!isEmptyDefault(temporary.value))
+      if (!isEmptyPrefill(temporary.value))
         prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
       stagedWrites.push({ temporaryId: temporary.id, value: prefill ?? null });
     }
@@ -1499,7 +1536,7 @@ function materializeInteractionUi(
     let prefill: string | undefined;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      if (!isEmptyDefault(temporary.value))
+      if (!isEmptyPrefill(temporary.value))
         prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
       stagedWrites.push({ temporaryId: temporary.id, value: prefill ?? null });
     }
@@ -1539,9 +1576,37 @@ function materializeInteractionUi(
         span,
       );
     }
+    const options = expandChoiceOptions(source.value.items, prepared.values, temporalContext, span);
+    let preselected: number | null | undefined = null;
+    if (prepared.prefillTemporary !== undefined && prepared.booleanPrefill === true) {
+      // askBoolean: true or false preselects its button, and null or blank text none, as for an ask's prefill (V30 §20).
+      const prefill = read(prepared.prefillTemporary).value;
+      if (typeof prefill === "boolean") preselected = preselectedChoice(options, prefill);
+      else if (prefill !== null && !(typeof prefill === "string" && isBlankTextAnswer(prefill)))
+        throw fault(
+          "TSR052",
+          `The prefill of askBoolean must be true or false, not ${describeRuntimeValue(prefill)}.`,
+          span,
+        );
+    } else if (prepared.prefillTemporary !== undefined) {
+      const prefill = read(prepared.prefillTemporary).value;
+      preselected = preselectedChoice(options, prefill);
+      // A value no button has preselects none; the script goes on, and Debug shows why (owner decision, 2026-10-08).
+      if (preselected === undefined)
+        warning = {
+          code: "TSW017",
+          message: `No button has the prefill value (${prefillNotation(prefill)}), so none is preselected.${
+            // The likely mistake: the text of a button whose value differs.
+            typeof prefill === "string" && options.some((option) => option.text === prefill)
+              ? " 'prefill:' gives a button's value, not its text."
+              : ""
+          }`,
+        };
+    }
     ui = {
       kind: "choice",
-      options: expandChoiceOptions(source.value.items, prepared.values, temporalContext, span),
+      options,
+      ...(typeof preselected === "number" ? { preselected } : {}),
       accessibleName: prepared.accessibleName,
     };
   }
@@ -1551,6 +1616,7 @@ function materializeInteractionUi(
     ui,
     ...(form === undefined ? {} : { form }),
     ...(prose === undefined ? {} : { prose }),
+    ...(warning === undefined ? {} : { warning }),
     stagedWrites: Object.freeze(
       stagedWrites.map((staged) =>
         Object.freeze({
@@ -1562,11 +1628,18 @@ function materializeInteractionUi(
   });
 }
 
+/** A `prefill:` value as a warning shows it: a text in quotes, a number or boolean as written, or else its kind. */
+function prefillNotation(value: SerializableRuntimeValue): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return describeRuntimeValue(value);
+}
+
 /**
- * A default that is `null` or blank text when the field opens prefills nothing (V30 §20), such as a `load` of a key a
+ * A prefill that is `null` or blank text when the field opens prefills nothing (V30 §20), such as a `load` of a key a
  * first play has not saved yet. Its temporary then holds `null`, which checkpoint validation reads as no prefill.
  */
-function isEmptyDefault(value: SerializableRuntimeValue): boolean {
+function isEmptyPrefill(value: SerializableRuntimeValue): boolean {
   return value === null || (typeof value === "string" && isBlankTextAnswer(value));
 }
 
@@ -1636,18 +1709,18 @@ function imageFilterTexts(
   });
 }
 
-/** The prefill text of a default answer, which must be an answer the field accepts. */
+/** The prefill text of a `prefill:` value, which must be an answer the field accepts. */
 function interactionPrefill(
   kind: "text" | "number" | "integer",
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): string {
   if (kind === "integer") {
-    // A non-whole default is an error, never rounded.
+    // A non-whole prefill is an error, never rounded.
     if (typeof value !== "number" || !Number.isSafeInteger(value))
       throw fault(
         "TSR052",
-        "The default answer of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'default:'.",
+        "The prefill of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'prefill:'.",
         span,
       );
     return numberAnswerText(value);
@@ -1656,7 +1729,7 @@ function interactionPrefill(
     if (typeof value !== "number" || !Number.isFinite(value))
       throw fault(
         "TSR052",
-        "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.",
+        "The prefill of askNumber must be a finite number. Ask without 'prefill:' when there is no number to offer.",
         span,
       );
     return numberAnswerText(value);
@@ -1664,13 +1737,13 @@ function interactionPrefill(
   if (typeof value !== "string")
     throw fault(
       "TSR052",
-      "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.",
+      "The prefill of askText must be text. Write the value as text with interpolation: 'prefill: \"${...}\"'.",
       span,
     );
   return value;
 }
 
-/** The ISO prefill text of a date or time default answer, which must be of the kind the field asks for. */
+/** The ISO prefill text of a date or time `prefill:` value, which must be of the kind the field asks for. */
 function temporalPrefill(
   kind: InteractionTemporalKind,
   value: SerializableRuntimeValue,
@@ -1691,7 +1764,7 @@ function temporalPrefill(
         : ["askDateTime", "a date and time", "toDateTime"];
   throw fault(
     "TSR052",
-    `The default answer of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
     span,
   );
 }
@@ -2311,7 +2384,12 @@ function cloneInteractionUi(
       value: cloneInteractionChoiceValue(option.value),
       ...(option.background === undefined ? {} : { background: option.background }),
     }));
-    return { kind: "choice", options, accessibleName };
+    return {
+      kind: "choice",
+      options,
+      ...(ui.preselected === undefined ? {} : { preselected: ui.preselected }),
+      accessibleName,
+    };
   }
   if (ui.kind === "button")
     return {

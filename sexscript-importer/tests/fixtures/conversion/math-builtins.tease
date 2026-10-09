@@ -1,5 +1,5 @@
 // Java's Math.sqrt(), Math.pow(), and Math.abs() are TeaseScript's sqrt(), pow(), and abs().
-let side = askInteger "Side?", default: 3
+let side = askInteger "Side?", prefill: 3
 let area: number = pow(side, 2)
 let diagonal = sqrt(2 * area)
 // Java's (int) cast truncates, Math.round() rounds, Math.floor() floors.

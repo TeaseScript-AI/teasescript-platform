@@ -129,6 +129,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "removePermanentButton",
   "playAudio",
   "playVideo",
+  "stopAudio",
   "showBackgroundColor",
   "showBackgroundImage",
   "showOverlayImage",

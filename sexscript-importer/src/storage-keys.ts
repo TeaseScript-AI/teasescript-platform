@@ -1991,7 +1991,7 @@ function valueType(value: IrExpression): string | null {
         ? "boolean"
         : null;
     case "input":
-      return value.input === "askText" ? "string" : null;
+      return value.input === "askText" ? "string" : value.input === "askBoolean" ? "boolean" : null;
     default:
       return null;
   }

@@ -5,8 +5,7 @@ if progress == null {
   progress = "new"
 }
 save 1 as "story.progress"
-say "Start the first chapter?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Start the first chapter?" {
   goto "chapters/first.tease"
 }
 // The legacy player found no such script and ended the chain.

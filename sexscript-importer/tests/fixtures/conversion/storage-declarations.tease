@@ -22,8 +22,7 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
 // A read that keeps its null declares its key's type at the variable it starts, with the other values the script gives
 // that variable.
 let payload: boolean | integer[] | string | null = load "game.payload", default: null
-say "A list?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "A list?" {
   payload = [1]
 } else {
   payload = "text"
@@ -35,8 +34,7 @@ save payload == null as "game.payloadMissing"
 function mark {
   save 1 as "game.marked"
 }
-say "Check?"
-if (choose yes: "Yes", no: "No") == "yes" and load("game.marked", default: null) == null {
+if askBoolean("Check?") and load("game.marked", default: null) == null {
   say "Not marked."
 }
 // A number key's empty value is a number.
@@ -59,7 +57,7 @@ save 3 as "game.count"
 // NOTE SX_LOAD_OPEN_NULL line 22: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
 let value = load "game.count", default: sexscriptLegacyValue(null)
 while value == null {
-  value = askInteger "A number?", default: 1
+  value = askInteger "A number?", prefill: 1
 }
 // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Value ${value + 1}"
@@ -69,7 +67,7 @@ function fill(answer) {
 }
 let savedFilled: boolean? = load "game.filled", default: null
 let filled = sexscriptLegacyValue(savedFilled)
-filled = fill(askText("Fill?", default: "text"))
+filled = fill(askText("Fill?", prefill: "text"))
 save true as "game.filled"
 say "Filled ${filled == null}"
 // A read of a key whose type nothing tells, which a list of a known type takes as a new item, reads the items' empty
@@ -89,8 +87,7 @@ if savedPoints == null {
   save 80 as "game.points"
 }
 let points = sexscriptLegacyLoadInteger("game.points")
-say "Halve the distance to 90?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Halve the distance to 90?" {
   points = 90 + (points - 90) / 2
 }
 save 7 + points as "game.points"

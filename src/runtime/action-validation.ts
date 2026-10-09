@@ -7,7 +7,7 @@ import {
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { isIntegerAnswerText, isValidInteractionPrefill } from "../interaction-answers.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
-import { expandChoiceOptions } from "./choice-options.js";
+import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { RuntimeFault } from "./errors.js";
 import {
   serializableEquals,
@@ -1373,7 +1373,8 @@ function validInteractionAction(
     return validPreparedInteractionAction(instruction, action, snapshot, speakers);
   }
   if (!interactionUiEqual(instruction.ui, action.ui) || action.timeoutMs !== null) return false;
-  if (instruction.speaker === null) return action.speakerId === snapshot.defaultSpeaker;
+  // The action keeps the default speaker of its request; an interrupt block may have changed the default since.
+  if (instruction.speaker === null) return true;
   const explicitSpeaker = speakerGlobalValue(snapshot, instruction.speaker);
   if (
     !isPlainRecord(explicitSpeaker) ||
@@ -1498,7 +1499,7 @@ function preparedInteractionUiMatchesAction(
       prepared.hintTemporary === null
         ? null
         : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
-    // A field without a prefill left `null` in the temporary of its empty default.
+    // A field without a prefill left `null` in the temporary of its empty prefill.
     const prefill =
       prepared.prefillTemporary === undefined
         ? undefined
@@ -1551,7 +1552,24 @@ function preparedInteractionUiMatchesAction(
     );
   }
   const options = preparedChoiceOptions(prepared, temporaries, context, span);
-  return options !== undefined && choiceOptionsEqual(options, actual.options);
+  if (options === undefined || !choiceOptionsEqual(options, actual.options)) return false;
+  // The prefill temporary keeps the value, so the preselected button is found again.
+  if (prepared.prefillTemporary === undefined) return actual.preselected === undefined;
+  const prefill = runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
+  if (prefill === undefined || validateCapturedSerializableValue(prefill) !== null) return false;
+  // askBoolean opens only with true, false, null, or blank text, as its prefill must be.
+  if (
+    prepared.booleanPrefill === true &&
+    !(
+      typeof prefill === "boolean" ||
+      prefill === null ||
+      (typeof prefill === "string" && !interactionStringHasNonWhitespace(prefill))
+    )
+  )
+    return false;
+  // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured prefill above.
+  const preselected = preselectedChoice(options, prefill as SerializableRuntimeValue);
+  return actual.preselected === (typeof preselected === "number" ? preselected : undefined);
 }
 
 function accessibleNameEqual(
@@ -1602,7 +1620,12 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
             ]
           : kind === "form"
             ? ["kind", "shape", "fields", "hint", "submit", "cancel", "timeout", "accessibleName"]
-            : ["kind", "options", "accessibleName"];
+            : [
+                "kind",
+                "options",
+                "accessibleName",
+                ...("preselected" in value ? ["preselected"] : []),
+              ];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
     ("integer" in value && value.integer !== true) ||
@@ -1705,6 +1728,9 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
     )
       return false;
   }
+  // A preselected button is one of the buttons.
+  const preselected = "preselected" in value ? value.preselected : 0;
+  if (!nonNegativeSafeInteger(preselected) || preselected >= value.options.length) return false;
   return !measurementExhausted;
 }
 
@@ -1740,7 +1766,10 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
     );
   // A form is always prepared.
   if (expected.kind === "form") return false;
-  return choiceOptionsEqual(expected.options, actual.options);
+  return (
+    choiceOptionsEqual(expected.options, actual.options) &&
+    actual.preselected === expected.preselected
+  );
 }
 
 /** The request fields of an image UI, read without assuming their types; `null` when one is malformed. */
@@ -2161,7 +2190,7 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&
-      // Only a default prefills, and one that was empty when the field opened did not.
+      // Only a `prefill:` prefills, and one that was empty when the field opened did not.
       (!("prefill" in ui) || prepared.prefillTemporary !== undefined) &&
       ui.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
@@ -2174,7 +2203,12 @@ function preparedUiFitsPresentedUi(
   // The request temporary is cleared after completion; the recorded request was checked by its shape.
   if (prepared.kind === "image") return true;
   if (prepared.kind === "form") return ui.shape === prepared.shape.kind;
-  return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
+  return (
+    Array.isArray(ui.options) &&
+    buttonsFitWrittenValues(prepared.values, ui.options) &&
+    // Only a `prefill:` preselects; its temporary is cleared after completion.
+    (!("preselected" in ui) || prepared.prefillTemporary !== undefined)
+  );
 }
 
 /**

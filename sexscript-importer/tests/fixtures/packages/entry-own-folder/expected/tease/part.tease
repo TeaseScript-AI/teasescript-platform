@@ -3,12 +3,10 @@ title: "Part"
 ---
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
-say "Bonus?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Bonus?" {
   goto "addon.tease"
 }
-say "Again?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Again?" {
   goto "tease.tease"
 }
 say "The end"

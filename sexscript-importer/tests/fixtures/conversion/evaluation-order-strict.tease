@@ -14,8 +14,7 @@ function yesText {
   return "Yes"
 }
 let option = yesText()
-say "Question"
-let result = (choose yes: option, no: "No") == "yes"
+let result = askBoolean "Question", yesText: option
 function getRandom(maxValue) {
   return maxValue - 1
 }
@@ -28,8 +27,7 @@ if question != null {
   say question
 }
 let answer = askText
-say "Ready?"
-let ignoredAnswer1 = choose yes: "Yes", no: "No"
+let ignoredAnswer1 = askBoolean "Ready?"
 let match = 1
 if count == match {
   say "matched"

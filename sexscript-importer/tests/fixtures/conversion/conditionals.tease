@@ -61,7 +61,7 @@ if switchValue1 < 2 {
 say "A number?"
 // NOTE SX_UNION_TYPE line 24: Groovy let 'given' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if given is string { ... }
 let given: string | integer = "five"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean {
   given = 5
 }
 if given is number {
@@ -71,10 +71,8 @@ if given is string {
   say "A text"
 }
 // Several conditional fragments in one text are computed first, so the text is written once.
-say "Leashed?"
-let leashed = (choose yes: "Yes", no: "No") == "yes"
-say "Gagged?"
-let gagged = (choose yes: "Yes", no: "No") == "yes"
+let leashed = askBoolean "Leashed?"
+let gagged = askBoolean "Gagged?"
 let conditional = ""
 if leashed {
   conditional = " with the leash"

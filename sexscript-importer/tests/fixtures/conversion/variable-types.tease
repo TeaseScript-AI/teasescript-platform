@@ -110,8 +110,7 @@ say toys[0]
 // A list of text that later holds lists of text keeps both in a union of its elements.
 // NOTE SX_UNION_TYPE line 51: Groovy gave the list 'words' elements of several types; TeaseScript declares it '(string | string[])[]' (ADR 0021 §3), so a use of an element that needs one of these types must keep it in a variable and test it first, as in: if item is string { ... }
 let words: (string | string[])[] = ["Rub", "Caress"]
-say "More?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "More?" {
   words = [
     ["Pinch", "Twist"],
     ["them!"]
@@ -148,8 +147,7 @@ say "P ${picked}"
 // A list that may become null, of elements no code shows, and a value that is first a number and then a date, are
 // declared with types an annotation can write.
 let picks: list | null = []
-say "Clear?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Clear?" {
   picks = null
 }
 say "Cleared ${picks == null}"
@@ -159,8 +157,7 @@ stamp = getDateTime()
 say "Stamped"
 // A variable that holds one of two ranges starts as null, not as a list.
 let span = null
-say "Low?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Low?" {
   span = 1..=3
 } else {
   span = 4..=6
@@ -176,7 +173,7 @@ fade(0.5)
 // A function that ends in an endless loop returns only what its returns give.
 function pickPage {
   while true {
-    let pageValue = askInteger "Page?", default: 1
+    let pageValue = askInteger "Page?", prefill: 1
     if pageValue > 0 {
       return pageValue
     }

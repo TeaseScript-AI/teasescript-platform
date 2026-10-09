@@ -268,10 +268,10 @@ test("a global with default: starts with that value and assigns its value where 
       "Global 'attempts' needs a value from the start of the session, before the story runs, so it cannot start with 'localCount'. Add a start value, as in 'global attempts = localCount, default: 0', or write 'global attempts = 0' and later 'attempts = localCount'.",
     ],
   );
-  // The default of an ask is the ask's, so the start value would ask the player; grouping gives it to the global.
+  // A compact ask takes the prefill, so the start value would ask the player; grouping gives a default to the global.
   assert.deepEqual(
     diagnostics([
-      { path: "main.tease", source: 'global name = askText "Name?", default: "nobody"\nexit' },
+      { path: "main.tease", source: 'global name = askText "Name?", prefill: "nobody"\nexit' },
     ]),
     [["main.tease", "TSV055", 1]],
   );

@@ -29,7 +29,7 @@ import {
   type RandomDrawView,
   type RandomPolicy,
 } from "./random-control.js";
-import type { RuntimeCapabilities } from "./evaluator.js";
+import type { RuntimeBuiltinFunction, RuntimeCapabilities } from "./evaluator.js";
 import type { InterpreterEvent } from "./events.js";
 import type { RuntimeInstructionTrace } from "./instruction-trace.js";
 import { runtimeDebugPreview, type RuntimeDebugContext } from "./debug-trace.js";
@@ -735,6 +735,7 @@ function sessionCapabilities(options: RuntimeSessionOptions): RuntimeCapabilitie
   if (builtins !== undefined && (typeof builtins !== "object" || builtins === null)) {
     throw new TypeError("capabilities.builtins must be an object.");
   }
+  const admitted = builtins === undefined ? undefined : admittedBuiltins(builtins);
   const random = capabilities.random;
   if (
     random !== undefined &&
@@ -743,9 +744,28 @@ function sessionCapabilities(options: RuntimeSessionOptions): RuntimeCapabilitie
     throw new TypeError("capabilities.random must have a next() method.");
   }
   return {
-    ...(builtins === undefined ? {} : { builtins }),
+    ...(admitted === undefined ? {} : { builtins: admitted }),
     ...(random === undefined ? {} : { random }),
   };
+}
+
+/**
+ * The functions `builtins` gives, each read once into a prototype-free record, so a call never meets a value that is
+ * not a function. An explicit `undefined` gives no builtin of that name.
+ */
+function admittedBuiltins(
+  builtins: Readonly<Record<string, RuntimeBuiltinFunction>>,
+): Readonly<Record<string, RuntimeBuiltinFunction>> {
+  const admitted: Record<string, RuntimeBuiltinFunction> = Object.create(null);
+  for (const name of Object.keys(builtins)) {
+    const builtin = builtins[name];
+    if (builtin === undefined) continue;
+    if (typeof builtin !== "function") {
+      throw new TypeError(`capabilities.builtins.${name} must be a function.`);
+    }
+    admitted[name] = builtin;
+  }
+  return Object.freeze(admitted);
 }
 
 /** The random policy `randomControl` gives a session of `plan`, checked once; `null` leaves every draw natural. */

@@ -118,8 +118,7 @@ function setVolume {
 // A null the script sets a text variable to is the empty text too; a value of a type that the importer cannot tell
 // keeps the read of an open type.
 let dompic = load "game.dompic", default: ""
-say "Reset the picture?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Reset the picture?" {
   dompic = ""
 }
 if dompic == "" {
@@ -155,8 +154,7 @@ function readName {
 }
 function decide {
   let ret = null
-  say "Ready?"
-  ret = (choose yes: "Yes", no: "No") == "yes"
+  ret = askBoolean "Ready?"
   return ret
 }
 say "${readName()} ${decide()}"
@@ -220,8 +218,7 @@ if noteCopy == null {
 // NOTE SX_LOAD_OPEN_NULL line 104: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let oldHints = load "game.oldHints", default: sexscriptLegacyValue(null)
 function readHint {
-  say "A hint?"
-  if (choose yes: "Yes", no: "No") == "yes" {
+  if askBoolean "A hint?" {
     let savedHint: string? = load "game.hint", default: null
     return savedHint
   }
@@ -232,14 +229,12 @@ if readHint() == null {
 }
 // A variable is apart from another of the same name in another block.
 function work {
-  say "Read?"
-  if (choose yes: "Yes", no: "No") == "yes" {
+  if askBoolean "Read?" {
     let v = load "game.work", default: ""
     say "Work ${v}"
   }
-  say "Ask?"
-  if (choose yes: "Yes", no: "No") == "yes" {
-    let v = askText "Your name?", default: "x"
+  if askBoolean "Ask?" {
+    let v = askText "Your name?", prefill: "x"
     if v == null {
       say "No name."
     }
@@ -284,8 +279,7 @@ say "Note ${checkNote()} ${checkNote(null)}"
 // A variable that such a text is copied into holds its null too, where no null test rules it out.
 let firstPic: string? = load "game.firstPic", default: null
 let shownPic: string? = "none"
-say "Show the first?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Show the first?" {
   shownPic = firstPic
 }
 say "Picture ${shownPic}"
@@ -385,14 +379,12 @@ let grids = [["old"]]
 grids[0][0] = load "game.grid${slot}", default: ""
 say "Grid ${grids[0][0]}"
 function fillLists {
-  say "Words?"
-  if (choose yes: "Yes", no: "No") == "yes" {
+  if askBoolean "Words?" {
     let values = ["old"]
     values[0] = load "game.word${slot}", default: ""
     say "Word ${values[0]}"
   }
-  say "Numbers?"
-  if (choose yes: "Yes", no: "No") == "yes" {
+  if askBoolean "Numbers?" {
     let values = [1]
     say "Number ${values[0]}"
   }

@@ -215,8 +215,9 @@ export class DebugRecorder {
     invoke: (admission: (store: CapturedMediaAdmission) => CapturedMediaAdmission) => R,
     continuation = false,
   ): R {
-    const owned = owner === this.#owner;
-    const paused = owned ? this.#paused.draw : null;
+    // Another engine's call, such as one of a session the recorder has moved on from, never reaches the recording.
+    if (owner !== this.#owner) return invoke((store) => store);
+    const paused = this.#paused.draw;
     // While the session stands paused at a random draw, the engine refuses every call but its resolution: such a call
     // changes nothing and needs no record, so the log, which it never copies, stays as it was.
     if (paused !== null && kind !== "resumeRandomDraw") {
@@ -227,9 +228,9 @@ export class DebugRecorder {
       }
       return result;
     }
-    const prepared = owned ? this.#prepare(input, args, continuation) : null;
+    const prepared = this.#prepare(input, args, continuation);
     // A resolution continues the record of the call that paused, unless the log started again before it.
-    const continues = owned && kind === "resumeRandomDraw" && this.#paused.record && !this.#broken;
+    const continues = kind === "resumeRandomDraw" && this.#paused.record && !this.#broken;
     const queries: DebugAdmissionQuery[] = [];
     const admission = (store: CapturedMediaAdmission): CapturedMediaAdmission => ({
       holds: (reference, mediaKind) => {
@@ -237,8 +238,10 @@ export class DebugRecorder {
         try {
           result = store.holds(reference, mediaKind);
         } catch (error) {
-          // The recording keeps only the store's answers, so a store that throws cannot be replayed.
-          this.#problem ??= "The media store failed during a recorded call.";
+          // The recording keeps only the store's answers, so a store that throws cannot be replayed. A frozen record
+          // holds no later call, so it keeps its evidence as it was.
+          if (this.#frozen === null)
+            this.#problem ??= "The media store failed during a recorded call.";
           throw error;
         }
         queries.push({ reference, kind: mediaKind, result });
@@ -253,7 +256,6 @@ export class DebugRecorder {
         this.#add(kind, prepared, queries, null, error instanceof Error ? error.name : "Error");
       throw error;
     }
-    if (!owned) return result;
     if (paused !== null && unchangedWhilePaused(result, paused)) return result;
     let recorded = false;
     if (prepared !== null) {
