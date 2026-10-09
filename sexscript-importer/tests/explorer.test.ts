@@ -719,7 +719,12 @@ test("a missed way's note tells what the condition itself needs: a stored value 
     noteOf({
       goals: [level, older],
       guards: [],
-      chains: new Map([["tour.level", { best: 0, closest: { distance: 0 } }]]),
+      chains: new Map([
+        [
+          "tour.level",
+          { best: 0, closest: { distance: 0, value: "tour.level = 2", left: { sessions: 1 } } },
+        ],
+      ]),
       notes: new Map([[older, "needs tour.oldLevel == 2; no explored session stored it"]]),
     }),
     "needs tour.level == 2; a session from storage that has it did not reach the condition",
@@ -738,6 +743,25 @@ test("a missed way's note tells what the condition itself needs: a stored value 
       ]),
     }),
     'needs desk.mode = "inspect"; no explored session stored it',
+  );
+  // A note that no session stored a key, written before a session did, says what the closest stored value is.
+  const plugged = goal("room.plugged", [], { operator: "!=", constant: 1, shown: true });
+  assert.equal(
+    noteOf({
+      goals: [plugged],
+      guards: [],
+      chains: new Map([
+        [
+          "room.plugged",
+          {
+            best: 1,
+            closest: { distance: 1, value: "room.plugged = true", left: { sessions: 2 } },
+          },
+        ],
+      ]),
+      notes: new Map([[plugged, "needs room.plugged != true; no explored session stored it"]]),
+    }),
+    "needs room.plugged != true; best reached: room.plugged = true after 2 sessions",
   );
   // The condition's own note goes before its chain's, even when only the chain's has progress.
   assert.equal(
