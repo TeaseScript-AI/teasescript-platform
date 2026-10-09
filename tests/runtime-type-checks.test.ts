@@ -241,6 +241,13 @@ test("an index or member that a value does not have names the value, its bounds,
       "level",
     ],
     [
+      // 'speaker' names the current speaker of a say, which is not a variable.
+      'speaker vera {}\nsay as vera "${(speaker)()}"',
+      "TSR011",
+      "'speaker' is not a function the Playroom provides, so it cannot be called. Call a function by its name instead.",
+      "speaker",
+    ],
+    [
       "let a = [[1]]\na[0]()",
       "TSR014",
       "Only a function or a method can be called, but this is neither. Call a function by its name instead.",
