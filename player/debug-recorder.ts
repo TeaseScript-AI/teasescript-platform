@@ -238,8 +238,10 @@ export class DebugRecorder {
         try {
           result = store.holds(reference, mediaKind);
         } catch (error) {
-          // The recording keeps only the store's answers, so a store that throws cannot be replayed.
-          this.#problem ??= "The media store failed during a recorded call.";
+          // The recording keeps only the store's answers, so a store that throws cannot be replayed. A frozen record
+          // holds no later call, so it keeps its evidence as it was.
+          if (this.#frozen === null)
+            this.#problem ??= "The media store failed during a recorded call.";
           throw error;
         }
         queries.push({ reference, kind: mediaKind, result });

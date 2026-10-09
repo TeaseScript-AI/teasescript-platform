@@ -368,6 +368,36 @@ test("a media store that throws during a recorded call leaves the recording inco
   );
 });
 
+test("a media store that throws after the record froze leaves the frozen record as it was", () => {
+  // With the scope IDs used up, a timer block throws in its middle, which freezes the record.
+  const source = [
+    "let go = true",
+    "timer async 1 s {",
+    '  say "before", instant',
+    "  if go {",
+    '    say "deep", instant',
+    "  }",
+    "}",
+    'let picture = askImage("Picture", allowCamera: false)',
+    "exit",
+  ].join("\n");
+  const recorder = new DebugRecorder();
+  const session = startedWithScopesUsedUp(source, 1, recorder);
+  assert.throws(() => observePlayerRuntimeTime(session, 1_000), SCOPES_USED_UP);
+  const frozen = recorder.recording()!;
+  assert.equal(frozen.complete, true);
+  // The Player continues from the state it showed, where the picture is still asked.
+  const failing = {
+    holds: (): boolean => {
+      throw new Error("store unavailable");
+    },
+  };
+  assert.throws(() => answerPlayerRuntimeImage(session, reference, failing), /store unavailable/);
+  const recording = recorder.recording()!;
+  assert.deepEqual([recording.complete, recording.reason], [true, null]);
+  assert.deepEqual(recording.operations, frozen.operations);
+});
+
 test("after a call throws, the session continues from the state the Player showed, and the recording keeps the call", async () => {
   // With the scope IDs used up, a timer block throws in its middle, after it changed the state.
   const source = [
