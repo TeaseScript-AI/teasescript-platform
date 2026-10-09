@@ -27,6 +27,13 @@
       "category": "e",
       "reason": "chores reads domme2.chanceBenWaBalls into an int, which fails on a fresh profile because nothing has saved the key yet (only chores and eat save it, and chores reads it first). Its next lines raise any value below 8 to 8 and save it, so 8 is the value the tease starts with: read into an Integer and default a missing key to 8.",
       "diff": "chores-ben-wa-default.diff"
+    },
+    {
+      "id": "spreader-bar-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "The bedtime spreader-bar choice tests clothes.spreader_bar, which nothing saves; the toy chest saves the spreader bar as toys.spreader_bar, so the choice always went back to picking a toy. Read toys.spreader_bar.",
+      "diff": "spreader-bar-key.diff"
     }
   ]
 }
