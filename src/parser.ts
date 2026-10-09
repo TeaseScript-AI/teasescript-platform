@@ -4444,6 +4444,9 @@ class Parser {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
+      // A statement on a line of its own ends a literal left open, as after `let o = {`; `let: 1` stays a property.
+      if (this.#previous().kind === TokenKind.Newline && this.#isRecoveredTopLevelStatement())
+        break;
       if (!isPropertyName(this.#peek())) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedPropertyName,
@@ -4498,6 +4501,9 @@ class Parser {
     const entries: DictEntry[] = [];
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
+      // As in an object literal, a statement on a line of its own ends a dict left open.
+      if (this.#previous().kind === TokenKind.Newline && this.#isRecoveredTopLevelStatement())
+        break;
       const keyStart = this.#peek();
       const key = yield* parseChild(this.#parseDictKey());
       if (key === null) {
@@ -4853,11 +4859,16 @@ class Parser {
     }
   }
 
+  /**
+   * Skips a malformed element to the next comma or the closer, or to a statement that starts a line, which no element
+   * can be: the closer is then missing, and the statement still parses, as after `let v = [` on a line of its own.
+   */
   #synchronizeDelimited(closing: TokenKind): void {
     while (
       !this.#check(TokenKind.Comma) &&
       !this.#check(closing) &&
-      !this.#check(TokenKind.EndOfFile)
+      !this.#check(TokenKind.EndOfFile) &&
+      !(this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
     ) {
       this.#advance();
     }
