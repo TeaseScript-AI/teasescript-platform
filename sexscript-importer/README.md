@@ -469,6 +469,14 @@ of 6 seeds instead of 5. No one level for the test serves a first session that s
 more, so phases stay opt-in. At four times the gate budgets, phases also cost Domme3 2.6 points (192,000 operations),
 whose next visits at other times of day they start far less often (14 instead of 171).
 
+A capped alternative was tried for DisciplineClinic, whose first session never got past the first of its punishment
+rounds without phases: later sessions get play by their gain per operation as soon as a first session leaves storage,
+at most a third of all play together. At 512,000 operations it reached 41.4% instead of 31.8%, kept ToyExpanded
+(42.0% instead of 40.8%), and left jewell's coverage as it was, but found its trap loops in 3 of 6 seeds instead of 5.
+It was not needed: the rounds needed millions of spanks because the explorer answered the clinic's unchecked 1 to 10
+level question with 1,000,000 (`--large-answers` keeps that answer), and without it the default search reaches 43.3%
+there (3 seeds) with all of its play still first-session play.
+
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
 random integers, picks from a collection, weighted picks, tag queries, and glob file transfers), which run naturally
