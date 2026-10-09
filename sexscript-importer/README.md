@@ -648,9 +648,19 @@ lines), `typed-asks` (compares a typed answer with a constant), and `large` (5,0
 Known limits:
 
 - Content behind a long automatic chain (a loop of waits with nothing else to do, past a hundred waits) waits longer:
-  such a chain's passes share a cell, so they no longer look new. Seen in BreatheAcademy (the ending after its long
-  countdown; −4.3 points in a 13-unit gate, from one seed) and Domme3 (`spanking.tease` 863–878, after a 300-stroke
-  chain). A later step that weighs work per operation or schedules by session depth should check these first.
+  such a chain's passes share a cell, so they no longer look new, and each pass of a hundred waits is one more
+  expansion, while a cell of a large unit gets one or two at gate budgets. Seen in Domme3 (`spanking.tease` 858–873,
+  after `spank(…, 300, 0.5)`, at least 300 waits with a sound each) and once in BreatheAcademy (the ending after its long
+  countdown, now reached in every seed). Three ways to go through such chains sooner were measured and dropped:
+  - walking a chain to its end within one expansion (at most 20 passes of 100 waits): every expansion into a
+    punishment paid the whole chain, up to about 8,000 operations, and DisciplineClinic fell to 29.7% and
+    BreatheAcademy to 73.3%;
+  - giving a chain's states the cell of the state that entered it: the passes still count as that cell's expansions, so
+    the chain sinks after a pass or two (Domme3 858–873 not reached; BreatheAcademy −1.6 points);
+  - following a chain at once, pass after pass, within a sixteenth of all operations: only for chains a step entered
+    with new code, it never followed Domme3's, as `spank()` is code every punishment shares; for every chain, it reached
+    Domme3 858–873 in two of three seeds, with Domme3's coverage unchanged, but cost DisciplineClinic 57 lines
+    consistently (`Punish.tease` 5471–5501, behind its own punishment chains) and jewell 0.7 points.
 - A step settles at most 1,000 automatic operations (`MAX_AUTO_OPERATIONS`). An automatic run longer than that, such as
   more than a thousand camera requests in a row, ends the step with the request still pending, and the state is
   reported as stuck although settling could go on.
