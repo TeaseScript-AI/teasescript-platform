@@ -273,6 +273,16 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText "Q",\n\n    hint: '), "hint");
   assert.equal(activeSlot('askText(\n    "Q",\n    prefill: ', "\n)"), "prefill");
   assert.equal(activeSlot('let x = askText "Q", hint: "a" +\n    '), "hint");
+  // A line break inside a bracket group of the statement does not end it.
+  assert.equal(activeSlot('let x = askText "Q", hint: (\n    "a"\n) + '), "hint");
+  assert.equal(activeSlot('let x = askText "Q", hint: [\n    "a"\n][0] + '), "hint");
+  assert.equal(activeSlot('let x = askText "Q", hint: {\n    a: "x"\n}.a + '), "hint");
+  assert.equal(activeSlot('let x = askText("Q"\n    , hint: '), "hint");
+  assert.equal(activeSlot('let x = askText("Q"\n    , hint: ', ")"), "hint");
+  assert.equal(
+    activeSlot('if ready {\n    askText "Q", hint: (\n        "a"\n    )\n}\nlet y = '),
+    null,
+  );
   assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
   assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");
