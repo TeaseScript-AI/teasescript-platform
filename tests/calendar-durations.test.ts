@@ -245,12 +245,16 @@ test("a calendar day keeps the local clock time while 24 h is elapsed time throu
   );
 });
 
-test("a timestamp moves only by exact time, and elapsed-time consumers reject calendar parts", () => {
+test("an absolute date and time moves only by exact time, and elapsed-time consumers reject calendar parts", () => {
   assert.ok(
-    compileErrors('let t = toTimestamp("2026-10-04T12:00:00Z") + 1 day\nexit').includes("TSV043"),
+    compileErrors('let t = toAbsoluteDateTime("2026-10-04T12:00:00Z") + 1 day\nexit').includes(
+      "TSV043",
+    ),
   );
   assert.equal(
-    runtimeFailure(`${DYNAMIC}let t = toTimestamp("2026-10-04T12:00:00Z") + dynamic(1 day)\nexit`),
+    runtimeFailure(
+      `${DYNAMIC}let t = toAbsoluteDateTime("2026-10-04T12:00:00Z") + dynamic(1 day)\nexit`,
+    ),
     "TSR009",
   );
   assert.ok(compileErrors("timer 1 day\nexit").length > 0);

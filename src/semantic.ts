@@ -34,6 +34,7 @@ import type { SourceSpan } from "./source.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  RENAMED_BUILTINS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
 import {
@@ -2047,6 +2048,12 @@ class SemanticValidator {
             this.#report(
               semanticCode.nonCallable,
               `'${name}' is a ${binding.kind}, not a callable function.`,
+              expression.callee.span,
+            );
+          } else if (RENAMED_BUILTINS.has(name)) {
+            this.#report(
+              semanticCode.unknownFunction,
+              `Unknown function '${name}'. Use '${RENAMED_BUILTINS.get(name)}'.`,
               expression.callee.span,
             );
           } else if (unboundValue(name, contextualSpeaker) !== null) {

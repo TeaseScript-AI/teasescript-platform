@@ -148,7 +148,7 @@ export function compareDateTimes(left: DateTimeFields, right: DateTimeFields): n
   return Math.sign(fieldsAsUtc(left) - fieldsAsUtc(right));
 }
 
-/** The earliest and latest representable timestamps: 0000-01-01T00:00:00Z and 9999-12-31T23:59:59.999Z. */
+/** The earliest and latest representable moments: 0000-01-01T00:00:00Z and 9999-12-31T23:59:59.999Z. */
 export const MIN_EPOCH_MILLISECONDS =
   daysFromEpoch({ year: MIN_YEAR, month: 1, day: 1 }) * MS_PER_DAY;
 export const MAX_EPOCH_MILLISECONDS =
@@ -162,7 +162,7 @@ export function isValidEpochMilliseconds(value: number): boolean {
   );
 }
 
-/** The UTC date and time of a valid timestamp. */
+/** The UTC date and time of a valid moment. */
 export function utcFields(epochMilliseconds: number): DateTimeFields {
   const days = Math.floor(epochMilliseconds / MS_PER_DAY);
   let rest = epochMilliseconds - days * MS_PER_DAY;
@@ -234,7 +234,7 @@ export function parseIsoDateTime(text: string): TemporalResult<DateTimeFields> {
   return { ok: true, value: { ...date.value, ...time.value } };
 }
 
-/** Reads a date and time with `Z` or a `±HH:MM` offset as a timestamp in epoch milliseconds. */
+/** Reads a date and time with `Z` or a `±HH:MM` offset as a moment in epoch milliseconds. */
 export function parseIsoTimestamp(text: string): TemporalResult<number> {
   const offsetStart = Math.max(text.lastIndexOf("Z"), text.lastIndexOf("+"), text.lastIndexOf("-"));
   const timeStart = text.indexOf("T");

@@ -135,7 +135,7 @@ test("the getters read the captured wall clock through the captured zone as scen
     runSession(
       session(
         [
-          "say getTimestamp().toISO()",
+          "say getAbsoluteDateTime().toISO()",
           "say getDateTime().toISO()",
           "wait 90 s",
           "say getTime().toISO()",
@@ -153,10 +153,10 @@ test("the getters read the captured wall clock through the captured zone as scen
     runSession(
       session(
         [
-          "say getTimestamp().toISO()",
+          "say getAbsoluteDateTime().toISO()",
           "say getTime().toISO(), instant",
           "wait 1 s",
-          "say getTimestamp().toISO()",
+          "say getAbsoluteDateTime().toISO()",
           "say getTime().toISO()",
           "exit",
         ].join("\n"),
@@ -176,7 +176,7 @@ test("the getters read the captured wall clock through the captured zone as scen
 test("a late observation gives the same events and state as observing every deadline on time", () => {
   const plain = runSession(
     session(
-      "wait 1 s\nsay getTimestamp().toISO(), instant\nwait 1.0004 s\nsay getTimestamp().toISO()\nexit",
+      "wait 1 s\nsay getAbsoluteDateTime().toISO(), instant\nwait 1.0004 s\nsay getAbsoluteDateTime().toISO()\nexit",
     ),
   );
   const onTime = observe(observe(copy(plain), 1_000), 2_000.4);
@@ -192,12 +192,12 @@ test("a late observation gives the same events and state as observing every dead
       session(
         [
           "timer async 50 ms {",
-          "    say getTimestamp().toISO(), instant",
+          "    say getAbsoluteDateTime().toISO(), instant",
           "    wait 75 ms",
-          "    say getTimestamp().toISO()",
+          "    say getAbsoluteDateTime().toISO()",
           "}",
           "wait 200 ms",
-          "say getTimestamp().toISO()",
+          "say getAbsoluteDateTime().toISO()",
           "exit",
         ].join("\n"),
       ),
@@ -214,7 +214,9 @@ test("a late observation gives the same events and state as observing every dead
 
 test("a Continue capture applies from the saved observed time; saved catch-up keeps the earlier one", () => {
   const saved = runSession(
-    session("wait 1 s\nsay getTimestamp().toISO()\nwait 10 s\nsay getTimestamp().toISO()\nexit"),
+    session(
+      "wait 1 s\nsay getAbsoluteDateTime().toISO()\nwait 10 s\nsay getAbsoluteDateTime().toISO()\nexit",
+    ),
   );
   // The session was saved after observing 5 s, with the 1 s wait due but its continuation not yet run.
   apply(saved, observeTime(saved.plan, saved.snapshot, 5_000));
@@ -223,7 +225,7 @@ test("a Continue capture applies from the saved observed time; saved catch-up ke
   assert.deepEqual(says(resumed), ["2026-10-04T16:00:01Z", "2026-10-05T09:00:06Z"]);
 
   // Due exactly at the boundary: execution from the boundary on uses the new capture.
-  const atBoundary = runSession(session("wait 1 s\nsay getTimestamp().toISO()\nexit"));
+  const atBoundary = runSession(session("wait 1 s\nsay getAbsoluteDateTime().toISO()\nexit"));
   apply(atBoundary, observeTime(atBoundary.plan, atBoundary.snapshot, 1_000));
   continueAt(atBoundary, utc("2026-10-05T09:00:00"));
   assert.deepEqual(says(runSession(atBoundary)), ["2026-10-05T09:00:00Z"]);
@@ -234,11 +236,11 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
     session(
       [
         "wait 1 s",
-        "say getTimestamp().toISO()",
+        "say getAbsoluteDateTime().toISO()",
         "wait 5.5 s",
-        "say getTimestamp().toISO()",
+        "say getAbsoluteDateTime().toISO()",
         "wait 5 s",
-        "say getTimestamp().toISO()",
+        "say getAbsoluteDateTime().toISO()",
         "exit",
       ].join("\n"),
     ),
@@ -264,11 +266,11 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
   const held = runSession(
     session(
       [
-        'timer async 1 ms { save 2 as "k"\nsay getTimestamp().toISO() }',
-        "timer async 2 ms { say getTimestamp().toISO() }",
-        "timer async 110 ms { say getTimestamp().toISO() }",
+        'timer async 1 ms { save 2 as "k"\nsay getAbsoluteDateTime().toISO() }',
+        "timer async 2 ms { say getAbsoluteDateTime().toISO() }",
+        "timer async 110 ms { say getAbsoluteDateTime().toISO() }",
         "wait 200 ms",
-        "say getTimestamp().toISO()",
+        "say getAbsoluteDateTime().toISO()",
         "exit",
       ].join("\n"),
       { persistentScriptStorage: true },
@@ -321,10 +323,10 @@ test("an open choice keeps the capture it was shown with through Continues, inte
   const suspended = runSession(
     session(
       [
-        "timer async 50 ms { wait 100 ms\nsay getTimestamp().toISO() }",
+        "timer async 50 ms { wait 100 ms\nsay getAbsoluteDateTime().toISO() }",
         'let day = choose [toDate("2026-10-04")]',
         "say day",
-        "say getTimestamp().toISO()",
+        "say getAbsoluteDateTime().toISO()",
         "exit",
       ].join("\n"),
     ),

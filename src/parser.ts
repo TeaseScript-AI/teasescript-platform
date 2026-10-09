@@ -2476,6 +2476,13 @@ class Parser {
         );
         return null;
       }
+      const renamed = RENAMED_TYPE_NAMES.get(first.lexeme);
+      if (first.kind === TokenKind.Identifier && renamed !== undefined)
+        this.#reportToken(
+          parserDiagnosticCode.invalidType,
+          `'${first.lexeme}' is not a type. Use '${renamed}'.`,
+          first,
+        );
       this.#advance();
       type = Object.freeze({ kind: "namedType", name, span: first.span });
     }
@@ -4800,7 +4807,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "date",
       "time",
       "datetime",
-      "timestamp",
+      "absoluteDateTime",
       "duration",
       "list",
       "dict",
@@ -4814,11 +4821,16 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
   ).map((name) => [name, name]),
 );
 
+/** The earlier names of types, which are compile errors that name the fix (ADR 0026). */
+const RENAMED_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map([
+  ["timestamp", "absoluteDateTime"],
+]);
+
 /** The type name a token spells in type position; `speaker`, `set`, and `null` are keywords elsewhere. */
 function typeName(token: Token): TypeName | undefined {
   switch (token.kind) {
     case TokenKind.Identifier:
-      return IDENTIFIER_TYPE_NAMES.get(token.lexeme);
+      return IDENTIFIER_TYPE_NAMES.get(token.lexeme) ?? RENAMED_TYPE_NAMES.get(token.lexeme);
     case TokenKind.KeywordSpeaker:
       return "speaker";
     case TokenKind.KeywordSet:

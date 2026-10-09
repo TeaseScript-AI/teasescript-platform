@@ -62,7 +62,10 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
       millisecond: 6,
     },
   },
-  { key: "timestamp", value: { kind: "timestamp", epochMilliseconds: 1_790_000_000_000 } },
+  {
+    key: "absoluteDateTime",
+    value: { kind: "absoluteDateTime", epochMilliseconds: 1_790_000_000_000 },
+  },
   { key: "script", value: { kind: "script", path: "rooms/cellar.tease", label: null } },
   { key: "unresolved", value: "captured-media:33333333-3333-4333-8333-333333333333:1" },
 ];
@@ -166,6 +169,27 @@ test("values edited by hand and a replaced photo are accepted, without any signa
   assert.deepEqual(read.images, [{ reference: photo, bytes: replacement }]);
   // The same edit, compressed by another tool, reads as a file.
   assert.deepEqual(await readStorageTransferFile(gzipSync(JSON.stringify(edited))), read);
+});
+
+test("a value exported as a timestamp is imported as an absoluteDateTime", async () => {
+  const epochMilliseconds = 1_790_000_000_000;
+  const exported = (kind: string) => ({
+    format: "teasescript-script-storage",
+    version: 2,
+    scripts: [
+      {
+        scope: "development-package:Example",
+        name: null,
+        photos: [],
+        entries: [
+          { key: "started", value: { kind: "list", items: [{ kind, epochMilliseconds }] } },
+        ],
+      },
+    ],
+    images: [],
+  });
+  const read = await readStorageTransferText(JSON.stringify(exported("timestamp")));
+  assert.deepEqual(read.scripts, exported("absoluteDateTime").scripts);
 });
 
 test("damaged files and text are refused with a message", async () => {

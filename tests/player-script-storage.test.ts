@@ -6,7 +6,10 @@ import {
   listLocalScriptStorageScopes,
 } from "../player/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 class MemoryStorage implements Storage {
   private readonly items = new Map<string, string>();
@@ -410,6 +413,44 @@ test("a value nested deeper than native JSON recursion allows is saved, replaced
   assert.equal(
     json(await createLocalScriptStorage(storage, "demo").load()),
     json([{ key: "replaced", value }]),
+  );
+});
+
+test("a value saved as a timestamp is read as an absoluteDateTime, also inside collections, and a script loads it", async () => {
+  const epochMilliseconds = Date.UTC(2026, 9, 4, 12, 30);
+  const before = { kind: "timestamp", epochMilliseconds };
+  const now = { kind: "absoluteDateTime", epochMilliseconds };
+  const nested = (moment: object) => ({
+    kind: "list",
+    items: [
+      { kind: "set", items: [moment] },
+      { kind: "object", properties: [{ name: "at", value: moment }] },
+      { kind: "dict", entries: [{ key: "at", value: moment }] },
+    ],
+  });
+  const storage = new MemoryStorage();
+  storage.setItem(itemName("demo", "started"), JSON.stringify({ v: 1, value: before }));
+  storage.setItem(itemName("demo", "history"), JSON.stringify({ v: 1, value: nested(before) }));
+  const entries = await createLocalScriptStorage(storage, "demo").load();
+  assert.deepEqual(
+    asMap(entries),
+    new Map<string, unknown>([
+      ["started", now],
+      ["history", nested(now)],
+    ]),
+  );
+  const plan = compileValidPlan(
+    [
+      'let started: absoluteDateTime = load "started", default: getAbsoluteDateTime()',
+      'say "${started.toISO()} ${started.toSeconds()}"',
+      "exit",
+    ].join("\n"),
+  );
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { scriptStorage: entries }));
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    [`2026-10-04T12:30:00Z ${epochMilliseconds / 1_000}`],
   );
 });
 

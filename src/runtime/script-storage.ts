@@ -131,6 +131,38 @@ export function assertPersistable(
   }
 }
 
+/** The value tags of earlier Players and the tags they now have (ADR 0026). */
+const RENAMED_VALUE_KINDS: ReadonlyMap<string, string> = new Map([
+  ["timestamp", "absoluteDateTime"],
+]);
+
+/**
+ * Upgrades, in place, saved values that an earlier Player wrote, before they are validated: a `timestamp` becomes an
+ * `absoluteDateTime` with the same moment. Saved values outlive the plan and snapshot formats, so a value is read as
+ * what it meant when it was saved and never dropped. `stored` is freshly read data, such as parsed JSON, which this
+ * walks without recursion; anything else in it is left to validation. Returns `stored`.
+ */
+export function upgradeStoredScriptValues(stored: unknown): unknown {
+  const pending: unknown[] = [stored];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (typeof next !== "object" || next === null || seen.has(next)) continue;
+    seen.add(next);
+    if (Array.isArray(next)) {
+      for (const item of next) pending.push(item);
+      continue;
+    }
+    // EVIDENCE: validation: the guards above proved a non-array object; only its own enumerable fields are read.
+    const record = next as Record<string, unknown>;
+    const renamed =
+      typeof record.kind === "string" ? RENAMED_VALUE_KINDS.get(record.kind) : undefined;
+    if (renamed !== undefined) record.kind = renamed;
+    for (const field of Object.values(record)) pending.push(field);
+  }
+  return stored;
+}
+
 /**
  * Validates host-supplied or restored script storage: an array of `{ key, value }` entries with unique string keys
  * and persistable, non-null values. A runtime view (`sorted`) must also be in key order. Returns the first failure

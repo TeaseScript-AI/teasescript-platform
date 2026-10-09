@@ -185,7 +185,7 @@ let start = askTime as mistress "What time?", prefill: toTime("20:00")
 ```
 
 The Player shows the browser's date, time, or date-and-time control, which submits strict ISO text
-([V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)); surrounding whitespace is
+([V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-and-durations)); surrounding whitespace is
 removed. A local time that the player's zone skips is a valid answer, because local values have no zone. Any other
 text is rejected with "That is wrong. I asked for a date." (a time, a date and time). The transcript shows the answer
 in the player's presentation, as `say` shows the value. A prefill of the asked kind fills the control with its ISO

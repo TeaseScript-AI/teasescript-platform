@@ -44,7 +44,7 @@ import type {
   SerializableRuntimeDuration,
   SerializableRuntimeTemporal,
   SerializableRuntimeTime,
-  SerializableRuntimeTimestamp,
+  SerializableRuntimeAbsoluteDateTime,
   SerializableRuntimeValue,
 } from "./serializable-values.js";
 import {
@@ -53,7 +53,7 @@ import {
   isDuration,
   isTemporal,
   isTime,
-  isTimestamp,
+  isAbsoluteDateTime,
 } from "./value-predicates.js";
 import { describeValue } from "./value-types.js";
 import { wallClockAt, type RuntimeTemporalCapture } from "./temporal-captures.js";
@@ -86,11 +86,11 @@ export const TEMPORAL_GETTERS: ReadonlySet<string> = new Set([
   "getDate",
   "getTime",
   "getDateTime",
-  "getTimestamp",
+  "getAbsoluteDateTime",
 ]);
 
 /**
- * `getDate()`, `getTime()`, `getDateTime()`, or `getTimestamp()` (V30 §35) at scene time `atMs`: the wall clock of the
+ * `getDate()`, `getTime()`, `getDateTime()`, or `getAbsoluteDateTime()` (V30 §35) at scene time `atMs`: the wall clock of the
  * capture in force, read through its zone for local values.
  */
 export function temporalNow(
@@ -110,8 +110,8 @@ export function temporalNow(
       `${name}() needs the current time, but this Player supplied no clock when the session started or continued.`,
       span,
     );
-  const now = timestamp(epochMilliseconds, span);
-  if (name === "getTimestamp") return now;
+  const now = absoluteDateTime(epochMilliseconds, span);
+  if (name === "getAbsoluteDateTime") return now;
   const fields = local(capture.context, now.epochMilliseconds, span);
   if (name === "getDate")
     return { kind: "date", year: fields.year, month: fields.month, day: fields.day };
@@ -166,7 +166,7 @@ function parseText(
       const parsed = parseIsoDateTime(text);
       return parsed.ok ? { ok: true, value: { kind, ...parsed.value } } : parsed;
     }
-    case "timestamp": {
+    case "absoluteDateTime": {
       const parsed = parseIsoTimestamp(text);
       return parsed.ok ? { ok: true, value: { kind, epochMilliseconds: parsed.value } } : parsed;
     }
@@ -196,7 +196,7 @@ export function temporalProperty(
   value: SerializableRuntimeTemporal,
   name: string,
 ): SerializableRuntimeValue | undefined {
-  if (value.kind === "timestamp") return undefined;
+  if (value.kind === "absoluteDateTime") return undefined;
   if (value.kind !== "time") {
     switch (name) {
       case "year":
@@ -233,8 +233,8 @@ export function temporalProperty(
 const METHODS: Readonly<Record<SerializableRuntimeTemporal["kind"], ReadonlySet<string>>> = {
   date: new Set(["toISO", "formatDate"]),
   time: new Set(["toISO", "formatTime"]),
-  datetime: new Set(["toISO", "formatDate", "formatTime", "formatDateTime", "toTimestamp"]),
-  timestamp: new Set([
+  datetime: new Set(["toISO", "formatDate", "formatTime", "formatDateTime", "toAbsoluteDateTime"]),
+  absoluteDateTime: new Set([
     "toISO",
     "formatDate",
     "formatTime",
@@ -270,17 +270,18 @@ export function temporalMethod(
         return formatIsoTime(value);
       case "datetime":
         return formatIsoDateTime(value);
-      case "timestamp":
+      case "absoluteDateTime":
         return formatIsoTimestamp(value.epochMilliseconds);
     }
   }
-  if (value.kind === "timestamp") {
+  if (value.kind === "absoluteDateTime") {
     if (name === "toSeconds") return Math.floor(value.epochMilliseconds / 1_000);
     if (name === "toMilliseconds") return value.epochMilliseconds;
   }
-  if (value.kind === "datetime" && name === "toTimestamp")
-    return timestamp(zoned(context, value, span), span);
-  const fields = value.kind === "timestamp" ? local(context, value.epochMilliseconds, span) : value;
+  if (value.kind === "datetime" && name === "toAbsoluteDateTime")
+    return absoluteDateTime(zoned(context, value, span), span);
+  const fields =
+    value.kind === "absoluteDateTime" ? local(context, value.epochMilliseconds, span) : value;
   if (name === "toDateTime") return { kind: "datetime", ...fields };
   // The remaining methods are formatDate, formatTime, and formatDateTime, on values that have those parts.
   // EVIDENCE: invariant: METHODS admits these names only for kinds whose fields include the formatted parts.
@@ -292,7 +293,7 @@ export function temporalMethod(
 
 /**
  * Ordering and arithmetic with a date or time operand (V30 §35), or `undefined` when neither operand is one. Exact
- * durations apply to a timestamp as elapsed time, and to a datetime as elapsed time through the player's zone.
+ * durations apply to an absolute date and time as elapsed time, and to a datetime as elapsed time through the player's zone.
  */
 export function temporalBinary(
   operator: string,
@@ -306,7 +307,7 @@ export function temporalBinary(
     if (!isTemporal(left) || !isTemporal(right) || left.kind !== right.kind)
       throw fault(
         "TSR009",
-        `'${operator}' orders two values of the same kind, such as two dates or two timestamps, but these are ${describeValue(left)} and ${describeValue(right)}.`,
+        `'${operator}' orders two values of the same kind, such as two dates or two absolute dates and times, but these are ${describeValue(left)} and ${describeValue(right)}.`,
         span,
       );
     const order = compareTemporal(left, right);
@@ -317,39 +318,43 @@ export function temporalBinary(
   }
   if (operator === "+" || operator === "-") {
     // A duration is added to or subtracted from the value written first, as in `started + 1 h`.
-    if (isDuration(right) && (isDate(left) || isTimestamp(left) || isDateTime(left))) {
+    if (isDuration(right) && (isDate(left) || isAbsoluteDateTime(left) || isDateTime(left))) {
       const parts = durationParts(right);
       return moved(left, operator === "-" ? negateDurationParts(parts) : parts);
     }
     if (operator === "-" && isDate(left) && isDate(right))
       return storedDuration({ months: 0, days: daysBetween(left, right), milliseconds: 0 });
-    if (operator === "-" && isTimestamp(left) && isTimestamp(right))
+    if (operator === "-" && isAbsoluteDateTime(left) && isAbsoluteDateTime(right))
       return elapsed(left.epochMilliseconds, right.epochMilliseconds);
     if (operator === "-" && isDateTime(left) && isDateTime(right))
       return elapsed(zoned(context, left, span), zoned(context, right, span));
   }
   throw fault(
     "TSR009",
-    `'${operator}' does not apply to ${describeValue(left)} and ${describeValue(right)}. A date, datetime, or timestamp adds or subtracts a duration, and two of one kind subtract to a duration.`,
+    `'${operator}' does not apply to ${describeValue(left)} and ${describeValue(right)}. A date, datetime, or absolute date and time adds or subtracts a duration, and two of one kind subtract to a duration.`,
     span,
   );
 
   /**
-   * A date, datetime, or timestamp moved by a duration's months, then days, then exact time (V30 §35). Calendar parts
+   * A date, datetime, or absolute date and time moved by a duration's months, then days, then exact time (V30 §35). Calendar parts
    * keep the local clock time; exact time is elapsed, through the player's zone for a datetime.
    */
   function moved(
-    value: SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeTimestamp,
+    value:
+      SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeAbsoluteDateTime,
     parts: DurationParts,
-  ): SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeTimestamp {
-    if (value.kind === "timestamp") {
+  ): SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeAbsoluteDateTime {
+    if (value.kind === "absoluteDateTime") {
       if (!isExactDuration(parts))
         throw fault(
           "TSR009",
-          `A timestamp moves only by exact time such as 24 h, not by ${formatDuration(parts)}: the length of a day or month depends on the zone. Convert it with toDateTime() first.`,
+          `An absolute date and time moves only by exact time such as 24 h, not by ${formatDuration(parts)}: the length of a day or month depends on the zone. Convert it with toDateTime() first.`,
           span,
         );
-      return timestamp(value.epochMilliseconds + roundToMillisecond(parts.milliseconds), span);
+      return absoluteDateTime(
+        value.epochMilliseconds + roundToMillisecond(parts.milliseconds),
+        span,
+      );
     }
     if (value.kind === "date" && parts.milliseconds !== 0)
       throw fault(
@@ -363,7 +368,7 @@ export function temporalBinary(
     if (value.kind === "date") return { kind: "date", ...date };
     const calendarMoved: SerializableRuntimeDateTime = { ...value, ...date };
     if (parts.milliseconds === 0) return calendarMoved;
-    const end = timestamp(
+    const end = absoluteDateTime(
       zoned(context, calendarMoved, span) + roundToMillisecond(parts.milliseconds),
       span,
     );
@@ -379,7 +384,7 @@ export function compareTemporal(
   if (left.kind === "date" && right.kind === "date") return compareDates(left, right);
   if (left.kind === "time" && right.kind === "time") return compareTimes(left, right);
   if (left.kind === "datetime" && right.kind === "datetime") return compareDateTimes(left, right);
-  if (left.kind === "timestamp" && right.kind === "timestamp")
+  if (left.kind === "absoluteDateTime" && right.kind === "absoluteDateTime")
     return Math.sign(left.epochMilliseconds - right.epochMilliseconds);
   throw new Error("Only values of one temporal kind are ordered.");
 }
@@ -388,10 +393,13 @@ function elapsed(from: number, to: number): SerializableRuntimeDuration {
   return { kind: "duration", milliseconds: from - to };
 }
 
-function timestamp(epochMilliseconds: number, span: SourceSpan): SerializableRuntimeTimestamp {
+function absoluteDateTime(
+  epochMilliseconds: number,
+  span: SourceSpan,
+): SerializableRuntimeAbsoluteDateTime {
   if (!isValidEpochMilliseconds(epochMilliseconds))
     throw fault(TEMPORAL_FAILURE, "The result lies outside the years 0000 to 9999.", span);
-  return { kind: "timestamp", epochMilliseconds };
+  return { kind: "absoluteDateTime", epochMilliseconds };
 }
 
 function zoned(
@@ -422,7 +430,7 @@ function isKind(
   | SerializableRuntimeDate
   | SerializableRuntimeTime
   | SerializableRuntimeDateTime
-  | SerializableRuntimeTimestamp {
+  | SerializableRuntimeAbsoluteDateTime {
   return isTemporal(value) && value.kind === kind;
 }
 
@@ -433,7 +441,7 @@ function describeKind(kind: SerializableRuntimeTemporal["kind"]): string {
       ? "a time"
       : kind === "datetime"
         ? "a date and time"
-        : "a timestamp";
+        : "an absolute date and time";
 }
 
 function capitalize(text: string): string {

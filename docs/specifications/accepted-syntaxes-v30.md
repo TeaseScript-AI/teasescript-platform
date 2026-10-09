@@ -39,7 +39,7 @@ This table is generated from the current section order.
 - [32. Switch statements](#32-switch-statements)
 - [33. Browser API: file, folder, camera, and URL references](#33-browser-api-file-folder-camera-and-url-references)
 - [34. Runtime warnings and recoverable values](#34-runtime-warnings-and-recoverable-values)
-- [35. Date, time, durations, and timestamps](#35-date-time-durations-and-timestamps)
+- [35. Date, time, and durations](#35-date-time-and-durations)
 - [36. Scheduling](#36-scheduling)
 - [37. Dynamic speaker terms](#37-dynamic-speaker-terms)
 - [38. Keywords and protected built-ins](#38-keywords-and-protected-built-ins)
@@ -374,7 +374,7 @@ let shares: integer = 10 / 5          // compile error: a quotient is a number
 let shares: integer = floor(10 / 5)   // valid
 ```
 
-Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). `+` also
+Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-and-durations). `+` also
 joins two values of the same kind: two texts give one text, and two lists give a new list ([§16](#16-lists)); `+=` joins
 the same way. Nothing converts: text and another value, or a list and a single value, is a compile error that points to
 interpolation or to `add`, and a runtime error when the compiler cannot see the kinds:
@@ -1089,7 +1089,7 @@ number
 date
 time
 datetime
-timestamp
+absoluteDateTime
 duration
 ```
 
@@ -1151,7 +1151,7 @@ if reward is integer {
 - `x is T` is true exactly when the value may be stored in a place of type `T`. `is number` is also true for integers,
   and `is integer` is true for any whole number, including `2.0`. A collection test with an element type checks every
   element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` test the date and time values of
-  [§35](#35-date-time-durations-and-timestamps).
+  [§35](#35-date-time-and-durations).
 - A test works on every value, including untyped storage, host data, and parameters of unknown type. The operand is
   evaluated once, and the test has no side effects.
 - `x is "happy"` is a compile error: `is` checks a type, and `==` compares values.
@@ -1221,10 +1221,10 @@ toBoolean(value)
 toDate(value)
 toTime(value)
 toDateTime(value)
-toTimestamp(value)
+toAbsoluteDateTime(value)
 ```
 
-The date and time conversions read strict ISO text; see [§35](#35-date-time-durations-and-timestamps).
+The date and time conversions read strict ISO text; see [§35](#35-date-time-and-durations).
 
 A conversion that cannot succeed raises a runtime error. A caller may provide an explicit fallback:
 
@@ -1286,7 +1286,7 @@ ceil(-2.5)   // -2
 
 `min(...)` and `max(...)` return the smallest or largest of two or more values, or of the values of one list
 ([§16](#statistics)), which are all numbers, all durations of one family, or all date and time values of one kind
-([§35](#35-date-time-durations-and-timestamps)). The result is
+([§35](#35-date-time-and-durations)). The result is
 an `integer` when every argument is an `integer`, a `number` otherwise, and for durations and date and time values the
 chosen value itself. Mixing numbers, durations, duration families, or temporal kinds, other values, `null`, and named
 arguments are compile errors when the types show them, and runtime errors otherwise:
@@ -1691,7 +1691,7 @@ Runtime behavior:
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
   objects and nested lists; `remove(value)` removes the first equal element.
 - A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
-  ([§35](#35-date-time-durations-and-timestamps)), lists, objects, dicts, sets, ranges, speakers, timer and media
+  ([§35](#35-date-time-and-durations)), lists, objects, dicts, sets, ranges, speakers, timer and media
   handles, and script references. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
   the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
   `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
@@ -1707,8 +1707,8 @@ Runtime behavior:
   warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
-  together), all text, all durations of one family, or all dates, all times, all datetimes, or all timestamps
-  ([§35](#35-date-time-durations-and-timestamps)); text is ordered by Unicode code point, independently of locale, so
+  together), all text, all durations of one family, or all dates, all times, all datetimes, or all absolute dates and times
+  ([§35](#35-date-time-and-durations)); text is ordered by Unicode code point, independently of locale, so
   `"B"` sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime
   error otherwise.
 - `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
@@ -1774,7 +1774,7 @@ max(scores)             // 18
 ```
 
 - The values are numbers or durations, and for `min` and `max` also date and time values of one kind
-  ([§35](#35-date-time-durations-and-timestamps)). With `by:`, the values are a property of a list of objects:
+  ([§35](#35-date-time-and-durations)). With `by:`, the values are a property of a list of objects:
   `median(sessions, by: "count")`.
 - `percentile(list, p)` is the value that `p` percent of the values lie at or below, for `p` from 0 through 100: in
   ascending order, the value at rank p/100 × (n − 1), between the two nearest values in proportion. `percentile(list,
@@ -1820,7 +1820,7 @@ let expected = predict(trend, toDate("2026-10-31"))
 
 - `linearRegression(list)` takes the list's values as y, numbers or exact durations, at x = 0, 1, 2, and so on. With
   `y:`, the y values are a property of a list of objects, and `x:` names a property for x as well: numbers, or dates,
-  datetimes, or timestamps of one kind, measured in days, with a time of day as a fraction of a day. Without `x:`, x is
+  datetimes, or absolute dates and times of one kind, measured in days, with a time of day as a fraction of a day. Without `x:`, x is
   the index.
 - The result is an object `{ slope, intercept, r2, start }`. `slope` is the change of y per step of x, or per day, and
   is a duration when y is. `intercept` is the line's value at the first point of the list, not at x = 0. `r2`, from 0
@@ -2309,7 +2309,7 @@ A dict written where the form is asked combines the answer types its entries pro
 type proves one kind, from a `value:` known where its values are created, the result is a dict of that answer
 type, such as an `integer dict`, or an `integer? dict` when a field may be `optional:`. Otherwise, as for an
 `object dict` of descriptors of different kinds with explicit `type:`, the result is a
-`(boolean | number | string | date | time | datetime | duration | timestamp | null) dict` (a cycle may return any
+`(boolean | number | string | date | time | datetime | duration | absoluteDateTime | null) dict` (a cycle may return any
 choice value); read an answer into a local and narrow it with `is` ([§13](#13-explicit-types)):
 
 ```text
@@ -2332,13 +2332,13 @@ let settings = askForm "Settings", fields: { enabled: saved.enabled, impact: sav
 save settings as "settings"
 ```
 
-A response time needs no syntax: compare `getTimestamp()` before and after the form
-([§35](#35-date-time-durations-and-timestamps)):
+A response time needs no syntax: compare `getAbsoluteDateTime()` before and after the form
+([§35](#35-date-time-and-durations)):
 
 ```text
-let asked = getTimestamp()
+let asked = getAbsoluteDateTime()
 let answers = askForm "Ready?", fields: { ready: false }
-let took = getTimestamp() - asked
+let took = getAbsoluteDateTime() - asked
 ```
 
 `timeout:`, a number of seconds or an elapsed duration as for `showButton` ([§21](#21-blocking-button)), with
@@ -2372,7 +2372,7 @@ These inputs use structured date and time controls and do not return unparsed fr
 
 The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, prefill: value] [, hint: text]` are
 implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
-control submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone
+control submits strict ISO text ([§35](#35-date-time-and-durations)); a local time that the player's zone
 skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and
 date-and-time controls cover the years 0001 through 9999, as the browser's native controls do; a prefill in year 0000 is
 shown and edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, prefills, and text
@@ -2685,7 +2685,7 @@ Rules:
 - Without a timeout, the command waits until the user clicks.
 - With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
   button without a chat message.
-- The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-durations-and-timestamps)),
+- The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-and-durations)),
   measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
   timeout; a timeout of `5` returns `5 s`.
 - If the caller does not need the elapsed time, the return value may be ignored.
@@ -3340,7 +3340,7 @@ comes first, then the presentation, the duration, an optional string-literal lab
 modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden` are recognized only directly after
 `timer`; write `timer (hidden)` to use a variable of that name as the duration.
 
-A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-timestamps) elapsed duration such as
+A duration is a bare number of seconds, a [§35](#35-date-time-and-durations) elapsed duration such as
 `500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
 `5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
 evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
@@ -3903,8 +3903,8 @@ Recovered errors should record:
 
 Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
 
-## 35. Date, time, durations, and timestamps
-**Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `timestamp` values, their conversions,
+## 35. Date, time, and durations
+**Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `absoluteDateTime` values, their conversions,
 fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, calendar durations,
 and date and time input ([§20](#date-and-time-input)). [ADR 0026](../decisions/0026-unified-time-semantics.md) changes
 parts of this section; each part moves here when it is implemented.
@@ -3916,11 +3916,11 @@ TeaseScript has two kinds of time:
 | `date` | A local calendar date without a zone, such as `2026-10-04` |
 | `time` | A local clock time without a zone, such as `14:30` |
 | `datetime` | A local date and clock time without a zone. It follows the player: tomorrow 18:00 stays 18:00 wherever the player is, also after saving, loading, and travel |
-| `timestamp` | A fixed moment in UTC, like Unix time |
+| `absoluteDateTime` | A fixed moment in UTC, like Unix time |
 | `duration` | Months, calendar days, and exact milliseconds |
 
-Use local values for "what clock time" and "which day", and `timestamp` for "how long ago" and "how much time
-passed". Unlike SQL, where `timestamp` names a local value, a TeaseScript `timestamp` is always an exact moment.
+Use local values for "what clock time" and "which day", and `absoluteDateTime` for "how long ago" and "how much time
+passed".
 
 ### Current values
 
@@ -3928,12 +3928,12 @@ passed". Unlike SQL, where `timestamp` names a local value, a TeaseScript `times
 let today = getDate()
 let now = getTime()
 let dinner = toDateTime(getDate() + 1 day, toTime("18:00"))
-let started = getTimestamp()
+let started = getAbsoluteDateTime()
 ```
 
-`getDate()`, `getTime()`, and `getDateTime()` return the player's current local values; `getTimestamp()` returns the
-current moment. Within one start or continue, `getTimestamp()` never goes backwards. Local values can: after the
-autumn daylight-saving change, or after travelling west. The engine reads no clock and no host time-zone or locale
+`getDate()`, `getTime()`, and `getDateTime()` return the player's current local values; `getAbsoluteDateTime()` returns
+the current moment. Within one start or continue, `getAbsoluteDateTime()` never goes backwards. Local values can: after
+the autumn daylight-saving change, or after travelling west. The engine reads no clock and no host time-zone or locale
 data: the Player records the player's zone and presentation as session data (see
 [`RUNTIME.md`](../RUNTIME.md#date-and-time-context)).
 
@@ -3946,10 +3946,10 @@ parsing:
 toDate("2026-10-04")
 toTime("14:30")                         // also "14:30:15" and "14:30:15.250"
 toDateTime("2026-10-04T18:00")
-toTimestamp("2026-10-04T12:30:00Z")     // also an offset, such as "2026-10-04T14:30:00+02:00"
+toAbsoluteDateTime("2026-10-04T12:30:00Z")   // also an offset, such as "2026-10-04T14:30:00+02:00"
 ```
 
-Local text has no offset; timestamp text requires `Z` or an offset. Fractions have one to three digits. Text that is
+Local text has no offset; absolute text requires `Z` or an offset. Fractions have one to three digits. Text that is
 known at compile time and is not a valid value is a compile error, also when a `default:` is given; other text follows
 the [§13](#13-explicit-types) conversion rules.
 
@@ -3959,17 +3959,17 @@ the [§13](#13-explicit-types) conversion rules.
 | `toTime(value)` | time text, a `time`, or the clock time of a `datetime` |
 | `toDateTime(value)` | datetime text or a `datetime` |
 | `toDateTime(date, time)` | a `date` and a `time` combined |
-| `toTimestamp(value)` | timestamp text or a `timestamp` |
+| `toAbsoluteDateTime(value)` | absolute text or an `absoluteDateTime` |
 
-Local values and timestamps convert through the player's current zone:
+Local and absolute values convert through the player's current zone:
 
 ```text
-let deadline = dinner.toTimestamp()
+let deadline = dinner.toAbsoluteDateTime()
 let local = started.toDateTime()
 ```
 
 A local time that the spring daylight-saving change skips moves forward by the gap; a local time that the autumn
-change repeats takes the earlier moment. A `date` or `time` alone cannot become a timestamp.
+change repeats takes the earlier moment. A `date` or `time` alone cannot become an `absoluteDateTime`.
 
 ### Fields
 
@@ -4026,36 +4026,36 @@ error, and any other one a runtime error.
 | `date ± calendar duration` | Calendar arithmetic; `date ± exact duration` is an error |
 | `datetime ± calendar duration` | The same local clock time that many days, weeks, months, or years later |
 | `datetime ± exact duration` | Elapsed time through the player's current zone |
-| `timestamp ± exact duration` | Elapsed time; a calendar duration is an error |
+| `absoluteDateTime ± exact duration` | Elapsed time; a calendar duration is an error |
 | `date - date` | Whole calendar days, such as `5 days` |
 | `datetime - datetime` | The elapsed exact duration through the player's current zone |
-| `timestamp - timestamp` | The elapsed exact duration |
+| `absoluteDateTime - absoluteDateTime` | The elapsed exact duration |
 
 A composed duration applies its months, then its days, then its exact time; source grouping is preserved. Across the
 spring daylight-saving night, `dinner + 24 h` is 19:00 the next day while `dinner + 1 day` is 18:00. Exact time added to
 a temporal value is rounded to whole milliseconds, with ties away from zero; `wait` and timers keep fractional
 milliseconds. Arithmetic on `time` is not available.
 
-A `date` orders by calendar, a `time` by clock (without wrapping at midnight), a `datetime` by calendar and clock, and a
-`timestamp` by moment. `sort()`, `min`, and `max` use the same order for values of one kind. Ordering or arithmetic
-across temporal kinds is an error, and `==` between different kinds is `false`. Known invalid combinations are compile
-errors; others are runtime errors.
+A `date` orders by calendar, a `time` by clock (without wrapping at midnight), a `datetime` by calendar and clock, and an
+`absoluteDateTime` by moment. `sort()`, `min`, and `max` use the same order for values of one kind. Ordering or
+arithmetic across temporal kinds is an error, and `==` between different kinds is `false`. Known invalid combinations are
+compile errors; others are runtime errors.
 
 Local comparisons can reverse after the autumn daylight-saving change or after travelling west, and a day counter counts
 calendar-date boundaries. `datetime - datetime` measures through the current zone, so `(dinner + 24 h) - dinner` is
-`23 h` when `dinner + 24 h` falls in the repeated autumn hour. Measure elapsed time with `timestamp`.
+`23 h` when `dinner + 24 h` falls in the repeated autumn hour. Measure elapsed time with `absoluteDateTime`.
 
 ### Display and technical conversion
 
-`say`, `${...}`, and `toString` show every temporal value, including a timestamp, in the player's numeric local form:
-date field order, separators, and 12- or 24-hour clock follow the player's locale, such as `4-10-2026, 18:30` in Dutch
-and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only when
+`say`, `${...}`, and `toString` show every temporal value, including an `absoluteDateTime`, in the player's numeric
+local form: date field order, separators, and 12- or 24-hour clock follow the player's locale, such as `4-10-2026, 18:30`
+in Dutch and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only when
 they are not zero, milliseconds never (`toISO()` keeps them), and no month or weekday names appear. `formatDate()`,
 `formatTime()`, and `formatDateTime()` return the same text for part or all of a value. Durations display as `1 h 2 min
 3.5 s`.
 
 Inside a list, set, or object, temporal values use a fixed notation: `<date 2026-10-04>`, `<time 14:30>`,
-`<datetime 2026-10-04 14:30>`, and `<timestamp 2026-10-04T12:30:00Z>`.
+`<datetime 2026-10-04 14:30>`, and `<absoluteDateTime 2026-10-04T12:30:00Z>`.
 
 ```text
 dinner.toISO()             // "2026-10-04T18:00", without an offset
@@ -4069,7 +4069,7 @@ There is no construction from a Unix number, because seconds and milliseconds wo
 ### Collections and storage
 
 Temporal values and durations can be list and set elements; a set compares kind and value. Typed storage keeps each
-kind distinct from the others and from text: local values without an offset, timestamps as moments in UTC.
+kind distinct from the others and from text: local values without an offset, absolute values as moments in UTC.
 
 ## 36. Scheduling
 **Status:** Wanted capability; final syntax, authority, and Player UI deferred
@@ -4902,7 +4902,7 @@ number
 date
 time
 datetime
-timestamp
+absoluteDateTime
 duration
 list
 dict
@@ -4966,11 +4966,11 @@ toBoolean
 toDate
 toTime
 toDateTime
-toTimestamp
+toAbsoluteDateTime
 getDate
 getTime
 getDateTime
-getTimestamp
+getAbsoluteDateTime
 schedule
 cancelSchedule
 askText
@@ -5015,6 +5015,9 @@ getPlayerHistory
 ```
 
 This protected list may grow when new engine APIs are added. Editor autocomplete should distinguish grammar keywords, protected built-ins, and user-declared identifiers.
+
+The earlier names `timestamp`, `getTimestamp`, and `toTimestamp` stay protected: each use is a compile error that names
+`absoluteDateTime`, `getAbsoluteDateTime`, or `toAbsoluteDateTime` ([ADR 0026](../decisions/0026-unified-time-semantics.md)).
 
 ### Debug mode
 **Status:** Accepted (Owner decision, 2026-10-07)

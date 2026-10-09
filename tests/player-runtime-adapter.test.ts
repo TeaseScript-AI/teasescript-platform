@@ -396,7 +396,7 @@ test("runtime checkpoint restore preserves a paced history and its continuation"
 
 test("Continue runs a restored ready session at once, after recording its capture", () => {
   const { plan } = compileSource(
-    'say "Resumed at ${getTimestamp().toISO()}", instant\nwait 1 s\nsay "Later", instant\nexit',
+    'say "Resumed at ${getAbsoluteDateTime().toISO()}", instant\nwait 1 s\nsay "Later", instant\nexit',
   );
   assert.ok(plan);
   const checkpointJson = serializeCheckpoint(

@@ -136,6 +136,7 @@ export type {
   ScriptStorageEditedEvent,
 } from "./runtime/events.js";
 export {
+  upgradeStoredScriptValues,
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
 } from "./runtime/script-storage.js";
@@ -342,7 +343,7 @@ export {
   type SerializableRuntimeDate,
   type SerializableRuntimeDateTime,
   type SerializableRuntimeTime,
-  type SerializableRuntimeTimestamp,
+  type SerializableRuntimeAbsoluteDateTime,
 } from "./runtime/serializable-values.js";
 export {
   DEFAULT_TEMPORAL_CONTEXT,

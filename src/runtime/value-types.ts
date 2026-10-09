@@ -24,7 +24,7 @@ import {
   isSpeakerReference,
   isTime,
   isTimerHandle,
-  isTimestamp,
+  isAbsoluteDateTime,
 } from "./value-predicates.js";
 
 /**
@@ -241,8 +241,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return isTime(value);
     case "datetime":
       return isDateTime(value);
-    case "timestamp":
-      return isTimestamp(value);
+    case "absoluteDateTime":
+      return isAbsoluteDateTime(value);
     case "never":
       // No value fits, so a list of it is only ever empty, as for an element both list types share.
       return false;
@@ -258,7 +258,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
-  timestamp: "a timestamp",
+  absoluteDateTime: "an absolute date and time",
   null: "null",
   range: "a range",
   speaker: "a speaker",

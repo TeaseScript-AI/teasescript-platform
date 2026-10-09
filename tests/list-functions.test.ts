@@ -255,7 +255,7 @@ test("possibly null lists and values of list functions need a check first", () =
   assert.deepEqual(diagnostics(`${DYNAMIC}say predict(dynamic(1), "x")\nexit`), [
     [
       "TSV043",
-      "predict(...) needs a number, date, datetime, or timestamp as its x, not text (string).",
+      "predict(...) needs a number, date, datetime, or absolute date and time as its x, not text (string).",
       '"x"',
     ],
   ]);
@@ -264,7 +264,7 @@ test("possibly null lists and values of list functions need a check first", () =
     [
       [
         "TSV043",
-        "predict(...) needs a number, date, datetime, or timestamp as its x, not text (string).",
+        "predict(...) needs a number, date, datetime, or absolute date and time as its x, not text (string).",
         '"a"',
       ],
     ],
@@ -346,7 +346,7 @@ test("linearRegression fits a line through the points of a list, and predict rea
         'say "${laps.slope} ${laps.intercept} ${predict(laps, 5)}"',
         // Half a day apart: the slope is per day.
         'let times = [{ at: toDateTime("2026-10-01T08:00"), n: 1 }, { at: toDateTime("2026-10-01T20:00"), n: 2 }]',
-        'let stamps = [{ at: toTimestamp("2026-10-01T00:00:00Z"), n: 0 }, { at: toTimestamp("2026-10-03T00:00:00Z"), n: 4 }]',
+        'let stamps = [{ at: toAbsoluteDateTime("2026-10-01T00:00:00Z"), n: 0 }, { at: toAbsoluteDateTime("2026-10-03T00:00:00Z"), n: 4 }]',
         'say "${linearRegression(times, x: "at", y: "n").slope} ${linearRegression(stamps, x: "at", y: "n").slope} ${linearRegression([5, 5, 5]).r2}"',
         "exit",
       ].join("\n"),
@@ -418,7 +418,7 @@ test("linearRegression and predict report too few points, one x, and values of t
     [
       'linearRegression(dynamic([{ x: toTime("08:00"), y: 2 }, { x: toTime("09:00"), y: 3 }]), x: "x", y: "y")',
       "TSR060",
-      "linearRegression(...) needs numbers, dates, datetimes, or timestamps as x values, not a time.",
+      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not a time.",
     ],
     [
       "predict(dynamic({ slope: 1 }), 2)",

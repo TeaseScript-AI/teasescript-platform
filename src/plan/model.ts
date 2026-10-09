@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 75;
+export const INSTRUCTION_PLAN_VERSION = 76;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -575,7 +575,7 @@ export type InteractionChoiceValue =
   | ({ readonly kind: "date" } & DateFields)
   | ({ readonly kind: "time" } & TimeFields)
   | ({ readonly kind: "datetime" } & DateTimeFields)
-  | { readonly kind: "timestamp"; readonly epochMilliseconds: number };
+  | { readonly kind: "absoluteDateTime"; readonly epochMilliseconds: number };
 /** One button. `value` is what `choose` returns for it; `text` is what the button shows. */
 export interface InteractionChoiceOption {
   readonly text: string;
@@ -1046,7 +1046,7 @@ export type TypePlanName =
   | "date"
   | "time"
   | "datetime"
-  | "timestamp"
+  | "absoluteDateTime"
   | "never"
   | "null"
   | "range"
