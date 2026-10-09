@@ -156,6 +156,7 @@ import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
+  MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import {
   describeRuntimeValue,
@@ -3873,6 +3874,13 @@ export function planLabel(plan: ExpressionPlan): string | null {
 
 /** A running round must end at a supported session time strictly after a positive remaining time starts. */
 function assertRepresentableRound(nowMs: number, remainingMs: number, span: SourceSpan): void {
+  if (remainingMs > 0 && nowMs === MAX_RUNTIME_SESSION_TIME_MS) {
+    throw fault(
+      "TSR050",
+      "Scene time has reached its limit, so this timer cannot continue. Stop it, or set its remaining time to 0 s.",
+      span,
+    );
+  }
   const deadlineMs = nowMs + remainingMs;
   if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
     throw fault(
