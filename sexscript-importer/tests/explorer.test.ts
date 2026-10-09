@@ -232,8 +232,9 @@ test(
       builtins: [],
     });
     assert.ok(isRecord(movedPlan));
+    // Room for every entry: one with an earlier session takes the states of both.
     const replay = (realign: boolean) =>
-      explore(engine, movedPlan, { ...options, maxStates: 12, corpus, realign }).corpus!;
+      explore(engine, movedPlan, { ...options, maxStates: 24, corpus, realign }).corpus!;
     const strict = replay(false);
     const realigned = replay(true);
     const withInputs = corpus.filter(
@@ -495,7 +496,7 @@ test(
     const answers = helper.session
       .options(helper.step.runtime)
       .map((input) => (input.kind === "text" ? input.text : input.kind));
-    assert.deepEqual(answers, ["0", "1", "-1", "1000000", "4320", "4321", "4322"]);
+    assert.deepEqual(answers, ["0", "1", "-1", "4320", "4321", "4322"]);
 
     // A button whose time the script compares with a duration can also be pressed just after it.
     const begged = start(
@@ -1682,6 +1683,29 @@ test(
 );
 
 test(
+  "a typed number is not answered with a million unless large answers are on: a script that counts to the answer without a range check would play on for ever",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let laps = askInteger "How many laps, 1 to 5?", prefill: 2\nlet lap = 0\nwhile lap < laps * 100 {\n' +
+      '  showButton "Run"\n  lap += 1\n}\nsay "Finish line."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const answers = (large: boolean) => {
+      const session = new Session(engine, plan, 1);
+      session.largeAnswers = large;
+      return session
+        .options(session.start().runtime)
+        .map((input) => (input.kind === "text" ? input.text : input.kind));
+    };
+    assert.ok(!answers(false).includes("1000000"), answers(false).join(","));
+    assert.ok(answers(true).includes("1000000"), answers(true).join(","));
+  },
+);
+
+test(
   "code without comparisons added near an ask leaves its typed answers as they were: the constants compared nearby, and the expressions compared with the answer, in the same order",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
@@ -1714,7 +1738,7 @@ test(
     assert.deepEqual(nearby(filler), nearby(""));
     assert.deepEqual(
       nearby("").map((input) => (input.kind === "text" ? input.text : input.kind)),
-      ["0", "1", "-1", "1000000", "6", "7", "8", "2", "3", "4", "5"],
+      ["0", "1", "-1", "6", "7", "8", "2", "3", "4", "5"],
     );
     // The answer is compared before the ask (in `judge`) and after it (in `review`); the filler goes after the ask only.
     const compared = (extra: string) => {

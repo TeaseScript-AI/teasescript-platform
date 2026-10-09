@@ -448,6 +448,12 @@ export class Session {
    * unless an input chose an outcome for its draw ID; and the step reports those draws, for the explorer to try others.
    */
   randomChoices = false;
+  /**
+   * Large answers: a typed number may also be 1,000,000, to probe how a script copes with one far beyond its range. Off
+   * by default: a script that counts to such an answer without a range check (`repeat level * 10`) plays on for ever,
+   * and that path takes the search's work.
+   */
+  largeAnswers = false;
   /** The outcomes the input being applied chose, by draw ID, and the draws the current step made. */
   readonly #decisions = new Map<number, Data>();
   /** The draws an input's chosen outcomes were taken at, while it is applied. */
@@ -612,7 +618,13 @@ export class Session {
           ? []
           : comparedValues(expressions, state(), ui.kind === "number" ? ui.integer === true : null);
       options.push(
-        ...interactionOptions(ui, literals, [...compared, ...directed], record(action.form)),
+        ...interactionOptions(
+          ui,
+          literals,
+          [...compared, ...directed],
+          record(action.form),
+          this.largeAnswers,
+        ),
       );
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
       // happens meanwhile. So is a button between two clock reads whose difference a condition compares, and one
@@ -1088,8 +1100,13 @@ function collectTexts(events: readonly Data[], texts: string[]): void {
   }
 }
 
-const INTEGER_ANSWERS = ["0", "1", "-1", "1000000"];
-const NUMBER_ANSWERS = [...INTEGER_ANSWERS, "0.5"];
+/**
+ * Boundary answers of a typed number: `0`, `1`, and `-1`, and for a non-integer field `0.5`; with large answers, also
+ * a number far beyond any range a script means (see {@link Session.largeAnswers}).
+ */
+function numberAnswers(integer: boolean, large: boolean): string[] {
+  return ["0", "1", "-1", ...(large ? ["1000000"] : []), ...(integer ? [] : ["0.5"])];
+}
 const TEXT_ANSWERS = ["x"];
 const TEMPORAL_ANSWERS: Readonly<Record<string, readonly string[]>> = {
   date: ["2026-10-02", "2026-01-01", "2026-12-31"],
@@ -1336,6 +1353,7 @@ function interactionOptions(
   literals: Literals,
   directed: readonly string[],
   form: Data,
+  large: boolean,
 ): ExplorerInput[] {
   const typed = (candidates: readonly string[]): ExplorerInput[] =>
     [
@@ -1362,16 +1380,13 @@ function interactionOptions(
     case "text":
       return typed([...TEXT_ANSWERS, ...literals.strings]);
     case "number":
-      return typed([
-        ...(ui.integer === true ? INTEGER_ANSWERS : NUMBER_ANSWERS),
-        ...near(ui.integer === true),
-      ]);
+      return typed([...numberAnswers(ui.integer === true, large), ...near(ui.integer === true)]);
     case "temporal":
       return typed(TEMPORAL_ANSWERS[String(ui.temporalKind)] ?? []);
     case "image":
       return [{ kind: "image" }];
     case "form":
-      return formOptions(ui, form);
+      return formOptions(ui, form, large);
     default:
       return [];
   }
@@ -1382,7 +1397,7 @@ function interactionOptions(
  * option of a cycle; each typed field at its boundaries (`min`, `max`, or the candidates of its type); and cancel
  * where the form offers it. A required typed field without a starting value gets its first candidate in every answer.
  */
-function formOptions(ui: Data, form: Data): ExplorerInput[] {
+function formOptions(ui: Data, form: Data, large: boolean): ExplorerInput[] {
   const fields = list(ui.fields);
   const values: unknown[] = Array.isArray(form.values) ? form.values : [];
   const optionIndex = (field: Data, wanted: unknown): number => {
@@ -1394,9 +1409,9 @@ function formOptions(ui: Data, form: Data): ExplorerInput[] {
     const bounded = [field.min, field.max].filter((value) => typeof value === "number").map(String);
     switch (field.kind) {
       case "integer":
-        return [...bounded, ...INTEGER_ANSWERS];
+        return [...bounded, ...numberAnswers(true, large)];
       case "number":
-        return [...bounded, ...NUMBER_ANSWERS];
+        return [...bounded, ...numberAnswers(false, large)];
       case "text":
         return TEXT_ANSWERS;
       default:

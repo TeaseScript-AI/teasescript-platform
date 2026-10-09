@@ -321,6 +321,8 @@ export interface ExploreOptions {
    * chosen outcome is labelled "play (chosen random)" (`chosen`). Off by default.
    */
   readonly randomChoices?: boolean;
+  /** Large answers: typed numbers are also answered with 1,000,000 (see `Session.largeAnswers`). Off by default. */
+  readonly largeAnswers?: boolean;
   /**
    * Quit-anywhere next visits: a player can quit at any moment, and what was saved so far stays, so next sessions also
    * start from the storage of explored states a session did not complete (at most {@link MAX_QUIT_SESSIONS}, within the
@@ -1708,6 +1710,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
   const chooses = options.randomChoices === true;
+  session.largeAnswers = options.largeAnswers === true;
   const quitAnywhere = options.quitAnywhere === true;
   // Corpus paths with chosen random outcomes replay them also without random choices; other draws stay natural.
   session.randomChoices =
