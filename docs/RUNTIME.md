@@ -1545,7 +1545,7 @@ restart, and report the failure with its debug export.
 | `TSR008` | An index on a value that is not a list or dict, or on a list that the same statement replaced. | Index only lists and dicts, and make such a change in a separate statement. |
 | `TSR009` | An operator that cannot combine its operands, such as values of different kinds, durations of different families, a date moved by clock time, or a calendar duration divided by zero. | Check or convert the operand the message names. |
 | `TSR010` | A named argument given twice. _Defect._ | Report it. |
-| `TSR011` | A call of a name that is not a function, such as `(x)()` or `(speaker)()`, or of a built-in function the host does not provide. | Call a function by its name. |
+| `TSR011` | A call of a built-in function the host does not provide, or of a name that is not a function, such as `(x)()`, which the compiler rejects (`TSV019`) but the plan of an older checkpoint may still hold. | Call a function by its name. |
 | `TSR012` | A built-in function failed: a core one such as `randomInteger(...)` on its argument, with its own message, or a host one for the reason the message gives. | Correct what the message names, or report a host failure with a debug export. |
 | `TSR013` | A host built-in returned a value a script cannot hold. | Report it to the host. |
 | `TSR014` | A call of something that is not a function or a method, such as `items[0]()`. | Call a function by its name. |

@@ -205,6 +205,44 @@ test("preserves existing function, unknown-name, callable, and protected-name di
   );
 });
 
+test("rejects a call of a parenthesized name that is not a function", () => {
+  for (const [source, name, message] of [
+    ["let value = 1\nsay (value)()", "value", "'value' is a variable, not a callable function."],
+    ["let value = 1\nsay ((value))()", "value", "'value' is a variable, not a callable function."],
+    ["speaker vera {}\n(vera)()", "vera", "'vera' is a speaker, not a callable function."],
+    [
+      'speaker vera {}\nsay as vera "${(speaker)()}"',
+      "speaker",
+      "'speaker' is the current speaker, not a callable function.",
+    ],
+    [
+      "say (debugMode)()",
+      "debugMode",
+      "'debugMode' is a read-only value, not a callable function.",
+    ],
+  ] as const) {
+    const start = source.lastIndexOf(`(${name})`) + 1;
+    assert.deepEqual(
+      compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV019", message, start, start + name.length]],
+      source,
+    );
+  }
+
+  // A function stays an invalid value, reported once.
+  assert.deepEqual(
+    compileSource("function sample { return 1 }\nsay (sample)()\nexit").diagnostics.map(
+      (diagnostic) => diagnostic.code,
+    ),
+    ["TSV028"],
+  );
+});
+
 test("reports a declaration named after the set keyword as a protected name", () => {
   for (const source of [
     "let set = 1",

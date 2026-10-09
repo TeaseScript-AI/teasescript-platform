@@ -2078,6 +2078,25 @@ class SemanticValidator {
           yield* compileChild(
             this.#validateExpressionTask(expression.callee, scope, contextualSpeaker),
           );
+          // Grouping a name does not make it callable: `(x)()` fails as `x()` does. The check of the name as a value
+          // already reports a function, a built-in, or an unknown name.
+          if (method.kind === "identifier") {
+            const binding = scope.resolve(method.name);
+            const kind =
+              method.name === "speaker" && contextualSpeaker !== null
+                ? "the current speaker"
+                : method.name === "debugMode"
+                  ? "a read-only value"
+                  : binding !== undefined && binding.kind !== "function"
+                    ? `a ${binding.kind}`
+                    : null;
+            if (kind !== null)
+              this.#report(
+                semanticCode.nonCallable,
+                `'${method.name}' is ${kind}, not a callable function.`,
+                method.span,
+              );
+          }
         }
         for (const argument of expression.arguments) {
           yield* compileChild(
