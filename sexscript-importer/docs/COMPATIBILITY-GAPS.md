@@ -230,6 +230,12 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   (100 in DisciplineClinic); other reads compare with `null` explicitly, and generic `load()` keeps that test because
   of the `"null"` text. TeaseScript keys are flat, so saving a scalar over a former list/map key leaves the old
   sub-keys.
+- Legacy `load(key)` of a key that is not stored itself rebuilt a list or map from its dotted sub-keys (`key.0`,
+  `key.name`), and `loadMap(key)` is that value cast to a map (sexscripts.jar 1.29.4), so `loadMap("intro")` read the
+  profile's `intro.*` keys as one map and `loadMap("toys")` the owned-item flags. TeaseScript keys are flat and have no
+  listing, so such a read stays reported (`SX_STORAGE_MAP_SEMANTICS`; AI_Mistress, 3 sites, an online-only package).
+  With the distribution's own keys known (profile.ts), a read of `intro`, `toys`, or `clothes` could become a dict
+  built from them, should the profile cover those packages.
 - `getRandom(max)` returned 0 for `max` 0 (rounding toward zero for a negative bound, and 0..99 for null), while
   `randomInteger()` rejects the empty range `0..0`. Bounds other than a positive whole number known before the script
   runs (a literal, a constant, or arithmetic on them without a division), or a variable that a declaration gives one
