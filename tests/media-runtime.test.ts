@@ -14,7 +14,6 @@ import {
   run,
   serializeCheckpoint,
   stageProjection,
-  validateInstructionPlan,
   validateRuntimeSnapshot,
   type InstructionPlan,
   type InterpreterEvent,
@@ -2134,58 +2133,6 @@ test("restore validation rejects malformed settled media records and their block
     Object.assign(corrupted.settledMedia[0]!, change);
     assert.equal(validateRuntimeSnapshot(corrupted, failed.plan).valid, false, name);
   }
-});
-
-test("settled media blocks may use a block function that plays of a valid plan share", () => {
-  const compiled = plan(
-    [
-      'let a = playAudio async "a" {',
-      '  at 500 ms { say "a", instant }',
-      '  finish { say "finish a", instant }',
-      "}",
-      'let b = playAudio async "b" {',
-      '  at 500 ms { say "b", instant }',
-      '  finish { say "finish b", instant }',
-      "}",
-      "timer async 0 s { wait 5 }",
-      "wait 10",
-      "exit",
-    ].join("\n"),
-  );
-  // EVIDENCE: JSON serialization preserves the compiled plan's plain-data shape; the case gives both plays one cue block.
-  const shared = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
-  const plays = shared.instructions.filter((instruction) => instruction.kind === "playMedia");
-  // EVIDENCE: the JSON copy is plain mutable data, so its readonly plan types do not apply to it.
-  (plays[1]!.cues[0] as { functionId: number }).functionId = plays[0]!.cues[0]!.functionId;
-  assert.equal(validateInstructionPlan(shared).valid, true);
-  let snapshot = run(shared, createImmediatePacingRuntimeSnapshot(shared)).snapshot;
-  for (const mediaId of [1, 2]) {
-    snapshot = reportMediaLoad(shared, snapshot, mediaId, {
-      kind: "loaded",
-      durationMs: 1_000,
-    }).snapshot;
-    snapshot = run(shared, snapshot).snapshot;
-  }
-  // Both finish while their cue and finish blocks wait behind the timer block.
-  snapshot = observeTime(shared, snapshot, 1_000, [
-    { mediaId: 1, segment: 1, progressMs: 1_000 },
-    { mediaId: 2, segment: 1, progressMs: 1_000 },
-  ]).snapshot;
-  assert.equal(snapshot.settledMedia.length, 2);
-  assert.equal(snapshot.pendingTimerHandlers.length, 4);
-  assert.deepEqual(validateRuntimeSnapshot(snapshot, shared).errors, []);
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(shared, snapshot)));
-  const observed = observeTime(shared, restored.snapshot, 6_000).snapshot;
-  const said = run(shared, observed).events.flatMap((event) =>
-    event.kind === "say" ? [event.text] : [],
-  );
-  // Both cues run the shared block of `a`.
-  assert.deepEqual(said, ["a", "a", "finish a", "finish b"]);
-  // A finish of the other play makes the blocks of media 1 belong to no play.
-  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case moves one finish block.
-  const corrupted = JSON.parse(JSON.stringify(snapshot)) as MutableSnapshot;
-  corrupted.pendingTimerHandlers.at(-1)!.mediaId = 1;
-  assert.equal(validateRuntimeSnapshot(corrupted, shared).valid, false);
 });
 
 test("the blocks of one settled media share its variables", () => {

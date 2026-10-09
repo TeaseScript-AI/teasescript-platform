@@ -510,45 +510,36 @@ export function validateMediaState(
     }
   }
   // The blocks of one settled media share one activation root and its variables and are blocks of one play, under which
-  // `finish` runs at most once and only after the media finished. Plays may share block functions, so the candidates are
-  // the plays that use every one of them.
-  let blockPlays: Map<unknown, Set<PlayMediaInstruction>> | undefined;
-  const playsUsing = (functionId: unknown): ReadonlySet<PlayMediaInstruction> => {
+  // `finish` runs at most once and only after the media finished. Plan validation gives each block function one play.
+  let blockPlays: Map<unknown, PlayMediaInstruction> | undefined;
+  const playOf = (functionId: unknown): PlayMediaInstruction | undefined => {
     if (blockPlays === undefined) {
       blockPlays = new Map();
       for (const instruction of plan?.instructions ?? []) {
         if (instruction?.kind !== "playMedia") continue;
-        const uses = [...instruction.cues.map((cue) => cue.functionId)];
-        if (instruction.finishFunctionId !== null) uses.push(instruction.finishFunctionId);
-        for (const used of uses) {
-          const plays = blockPlays.get(used) ?? new Set<PlayMediaInstruction>();
-          plays.add(instruction);
-          blockPlays.set(used, plays);
-        }
+        for (const cue of instruction.cues) blockPlays.set(cue.functionId, instruction);
+        if (instruction.finishFunctionId !== null)
+          blockPlays.set(instruction.finishFunctionId, instruction);
       }
     }
-    return blockPlays.get(functionId) ?? new Set();
+    return blockPlays.get(functionId);
   };
   for (const [media, blocks] of settledBlocks) {
     const first = blocks[0]!;
-    const runs = new Map<unknown, number>();
+    const play = playOf(first.functionId);
+    let finishRuns = 0;
     for (const block of blocks)
-      runs.set(block.functionId, (runs.get(block.functionId) ?? 0) + block.count);
-    let candidates = [...playsUsing(first.functionId)];
-    for (const functionId of runs.keys()) {
-      const plays = playsUsing(functionId);
-      candidates = candidates.filter((play) => plays.has(play));
-    }
-    const finishFits = (play: PlayMediaInstruction): boolean => {
-      const finishRuns = runs.get(play.finishFunctionId) ?? 0;
-      return finishRuns === 0 || (finishRuns === 1 && media.state === "finished");
-    };
+      if (play !== undefined && block.functionId === play.finishFunctionId)
+        finishRuns += block.count;
     if (
       blocks.some(
         (block) =>
-          block.rootScopeId !== first.rootScopeId || !sameCaptures(block.captures, first.captures),
+          block.rootScopeId !== first.rootScopeId ||
+          !sameCaptures(block.captures, first.captures) ||
+          (plan !== undefined && playOf(block.functionId) !== play),
       ) ||
-      (plan !== undefined && !candidates.some(finishFits))
+      (plan !== undefined &&
+        (play === undefined || (finishRuns > 0 && (finishRuns > 1 || media.state !== "finished"))))
     ) {
       errors.push("Runtime settled media blocks do not belong to one play.");
     }
