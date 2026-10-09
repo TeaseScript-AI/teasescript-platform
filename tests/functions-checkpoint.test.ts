@@ -6,6 +6,7 @@ import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_VERSION,
+  CheckpointError,
   createCheckpoint,
   deserializeCheckpoint,
   restoreCheckpoint,
@@ -738,12 +739,25 @@ test("a prepared reference keeps a copy of its root only where a later call in i
       source,
     );
     if (keepsRoot) removeSerializedObjectProperty(descriptor, "capturedRoot");
-    else
-      descriptor.properties.splice(4, 0, {
-        name: "capturedRoot",
-        value: { kind: "list", items: [] },
-      });
-    assertCheckpointRejected(base, "TSK002");
+    else {
+      // The variable's own value: a root the path leads through, so only the plan's rule refuses it.
+      const root = base.snapshot.frames[0].bindings.find(
+        (binding: { name: string }) => binding.name === "target",
+      ).value;
+      descriptor.properties.splice(4, 0, { name: "capturedRoot", value: root });
+    }
+    assert.throws(
+      () => restoreCheckpoint(base),
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        error.message.includes(
+          keepsRoot
+            ? "the captured root is missing."
+            : "an attached descriptor keeps a captured root where the plan keeps none.",
+        ),
+      source,
+    );
   }
 });
 

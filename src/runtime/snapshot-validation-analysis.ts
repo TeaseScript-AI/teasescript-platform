@@ -178,47 +178,64 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
 
 /**
  * An attached prepared reference resolves through its variable, and every change that could break its path first fixes
- * it to the value it reaches. Its copy of the root is read only while a preparation runs: by its own, when a call after
- * the root was read can change the value it selects, and by a later preparation that extends it and keeps a copy too.
- * Only such references keep one.
+ * it to the value it reaches. Its copy of the root is then read only while a preparation runs: by its own, when a call
+ * after the root was read can change the value it selects, and by a later preparation that extends it and keeps a copy
+ * too. A path through the `keys` or `values` of a dict is the exception: those lists are made anew each time, so no
+ * change of the dict fixes a reference through them, and such a reference, and each one that extends it, falls back to
+ * its copy once its path leads nowhere. Only these references keep one.
  */
 function collectPreparedReferenceTemporaries(plan: InstructionPlan): ReadonlyMap<number, boolean> {
-  const temporaries = new Map<number, boolean>();
-  // A producer precedes every use, so the preparations that extend a reference come before it here.
-  for (let index = plan.instructions.length - 1; index >= 0; index -= 1) {
-    const instruction = plan.instructions[index];
+  const preparations: { readonly temporaryId: number; readonly scan: PreparationScan }[] = [];
+  for (const instruction of plan.instructions) {
     if (instruction?.kind !== "prepareReference") continue;
+    preparations.push({
+      temporaryId: instruction.destinationTemporary,
+      scan: scanPreparation(instruction.expression),
+    });
+  }
+  // A producer precedes every use: in plan order a reference is classified before those that extend it.
+  const throughDerived = new Set<number>();
+  for (const { temporaryId, scan } of preparations) {
+    if (scan.derived || scan.leaves.some((leaf) => throughDerived.has(leaf)))
+      throughDerived.add(temporaryId);
+  }
+  // In reverse, the preparations that extend a reference come before it.
+  const temporaries = new Map<number, boolean>();
+  for (let index = preparations.length - 1; index >= 0; index -= 1) {
+    const { temporaryId, scan } = preparations[index]!;
     const keepsRoot =
-      temporaries.get(instruction.destinationTemporary) === true ||
-      expressionCalls(instruction.expression);
-    temporaries.set(instruction.destinationTemporary, keepsRoot);
-    if (!keepsRoot) continue;
-    for (const extended of preparedReferenceLeaves(instruction.expression)) {
-      temporaries.set(extended, true);
-    }
+      temporaries.get(temporaryId) === true || scan.calls || throughDerived.has(temporaryId);
+    temporaries.set(temporaryId, keepsRoot);
+    if (keepsRoot) for (const leaf of scan.leaves) temporaries.set(leaf, true);
   }
   return temporaries;
 }
 
-function expressionCalls(root: ExpressionPlan): boolean {
-  const pending = [root];
-  while (pending.length > 0) {
-    const expression = pending.pop()!;
-    if (expression.kind === "call") return true;
-    pending.push(...expressionPlanChildren(expression));
-  }
-  return false;
+/** What a `prepareReference` expression holds: a call, a dict's `keys` or `values`, and the references it extends. */
+interface PreparationScan {
+  readonly calls: boolean;
+  readonly derived: boolean;
+  readonly leaves: readonly number[];
 }
 
-function preparedReferenceLeaves(root: ExpressionPlan): number[] {
+function scanPreparation(root: ExpressionPlan): PreparationScan {
+  let calls = false;
+  let derived = false;
   const leaves: number[] = [];
   const pending = [root];
   while (pending.length > 0) {
     const expression = pending.pop()!;
-    if (expression.kind === "preparedReference") leaves.push(expression.temporaryId);
-    else pending.push(...expressionPlanChildren(expression));
+    if (expression.kind === "call") calls = true;
+    else if (expression.kind === "preparedReference") leaves.push(expression.temporaryId);
+    else if (
+      expression.kind === "property" &&
+      (expression.name === "keys" || expression.name === "values")
+    )
+      derived = true;
+    // One by one: a wide list must not depend on the host's argument-spread limit.
+    for (const child of expressionPlanChildren(expression)) pending.push(child);
   }
-  return leaves;
+  return { calls, derived, leaves };
 }
 
 function collectPreparedSayTemporaryOwnership(

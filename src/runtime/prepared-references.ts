@@ -48,9 +48,9 @@ export interface PreparedReferenceDescriptor {
   readonly rootName: string | null;
   readonly path: PreparedReferenceStep[];
   /**
-   * A copy of the root: the value of a detached reference, and for an attached one, where the plan keeps it, the
-   * fallback while a preparation runs (`preparedReferenceTemporaries` of the snapshot validation analysis). `undefined`
-   * for an attached reference that keeps none.
+   * A copy of the root: the value of a detached reference, and for an attached one, where the plan keeps it, its
+   * fallback (`preparedReferenceTemporaries` of the snapshot validation analysis). `undefined` for an attached
+   * reference that keeps none.
    */
   readonly capturedRoot: SerializableRuntimeValue | undefined;
   readonly detached: boolean;
@@ -397,8 +397,7 @@ function freezePreparedReference(
 ): void {
   const resolution = resolvePreparedReferenceDescriptor(snapshot, descriptor);
   if (!resolution.found) {
-    // Every change that could break the path of an attached reference freezes it first; only a reference that keeps a
-    // copy of its root for a preparation has a fallback.
+    // Every change that could break the path of an attached reference that keeps no copy of its root freezes it first.
     if (descriptor.capturedRoot === undefined) {
       throw fault(
         "TSR053",

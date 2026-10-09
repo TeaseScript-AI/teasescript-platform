@@ -709,8 +709,8 @@ export class Evaluator {
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
           trace?.readBinding(location.frame.id, expression.name, location.binding.value);
           // Only the root of a prepared reference, reached through reference frames alone, keeps a copy, and only where
-          // the plan keeps one: a call in an index read after it can remove an ancestor of the value it selects. The
-          // receiver of an immediate call resolves through its binding, so it shares the root instead of copying it.
+          // the plan keeps one: for instance, a call in an index read after it can remove an ancestor of the value it
+          // selects. The receiver of an immediate call resolves through its binding, so it shares the root instead.
           const prepared = pending.every((pendingFrame) => pendingFrame.reference);
           result = {
             value: location.binding.value,
