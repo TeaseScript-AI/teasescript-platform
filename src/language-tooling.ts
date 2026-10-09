@@ -628,10 +628,18 @@ function activeParameterFor(
     command === "showButton"
   ) {
     // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
-    // command ends the command, so later options belong to the enclosing construct.
+    // command ends the command, so later options belong to the enclosing construct. A `(` right after an ask or its
+    // `as speaker` opens the ask's own arguments, as the parser reads it, and its `)` ends the ask.
+    const speakerLength =
+      tail[0]?.kind === TokenKind.KeywordAs && tail[1]?.kind === TokenKind.Identifier ? 2 : 0;
+    const argumentsStart =
+      command !== "showButton" && tail[speakerLength]?.kind === TokenKind.LeftParenthesis
+        ? speakerLength + 1
+        : 0;
     let active = 1;
     let depth = 0;
     for (const [index, token] of tail.entries()) {
+      if (index < argumentsStart) continue;
       if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
       else if (CLOSING_DELIMITERS.has(token.kind)) {
         if (depth === 0) break;

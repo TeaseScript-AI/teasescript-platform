@@ -247,6 +247,13 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askInteger "How many?", prefill: '), "prefill");
   assert.equal(activeSlot('askDateTime "When?", prefill: '), "prefill");
   assert.equal(activeSlot('askText "Name?", hint: '), "hint");
+  // A parenthesized ask's own parentheses hold its arguments.
+  assert.equal(activeSlot('askText("Q", prefill: '), "prefill");
+  assert.equal(activeSlot('askText("Q", hint: '), "hint");
+  assert.equal(activeSlot('askText as mistress ("Q", prefill: '), "prefill");
+  assert.equal(activeSlot('askText("Q"'), "question");
+  assert.equal(activeSlot('askText("Q", prefill: pick(hint: 1'), "prefill");
+  assert.equal(activeSlot('say "${askText("Q", hint: '), "hint");
   assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
   assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");
