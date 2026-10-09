@@ -809,6 +809,47 @@ test(
 );
 
 test(
+  "a long run of waits with nothing else to do takes one cell however far it goes, so its passes do not look new, and an endless one is still a trap",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const run = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 20_000,
+        maxStates: 100_000,
+        sources: new Map(),
+        diagnostics: [],
+      });
+    };
+    // Every hundred strokes the explorer records a state with nothing to do but wait; a stroke's place in the loop is
+    // no place the player chose, so twice the strokes make no more cells.
+    const strokes = (count: number) =>
+      run(
+        'let pick = choose punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
+          `for stroke in 1..=${count} {\n  wait 1 s\n}\nsay "Done."\nexit\n`,
+      );
+    const short = strokes(500);
+    const long = strokes(1000);
+    assert.ok(long.search.states > short.search.states);
+    assert.equal(long.search.cells?.cells, short.search.cells?.cells);
+    assert.equal(long.coverage.percent, short.coverage.percent);
+    // Waiting forever is still a loop the player cannot leave.
+    const endless = run(
+      'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  exit\n}\nwhile true {\n  wait 1 s\n}\n',
+    );
+    assert.deepEqual(
+      endless.traps.map((trap) => trap.kind),
+      ["loop"],
+    );
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

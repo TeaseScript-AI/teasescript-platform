@@ -127,12 +127,13 @@ HOST=127.0.0.1 PORT=4182 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/co
 HOST=127.0.0.1 PORT=4183 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/verified node dist/playground/server.js
 node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/external/catalog \
   --upstream http://127.0.0.1:4182 --verified-root sexscript-importer/external/verified \
-  --verified-upstream http://127.0.0.1:4183 --cert cert.pem --key key.pem --port 4443 [--http-port 4180]
+  --verified-upstream http://127.0.0.1:4183 --cert cert.pem --key key.pem --port 4443 [--http-port 4180] \
+  [--pins sexscript-importer/external/catalog-pins.json]
 # from sexscript-importer/:
 node tools/play-check.ts [--base https://host:4443] [--runs N] [--steps N] [--only id,id] external/converted external/play-checks
 node tools/verify-package.ts --checks external/play-checks --verified external/verified --manual "<note>" external/converted <id>
-node tools/catalog.ts [--player https://host:port] --play-checks external/play-checks [--explorer <dir>]... \
-  --verified external/verified [--approved docs/APPROVED.md] external/converted external/catalog/index.html
+node tools/catalog.ts [--player https://host:port] [--build <repository>] --play-checks external/play-checks \
+  [--explorer <dir>]... --verified external/verified [--approved docs/APPROVED.md] external/converted external/catalog/index.html
 ```
 
 `convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
@@ -231,8 +232,10 @@ Script-specific fixes stay out of the converter (owner decision 2026-10-05). The
 The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
 page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and
 `/source/` itself, with the sources as UTF-8 plain text, and forwards the other GET requests to the playground server
-on loopback, or, for a package with a verified copy, to the one that offers the verified copies. A self-signed
-certificate works once its browser warning is accepted.
+on loopback, or, for a package with a verified copy, to the one that offers the verified copies; the package id
+`latest~<id>` reaches the latest conversion of such a package. With `--pins`, `/pins.json` keeps the page's pins in
+that file (GET, and PUT of a JSON array of package ids), so they outlive regenerations of the page, restarts, other
+origins, and browser storage. A self-signed certificate works once its browser warning is accepted.
 
 `play-check` plays each package in the real Player with Playwright (`PLAYWRIGHT_CORE` names the `playwright-core`
 folder), one browser at a time. A run presses buttons, picks choices, and types answers until the session halts,
@@ -250,21 +253,27 @@ package's current `.tease` files.
 `external/verified/<id>/` and adds a row to [`docs/VERIFIED.md`](docs/VERIFIED.md). It never replaces a verified copy.
 
 `catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
-`compileProject` with the package images. A summary table counts the packages that convert fully, compile, play to the
-end, stop during play, do not start, are not played in the Player, are blocked by unbuilt commands, are verified, or
-are owner-approved, and the explorer results. Each table row shows the `---` header of `main.tease`, or of the first script that a generated
-`main.tease` menu goes to: title (the Player link), author, keywords, and description. The status column takes, in
+`compileProject` with the package images, from this repository's build or, with `--build`, from that of another
+checkout, such as the one the served Player was built in. Under the time it was written, in the reader's time zone, a few counts:
+the packages listed, that convert fully, compile, and play to the end, then the other counts that are not zero, each
+explained in its tooltip. A filter under each of the title, author, keywords, and description columns narrows the
+rows on that column, the filters combined; a coverage range and a sort order (coverage, crashes, traps) use the
+explorer column. Each table row shows the `---` header of
+`main.tease`, or of the first script that a generated `main.tease` menu goes to: title (the Player link), author,
+keywords, and description. A package with a verified copy has two Player links instead, `Play (verified copy)` and
+`Play (latest conversion)`, and source links to both. The status column takes, in
 this order, the owner-approved list (the first column of the Markdown table in `--approved`), the verified copy, the
 Player check of the current files, or else the compiler and the report's smoke run. A `partly converted` mark counts
 unconverted code, and a grey `older conversion` mark shows the latest Player check of files the importer has converted
 again since, which the summary counts apart; click a status for details. The explorer column shows the latest [`explore`](#branch-explorer)
 report of the current files from the `--explorer` folders (`<unit>.json` or `<unit>/<unit>.json`), for a verified
-copy else of the unit's newer conversion, marked so, else the latest report of other files, marked stale: line coverage and the numbers of crashes and traps, with the first crash's code
+copy else of the unit's latest conversion, marked so, else the latest report of other files, marked stale: line coverage and the numbers of crashes and traps, with the first crash's code
 and `file:line`, the first trap, and the search in its details. A report's compact `catalog` block (`coveragePercent`,
 `crashes`, `traps`, `firstCrash`, `firstTrap`, and `reach`, the lines per reach label) counts before its full fields. The source column links the legacy Groovy and converted `.tease` files,
 which `catalog` hard-links under `source/` next to the page; earlier versions that the unit's `unit.json` lists under
-`earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites in `localStorage` and lists
-them at the top.
+`earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites and lists them at the
+top: on the server with `serve-catalog --pins`, else in `localStorage`; the server starts from the first browser's
+`localStorage` pins.
 
 ## Branch explorer
 
@@ -320,12 +329,15 @@ in. The search first expands directed states (below), then states whose step rea
 session, then, earlier sessions first, states that look new apart from clock, random state, and settled handles (their
 loop key), and then the repeats, least repeated first; play goes before clock states (below), and the newest state
 first. The search ranks states by cells (`--no-cells` switches this off). A cell is where a state waits (its pending action, the return
-points of its calls, and the pass of each `for` and `repeat` loop) with the bucket of each value that conditions compare
+points of its calls, and the pass of each `for` and `repeat` loop, except for a state that, after a hundred waits in a
+row, still has nothing to do but wait: its passes are time going by, not places the player chooses) with the bucket of
+each value that conditions compare
 with constants: each variable and stored key (also through the data flow, each key a key template matches apart) a
 comparison reads, or its length, bucketed as unset, `null`, `true` or `false`, a compared text or other text, or a
 number's or duration's place among its compared constants (below, at, between, or above them). A step that shows such
 a value, or a change of one, for the first time counts as reaching new instructions, and among the other states those
-of the cells expanded least go first, before the loop key. A cell groups states coarsely: a condition that computes
+of the cells expanded least go first, before the loop key, and of those the states last queued when their cell was
+expanded least, the ones that waited longest. A cell groups states coarsely: a condition that computes
 with a value (`n + 1 == 3`) can still tell states of one cell apart. A loop that keeps making states no condition
 tells apart, such as a counter no condition reads, so no longer takes most of the search; the report's `search.cells`
 counts the slots, cells, values, and changes found. Waiting states keep their tagged snapshots (below): the JSON's
@@ -548,6 +560,16 @@ one side in at least two thirds of the seeds and by the other in none), with the
 figures that help explain them (states, sessions, time steps, quit visits, traps, open states, the top hotspot). A
 `--favourite` unit with consistently lost lines is marked `EXPLAIN`. Lines are counted from compiling each unit, as the
 explorer counts them.
+
+Known limits:
+
+- Content behind a long automatic chain (a loop of waits with nothing else to do, past a hundred waits) waits longer:
+  such a chain's passes share a cell, so they no longer look new. Seen in BreatheAcademy (the ending after its long
+  countdown; −4.3 points in a 13-unit gate, from one seed) and Domme3 (`spanking.tease` 863–878, after a 300-stroke
+  chain). A later step that weighs work per operation or schedules by session depth should check these first.
+- A step settles at most 1,000 automatic operations (`MAX_AUTO_OPERATIONS`). An automatic run longer than that, such as
+  more than a thousand camera requests in a row, ends the step with the request still pending, and the state is
+  reported as stuck although settling could go on.
 
 ## Tests
 
