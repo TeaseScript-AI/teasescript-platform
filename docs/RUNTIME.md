@@ -625,9 +625,10 @@ that more than one timer, media, or button block uses, also within one statement
 
 Each scope exists once: on the stack while its code runs, otherwise in `retainedScopes`. A scope that a list names is
 marked `shared: true` from then on. Leaving a block, loop iteration, or function, and a transfer that discards them,
-retains a marked scope that a live timer, media, button, or queued block still names, with all its bindings; a running
-block names only scopes below its own, and leaving an unmarked scope checks nothing. A retained scope of this
-kind is dropped as soon as nothing names it: when a block returns, a resource settles or is removed, or a transfer runs.
+retains a marked scope that a live timer, media, button, or queued block still names, with only the bindings those lists
+name; a running block names only scopes below its own, and leaving an unmarked scope checks nothing. A retained scope of
+this kind drops a binding once no live list names it, and is dropped itself once nothing names it: when a block returns,
+a resource settles or is removed, or a transfer runs.
 Settled timer and media records drop the list. `exit` clears everything. Prepared references keep addressing a scope
 by its ID wherever it is.
 
