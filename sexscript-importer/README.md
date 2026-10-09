@@ -298,8 +298,11 @@ within the budget, and replaces playing converted packages by hand to find crash
 `src/explorer-search.ts` searches, and `src/explorer-analysis.ts` reads the plan for directed search. Each pending
 action is a branch point. The options are every button and choice option; for a form, its starting values, each toggle
 switched (and all on, all off), each other option of a cycle, each typed field at its bounds, and cancel where the
-form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1`, `1000000` (and
-`0.5` for `askNumber`), the text `x`, and dates and times at both ends of a day or year. Each constant that the code
+form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1` (and `0.5`
+for `askNumber`), the text `x`, and dates and times at both ends of a day or year. `--large-answers` adds `1000000`,
+to probe how a script copes with a number far beyond its range; it is off by default, as a script that counts to an
+answer without a range check then plays on practically for ever, and that path takes the search's work
+(DisciplineClinic's level from 1 to 10 made its punishment rounds need millions of spanks). Each constant that the code
 compares with near the ask (within 40 instructions of it, in its function, or of where a call that leads to it
 returns, in the caller's; three per type, the nearest first) adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. With compared answers (on by
 default, off with `--no-compared-answers`), a text or number ask is also answered with the values, in the state at the ask, of what the code compares its answer
@@ -466,6 +469,14 @@ ToyExpanded 2.0 (its second visit gains early, and the stricter test kept it clo
 of 6 seeds instead of 5. No one level for the test serves a first session that still gains and a second one that gains
 more, so phases stay opt-in. At four times the gate budgets, phases also cost Domme3 2.6 points (192,000 operations),
 whose next visits at other times of day they start far less often (14 instead of 171).
+
+A capped alternative was tried for DisciplineClinic, whose first session never got past the first of its punishment
+rounds without phases: later sessions get play by their gain per operation as soon as a first session leaves storage,
+at most a third of all play together. At 512,000 operations it reached 41.4% instead of 31.8%, kept ToyExpanded
+(42.0% instead of 40.8%), and left jewell's coverage as it was, but found its trap loops in 3 of 6 seeds instead of 5.
+It was not needed: the rounds needed millions of spanks because the explorer answered the clinic's unchecked 1 to 10
+level question with 1,000,000 (`--large-answers` keeps that answer), and without it the default search reaches 43.3%
+there (3 seeds) with all of its play still first-session play.
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,

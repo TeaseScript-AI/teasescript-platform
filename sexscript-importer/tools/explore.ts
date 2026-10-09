@@ -8,7 +8,7 @@
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
  *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]
- *          [--[no-]follow-chains] [--no-report]
+ *          [--[no-]follow-chains] [--[no-]large-answers] [--no-report]
  *          <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
@@ -27,8 +27,9 @@
  * steering (a way that needs all parts of its condition is steered to by their summed distance), and random choices
  * (the explorer also chooses other outcomes of random draws) are on by default (`--no-cells`, `--no-later`,
  * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
- * off). `--guidance` leads states toward the largest region of code not reached yet, and `--depth-phases` lets play work
- * go to session numbers by their gain per operation (see `src/explorer-search.ts` and the README).
+ * off). `--guidance` leads states toward the largest region of code not reached yet, `--depth-phases` lets play work
+ * go to session numbers by their gain per operation, and `--large-answers` also answers typed numbers with 1,000,000, to
+ * probe a script's ranges (see `src/explorer-search.ts` and the README).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -96,6 +97,7 @@ const STRATEGIES = [
   "depthPhases",
   "effectRanking",
   "followChains",
+  "largeAnswers",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -164,6 +166,7 @@ async function main(args: string[]): Promise<void> {
       "depth-phases": { type: "boolean", default: false },
       "effect-ranking": { type: "boolean", default: false },
       "follow-chains": { type: "boolean", default: false },
+      "large-answers": { type: "boolean", default: false },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -222,7 +225,7 @@ async function main(args: string[]): Promise<void> {
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
         "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]\n" +
-        "         [--[no-]follow-chains] [--no-report] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]follow-chains] [--[no-]large-answers] [--no-report] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -272,6 +275,7 @@ async function main(args: string[]): Promise<void> {
             depthPhases: values["depth-phases"],
             effectRanking: values["effect-ranking"],
             followChains: values["follow-chains"],
+            largeAnswers: values["large-answers"],
           },
         },
         out,
@@ -325,6 +329,7 @@ interface RunSettings {
     depthPhases: boolean;
     effectRanking: boolean;
     followChains: boolean;
+    largeAnswers: boolean;
   };
 }
 

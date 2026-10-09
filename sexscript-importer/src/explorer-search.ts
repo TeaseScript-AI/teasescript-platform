@@ -321,6 +321,8 @@ export interface ExploreOptions {
    * chosen outcome is labelled "play (chosen random)" (`chosen`). Off by default.
    */
   readonly randomChoices?: boolean;
+  /** Large answers: typed numbers are also answered with 1,000,000 (see `Session.largeAnswers`). Off by default. */
+  readonly largeAnswers?: boolean;
   /**
    * Quit-anywhere next visits: a player can quit at any moment, and what was saved so far stays, so next sessions also
    * start from the storage of explored states a session did not complete (at most {@link MAX_QUIT_SESSIONS}, within the
@@ -1605,8 +1607,8 @@ interface Target {
   reach: { label: "play" | "chosen" | "clock"; via: "directed" | "search"; repro: Repro } | null;
   /** Session chains toward the stored values its condition needs, by key. */
   readonly chains: Map<string, Chain>;
-  /** What keeps directed search from the way, when known. */
-  note: string | null;
+  /** What keeps directed search from the way, per stored-value goal, when known (see {@link noteOf}). */
+  readonly notes: Map<Goal, string>;
 }
 
 /**
@@ -1708,6 +1710,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const files = instructionFiles(plan);
   const session = new Session(engine, plan, options.seed);
   const chooses = options.randomChoices === true;
+  session.largeAnswers = options.largeAnswers === true;
   const quitAnywhere = options.quitAnywhere === true;
   // Corpus paths with chosen random outcomes replay them also without random choices; other draws stay natural.
   session.randomChoices =
@@ -2106,7 +2109,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   {
     const known = new Map<string, number>();
     instructions.forEach((instruction, index) => {
-      const line = compactSpan(instruction.span)?.line;
+      const line = coverableLine(instruction, files[index]!, options.sources);
       if (line == null) return;
       const key = `${files[index]}\u0000${line}`;
       let id = known.get(key);
@@ -2227,7 +2230,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let rejectedInputs = 0;
   let replays = 0;
   const engineErrors: ExploreResult["search"]["engineErrors"] = { count: 0, first: null };
-  const items = options.corpus === undefined ? null : corpusItems(instructions, files);
+  const items =
+    options.corpus === undefined ? null : corpusItems(instructions, files, options.sources);
   /** With a corpus: the items covered so far, the steps that covered one first, and the state of each crash. */
   const covered = new Uint8Array(items?.size ?? 0);
   const candidates: Candidate[] = [];
@@ -3107,7 +3111,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const best = found.closest;
     const need = describeNeed(key, goal);
     if (best === null) {
-      target.note = `needs ${need}; no explored session stored it`;
+      target.notes.set(goal, `needs ${need}; no explored session stored it`);
       return false;
     }
     // With forward time, the next session follows the rhythm of the one that left the storage: as long after it.
@@ -3153,7 +3157,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     if (best.distance === 0) {
       if (found.best === 0) {
-        target.note = `needs ${need}; a session from storage that has it did not reach the condition`;
+        target.notes.set(
+          goal,
+          `needs ${need}; a session from storage that has it did not reach the condition`,
+        );
         return false;
       }
       Object.assign(found, {
@@ -3166,7 +3173,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return true;
     }
     const noted = () => {
-      target.note = `needs ${need}; best reached: ${found.value} after ${found.sessions} session${found.sessions === 1 ? "" : "s"}`;
+      target.notes.set(
+        goal,
+        `needs ${need}; best reached: ${found.value} after ${found.sessions} session${found.sessions === 1 ? "" : "s"}`,
+      );
       return false;
     };
     if (found.started >= MAX_CHAIN) return noted();
@@ -3441,7 +3451,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
                 ),
               },
         chains: new Map(),
-        note: null,
+        notes: new Map(),
       };
       targets.set(code, target);
       for (const goal of goals) {
@@ -4462,11 +4472,15 @@ interface Candidate {
  * What a corpus covers, as numbered items: each line holding instructions (by file and line, as the report counts
  * lines) and each condition way, apart for play and for clock steps.
  */
-function corpusItems(instructions: readonly Data[], files: readonly string[]) {
+function corpusItems(
+  instructions: readonly Data[],
+  files: readonly string[],
+  sources: ReadonlyMap<string, string>,
+) {
   const ids = new Map<string, number>();
   const lineIds = Int32Array.from(instructions, (instruction, index) => {
-    const line = compactSpan(instruction.span)?.line;
-    if (line === undefined) return -1;
+    const line = coverableLine(instruction, files[index]!, sources);
+    if (line === null) return -1;
     const key = `${files[index]}:${line}`;
     if (!ids.has(key)) ids.set(key, ids.size);
     return ids.get(key)!;
@@ -4748,6 +4762,43 @@ function storageDistance(
   return best;
 }
 
+/**
+ * What keeps directed search from a way, as one note. A stored value the condition itself needs that an explored
+ * session left says so, whatever keys that value was copied from before; otherwise a note of the condition's own goals,
+ * and only without one a note of its `else if` chain's, each a goal with progress before one no session stored.
+ */
+export function noteOf(
+  target:
+    | {
+        readonly goals: readonly Goal[];
+        readonly guards: readonly { readonly goals: readonly Goal[] }[];
+        readonly chains: ReadonlyMap<
+          string,
+          { readonly best: number; readonly closest: { readonly distance: number } | null }
+        >;
+        readonly notes: ReadonlyMap<Goal, string>;
+      }
+    | undefined,
+): string | undefined {
+  if (target === undefined) return undefined;
+  const guarded = new Set(target.guards.flatMap((guard) => guard.goals));
+  const own = target.goals.filter((goal) => !guarded.has(goal));
+  for (const goal of own) {
+    if (goal.source.kind !== "storage") continue;
+    const chain = target.chains.get(goal.source.key);
+    if (chain !== undefined && (chain.best === 0 || chain.closest?.distance === 0))
+      return `needs ${describeNeed(goal.source.key, goal)}; a session from storage that has it did not reach the condition`;
+  }
+  // The condition's own notes, if any, before its chain's; within each, one with progress first.
+  const pick = (goals: readonly Goal[]) => {
+    const noted = goals
+      .map((goal) => target.notes.get(goal))
+      .filter((note): note is string => note !== undefined);
+    return noted.find((note) => !note.endsWith("no explored session stored it")) ?? noted[0];
+  };
+  return pick(own) ?? pick(target.goals.filter((goal) => guarded.has(goal)));
+}
+
 /** What a goal needs of a stored key, in words, such as `score > 100`. */
 function describeNeed(key: string, goal: Goal): string {
   const name = key.replaceAll("\u0000", "*");
@@ -4887,6 +4938,24 @@ function sourceKinds(goals: readonly Goal[]): SourceKind[] {
   return [...kinds].sort();
 }
 
+/**
+ * The line an instruction counts on in line coverage, or null for none. The compiler's own `end` of a file, on a line
+ * with no source text after the last statement, is no line of the script: a script that ends with `goto` or `exit`
+ * never reaches it, which is no code that can never run.
+ */
+function coverableLine(
+  instruction: Data,
+  path: string,
+  sources: ReadonlyMap<string, string>,
+): number | null {
+  const line = compactSpan(instruction.span)?.line ?? null;
+  const source = sources.get(path);
+  // Without the file's text, an `end` the author wrote cannot be told apart: it counts.
+  if (line === null || instruction.kind !== "end" || source === undefined) return line;
+  const text = source.split("\n")[line - 1];
+  return text === undefined || text.trim() === "" ? null : line;
+}
+
 function conditionText(instruction: Data, path: string, sources: ReadonlyMap<string, string>) {
   const span = compactSpan(record(instruction.condition ?? instruction.expression).span);
   const source = sources.get(path);
@@ -4945,7 +5014,9 @@ function lineCoverage(
   const order: readonly Reach[] = ["play", "chosen", "clock", "unknown", "unreachable"];
   // Per file, per line: the strongest label of the instructions starting on it, and for `unreachable` its reason.
   const lines = new Map<string, Map<number, { reach: Reach; reason?: string }>>();
-  const lineOf = instructions.map((instruction) => compactSpan(instruction.span)?.line ?? null);
+  const lineOf = instructions.map((instruction, index) =>
+    coverableLine(instruction, files[index]!, sources),
+  );
   instructions.forEach((_, index) => {
     const line = lineOf[index];
     if (line == null) return;
@@ -5171,7 +5242,7 @@ function lineCoverage(
           ? `the compiler proves the condition always ${constant}`
           : storage?.reason
         : label === "unknown"
-          ? (directed?.note ?? undefined)
+          ? noteOf(directed)
           : undefined;
     const reached = directed?.reach;
     const parts = partsOf(directed);
