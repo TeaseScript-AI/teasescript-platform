@@ -1518,7 +1518,7 @@ test("a say statement that calls skippable or unskippable names the forms that s
   assert.deepEqual(mismatches('say unskippable("Hi")\nexit'), [
     [
       "TSV018",
-      "Unknown function 'unskippable'. To say a message unskippable, write its text without parentheses, as in 'say unskippable \"Hi\"'; only a say used as a value, such as 'let line = say unskippable (\"Hi\", instant)', takes its text in parentheses.",
+      "Unknown function 'unskippable'. To say a message unskippable, write its text without parentheses, as in 'say unskippable \"Hi\"'. Only a say used as a value, such as 'let line = say unskippable (\"Hi\", instant)', takes its text in parentheses.",
       "unskippable",
     ],
   ]);

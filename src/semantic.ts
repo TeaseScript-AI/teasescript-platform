@@ -402,7 +402,7 @@ class ProjectNames {
     first: ProjectDeclaration,
   ): void {
     const rule =
-      "Globals, global functions, and speakers need a name of their own in the whole project; rename one of them.";
+      "Globals, global functions, and speakers need a name of their own in the whole project. Rename one of them.";
     this.report(
       second.file,
       semanticCode.duplicateDeclaration,
@@ -827,7 +827,7 @@ class SemanticValidator {
       if (valuePosition) {
         this.#report(
           semanticCode.invalidTimer,
-          "A blocking timer returns no handle; use 'timer async ...' to keep one.",
+          "A blocking timer returns no handle. Use 'timer async ...' to keep one.",
           timer.span,
         );
       }
@@ -846,7 +846,7 @@ class SemanticValidator {
       if (timer.unit !== null && timer.unit !== "s") {
         this.#report(
           semanticCode.invalidRangeOperand,
-          "A timer range counts whole seconds; other units are not supported for ranges yet.",
+          "A timer range counts whole seconds. Other units are not supported for ranges yet.",
           timer.duration.span,
         );
       } else if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
@@ -936,7 +936,7 @@ class SemanticValidator {
     if (!media.async && valuePosition) {
       this.#report(
         semanticCode.invalidMedia,
-        `Blocking media returns no handle; use '${command} async ...' to keep one.`,
+        `Blocking media returns no handle. Use '${command} async ...' to keep one.`,
         media.span,
       );
     }
@@ -1510,7 +1510,7 @@ class SemanticValidator {
         if (scope !== this.#root || this.#functionDepth > 0) {
           this.#report(
             semanticCode.invalidLabel,
-            `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block; a goto may still jump to it from anywhere in the file.`,
+            `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block. A goto may still jump to it from anywhere in the file.`,
             statement.span,
           );
         }
@@ -1943,7 +1943,7 @@ class SemanticValidator {
             if (keys.has(key))
               this.#report(
                 semanticCode.duplicateProperty,
-                `Duplicate dict key ${JSON.stringify(key)}. Each key appears once; remove one of the entries.`,
+                `Duplicate dict key ${JSON.stringify(key)}. Each key may appear only once. Remove one of the entries.`,
                 entry.key.span,
               );
             keys.add(key);
@@ -2054,7 +2054,7 @@ class SemanticValidator {
             const hint =
               this.#sayStatementValues.has(expression) &&
               (name === "skippable" || name === "unskippable")
-                ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'; only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
+                ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'. Only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
                 : "";
             this.#report(
               semanticCode.unknownFunction,
@@ -2130,7 +2130,7 @@ class SemanticValidator {
         if (mixed && !scaling) {
           this.#report(
             semanticCode.mixedDurationOperands,
-            "A number and a duration cannot be combined with this operator; give both a unit, or group a number before its unit as in '(1 + 2) s'.",
+            "A number and a duration cannot be combined with this operator. Give both a unit, or group a number before its unit as in '(1 + 2) s'.",
             expression.span,
           );
         }

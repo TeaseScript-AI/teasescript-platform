@@ -100,10 +100,10 @@ test("compact and parenthesized askBoolean and askBooleans compile to the same p
   const errors = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
   assert.deepEqual(errors('let a = askBoolean "Q", message: "M"'), [
-    "askBoolean has a question and 'message:'; keep one.",
+    "askBoolean has a question and 'message:'. Keep one.",
   ]);
   assert.deepEqual(errors('let a = askBoolean "Q", yes: "Sure"'), [
-    "Unknown askBoolean option 'yes'; use 'yesText:', 'noText:', 'prefill:', 'message:'.",
+    "Unknown askBoolean option 'yes'. Use 'yesText:', 'noText:', 'prefill:', 'message:'.",
   ]);
   assert.deepEqual(errors('let a = askBoolean "Q", yesText: ["Sure"]'), [
     'A list cannot be a button text. Select one element with "${list}" or list.random.',

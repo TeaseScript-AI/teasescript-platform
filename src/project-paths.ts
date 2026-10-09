@@ -17,7 +17,7 @@ export function packagePathProblem(path: string): string | null {
 /** Why `path` is not a path of a package file, such as an image, or `null` when it is one; as for `.tease` files. */
 export function packageAssetPathProblem(path: string): string | null {
   for (const segment of path.split("/")) {
-    if (segment === "") return "it has an empty folder name; separate folders with a single /";
+    if (segment === "") return "it has an empty folder name. Separate folders with a single '/'";
     if (segment === "." || segment === "..")
       return "paths start at the package root and use no . or ..";
   }

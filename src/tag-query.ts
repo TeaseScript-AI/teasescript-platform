@@ -101,7 +101,7 @@ function queryTagName(
   if (recovered(literal)) return null;
   if (literal.form !== "singleLine" || literal.parts.some((part) => part.kind !== "stringText")) {
     report(
-      "Write a tag name in a query out in full; for computed names, use all:, none:, or any: with a list.",
+      "Write a tag name in a query out in full. For computed names, use all:, none:, or any: with a list.",
       literal.span,
     );
     return null;

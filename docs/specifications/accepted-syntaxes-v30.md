@@ -2419,7 +2419,7 @@ Rules:
   ([§19](#preselected-button)); a preselected button is never chosen by itself. File, folder, image, video, and audio
   pickers have no prefill because a browser cannot preset a file input. Multi-field inputs take a `prefill:` list.
 - An ask's earlier `default:`, or `defaults:` of a multi-field input, is a compile error that names the fix, such as
-  `askText has no 'default:'; use 'prefill:'.` (Owner decision on #512, 2026-10-08.) `default:` stays where its value
+  `askText has no 'default:'. Use 'prefill:'.` (Owner decision on #512, 2026-10-08.) `default:` stays where its value
   becomes the result without the player: `load`, `dict.get`, the conversions such as `toNumber`, parameter defaults,
   and a `global`'s start value.
 
