@@ -7,23 +7,13 @@ function sexscriptLegacyMenuOptions(texts, first) {
   }
   return optionsValue
 }
-function sexscriptLegacyItemAt(listValue, position) {
-  if position < 0 {
-    return listValue[listValue.length + position]
-  }
-  if position >= listValue.length {
-    return null
-  }
-  return listValue[position]
-}
 // Menus built from runtime lists: written options keep their index, list elements follow.
 let offenses = ["Being late", "Being rude"]
 offenses.add("Lying")
 say "What do you confess?"
 let pick = choose 0: "Back", sexscriptLegacyMenuOptions(offenses, 1)
 if pick > 0 {
-  // NOTE SX_NEGATIVE_INDEX line 6: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
-  say "You confessed: ${sexscriptLegacyItemAt(offenses, pick - 1)}"
+  say "You confessed: ${offenses[pick - 1]}"
 }
 
 let levels = ["Low", "High"]

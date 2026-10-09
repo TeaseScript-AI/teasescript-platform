@@ -62,6 +62,7 @@ import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
+import { menuIndexes } from "./menu-indexes.ts";
 import {
   BOOLEAN,
   inferType,
@@ -240,6 +241,8 @@ interface LowerContext {
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
   /** Bindings declared with a value, and those something else may change too (declaredWrites). */
   declaredWrites: DeclaredWrites;
+  /** List reads by a menu position that are certainly in range (menu-indexes.ts). */
+  menuIndexes: ReadonlySet<AstNode>;
   /** Lists whose elements the code compares with null (nullElementLists), by binding. */
   nullElementLists: ReadonlySet<string>;
   /** Set while a getBooleans whose null result the next statement tests is lowered (cancelledBooleans). */
@@ -1461,6 +1464,7 @@ export function lowerParsedFile(
     assignedValues: new Map(),
     compoundValues: new Map(),
     declaredWrites: { initialized: new Set(), other: new Set() },
+    menuIndexes: new Set(),
     nullElementLists: new Set(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
@@ -1559,6 +1563,7 @@ export function lowerParsedFile(
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
     context.declaredWrites = declaredWrites(body, context.bindings);
+    context.menuIndexes = menuIndexes(body);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
     context.constantInitializers = declarationInitializers(body, context.types);
@@ -2602,6 +2607,7 @@ function lowerHelperMethod(
     assignedValues: assignedValues(body, new Map()),
     compoundValues: compoundValues(body, new Map()),
     declaredWrites: declaredWrites(body, new Map()),
+    menuIndexes: menuIndexes(body),
     nullElementLists: new Set(),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
@@ -10370,6 +10376,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const index = lowerExpression(indexNode, context);
     if (index === null) return null;
+    // A menu position that names an element of the list the menu offered reads it as it is (menu-indexes.ts).
+    if (context.menuIndexes.has(node)) return { kind: "index", target, index };
     // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on, or that tests a
     // position for null.
     if (
