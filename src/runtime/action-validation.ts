@@ -1557,6 +1557,16 @@ function preparedInteractionUiMatchesAction(
   if (prepared.prefillTemporary === undefined) return actual.preselected === undefined;
   const prefill = runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
   if (prefill === undefined || validateCapturedSerializableValue(prefill) !== null) return false;
+  // askBoolean opens only with true, false, null, or blank text, as its prefill must be.
+  if (
+    prepared.booleanPrefill === true &&
+    !(
+      typeof prefill === "boolean" ||
+      prefill === null ||
+      (typeof prefill === "string" && !interactionStringHasNonWhitespace(prefill))
+    )
+  )
+    return false;
   // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured prefill above.
   const preselected = preselectedChoice(options, prefill as SerializableRuntimeValue);
   return actual.preselected === (typeof preselected === "number" ? preselected : undefined);

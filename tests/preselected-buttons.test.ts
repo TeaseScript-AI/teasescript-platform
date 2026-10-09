@@ -106,6 +106,26 @@ test("an askBoolean prefill known only at runtime is true or false, null or blan
     );
     assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true, String(value));
   }
+  // A pending askBoolean whose prefill is none of those is not a state the engine makes.
+  const pending = run(
+    plan,
+    createFreshRuntimeSnapshot(plan, { globals: { value: true } }),
+  ).snapshot;
+  const interaction = plan.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(interaction !== undefined && "preparedUi" in interaction);
+  const prepared = interaction.preparedUi;
+  assert.ok(prepared.kind === "choice" && prepared.prefillTemporary !== undefined);
+  for (const value of [5, "yes"]) {
+    const tampered = structuredClone(pending);
+    // EVIDENCE: fixture puts an invalid prefill in the temporary and drops the preselection it would not give.
+    tampered.temporaries.find((temporary) => temporary.id === prepared.prefillTemporary)!.value =
+      value;
+    const action = tampered.foregroundAction;
+    assert.ok(action?.kind === "interaction" && action.ui.kind === "choice");
+    // EVIDENCE: fixture: the cloned UI is mutable; only its preselected button is removed.
+    delete (action.ui as { preselected?: number }).preselected;
+    assert.equal(validateRuntimeSnapshot(tampered, plan).valid, false, String(value));
+  }
   for (const value of [5, "yes"]) {
     const { snapshot } = run(plan, createFreshRuntimeSnapshot(plan, { globals: { value } }));
     assert.equal(snapshot.foregroundAction, null, String(value));
