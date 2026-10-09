@@ -1017,7 +1017,8 @@ operations stay as they are.
   caller continues from its last export or checkpoint. Malformed options, an invalid `instructionBudget`, a
   `capturedMedia` without `holds`, and malformed session `capabilities`, such as a builtin that is not a function, throw
   before anything runs and leave the session usable; the session reads each option once, so the value it checks is the
-  value it uses. A typed refusal, such as `invalidPayload`, changes nothing.
+  value it uses. A typed refusal, such as `invalidPayload`, changes nothing the script can read. Like every operation,
+  it drops the message, media, and timer records that nothing reaches, which only an imported snapshot can hold.
 - **Forks.** `fork()` returns an independent session with a trusted copy of the state, which keeps the property order
   and therefore the checkpoint bytes, and shares only the immutable plan and deeply frozen temporal contexts. It keeps
   each of the parent's capabilities, `builtins` and `random`, that its options do not give, and the parent's random
