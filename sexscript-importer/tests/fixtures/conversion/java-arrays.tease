@@ -27,10 +27,14 @@ say "Counts ${counts[1]}"
 // | def letters = new char[2]
 let letters = []
 // The texts split() gives are a Java String[], which kept a number written into it as its text (MandysBlackmail).
-// NOTE SX_SPLIT_TRAILING_EMPTY line 15: Java split() drops trailing empty parts; TeaseScript split() keeps them.
-let record = "20,1,Mandy".split(",")
-if record[0] == "20" {
-  record[0] = "${record.length - 6}"
+function review(key) {
+  let record = load key, default: "20,1,Mandy"
+  // NOTE SX_SPLIT_TRAILING_EMPTY line 18: Java split() drops trailing empty parts; TeaseScript split() keeps them.
+  let parts = record.split(",")
+  if parts[0] == "20" {
+    parts[0] = "${parts.length - 6}"
+  }
+  say "Progress ${parts[0]}"
 }
-say "Progress ${record[0]}"
+review("mandy.record")
 exit

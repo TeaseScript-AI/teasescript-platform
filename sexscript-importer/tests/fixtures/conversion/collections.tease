@@ -204,8 +204,11 @@ let value = 100 + randomInteger(0..20)
 for position2 in [0, 2] {
   paces[position2] = value
 }
-let firstPaces = [paces[0], paces[1]]
-say "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces.length}"
+function firstPaces(all) {
+  return [all[0], all[1]]
+}
+// NOTE SX_LENGTH_RECEIVER line 71: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces(paces).length}"
 // A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
 let replies = []
 if replies.length == 0 {

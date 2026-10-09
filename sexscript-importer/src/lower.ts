@@ -6038,10 +6038,7 @@ function lowerAssignment(
     target.kind === "index" &&
     arrayValues.length > 0 &&
     arrayValues.every(
-      (assigned) =>
-        assigned.kind === "methodCall" &&
-        constantString(assigned.method) === "split" &&
-        onlyOf(inferType(asNode(assigned.object), context.types), STRING),
+      (assigned) => assigned.kind === "methodCall" && constantString(assigned.method) === "split",
     ) &&
     valueType !== 0 &&
     onlyOf(valueType, NUMBER | BOOLEAN)
@@ -10358,7 +10355,9 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       positions.every(
         (position) => typeof position === "number" && Number.isInteger(position) && position >= 0,
       ) &&
-      isKnownListExpression(targetNode, context) &&
+      // A parameter of unknown type, as Concentration's, was given a list.
+      (isKnownListExpression(targetNode, context) ||
+        inferType(targetNode, context.types) === UNKNOWN) &&
       isRepeatableExpression(targetNode)
     )
       return {

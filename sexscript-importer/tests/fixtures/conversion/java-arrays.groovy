@@ -12,6 +12,11 @@ counts[1] = counts[0] + 2.5
 show("Counts " + counts[1])
 def letters = new char[2]
 // The texts split() gives are a Java String[], which kept a number written into it as its text (MandysBlackmail).
-def record = "20,1,Mandy".split(",")
-if (record[0] == "20") record[0] = (record.size() - 6)
-show("Progress " + record[0])
+def review = { key ->
+  def record = loadString(key)
+  if (record == null) record = "20,1,Mandy"
+  def parts = record.split(",")
+  if (parts[0] == "20") parts[0] = (parts.size() - 6)
+  show("Progress " + parts[0])
+}
+review("mandy.record")
