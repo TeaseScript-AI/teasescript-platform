@@ -281,7 +281,7 @@ const missingPhotos = computed(() =>
                     copyStatus === "copied"
                       ? "Copied."
                       : copyStatus === "failed"
-                        ? "Copying is not available here; the text is selected, so copy it with the browser."
+                        ? "Copying is not available here. The text is selected, so copy it with the browser."
                         : ""
                   }}
                 </p>

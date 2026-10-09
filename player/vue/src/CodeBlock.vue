@@ -163,7 +163,7 @@ const copyLabel = computed(() =>
   copyStatus.value === "copied"
     ? "Copied"
     : copyStatus.value === "failed"
-      ? "Copying is not available here; the lines are selected, so copy them with the browser."
+      ? "Copying is not available here. The lines are selected, so copy them with the browser."
       : "Copy visible lines",
 );
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
