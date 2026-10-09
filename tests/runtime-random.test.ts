@@ -99,7 +99,7 @@ test("distinguishes an absent random hook from invalid and valid hook results", 
 
     assert.equal(calls, 1);
     assert.equal(result.snapshot.status, "failed");
-    assert.equal(result.snapshot.failure?.code, "TSR012");
+    assert.equal(result.snapshot.failure?.code, "TSR020");
     assert.equal(
       result.snapshot.failure?.message,
       `The random source returned ${invalidResult === null ? "null" : "a value of type undefined"}, but it must return a number that is at least 0 and less than 1. This is a fault in the Playroom, not in the script. Report it with a debug export.`,

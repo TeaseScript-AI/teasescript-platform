@@ -1961,9 +1961,9 @@ export class Evaluator {
         }
         // A text that would be too long fails as it does anywhere else.
         if (error instanceof RuntimeFault && error.code === "TSR084") throw error;
-        // A core built-in's own failure already says what to do; a host's comes with the built-in's name.
-        if (!hostBuiltin && error instanceof RuntimeFault)
-          throw fault("TSR012", error.message, expression.span);
+        // A core built-in's own failure keeps its code and already says what to do; a host's comes with the built-in's
+        // name.
+        if (!hostBuiltin && error instanceof RuntimeFault) throw error;
         const message = messageText(error instanceof Error ? error.message : String(error)).trim();
         const reason =
           message === "" ? "" : `: ${/[.!?…]$/u.test(message) ? message : `${message}.`}`;
