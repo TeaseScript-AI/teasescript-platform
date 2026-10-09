@@ -9,6 +9,7 @@ import {
   conditionDistance,
   conjunctive,
   DataFlow,
+  exactMilliseconds,
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
@@ -1264,6 +1265,42 @@ test(
       ),
       [],
     );
+  },
+);
+
+test(
+  "forward time reads an exact span, and leaves a calendar one unknown: days and months last as long as the date makes them",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const holds = (span: string) => {
+      const source =
+        'let start = getAbsoluteDateTime()\nshowButton "Go"\n' +
+        `if getAbsoluteDateTime() - start >= ${span} {\n  say "Later."\n}\nexit\n`;
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const model = clockModel(plan, instructions);
+      const [comparison] = [...model.comparisons.values()][0] ?? [];
+      assert.ok(comparison !== undefined, span);
+      const kept = timeContext({
+        globals: [
+          { name: "start", value: { kind: "absoluteDateTime", epochMilliseconds: EPOCH_MS } },
+        ],
+      });
+      return [3600, 40 * 3600].map((seconds) =>
+        holdsAt(comparison, model, kept, EPOCH_MS + seconds * 1000),
+      );
+    };
+    assert.deepEqual(holds("36 h"), [false, true]);
+    // Read as no time at all, a calendar span would hold an hour later.
+    assert.deepEqual(holds("2 day"), [undefined, undefined]);
+    assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 0, days: 2 }), null);
+    assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 0, months: 1 }), null);
+    assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 129_600_000 }), 129_600_000);
   },
 );
 

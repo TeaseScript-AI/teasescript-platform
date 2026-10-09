@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
-import type { ClockDifference, Constants } from "./explorer-analysis.ts";
+import { exactMilliseconds, type ClockDifference, type Constants } from "./explorer-analysis.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
@@ -1017,10 +1017,9 @@ export class Session {
       const bindings = bindingsOf(state(), this.scopedReads);
       for (const expression of expressions) {
         const value = valueOf(expression, bindings, this.scopedReads);
-        const duration = record(value);
+        const milliseconds = exactMilliseconds(value);
         if (typeof value === "number") found.numbers.push(value);
-        else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
-          found.durations.push(duration.milliseconds);
+        else if (milliseconds !== null) found.durations.push(milliseconds);
       }
     }
     return found;
@@ -1136,8 +1135,8 @@ function comparedLiterals(instruction: Data): Literals {
   const found: Literals = { numbers: [], strings: [], durations: [] };
   const take = (value: unknown) => {
     const literal = record(value);
-    if (literal.kind === "duration" && typeof literal.milliseconds === "number")
-      found.durations.push(literal.milliseconds);
+    const milliseconds = exactMilliseconds(literal);
+    if (milliseconds !== null) found.durations.push(milliseconds);
     if (literal.kind !== "literal") return;
     if (typeof literal.value === "number") found.numbers.push(literal.value);
     if (typeof literal.value === "string" && literal.value.trim() !== "")

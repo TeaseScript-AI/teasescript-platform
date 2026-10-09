@@ -14,6 +14,20 @@ function record(value: unknown): Data {
   return isRecord(value) ? value : {};
 }
 
+/**
+ * The milliseconds of an exact duration, a literal or value of kind `duration` without calendar months or days; null for
+ * a calendar one (`1 month`, and `1 day` until the time model makes a day 24 hours), whose length depends on the date.
+ */
+export function exactMilliseconds(value: unknown): number | null {
+  const duration = record(value);
+  return duration.kind === "duration" &&
+    typeof duration.milliseconds === "number" &&
+    duration.months === undefined &&
+    duration.days === undefined
+    ? duration.milliseconds
+    : null;
+}
+
 function list(value: unknown): Data[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
@@ -1230,11 +1244,10 @@ export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Sl
       };
       slots.set(id, known);
     }
-    const duration = record(constant);
+    const milliseconds = exactMilliseconds(constant);
     if (typeof constant === "number") known.numbers.add(constant);
     else if (typeof constant === "string") known.strings.add(constant);
-    else if (duration.kind === "duration" && typeof duration.milliseconds === "number")
-      known.durations.add(duration.milliseconds);
+    else if (milliseconds !== null) known.durations.add(milliseconds);
   };
   const compared = (subject: unknown, constant: unknown) => {
     const value = record(subject);
@@ -1485,14 +1498,9 @@ function divisorOf(expression: unknown): number | null {
     return null;
   }
   if (!isRecord(expression)) return null;
-  const right = record(expression.right);
-  if (
-    expression.kind === "binary" &&
-    expression.operator === "/" &&
-    right.kind === "duration" &&
-    typeof right.milliseconds === "number"
-  )
-    return right.milliseconds;
+  const divisor = exactMilliseconds(expression.right);
+  if (expression.kind === "binary" && expression.operator === "/" && divisor !== null)
+    return divisor;
   for (const [key, item] of Object.entries(expression)) {
     if (key === "span") continue;
     const found = divisorOf(item);
@@ -1568,15 +1576,11 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
   const unmeasured = new Set<number>();
   const add = (difference: ClockDifference, constant: unknown, condition: number) => {
     if (!difference.conditions.includes(condition)) difference.conditions.push(condition);
-    const duration = record(constant);
+    const milliseconds = exactMilliseconds(constant);
     if (typeof constant === "number" && !difference.numbers.includes(constant))
       difference.numbers.push(constant);
-    if (
-      duration.kind === "duration" &&
-      typeof duration.milliseconds === "number" &&
-      !difference.durations.includes(duration.milliseconds)
-    )
-      difference.durations.push(duration.milliseconds);
+    if (milliseconds !== null && !difference.durations.includes(milliseconds))
+      difference.durations.push(milliseconds);
   };
   instructions.forEach((instruction, index) => {
     const name =

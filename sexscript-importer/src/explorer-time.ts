@@ -1,5 +1,5 @@
 import { isRecord } from "./ast.ts";
-import { successors } from "./explorer-analysis.ts";
+import { exactMilliseconds, successors } from "./explorer-analysis.ts";
 
 /**
  * Forward time for the explorer's search (`ExploreOptions.later`): the comparisons in conditions that read the clock,
@@ -778,10 +778,10 @@ function valueAt(expression: unknown, reading: Reading): Value {
   switch (node.kind) {
     case "literal":
       return runtimeValue(node.value);
-    case "duration":
-      return typeof node.milliseconds === "number"
-        ? { kind: "duration", milliseconds: node.milliseconds }
-        : undefined;
+    case "duration": {
+      const milliseconds = exactMilliseconds(node);
+      return milliseconds === null ? undefined : { kind: "duration", milliseconds };
+    }
     case "group":
       return valueAt(node.expression, reading);
     case "identifier": {
