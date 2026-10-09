@@ -140,7 +140,7 @@ export function materializeForm(
     if (texts.items.length !== defaults.items.length)
       throw new RuntimeFault(
         "TSR058",
-        `askBooleans has ${texts.items.length} texts but ${defaults.items.length} prefill ${defaults.items.length === 1 ? "value" : "values"}. Give one prefill value for each text.`,
+        `askBooleans has ${texts.items.length} ${texts.items.length === 1 ? "text" : "texts"} but ${defaults.items.length} prefill ${defaults.items.length === 1 ? "value" : "values"}. Give one prefill value for each text.`,
         copySpan(span),
       );
     texts.items.forEach((text, index) => {

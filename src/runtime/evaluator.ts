@@ -2514,7 +2514,7 @@ export class Evaluator {
     if (!view.shown) {
       this.#warn(
         "TSW010",
-        "This camera view is hidden, so its placement is not visible until showCamera shows it again.",
+        "This camera view is hidden, so its placement does not change. Show it with showCamera first.",
         span,
       );
       return;
@@ -3798,7 +3798,9 @@ function assertRepresentableRound(nowMs: number, remainingMs: number, span: Sour
   if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
     throw fault(
       "TSR050",
-      `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
+      isValidSessionTime(deadlineMs)
+        ? `Timer remaining time of ${formatDuration(remainingMs)} is too short to measure this late in the scene. Use a longer duration.`
+        : `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }

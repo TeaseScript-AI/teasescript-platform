@@ -3644,7 +3644,7 @@ class TypeChecker {
     )
       this.#report(
         typeCode.invalidOperand,
-        `askBooleans has ${textsList.elements.length} texts but ${prefillList.elements.length} prefill ${prefillList.elements.length === 1 ? "value" : "values"}. Give one prefill value for each text.`,
+        `askBooleans has ${textsList.elements.length} ${textsList.elements.length === 1 ? "text" : "texts"} but ${prefillList.elements.length} prefill ${prefillList.elements.length === 1 ? "value" : "values"}. Give one prefill value for each text.`,
         prefillList.span,
       );
     const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };

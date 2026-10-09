@@ -2486,7 +2486,9 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs)
     throw fault(
       "TSR052",
-      "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+      isValidSessionTime(deadlineMs)
+        ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        : "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
       span,
     );
   return timeoutMs;
@@ -2511,7 +2513,9 @@ function buttonTimeoutMs(
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      "This showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+      isValidSessionTime(deadlineMs)
+        ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        : "This showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
       span,
     );
   }
@@ -3140,6 +3144,14 @@ export function timerDurationMs(
     isDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
       : drawn;
+  if (command === "timer" && isRange(drawn))
+    throw fault(
+      "TSR050",
+      unit !== null && unit !== "s"
+        ? "A timer range counts whole seconds. Other units are not supported for ranges yet."
+        : `A timer range must not start below zero seconds, but this range is ${drawn.start}${drawn.inclusive ? "..=" : ".."}${drawn.end}.`,
+      span,
+    );
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     throw fault(
       "TSR050",
