@@ -720,7 +720,21 @@ test("a union of collections takes an operation result that one of its members c
   assert.deepEqual(
     run("let rows: string[][] | number[][] = [[1.5]]", "rows.add([x / 4])", "say rows"),
     ["[[1.5], [2]]"],
-  );
+  ); // A parameter is not narrowed by a start value, so each member of its union is checked.
+  for (const members of ["string[][] | number[][]", "number[][] | string[][]"])
+    assert.deepEqual(
+      mismatches(
+        [
+          `function g(rows: ${members}, x) {`,
+          "    rows.add([x / 4])",
+          "    rows.addAll([[x / 4]])",
+          "}",
+          "exit",
+        ].join("\n"),
+      ),
+      [],
+      members,
+    );
 });
 
 test("type inference handles deeply nested expressions without native recursion", () => {
