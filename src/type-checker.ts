@@ -188,6 +188,7 @@ import {
   ownPartOrigins,
   type Declaration,
   type Origin,
+  type Origins,
   type PartOrigin,
   type StaticType,
 } from "./static-types.js";
@@ -503,10 +504,67 @@ function extendPath(owner: PlacePath | undefined, step: string): PlacePath | und
   return owner === undefined ? undefined : { root: owner.root, path: [...owner.path, step] };
 }
 
-/** A place that stores a value of another place, so it widens with it (see `TypeChecker.#follow`). */
+/** A place that stores a value of other places, so it widens with them (see `TypeChecker.#follow`). */
 interface Follower {
   readonly place: PlacePath;
   readonly at: SourceSpan;
+  /** The places the stored value derives from. */
+  readonly origins: Origins;
+}
+
+/**
+ * Finds the followers whose value derives from a place, in checking order. A follower that an earlier call returned is
+ * not returned again, since its place has widened by then. Values copied from each other share groups of origins, and
+ * each group is visited once over all calls, not once per follower that holds it, so a long chain of copies costs no
+ * more than its length.
+ */
+function followerFinder(followers: readonly Follower[]): (place: PlacePath) => Follower[] {
+  // The followers that hold each group, the groups that merged it, and the groups of one origin by its place.
+  const holders = new Map<Origins, number[]>();
+  const mergedInto = new Map<Origins, Origins[]>();
+  const singles = new Map<Declaration, Map<string, Origins[]>>();
+  const seen = new Set<Origins>();
+  for (const [index, follower] of followers.entries()) {
+    const held = holders.get(follower.origins) ?? [];
+    held.push(index);
+    holders.set(follower.origins, held);
+    const work = [follower.origins];
+    while (work.length > 0) {
+      const group = work.pop()!;
+      if (seen.has(group)) continue;
+      seen.add(group);
+      if (group.origin !== undefined) {
+        const { root, path } = originPlace(group.origin);
+        const paths = singles.get(root) ?? new Map<string, Origins[]>();
+        const key = path.join(".");
+        const groups = paths.get(key) ?? [];
+        groups.push(group);
+        paths.set(key, groups);
+        singles.set(root, paths);
+      }
+      for (const part of group.parts) {
+        const into = mergedInto.get(part) ?? [];
+        into.push(group);
+        mergedInto.set(part, into);
+        work.push(part);
+      }
+    }
+  }
+  // A visited group is not visited again: the followers that hold it and every group that merged it were returned then.
+  const visited = new Set<Origins>();
+  return (place) => {
+    const found: number[] = [];
+    const work = [...(singles.get(place.root)?.get(place.path.join(".")) ?? [])];
+    while (work.length > 0) {
+      const group = work.pop()!;
+      if (visited.has(group)) continue;
+      visited.add(group);
+      for (const index of holders.get(group) ?? []) found.push(index);
+      for (const merged of mergedInto.get(group) ?? []) work.push(merged);
+    }
+    found.sort((left, right) => left - right);
+    return found.map((index) => followers[index]!);
+  };
 }
 
 /** The place an origin stands for: a variable, or an element or property inside one. */
@@ -878,10 +936,11 @@ class TypeChecker {
     for (const [root, paths] of this.#widened)
       for (const path of paths.keys())
         pending.push({ root, path: path === "" ? [] : path.split(".") });
+    if (pending.length === 0) return;
+    const followersOf = followerFinder(this.#followers);
     while (pending.length > 0) {
       const widened = pending.pop()!;
-      for (const { place, at } of this.#followers.get(widened.root)?.get(widened.path.join(".")) ??
-        []) {
+      for (const { place, at } of followersOf(widened)) {
         if (this.#widenedAt(place.root, place.path)) continue;
         this.#recordWidening(place, at);
         pending.push(place);
@@ -895,10 +954,10 @@ class TypeChecker {
   readonly #unappliedWidening = new Set<Declaration>();
 
   /**
-   * For each integer place, by its variable and its path there, the integer places that store its value, with where:
-   * when it widens, they widen too, without one more check per step of a chain.
+   * The integer places that store a value of other integer places, in checking order, with where: when one of those
+   * widens, they widen too, without one more check per step of a chain.
    */
-  readonly #followers = new Map<Declaration, Map<string, Follower[]>>();
+  readonly #followers: Follower[] = [];
 
   /** The variable each declaration created most recently, whose type later widenings change. */
   readonly #declared = new Map<Declaration, Variable>();
@@ -2394,20 +2453,14 @@ class TypeChecker {
    */
   #follow(target: PlacePath | undefined, value: StaticType, at: SourceSpan): void {
     if (target === undefined) return;
-    for (const part of integerParts(value)) {
-      const place: PlacePath = { root: target.root, path: [...target.path, ...part.path] };
-      const key = place.path.join(".");
-      for (const origin of part.origins) {
-        const source = originPlace(origin);
-        const sourceKey = source.path.join(".");
-        if (source.root === place.root && sourceKey === key) continue;
-        const paths = this.#followers.get(source.root) ?? new Map<string, Follower[]>();
-        const followers = paths.get(sourceKey) ?? [];
-        followers.push({ place, at });
-        paths.set(sourceKey, followers);
-        this.#followers.set(source.root, paths);
-      }
-    }
+    // The origins are not listed here: a copy's parts keep every origin of what they were copied from, so listing them
+    // for each store would grow with the square of a chain of copies.
+    for (const part of integerParts(value))
+      this.#followers.push({
+        place: { root: target.root, path: [...target.path, ...part.path] },
+        at,
+        origins: part.origins,
+      });
   }
 
   /** Why a value is a number when a non-whole number widened a variable it derives from, naming that assignment. */
