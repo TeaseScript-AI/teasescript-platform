@@ -342,10 +342,12 @@ test("submitting requires every required field and returns the answers once, wit
       completion.settlement.actionKind === "interaction" &&
       completion.settlement.ui.kind === "form",
   );
-  const { ui, result } = completion.settlement;
+  const { ui, result, shownOptions } = completion.settlement;
+  // The settlement records the option each cycle showed.
+  assert.deepEqual(shownOptions, [null, null, 0, 2, null, null, null, null, null, null]);
   const presentation = DEFAULT_TEMPORAL_CONTEXT.presentation;
   assert.deepEqual(
-    formSummaryOf(ui, result, presentation)?.map((line) =>
+    formSummaryOf(ui, result, shownOptions, presentation)?.map((line) =>
       line.kind === "toggle" ? `${line.label} ${line.on}` : `${line.label}: ${line.value}`,
     ),
     [
@@ -361,7 +363,16 @@ test("submitting requires every required field and returns the answers once, wit
       "count: 3",
     ],
   );
-  assert.equal(formSummaryOf(ui, { kind: "list", items: [] }, presentation), null);
+  assert.equal(formSummaryOf(ui, { kind: "list", items: [] }, shownOptions, presentation), null);
+  // A shown option must be an option of its cycle with its answer as value, and only a cycle shows one.
+  for (const shown of [
+    [null, null, 0, 1, null, null, null, null, null, null],
+    [null, null, 0, 9, null, null, null, null, null, null],
+    [0, null, 0, 2, null, null, null, null, null, null],
+    [null, null, 0, 2],
+    null,
+  ])
+    assert.equal(formSummaryOf(ui, result, shown, presentation), null, JSON.stringify(shown));
   const actionId = pendingForm(snapshot).actionId;
   const repeated = completeAction(plan, submitted.snapshot, {
     actionId,
@@ -627,6 +638,20 @@ test("restore rejects form answers that its definition cannot hold", () => {
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
   (wrongResult.lastSettlement as any).result.properties[4].value = 40;
   assert.equal(validateRuntimeSnapshot(wrongResult, plan).valid, false);
+  // The settlement's shown options must be options with their fields' answers, and recorded at all.
+  for (const [name, shownOptions] of [
+    ["another option's value", [null, null, 0, 0, null, null, null, null, null, null]],
+    ["an option a toggle cannot show", [0, null, 1, 1, null, null, null, null, null, null]],
+    ["too few", [null, null, 1]],
+    ["none", undefined],
+  ] as const) {
+    const broken = structuredClone(submitted);
+    // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
+    const settlement = broken.lastSettlement as any;
+    if (shownOptions === undefined) delete settlement.shownOptions;
+    else settlement.shownOptions = shownOptions;
+    assert.equal(validateRuntimeSnapshot(broken, plan).valid, false, name);
+  }
 });
 
 test("a form with a cancel button cancels as a whole, dropping its edits, and returns null once", () => {
@@ -659,6 +684,13 @@ test("a form with a cancel button cancels as a whole, dropping its edits, and re
     ["Back", "actionCompleted"],
   );
   assert.equal(cancel(cancelled.snapshot).outcome.kind, "alreadySettled");
+  // A cancelled form showed no options it returns.
+  assert.equal(
+    cancelled.snapshot.lastSettlement?.actionKind === "interaction"
+      ? cancelled.snapshot.lastSettlement.shownOptions
+      : undefined,
+    null,
+  );
   const finished = runUntilExit(plan, roundTrip(plan, cancelled.snapshot)).snapshot;
   assert.equal(binding(finished, "result"), null);
   // A settlement that claims a cancellation the form did not offer is rejected.
@@ -682,5 +714,6 @@ test("a form with a cancel button cancels as a whole, dropping its edits, and re
   const settlement = forged.lastSettlement as any;
   settlement.result = null;
   settlement.transcriptText = "Back";
+  settlement.shownOptions = null;
   assert.equal(validateRuntimeSnapshot(forged, noCancel).valid, false);
 });

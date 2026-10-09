@@ -388,6 +388,11 @@ export interface RuntimeInteractionActionSettlementSnapshot {
   readonly transcriptText: string | null;
   /** The UI the player answered, so the settlement validates against what was presented. */
   readonly ui: InteractionUiPayload;
+  /**
+   * Only a form's: for each field, the position of the option a cycle showed, else `null`; `null` as a whole for a form
+   * that returned `null`. Options of one cycle may share a value, so the result alone cannot tell which one was shown.
+   */
+  readonly shownOptions?: readonly (number | null)[] | null;
 }
 
 export interface RuntimeChatPacingGateSettlementSnapshot {

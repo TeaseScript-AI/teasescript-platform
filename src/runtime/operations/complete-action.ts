@@ -29,7 +29,7 @@ import {
   type CapturedMediaAdmission,
 } from "../actions/capture.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
-import { timedOutFormResult } from "../actions/form.js";
+import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
@@ -499,6 +499,7 @@ function completeInteraction(
       completionEventSequence: completionSequence,
       result,
       transcriptText: resolved.transcriptText,
+      ...(resolved.shownOptions === undefined ? {} : { shownOptions: resolved.shownOptions }),
     },
     trace,
   );
@@ -536,6 +537,12 @@ export function timeOutButton(
 ): void {
   if (action.timeoutMs === null) throw new Error("Only a button with a timeout can time out.");
   const completionSequence = takeSequence(current, 2);
+  // A form returns its answers as they stand, with the options its cycles show, or `null`.
+  const form =
+    action.ui.kind === "form" && action.form !== undefined
+      ? { ui: action.ui, state: action.form }
+      : null;
+  const formResult = form === null ? undefined : timedOutFormResult(form.ui, form.state);
   const settlement = commitInteractionSettlement(
     current,
     action,
@@ -544,12 +551,17 @@ export function timeOutButton(
       transcriptEventSequence: null,
       completionEventSequence: completionSequence,
       result:
-        action.ui.kind === "form" && action.form !== undefined
-          ? timedOutFormResult(action.ui, action.form)
+        formResult !== undefined
+          ? formResult
           : action.expectedResult === "duration"
             ? Object.freeze({ kind: "duration" as const, milliseconds: action.timeoutMs })
             : null,
       transcriptText: null,
+      ...(form === null
+        ? {}
+        : {
+            shownOptions: formResult === null ? null : formShownOptions(form.ui, form.state.values),
+          }),
     },
     trace,
   );
@@ -577,6 +589,7 @@ function commitInteractionSettlement(
     | "completionEventSequence"
     | "result"
     | "transcriptText"
+    | "shownOptions"
   >,
   trace: TraceStore | null,
 ): RuntimeInteractionActionSettlementSnapshot {
@@ -613,6 +626,8 @@ function commitInteractionSettlement(
     result,
     transcriptText: outcome.transcriptText,
     ui: action.ui,
+    // A form records the options its cycles showed, which its result cannot always tell.
+    ...(action.ui.kind === "form" ? { shownOptions: outcome.shownOptions ?? null } : {}),
   });
   const handoff: RuntimeInteractionResultHandoffSnapshot | null =
     action.destinationTemporary === null

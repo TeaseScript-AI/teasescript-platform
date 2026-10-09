@@ -32,7 +32,13 @@ export function buttonTimeoutMilliseconds(value: unknown): number | null {
 }
 
 export type ResolvedInteraction =
-  | { readonly ok: true; readonly result: InteractionResultValue; readonly transcriptText: string }
+  | {
+      readonly ok: true;
+      readonly result: InteractionResultValue;
+      readonly transcriptText: string;
+      /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
+      readonly shownOptions?: readonly (number | null)[] | null;
+    }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -63,7 +69,7 @@ export function resolveInteractionCompletion(
     if (payload.kind === "cancel")
       return action.ui.cancel === null
         ? { ok: false, message: "This form has no cancel button, so it can only be submitted." }
-        : { ok: true, result: null, transcriptText: action.ui.cancel.text };
+        : { ok: true, result: null, transcriptText: action.ui.cancel.text, shownOptions: null };
     return submitForm(action.ui, action.form, context.presentation);
   }
   if (action.interactionKind === "button") {

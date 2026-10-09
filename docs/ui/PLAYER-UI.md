@@ -900,8 +900,8 @@ the composer notice. While a field is edited, **Back** (and Escape in the input)
 control keeps the action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and
 adds nothing to the transcript; submitting adds the player's answer listing every field
 ([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
-of the `›` response marker; screen readers read its plain text. A form with a cycle whose value several of its options
-share is shown as that plain text with the `›` marker, since its result cannot say which of them was shown. Exact
+of the `›` response marker; screen readers read its plain text. Each cycle line names the option the cycle showed,
+also where several of its options share a value. Exact
 unambiguous text of one field label or of the submit or cancel button activates it from the composer, as for `choose`. A
 form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 
