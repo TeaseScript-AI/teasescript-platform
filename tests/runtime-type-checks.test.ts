@@ -246,10 +246,10 @@ test("an index or member that a value does not have names the value, its bounds,
       "who.mood",
     ],
     [
-      'let items = [1]\nsay items[pick("1")]',
+      'let items = pick([1])\nsay items["1"]',
       "TSR024",
       'A list index must be a whole number (integer), but this is text (string) "1". Convert the text with toInteger(...) first.',
-      'pick("1")',
+      '"1"',
     ],
     [
       "let items = pick([1])\nsay items.size",
