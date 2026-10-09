@@ -111,6 +111,13 @@
       "category": "b",
       "reason": "Choosing Back in the offense level menu gives 0, and the clinic-offense test read offenseArray[-1] before the loop ended: the last offense of the category, which could wrongly show the clinic's refusal, and an error where the category has no offenses, such as the one for offenses not in the list, which failed in Groovy too. The test now runs only for a chosen offense, as resetOffense already did, so Back leaves the menu.",
       "diff": "offense-level-back.diff"
+    },
+    {
+      "id": "stale-dialog-questions",
+      "layer": "source",
+      "category": "b",
+      "reason": "Three questions in Punish ask getSelectedValue(dialog, …) with a dialog that an earlier pick set for another text: the mercy question after the mumble question (\"Please Stop\" …), the reply after a mercy answer that show(dialog) has just shown (\"Yes, Miss\" …), and the repeat-offense reply (\"I understand.\" …), where dialog still holds a text shown long before or in another function. Legacy showed that older text again above the buttons; the author meant the buttons under the text just shown, which a null question gives. Unread, the leftover dialog no longer keeps the clinic's random dialog lists whole (the paragraph rule).",
+      "diff": "stale-dialog-questions.diff"
     }
   ]
 }
