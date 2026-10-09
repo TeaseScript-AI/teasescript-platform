@@ -222,6 +222,13 @@ test("rejects a call of anything but a function or a method", () => {
       "debugMode",
       "'debugMode' is a read-only value, not a callable function.",
     ],
+    // Without parentheses around the name, too.
+    [
+      'speaker vera {}\nsay as vera "${speaker()}"',
+      "speaker",
+      "'speaker' is the current speaker, not a callable function.",
+    ],
+    ["say debugMode()", "debugMode", "'debugMode' is a read-only value, not a callable function."],
     ["let items = [1]\nsay items[0]()", "items[0]", notCallable],
     ["let items = [1]\nsay (items[0])()", "items[0]", notCallable],
     ["function pick(value) {\n    return value\n}\nsay pick(1)()", "pick(1)", notCallable],
