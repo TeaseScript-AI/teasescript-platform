@@ -552,4 +552,12 @@ test("every pair of loads without a declared type agrees, not only each with the
       ],
     ],
   );
+  // A load agrees with the loads before it, also when one of them takes its default from a key that a later load
+  // declares, which changes that load's type after the first check.
+  assert.deepEqual(
+    errors(
+      'let a = load("d", default: 1)\nlet u1 = load("u", default: 1)\nlet u2 = load("u", default: a)\nlet u3 = load("u", default: "x")\nlet s: number = load("d", default: 0.5)\nexit',
+    ).map(([code, , text]) => [code, text]),
+    [["TSV041", 'load("u", default: "x")']],
+  );
 });

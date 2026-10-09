@@ -199,6 +199,7 @@ import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 import {
   detachedType,
   sameStorageKeyTypes,
+  sameReadStorageKeyTypes,
   sameType,
   storageKeyTypes,
   typeKey,
@@ -311,7 +312,9 @@ export function checkTypes(
   const copies: Copies = new Map();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
-  // them, so they settle at once; the bound only guards against a load type that changes with variable types.
+  // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
+  // they changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that
+  // the next check would read changed, the next check would repeat this one exactly, so it is not run.
   let storage: ReadonlyMap<string, StorageKeyType> = new Map();
   let storageRounds = 0;
   for (;;) {
@@ -328,6 +331,8 @@ export function checkTypes(
     checker.check(programs);
     checker.recordDecisions();
     let storageChanged = false;
+    // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
+    let storageRead = false;
     if (storageRounds < MAX_STORAGE_ROUNDS) {
       // A key whose type the runtime cannot check has none.
       const found = new Map(
@@ -336,12 +341,25 @@ export function checkTypes(
         ),
       );
       if (!sameStorageKeyTypes(storage, found)) {
+        storageRead = !sameReadStorageKeyTypes(storage, found);
         storage = found;
         storageChanged = true;
         storageRounds += 1;
       }
     }
-    if (!checker.widenedMore && !checker.decidedMore && !storageChanged) {
+    // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
+    // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
+    let last =
+      !checker.widenedMore &&
+      !checker.decidedMore &&
+      (!storageChanged || (!storageRead && !checker.copiedMore));
+    let followed = false;
+    if (last && storageChanged) {
+      checker.widenFollowers();
+      followed = true;
+      last = !checker.widenedMore;
+    }
+    if (last) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
@@ -360,7 +378,7 @@ export function checkTypes(
         storageTypes: storageTypePlans(storage),
       });
     }
-    checker.widenFollowers();
+    if (!followed) checker.widenFollowers();
   }
 }
 
@@ -875,6 +893,9 @@ class TypeChecker {
   /** Whether this check found a place decided after a read that earlier checks did not (see {@link Decided}). */
   decidedMore = false;
 
+  /** Whether this check found a copy of an undecided place that earlier checks did not (see {@link Copies}). */
+  copiedMore = false;
+
   /**
    * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
    * variable it was copied from, which a mismatch in the copy names.
@@ -926,8 +947,12 @@ class TypeChecker {
       const decider = source === undefined ? undefined : deciding.get(source);
       if (source === undefined || !settled(decider) || storedIn(slot).has(decider)) continue;
       const copies = this.#copies.get(place.root) ?? new Map<string, string>();
-      copies.set(place.path.join("."), declaredName(places.get(source)!.root));
+      const key = place.path.join(".");
+      const name = declaredName(places.get(source)!.root);
+      if (copies.get(key) === name) continue;
+      copies.set(key, name);
       this.#copies.set(place.root, copies);
+      this.copiedMore = true;
     }
   }
 

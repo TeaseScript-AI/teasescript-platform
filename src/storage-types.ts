@@ -151,17 +151,53 @@ export function sameStorageKeyTypes(
   return true;
 }
 
+/**
+ * Whether a check reads the same key types from both: as {@link sameStorageKeyTypes}, but with union members and object
+ * properties compared in their order, since a check copies the types as they are, and without the loads of a key whose
+ * type a load declares, since a check reads those only for a key without a declared type.
+ */
+export function sameReadStorageKeyTypes(
+  left: ReadonlyMap<string, StorageKeyType>,
+  right: ReadonlyMap<string, StorageKeyType>,
+): boolean {
+  if (left.size !== right.size) return false;
+  for (const [key, kept] of left) {
+    const other = right.get(key);
+    if (
+      other === undefined ||
+      other.at !== kept.at ||
+      other.declared !== kept.declared ||
+      typeKey(other.type, false) !== typeKey(kept.type, false)
+    )
+      return false;
+    if (
+      !kept.declared &&
+      (other.loads.length !== kept.loads.length ||
+        other.loads.some(
+          (load, index) =>
+            load.at !== kept.loads[index]!.at ||
+            typeKey(load.type, false) !== typeKey(kept.loads[index]!.type, false),
+        ))
+    )
+      return false;
+  }
+  return true;
+}
+
 /** Whether two types are equal, with union members and object properties in any order. */
 export function sameType(left: StaticType, right: StaticType): boolean {
   return typeKey(left) === typeKey(right);
 }
 
-/** A text that equal types share: union members and object properties in a fixed order. */
-export function typeKey(type: StaticType): string {
-  return runCompileTask(typeKeyTask(type));
+/**
+ * A text that equal types share: union members and object properties in a fixed order, or with `sorted` false, in the
+ * order the type has them.
+ */
+export function typeKey(type: StaticType, sorted = true): string {
+  return runCompileTask(typeKeyTask(type, sorted));
 }
 
-function* typeKeyTask(typeToName: StaticType): CompileTask<string> {
+function* typeKeyTask(typeToName: StaticType, sorted: boolean): CompileTask<string> {
   const type = resolved(typeToName);
   switch (type.kind) {
     case "open":
@@ -171,18 +207,21 @@ function* typeKeyTask(typeToName: StaticType): CompileTask<string> {
     case "list":
     case "set":
     case "dict":
-      return `${type.kind}<${yield* compileChild(typeKeyTask(type.element))}>`;
+      return `${type.kind}<${yield* compileChild(typeKeyTask(type.element, sorted))}>`;
     case "object": {
       if (type.properties === null) return "object";
       const properties: string[] = [];
       for (const [name, value] of type.properties)
-        properties.push(`${JSON.stringify(name)}:${yield* compileChild(typeKeyTask(value))}`);
-      return `{${properties.sort().join(",")}}`;
+        properties.push(
+          `${JSON.stringify(name)}:${yield* compileChild(typeKeyTask(value, sorted))}`,
+        );
+      return `{${(sorted ? properties.sort() : properties).join(",")}}`;
     }
     case "union": {
       const parts: string[] = [];
-      for (const member of type.members) parts.push(yield* compileChild(typeKeyTask(member)));
-      return `(${parts.sort().join("|")})`;
+      for (const member of type.members)
+        parts.push(yield* compileChild(typeKeyTask(member, sorted)));
+      return `(${(sorted ? parts.sort() : parts).join("|")})`;
     }
     default:
       return type.kind;
