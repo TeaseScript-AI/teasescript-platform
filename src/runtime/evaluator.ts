@@ -1915,8 +1915,8 @@ export class Evaluator {
       // called, so it need not be registered then.
       const recorded = hostBuiltin ? this.control?.replayedBuiltin() : undefined;
       if (hostBuiltin && builtin === undefined && recorded === undefined) {
-        // The compiler rejects a call of a parenthesized name that is not a function, such as `(x)()`, but the plan of
-        // an older checkpoint may still hold one, so the message does not blame the Playroom.
+        // The compiler rejects a call of a parenthesized name that is not a function, such as `(x)()`, but a plan
+        // compiled before it did may still hold one, so the message does not blame the Playroom.
         const bound = this.binding(name);
         throw fault(
           "TSR011",

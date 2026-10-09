@@ -205,8 +205,10 @@ test("preserves existing function, unknown-name, callable, and protected-name di
   );
 });
 
-test("rejects a call of a parenthesized name that is not a function", () => {
-  for (const [source, name, message] of [
+test("rejects a call of anything but a function or a method", () => {
+  const notCallable =
+    "Only a function or a method can be called. Call a function by its name instead.";
+  for (const [source, callee, message] of [
     ["let value = 1\nsay (value)()", "value", "'value' is a variable, not a callable function."],
     ["let value = 1\nsay ((value))()", "value", "'value' is a variable, not a callable function."],
     ["speaker vera {}\n(vera)()", "vera", "'vera' is a speaker, not a callable function."],
@@ -220,8 +222,12 @@ test("rejects a call of a parenthesized name that is not a function", () => {
       "debugMode",
       "'debugMode' is a read-only value, not a callable function.",
     ],
+    ["let items = [1]\nsay items[0]()", "items[0]", notCallable],
+    ["let items = [1]\nsay (items[0])()", "items[0]", notCallable],
+    ["function pick(value) {\n    return value\n}\nsay pick(1)()", "pick(1)", notCallable],
+    ['say ("Hi")()', '"Hi"', notCallable],
   ] as const) {
-    const start = source.lastIndexOf(`(${name})`) + 1;
+    const start = source.lastIndexOf(callee);
     assert.deepEqual(
       compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => [
         diagnostic.code,
@@ -229,7 +235,7 @@ test("rejects a call of a parenthesized name that is not a function", () => {
         diagnostic.span.start.offset,
         diagnostic.span.end.offset,
       ]),
-      [["TSV019", message, start, start + name.length]],
+      [["TSV019", message, start, start + callee.length]],
       source,
     );
   }

@@ -2096,6 +2096,13 @@ class SemanticValidator {
                 `'${method.name}' is ${kind}, not a callable function.`,
                 method.span,
               );
+          } else {
+            // Functions are not values, so no other expression, such as `items[0]` or `pick(1)`, gives one to call.
+            this.#report(
+              semanticCode.nonCallable,
+              "Only a function or a method can be called. Call a function by its name instead.",
+              method.span,
+            );
           }
         }
         for (const argument of expression.arguments) {

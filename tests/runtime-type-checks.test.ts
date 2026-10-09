@@ -235,12 +235,6 @@ test("an index or member that a value does not have names the value, its bounds,
       "a[1][a.removeLast().length - 1]",
     ],
     [
-      "let a = [[1]]\na[0]()",
-      "TSR014",
-      "Only a function or a method can be called, but this is neither. Call a function by its name instead.",
-      "a[0]",
-    ],
-    [
       "let empty = pick({})\nsay empty.lock",
       "TSR017",
       "'empty' has no properties, so it has no 'lock'.",
