@@ -254,6 +254,11 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText("Q"'), "question");
   assert.equal(activeSlot('askText("Q", prefill: pick(hint: 1'), "prefill");
   assert.equal(activeSlot('say "${askText("Q", hint: '), "hint");
+  // Its `)` ends it, so what follows belongs to the enclosing construct, if any.
+  assert.equal(activeSlot('let more = askInteger("How many?", prefill: 3) + '), null);
+  assert.equal(activeSlot('let more = askInteger as mistress ("How many?") + '), null);
+  assert.equal(activeSlot('askText("Q", prefill: askText("Default") + '), "prefill");
+  assert.equal(activeSlot('say askText("Q") + '), "text");
   assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
   assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");
