@@ -105,7 +105,6 @@ import {
   type TemporalContext,
 } from "../../../src/index.js";
 import { serializeValidatedRuntimeJson } from "../../../src/runtime/checkpoint.js";
-import { isRecord } from "../../../src/plan/validation-support.js";
 import { silence } from "./generatedAudio";
 import { useImageCapture } from "./useImageCapture";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
@@ -190,18 +189,19 @@ export type PlayerSessionStart = (recording: {
   readonly randomControl?: RandomControlOptions;
 }) => PlayerRuntimeSession;
 
+/**
+ * The format revision of a stored plan or snapshot, read from its start, where the serializer writes it after the
+ * format name, so a large snapshot is not parsed for it; `Infinity` when the text names none.
+ */
+function formatVersion(json: unknown): number {
+  if (typeof json !== "string") return Infinity;
+  const match = /^\{"format":"[^"\\]*","version":(\d+)[,}]/u.exec(json.slice(0, 200));
+  return match === null ? Infinity : Number(match[1]);
+}
+
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
-/** The format revision a stored plan or snapshot names, or `Infinity` when it names none. */
-function formatVersion(json: string): number {
-  try {
-    const value: unknown = JSON.parse(json);
-    return isRecord(value) && typeof value.version === "number" ? value.version : Infinity;
-  } catch {
-    return Infinity;
-  }
-}
 
 export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolvePackageAsset = options.resolveAsset ?? (() => null);
@@ -1190,13 +1190,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (sources !== undefined) scriptSources = sources;
     await prepareKept();
   }
-  /**
-   * Tells the player why Start shows when a kept session's plan or snapshot `json` has a format older than `current`,
-   * which this Player cannot continue. The kept record stays as it is.
-   */
-  function reportOlderFormat(json: string, current: number): void {
-    if (formatVersion(json) < current) notices.publish(playerNotices.olderKeptSession());
-  }
   /** Shows Continue when the script keeps a session that can go on, else Start. */
   async function prepareKept(): Promise<void> {
     const continued = scriptPlan === null ? null : await restoreKept(scriptPlan);
@@ -1221,17 +1214,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     await storageRoute;
     const store = keptStore();
     const stored = await store.session(keptScope).catch(() => null);
-    const found = stored === null ? null : keptSession(stored);
-    if (found === null) return null;
-    if (found.planJson !== JSON.stringify(plan)) {
-      reportOlderFormat(found.planJson, INSTRUCTION_PLAN_VERSION);
+    if (stored === null) return null;
+    // A session kept in an older format is refused before its events are read, which that format may hold otherwise.
+    if (
+      formatVersion(stored.planJson) < INSTRUCTION_PLAN_VERSION ||
+      formatVersion(stored.snapshotJson) < RUNTIME_SNAPSHOT_VERSION
+    ) {
+      notices.publish(playerNotices.olderKeptSession());
       return null;
     }
+    const found = keptSession(stored);
+    if (found === null || found.planJson !== JSON.stringify(plan)) return null;
     let restored: PlayerRuntimeSession;
     try {
       restored = restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events);
     } catch {
-      reportOlderFormat(found.snapshotJson, RUNTIME_SNAPSHOT_VERSION);
       return null;
     }
     if (restored.state.status === "halted" || restored.state.status === "failed") return null;

@@ -8,6 +8,7 @@ import {
   compilePlayerProject,
   createPlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
+  submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -18,11 +19,13 @@ import {
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
+  type StoredKeptSession,
 } from "../player/kept-sessions.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type {
   InstructionPlan,
+  InterpreterEvent,
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
 } from "../src/index.js";
@@ -233,26 +236,44 @@ test("Debug on during a normal session goes on with a copy in the debug room, an
 
 test("a session kept in an older format shows Start with a notice, and its record stays", async (context) => {
   stubBrowser(context);
+  // A completed form keeps an absolute date and time in its events, which an older Player wrote as a timestamp.
+  const form = compilePlayerProject(
+    [
+      "let answers = askForm fields: {",
+      '    at: { type: "cycle", options: [toAbsoluteDateTime("2026-10-04T12:30:00Z")] }',
+      "}",
+      'showButton "Next"',
+      "exit",
+    ].join("\n"),
+  ).plan!;
   const kept = memoryKeptSessionStore();
   const first = mountHost(context, { own: savedData([]), kept, rooms: memoryKeptRoomStore() });
-  await prepare(context, first, SCRIPT);
+  await prepare(context, first, form);
   await first.activate();
   await settle(context);
-  const current = keptSession((await kept.session("test"))!)!;
-  const older = (json: string) => {
-    const value: { version: number } = JSON.parse(json);
-    return JSON.stringify({ ...value, version: value.version - 1 });
-  };
-  const reopen = async (planJson: string, snapshotJson: string) => {
+  first.update(submitPlayerRuntimeForm(first.session.value!)!.session);
+  await settle(context);
+  const current = (await kept.session("test"))!;
+  assert.ok(keptSession(current) !== null);
+  // The revision follows the format name at the start of a stored plan or snapshot.
+  const older = (json: unknown) =>
+    String(json).replace(
+      /^(\{"format":"[^"]*","version":)(\d+)/u,
+      (_, head: string, version: string) => `${head}${Number(version) - 1}`,
+    );
+  const timestamps = (json: string) => json.replaceAll('"absoluteDateTime"', '"timestamp"');
+  const reopen = async (record: StoredKeptSession) => {
+    await kept.discard("test");
     await kept.publish("test", {
-      planJson,
-      snapshotJson,
+      planJson: String(record.planJson),
+      snapshotJson: String(record.snapshotJson),
       eventsFrom: 0,
-      events: current.events,
-      marks: current.marks,
+      // EVIDENCE: fixture: the events are a kept session's, at most with an older value tag.
+      events: record.events as InterpreterEvent[],
+      marks: keptSession(current)!.marks,
     });
     const host = mountHost(context, { own: savedData([]), kept, rooms: memoryKeptRoomStore() });
-    await prepare(context, host, SCRIPT);
+    await prepare(context, host, form);
     return host;
   };
   const notice = (host: RoomHost) =>
@@ -261,21 +282,31 @@ test("a session kept in an older format shows Start with a notice, and its recor
       .map((entry) => entry.message);
   const message =
     "The last session comes from an older Player version and cannot be continued. Start begins a new session. Saved data is kept.";
-  const plan = current.planJson;
-  const snapshot = current.snapshotJson;
   // The current formats continue, without the notice.
-  const same = await reopen(plan, snapshot);
+  const same = await reopen(current);
   assert.equal(same.activation.value, "continue");
   assert.deepEqual(notice(same), []);
-  for (const [planJson, snapshotJson] of [
-    [older(plan), snapshot],
-    [plan, older(snapshot)],
-  ] as const) {
-    const host = await reopen(planJson, snapshotJson);
+  const earlier: StoredKeptSession = {
+    planJson: older(timestamps(String(current.planJson))),
+    snapshotJson: older(timestamps(String(current.snapshotJson))),
+    events: JSON.parse(timestamps(JSON.stringify(current.events))),
+    marks: current.marks,
+  };
+  // This Player cannot read the earlier record's events, so it must refuse the record by its revision first.
+  assert.equal(keptSession(earlier), null);
+  for (const record of [
+    earlier,
+    { ...current, planJson: older(current.planJson) },
+    { ...current, snapshotJson: older(current.snapshotJson) },
+  ]) {
+    const host = await reopen(record);
     assert.equal(host.activation.value, "start");
     assert.deepEqual(notice(host), [message]);
     const stored = (await kept.session("test"))!;
-    assert.deepEqual([stored.planJson, stored.snapshotJson], [planJson, snapshotJson]);
+    assert.deepEqual(
+      [stored.planJson, stored.snapshotJson],
+      [record.planJson, record.snapshotJson],
+    );
   }
 });
 
