@@ -7,8 +7,7 @@
  *          [--workers 1|2] [--until-stalled]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
- *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]needed-writes]
- *          <unit-dir>... --out <dir>
+ *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -23,10 +22,9 @@
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
  * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too), and conjunctive
  * steering (a way that needs all parts of its condition is steered to by their summed distance), random choices (the
- * explorer also chooses other outcomes of random draws), depth phases (play work goes to session numbers by their gain
- * per operation), and needed writes (a save of a stored value a missed way needs that no state stored is aimed at) are on
- * by default (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`, `--no-realign`,
- * `--no-conjunctive`, `--no-random-choices`, `--no-depth-phases`, `--no-needed-writes` switch them off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
+ * explorer also chooses other outcomes of random draws), and depth phases (play work goes to session numbers by their
+ * gain per operation) are on by default (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`,
+ * `--no-realign`, `--no-conjunctive`, `--no-random-choices`, `--no-depth-phases` switch them off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -81,7 +79,6 @@ const STRATEGIES = [
   "randomChoices",
   "quitAnywhere",
   "depthPhases",
-  "neededWrites",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -147,7 +144,6 @@ async function main(args: string[]): Promise<void> {
       "random-choices": { type: "boolean", default: true },
       "quit-anywhere": { type: "boolean", default: false },
       "depth-phases": { type: "boolean", default: true },
-      "needed-writes": { type: "boolean", default: true },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -205,8 +201,7 @@ async function main(args: string[]): Promise<void> {
         "         [--workers 1|2] [--until-stalled]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
-        "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]needed-writes]\n" +
-        "         <unit-dir>... --out <dir>\n" +
+        "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -253,7 +248,6 @@ async function main(args: string[]): Promise<void> {
             randomChoices: values["random-choices"],
             quitAnywhere: values["quit-anywhere"],
             depthPhases: values["depth-phases"],
-            neededWrites: values["needed-writes"],
           },
         },
         out,
@@ -303,7 +297,6 @@ interface RunSettings {
     randomChoices: boolean;
     quitAnywhere: boolean;
     depthPhases: boolean;
-    neededWrites: boolean;
   };
 }
 

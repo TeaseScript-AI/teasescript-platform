@@ -331,13 +331,6 @@ export interface ExploreOptions {
    */
   readonly depthPhases?: boolean;
   /**
-   * Needed writes: when a missed way needs a stored value that no explored state stored, the saves of its key that can
-   * store it and that play has not run yet are aimed at, one at a time in the order found, as guidance aims at a region
-   * (states that come nearer to the save share a lead toward it for {@link CLOSER_EXPANSIONS} expansions), before any
-   * region guidance picks. Once a state runs the save, its storage brings the chain toward the value on. Off by default.
-   */
-  readonly neededWrites?: boolean;
-  /**
    * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
    * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
    * a missed way needs. New cells are counted but do not hold a run up: cells of counters keep coming long after
@@ -663,11 +656,6 @@ export interface ExploreResult {
     time?: { conditions: number; places: number; steps: number; sessions: number };
     /** With guidance: the regions of code not reached yet that the search was led toward, and those it reached. */
     guidance?: { regions: number; reached: number };
-    /**
-     * With needed writes: the saves of a stored value a missed way needed that no explored state stored, those the
-     * search was led toward, and those reached then.
-     */
-    neededWrites?: { saves: number; led: number; reached: number };
     /** With quit-anywhere next visits: those started from the storage of a state a session did not complete. */
     quitVisits?: number;
     /**
@@ -1786,10 +1774,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const elseIfs =
     options.realign === true ? elseIfChains(instructions) : new Map<number, number[]>();
   // With guidance, the map of the plan, measured again from what play has not reached at each analysis.
-  const map =
-    options.guidance === true || options.neededWrites === true
-      ? new TreasureMap(plan, instructions, allConstants)
-      : null;
+  const map = options.guidance === true ? new TreasureMap(plan, instructions, allConstants) : null;
   const dead = map === null ? null : unreachableInstructions(plan, instructions, allConstants);
   /**
    * With guidance: the region of code not reached yet the search is led toward, by its first instruction, the regions
@@ -1802,65 +1787,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     readonly tried: Set<number>;
     reached: number;
   } = { region: null, lead: null, tried: new Set(), reached: 0 };
-  /**
-   * With needed writes: the saves of each stored key, by the goal's key; the saves aimed at or to aim at, in the order
-   * found; the pairs of target and key already looked at; and the saves led toward and reached.
-   */
-  const savesOf = new Map<string, number[]>();
-  const neededSaves: number[] = [];
-  const neededSeen = new Set<number>();
-  const neededAsked = new Set<string>();
-  const needed = { led: 0, reached: 0 };
-  /** With needed writes: queues the saves of `key` that can store what `goal` needs and that play has not run yet. */
-  const needWrites = (code: number, key: string, goal: Goal): void => {
-    if (options.neededWrites !== true || neededAsked.has(`${code} ${key}`)) return;
-    neededAsked.add(`${code} ${key}`);
-    let saves = savesOf.get(key);
-    if (saves === undefined) {
-      const matches = keyMatcher(key);
-      saves = [];
-      instructions.forEach((instruction, index) => {
-        if (instruction.kind !== "storageWrite" || instruction.value === null) return;
-        const written = keyText(instruction.key) ?? KEY_PLACEHOLDER;
-        if (matches(written) || keyMatcher(written)(key)) saves!.push(index);
-      });
-      savesOf.set(key, saves);
-    }
-    for (const index of saves) {
-      if (neededSeen.has(index) || session.visited[index] === 1 || dead?.[index] === 1) continue;
-      // A literal saved must be what the goal needs; a computed value may be.
-      const value = record(instructions[index]!.value);
-      const literal = value.kind === "literal" ? atomScalar(value.value) : undefined;
-      if (literal !== undefined && !storedValueHolds(goal, literal)) continue;
-      neededSeen.add(index);
-      neededSaves.push(index);
-    }
-  };
   const guide = () => {
     if (map === null) return;
     const { region, lead } = guidance;
     const reached = region !== null && [...region].some((index) => session.visited[index] === 1);
     if (reached) guidance.reached += 1;
-    if (reached && region.size === 1 && neededSeen.has([...region][0]!)) needed.reached += 1;
     if (region !== null && !reached && lead !== null && lead.remaining > 0) return;
     if (lead !== null) lead.remaining = 0;
-    // A save a missed way needs comes first.
-    const save = neededSaves.find(
-      (index) => session.visited[index] === 0 && !guidance.tried.has(index),
-    );
-    if (save !== undefined) {
-      guidance.region = new Set([save]);
-      guidance.tried.add(save);
-      map.update((index) => index === save);
-      guidance.lead = { remaining: CLOSER_EXPANSIONS, target: GUIDED };
-      needed.led += 1;
-      return;
-    }
-    if (options.guidance !== true) {
-      guidance.lead = null;
-      guidance.region = null;
-      return;
-    }
     const unreached = (index: number) => session.visited[index] === 0 && dead?.[index] === 0;
     const next = map
       .regions(unreached)
@@ -3160,7 +3093,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const need = describeNeed(key, goal);
     if (best === null) {
       target.note = `needs ${need}; no explored session stored it`;
-      needWrites(code, key, goal);
       return false;
     }
     // With forward time, the next session follows the rhythm of the one that left the storage: as long after it.
@@ -4435,12 +4367,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           }
         : {}),
       ...(cells === null ? {} : { cells: cells.stats }),
-      ...(options.guidance === true
-        ? { guidance: { regions: guidance.tried.size, reached: guidance.reached } }
-        : {}),
-      ...(options.neededWrites === true
-        ? { neededWrites: { saves: neededSaves.length, ...needed } }
-        : {}),
+      ...(map === null
+        ? {}
+        : { guidance: { regions: guidance.tried.size, reached: guidance.reached } }),
       ...(quitAnywhere ? { quitVisits } : {}),
       ...(times === null
         ? {}
@@ -4773,15 +4702,6 @@ function storageDistance(
       best = { distance: measured, value: `${entry.key} = ${JSON.stringify(entry.value)}` };
   }
   return best;
-}
-
-/** Whether a stored value is what a goal needs of its key, as {@link storageDistance} measures it. */
-function storedValueHolds(goal: Goal, value: AtomValue): boolean {
-  const numeric =
-    typeof value === "number" ? value : typeof value === "boolean" ? Number(value) : null;
-  if (goal.comparison !== null && numeric !== null)
-    return distance(numeric, goal.comparison.operator, goal.comparison.constant) === 0;
-  return goal.candidates.length === 0 || goal.candidates.some((candidate) => candidate === value);
 }
 
 /** What a goal needs of a stored key, in words, such as `score > 100`. */
