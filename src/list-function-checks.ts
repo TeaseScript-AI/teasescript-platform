@@ -307,7 +307,9 @@ function describeKinds(kinds: readonly ValueKind[]): string {
         ? "durations"
         : kind === "datetime"
           ? "datetimes"
-          : `${kind}s`,
+          : kind === "absoluteDateTime"
+            ? "absolute dates and times"
+            : `${kind}s`,
   );
   return words.length === 1
     ? words[0]!

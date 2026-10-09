@@ -389,6 +389,14 @@ test("linearRegression and predict report too few points, one x, and values of t
       ],
     ],
   );
+  assert.deepEqual(
+    diagnostics(
+      'say linearRegression([{ at: "a", n: 1 }, { at: "b", n: 2 }], x: "at", y: "n").slope\nexit',
+    ).map(([, message]) => message),
+    [
+      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times, not text (string).",
+    ],
+  );
   assert.deepEqual(diagnostics('say linearRegression([{ day: 1 }], x: "day")\nexit'), [
     [
       "TSV043",
@@ -429,6 +437,11 @@ test("linearRegression and predict report too few points, one x, and values of t
       'predict(linearRegression([1, 2]), dynamic(toDate("2026-01-01")))',
       "TSR059",
       "predict(...) needs a number as its x, like the line's start, not a date.",
+    ],
+    [
+      'predict(linearRegression([{ at: toAbsoluteDateTime("2026-01-01T00:00:00Z"), n: 1 }, { at: toAbsoluteDateTime("2026-01-02T00:00:00Z"), n: 2 }], x: "at", y: "n"), dynamic(toDate("2026-01-01")))',
+      "TSR059",
+      "predict(...) needs an absolute date and time as its x, like the line's start, not a date.",
     ],
   ];
   for (const [call, code, message] of cases)

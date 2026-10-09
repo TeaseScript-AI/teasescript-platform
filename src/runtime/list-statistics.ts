@@ -501,7 +501,7 @@ export function predict(
   if (offset === undefined)
     throw fault(
       "TSR059",
-      `predict(...) needs ${startKind === "number" ? "a number" : startKind === "datetime" ? "a date and time" : `a ${startKind}`} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
+      `predict(...) needs ${describeRuntimeValue(start!)} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
       span,
     );
   const value = quotient(
