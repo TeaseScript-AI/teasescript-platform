@@ -547,6 +547,15 @@ function heldOnlyNull(slot: OpenType, known: Map<OpenType, boolean>): boolean {
   return only;
 }
 
+/**
+ * The type of a loop variable, or of a `for key, value` value, that takes elements of type `element`: the plain element
+ * type, or for elements that are only null, a type that the first other value stored in it decides, as for
+ * `let v = null` (ADR 0021 rule 1.2).
+ */
+function loopPlaceType(element: StaticType): StaticType {
+  return resolved(element).kind === "null" ? placeType(element) : copyType(plainType(element));
+}
+
 /** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
 function storedIn(slot: OpenType): Set<OpenType> {
   const chain = new Set<OpenType>();
@@ -1676,8 +1685,7 @@ class TypeChecker {
           statement.iterable,
           "A for-loop goes through a list, a set, a dict, or a range",
         );
-        // The loop variable is a new place, as if declared with `let` from the element (rules 1.2 and 1.3).
-        const loopType = element === undefined ? UNKNOWN_TYPE : placeType(element);
+        const loopType = element === undefined ? UNKNOWN_TYPE : loopPlaceType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1692,6 +1700,7 @@ class TypeChecker {
             scope,
             [variable],
             !isEmptyLiteral(statement.iterable),
+            element !== undefined && resolved(element).kind === "null" ? [variable] : [],
           ),
         );
         return !isNonEmptyLiteral(statement.iterable) || ends;
@@ -1795,7 +1804,7 @@ class TypeChecker {
       declaration: statement,
     };
     const element = dictValueType(iterable);
-    const valueType = element === undefined ? UNKNOWN_TYPE : placeType(element);
+    const valueType = element === undefined ? UNKNOWN_TYPE : loopPlaceType(element);
     this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
     const value: Variable = {
       name: valueName.name,
@@ -1806,7 +1815,13 @@ class TypeChecker {
     this.#declared.set(statement, key);
     this.#declared.set(valueName, value);
     const ends = yield* compileChild(
-      this.#loopBodyTask(statement.body, scope, [key, value], !isEmptyLiteral(statement.iterable)),
+      this.#loopBodyTask(
+        statement.body,
+        scope,
+        [key, value],
+        !isEmptyLiteral(statement.iterable),
+        element !== undefined && resolved(element).kind === "null" ? [value] : [],
+      ),
     );
     return !isNonEmptyLiteral(statement.iterable) || ends;
   }
@@ -1814,13 +1829,14 @@ class TypeChecker {
   /**
    * The body of a `repeat` or `for` loop, which may run any number of times, including none. Returns whether the body
    * can end normally or leave through a `break`. A body that certainly runs no time is checked, but nothing in it can
-   * be reached.
+   * be reached. Each pass starts with `nullStarts`, loop variables that take only null elements, holding null.
    */
   *#loopBodyTask(
     body: Block,
     scope: Scope,
     variables: readonly Variable[],
     reached: boolean,
+    nullStarts: readonly Variable[] = [],
   ): CompileTask<boolean> {
     const reachable = this.#reachable;
     if (!reached) this.#reachable = false;
@@ -1829,6 +1845,7 @@ class TypeChecker {
     const loopScope = new Scope(scope);
     for (const variable of variables)
       loopScope.declare(variable.name, { kind: "variable", variable });
+    for (const variable of nullStarts) this.#assigned(variable, NULL_TYPE);
     this.#loops.push({ start, breaks: [], continued: false });
     const continues = yield* compileChild(this.#statementsTask(body.statements, loopScope));
     const { breaks, continued } = this.#loops.pop()!;

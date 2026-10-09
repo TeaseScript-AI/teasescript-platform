@@ -1281,6 +1281,13 @@ test("a first null is remembered wherever a first value decides a type", () => {
   assert.deepEqual(codes('for v in [null] {\n    v = 1\n    v = "x"\n}\nexit'), [
     ["TSV041", '"x"'],
   ]);
+  // Each pass still starts with its element, null, so arithmetic on it is an error, also inside a nested element.
+  for (const [loop, use] of [
+    ["for v in [null]", "v + 1"],
+    ["for k, v in dict{ a: null }", "v + 1"],
+    ["for v in [[null]]", "v[0] + 1"],
+  ] as const)
+    assert.deepEqual(codes(`${loop} {\n    say ${use}\n}\nexit`), [["TSV043", use]], loop);
   assert.deepEqual(
     codes("let door = {}\ndoor.owner = null\ndoor.owner = 1\ndoor.owner = null\nexit"),
     [],
