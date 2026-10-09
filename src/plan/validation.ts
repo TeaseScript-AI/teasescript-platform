@@ -1785,13 +1785,14 @@ function validatePreparedInteractionUi(
 }
 
 /**
- * An object form names each numeric field once by its unique name; a dict form has one numeric kind or `null`; a
- * boolean list has none.
+ * An object form names each numeric field once by its unique name; a dict form has one numeric kind or `null`; an
+ * unknown form and a boolean list have none.
  */
 function validPreparedFormShape(value: unknown): value is PreparedFormShape {
   if (!isRecord(value)) return false;
   const numericKind = (kind: unknown) => kind === "integer" || kind === "number";
-  if (value.kind === "booleanList") return hasExactKeys(value, ["kind"]);
+  if (value.kind === "booleanList" || value.kind === "unknown")
+    return hasExactKeys(value, ["kind"]);
   if (value.kind === "dict")
     return (
       hasExactKeys(value, ["kind", "numericKind", "answer"]) &&
@@ -2127,7 +2128,7 @@ const TYPE_PLAN_NAMES = [
   "date",
   "time",
   "datetime",
-  "timestamp",
+  "absoluteDateTime",
   "never",
   "null",
   "range",

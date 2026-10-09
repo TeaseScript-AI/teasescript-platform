@@ -199,7 +199,7 @@ function checkProjectFiles(sources: readonly ProjectSourceFile[]): {
     diagnostics.push(
       projectDiagnostic(
         MAIN_FILE_PATH,
-        `The project has no ${MAIN_FILE_PATH}; every session starts there.`,
+        `The project has no ${MAIN_FILE_PATH}. Every session starts there.`,
       ),
     );
   }

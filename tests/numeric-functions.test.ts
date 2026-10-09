@@ -71,7 +71,7 @@ test("round to decimals rounds the number as written, half away from zero, and g
     ],
   ]);
   assert.deepEqual(diagnostics("say floor(2.5, decimals: 1)\nexit"), [
-    ["TSV022", "floor(...) takes no named arguments; remove 'decimals:'.", "decimals"],
+    ["TSV022", "floor(...) takes no named arguments. Remove 'decimals:'.", "decimals"],
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say round(2.5, decimals: dynamic(-1))\nexit`), [
     "TSR039",
@@ -177,7 +177,7 @@ test("abs keeps an integer whole, pow of a whole number to a known whole power i
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let whole: integer = abs(dynamic(-2.5))\nexit`), [
     "TSR058",
-    "'whole' holds a whole number (integer), so it cannot take a number.",
+    "'whole' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
   ]);
 });
 
@@ -219,7 +219,7 @@ test("numeric functions check their arguments", () => {
       ],
       ["TSV020", "sqrt(...) takes 1 argument (value), received 0.", "sqrt()"],
       ["TSV020", "pow(...) takes 2 arguments (base, exponent), received 1.", "pow(2)"],
-      ["TSV022", "abs(...) takes no named arguments; remove 'by:'.", "by"],
+      ["TSV022", "abs(...) takes no named arguments. Remove 'by:'.", "by"],
       ["TSV043", "'maybe' may be null. Check it first: if maybe != null { ... }", "maybe"],
       [
         "TSV043",

@@ -1,9 +1,3 @@
-function sexscriptLegacyMin(first, second) {
-  if first <= second {
-    return first
-  }
-  return second
-}
 // A C-style loop may leave out its start or name the counter without a value; neither part does anything.
 let count = 3
 let turn = 0
@@ -44,7 +38,7 @@ if askBoolean "Again?" {
 // A prefix increment inside an expression changes the variable before the statement; for (;;) loops until a break.
 let lives = 3
 lives += 1
-let capped = sexscriptLegacyMin(lives, 10)
+let capped = min(lives, 10)
 while true {
   lives -= 1
   if lives < 2 {

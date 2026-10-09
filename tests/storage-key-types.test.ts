@@ -170,7 +170,7 @@ test("loads of one key agree on its type, across files", () => {
     [
       [
         "TSV041",
-        'Storage key "level" is declared as a whole number (integer) or text (string) on line 1, so it cannot be declared as a whole number (integer) here. Declare its type at one load; the others take it.',
+        'Storage key "level" is declared as a whole number (integer) or text (string) on line 1, so it cannot be declared as a whole number (integer) here. Declare its type at one load only. The other loads use that type.',
         'load("level", default: 0)',
       ],
     ],
@@ -293,7 +293,7 @@ test("a stored value of another type is ignored with a warning, kept, and replac
     scriptStorage: [{ key: "level", value: "high" }],
   });
   const warning =
-    'Storage key "level" is loaded as a whole number (integer) here, but the saved value is text (string). This load uses its default; the saved value is kept.';
+    'Storage key "level" is loaded as a whole number (integer) here, but the saved value is text (string). This load uses its default, and the saved value is kept.';
   // A load through a computed key has no type, so it returns the stored value as it is.
   assert.deepEqual(warnings(result.events), [
     ["TSW016", warning],
@@ -333,7 +333,7 @@ test("a stored value of another type is ignored with a warning, kept, and replac
   assert.deepEqual(warnings(kept.events), [
     [
       "TSW016",
-      'Storage key "scores" is loaded as a list (integer[]) here, but the saved value has text (string) at [1]. This load uses its default; the saved value is kept.',
+      'Storage key "scores" is loaded as a list (integer[]) here, but the saved value has text (string) at [1]. This load uses its default, and the saved value is kept.',
     ],
   ]);
   assert.deepEqual(binding(kept.finalSnapshot, "scores"), { kind: "list", items: [0] });
@@ -385,7 +385,7 @@ test("a saved value the compiler cannot know is checked against its key's type w
   };
   const misfit = [
     "TSR058",
-    'Storage key "level" holds a whole number (integer), so it cannot take text (string).',
+    'Storage key "level" holds a whole number (integer), so it cannot take text (string) "x".',
   ];
   // A value of unknown type, also under a computed key that equals a key a load gives a type.
   assert.deepEqual(
@@ -483,7 +483,7 @@ test("a default the compiler cannot know takes the key's declared type and is ch
     [result.snapshot.failure?.code, result.snapshot.failure?.message],
     [
       "TSR058",
-      'Storage key "k" holds a whole number (integer) or null, so it cannot take text (string).',
+      'Storage key "k" holds a whole number (integer) or null, so it cannot take text (string) "bad".',
     ],
   );
   assert.deepEqual(result.snapshot.scriptStorage, []);

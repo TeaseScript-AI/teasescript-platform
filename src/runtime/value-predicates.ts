@@ -4,7 +4,7 @@ import type {
   SerializableRuntimeDuration,
   SerializableRuntimeTemporal,
   SerializableRuntimeTime,
-  SerializableRuntimeTimestamp,
+  SerializableRuntimeAbsoluteDateTime,
   SerializableRuntimeList,
   SerializableRuntimeObject,
   SerializableRuntimeRange,
@@ -105,6 +105,8 @@ export function describeRuntimeValue(value: SerializableRuntimeValue): string {
       return "a message handle";
     case "datetime":
       return "a date and time";
+    case "absoluteDateTime":
+      return "an absolute date and time";
     case "script":
       return "a script reference";
     default:
@@ -124,13 +126,13 @@ export function isDateTime(value: SerializableRuntimeValue): value is Serializab
   return typeof value === "object" && value !== null && value.kind === "datetime";
 }
 
-export function isTimestamp(
+export function isAbsoluteDateTime(
   value: SerializableRuntimeValue,
-): value is SerializableRuntimeTimestamp {
-  return typeof value === "object" && value !== null && value.kind === "timestamp";
+): value is SerializableRuntimeAbsoluteDateTime {
+  return typeof value === "object" && value !== null && value.kind === "absoluteDateTime";
 }
 
-/** A date, time, datetime, or timestamp. */
+/** A date, time, datetime, or absolute date and time. */
 export function isTemporal(value: SerializableRuntimeValue): value is SerializableRuntimeTemporal {
-  return isDate(value) || isTime(value) || isDateTime(value) || isTimestamp(value);
+  return isDate(value) || isTime(value) || isDateTime(value) || isAbsoluteDateTime(value);
 }

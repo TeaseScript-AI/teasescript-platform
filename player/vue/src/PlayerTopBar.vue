@@ -210,21 +210,12 @@ onBeforeUnmount(cancelHide);
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
 }
+/* Every segment uses the shell's inner radius on all corners, so its hover fill and focus outline frame the whole
+   control. */
 .player-top-bar-actions :deep(button) {
   inline-size: var(--player-top-control-size);
   block-size: calc(var(--player-top-control-size) - 2px);
-  border-radius: 0;
-}
-/* Match the shared shell without clipping the buttons' keyboard focus rings. A slotted control may wrap its button. */
-.player-top-bar-actions > :deep(:first-child),
-.player-top-bar-actions > :deep(:first-child button) {
-  border-start-start-radius: calc(var(--action-group-radius) - 1px);
-  border-end-start-radius: calc(var(--action-group-radius) - 1px);
-}
-.player-top-bar-actions > :deep(:last-child),
-.player-top-bar-actions > :deep(:last-child button) {
-  border-start-end-radius: calc(var(--action-group-radius) - 1px);
-  border-end-end-radius: calc(var(--action-group-radius) - 1px);
+  border-radius: calc(var(--action-group-radius) - 1px);
 }
 .player-top-bar-title {
   flex: 1;

@@ -38,9 +38,10 @@ export interface ListFunctionCheck {
 }
 
 /** The kind of the values a list function reads, when the compiler knows it. */
-type ValueKind = "integer" | "number" | "duration" | "date" | "time" | "datetime" | "timestamp";
+type ValueKind =
+  "integer" | "number" | "duration" | "date" | "time" | "datetime" | "absoluteDateTime";
 
-const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "timestamp"];
+const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "absoluteDateTime"];
 
 interface Context {
   readonly name: string;
@@ -92,7 +93,7 @@ function listFunctionType(
           : valueKind(
               context,
               valuesType(context, list, x, "x"),
-              ["number", "date", "datetime", "timestamp"],
+              ["number", "date", "datetime", "absoluteDateTime"],
               x,
             );
       const amount =
@@ -169,8 +170,8 @@ function shape(
         kind: "unknownNamedArgument",
         message:
           names.length === 0
-            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'; its named arguments are ${names.map((one) => `${one}:`).join(" and ")}.`,
+            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
+            : `${name}(...) has no parameter '${argument.name.name}'. ${names.length === 1 ? "Its only named argument is" : "Its named arguments are"} ${names.map((one) => `'${one}:'`).join(" and ")}.`,
         span: argument.name.span,
       });
   const count = call.arguments.filter((argument) => argument.kind === "positionalArgument").length;
@@ -306,7 +307,9 @@ function describeKinds(kinds: readonly ValueKind[]): string {
         ? "durations"
         : kind === "datetime"
           ? "datetimes"
-          : `${kind}s`,
+          : kind === "absoluteDateTime"
+            ? "absolute dates and times"
+            : `${kind}s`,
   );
   return words.length === 1
     ? words[0]!
@@ -332,14 +335,14 @@ function predictType(context: Context): StaticType {
     .find(
       (member) =>
         isKnown(member) &&
-        !(["integer", "number", "date", "datetime", "timestamp"] as const).some((kind) =>
+        !(["integer", "number", "date", "datetime", "absoluteDateTime"] as const).some((kind) =>
           isScalar(member, kind),
         ),
     );
   if (other !== undefined) {
     problem(
       context,
-      `${name}(...) needs a number, date, datetime, or timestamp as its x, not ${describeValue(other)}.`,
+      `${name}(...) needs a number, date, datetime, or absolute date and time as its x, not ${describeValue(other)}.`,
       x,
     );
     return UNKNOWN_TYPE;
@@ -422,7 +425,7 @@ function weightedType(context: Context): StaticType {
     if (weight !== undefined)
       problem(
         context,
-        `${name}(...) of a dict takes its weights from the dict; remove weight:.`,
+        `${name}(...) of a dict takes its weights from the dict. Remove 'weight:'.`,
         weight,
       );
     else valueKind(context, value.element, ["number"], source);

@@ -1,6 +1,6 @@
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
-import { RuntimeFault } from "./errors.js";
+import { internalFault, RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type { RuntimeSnapshot } from "./state.js";
 
@@ -48,7 +48,11 @@ export function resolveCaptures(
     const shared =
       top?.kind === "function" ? top.captures.find((capture) => capture.name === name) : undefined;
     if (shared === undefined) {
-      throw new RuntimeFault("TSR006", `Unknown identifier '${name}'.`, copySpan(span));
+      throw new RuntimeFault(
+        "TSR006",
+        internalFault(`The plan uses the name '${name}' but does not declare it.`),
+        copySpan(span),
+      );
     }
     return { name, scopeId: shared.scopeId };
   });

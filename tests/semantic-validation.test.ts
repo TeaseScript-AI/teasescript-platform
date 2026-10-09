@@ -205,6 +205,57 @@ test("preserves existing function, unknown-name, callable, and protected-name di
   );
 });
 
+test("rejects a call of anything but a function or a method", () => {
+  const notCallable =
+    "Only a function or a method can be called. Call a function by its name instead.";
+  for (const [source, callee, message] of [
+    ["let value = 1\nsay (value)()", "value", "'value' is a variable, not a callable function."],
+    ["let value = 1\nsay ((value))()", "value", "'value' is a variable, not a callable function."],
+    ["speaker vera {}\n(vera)()", "vera", "'vera' is a speaker, not a callable function."],
+    [
+      'speaker vera {}\nsay as vera "${(speaker)()}"',
+      "speaker",
+      "'speaker' is the current speaker, not a callable function.",
+    ],
+    [
+      "say (debugMode)()",
+      "debugMode",
+      "'debugMode' is a read-only value, not a callable function.",
+    ],
+    // Without parentheses around the name, too.
+    [
+      'speaker vera {}\nsay as vera "${speaker()}"',
+      "speaker",
+      "'speaker' is the current speaker, not a callable function.",
+    ],
+    ["say debugMode()", "debugMode", "'debugMode' is a read-only value, not a callable function."],
+    ["let items = [1]\nsay items[0]()", "items[0]", notCallable],
+    ["let items = [1]\nsay (items[0])()", "items[0]", notCallable],
+    ["function pick(value) {\n    return value\n}\nsay pick(1)()", "pick(1)", notCallable],
+    ['say ("Hi")()', '"Hi"', notCallable],
+  ] as const) {
+    const start = source.lastIndexOf(callee);
+    assert.deepEqual(
+      compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV019", message, start, start + callee.length]],
+      source,
+    );
+  }
+
+  // A function stays an invalid value, reported once.
+  assert.deepEqual(
+    compileSource("function sample { return 1 }\nsay (sample)()\nexit").diagnostics.map(
+      (diagnostic) => diagnostic.code,
+    ),
+    ["TSV028"],
+  );
+});
+
 test("reports a declaration named after the set keyword as a protected name", () => {
   for (const source of [
     "let set = 1",

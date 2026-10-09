@@ -37,12 +37,12 @@ export function imageFilterTextProblem(option: "types" | "mime", text: string): 
 }
 
 export const IMAGE_NO_SOURCE_MESSAGE =
-  "askImage needs allowCamera: or allowFile: to be true; otherwise the player cannot answer.";
+  "askImage needs allowCamera: or allowFile: to be true. Otherwise the player cannot answer.";
 
 export function emptyImageFilterMessage(option: "types" | "mime"): string {
   return option === "types"
-    ? 'askImage(types:) needs at least one extension, such as [".png"]; leave it out to accept any image.'
-    : 'askImage(mime:) needs at least one MIME type, such as ["image/png"]; leave it out to accept any image.';
+    ? 'askImage(types:) needs at least one extension, such as [".png"]. Leave it out to accept any image.'
+    : 'askImage(mime:) needs at least one MIME type, such as ["image/png"]. Leave it out to accept any image.';
 }
 
 /**

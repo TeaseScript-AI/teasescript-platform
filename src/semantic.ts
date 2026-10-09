@@ -34,6 +34,8 @@ import type { SourceSpan } from "./source.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  RENAMED_BUILTINS,
+  RENAMED_METHODS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
 import {
@@ -402,7 +404,7 @@ class ProjectNames {
     first: ProjectDeclaration,
   ): void {
     const rule =
-      "Globals, global functions, and speakers need a name of their own in the whole project; rename one of them.";
+      "Globals, global functions, and speakers need a name of their own in the whole project. Rename one of them.";
     this.report(
       second.file,
       semanticCode.duplicateDeclaration,
@@ -827,7 +829,7 @@ class SemanticValidator {
       if (valuePosition) {
         this.#report(
           semanticCode.invalidTimer,
-          "A blocking timer returns no handle; use 'timer async ...' to keep one.",
+          "A blocking timer returns no handle. Use 'timer async ...' to keep one.",
           timer.span,
         );
       }
@@ -846,7 +848,7 @@ class SemanticValidator {
       if (timer.unit !== null && timer.unit !== "s") {
         this.#report(
           semanticCode.invalidRangeOperand,
-          "A timer range counts whole seconds; other units are not supported for ranges yet.",
+          "A timer range counts whole seconds. Other units are not supported for ranges yet.",
           timer.duration.span,
         );
       } else if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
@@ -936,7 +938,7 @@ class SemanticValidator {
     if (!media.async && valuePosition) {
       this.#report(
         semanticCode.invalidMedia,
-        `Blocking media returns no handle; use '${command} async ...' to keep one.`,
+        `Blocking media returns no handle. Use '${command} async ...' to keep one.`,
         media.span,
       );
     }
@@ -948,7 +950,7 @@ class SemanticValidator {
       if (!media.async) {
         this.#report(
           semanticCode.invalidMedia,
-          `Blocking media cannot repeat indefinitely; use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
+          `Blocking media cannot repeat indefinitely. Use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
           repeat.span,
         );
       }
@@ -1029,7 +1031,7 @@ class SemanticValidator {
           if (media.repeat?.kind === "indefinite" || isIndefiniteRepeatValue(media.repeat)) {
             this.#report(
               semanticCode.invalidMedia,
-              "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+              "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.",
               cue.keywordSpan,
             );
           }
@@ -1114,9 +1116,9 @@ class SemanticValidator {
     this.#report(
       semanticCode.invalidTimerHandleMember,
       use === "call"
-        ? `Timer handles have no method '${name.name}'; use pause(), resume(), or stop().`
+        ? `Timer handles have no method '${name.name}'. Use pause(), resume(), or stop().`
         : use === "assign"
-          ? `Timer handle property '${name.name}' cannot be assigned; assign remaining, display, or repeatDuration.`
+          ? `Timer handle property '${name.name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
           : `Timer handles have no property '${name.name}'.`,
       name.span,
     );
@@ -1133,8 +1135,8 @@ class SemanticValidator {
       this.#report(
         semanticCode.invalidCameraHandleMember,
         use === "call"
-          ? `Camera views have no method '${name.name}'; hide them with hideCamera.`
-          : `Camera views have no property '${name.name}'; use placement.`,
+          ? `Camera views have no method '${name.name}'. Hide them with hideCamera.`
+          : `Camera views have no property '${name.name}'. Use the placement property.`,
         name.span,
       );
       return;
@@ -1170,9 +1172,9 @@ class SemanticValidator {
       this.#report(
         semanticCode.invalidMediaHandleMember,
         use === "call"
-          ? `Media handles have no method '${name.name}'; use pause(), resume(), or stop().`
+          ? `Media handles have no method '${name.name}'. Use pause(), resume(), or stop().`
           : use === "assign"
-            ? `Media handle property '${name.name}' cannot be assigned; assign position, remaining, or volume.`
+            ? `Media handle property '${name.name}' cannot be assigned. You can assign position, remaining, or volume.`
             : `Media handles have no property '${name.name}'.`,
         name.span,
       );
@@ -1427,7 +1429,7 @@ class SemanticValidator {
           this.#report(
             semanticCode.invalidLoopSource,
             statement.valueVariable === null
-              ? "A for-loop source must be a list, set, or integer range."
+              ? "A for-loop source must be a list, set, dict, or integer range."
               : "A for-loop with a key and a value goes through a dict.",
             statement.iterable.span,
           );
@@ -1510,7 +1512,7 @@ class SemanticValidator {
         if (scope !== this.#root || this.#functionDepth > 0) {
           this.#report(
             semanticCode.invalidLabel,
-            `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block; a goto may still jump to it from anywhere in the file.`,
+            `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block. A goto may still jump to it from anywhere in the file.`,
             statement.span,
           );
         }
@@ -1943,7 +1945,7 @@ class SemanticValidator {
             if (keys.has(key))
               this.#report(
                 semanticCode.duplicateProperty,
-                `Duplicate dict key ${JSON.stringify(key)}. Each key appears once; remove one of the entries.`,
+                `Duplicate dict key ${JSON.stringify(key)}. Each key may appear only once. Remove one of the entries.`,
                 entry.key.span,
               );
             keys.add(key);
@@ -2049,12 +2051,24 @@ class SemanticValidator {
               `'${name}' is a ${binding.kind}, not a callable function.`,
               expression.callee.span,
             );
+          } else if (RENAMED_BUILTINS.has(name)) {
+            this.#report(
+              semanticCode.unknownFunction,
+              `Unknown function '${name}'. Use '${RENAMED_BUILTINS.get(name)}'.`,
+              expression.callee.span,
+            );
+          } else if (unboundValue(name, contextualSpeaker) !== null) {
+            this.#report(
+              semanticCode.nonCallable,
+              `'${name}' is ${unboundValue(name, contextualSpeaker)}, not a callable function.`,
+              expression.callee.span,
+            );
           } else if (!this.#reportFileName(name, expression.callee.span)) {
             // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text.
             const hint =
               this.#sayStatementValues.has(expression) &&
               (name === "skippable" || name === "unskippable")
-                ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'; only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
+                ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'. Only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
                 : "";
             this.#report(
               semanticCode.unknownFunction,
@@ -2066,6 +2080,14 @@ class SemanticValidator {
           yield* compileChild(
             this.#validateExpressionTask(method.object, scope, contextualSpeaker),
           );
+          // No value has a method by an earlier name, so its call names the fix whatever the value is.
+          const renamed = RENAMED_METHODS.get(method.property.name);
+          if (renamed !== undefined)
+            this.#report(
+              semanticCode.unknownFunction,
+              `Unknown method '${method.property.name}'. Use '${renamed}()'.`,
+              method.property.span,
+            );
           this.#validateTimerHandleMember(
             method.object,
             method.property,
@@ -2078,6 +2100,27 @@ class SemanticValidator {
           yield* compileChild(
             this.#validateExpressionTask(expression.callee, scope, contextualSpeaker),
           );
+          // Grouping a name does not make it callable: `(x)()` fails as `x()` does. The check of the name as a value
+          // already reports a function, a built-in, or an unknown name.
+          if (method.kind === "identifier") {
+            const binding = scope.resolve(method.name);
+            const kind =
+              unboundValue(method.name, contextualSpeaker) ??
+              (binding !== undefined && binding.kind !== "function" ? `a ${binding.kind}` : null);
+            if (kind !== null)
+              this.#report(
+                semanticCode.nonCallable,
+                `'${method.name}' is ${kind}, not a callable function.`,
+                method.span,
+              );
+          } else {
+            // Functions are not values, so no other expression, such as `items[0]` or `pick(1)`, gives one to call.
+            this.#report(
+              semanticCode.nonCallable,
+              "Only a function or a method can be called. Call a function by its name instead.",
+              method.span,
+            );
+          }
         }
         for (const argument of expression.arguments) {
           yield* compileChild(
@@ -2130,7 +2173,7 @@ class SemanticValidator {
         if (mixed && !scaling) {
           this.#report(
             semanticCode.mixedDurationOperands,
-            "A number and a duration cannot be combined with this operator; give both a unit, or group a number before its unit as in '(1 + 2) s'.",
+            "A number and a duration cannot be combined with this operator. Give both a unit, or group a number before its unit as in '(1 + 2) s'.",
             expression.span,
           );
         }
@@ -2259,7 +2302,7 @@ class SemanticValidator {
     if (text !== undefined && normalizeOpaqueColor(text) === null)
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "Expected an opaque CSS button background colour.",
+        'A button background must be an opaque CSS colour, such as "#336699".',
         expression.span,
       );
   }
@@ -2315,7 +2358,7 @@ class SemanticValidator {
     if (!entry.properties.some((property) => property.name.name === "text"))
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "A choice object requires text.",
+        "A choice object needs a 'text' property to label its button.",
         entry.span,
       );
     for (const property of entry.properties) {
@@ -2331,7 +2374,7 @@ class SemanticValidator {
       else if (name !== "value")
         this.#report(
           semanticCode.invalidInteractionChoice,
-          "Choice objects support value, text, and background only.",
+          `A choice object can only have 'value', 'text', and 'background', but this one has '${name}'. Remove it.`,
           property.name.span,
         );
     }
@@ -3065,6 +3108,12 @@ function unwrapParentheses(expression: Expression): Expression {
   return expression;
 }
 
+/** What `speaker` is where a speaker is current, or what `debugMode` is: names that are values without a binding. */
+function unboundValue(name: string, contextualSpeaker: string | null): string | null {
+  if (name === "speaker" && contextualSpeaker !== null) return "the current speaker";
+  return name === "debugMode" ? "a read-only value" : null;
+}
+
 function isDefinitelyNonNumeric(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   if (expression.kind === "interactionExpression") {
@@ -3138,8 +3187,10 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    // `askBooleans` returns a list of booleans.
-    (expression.kind === "interactionExpression" && expression.interactionKind !== "booleans") ||
+    // `askBooleans` returns a list of booleans, and `askForm` a dict when its fields are a dict; its type tells.
+    (expression.kind === "interactionExpression" &&
+      expression.interactionKind !== "booleans" &&
+      expression.interactionKind !== "form") ||
     expression.kind === "showButtonExpression"
   );
 }

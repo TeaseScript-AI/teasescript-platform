@@ -9,6 +9,7 @@ import type {
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import type { TemporalContext } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
+import { describeShownValue } from "./value-types.js";
 import { copySpan } from "./operations/support.js";
 import {
   getSerializableProperty,
@@ -102,15 +103,19 @@ function choiceButton(
       );
     return { text: visibleText(option, span, context), value: value ?? choiceValue(option, span) };
   }
-  if (
-    option.properties.some(
-      (property) =>
-        property.name !== "value" && property.name !== "text" && property.name !== "background",
-    )
-  )
-    throw fault("TSR052", "Choice objects support value, text, and background only.", span);
+  const extra = option.properties.find(
+    (property) =>
+      property.name !== "value" && property.name !== "text" && property.name !== "background",
+  );
+  if (extra !== undefined)
+    throw fault(
+      "TSR052",
+      `A choice object can only have 'value', 'text', and 'background', but this one has '${extra.name}'. Remove it.`,
+      span,
+    );
   const textValue = getSerializableProperty(option, "text");
-  if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
+  if (textValue === undefined)
+    throw fault("TSR052", "A choice object needs a 'text' property to label its button.", span);
   const text = fieldText(textValue, span, context);
   const ownValue = getSerializableProperty(option, "value");
   if (ownValue !== undefined && value !== null)
@@ -151,7 +156,11 @@ function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): Interac
 function backgroundColor(value: SerializableRuntimeValue, span: SourceSpan): string {
   const normalized = normalizeOpaqueColor(value);
   if (normalized === null)
-    throw fault("TSR052", "Expected an opaque CSS button background colour.", span);
+    throw fault(
+      "TSR052",
+      `A button background must be an opaque CSS colour, such as "#336699", but this is ${describeShownValue(value)}.`,
+      span,
+    );
   return normalized;
 }
 

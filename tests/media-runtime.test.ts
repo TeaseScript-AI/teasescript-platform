@@ -31,7 +31,7 @@ interface MutableSnapshot {
   pendingTimerHandlers: Record<string, unknown>[];
   nextMediaId: number;
   callFrames: { timerInterruption: { mediaId?: number } | null }[];
-  settledMedia: MutableMedia[];
+  settledMedia: Record<string, unknown>[];
 }
 
 interface MutableMedia {
@@ -140,7 +140,7 @@ class Session {
           nowMs,
           reports: reports.map(([mediaId, progressMs]) => ({
             mediaId,
-            segment: this.media(mediaId)?.segment ?? 0,
+            segment: this.activeMedia(mediaId)?.segment ?? 0,
             progressMs,
           })),
         }),
@@ -202,11 +202,16 @@ class Session {
 
   media(mediaId: number) {
     return (
-      this.snapshot.backgroundActions.find(
-        (action): action is RuntimeMediaActionSnapshot =>
-          action.kind === "media" && action.media.mediaId === mediaId,
-      )?.media ?? this.snapshot.settledMedia.find((media) => media.mediaId === mediaId)
+      this.activeMedia(mediaId) ??
+      this.snapshot.settledMedia.find((media) => media.mediaId === mediaId)
     );
+  }
+
+  activeMedia(mediaId: number) {
+    return this.snapshot.backgroundActions.find(
+      (action): action is RuntimeMediaActionSnapshot =>
+        action.kind === "media" && action.media.mediaId === mediaId,
+    )?.media;
   }
 
   #apply(operation: {
@@ -306,7 +311,7 @@ test("cues fire on every natural pass; the compact block is a per-pass end; fini
     "end 4 s",
     "finish finished",
   ]);
-  assert.equal(session.media(1)?.passesCompleted, 2);
+  assert.equal(session.media(1)?.elapsedMs, 4_000);
 
   const compact = new Session(
     'playAudio async repeat "beat.mp3" {\n  say "again"\n}\nwait 10\nexit',
@@ -989,7 +994,12 @@ test("restore validation rejects a queued cue owned by another media", () => {
       '    say "a"',
       "  }",
       "}",
-      'let b = playAudio async "b.mp3"',
+      'let b = playAudio async "b.mp3" {',
+      "  at 500 ms {",
+      '    say "b"',
+      "  }",
+      "}",
+      'let c = playAudio async "c.mp3"',
       "timer async 0 s {",
       '  say "hold"',
       "  wait 5",
@@ -998,15 +1008,24 @@ test("restore validation rejects a queued cue owned by another media", () => {
       "exit",
     ].join("\n"),
   );
-  session.load(1, 1_000).load(2, 1_000).at(1_000, [1, 1_000], [2, 1_000]);
-  const queued = session.snapshot.pendingTimerHandlers.find((entry) => "mediaId" in entry);
-  assert.ok(queued !== undefined, "a cue block waits behind the running timer block");
+  // `a` and `b` finish while their cue blocks wait behind the running timer block; `c` still plays.
+  session
+    .load(1, 1_000)
+    .load(2, 1_000)
+    .load(3, 2_000)
+    .at(1_000, [1, 1_000], [2, 1_000], [3, 1_000]);
+  assert.deepEqual(
+    session.snapshot.pendingTimerHandlers.map((entry) => ("mediaId" in entry ? entry.mediaId : 0)),
+    [1, 2],
+  );
   assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
-  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case moves one cue owner.
-  const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
-  const entry = corrupted.pendingTimerHandlers.find((candidate) => "mediaId" in candidate)!;
-  entry.mediaId = 2;
-  assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false);
+  // An active record lists its blocks. A settled record no longer does, but the blocks of one media come from one play.
+  for (const owner of [3, 2]) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case moves one cue owner.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+    corrupted.pendingTimerHandlers.find((candidate) => candidate.mediaId === 1)!.mediaId = owner;
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, `media ${owner}`);
+  }
 });
 
 test("the session end keeps the exit statement's span however late the media is observed", () => {
@@ -1269,7 +1288,6 @@ test("reporting the projected terminal progress ends fractional ranges, also aft
     controlled.load(1, 5_000).at(1_000, [1, 0.25]);
     controlled.at(2_000, [1, terminal(controlled)]);
     assert.equal(controlled.media(1)?.state, "finished", endAt);
-    assert.equal(controlled.media(1)?.points.length, 1, "settled media keeps one sample");
   }
 });
 
@@ -1304,7 +1322,11 @@ test("restore validation relates segment anchors to the committed cursor and cur
   let snapshot = observeTime(held.plan, held.snapshot, 1_000, [
     { mediaId: 1, segment: 1, progressMs: 1_000 },
   ]).snapshot;
-  for (let step = 0; held.media(1)?.segment === 1 && snapshot.status !== "halted"; step += 1) {
+  for (
+    let step = 0;
+    held.activeMedia(1)?.segment === 1 && snapshot.status !== "halted";
+    step += 1
+  ) {
     assert.ok(step < 100, "the timer block's seek must start a new segment");
     snapshot = executeInstruction(held.plan, snapshot).snapshot;
     held.snapshot = snapshot;
@@ -1498,8 +1520,8 @@ test("crossings never become due before an on-time observation could report them
   const late = new Session(control).load(1, 20).at(20, [1, 20]);
   assert.deepEqual(late.said(), fine.said());
   assert.deepEqual(
-    [late.media(1)?.elapsedMs, late.media(1)?.passesCompleted],
-    [fine.media(1)?.elapsedMs, fine.media(1)?.passesCompleted],
+    [late.activeMedia(1)?.elapsedMs, late.activeMedia(1)?.passesCompleted],
+    [fine.activeMedia(1)?.elapsedMs, fine.activeMedia(1)?.passesCompleted],
   );
   // An exact sample at a fractional time and an interpolation of the same curve give the same cue time.
   for (const q of [10, 10.1, 10.5, 10.9]) {
@@ -1550,11 +1572,7 @@ test("anchor coherence follows the producing arithmetic exactly", () => {
     assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
     // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
     const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
-    const media =
-      corrupted.backgroundActions.find((action) => action.media?.mediaId === 1)?.media ??
-      corrupted.settledMedia.find((candidate) => candidate.mediaId === 1);
-    assert.ok(media !== undefined, name);
-    mutate(media);
+    mutate(mediaOf(corrupted, 1));
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   };
   const large = new Session(
@@ -1562,24 +1580,6 @@ test("anchor coherence follows the producing arithmetic exactly", () => {
   );
   large.load(1, 8_000_000_000_002_000).at(8_000_000_000_000_000, [1, 8_000_000_000_000_000]);
   corrupt(large, (media) => (media.segmentPositionMs = 1), "large progress anchor");
-  const duration = new Session(
-    'let m = playAudio(file: "a", async: true, startAt: 8000000000000000 ms, endAt: 8000000000001000 ms, repeat: 500 ms)\nwait 10\nexit',
-  );
-  duration.load(1, 8_000_000_000_002_000).at(500, [1, 500]);
-  corrupt(duration, (media) => (media.positionMs += 1), "duration finish position");
-  for (const repeat of ["false", "3 times"]) {
-    const counted = new Session(
-      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: ${repeat})\nwait 10\nexit`,
-    );
-    const end = repeat === "false" ? 1_000 : 3_000;
-    counted.load(1, 1_000).at(end, [1, end]);
-    corrupt(counted, (media) => (media.positionMs = 0), `finished ${repeat} at the start`);
-  }
-  const aligned = new Session(
-    'let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 2000 ms)\nwait 10\nexit',
-  );
-  aligned.load(1, 1_000).at(2_000, [1, 2_000]);
-  corrupt(aligned, (media) => (media.positionMs = 0), "duration ending at a pass end");
   // Genuine states at rounding edges stay valid: a wrapped start beyond the previous pass end, and a repeat duration
   // that ends exactly at a cue arrival.
   new Session(
@@ -1679,11 +1679,7 @@ test("restore validation accepts only positions the runtime can stand on", () =>
     assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
     // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
     const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
-    const media =
-      corrupted.backgroundActions.find((action) => action.media?.mediaId === 1)?.media ??
-      corrupted.settledMedia.find((candidate) => candidate.mediaId === 1);
-    assert.ok(media !== undefined, name);
-    mutate(media);
+    mutate(mediaOf(corrupted, 1));
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   };
   const wrapped = new Session(
@@ -1691,11 +1687,6 @@ test("restore validation accepts only positions the runtime can stand on", () =>
   );
   wrapped.load(1, 100).at(1, [1, 1.1]);
   corrupt(wrapped, (media) => (media.positionMs = Number.MIN_VALUE), "wrapped start alias");
-  const tail = new Session(
-    'let m = playAudio(file: "a", async: true, endAt: 1000000000000000.1 ms, repeat: 6700000000000001 ms)\nwait 8000000000000000 ms\nexit',
-  );
-  tail.load(1, 1_000_000_000_000_000.1).at(6_700_000_000_000_001, [1, 6_700_000_000_000_001]);
-  corrupt(tail, (media) => (media.positionMs += 0.125), "duration tail alias");
 });
 
 test("restore validation never coerces media settlement enumerations to text", () => {
@@ -1720,11 +1711,7 @@ test("restore validation accepts exactly the cursors the runtime's own arrivals 
     assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
     // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
     const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
-    const media =
-      corrupted.backgroundActions.find((action) => action.media?.mediaId === 1)?.media ??
-      corrupted.settledMedia.find((candidate) => candidate.mediaId === 1);
-    assert.ok(media !== undefined, name);
-    mutate(media);
+    mutate(mediaOf(corrupted, 1));
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   };
   const counted = (cue = "") =>
@@ -1747,23 +1734,6 @@ test("restore validation accepts exactly the cursors the runtime's own arrivals 
     'let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)\nm.position = 0.01 ms\nwait 10\nexit',
   ).load(1, 1_000);
   corrupt(seek, (media) => (media.positionMs = 0), "seek anchor moved to the range start");
-  const duration = (cues: string) =>
-    new Session(
-      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 500 ms) {\n${cues}\n}\nwait 10\nexit`,
-    )
-      .load(1, 1_000)
-      .at(500, [1, 500]);
-  corrupt(duration("  at 600 ms { }"), (media) => (media.positionMs = 600), "unreached cue");
-  corrupt(duration("  at 400 ms { }"), (media) => (media.positionMs = 400), "earlier cue");
-  corrupt(duration("  at 0 ms { }"), (media) => (media.positionMs = 0), "start cue");
-  corrupt(
-    duration(""),
-    (media) => {
-      media.positionMs = 1_000;
-      media.passesCompleted = 1;
-    },
-    "duration moved to the range end",
-  );
   corrupt(
     new Session(
       'let m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: 2 times) {\n  at 5 ms { }\n}\nwait 10\nexit',
@@ -1917,9 +1887,9 @@ test("a control at the end of a pass leaves pending start cues at the start unti
       `let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 3.4000000000000004 ms, repeat: 3 times) {\n  at 1.1 ms { say "start", instant }\n  beforeEnd 0 ms { ${control} }\n}\nwait 100 ms\nexit`,
     );
     session.load(1, 100).at(50, [1, 50]);
-    const media = session.media(1)!;
-    assert.equal(media.positionMs, 1.1, control);
-    if (control === "m.pause()") assert.equal(media.startCuesPending, true, control);
+    assert.equal(session.media(1)?.positionMs, 1.1, control);
+    if (control === "m.pause()")
+      assert.equal(session.activeMedia(1)?.startCuesPending, true, control);
     assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, control);
   }
 });
@@ -1966,7 +1936,7 @@ test("catch-up across 10^12 silent repeat passes finishes within the bound with 
     .load(1, 10)
     .atBounded(1e12, [1, 1e12]);
   assert.deepEqual(forever.said(), ["true"]);
-  assert.equal(forever.media(1)?.passesCompleted, 1e12);
+  assert.equal(forever.media(1)?.elapsedMs, 1e12);
 
   const counted = new Session(
     'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: 1000000000000 times) {\n  finish { say "done ${m.elapsed == 1000000000 s}" }\n}\nwait 2000000000 s\nexit',
@@ -1975,7 +1945,7 @@ test("catch-up across 10^12 silent repeat passes finishes within the bound with 
     .atBounded(2e12, [1, 2e12]);
   assert.deepEqual(counted.said(), ["done true"]);
   assert.equal(counted.media(1)?.state, "finished");
-  assert.equal(counted.media(1)?.passesCompleted, 1e12);
+  assert.equal(counted.media(1)?.elapsedMs, 1e12);
 
   const budget = new Session(
     'let m = playAudio(file: "a", async: true, endAt: 1.5 ms, repeat: 1000000000.25 s) {\n  finish { say "done ${m.position}" }\n}\nwait 2000000000 s\nexit',
@@ -2029,6 +1999,173 @@ test("settled media stay readable through every handle and cue block that still 
     boundaries.at(-1)?.settledMedia.map((media) => media.mediaId),
     [3, 4],
   );
+});
+
+test("a settled record keeps only what its handle reads, the same at every checkpoint boundary", () => {
+  const source = [
+    "function start(n: integer): media {",
+    '  let tune = playAudio(file: "done.mp3", async: true, startAt: 200 ms, endAt: 700 ms, repeat: 2 times, volume: 0.5) {',
+    '    at 300 ms { say "cue ${n}" }',
+    '    finish { say "finish ${n} ${tune.state}" }',
+    "  }",
+    "  return tune",
+    "}",
+    "let done = start(1)",
+    'let cut = playAudio async "cut.mp3"',
+    "wait 250 ms",
+    "cut.stop()",
+    'let empty = playAudio(file: "empty.mp3", async: true, startAt: 2 s)',
+    "wait 2",
+    "for m in [done, cut, empty] {",
+    "  say m",
+    '  say "${m.position} ${m.elapsed} ${m.remaining} ${m.duration} ${m.volume}"',
+    "  m.pause()",
+    "  m.resume()",
+    "  m.position = 0 s",
+    "  m.remaining = 0 s",
+    "  m.volume = 1",
+    "  m.stop()",
+    '  say "${m.state} ${m.position} ${m.elapsed} ${m.remaining}"',
+    "}",
+    "exit",
+  ].join("\n");
+  const { boundaries, events } = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
+  // Two passes of the 500 ms range end at its end; the stopped clip keeps where it stood; the empty range never played.
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    [
+      "cue 1",
+      "cue 1",
+      "finish 1 finished",
+      '<media "done.mp3", finished>',
+      "700 ms 1 s 0 s 1 s 0.5",
+      "finished 700 ms 1 s 0 s",
+      '<media "cut.mp3", stopped>',
+      "250 ms 250 ms 0 s 1 s 1",
+      "stopped 250 ms 250 ms 0 s",
+      '<media "empty.mp3", stopped>',
+      "2 s 0 s 0 s 1 s 1",
+      "stopped 2 s 0 s 0 s",
+    ],
+  );
+  // Controls of settled media change nothing: each warns except the silent stop.
+  assert.equal(
+    events.filter((event) => event.kind === "developerWarning" && event.code === "TSW010").length,
+    15,
+  );
+  const kept = boundaries.flatMap((boundary) => boundary.settledMedia);
+  assert.ok(kept.length > 0);
+  for (const media of kept) {
+    assert.deepEqual(Object.keys(media), [
+      "mediaId",
+      "source",
+      "state",
+      "durationMs",
+      "volume",
+      "positionMs",
+      "elapsedMs",
+    ]);
+  }
+  // A source that never loaded reads no duration and no remaining time.
+  const failed = new Session('let m = playAudio async "gone.mp3"\nwait 1\nexit').fail(1);
+  assert.deepEqual(failed.snapshot.settledMedia, [
+    {
+      mediaId: 1,
+      source: "gone.mp3",
+      state: "stopped",
+      durationMs: null,
+      volume: 1,
+      positionMs: 0,
+      elapsedMs: 0,
+    },
+  ]);
+});
+
+test("restore validation rejects malformed settled media records and their blocks", () => {
+  const session = new Session(
+    [
+      'let m = playAudio async "m.mp3" {',
+      "  finish {",
+      '    say "done"',
+      "  }",
+      "}",
+      "timer async 0 s {",
+      "  wait 5",
+      "}",
+      "wait 10",
+      "exit",
+    ].join("\n"),
+  )
+    .load(1, 1_000)
+    .at(1_000, [1, 1_000]);
+  // The media finished while the timer block runs, so its finish block waits.
+  assert.deepEqual(
+    session.snapshot.settledMedia.map((media) => media.state),
+    ["finished"],
+  );
+  assert.equal(session.snapshot.pendingTimerHandlers.length, 1);
+  assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
+  const mutations: readonly (readonly [
+    string,
+    (media: Record<string, unknown>, snapshot: MutableSnapshot) => void,
+  ])[] = [
+    ["kept samples", (media) => (media.points = [])],
+    ["active state", (media) => (media.state = "running")],
+    ["volume out of range", (media) => (media.volume = 2)],
+    ["negative position", (media) => (media.positionMs = -1)],
+    ["finish of stopped media", (media) => (media.state = "stopped")],
+    ["finish queued twice", (_, snapshot) => (snapshot.pendingTimerHandlers[0]!.count = 2)],
+  ];
+  for (const [name, mutate] of mutations) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+    mutate(corrupted.settledMedia[0]!, corrupted);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  }
+  // A source that never loaded stopped without playing.
+  const failed = new Session('let m = playAudio async "gone.mp3"\nwait 1\nexit').fail(1);
+  for (const [name, change] of [
+    ["finished without loading", { state: "finished" }],
+    ["played without loading", { elapsedMs: 5 }],
+  ] as const) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(failed.snapshot)) as MutableSnapshot;
+    Object.assign(corrupted.settledMedia[0]!, change);
+    assert.equal(validateRuntimeSnapshot(corrupted, failed.plan).valid, false, name);
+  }
+});
+
+test("the blocks of one settled media share its variables", () => {
+  const session = new Session(
+    [
+      "function start(n: integer): media {",
+      '  let tune = playAudio async "t.mp3" {',
+      '    at 500 ms { say "cue ${n}", instant }',
+      '    finish { say "finish ${n}", instant }',
+      "  }",
+      "  return tune",
+      "}",
+      "let a = start(1)",
+      "let b = start(2)",
+      "timer async 0 s { wait 5 }",
+      "wait 10",
+      "exit",
+    ].join("\n"),
+  )
+    .load(1, 1_000)
+    .load(2, 1_000)
+    .at(1_000, [1, 1_000], [2, 1_000]);
+  const blocks = session.snapshot.pendingTimerHandlers;
+  assert.deepEqual(
+    blocks.map((entry) => ("mediaId" in entry ? entry.mediaId : 0)),
+    [1, 2, 1, 2],
+  );
+  assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
+  // Each call's `n` is its own scope, which media 2's blocks share; one block of media 1 now names it.
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case swaps one block's list.
+  const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+  corrupted.pendingTimerHandlers[2]!.captures = corrupted.pendingTimerHandlers[1]!.captures;
+  assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false);
 });
 
 test("a long play and settle loop keeps settledMedia and the snapshot bounded", () => {

@@ -83,7 +83,7 @@ test("context, hover, and signature help select the compact command and its slot
     end: languagePositionAt(document, start + "askText".length),
   });
   const signature = languageSignatureHelp(document, position);
-  assert.deepEqual(signature?.parameters, ["speaker", "hint", "prefill"]);
+  assert.deepEqual(signature?.parameters, ["speaker", "question", "prefill", "hint"]);
   assert.equal(signature?.activeParameter, 1);
 });
 
@@ -227,8 +227,9 @@ test("formatter leaves malformed and incomplete source untouched", () => {
 
 test("signature help ignores punctuation inside say strings and tracks grammar slots", () => {
   // Compare slot names, not positions, so adding an accepted slot to a signature does not shift the expectations.
-  const activeSlot = (source: string) => {
-    const document = createLanguageDocument("file:///main.tease", source);
+  // `after` follows the cursor.
+  const activeSlot = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
     const help = languageSignatureHelp(document, languagePositionAt(document, source.length));
     return help === null ? null : help.parameters[help.activeParameter];
   };
@@ -240,14 +241,34 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot("say skippable "), "text");
   assert.equal(activeSlot("say unskippable "), "text");
   assert.equal(activeSlot("askText as mistress"), "speaker");
-  assert.equal(activeSlot("askText as mistress "), "hint");
-  assert.equal(activeSlot("askNumber as mistress "), "hint");
+  assert.equal(activeSlot("askText as mistress "), "question");
+  assert.equal(activeSlot("askNumber as mistress "), "question");
   assert.equal(activeSlot('askText "Name?", prefill: '), "prefill");
   assert.equal(activeSlot("askNumber prefill: "), "prefill");
   assert.equal(activeSlot('askInteger "How many?", prefill: '), "prefill");
   assert.equal(activeSlot('askDateTime "When?", prefill: '), "prefill");
-  assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
-  assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "hint");
+  assert.equal(activeSlot('askText "Name?", hint: '), "hint");
+  // A parenthesized ask's own parentheses hold its arguments.
+  assert.equal(activeSlot('askText("Q", prefill: '), "prefill");
+  assert.equal(activeSlot('askText("Q", hint: '), "hint");
+  assert.equal(activeSlot('askText as mistress ("Q", prefill: '), "prefill");
+  assert.equal(activeSlot('askText("Q"'), "question");
+  assert.equal(activeSlot('askText("Q", prefill: pick(hint: 1'), "prefill");
+  assert.equal(activeSlot('say "${askText("Q", hint: '), "hint");
+  // Its `)` ends it, so what follows belongs to the enclosing construct, if any.
+  assert.equal(activeSlot('let more = askInteger("How many?", prefill: 3) + '), null);
+  assert.equal(activeSlot('let more = askInteger as mistress ("How many?") + '), null);
+  assert.equal(activeSlot('askText("Q", prefill: askText("Default") + '), "prefill");
+  assert.equal(activeSlot('say askText("Q") + '), "text");
+  // Before its `)`, as an editor that closes brackets leaves the cursor, the ask is still open.
+  assert.equal(activeSlot("askText(", ")"), "question");
+  assert.equal(activeSlot('askText("Q", hint: ', ")"), "hint");
+  assert.equal(activeSlot('askText("Q", prefill: askText(', "))"), "question");
+  assert.equal(activeSlot('askText("Q", prefill: askText("D"', "))"), "question");
+  assert.equal(activeSlot('askText("Q", prefill: askText("D")', ")"), "prefill");
+  assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
+  assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
+  assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");
   assert.equal(activeSlot("showButton as mistress "), "label");
   assert.equal(activeSlot('showButton "Go", timeout: '), "timeout");
   assert.equal(

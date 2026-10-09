@@ -28,12 +28,12 @@ if toys[0] == true {
 // NOTE SX_POPUP_WORKAROUND line 13: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
 say "Time for a break"
 showButton "OK"
-// NOTE SX_POPUP_ELAPSED line 14: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_ELAPSED line 14: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.
 // NOTE SX_POPUP_WORKAROUND line 14: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
-let popupStart = getTimestamp().toSeconds()
+let popupStart = getAbsoluteDateTime().toSeconds()
 say "Kneel until you close this"
 showButton "OK"
-let seconds = getTimestamp().toSeconds() - popupStart
+let seconds = getAbsoluteDateTime().toSeconds() - popupStart
 say "You knelt ${seconds} seconds"
 // useUrl: the link in the chat and a button to continue.
 // NOTE SX_OPEN_URL_WORKAROUND line 17: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.

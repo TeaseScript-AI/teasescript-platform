@@ -409,7 +409,7 @@ test("persist is a literal option of the command, and the block line it replaces
     ],
     [
       "color: true",
-      "TSP035 0:28 Unknown showPermanentButton option 'color'; the only option is 'persist'.",
+      "TSP035 0:28 Unknown showPermanentButton option 'color'. The only option is 'persist'.",
     ],
     ["persist:", "TSP012 0:37 Expected true or false after 'persist:'."],
   ];

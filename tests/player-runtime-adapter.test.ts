@@ -396,7 +396,7 @@ test("runtime checkpoint restore preserves a paced history and its continuation"
 
 test("Continue runs a restored ready session at once, after recording its capture", () => {
   const { plan } = compileSource(
-    'say "Resumed at ${getTimestamp().toISO()}", instant\nwait 1 s\nsay "Later", instant\nexit',
+    'say "Resumed at ${getAbsoluteDateTime().toISO()}", instant\nwait 1 s\nsay "Later", instant\nexit',
   );
   assert.ok(plan);
   const checkpointJson = serializeCheckpoint(
@@ -836,7 +836,12 @@ test("runtime adapter retains the previous value and emits TSW014 after a failed
     completed.session.events
       .filter((event) => event.kind === "developerWarning")
       .map(({ code, message }) => ({ code, message })),
-    [{ code: "TSW014", message: 'save could not persist "answer"; the previous value is kept.' }],
+    [
+      {
+        code: "TSW014",
+        message: 'save could not persist "answer", so the previous value is kept.',
+      },
+    ],
   );
 });
 
@@ -1261,7 +1266,10 @@ test("an answer whose run throws leaves the transcript as the Player showed it, 
   const session = restored(new DebugRecorder());
   const events = [...session.events];
   const transcript = [...session.transcriptEntries];
-  assert.throws(() => choose(session, "Long"), /nextScopeId cannot be advanced safely/u);
+  assert.throws(
+    () => choose(session, "Long"),
+    /nextScopeId is at its largest value, so it cannot advance/u,
+  );
   assert.deepEqual(session.events, events);
   assert.deepEqual(session.transcriptEntries, transcript);
 

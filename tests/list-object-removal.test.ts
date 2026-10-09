@@ -107,22 +107,22 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
     [
       'let items = ["a"]\nitems.removeAt(1)\nexit',
       "TSR025",
-      "List index 1 is outside the valid range.",
+      "Cannot remove index 1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
     ],
     [
       'let items = ["a"]\nlet index = 0 - 1\nitems.removeAt(index)\nexit',
       "TSR025",
-      "List index -1 is outside the valid range.",
+      "Cannot remove index -1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
     ],
     [
       "let items = []\nitems.removeAt(0)\nexit",
       "TSR025",
-      "List index 0 is outside the valid range.",
+      "Cannot remove index 0: 'items' is empty. Check 'items.length' first.",
     ],
     [
       'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nitems.removeAt(dynamic(1 / 2))\nexit',
       "TSR024",
-      "A list index must be an integer.",
+      "A list index must be a whole number (integer), but this is 0.5. Round it with floor(...), round(...), or ceil(...) first.",
     ],
     [
       "let items = []\nitems.removeFirst()\nexit",
@@ -137,12 +137,12 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
     [
       'let items = ["a"]\nitems.removeAt()\nexit',
       "TSR028",
-      "Expected 1 positional argument(s), received 0.",
+      "removeAt() takes one argument, but this call has none.",
     ],
     [
       "function dynamic(value) {\n    return value\n}\nlet items = dynamic(set[1])\nitems.removeAt(0)\nexit",
       "TSR016",
-      "Unsupported method 'removeAt'.",
+      "Sets have no method 'removeAt'.",
     ],
   ] as const;
   for (const [source, code, message] of cases) {

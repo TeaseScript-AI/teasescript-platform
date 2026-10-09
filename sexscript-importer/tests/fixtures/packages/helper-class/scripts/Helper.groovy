@@ -9,4 +9,13 @@ class Helper {
     count.times { showWait(main, msg, 1) }
   }
   def static twice = { it * 2 }
+  // Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
+  def static percentChance(main, percent) {
+    switch (main.getRandom(99) + 1) {
+      case 0..percent:
+        return true
+      default:
+        return false
+    }
+  }
 }

@@ -312,13 +312,27 @@ export function escapedMarkupLength(text: string): number {
   return length;
 }
 
+/** How many UTF-16 code units `escapeMarkup` collects before it makes them a string; a bounded argument count. */
+const ESCAPE_CHUNK_LENGTH = 8192;
+const BACKSLASH = 0x5c;
+
 export function escapeMarkup(text: string): string {
-  const escaped: string[] = [];
-  for (const character of text) {
-    if (ESCAPABLE_CHARACTERS.has(character)) escaped.push("\\");
-    escaped.push(character);
+  // The escaped text is written in chunks of code units, not as a string per character, which for a long text would
+  // take far more memory than the text. Every escapable character is a single code unit, so a surrogate pair, also one
+  // split between two chunks, is copied unchanged.
+  const chunks: string[] = [];
+  let units: number[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80 && ESCAPABLE_CODES[code] === 1) units.push(BACKSLASH);
+    units.push(code);
+    if (units.length >= ESCAPE_CHUNK_LENGTH) {
+      chunks.push(String.fromCharCode.apply(null, units));
+      units = [];
+    }
   }
-  return escaped.join("");
+  chunks.push(String.fromCharCode.apply(null, units));
+  return chunks.length === 1 ? chunks[0]! : chunks.join("");
 }
 
 function cloneMessageMarkupLine(line: MessageMarkupLine): MessageMarkupLine {

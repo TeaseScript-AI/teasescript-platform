@@ -62,7 +62,6 @@ import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
-import { timeName } from "./time-model.ts";
 import {
   BOOLEAN,
   inferType,
@@ -239,6 +238,8 @@ interface LowerContext {
   assignedValues: ReadonlyMap<string, readonly AstNode[]>;
   /** The values each binding is updated to by `+=`, `-=`, `*=`, and `/=` (compoundValues). */
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
+  /** Bindings declared with a value, and those something else may change too (declaredWrites). */
+  declaredWrites: DeclaredWrites;
   /** Lists whose elements the code compares with null (nullElementLists), by binding. */
   nullElementLists: ReadonlySet<string>;
   /** Set while a getBooleans whose null result the next statement tests is lowered (cancelledBooleans). */
@@ -1308,6 +1309,29 @@ function assignedValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]
   return values;
 }
 
+interface DeclaredWrites {
+  /** Bindings that a declaration gives a value. */
+  initialized: ReadonlySet<string>;
+  /** Bindings declared without a value, or changed by `++` or `--`. */
+  other: ReadonlySet<string>;
+}
+
+/** The bindings declarations give a value, and those that start without one or that `++` and `--` change. */
+function declaredWrites(body: AstNode, keys: BindingKeys): DeclaredWrites {
+  const initialized = new Set<string>();
+  const other = new Set<string>();
+  walkAst(body, (node) => {
+    if (node.kind === "declaration") {
+      const key = bindingKey(node.left, keys);
+      if (key !== null) (asNode(node.right) === null ? other : initialized).add(key);
+    } else if (node.kind === "postfix" || node.kind === "prefix") {
+      const key = bindingKey(node.value, keys);
+      if (key !== null) other.add(key);
+    }
+  });
+  return { initialized, other };
+}
+
 /** The value each compound update gives its variable, as the binary expression it computes (`x += y` is `x + y`). */
 function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]> {
   const values = new Map<string, AstNode[]>();
@@ -1436,6 +1460,7 @@ export function lowerParsedFile(
     parameterBindings: new Set(),
     assignedValues: new Map(),
     compoundValues: new Map(),
+    declaredWrites: { initialized: new Set(), other: new Set() },
     nullElementLists: new Set(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
@@ -1533,6 +1558,7 @@ export function lowerParsedFile(
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
+    context.declaredWrites = declaredWrites(body, context.bindings);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
     context.constantInitializers = declarationInitializers(body, context.types);
@@ -2575,6 +2601,7 @@ function lowerHelperMethod(
     ),
     assignedValues: assignedValues(body, new Map()),
     compoundValues: compoundValues(body, new Map()),
+    declaredWrites: declaredWrites(body, new Map()),
     nullElementLists: new Set(),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
@@ -2791,7 +2818,7 @@ function withNestedStatements(
 }
 
 /**
- * A loop that only redraws a countdown until `waited = getTimestamp().toSeconds() - start` reaches a limit kept the
+ * A loop that only redraws a countdown until `waited = getAbsoluteDateTime().toSeconds() - start` reaches a limit kept the
  * legacy player busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
  * body that only shows text and sets its own locals before recomputing `waited`, it becomes a visible timer over the
  * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text; a limit not above 0 runs no timer, as
@@ -2938,7 +2965,7 @@ function isRepeatableBound(value: IrExpression): boolean {
   }
 }
 
-/** The start variable of `waited = getTimestamp().toSeconds() - start` (declaration or assignment), or null. */
+/** The start variable of `waited = getAbsoluteDateTime().toSeconds() - start` (declaration or assignment), or null. */
 function elapsedStart(statement: IrStatement, waited: string): string | null {
   const value =
     statement.kind === "let" && statement.name === waited
@@ -2961,13 +2988,13 @@ function elapsedStart(statement: IrStatement, waited: string): string | null {
 }
 
 /**
- * The current Unix time in seconds, which legacy code used for elapsed time and "how long ago": a `timestamp` is the
+ * The current Unix time in seconds, which legacy code used for elapsed time and "how long ago": an `absoluteDateTime` is the
  * fixed moment for that, while local date and time values have no zone (#532).
  */
 function currentSeconds(): IrExpression {
   return {
     kind: "methodCall",
-    target: { kind: "call", name: "getTimestamp", positional: [], named: {} },
+    target: { kind: "call", name: "getAbsoluteDateTime", positional: [], named: {} },
     name: "toSeconds",
     arguments: [],
   };
@@ -2979,7 +3006,7 @@ function isCurrentSeconds(value: IrExpression): boolean {
     value.name === "toSeconds" &&
     value.arguments.length === 0 &&
     value.target.kind === "call" &&
-    value.target.name === "getTimestamp" &&
+    value.target.name === "getAbsoluteDateTime" &&
     value.target.positional.length === 0
   );
 }
@@ -12139,7 +12166,15 @@ function lowerObjectMethodCallExpression(
     const helper = MATH_HELPERS.get(name);
     if (helper !== undefined && argumentsNodes.length === helper.arity) {
       const args = lowerArguments(argumentsNodes, context);
-      return args === null ? null : useHelper(context, helper.name, args);
+      if (args === null) return null;
+      // Java took numbers only, as the built-ins do (V30 §13), and a null fails in both; the helper stays for an operand
+      // that may be anything else.
+      const numeric = argumentsNodes.every((argument) =>
+        onlyOf(inferType(argument, context.types), NUMBER | NULL),
+      );
+      return numeric
+        ? { kind: "call", name, positional: args, named: {} }
+        : useHelper(context, helper.name, args);
     }
     if ((name === "ceil" || name === "floor" || name === "abs") && argumentsNodes.length === 1) {
       const args = lowerArguments(argumentsNodes, context);
@@ -12781,7 +12816,7 @@ const STRING_METHODS = new Set([
 /** Methods that lists have too, converted as text operations only on receivers proven to be text. */
 const TEXT_ONLY_METHODS = new Set(["contains", "count", "indexOf", "lastIndexOf"]);
 
-/** Java Math helpers without an accepted TeaseScript built-in. */
+/** Java Math helpers for operands not proven numeric, which the built-ins `max` and `min` reject. */
 const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
   ["max", { name: "max", arity: 2 }],
   ["min", { name: "min", arity: 2 }],
@@ -13990,7 +14025,7 @@ function dateFormat(
         context,
         "SX_DATE_FROM_SECONDS",
         "warning",
-        `Workaround: TeaseScript builds no ${timeName("timestamp")} from a Unix number (#532), so the moment is the current ${timeName("timestamp")} minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
+        `Workaround: TeaseScript builds no absoluteDateTime from a Unix number (#532), so the moment is the current absoluteDateTime minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
         node.span,
       );
       return {
@@ -14006,7 +14041,7 @@ function dateFormat(
       context,
       node,
       "SX_DATE_FORMAT",
-      `This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no ${timeName("timestamp")} or date from a number (#532). Store and load the ${timeName("timestamp")} or datetime itself, then format it.`,
+      `This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no absoluteDateTime or date from a number (#532). Store and load the absoluteDateTime or datetime itself, then format it.`,
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
@@ -14042,8 +14077,8 @@ function dateFormat(
 }
 
 /**
- * `new Date(milliseconds)` as a timestamp: the current timestamp minus the exact seconds since that moment, since
- * TeaseScript builds no timestamp from a number (#532). Null for another receiver, undefined after a diagnostic.
+ * `new Date(milliseconds)` as an absoluteDateTime: the current one minus the exact seconds since that moment, since
+ * TeaseScript builds no absoluteDateTime from a number (#532). Null for another receiver, undefined after a diagnostic.
  */
 function unixDate(node: AstNode, context: LowerContext): IrExpression | null | undefined {
   const args = nodeArray(asNode(node.arguments)?.items);
@@ -14074,7 +14109,12 @@ function unixDate(node: AstNode, context: LowerContext): IrExpression | null | u
     secondsNode !== null
       ? value
       : { kind: "binary", operator: "/", left: value, right: { kind: "literal", value: 1000 } };
-  const now: IrExpression = { kind: "call", name: "getTimestamp", positional: [], named: {} };
+  const now: IrExpression = {
+    kind: "call",
+    name: "getAbsoluteDateTime",
+    positional: [],
+    named: {},
+  };
   return {
     kind: "binary",
     operator: "-",
@@ -15016,13 +15056,10 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_RANDOM_ARITY",
           "getRandom() must have one argument.",
         );
-      // Only a positive integer bound is certain to give randomInteger() a non-empty range: a literal, or a value known
-      // before the script runs, such as a constant or arithmetic on numbers, without a division's fraction.
-      const bound = staticNumber(call.arguments[0] ?? null, context);
+      // Only a positive integer bound is certain to give randomInteger() a non-empty range (positiveWholeBound), without
+      // a division's fraction.
       if (
-        bound !== undefined &&
-        Number.isInteger(bound) &&
-        bound > 0 &&
+        positiveWholeBound(asNode(call.arguments[0]), context) &&
         !JSON.stringify(args[0]).includes('"operator":"/"')
       ) {
         return {
@@ -15053,7 +15090,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_POPUP_ELAPSED",
         "warning",
-        `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with ${timeName("getTimestamp")}().toSeconds(), in whole seconds.`,
+        `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.`,
         node.span,
       );
       // Legacy timing started once the message was computed.
@@ -18998,6 +19035,37 @@ function staticNumber(
     : staticNumber(initializer, context, new Set([...seen, name]));
 }
 
+/**
+ * Whether a value is a positive whole number wherever it is read: one known before the script runs, or a variable that
+ * a declaration gives such a value and that every assignment sets to one, which nothing else changes, as a parameter, a
+ * loop, `++` or `--`, or a compound assignment would.
+ */
+function positiveWholeBound(
+  node: AstNode | null,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  if (node === null) return false;
+  const value = staticNumber(node, context);
+  if (value !== undefined) return Number.isInteger(value) && value > 0;
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  if (
+    key === null ||
+    seen.has(key) ||
+    !context.declaredWrites.initialized.has(key) ||
+    context.declaredWrites.other.has(key) ||
+    context.parameterBindings.has(key) ||
+    (context.compoundValues.get(key)?.length ?? 0) > 0
+  )
+    return false;
+  const values = context.assignedValues.get(key) ?? [];
+  return (
+    values.length > 0 &&
+    values.every((written) => positiveWholeBound(written, context, new Set([...seen, key])))
+  );
+}
+
 function isTrueConstant(node: AstNode | null): boolean {
   return node?.kind === "constant" && node.value === true;
 }
@@ -19019,7 +19087,7 @@ function migrateScriptPath(value: string): string {
 }
 
 /** Whether any call in the values names the function. */
-function callsFunction(value: unknown, name: string): boolean {
+export function callsFunction(value: unknown, name: string): boolean {
   if (Array.isArray(value)) return value.some((item) => callsFunction(item, name));
   if (!isRecord(value)) return false;
   if (value.kind === "call" && value.name === name) return true;

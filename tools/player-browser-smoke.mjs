@@ -34,6 +34,39 @@ const MODEL_PATHS_CATALOG = {
   problems: [],
 };
 
+// A file of a few thousand lines with a draw deep inside a long function, for the random draw picker's code; generated,
+// as only its length, one long line far from the draw, and the lines above the draw that wrap matter.
+const LARGE_FILE_LINES = Array.from({ length: 2_000 }, (_, index) =>
+  index >= 1_200 && index % 3 === 0
+    ? `// Line ${index + 1}. ${"Words that wrap. ".repeat(10)}`
+    : `// Line ${index + 1}.`,
+);
+LARGE_FILE_LINES[0] = "let hit = false";
+LARGE_FILE_LINES[1] = `// ${"A long line. ".repeat(20)}`;
+LARGE_FILE_LINES[1_199] = "function flip {";
+LARGE_FILE_LINES.splice(
+  1_499,
+  6,
+  "    hit = chance(25)",
+  "}",
+  "flip()",
+  'say "Hit: ${hit}", instant',
+  'showButton "Done"',
+  "exit",
+);
+const CATALOGS = new Map([
+  ["/dev-package/model-paths/catalog.json", MODEL_PATHS_CATALOG],
+  [
+    "/dev-package/large-file/catalog.json",
+    {
+      images: [],
+      media: [],
+      sources: [{ path: "main.tease", source: LARGE_FILE_LINES.join("\n") }],
+      problems: [],
+    },
+  ],
+]);
+
 const LAN_HOST = "player-lan.test";
 // The late-image scenario holds the first response for this image until the scenario releases it.
 const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
@@ -54,7 +87,8 @@ async function main() {
   const server = createPlaygroundServer({
     packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
   });
-  // The model-paths package exists only as this catalog, so the smoke needs no file named with `\` or `C:` on disk.
+  // The model-paths and large-file packages exist only as catalogs, so the smoke needs no file named with `\` or `C:`,
+  // nor one of thousands of lines, on disk.
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
@@ -63,19 +97,25 @@ async function main() {
       lateImage.release = () => handleRequest(request, response);
       return;
     }
-    if (request.url === DEBUG_HISTORY_MODULE_URL) {
-      void readFile(new URL("../dist/player/debug-history-indexeddb.js", import.meta.url)).then(
+    // The spill store's module and the compiled Player modules it imports.
+    const smokeModule = /^\/smoke\/([a-z-]+\.js)$/u.exec(request.url ?? "");
+    if (smokeModule !== null) {
+      void readFile(new URL(`../dist/player/${smokeModule[1]}`, import.meta.url)).then(
         (module) => {
           response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
           response.end(module);
         },
+        () => {
+          response.writeHead(404);
+          response.end();
+        },
       );
       return;
     }
-    if (request.url !== "/dev-package/model-paths/catalog.json")
-      return handleRequest(request, response);
+    const catalog = CATALOGS.get(request.url);
+    if (catalog === undefined) return handleRequest(request, response);
     response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(MODEL_PATHS_CATALOG));
+    response.end(JSON.stringify(catalog));
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -135,6 +175,7 @@ async function main() {
       await keptSessionScenario(cdp, origin, profile);
       await debugRoomScenario(cdp, origin);
       await randomPickerScenario(cdp, origin);
+      await largeRandomPickerScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -162,7 +203,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -1643,6 +1684,45 @@ async function randomPickerScenario(cdp, origin) {
     await cdp.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: block.x, y: block.y });
     await waitFor(cdp, `${tools} === "1"`, 5_000, "The code's tools did not show on hover");
   } else assertEqual(await value(cdp, tools), "1", "The code's tools hid without hover");
+  // Without the clipboard API, as over plain HTTP, Copy copies the lines in view the older way and keeps focus; where
+  // the browser refuses that too, it selects them instead of claiming a copy.
+  const copyButton = `document.querySelector('[data-random-draw-source] [data-code-block-copy]')`;
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
+  );
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
+  await waitFor(
+    cdp,
+    `${copyButton}.getAttribute('aria-label') === "Copied"`,
+    5_000,
+    "Copy without the clipboard API did not copy",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `window.__copied?.includes("chance(25)") && document.activeElement === ${copyButton}`,
+    ),
+    true,
+    "Copy without the clipboard API lost the lines in view or the focus",
+  );
+  await evaluate(cdp, `document.execCommand = () => false;`);
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
+  await waitFor(
+    cdp,
+    `${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
+    5_000,
+    "A refused copy claimed to copy",
+  );
+  assertEqual(
+    await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
+    true,
+    "A refused copy did not select the lines in view",
+  );
+  await evaluate(
+    cdp,
+    `delete document.execCommand; delete navigator.clipboard; document.getSelection().removeAllRanges();`,
+  );
   await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
   await waitFor(
     cdp,
@@ -1650,6 +1730,19 @@ async function randomPickerScenario(cdp, origin) {
     5_000,
     "Expand did not open the code large",
   );
+  // Copy works without the clipboard API in the large view too, whose dialog keeps focus inside it.
+  await evaluate(
+    cdp,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });`,
+  );
+  await physicalClick(cdp, "[data-code-block-lightbox] [data-code-block-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-code-block-lightbox] [data-code-block-copy]').getAttribute('aria-label') === "Copied"`,
+    5_000,
+    "Copy without the clipboard API did not copy in the large view",
+  );
+  await evaluate(cdp, `delete navigator.clipboard;`);
   await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
   await waitFor(
     cdp,
@@ -1719,6 +1812,110 @@ async function randomPickerScenario(cdp, origin) {
     `!document.querySelector('[data-random-draw-picker]') && ${said}.includes('Again: ')`,
     8_000,
     "Least tried did not go on",
+  );
+}
+
+// In a file of a few thousand lines the picker's unwrapped code renders only the lines in and near view, and shows like
+// a short file's: the draw's line in the middle from the first frame and through Wrap, Copy copies the lines in view,
+// it scrolls sideways as far as its widest line, its large view opens on the draw, Show whole function starts at the
+// function's first line, the file's end scrolls into view, and Show less returns to the draw.
+async function largeRandomPickerScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const block = `document.querySelector('[data-random-draw-source] [data-code-block]')`;
+  const rendered = (scope) => `document.querySelectorAll('${scope} [data-code-line]').length`;
+  const inView = (number) =>
+    `(() => { const line = ${block}.querySelector('[data-code-line="${number}"]'); return !!line && line.offsetTop >= ${block}.scrollTop && line.offsetTop + line.offsetHeight <= ${block}.scrollTop + ${block}.clientHeight; })()`;
+  const centred = `(() => { const line = ${block}?.querySelector('[data-code-highlight]'); return line?.dataset.codeLine === '1500' && line.offsetTop - ${block}.scrollTop === 3 * line.offsetHeight; })()`;
+  // Where the draw's line is in each of the next frames once the code shows: 0 in its place, null when not rendered.
+  // Sampling starts at once, or with the next click.
+  const sampleFrames = (count, onClick = false) =>
+    `window.__frames = []; const sample = () => { const block = ${block}; if (block) { const line = block.querySelector('[data-code-highlight]'); window.__frames.push(line ? line.offsetTop - block.scrollTop - 3 * line.offsetHeight : null); } if (window.__frames.length < ${count}) requestAnimationFrame(sample); }; ${onClick ? "addEventListener('click', () => requestAnimationFrame(sample), { capture: true, once: true });" : "sample();"}`;
+  const stayed = async (message) => {
+    await waitFor(cdp, `window.__frames.length >= 8`, 20_000);
+    assertEqual(
+      await value(cdp, `JSON.stringify(window.__frames)`),
+      JSON.stringify(Array(8).fill(0)),
+      message,
+    );
+  };
+  await navigate(cdp, `${origin}/player/?package=large-file&room=debug`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
+  if (!(await value(cdp, `!!document.querySelector('[data-debug-random-active]')`)))
+    await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('[data-debug-random-active]')`);
+  await physicalClick(cdp, "[data-debug-random-active]");
+  await evaluate(cdp, sampleFrames(8));
+  await physicalClick(cdp, "[data-session-start]");
+  // The draw's line has three lines above it, like a short file's, from the first frame the code shows.
+  await stayed("The code did not open with the draw's line in the middle");
+  assertEqual(
+    await value(
+      cdp,
+      `[...${block}.querySelectorAll('[data-code-mark]')].map((node) => node.textContent).join('')`,
+    ),
+    "chance(25)",
+    "The draw was not marked",
+  );
+  // Regression oracle for rendering every line of the file, which took seconds in a file of thousands of lines.
+  if ((await value(cdp, rendered("[data-random-draw-source]"))) > 100)
+    throw new Error("The picker rendered most of a file of thousands of lines");
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
+  );
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
+  await waitFor(cdp, `window.__copied !== null`, 5_000, "Copy did not copy");
+  assertEqual(
+    await value(cdp, `window.__copied`),
+    LARGE_FILE_LINES.slice(1_496, 1_503).join("\n"),
+    "Copy did not copy the lines in view",
+  );
+  assertEqual(
+    await value(cdp, `${block}.scrollWidth > ${block}.clientWidth + 200`),
+    true,
+    "The code scrolled sideways only as far as the lines near view",
+  );
+  // Wrapping the lines above the draw's keeps the draw's line in place in every frame from the click, and so does
+  // unwrapping them, also after scrolling the wrapped lines.
+  for (const state of ["on", "off"]) {
+    if (state === "off") await evaluate(cdp, `${block}.scrollTop -= 600`);
+    await evaluate(cdp, sampleFrames(8, true));
+    await physicalClick(cdp, "[data-random-draw-source] [data-code-block-wrap]");
+    await stayed(`Wrap ${state} moved the draw's line`);
+  }
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('[data-code-block-lightbox] [data-code-mark]')].map((node) => node.textContent).join('') === 'chance(25)' && (() => { const block = document.querySelector('[data-code-block-lightbox] [data-code-block]'); const line = block.querySelector('[data-code-highlight]'); return Math.abs(line.offsetTop - block.scrollTop + line.offsetHeight / 2 - block.clientHeight / 2) <= 1; })()`,
+    5_000,
+    "The large view did not open with the draw's line in the middle",
+  );
+  if ((await value(cdp, rendered("[data-code-block-lightbox]"))) > 200)
+    throw new Error("The large view rendered most of a file of thousands of lines");
+  await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
+  await waitFor(cdp, `!document.querySelector('[data-code-block-lightbox]')`);
+  await physicalClick(cdp, "[data-random-draw-expand]");
+  await waitFor(
+    cdp,
+    `(() => { const line = ${block}.querySelector('[data-code-line="1200"]'); return !!line && Math.abs(line.offsetTop - ${block}.scrollTop) < 1; })()`,
+    5_000,
+    "Show whole function did not start at the function's first line",
+  );
+  await evaluate(cdp, `${block}.scrollTop = ${block}.scrollHeight`);
+  await waitFor(cdp, inView(2000), 5_000, "The file's last line did not scroll into view");
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-random-draw-expand]').scrollIntoView({ block: 'nearest' })`,
+  );
+  await physicalClick(cdp, "[data-random-draw-expand]");
+  await waitFor(cdp, centred, 5_000, "Show less did not return to the draw's line");
+
+  await physicalClick(cdp, "[data-random-draw-outcome]");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Hit: true'))`,
+    8_000,
+    "The chosen outcome did not reach the script",
   );
 }
 
@@ -1977,6 +2174,9 @@ async function audioOverlapScenario(cdp, origin) {
     source: `window.__instances = [];
       window.__samples = [];
       window.__elements = new Set();
+      // Released elements not used again yet, and how often an instance got a new element while one of them was free.
+      window.__free = new Set();
+      window.__newWhileFree = 0;
       window.__lateSeeked = 0;
       const current = new Map();
       const prototype = HTMLMediaElement.prototype;
@@ -1984,14 +2184,22 @@ async function audioOverlapScenario(cdp, origin) {
       Object.defineProperty(prototype, 'src', {
         ...src,
         set(value) {
+          if (!window.__free.delete(this) && window.__free.size > 0) window.__newWhileFree++;
           window.__elements.add(this);
           src.set.call(this, value);
           if (!String(value).includes('/dev-package/audio-overlap/')) return current.delete(this);
-          const instance = { file: String(value).split('/').pop(), plays: 0, end: false, time: 0, rewound: false };
+          const instance = { file: String(value).split('/').pop(), plays: 0, end: false, time: 0, rewound: false, released: false };
           window.__instances.push(instance);
           current.set(this, instance);
         },
       });
+      const removeAttribute = Element.prototype.removeAttribute;
+      prototype.removeAttribute = function (name) {
+        const instance = current.get(this);
+        if (name === 'src' && instance) instance.released = true;
+        if (name === 'src') window.__free.add(this);
+        return removeAttribute.call(this, name);
+      };
       const play = prototype.play;
       prototype.play = function () {
         const instance = current.get(this);
@@ -2005,16 +2213,24 @@ async function audioOverlapScenario(cdp, origin) {
         if (instance && this.getAttribute('src') && this.currentTime >= this.duration) instance.end = true;
         return pause.call(this);
       };
+      // Delivers each seeked notification 60 ms late, and not before the element played on from the seek, which under
+      // load can take longer; after 2 seconds it is delivered anyway.
       const late = new WeakMap();
       const addEventListener = prototype.addEventListener;
       const removeEventListener = prototype.removeEventListener;
       prototype.addEventListener = function (type, listener, options) {
         if (type !== 'seeked') return addEventListener.call(this, type, listener, options);
         if (!late.has(listener))
-          late.set(listener, (event) => setTimeout(() => {
-            if (!this.paused && this.currentTime > 0) window.__lateSeeked++;
-            listener.call(this, event);
-          }, 60));
+          late.set(listener, (event) => {
+            const deadline = performance.now() + 2_000;
+            const deliver = () => {
+              const playedOn = !this.paused && this.currentTime > 0;
+              if (!playedOn && performance.now() < deadline) return setTimeout(deliver, 10);
+              if (playedOn) window.__lateSeeked++;
+              listener.call(this, event);
+            };
+            setTimeout(deliver, 60);
+          });
         return addEventListener.call(this, type, late.get(listener), options);
       };
       prototype.removeEventListener = function (type, listener, options) {
@@ -2040,6 +2256,14 @@ async function audioOverlapScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
     await waitFor(cdp, transcript("Overlap done"), 10_000, "The overlapping sounds did not finish");
+    // The script's waits do not wait for what is heard, and under load playback starts late: judge the three instances
+    // once the device has released them.
+    await waitFor(
+      cdp,
+      `window.__instances.length >= 3 && window.__instances.slice(0, 3).every((instance) => instance.released)`,
+      20_000,
+      "The overlapping sounds kept their elements",
+    );
     const overlap = await value(
       cdp,
       `(() => {
@@ -2048,7 +2272,8 @@ async function audioOverlapScenario(cdp, origin) {
         return JSON.stringify({
           files: window.__instances.slice(0, 3).map((instance) => instance.file),
           once: window.__instances.slice(0, 3).map(once),
-          both: window.__samples.some((sample) => time(sample, 0) > time(sample, 1) + 0.2),
+          // The first instance plays on, ahead of the second, while the second plays.
+          both: window.__samples.some((sample) => time(sample, 1) > 0 && time(sample, 0) > time(sample, 1)),
           all: window.__samples.some((sample) => [0, 1, 2].every((index) => time(sample, index) !== undefined)),
           lateSeeked: window.__lateSeeked > 0,
         });
@@ -2067,11 +2292,12 @@ async function audioOverlapScenario(cdp, origin) {
     );
     const loopStart = await value(cdp, "window.__samples.length");
     await waitFor(cdp, transcript("Loop done"), 15_000, "The sound loop did not finish");
-    // Every finished instance released its element; the loop reused elements instead of creating one per instance.
+    // Every finished instance released its element; the loop reused elements instead of creating one per instance. Under
+    // load the instances play out well after the script's waits.
     await waitFor(
       cdp,
       `window.__instances.length === 33 && [...window.__elements].every((element) => !element.getAttribute('src'))`,
-      5_000,
+      20_000,
       "Finished sounds kept their elements",
     );
     const loop = await value(
@@ -2079,7 +2305,8 @@ async function audioOverlapScenario(cdp, origin) {
       `JSON.stringify({
         once: window.__instances.every(${once}),
         overlapped: window.__samples.slice(${loopStart}).some((sample) => sample.length > 1),
-        reused: window.__elements.size < 30,
+        // How many elements the loop needs depends on how fast the browser plays: no new element while one was free.
+        reused: window.__newWhileFree === 0 && window.__elements.size < window.__instances.length,
       })`,
     );
     assertEqual(
@@ -2151,7 +2378,9 @@ async function entrancesScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
   // Records, every frame, which parts of the conversation an animation moves, and how far the controls are from the
-  // entry above them while the conversation glides.
+  // entry above them while the conversation glides. Each of them also rises in its own entrance, which under load
+  // starts at a different frame for each, so the distance leaves those rises out. Under load a glide can also end
+  // before a frame samples it, so the distance is also measured as each glide starts.
   const start = async () => {
     await navigate(cdp, `${origin}/player/?package=entrances`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -2159,6 +2388,22 @@ async function entrancesScenario(cdp, origin) {
       cdp,
       `window.smokeEntrances = new Set();
       window.smokeControlGaps = new Set();
+      const rise = (element) => Number.parseFloat(getComputedStyle(element).translate.split(' ')[1] ?? 0) || 0;
+      const measureGap = () => {
+        const controls = document.querySelector('[data-foreground-controls]');
+        const above = document.querySelector('.transcript-entry[data-index="2"]');
+        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
+          window.smokeControlGaps.add(
+            Math.round(controls.getBoundingClientRect().top - rise(controls) - (above.getBoundingClientRect().bottom - rise(above))),
+          );
+      };
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...parameters) {
+        const animation = animate.apply(this, parameters);
+        // Once every animation the glide starts together exists.
+        if (this.matches('.transcript-history')) queueMicrotask(measureGap);
+        return animation;
+      };
       const record = () => {
         for (const animation of document.getAnimations()) {
           const target = animation.effect?.target;
@@ -2166,10 +2411,7 @@ async function entrancesScenario(cdp, origin) {
           else if (target?.matches?.('.transcript-history')) window.smokeEntrances.add('glide');
           else if (target?.matches?.('[data-foreground-controls]')) window.smokeEntrances.add('controls');
         }
-        const controls = document.querySelector('[data-foreground-controls]');
-        const above = document.querySelector('.transcript-entry[data-index="2"]');
-        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
-          window.smokeControlGaps.add(Math.round(controls.getBoundingClientRect().top - above.getBoundingClientRect().bottom));
+        measureGap();
         requestAnimationFrame(record);
       };
       requestAnimationFrame(record);`,
@@ -3684,10 +3926,29 @@ async function savedDataExportScenario(cdp, origin, profile) {
     gunzipSync(downloaded).toString("utf8"),
     "The text holds the same export as the file",
   );
-  // Refused clipboard access leaves the text selected for copying by hand.
+  // Without the clipboard API, as over plain HTTP, the selected text copies the older way, and focus stays on Copy.
   await evaluate(
     cdp,
-    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) } });`,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
+  );
+  await physicalClick(cdp, "[data-export-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `window.__copied === document.querySelector('[data-export-text]').value && document.activeElement === document.querySelector('[data-export-copy]')`,
+    ),
+    true,
+    "Copy without the clipboard API did not copy the text or lost the focus",
+  );
+  // Refused clipboard access, where the browser also refuses copying the selection, leaves the text selected for
+  // copying by hand.
+  await evaluate(
+    cdp,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) } }); document.execCommand = () => false;`,
   );
   await physicalClick(cdp, "[data-export-copy]");
   await waitFor(
@@ -3704,7 +3965,7 @@ async function savedDataExportScenario(cdp, origin, profile) {
   );
   await evaluate(
     cdp,
-    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
+    `delete document.execCommand; window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
   );
   await physicalClick(cdp, "[data-export-copy]");
   await waitFor(
@@ -4184,7 +4445,7 @@ async function debugExportScenario(cdp, origin, profile) {
       `JSON.stringify([document.querySelector('[data-session-error-code]').textContent.trim(), document.querySelector('[data-session-error-source]').textContent, document.querySelector('[data-session-error-failing]').textContent, !!document.querySelector('[data-session-error-calls]')])`,
     ),
     JSON.stringify([
-      "TSR036: Numeric operation produced a non-finite result.",
+      "TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0 first.",
       "let result = 1 / zero",
       "1 / zero",
       false,

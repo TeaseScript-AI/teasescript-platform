@@ -1,3 +1,4 @@
+import { randomUuid } from "./captured-media.js";
 import type { DebugHistorySpill } from "./debug-history.js";
 
 /**
@@ -42,7 +43,7 @@ export async function openDebugHistorySpill(
   factory: IDBFactory | undefined = globalThis.indexedDB,
 ): Promise<DebugHistorySpill | null> {
   if (factory === undefined) return null;
-  const name = `${NAME_PREFIX}${crypto.randomUUID()}`;
+  const name = `${NAME_PREFIX}${randomUuid()}`;
   opened.add(name);
   const request = factory.open(name, 1);
   request.onupgradeneeded = () => request.result.createObjectStore(STORE);

@@ -96,7 +96,7 @@ test("+10 s at a button runs timers and its timeout in scene-time order and show
   // A jump is real scene time: a button's elapsed result and timestamp differences include it.
   session = advancePlayerRuntimeTime(
     createPlayerRuntimeSession(
-      'let before = getTimestamp()\nlet elapsed = showButton "Done"\nlet after = getTimestamp()\nsay "${elapsed} ${after - before}", instant\nexit',
+      'let before = getAbsoluteDateTime()\nlet elapsed = showButton "Done"\nlet after = getAbsoluteDateTime()\nsay "${elapsed} ${after - before}", instant\nexit',
       { wallClockMs: Date.UTC(2026, 0, 1) },
     ),
     10_000,

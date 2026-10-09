@@ -477,15 +477,15 @@ When a script error stops the session, a line above the composer says "The scrip
 offers **Details**; after an exception of the Player itself it says "The Player ran into an error." An error notice with
 **Details** supplements the line until a new session starts. Both open one error dialog, which never opens by itself. It
 shows "Script error" and "In rules.tease, line 3.", then **Technical details**, collapsed, with the error code and the
-runtime's message ("TSR036: Numeric operation produced a non-finite result."), the failing line with the failing
-expression marked, when the host supplied the script's source, and, for an error inside a function, called file, or
-timer, media, or button block, the call path, such as "in punish(), called from main.tease:6". After a Player exception
-it shows "Player error" and "The script did not cause this.", with the error's name as its technical detail. **Download
-debug export** and, for a script error while Debug runs, **Open in Debug** close it and open the debug export dialog, or
-the Debug panel's Now tab, which names the error and its statement; **Close** returns focus to the line. Apart from
-those hand-overs, each dialog closes only with **Close** or Escape. Media warnings are notices, never failures. The
-transcript and Stage stay for inspection, with the transcript's end scrolling clear of the line. The dialogs fit narrow
-screens, and their buttons are at least 44px tall.
+runtime's message ("TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0
+first."), the failing line with the failing expression marked, when the host supplied the script's source, and, for an
+error inside a function, called file, or timer, media, or button block, the call path, such as "in punish(), called from
+main.tease:6". After a Player exception it shows "Player error" and "The script did not cause this.", with the error's
+name as its technical detail. **Download debug export** and, for a script error while Debug runs, **Open in Debug**
+close it and open the debug export dialog, or the Debug panel's Now tab, which names the error and its statement;
+**Close** returns focus to the line. Apart from those hand-overs, each dialog closes only with **Close** or Escape.
+Media warnings are notices, never failures. The transcript and Stage stay for inspection, with the transcript's end
+scrolling clear of the line. The dialogs fit narrow screens, and their buttons are at least 44px tall.
 
 The error dialog, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a

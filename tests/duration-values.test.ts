@@ -69,17 +69,27 @@ test("duration arithmetic and cross-unit comparisons follow V30 section 35", () 
 });
 
 test("mixing plain numbers with durations fails instead of guessing a unit", () => {
-  for (const [declaration, expression] of [
-    ["let n = 1", "1 s + n"],
-    ["let n = 1", "n - 1 s"],
-    ["let n = 2", "n / 1 s"],
-    ["let n = 2", "1 s < n"],
-    ["let d = 1 s", "d * d"],
+  const arithmetic = "Add or subtract two durations, or multiply or divide a duration by a number.";
+  for (const [declaration, expression, message] of [
+    ["let n = 1", "1 s + n", `'+' cannot combine a duration (1 s) and a number (1). ${arithmetic}`],
+    ["let n = 1", "n - 1 s", `'-' cannot combine a number (1) and a duration (1 s). ${arithmetic}`],
+    ["let n = 2", "n / 1 s", `'/' cannot combine a number (2) and a duration (1 s). ${arithmetic}`],
+    [
+      "let n = 2",
+      "1 s < n",
+      "'<' cannot compare a duration (1 s) with a number (2). Use a duration on both sides.",
+    ],
+    [
+      "let d = 1 s",
+      "d * d",
+      `'*' cannot combine a duration (1 s) and a duration (1 s). ${arithmetic}`,
+    ],
   ] as const) {
     const source = `${declaration}\nsay "\${${expression}}"\nexit`;
     assert.deepEqual(diagnostics(source), ["TSV043"], source);
     const dynamic = `${DYNAMIC}${declaration.replace(/= (.*)$/, "= dynamic($1)")}\nsay "\${${expression}}"\nexit`;
-    assert.equal(runtimeFailure(dynamic), "TSR009", dynamic);
+    const failure = runValidSource(dynamic).snapshot.failure;
+    assert.deepEqual([failure?.code, failure?.message], ["TSR009", message], dynamic);
   }
   // `%` takes no duration whatever the other operand is, so the compiler rejects it also beside an unknown value.
   for (const declaration of ["let n = 2", `${DYNAMIC}let n = dynamic(2)`])

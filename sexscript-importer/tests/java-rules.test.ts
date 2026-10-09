@@ -176,7 +176,7 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
     /^c = sexscriptLegacyCalendarTime\(c, 1, c\.minute, c\.second, c\.millisecond\)$/mu,
   );
   assert.match(source, /^let later = moment \+ 2 \* 1 day$/mu);
-  assert.match(source, /getTimestamp\(\)\.toMilliseconds\(\) > 0/u);
+  assert.match(source, /getAbsoluteDateTime\(\)\.toMilliseconds\(\) > 0/u);
   assert.match(source, /NOTE SX_DATE_MOMENT/u);
   assert.doesNotMatch(source, /TODO/u);
   assert.deepEqual(run(source), [

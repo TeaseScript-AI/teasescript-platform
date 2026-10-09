@@ -21,13 +21,12 @@ export function textTooLong(
   span: SourceSpan,
   length: number | null,
 ): RuntimeFault {
-  const size =
-    length === null || !Number.isFinite(length)
-      ? ""
-      : ` of about ${groupedDigits(length)} characters`;
+  const most = `${Math.floor(MAX_TEXT_LENGTH / 1_000_000)} million`;
   return new RuntimeFault(
     "TSR084",
-    `Text too long: ${operation} would make a text${size}; a text can hold at most about ${Math.floor(MAX_TEXT_LENGTH / 1_000_000)} million.`,
+    length === null || !Number.isFinite(length)
+      ? `Text too long: ${operation} would make a text longer than a text can hold, which is about ${most} characters.`
+      : `Text too long: ${operation} would make about ${groupedDigits(length)} characters, but a text can hold at most about ${most}.`,
     copySpan(span),
   );
 }

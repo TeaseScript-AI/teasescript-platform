@@ -109,7 +109,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     ],
   ]);
   assert.deepEqual(diagnostics("say sum([1, 2], scale: 2)\nexit"), [
-    ["TSV022", "sum(...) has no parameter 'scale'; its named arguments are by:.", "scale"],
+    ["TSV022", "sum(...) has no parameter 'scale'. Its only named argument is 'by:'.", "scale"],
   ]);
   const cases: [string, string, string][] = [
     [
@@ -154,7 +154,11 @@ test("statistics report empty lists, values they cannot read, and percentages ou
       "median(...) needs a list of objects for by:, not a list that holds a number.",
     ],
     ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a number."],
-    ["sum(dynamic([1e308, 1e308]))", "TSR036", "sum(...) gives a number too large to represent."],
+    [
+      "sum(dynamic([1e308, 1e308]))",
+      "TSR036",
+      "sum(...) gives a number too large to represent. Use smaller values.",
+    ],
   ];
   for (const [call, code, message] of cases)
     assert.deepEqual(failure(`${DYNAMIC}say ${call}\nexit`), [code, message], call);
@@ -251,7 +255,7 @@ test("possibly null lists and values of list functions need a check first", () =
   assert.deepEqual(diagnostics(`${DYNAMIC}say predict(dynamic(1), "x")\nexit`), [
     [
       "TSV043",
-      "predict(...) needs a number, date, datetime, or timestamp as its x, not text (string).",
+      "predict(...) needs a number, date, datetime, or absolute date and time as its x, not text (string).",
       '"x"',
     ],
   ]);
@@ -260,7 +264,7 @@ test("possibly null lists and values of list functions need a check first", () =
     [
       [
         "TSV043",
-        "predict(...) needs a number, date, datetime, or timestamp as its x, not text (string).",
+        "predict(...) needs a number, date, datetime, or absolute date and time as its x, not text (string).",
         '"a"',
       ],
     ],
@@ -342,7 +346,7 @@ test("linearRegression fits a line through the points of a list, and predict rea
         'say "${laps.slope} ${laps.intercept} ${predict(laps, 5)}"',
         // Half a day apart: the slope is per day.
         'let times = [{ at: toDateTime("2026-10-01T08:00"), n: 1 }, { at: toDateTime("2026-10-01T20:00"), n: 2 }]',
-        'let stamps = [{ at: toTimestamp("2026-10-01T00:00:00Z"), n: 0 }, { at: toTimestamp("2026-10-03T00:00:00Z"), n: 4 }]',
+        'let stamps = [{ at: toAbsoluteDateTime("2026-10-01T00:00:00Z"), n: 0 }, { at: toAbsoluteDateTime("2026-10-03T00:00:00Z"), n: 4 }]',
         'say "${linearRegression(times, x: "at", y: "n").slope} ${linearRegression(stamps, x: "at", y: "n").slope} ${linearRegression([5, 5, 5]).r2}"',
         "exit",
       ].join("\n"),
@@ -385,6 +389,14 @@ test("linearRegression and predict report too few points, one x, and values of t
       ],
     ],
   );
+  assert.deepEqual(
+    diagnostics(
+      'say linearRegression([{ at: "a", n: 1 }, { at: "b", n: 2 }], x: "at", y: "n").slope\nexit',
+    ).map(([, message]) => message),
+    [
+      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times, not text (string).",
+    ],
+  );
   assert.deepEqual(diagnostics('say linearRegression([{ day: 1 }], x: "day")\nexit'), [
     [
       "TSV043",
@@ -409,12 +421,12 @@ test("linearRegression and predict report too few points, one x, and values of t
     [
       'linearRegression(dynamic([{ x: 1, y: 2 }, { x: 1, y: 3 }]), x: "x", y: "y")',
       "TSR036",
-      "linearRegression(...) has no result: every point has the same x, so no line fits.",
+      "linearRegression(...) has no result: every point has the same x, so the line's slope cannot be determined. Use points with at least two different x values.",
     ],
     [
       'linearRegression(dynamic([{ x: toTime("08:00"), y: 2 }, { x: toTime("09:00"), y: 3 }]), x: "x", y: "y")',
       "TSR060",
-      "linearRegression(...) needs numbers, dates, datetimes, or timestamps as x values, not a time.",
+      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not a time.",
     ],
     [
       "predict(dynamic({ slope: 1 }), 2)",
@@ -425,6 +437,11 @@ test("linearRegression and predict report too few points, one x, and values of t
       'predict(linearRegression([1, 2]), dynamic(toDate("2026-01-01")))',
       "TSR059",
       "predict(...) needs a number as its x, like the line's start, not a date.",
+    ],
+    [
+      'predict(linearRegression([{ at: toAbsoluteDateTime("2026-01-01T00:00:00Z"), n: 1 }, { at: toAbsoluteDateTime("2026-01-02T00:00:00Z"), n: 2 }], x: "at", y: "n"), dynamic(toDate("2026-01-01")))',
+      "TSR059",
+      "predict(...) needs an absolute date and time as its x, like the line's start, not a date.",
     ],
   ];
   for (const [call, code, message] of cases)

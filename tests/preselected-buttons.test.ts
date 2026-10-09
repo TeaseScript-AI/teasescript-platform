@@ -218,6 +218,6 @@ test("choose takes prefill: once, after its options, and askBoolean's prefill is
     "The prefill of askBoolean must be true or false, not text (string).",
   ]);
   assert.deepEqual(errors('let a = askBoolean "Q", default: true'), [
-    "askBoolean has no 'default:'; use 'prefill:'.",
+    "askBoolean has no 'default:'. Use 'prefill:'.",
   ]);
 });

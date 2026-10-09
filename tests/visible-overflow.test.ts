@@ -68,16 +68,54 @@ test("only the overflowing step is reported, once", () => {
   assert.deepEqual(diagnostics("say 1e308 * 10\nsay 1 / 0"), ["TSV050 1:5", "TSV050 2:5"]);
 });
 
-test("values the compiler cannot know stay runtime checks", () => {
-  for (const source of [
-    "let big = 1e308\nsay big * 10\nexit",
-    "function grow(x) { return x * 10 }\nsay grow(1e308)\nexit",
-    "let zero = 0\nsay 1 / zero\nexit",
-  ]) {
+test("values the compiler cannot know fail at runtime with the cause, the values, and the fix", () => {
+  for (const [source, code, message] of [
+    [
+      "let big = 1e308\nsay big * 10\nexit",
+      "TSR036",
+      "'big * 10' is 1e+308 * 10, which gives a number too large to represent. Use smaller values.",
+    ],
+    [
+      "function grow(x) { return x * 10 }\nsay grow(1e308)\nexit",
+      "TSR036",
+      "'x * 10' is 1e+308 * 10, which gives a number too large to represent. Use smaller values.",
+    ],
+    [
+      "let zero = 0\nsay 1 / zero\nexit",
+      "TSR036",
+      "Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0 first.",
+    ],
+    [
+      "let count = 0\nsay 7 % count\nexit",
+      "TSR036",
+      "Remainder by zero: '7 % count' has no result because 'count' is 0. Check that 'count' is not 0 first.",
+    ],
+    // An operand the source does not spell as a name or a number shows its value instead.
+    [
+      "let zero = 0\nsay (1 + 2) / (zero * 1)\nexit",
+      "TSR036",
+      "Division by zero: 3 / 0 has no result. Check that the divisor is not 0 first.",
+    ],
+    // Dividing exact time by zero keeps TSR036, and a calendar duration TSR009.
+    [
+      "let n = 0\nsay 1 s / n\nexit",
+      "TSR036",
+      "Division by zero: 1 s / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
+    ],
+    [
+      "let n = 0\nsay 1 month / n\nexit",
+      "TSR009",
+      "Division by zero: 1 mo / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
+    ],
+    [
+      "let n = 1e305\nsay 1 h * n\nexit",
+      "TSR036",
+      "1 h * 1e+305 gives a duration too long to represent. Use smaller values.",
+    ],
+  ] as const) {
     assert.deepEqual(diagnostics(source), [], source);
-    const result = runValidSource(source);
-    assert.equal(result.snapshot.status, "failed", source);
-    assert.equal(result.snapshot.failure?.code, "TSR036", source);
+    const failure = runValidSource(source).snapshot.failure;
+    assert.deepEqual([failure?.code, failure?.message], [code, message], source);
   }
 });
 

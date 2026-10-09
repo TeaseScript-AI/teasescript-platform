@@ -64,7 +64,7 @@ export function resolveInteractionCompletion(
     // Cancelling drops every edit, also text that is not an answer, and returns `null`.
     if (payload.kind === "cancel")
       return action.ui.cancel === null
-        ? { ok: false, message: "This form has no cancel button; it must be submitted." }
+        ? { ok: false, message: "This form has no cancel button, so it can only be submitted." }
         : { ok: true, result: null, transcriptText: action.ui.cancel.text };
     return submitForm(action.ui, action.form, context.presentation);
   }
@@ -196,7 +196,7 @@ export function resolveInteractionCompletion(
         message:
           matches.length === 0
             ? "Choice text is not available."
-            : "Choice text is ambiguous; select a rendered control.",
+            : "More than one button has this text. Select one of the buttons instead.",
       };
     }
     selected = matches[0]!;

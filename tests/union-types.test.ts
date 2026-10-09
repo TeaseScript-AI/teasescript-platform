@@ -276,7 +276,7 @@ test("mixed list literals need a declared union, and every other mix points to i
   assert.deepEqual(diagnostics('let values = ["Level", 2, 3.5]\nexit'), [
     [
       "TSV044",
-      "This list mixes text (string) and a whole number (integer). A list holds one type; to keep both, declare a union type, as in 'let values: (string | number)[] = ...'.",
+      "This list mixes text (string) and a whole number (integer). A list holds one type. To keep both, declare a union type, as in 'let values: (string | number)[] = ...'.",
       '["Level", 2, 3.5]',
     ],
   ]);

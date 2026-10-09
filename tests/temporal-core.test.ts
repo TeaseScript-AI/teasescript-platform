@@ -138,7 +138,7 @@ test("strict ISO text reads real local values and explains values that do not ex
   assert.deepEqual(parseIsoDate("2026-10-00"), { ok: false, reason: "there is no day 0" });
   assert.deepEqual(parseIsoTime("24:00"), {
     ok: false,
-    reason: "there is no hour 24; midnight is 00:00",
+    reason: "there is no hour 24. Midnight is 00:00",
   });
   assert.deepEqual(parseIsoTime("12:60"), { ok: false, reason: "there is no minute 60" });
   assert.deepEqual(parseIsoTime("12:00:60"), { ok: false, reason: "there is no second 60" });

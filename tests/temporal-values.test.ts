@@ -61,7 +61,7 @@ test("ISO text converts to date and time values whose fields, ISO text, and Unix
         'let d = toDate("2026-10-04")',
         'let t = toTime("14:30:05.250")',
         "let dt = toDateTime(d, t)",
-        'let ts = toTimestamp("2026-10-04T14:30:00+02:00")',
+        'let ts = toAbsoluteDateTime("2026-10-04T14:30:00+02:00")',
         "say d.year",
         "say d.month",
         "say d.day",
@@ -74,7 +74,7 @@ test("ISO text converts to date and time values whose fields, ISO text, and Unix
         "say ts.toISO()",
         "say ts.toSeconds()",
         "say ts.toMilliseconds()",
-        'say toTimestamp("1969-12-31T23:59:59.500Z").toSeconds()',
+        'say toAbsoluteDateTime("1969-12-31T23:59:59.500Z").toSeconds()',
         "exit",
       ].join("\n"),
     ),
@@ -96,6 +96,35 @@ test("ISO text converts to date and time values whose fields, ISO text, and Unix
   );
 });
 
+test("weekNumber and weekYear give the ISO 8601 week, whose Thursday decides the year", () => {
+  const weeks = (dates: readonly string[]) =>
+    runSays(
+      [
+        ...dates.map(
+          (date) => `say "\${toDate("${date}").weekNumber} \${toDate("${date}").weekYear}"`,
+        ),
+        'let dt = toDateTime("2026-10-09T23:30")',
+        'say "${dt.weekNumber} ${dt.weekYear}"',
+        "exit",
+      ].join("\n"),
+    );
+  // Derived by hand: 2024-12-30 is the Monday before Thursday 2025-01-02, and 2021-01-01 the Friday after Thursday
+  // 2020-12-31. A 400-year cycle is whole weeks, so 0000-01-01 and 9999-12-31 fall like 2000-01-01 and 1999-12-31, both
+  // in week 52 of 1999. 2026-01-01 is a Thursday, so week 41 of 2026 starts on Monday 2026-10-05.
+  assert.deepEqual(
+    weeks([
+      "2024-12-30",
+      "2025-01-01",
+      "2021-01-01",
+      "2021-01-04",
+      "2020-12-31",
+      "0000-01-01",
+      "9999-12-31",
+    ]),
+    ["1 2025", "1 2025", "53 2020", "1 2021", "53 2020", "52 -1", "52 9999", "41 2026"],
+  );
+});
+
 test("text known only at runtime converts, falls back to default:, or fails with a reason", () => {
   assert.deepEqual(
     runSays(
@@ -103,8 +132,8 @@ test("text known only at runtime converts, falls back to default:, or fails with
         [
           'say toDate(dynamic("2026-10-04")).toISO()',
           'say toDate(dynamic("2026-02-30"), default: toDate("2000-01-01")).toISO()',
-          'let backup = toTimestamp("2000-01-01T00:00:00Z")',
-          'say toTimestamp(dynamic("2026-10-04T12:30"), default: backup).toISO()',
+          'let backup = toAbsoluteDateTime("2000-01-01T00:00:00Z")',
+          'say toAbsoluteDateTime(dynamic("2026-10-04T12:30"), default: backup).toISO()',
           "exit",
         ].join("\n"),
     ),
@@ -117,7 +146,7 @@ test("text known only at runtime converts, falls back to default:, or fails with
   assert.equal(notIso?.code, "TSR058");
   assert.equal(
     notIso?.message,
-    'toTime(...) cannot convert text (string) "2:30 PM" to a time; the text must be ISO time text such as "14:30". Give a fallback with default: if the value may not convert.',
+    `toTime(...) cannot convert text (string) "2:30 PM" to a time. The text must be ISO time text such as "14:30". Give a fallback with 'default:' if the value may not convert.`,
   );
 });
 
@@ -125,13 +154,13 @@ test("say, interpolation, and format methods use the captured presentation; coll
   const source = [
     'let d = toDate("2026-10-04")',
     'let dt = toDateTime("2026-10-04T18:30:05")',
-    'let ts = toTimestamp("2026-10-04T16:30:00Z")',
+    'let ts = toAbsoluteDateTime("2026-10-04T16:30:00Z")',
     "say d",
     'say "Dinner at ${dt}"',
     "say ts",
     "say dt.formatDate()",
     "say dt.formatTime()",
-    'let mixed: (date | time | datetime | timestamp)[] = [d, toTime("14:30"), dt, ts]',
+    'let mixed: (date | time | datetime | absoluteDateTime)[] = [d, toTime("14:30"), dt, ts]',
     "say mixed",
     "exit",
   ].join("\n");
@@ -141,7 +170,7 @@ test("say, interpolation, and format methods use the captured presentation; coll
     "4-10-2026, 18:30",
     "4-10-2026",
     "18:30:05",
-    "[<date 2026-10-04>, <time 14:30>, <datetime 2026-10-04 18:30:05>, <timestamp 2026-10-04T16:30:00Z>]",
+    "[<date 2026-10-04>, <time 14:30>, <datetime 2026-10-04 18:30:05>, <absoluteDateTime 2026-10-04T16:30:00Z>]",
   ]);
   // Without a captured context a session shows UTC in locale-neutral text.
   assert.deepEqual(runSays(source).slice(0, 3), [
@@ -180,7 +209,7 @@ test("ordering, equality, and set membership compare kind and value", () => {
         'say d < toDate("2026-10-05")',
         'say toTime("23:59") > toTime("00:00")',
         'say toDateTime("2026-10-04T23:00") < toDateTime("2026-10-05T01:00")',
-        'say toTimestamp("2026-10-04T12:00:00Z") == toTimestamp("2026-10-04T14:00:00+02:00")',
+        'say toAbsoluteDateTime("2026-10-04T12:00:00Z") == toAbsoluteDateTime("2026-10-04T14:00:00+02:00")',
         'say d == toDate("2026-10-04")',
         'let days = set[d, toDate("2026-10-04"), toDate("2026-10-05")]',
         "say days.length",
@@ -196,6 +225,12 @@ test("ordering, equality, and set membership compare kind and value", () => {
     `${DYNAMIC}let wrong = dynamic(toDate("2026-10-04")) < dynamic(toTime("14:30"))\nexit`,
   );
   assert.equal(failure?.code, "TSR009");
+  assert.equal(
+    failureOf(
+      `${DYNAMIC}let wrong = dynamic(toAbsoluteDateTime("2026-10-04T12:00:00Z")) < dynamic(toDate("2026-10-04"))\nexit`,
+    )?.message,
+    "'<' orders two values of the same kind, such as two dates or two absolute dates and times, but these are an absolute date and time and a date.",
+  );
 });
 
 test("sort, min, and max order date and time values of one kind", () => {
@@ -207,7 +242,7 @@ test("sort, min, and max order date and time values of one kind", () => {
         'say days.join(", ")',
         'let first: time = min(toTime("14:30"), toTime("09:15:30"), toTime("23:00"))',
         "say first.toISO()",
-        'say max(toTimestamp("2026-10-04T12:00:00Z"), toTimestamp("2026-10-04T13:00:00+02:00")).toISO()',
+        'say max(toAbsoluteDateTime("2026-10-04T12:00:00Z"), toAbsoluteDateTime("2026-10-04T13:00:00+02:00")).toISO()',
         'say max(toDateTime("2026-10-04T18:00"), toDateTime("2026-10-04T18:00:00.001")).toISO()',
         "exit",
       ].join("\n"),
@@ -246,7 +281,7 @@ test("sort, min, and max order date and time values of one kind", () => {
   );
 });
 
-test("exact durations move datetimes through the captured zone and timestamps by elapsed time", () => {
+test("exact durations move datetimes through the captured zone and absolute dates and times by elapsed time", () => {
   assert.deepEqual(
     runSays(
       [
@@ -258,14 +293,14 @@ test("exact durations move datetimes through the captured zone and timestamps by
         'let late = toDateTime("2026-10-24T03:30")',
         "say (late + 24 h).toISO()",
         "say (late + 24 h) - late",
-        'let start = toTimestamp("2026-10-04T12:00:00Z")',
+        'let start = toAbsoluteDateTime("2026-10-04T12:00:00Z")',
         "say (start + 90 min).toISO()",
         "say (start + 90 min) - start",
         "say (start + 0.4 ms).toISO()",
-        "say dinner.toTimestamp().toISO()",
-        'say toTimestamp("2026-03-29T01:30:00Z").toDateTime().toISO()',
+        "say dinner.toAbsoluteDateTime().toISO()",
+        'say toAbsoluteDateTime("2026-03-29T01:30:00Z").toDateTime().toISO()',
         // 02:30 does not exist on 29 March; it moves forward by the skipped hour.
-        'say toDateTime("2026-03-29T02:30").toTimestamp().toISO()',
+        'say toDateTime("2026-03-29T02:30").toAbsoluteDateTime().toISO()',
         "exit",
       ].join("\n"),
       AMSTERDAM,
@@ -284,7 +319,7 @@ test("exact durations move datetimes through the captured zone and timestamps by
     ],
   );
   const failure = failureOf(
-    'let x = toDateTime("2101-07-01T12:00").toTimestamp()\nexit',
+    'let x = toDateTime("2101-07-01T12:00").toAbsoluteDateTime()\nexit',
     AMSTERDAM,
   );
   assert.equal(failure?.code, "TSR063");
@@ -352,9 +387,9 @@ test("typed storage keeps date and time kinds apart from each other and from tex
     runSays(
       [
         'save toDate("2026-10-04") as "day"',
-        'save toTimestamp("2026-10-04T12:00:00Z") as "moment"',
+        'save toAbsoluteDateTime("2026-10-04T12:00:00Z") as "moment"',
         'let day: date = load "day", default: toDate("2026-01-01")',
-        'let moment: timestamp = load "moment", default: toTimestamp("2026-01-01T00:00:00Z")',
+        'let moment: absoluteDateTime = load "moment", default: toAbsoluteDateTime("2026-01-01T00:00:00Z")',
         "say day.toISO()",
         "say moment.toISO()",
         "exit",

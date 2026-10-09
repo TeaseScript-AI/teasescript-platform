@@ -103,38 +103,38 @@ const HELP = Object.freeze({
   askText: Object.freeze({
     command: "askText" as const,
     summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
-    syntax: "askText [as speaker] [hint | hint, prefill: answer | prefill: answer]",
+      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The asking speaker says the optional question in the chat before the field opens. An optional hint is shown in the field, not in the chat. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
+    syntax: "askText [as speaker] [question] [, prefill: answer] [, hint: text]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
       "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional prefill number fills the field at first.",
-    syntax: "askNumber [as speaker] [hint | hint, prefill: number | prefill: number]",
+    syntax: "askNumber [as speaker] [question] [, prefill: number] [, hint: text]",
   }),
   askInteger: Object.freeze({
     command: "askInteger" as const,
     summary:
       "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional prefill whole number fills the field at first.",
-    syntax: "askInteger [as speaker] [hint | hint, prefill: integer | prefill: integer]",
+    syntax: "askInteger [as speaker] [question] [, prefill: integer] [, hint: text]",
   }),
   askDate: Object.freeze({
     command: "askDate" as const,
     summary:
       "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
-    syntax: "askDate [as speaker] [hint | hint, prefill: date | prefill: date]",
+    syntax: "askDate [as speaker] [question] [, prefill: date] [, hint: text]",
   }),
   askTime: Object.freeze({
     command: "askTime" as const,
     summary:
       "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
-    syntax: "askTime [as speaker] [hint | hint, prefill: time | prefill: time]",
+    syntax: "askTime [as speaker] [question] [, prefill: time] [, hint: text]",
   }),
   askDateTime: Object.freeze({
     command: "askDateTime" as const,
     summary:
       "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
-    syntax: "askDateTime [as speaker] [hint | hint, prefill: datetime | prefill: datetime]",
+    syntax: "askDateTime [as speaker] [question] [, prefill: datetime] [, hint: text]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -534,9 +534,10 @@ function locateCompactCommand(
       return { command, range: token.span };
     }
   }
+  // A token that starts at the cursor, such as the `)` an editor adds when it closes a bracket, is after it.
   const before = tokens.filter(
     (token) =>
-      token.span.start.offset <= offset &&
+      token.span.start.offset < offset &&
       token.kind !== TokenKind.Newline &&
       token.kind !== TokenKind.EndOfFile,
   );
@@ -545,23 +546,44 @@ function locateCompactCommand(
 
 /**
  * The nearest command that no later closing delimiter has ended, found in one backward pass: a closing delimiter whose
- * opener lies before a command ends that command.
+ * opener lies before a command ends that command, and so does the `)` of an ask's own parentheses.
  */
 function nearestOpenCompactCommand(
   tokens: readonly Token[],
 ): { command: CompactCommand; range: LanguageRange } | null {
   let unmatchedClosers = 0;
+  // The positions of the opening delimiters that a later closing delimiter matches.
+  const closed = new Set<number>();
   for (let index = tokens.length - 1; index >= 0; index -= 1) {
     const token = tokens[index]!;
     if (CLOSING_DELIMITERS.has(token.kind)) unmatchedClosers += 1;
-    else if (OPENING_DELIMITERS.has(token.kind))
+    else if (OPENING_DELIMITERS.has(token.kind)) {
+      if (unmatchedClosers > 0) closed.add(index);
       unmatchedClosers = Math.max(0, unmatchedClosers - 1);
-    else if (unmatchedClosers === 0) {
+    } else if (unmatchedClosers === 0) {
       const command = tokenToCompactCommand(token);
-      if (command !== null) return { command, range: token.span };
+      if (command !== null && !closed.has(askArgumentsOpener(command, tokens, index + 1)))
+        return { command, range: token.span };
     }
   }
   return null;
+}
+
+/**
+ * The position of the `(` that opens an ask's own arguments, as the parser reads it: at `after`, the token right after
+ * the ask, or after its `as speaker`. It is -1 for another command or an ask without parentheses.
+ */
+function askArgumentsOpener(
+  command: CompactCommand,
+  tokens: readonly Token[],
+  after: number,
+): number {
+  if (command === "say" || command === "showButton" || command === "choose") return -1;
+  const opener =
+    tokens[after]?.kind === TokenKind.KeywordAs && tokens[after + 1]?.kind === TokenKind.Identifier
+      ? after + 2
+      : after;
+  return tokens[opener]?.kind === TokenKind.LeftParenthesis ? opener : -1;
 }
 
 function containsOffset(span: SourceSpan, offset: number): boolean {
@@ -578,7 +600,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
     case "askDate":
     case "askTime":
     case "askDateTime":
-      return Object.freeze(["speaker", "hint", "prefill"]);
+      return Object.freeze(["speaker", "question", "prefill", "hint"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
     case "say":
@@ -628,10 +650,13 @@ function activeParameterFor(
     command === "showButton"
   ) {
     // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
-    // command ends the command, so later options belong to the enclosing construct.
+    // command ends the command, so later options belong to the enclosing construct. The `)` of an ask's own
+    // parentheses ends the ask.
+    const argumentsStart = askArgumentsOpener(command, tail, 0) + 1;
     let active = 1;
     let depth = 0;
     for (const [index, token] of tail.entries()) {
+      if (index < argumentsStart) continue;
       if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
       else if (CLOSING_DELIMITERS.has(token.kind)) {
         if (depth === 0) break;
@@ -663,7 +688,7 @@ function activeParameterFor(
 /** The signature parameter of a named compact option, such as `timeout:` of `showButton`. */
 function namedOptionParameter(command: CompactCommand, name: string): number | null {
   if (command === "showButton") return name === "background" ? 2 : name === "timeout" ? 3 : null;
-  return name === "prefill" ? 2 : null;
+  return name === "prefill" ? 2 : name === "hint" ? 3 : null;
 }
 
 function lineStarts(source: string): readonly number[] {

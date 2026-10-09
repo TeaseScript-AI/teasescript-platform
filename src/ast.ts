@@ -433,7 +433,7 @@ export type ScalarTypeName =
   | "date"
   | "time"
   | "datetime"
-  | "timestamp"
+  | "absoluteDateTime"
   | "duration"
   | "script";
 

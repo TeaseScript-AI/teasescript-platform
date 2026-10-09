@@ -11,6 +11,7 @@ import {
   interactionDeadlineMs,
   MAIN_FILE_PATH,
   restoreCheckpoint,
+  RuntimeSessionError,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
@@ -134,7 +135,7 @@ type PlayerRuntimePublication = Pick<PlayerRuntimeSession, "revision" | "recorde
  * an earlier publication throws. When an engine call throws, the runtime session ends; the next use rebuilds the state
  * of the latest publication from the calls the session's debug recorder logged, so the session continues where the
  * Player showed it, as it did before the call. Without a recorder, or when its log does not reach that publication, the
- * original error is thrown again.
+ * original error is thrown again. A call cannot start while another runs, such as from a random decision it reaches.
  */
 export class PlayerRuntimeEngine {
   #runtime: RuntimeSession;
@@ -145,6 +146,8 @@ export class PlayerRuntimeEngine {
   #thrown: { readonly error: unknown } | null = null;
   /** Which random draws the host decides or pauses at, which a rebuilt runner takes over. */
   #randomControl: RandomControlOptions | null = null;
+  /** Whether a call runs; the runner is busy then, so a call it reaches would only throw and end it. */
+  #calling = false;
 
   public constructor(runtime: RuntimeSession, revision: number) {
     this.#runtime = runtime;
@@ -181,7 +184,12 @@ export class PlayerRuntimeEngine {
     ) => R,
     continuation = false,
   ): R {
+    if (this.#calling)
+      throw new RuntimeSessionError(
+        "A Player session call cannot start while another call of the same session runs.",
+      );
     const runtime = this.runtimeAt(at);
+    this.#calling = true;
     try {
       if (at.recorder === null) return invoke(runtime, (store) => store);
       return at.recorder.call(
@@ -199,6 +207,8 @@ export class PlayerRuntimeEngine {
     } catch (error) {
       if (ended(runtime)) this.#thrown = { error };
       throw error;
+    } finally {
+      this.#calling = false;
     }
   }
 

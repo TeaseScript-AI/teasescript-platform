@@ -80,6 +80,10 @@ test("host values cannot carry handles or speaker references, which only the run
     });
     assert.equal(result.snapshot.status, "failed");
     assert.equal(result.snapshot.failure?.code, "TSR013");
+    assert.match(
+      result.snapshot.failure?.message ?? "",
+      /^The built-in function 'host' returned a value that contains an? [a-z ]+\. Only the engine creates [a-z ]+s, so a built-in cannot return one\. This is a fault in the Playroom, not in the script\. Report it with a debug export\.$/u,
+    );
     assert.throws(
       () => createFreshRuntimeSnapshot(compiled, { globals: { given: value } }),
       /only the runtime creates/,

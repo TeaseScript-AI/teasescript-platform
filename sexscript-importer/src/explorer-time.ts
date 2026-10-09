@@ -24,7 +24,14 @@ function list(value: unknown): Data[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
-const CLOCK_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
+// getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
+const CLOCK_GETTERS = new Set([
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getTimestamp",
+  "getAbsoluteDateTime",
+]);
 const PARTS = new Set(["year", "month", "day", "hour", "minute", "second", "weekdayNumber"]);
 const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">=", "in"]);
 const MINUTE = 60_000;
@@ -696,7 +703,10 @@ function runtimeValue(value: unknown): Value {
     return data.months === undefined && data.days === undefined
       ? { kind: "duration", milliseconds: data.milliseconds }
       : undefined;
-  if (data.kind === "timestamp" && typeof data.epochMilliseconds === "number")
+  if (
+    (data.kind === "timestamp" || data.kind === "absoluteDateTime") &&
+    typeof data.epochMilliseconds === "number"
+  )
     return { kind: "timestamp", milliseconds: data.epochMilliseconds };
   return isRecord(value) ? { kind: "data", data: value } : undefined;
 }
@@ -858,7 +868,10 @@ function callAt(node: Data, reading: Reading): Value {
   const name = calleeName(node) ?? "";
   const callee = record(node.callee);
   if (callee.kind === "identifier" && CLOCK_GETTERS.has(name))
-    return { kind: name === "getTimestamp" ? "timestamp" : "datetime", milliseconds: reading.now };
+    return {
+      kind: name === "getTimestamp" || name === "getAbsoluteDateTime" ? "timestamp" : "datetime",
+      milliseconds: reading.now,
+    };
   const helper = callee.kind === "identifier" ? reading.model.helpers.get(name) : undefined;
   if (helper !== undefined) return part(helper.part, reading.now);
   if (typeof node.functionId === "number" && reading.model.pure.has(node.functionId))

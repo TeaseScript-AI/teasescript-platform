@@ -274,7 +274,7 @@ const script = [
   "exit",
 ].join("\n");
 
-const SCOPES_USED_UP = /nextScopeId cannot be advanced safely/u;
+const SCOPES_USED_UP = /nextScopeId is at its largest value, so it cannot advance/u;
 
 async function start(context: TestContext, host: RewindHost) {
   await host.loadScriptStorage();

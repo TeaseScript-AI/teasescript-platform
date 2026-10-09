@@ -22,12 +22,6 @@ function sexscriptLegacyListMax(itemsValue2) {
   }
   return best
 }
-function sexscriptLegacyMax(first, second) {
-  if first >= second {
-    return first
-  }
-  return second
-}
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
     return listValue[listValue.length + position]
@@ -87,7 +81,7 @@ pairs.remove([1, 2])
 let numbers = [5, 6]
 say "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}"
 say "Best: ${sexscriptLegacyListMax([3, 7, 5])}"
-let bigger = sexscriptLegacyMax(total, 4)
+let bigger = max(total, 4)
 if items.length == 0 {
   say "Nothing left"
 }

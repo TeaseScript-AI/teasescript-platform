@@ -12,3 +12,8 @@ global function rounds(count, msg) {
 global function twice(it = null) {
   return it * 2
 }
+// Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
+global function percentChance(percent) {
+  let switchValue1 = randomInteger(0..99) + 1
+  return (switchValue1 >= 0 and switchValue1 <= percent) or (switchValue1 <= 0 and switchValue1 >= percent)
+}

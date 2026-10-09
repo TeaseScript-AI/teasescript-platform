@@ -605,7 +605,7 @@ export class RuntimeSession {
   #read<T>(read: (state: RuntimeSnapshot) => T): T {
     if (this.#thrown !== null) {
       throw new RuntimeSessionError(
-        "This runtime session ended when one of its operations threw; continue from the last exported snapshot or checkpoint.",
+        "This runtime session ended when one of its operations threw. Continue from the last exported snapshot or checkpoint.",
         { cause: this.#thrown.error },
       );
     }

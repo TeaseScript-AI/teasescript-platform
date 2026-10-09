@@ -1337,7 +1337,6 @@ test("late fractional rounds match on time, tiny rounds end normally, zero remai
     adjusted.snapshot.settledTimers.map((timer) => [timer.timerId, timer.state]),
     [[issued.timer.timerId, "finished"]],
   );
-  assert.ok(adjusted.snapshot.settledTimers.every((timer) => timer.roundDurationMs >= 0));
 
   const range = plan("let n = 0\ntimer(duration: n..2, async: true, repeat: true)\nwait 10\nexit");
   const fresh = createImmediatePacingRuntimeSnapshot(range, { seed: 0x1234_5678 });
@@ -1550,6 +1549,115 @@ test("settled timers stay readable through every handle and expiry block that st
     boundaries.at(-1)?.settledTimers.map((timer) => timer.timerId),
     [4, 5],
   );
+});
+
+test("a settled timer record keeps only what its handle reads, the same at every checkpoint boundary", () => {
+  const source = [
+    "function start(n: integer): timer {",
+    '  let t = timer(duration: 2, async: true, display: "mystery", label: "Beat", repeat: true) { say "beat ${n}" }',
+    "  return t",
+    "}",
+    "let beat = start(1)",
+    'let once = timer(duration: 1, async: true, label: "Once") { say "once ${once.state}" }',
+    'let cut = timer async 10 "Cut"',
+    "let plain = timer async 20",
+    "wait 3",
+    "beat.repeatDuration = 3 s",
+    "beat.stop()",
+    "cut.stop()",
+    "plain.stop()",
+    "wait 1",
+    "for t in [beat, once, cut, plain] {",
+    "  say t",
+    '  say "${t.remaining} ${t.elapsed} ${t.display} ${t.label} ${t.state} ${t.repeatDuration}"',
+    "  t.pause()",
+    "  t.resume()",
+    "  t.remaining = 1 s",
+    '  t.display = "visible"',
+    "  t.repeatDuration = 2 s",
+    "  t.stop()",
+    '  say "${t.remaining} ${t.elapsed} ${t.display} ${t.state}"',
+    "}",
+    "exit",
+  ].join("\n");
+  const { boundaries, events } = assertRuntimeResumeEquivalent(source);
+  // Settled timers read no time left and the time they ran; controls change nothing and warn, except the silent stop.
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    [
+      "once finished",
+      "beat 1",
+      '<timer "Beat", stopped>',
+      "0 s 3 s mystery Beat stopped 3 s",
+      "0 s 3 s mystery stopped",
+      '<timer "Once", finished>',
+      "0 s 1 s visible Once finished null",
+      "0 s 1 s visible finished",
+      '<timer "Cut", stopped>',
+      "0 s 3 s visible Cut stopped null",
+      "0 s 3 s visible stopped",
+      "<timer, stopped>",
+      "0 s 3 s visible null stopped null",
+      "0 s 3 s visible stopped",
+    ],
+  );
+  assert.equal(
+    events.filter((event) => event.kind === "developerWarning" && event.code === "TSW010").length,
+    20,
+  );
+  const kept = boundaries.flatMap((boundary) => boundary.settledTimers);
+  assert.ok(kept.length > 0);
+  for (const timer of kept) {
+    assert.deepEqual(Object.keys(timer), [
+      "timerId",
+      "state",
+      "display",
+      "label",
+      "persist",
+      "repeatDurationMs",
+      "elapsedMs",
+    ]);
+  }
+});
+
+test("restore validation rejects malformed settled timer records and their blocks", () => {
+  // The one-shot timer finishes while the second timer's block runs, so its own block waits.
+  const session = new Session(
+    'let t = timer async 1 {\n  say "late"\n}\ntimer async 0 s {\n  wait 5\n}\nwait 10\nexit',
+  ).at(1_500);
+  // The waiting block and the running one keep both records.
+  assert.deepEqual(
+    session.snapshot.settledTimers.map((timer) => [timer.timerId, timer.state]),
+    [
+      [2, "finished"],
+      [1, "finished"],
+    ],
+  );
+  assert.equal(session.snapshot.pendingTimerHandlers.length, 1);
+  assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
+  type Mutable = {
+    settledTimers: Record<string, unknown>[];
+    pendingTimerHandlers: { count: number }[];
+  };
+  const mutations: readonly (readonly [string, (snapshot: Mutable) => void])[] = [
+    ["kept round", (snapshot) => (snapshot.settledTimers.at(-1)!.roundDurationMs = 1_000)],
+    ["active state", (snapshot) => (snapshot.settledTimers.at(-1)!.state = "running")],
+    [
+      "ran longer than scene time",
+      (snapshot) => (snapshot.settledTimers.at(-1)!.elapsedMs = 2_000),
+    ],
+    ["unknown display", (snapshot) => (snapshot.settledTimers.at(-1)!.display = "loud")],
+    ["block of a stopped timer", (snapshot) => (snapshot.settledTimers.at(-1)!.state = "stopped")],
+    ["no statement persists", (snapshot) => (snapshot.settledTimers.at(-1)!.persist = true)],
+    ["no statement has a label", (snapshot) => (snapshot.settledTimers.at(-1)!.label = "Late")],
+    ["one-shot block twice", (snapshot) => (snapshot.pendingTimerHandlers[0]!.count = 2)],
+  ];
+  for (const [name, mutate] of mutations) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as Mutable;
+    mutate(corrupted);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  }
 });
 
 test("a long start and stop loop keeps settledTimers and the snapshot bounded", () => {

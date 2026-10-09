@@ -611,7 +611,8 @@ with the message above them, an update taller than the view shows directly and s
 with Return to latest while later messages do not move the reader, also for a two-entry update after the reader
 scrolled back to the end, and that nothing enters under reduced motion. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
-with the saved photo's exact bytes and not the unsaved one, a refused copy selects the text, closing releases the file,
+with the saved photo's exact bytes and not the unsaved one, a copy without the clipboard API still copies the text, a
+refused copy selects it, closing releases the file,
 and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file
 lists every script as new and Cancel keeps the running session; a dropped file's confirmation ends the session, puts
 every script into its own scope, and the next Start shows the imported photo; pasted text replaces the data before

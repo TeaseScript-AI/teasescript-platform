@@ -80,8 +80,8 @@ export function storagePreview(value: SerializableRuntimeValue): StoragePreview 
       return preview("Time", formatIsoTime(value));
     case "datetime":
       return preview("Date and time", formatIsoDateTime(value));
-    case "timestamp":
-      return preview("Timestamp", formatIsoTimestamp(value.epochMilliseconds));
+    case "absoluteDateTime":
+      return preview("Absolute date and time", formatIsoTimestamp(value.epochMilliseconds));
     case "script":
       return preview(
         "Script",

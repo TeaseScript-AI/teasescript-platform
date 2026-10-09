@@ -94,10 +94,10 @@ function reset2 {
 // A number a built-in computes with was there, or legacy failed, so it reads as 0 where missing, as Domme3's start time.
 let started = load "game.started", default: 0
 let startedDay = toInteger(started) / 86400
-let since = getTimestamp().toSeconds() - started
+let since = getAbsoluteDateTime().toSeconds() - started
 say "Day ${startedDay}, ${since} s ago"
 function restart {
-  save getTimestamp().toSeconds() as "game.started"
+  save getAbsoluteDateTime().toSeconds() as "game.started"
 }
 // A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
 // it into text, or into true only for "true".

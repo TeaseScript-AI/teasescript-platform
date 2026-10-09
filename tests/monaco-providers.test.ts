@@ -56,7 +56,7 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
     position("askText as mistress ".length + 1),
   );
   assert.equal(signatureResult?.value.activeParameter, 1);
-  assert.equal(signatureResult?.value.signatures[0]?.parameters[1]?.label, "hint");
+  assert.equal(signatureResult?.value.signatures[0]?.parameters[1]?.label, "question");
 
   const source = 'say    "Hello",instant\nexit';
   const edits = formatting.provideDocumentFormattingEdits(model(source));

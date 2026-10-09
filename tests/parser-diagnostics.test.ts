@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileProject } from "../src/compiler.js";
 import { compileSource } from "../src/index.js";
 import { parse } from "../src/parser.js";
 
@@ -72,7 +73,7 @@ test("reports an empty string interpolation and parses a later statement", () =>
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [["TSP008", "error", [13, 0, 13, 13, 0, 13]]]);
-  assert.deepEqual(statementKinds(result), ["exitStatement"]);
+  assert.deepEqual(statementKinds(result), ["sayStatement", "exitStatement"]);
 });
 
 test("rejects invalid interpolation punctuation deterministically", () => {
@@ -80,7 +81,7 @@ test("rejects invalid interpolation punctuation deterministically", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [["TSP009", "error", [13, 0, 13, 14, 0, 14]]]);
-  assert.deepEqual(statementKinds(result), ["exitStatement"]);
+  assert.deepEqual(statementKinds(result), ["sayStatement", "exitStatement"]);
 });
 
 test("reports a missing property after dot without cascading", () => {
@@ -88,7 +89,7 @@ test("reports a missing property after dot without cascading", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [["TSP010", "error", [14, 0, 14, 14, 0, 14]]]);
-  assert.deepEqual(statementKinds(result), ["exitStatement"]);
+  assert.deepEqual(statementKinds(result), ["sayStatement", "exitStatement"]);
 });
 
 test("does not duplicate lexer diagnostics for an unterminated interpolation", () => {
@@ -96,7 +97,12 @@ test("does not duplicate lexer diagnostics for an unterminated interpolation", (
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [["TSL005", "error", [11, 0, 11, 19, 0, 19]]]);
-  assert.deepEqual(statementKinds(result), ["exitStatement"]);
+  assert.deepEqual(statementKinds(result), ["sayStatement", "exitStatement"]);
+  // Where only a path written out in quotes is allowed, the string counts as failed without another error.
+  assert.deepEqual(
+    compactDiagnostics(parse('goto "rooms/${room"\nexit')).map(([code]) => code),
+    ["TSL005"],
+  );
 });
 
 test("an error inside an interpolation where a value is required is reported only once", () => {
@@ -110,7 +116,71 @@ test("an error inside an interpolation where a value is required is reported onl
     const compilation = compileSource(source);
     assert.deepEqual(compactDiagnostics(compilation), [expected], source);
     assert.equal(compilation.plan, null, source);
-    assert.deepEqual(statementKinds(parse(source)), ["exitStatement"], source);
+    assert.deepEqual(statementKinds(parse(source)), ["letStatement", "exitStatement"], source);
+  }
+});
+
+test("a statement keeps a string whose interpolation failed, so nothing around it reports another error", () => {
+  for (const [source, code, kinds] of [
+    [
+      'let value = "${askText "Q", default: "Ada"}"\nlet after = 1\nexit',
+      "TSP032",
+      ["letStatement", "letStatement", "exitStatement"],
+    ],
+    // A dropped string would add an error for its missing value to each of these.
+    ['let value = 1 + "${1 < 2 < 3}"\nexit', "TSP020", ["letStatement", "exitStatement"]],
+    [
+      'let pick = choose "${name nickname}", "Later"\nexit',
+      "TSP009",
+      ["letStatement", "exitStatement"],
+    ],
+    ['if "${}" == "x" {\n  say "y"\n}\nexit', "TSP008", ["ifStatement", "exitStatement"]],
+    ['showButton "${player.}"\nexit', "TSP010", ["showButtonStatement", "exitStatement"]],
+    ['save "key ${1 +}" as 1\nexit', "TSP012", ["saveStatement", "exitStatement"]],
+    // The bounded say form is told by the comma after its text, also when the text recovered from an error.
+    ['say("Hi ${player.}", instant)\nexit', "TSP010", ["sayStatement", "exitStatement"]],
+    // A say of a call to a function named bubble, whose argument recovered from an error.
+    [
+      'function bubble(text) {\n  return text\n}\nsay bubble ("Hi ${player.}")\nexit',
+      "TSP010",
+      ["functionDeclaration", "sayStatement", "exitStatement"],
+    ],
+    // What follows an expression that already reported its error is skipped without another one.
+    ['let value = "${1 < 2 < 3 x}"\nexit', "TSP020", ["letStatement", "exitStatement"]],
+  ] as const) {
+    const compilation = compileSource(source);
+    assert.deepEqual(
+      compilation.diagnostics.map((diagnostic) => diagnostic.code),
+      [code],
+      source,
+    );
+    assert.deepEqual(statementKinds(parse(source)), kinds, source);
+  }
+  // Another file still finds the global.
+  const project = compileProject([
+    { path: "main.tease", source: 'global greeting = "${1 < 2 < 3}"\ngoto "other.tease"\n' },
+    { path: "other.tease", source: "say greeting\nexit\n" },
+  ]);
+  assert.deepEqual(
+    project.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["main.tease", "TSP020"]],
+  );
+});
+
+test("where only text written out in quotes is allowed, a failed interpolation reports nothing more", () => {
+  for (const [source, code] of [
+    ['goto "rooms/${room name}.tease"\nexit', "TSP009"],
+    ['goto "rooms/${}.tease"\nexit', "TSP008"],
+    ['call tagged "punishment ${1 < 2 < 3}"\nexit', "TSP020"],
+    ['call tagged "a ${}"\nexit', "TSP008"],
+    ['call tagged "punishment", from: "modules/${x y}"\nexit', "TSP009"],
+    ['let pool = findScripts(from: "modules/${}")\nexit', "TSP008"],
+  ] as const) {
+    assert.deepEqual(
+      compileSource(source).diagnostics.map((diagnostic) => diagnostic.code),
+      [code],
+      source,
+    );
   }
 });
 

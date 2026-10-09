@@ -1728,6 +1728,22 @@ function validateFunctionDefinitions(
   }
 
   const index = createPlanValidationIndex(instructions, files, validatedRanges);
+  // A timer, media, or button block is a handler region of its own: a waiting block's resource, its activation, and its
+  // shared variables are known from the one statement that uses the block.
+  const blockFunctions = new Set<number>();
+  const claimBlock = (functionId: number, instructionIndex: number): void => {
+    if (!blockFunctions.has(functionId)) {
+      blockFunctions.add(functionId);
+      return;
+    }
+    errors.push(
+      planError(
+        "TSC002",
+        "A block function belongs to one timer, media, or button block only.",
+        `$.instructions[${instructionIndex}]`,
+      ),
+    );
+  };
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const ownerRegion = index?.owners[instructionIndex];
@@ -1796,6 +1812,9 @@ function validateFunctionDefinitions(
           : instruction.kind === "showPermanentButton"
             ? "button"
             : null;
+      if (handler !== null)
+        // EVIDENCE: validation: the enclosing condition established the numeric handler ID.
+        claimBlock(instruction.handlerFunctionId as number, instructionIndex);
       if (target !== undefined && target.handler !== handler) {
         errors.push(
           planError(
@@ -1819,6 +1838,7 @@ function validateFunctionDefinitions(
       ];
       for (const id of handlerIds) {
         if (typeof id !== "number") continue;
+        claimBlock(id, instructionIndex);
         const targetRange = index?.functionsById.get(id);
         reportForeignFunction(targetRange, ownerRegion, false, index, instructionIndex, errors);
         const target = targetRange?.definition;
