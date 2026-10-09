@@ -19,7 +19,7 @@ export const CONVERSION_RESULTS = new Map([
   ["toDate", "date"],
   ["toTime", "time"],
   ["toDateTime", "datetime"],
-  ["toTimestamp", "timestamp"],
+  ["toAbsoluteDateTime", "absoluteDateTime"],
 ] as const);
 
 export type ConversionName =
@@ -34,7 +34,7 @@ export function isConversionName(name: string): name is ConversionName {
 export type ConversionResult =
   typeof CONVERSION_RESULTS extends ReadonlyMap<string, infer V> ? V : never;
 
-export type TemporalConversionResult = "date" | "time" | "datetime" | "timestamp";
+export type TemporalConversionResult = "date" | "time" | "datetime" | "absoluteDateTime";
 
 /** What each date and time conversion converts besides text, and the ISO text it reads (V30 §35). */
 export const TEMPORAL_CONVERSIONS: Readonly<
@@ -66,10 +66,10 @@ export const TEMPORAL_CONVERSIONS: Readonly<
     text: 'local ISO date and time text without an offset, such as "2026-10-04T18:00"',
     parse: parseIsoDateTime,
   },
-  timestamp: {
-    from: ["timestamp"],
-    converts: "text or a timestamp",
-    text: 'ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z"',
+  absoluteDateTime: {
+    from: ["absoluteDateTime"],
+    converts: "text or an absolute date and time",
+    text: 'ISO text with Z or an offset, such as "2026-10-04T12:30:00Z"',
     parse: parseIsoTimestamp,
   },
 };
@@ -111,8 +111,8 @@ export function describeConversionResult(result: ConversionResult): string {
       return "a time";
     case "datetime":
       return "a date and time";
-    case "timestamp":
-      return "a timestamp";
+    case "absoluteDateTime":
+      return "an absolute date and time";
   }
 }
 

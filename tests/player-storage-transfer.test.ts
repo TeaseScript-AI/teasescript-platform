@@ -62,7 +62,10 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
       millisecond: 6,
     },
   },
-  { key: "timestamp", value: { kind: "timestamp", epochMilliseconds: 1_790_000_000_000 } },
+  {
+    key: "absoluteDateTime",
+    value: { kind: "absoluteDateTime", epochMilliseconds: 1_790_000_000_000 },
+  },
   { key: "script", value: { kind: "script", path: "rooms/cellar.tease", label: null } },
   { key: "unresolved", value: "captured-media:33333333-3333-4333-8333-333333333333:1" },
 ];

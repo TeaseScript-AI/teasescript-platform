@@ -47,8 +47,8 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
  * Scalar visible text: strings, finite numbers, booleans, `null`, durations, date and time values, and script
- * references. Dates and times use the player's numeric presentation from `context`, and a timestamp shows as the local
- * date and time it is.
+ * references. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows
+ * as the local date and time it is.
  */
 export function visibleText(
   value: SerializableRuntimeValue,
@@ -70,12 +70,12 @@ function temporalText(
       return presentTime(context.presentation, value);
     case "datetime":
       return presentDateTime(context.presentation, value);
-    case "timestamp": {
+    case "absoluteDateTime": {
       const local = localFields(context.zone, value.epochMilliseconds);
       if (!local.ok)
         throw fault(
           "TSR063",
-          `This timestamp cannot be shown as local time: ${local.reason}. Show it with toISO() instead.`,
+          `This absolute date and time cannot be shown as local time: ${local.reason}. Show it with toISO() instead.`,
           span,
         );
       return presentDateTime(context.presentation, local.value);
@@ -92,8 +92,8 @@ function temporalNotation(value: SerializableRuntimeTemporal): string {
       return `<time ${formatIsoTime(value)}>`;
     case "datetime":
       return `<datetime ${formatIsoDate(value)} ${formatIsoTime(value)}>`;
-    case "timestamp":
-      return `<timestamp ${formatIsoTimestamp(value.epochMilliseconds)}>`;
+    case "absoluteDateTime":
+      return `<absoluteDateTime ${formatIsoTimestamp(value.epochMilliseconds)}>`;
   }
 }
 

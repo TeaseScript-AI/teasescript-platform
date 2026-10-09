@@ -342,7 +342,7 @@ export {
   type SerializableRuntimeDate,
   type SerializableRuntimeDateTime,
   type SerializableRuntimeTime,
-  type SerializableRuntimeTimestamp,
+  type SerializableRuntimeAbsoluteDateTime,
 } from "./runtime/serializable-values.js";
 export {
   DEFAULT_TEMPORAL_CONTEXT,

@@ -47,6 +47,8 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "date",
   "time",
   "datetime",
+  "absoluteDateTime",
+  // The earlier name stays reserved, so its use is a compile error that names the fix (ADR 0026).
   "timestamp",
   "duration",
   "list",
@@ -104,10 +106,13 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "toDate",
   "toTime",
   "toDateTime",
-  "toTimestamp",
+  "toAbsoluteDateTime",
   "getDate",
   "getTime",
   "getDateTime",
+  "getAbsoluteDateTime",
+  // The earlier names stay reserved, so their calls are compile errors that name the fix (ADR 0026).
+  "toTimestamp",
   "getTimestamp",
   "schedule",
   "cancelSchedule",
@@ -202,14 +207,25 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "toDate",
   "toTime",
   "toDateTime",
-  "toTimestamp",
+  "toAbsoluteDateTime",
   "getDate",
   "getTime",
   "getDateTime",
-  "getTimestamp",
+  "getAbsoluteDateTime",
   "script",
   "removePermanentButton",
 ] as const);
+
+/** The earlier names of core built-ins, whose calls are compile errors that name the fix (ADR 0026). */
+export const RENAMED_BUILTINS: ReadonlyMap<string, string> = new Map([
+  ["getTimestamp", "getAbsoluteDateTime"],
+  ["toTimestamp", "toAbsoluteDateTime"],
+]);
+
+/** The earlier names of methods, whose calls are compile errors that name the fix on any value (ADR 0026). */
+export const RENAMED_METHODS: ReadonlyMap<string, string> = new Map([
+  ["toTimestamp", "toAbsoluteDateTime"],
+]);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
 export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);

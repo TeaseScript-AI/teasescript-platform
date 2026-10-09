@@ -3081,7 +3081,7 @@ export class Evaluator {
       throw fault(
         "TSR059",
         other === undefined
-          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps.`
+          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times.`
           : `${name}(...) needs numbers, durations, or date and time values, not ${describeRuntimeValue(other)}.`,
         span,
       );
@@ -3357,8 +3357,8 @@ export class Evaluator {
       if (property === undefined)
         throw fault(
           "TSR017",
-          value.kind === "timestamp"
-            ? `Timestamps have no property '${name}'. Convert it with toDateTime() to read local fields.`
+          value.kind === "absoluteDateTime"
+            ? `An absolute date and time has no property '${name}'. Convert it with toDateTime() to read local fields.`
             : `This ${value.kind} has no property '${name}'.`,
           span,
         );

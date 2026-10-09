@@ -275,14 +275,14 @@ defined in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage
 boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
 Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
-and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
-asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
+and `absoluteDateTime` values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`,
+and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
 restore, and permanent buttons whose clicks run their blocks like expiry interrupts. Timer, media, and button blocks
 share the variables of the code that creates them
 ([§14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)). Accepted forms and current
 limits are defined in specification [§27](specifications/accepted-syntaxes-v30.md#27-timers),
 [§28](specifications/accepted-syntaxes-v30.md#28-permanent-buttons), and
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-and-durations).
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
 `playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,

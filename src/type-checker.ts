@@ -159,7 +159,7 @@ import {
   settle,
   STRING_TYPE,
   TIME_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
   SCRIPT_TYPE,
   typeFromAnnotation,
   typeName,
@@ -4171,9 +4171,9 @@ class TypeChecker {
   }
 
   /**
-   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different
-   * families, moving a timestamp by calendar parts or a date by exact time, and calendar parts that would not stay whole.
-   * Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
+   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different families,
+   * moving an absolute date and time by calendar parts or a date by exact time, and calendar parts that would not stay
+   * whole. Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
    */
   #checkKnownDurations(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -4194,15 +4194,15 @@ class TypeChecker {
     };
     let problem: string | number | DurationParts | undefined;
     if (operator === "+" || operator === "-") {
-      // Only a timestamp or a date moved by a known duration has something to check.
-      const moved = isScalar(left, "timestamp")
-        ? "timestamp"
+      // Only an absolute date and time or a date moved by a known duration has something to check.
+      const moved = isScalar(left, "absoluteDateTime")
+        ? "absoluteDateTime"
         : isScalar(left, "date")
           ? "date"
           : undefined;
       const b = moved !== undefined && rightDuration ? duration(expression.right) : undefined;
-      if (b !== undefined && moved === "timestamp" && !isExactDuration(b))
-        problem = `a timestamp moves only by exact time such as 24 h, not by ${formatDuration(b)}. Convert it with toDateTime() first`;
+      if (b !== undefined && moved === "absoluteDateTime" && !isExactDuration(b))
+        problem = `an absolute date and time moves only by exact time such as 24 h, not by ${formatDuration(b)}. Convert it with toDateTime() first`;
       else if (b !== undefined && moved === "date" && b.milliseconds !== 0)
         problem = `a date moves only by days, weeks, months, or years, not by ${formatDuration(b)}`;
     } else if (leftDuration && rightDuration) {
@@ -4970,7 +4970,7 @@ class TypeChecker {
             this.#typeOf(item.value),
             (member) => familyOf(member) !== undefined && familyOf(member) === family,
             item.value,
-            `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps`,
+            `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times`,
           );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
@@ -4995,7 +4995,7 @@ class TypeChecker {
       case "toDate":
       case "toTime":
       case "toDateTime":
-      case "toTimestamp":
+      case "toAbsoluteDateTime":
         this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return scalarType(CONVERSION_RESULTS.get(name)!);
       case "escapeMarkup":
@@ -5010,7 +5010,7 @@ class TypeChecker {
       case "getDate":
       case "getTime":
       case "getDateTime":
-      case "getTimestamp":
+      case "getAbsoluteDateTime":
         // The current date and time take no arguments (V30 §35).
         if (expression.arguments.length > 0)
           this.#report(
@@ -5024,7 +5024,7 @@ class TypeChecker {
             ? TIME_TYPE
             : name === "getDateTime"
               ? DATETIME_TYPE
-              : TIMESTAMP_TYPE;
+              : ABSOLUTE_DATE_TIME_TYPE;
       case "script": {
         // `script(path)` or `script(path, label: name)`, both text (V30 §29).
         const positional = expression.arguments.filter(
@@ -5097,11 +5097,11 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
-    // A timestamp has no local fields until it is converted through the player's zone.
-    if (isScalar(value, "timestamp") && temporalFieldType("datetime", name) !== undefined) {
+    // An absolute date and time has no local fields until it is converted through the player's zone.
+    if (isScalar(value, "absoluteDateTime") && temporalFieldType("datetime", name) !== undefined) {
       this.#report(
         typeCode.invalidOperand,
-        `A timestamp has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        `An absolute date and time has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -6623,7 +6623,7 @@ const OPERAND_KINDS: readonly StaticType[] = [
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
   { kind: "list", element: UNKNOWN_TYPE },
 ];
 
@@ -7149,16 +7149,16 @@ const TEMPORAL_KINDS: ReadonlySet<ScalarTypeName> = new Set([
   "date",
   "time",
   "datetime",
-  "timestamp",
+  "absoluteDateTime",
 ]);
 
-/** Whether a value of this type is a date, time, date and time, or timestamp. */
+/** Whether a value of this type is a date, time, date and time, or absolute date and time. */
 function isTemporal(type: StaticType): boolean {
   const value = resolved(type);
   return value.kind === "scalar" && TEMPORAL_KINDS.has(value.name);
 }
 
-/** The type of a read-only field of a date or time value (V30 §35); a timestamp has none. */
+/** The type of a read-only field of a date or time value (V30 §35); an absolute date and time has none. */
 function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
   if (kind === "date" || kind === "datetime") {
     if (["year", "month", "day", "weekNumber", "weekYear"].includes(name)) return INTEGER_TYPE;
@@ -7184,14 +7184,14 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
     case "formatTime":
       return kind === "date" ? undefined : STRING_TYPE;
     case "formatDateTime":
-      return kind === "datetime" || kind === "timestamp" ? STRING_TYPE : undefined;
-    case "toTimestamp":
-      return kind === "datetime" ? TIMESTAMP_TYPE : undefined;
+      return kind === "datetime" || kind === "absoluteDateTime" ? STRING_TYPE : undefined;
+    case "toAbsoluteDateTime":
+      return kind === "datetime" ? ABSOLUTE_DATE_TIME_TYPE : undefined;
     case "toDateTime":
-      return kind === "timestamp" ? DATETIME_TYPE : undefined;
+      return kind === "absoluteDateTime" ? DATETIME_TYPE : undefined;
     case "toSeconds":
     case "toMilliseconds":
-      return kind === "timestamp" ? INTEGER_TYPE : undefined;
+      return kind === "absoluteDateTime" ? INTEGER_TYPE : undefined;
     default:
       return undefined;
   }
@@ -7692,8 +7692,8 @@ function operatorMessage(
   if (isScalar(left!, "time") || isScalar(right!, "time"))
     return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.`;
   if (expression.kind === "binaryExpression" && (operator === "+" || operator === "-")) {
-    // A timestamp or a date and time moves by a duration written after it.
-    if (isScalar(left!, "timestamp", "datetime")) {
+    // An absolute date and time or a date and time moves by a duration written after it.
+    if (isScalar(left!, "absoluteDateTime", "datetime")) {
       const subject = describeValue(left!);
       const added =
         operator === "+"
@@ -7706,7 +7706,7 @@ function operatorMessage(
           : "";
       return `${added}, not ${describeValue(right!)}.${fix}`;
     }
-    if (operator === "+" && duration(left!) && isScalar(right!, "timestamp", "datetime"))
+    if (operator === "+" && duration(left!) && isScalar(right!, "absoluteDateTime", "datetime"))
       return `'+' cannot add ${describeValue(right!)} to a duration. Write it first, as in '${expressionLabel(expression.right) ?? "value"} + 1 h'.`;
   }
   return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}.`;
@@ -7779,8 +7779,9 @@ function temporalNoun(type: StaticType): string {
 }
 
 /**
- * How to compare or subtract a date and time and a value of another kind: convert one of them. A date and time and a
- * timestamp convert through the player's zone; a date or a time is compared with that part of a date and time.
+ * How to compare or subtract a date and time and a value of another kind: convert one of them. A date and time and an
+ * absolute date and time convert through the player's zone; a date or a time is compared with that part of a date and
+ * time.
  */
 function temporalPairFix(
   expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -7792,7 +7793,8 @@ function temporalPairFix(
   if (local < 0) return "";
   const other = local === 0 ? right : left;
   const label = expressionLabel(local === 0 ? expression.left : expression.right) ?? "value";
-  if (isScalar(other, "timestamp")) return ` Convert one first, as in '${label}.toTimestamp()'.`;
+  if (isScalar(other, "absoluteDateTime"))
+    return ` Convert one first, as in '${label}.toAbsoluteDateTime()'.`;
   if (operator === "-") return "";
   if (isScalar(other, "date")) return ` Compare its date, as in 'toDate(${label})'.`;
   if (isScalar(other, "time")) return ` Compare its time, as in 'toTime(${label})'.`;
@@ -7814,8 +7816,8 @@ function unitFix(number: Expression | null): string {
  */
 function operandFix(operand: StaticType, type: StaticType, statement: AssignmentStatement): string {
   if (isNumeric(operand)) return " Use a number instead.";
-  // A timestamp or a date and time moves by a duration as well.
-  if (isScalar(operand, "duration", "timestamp", "datetime")) {
+  // An absolute date and time or a date and time moves by a duration as well.
+  if (isScalar(operand, "duration", "absoluteDateTime", "datetime")) {
     const literal = unwrap(statement.value);
     return literal.kind === "numberLiteral"
       ? ` Give the number a unit, such as '${literal.raw} s'.`
@@ -8022,7 +8024,7 @@ const GENERIC_FORM_ANSWER_TYPE = union([
   DATETIME_TYPE,
   // A cycle may return any choice value but `null`.
   DURATION_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
 ]);
 
 /** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */

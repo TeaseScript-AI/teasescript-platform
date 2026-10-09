@@ -70,8 +70,8 @@ export interface SerializableRuntimeDateTime extends DateTimeFields {
 }
 
 /** A fixed moment, in whole milliseconds since 1970-01-01T00:00:00Z. */
-export interface SerializableRuntimeTimestamp {
-  readonly kind: "timestamp";
+export interface SerializableRuntimeAbsoluteDateTime {
+  readonly kind: "absoluteDateTime";
   readonly epochMilliseconds: number;
 }
 
@@ -79,7 +79,7 @@ export type SerializableRuntimeTemporal =
   | SerializableRuntimeDate
   | SerializableRuntimeTime
   | SerializableRuntimeDateTime
-  | SerializableRuntimeTimestamp;
+  | SerializableRuntimeAbsoluteDateTime;
 
 /** An opaque script handle for one asynchronous timer record. */
 export interface SerializableTimerHandle {
@@ -358,7 +358,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "date":
     case "time":
     case "datetime":
-    case "timestamp":
+    case "absoluteDateTime":
     case "timerHandle":
     case "mediaHandle":
     case "permanentButtonHandle":
@@ -612,7 +612,7 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
       return `c${value.hour}:${value.minute}:${value.second}.${value.millisecond};`;
     case "datetime":
       return `D${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}:${value.second}.${value.millisecond};`;
-    case "timestamp":
+    case "absoluteDateTime":
       return `T${value.epochMilliseconds};`;
     case "range":
       return `r${numberText(value.start)}:${numberText(value.end)}:${value.inclusive ? 1 : 0};`;
@@ -755,7 +755,7 @@ function equalsOrDefer(
     case "date":
     case "time":
     case "datetime":
-    case "timestamp":
+    case "absoluteDateTime":
       return right.kind === left.kind && leafKey(right) === leafKey(left);
     case "timerHandle":
       return right.kind === "timerHandle" && right.timerId === left.timerId;
@@ -1060,12 +1060,12 @@ const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
   ["date", ["kind", "year", "month", "day"]],
   ["time", ["kind", "hour", "minute", "second", "millisecond"]],
   ["datetime", ["kind", "year", "month", "day", "hour", "minute", "second", "millisecond"]],
-  ["timestamp", ["kind", "epochMilliseconds"]],
+  ["absoluteDateTime", ["kind", "epochMilliseconds"]],
 ]);
 
 /**
- * Why a duration, date, time, datetime, or timestamp record is malformed, as a phrase such as "a malformed date", or
- * `null` when it is valid.
+ * Why a duration, date, time, datetime, or absolute date and time record is malformed, as a phrase such as "a malformed
+ * date", or `null` when it is valid.
  */
 function timeRecordProblem(value: Record<string, unknown>): string | null {
   if (value.kind === "duration")

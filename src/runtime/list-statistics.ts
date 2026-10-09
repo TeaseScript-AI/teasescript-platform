@@ -266,7 +266,7 @@ const ONE = whole(1);
 
 /**
  * The x positions of points as exact offsets from the first point: steps, whole days between dates, or milliseconds
- * between datetimes or timestamps, `perDay` of them in a day.
+ * between datetimes or absolute dates and times, `perDay` of them in a day.
  */
 type Positions =
   | {
@@ -419,8 +419,8 @@ function positionsOf(
     throw fault(
       "TSR060",
       other === undefined
-        ? "linearRegression(...) needs x values of one kind: numbers, dates, datetimes, or timestamps."
-        : `linearRegression(...) needs numbers, dates, datetimes, or timestamps as x values, not ${describeRuntimeValue(other)}.`,
+        ? "linearRegression(...) needs x values of one kind: numbers, dates, datetimes, or absolute dates and times."
+        : `linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not ${describeRuntimeValue(other)}.`,
       span,
     );
   }
@@ -437,9 +437,11 @@ function unitsFrom(start: SerializableRuntimeTemporal, value: SerializableRuntim
   if (start.kind === "date" && value.kind === "date") return daysBetween(value, start);
   if (start.kind === "datetime" && value.kind === "datetime")
     return dateTimeMilliseconds(value) - dateTimeMilliseconds(start);
-  if (start.kind === "timestamp" && value.kind === "timestamp")
+  if (start.kind === "absoluteDateTime" && value.kind === "absoluteDateTime")
     return value.epochMilliseconds - start.epochMilliseconds;
-  throw new Error("Only dates, datetimes, or timestamps of one kind have a distance.");
+  throw new Error(
+    "Only dates, datetimes, or absolute dates and times of one kind have a distance.",
+  );
 }
 
 /** The value a line from `linearRegression` expects at `x` (V30 §16). */
@@ -499,7 +501,7 @@ export function predict(
   if (offset === undefined)
     throw fault(
       "TSR059",
-      `predict(...) needs ${startKind === "number" ? "a number" : startKind === "datetime" ? "a date and time" : `a ${startKind}`} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
+      `predict(...) needs ${describeRuntimeValue(start!)} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
       span,
     );
   const value = quotient(

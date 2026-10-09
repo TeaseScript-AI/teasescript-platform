@@ -2128,7 +2128,7 @@ const TYPE_PLAN_NAMES = [
   "date",
   "time",
   "datetime",
-  "timestamp",
+  "absoluteDateTime",
   "never",
   "null",
   "range",

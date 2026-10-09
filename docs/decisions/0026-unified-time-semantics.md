@@ -155,7 +155,7 @@ These parts of the #512 time proposal remain open:
 
 ## Consequences
 
-- [V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps) describes the implemented
+- [V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-and-durations) describes the implemented
   language and gains each part of this decision in the change that implements it.
 - Source with the `timestamp` names or with `month` or `year` without `calendar` stops compiling, and so does `date`
   and `datetime` arithmetic with a `duration`. The SexScript importer emits the new forms.
