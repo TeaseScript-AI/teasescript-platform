@@ -100,4 +100,29 @@ while picked != null and picked != 0 {
     say "Reset ${picked}"
   }
 }
+// simpletimer: a menu over a list a loop built with one option for each saved timer after "New" names a timer where
+// its position is above 0.
+let timers = [
+  { name: "Short" },
+  { name: "Long" }
+]
+let timerNames = ["*** New ***"]
+for timerValue in timers {
+  timerNames.add(timerValue.name)
+}
+say "Which timer?"
+let timerChoice = choose sexscriptLegacyMenuOptions(timerNames, 0)
+if timerChoice != 0 {
+  say "Timer ${timers[timerChoice - 1].name}"
+}
+// DisciplineClinic's pending offenses: a counter from 0 that only grows reads the list while it is below its size.
+let pendingOffenses = ["late", "rude"]
+let p = pendingOffenses.length
+p = 0
+while p < pendingOffenses.length {
+  if load("pending.${pendingOffenses[p]}", default: false) == true {
+    say "Pending: ${pendingOffenses[p]}"
+  }
+  p += 1
+}
 exit

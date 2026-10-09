@@ -1624,12 +1624,15 @@ export function lowerParsedFile(
       : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
-      withDirectClosureCalls(
-        withPlacedBindings(
-          bindingDeclarations(body, context, members),
-          withPlacedFunctions(
-            context.closureFunctions,
-            withScriptBindings(authoredStatements, body, context, members),
+      withSetUpActions(
+        withDirectClosureCalls(
+          withPlacedBindings(
+            bindingDeclarations(body, context, members),
+            withPlacedFunctions(
+              context.closureFunctions,
+              withScriptBindings(authoredStatements, body, context, members),
+            ),
+            context,
           ),
           context,
         ),
@@ -5665,6 +5668,167 @@ function withDirectClosureCalls(statements: IrStatement[], context: LowerContext
   for (const action of replacedActions) if (!named.has(action)) context.actions.delete(action);
   if (!dispatched) context.actions.delete(ACTION_DISPATCHER_MARKER);
   return rewritten;
+}
+
+/**
+ * A script variable that starts as null and that one statement of the script's own code later sets to a closure, as
+ * BanjoRPG's world (`def worldTown`, then `worldTown = { ... }`), names that closure's function wherever it is
+ * called once the statement ran: before it the script's own code calls nothing, so no call can find the variable
+ * still null. Such calls call the function directly, and where nothing else reads the variable, the function takes its
+ * name and the variable goes.
+ */
+function withSetUpActions(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  const functions = new Map(
+    statements.flatMap((statement): Array<[string, Extract<IrStatement, { kind: "function" }>]> =>
+      statement.kind === "function" ? [[statement.name, statement]] : [],
+    ),
+  );
+  if (functions.size === 0) return statements;
+  // Every declaration and assignment of a name anywhere, and every variable name the code reads or binds.
+  const declared = new Map<string, number>();
+  const assigned = new Map<string, number>();
+  const bound = new Set<string>();
+  const count = (map: Map<string, number>, name: string): void => {
+    map.set(name, (map.get(name) ?? 0) + 1);
+  };
+  const scan = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(scan);
+    if (!isRecord(value)) return;
+    if (value.kind === "let" && typeof value.name === "string") count(declared, value.name);
+    if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+      count(assigned, String(value.target.name));
+    if (value.kind === "for" && typeof value.variable === "string") bound.add(value.variable);
+    if (value.kind === "function" && Array.isArray(value.parameters))
+      for (const parameter of value.parameters)
+        if (isRecord(parameter) && typeof parameter.name === "string") bound.add(parameter.name);
+    Object.values(value).forEach(scan);
+  };
+  scan(statements);
+  const calls = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(calls);
+    if (!isRecord(value)) return false;
+    if (
+      value.kind === "call" &&
+      (value.name === ACTION_DISPATCHER || functions.has(String(value.name)))
+    )
+      return true;
+    return Object.values(value).some(calls);
+  };
+  // The variables, by the action their one assignment gives them, where the script's own code ran nothing before it.
+  const actions = new Map<string, string>();
+  let ran = false;
+  for (const statement of statements) {
+    if (statement.kind === "function") continue;
+    if (
+      !ran &&
+      statement.kind === "assign" &&
+      statement.operator === "=" &&
+      statement.target.kind === "variable" &&
+      statement.value.kind === "literal" &&
+      statement.value.action === true &&
+      typeof statement.value.value === "string" &&
+      functions.has(statement.value.value)
+    ) {
+      const name = statement.target.name;
+      const start = statements.find(
+        (item) => item.kind === "let" && item.name === name && item.global !== true,
+      );
+      if (
+        start?.kind === "let" &&
+        start.value.kind === "literal" &&
+        start.value.value === null &&
+        declared.get(name) === 1 &&
+        assigned.get(name) === 1 &&
+        !bound.has(name)
+      )
+        actions.set(name, statement.value.value);
+    }
+    ran ||= calls(statement);
+  }
+  if (actions.size === 0) return statements;
+  // Each call passes a number of arguments the function takes.
+  let rewritten = deepMapped(statements, (value) => {
+    if (
+      value.kind !== "call" ||
+      value.name !== ACTION_DISPATCHER ||
+      !Array.isArray(value.positional) ||
+      !isRecord(value.positional[0]) ||
+      value.positional[0].kind !== "variable" ||
+      !isRecord(value.positional[1]) ||
+      value.positional[1].kind !== "list" ||
+      !Array.isArray(value.positional[1].items)
+    )
+      return value;
+    const action = actions.get(String(value.positional[0].name));
+    const target = action === undefined ? undefined : functions.get(action);
+    const args = value.positional[1].items;
+    if (
+      action === undefined ||
+      target === undefined ||
+      args.length > target.parameters.length ||
+      args.length < target.parameters.filter((parameter) => parameter.defaultValue === null).length
+    )
+      return value;
+    return { kind: "call", name: action, positional: args, named: {}, local: true };
+  });
+  // A variable that nothing reads any more goes, and its function takes its name, where nothing else names the
+  // function and the name is free.
+  const read = new Set<string>();
+  const named = new Set<string>();
+  let dispatched = false;
+  const uses = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(uses);
+    if (!isRecord(value)) return;
+    if (value.kind === "variable" && typeof value.name === "string") read.add(value.name);
+    if (value.kind === "literal" && value.action === true && typeof value.value === "string")
+      named.add(value.value);
+    if (value.kind === "call" && value.name === ACTION_DISPATCHER) dispatched = true;
+    Object.values(value).forEach(uses);
+  };
+  const setUp = (item: IrStatement): boolean =>
+    (item.kind === "let" && actions.has(item.name)) ||
+    (item.kind === "assign" && item.target.kind === "variable" && actions.has(item.target.name));
+  uses(rewritten.filter((item) => !setUp(item)));
+  const renamed = new Map<string, string>();
+  for (const [name, action] of actions)
+    if (!read.has(name) && !named.has(action) && !functions.has(name)) renamed.set(action, name);
+  const gone = new Set([...renamed.values()]);
+  rewritten = rewritten.filter(
+    (item) =>
+      !(item.kind === "let" && gone.has(item.name)) &&
+      !(item.kind === "assign" && item.target.kind === "variable" && gone.has(item.target.name)),
+  );
+  if (renamed.size > 0) {
+    rewritten = deepMapped(rewritten, (value) =>
+      (value.kind === "call" || value.kind === "function") &&
+      typeof value.name === "string" &&
+      renamed.has(value.name)
+        ? { ...value, name: renamed.get(value.name)! }
+        : value,
+    );
+    for (const action of renamed.keys()) context.actions.delete(action);
+  }
+  if (!dispatched) context.actions.delete(ACTION_DISPATCHER_MARKER);
+  return rewritten;
+}
+
+/**
+ * The value with every record in it mapped by `map`, children first; what `map` leaves as it is stays the same object.
+ */
+function deepMapped<T>(value: T, map: (record: Record<string, unknown>) => unknown): T {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => deepMapped(item, map));
+    return (items.some((item, index) => item !== value[index]) ? items : value) as T;
+  }
+  if (!isRecord(value)) return value;
+  let changed = false;
+  const children: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    const mapped = deepMapped(child, map);
+    changed ||= mapped !== child;
+    children[key] = mapped;
+  }
+  return map(changed ? children : value) as T;
 }
 
 /** The function a closure body only forwards to, passing its own parameters unchanged. */
