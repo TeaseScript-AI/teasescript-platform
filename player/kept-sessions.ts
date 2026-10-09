@@ -237,7 +237,10 @@ function validEvent(event: Record<string, unknown>): boolean {
   }
 }
 
-/** A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers checked against it. */
+/**
+ * A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers and shown options
+ * checked against it.
+ */
 function validSettlement(settlement: unknown): boolean {
   if (
     !isRecord(settlement) ||
@@ -262,6 +265,7 @@ function validSettlement(settlement: unknown): boolean {
         ui,
         settlement["result"],
         transcriptText,
+        settlement["shownOptions"],
         settlement["settlementKind"] === "timedOut",
       ))
   );

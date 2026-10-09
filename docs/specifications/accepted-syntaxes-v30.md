@@ -2284,8 +2284,8 @@ Rules:
 - Edits add nothing to the transcript. Submitting adds one player answer that lists every field with its state, in field
   order and never as a count: a toggle as on or off, and any other field as `label: value`, as its button shows it, or
   `label: Not set` for an optional field without a value. The Player shows one field per line, a toggle behind a check
-  or an empty box, or the plain text when a cycle's value is that of several of its options, which the result cannot
-  tell apart. The answer's plain text, for the transcript, exports, and screen readers, joins the fields with `, ` and
+  or an empty box, and a cycle with the option it showed, also where several of its options share a value. The
+  answer's plain text, for the transcript, exports, and screen readers, joins the fields with `, ` and
   marks a toggle `✓` or `✗`, such as `✓ crop / cane, ✗ paddle, ✓ whip` or `Intensity: High, Impact: 5`. Every answer is
   shown in full; answers too long for one transcript line are refused and the form stays open. (Owner decision,
   2026-10-07; it replaces the earlier `12 of 43 selected` and `5 of 6 fields set` counts.)
