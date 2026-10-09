@@ -1714,6 +1714,13 @@ async function randomPickerScenario(cdp, origin) {
     5_000,
     "A refused copy claimed to copy",
   );
+  // The click closes the tooltip, which then opens again to say why nothing was copied.
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-slot="tooltip-content"]')?.textContent.trim().startsWith("Copying is not available here") === true`,
+    5_000,
+    "A refused copy did not say why in its tooltip",
+  );
   assertEqual(
     await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
     true,
