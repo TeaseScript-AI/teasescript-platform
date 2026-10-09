@@ -1182,7 +1182,7 @@ test(
     // Background media keeps playing while the script waits.
     assert.deepEqual(
       run(
-        'let music = playAudio async "a.wav"\nwhile music.state == "running" {\n  wait 1\n}\nsay "done"\nexit\n',
+        'let music = playAudio async "a.wav"\nwhile music.state == "running" {\n  wait 1 s\n}\nsay "done"\nexit\n',
       ),
       halted,
     );
@@ -1192,7 +1192,7 @@ test(
       halted,
     );
     // A runtime failure caused by the last allowed step is still reported.
-    assert.deepEqual(run("wait 1\nlet item = [1][5]\nexit\n", 1), {
+    assert.deepEqual(run("wait 1 s\nlet item = [1][5]\nexit\n", 1), {
       status: "failed",
       code: "TSR025",
     });
