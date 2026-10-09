@@ -132,7 +132,7 @@ function shownLines(): { line: CodeLine; element: HTMLElement }[] {
   });
 }
 // Outside a secure context the clipboard API is missing; the selection route copies where the browser allows it, and
-// focus returns to where it was.
+// focus returns to where it was. Its field sits in the block, so a dialog around the large view keeps focus on it.
 function copyBySelection(text: string): boolean {
   const focused = document.activeElement;
   const area = document.createElement("textarea");
@@ -140,7 +140,7 @@ function copyBySelection(text: string): boolean {
   area.setAttribute("readonly", "");
   area.style.position = "fixed";
   area.style.opacity = "0";
-  document.body.append(area);
+  (scroller.value?.parentElement ?? document.body).append(area);
   area.select();
   const copied = document.execCommand("copy");
   area.remove();
@@ -220,7 +220,10 @@ async function copy() {
             <component :is="copyStatus === 'copied' ? Check : Copy" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{{ copyLabel }}</TooltipContent>
+        <!-- The failure text wraps within the screen. -->
+        <TooltipContent :collision-padding="8" class="max-w-(--reka-tooltip-content-available-width)">{{
+          copyLabel
+        }}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger as-child>

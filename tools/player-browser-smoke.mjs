@@ -1695,6 +1695,19 @@ async function randomPickerScenario(cdp, origin) {
     5_000,
     "Expand did not open the code large",
   );
+  // Copy works without the clipboard API in the large view too, whose dialog keeps focus inside it.
+  await evaluate(
+    cdp,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });`,
+  );
+  await physicalClick(cdp, "[data-code-block-lightbox] [data-code-block-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-code-block-lightbox] [data-code-block-copy]').getAttribute('aria-label') === "Copied"`,
+    5_000,
+    "Copy without the clipboard API did not copy in the large view",
+  );
+  await evaluate(cdp, `delete navigator.clipboard;`);
   await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
   await waitFor(
     cdp,
@@ -3774,6 +3787,24 @@ async function savedDataExportScenario(cdp, origin, profile) {
     gunzipSync(downloaded).toString("utf8"),
     "The text holds the same export as the file",
   );
+  // Without the clipboard API, as over plain HTTP, the selected text copies the older way, and focus stays on Copy.
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
+  );
+  await physicalClick(cdp, "[data-export-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `window.__copied === document.querySelector('[data-export-text]').value && document.activeElement === document.querySelector('[data-export-copy]')`,
+    ),
+    true,
+    "Copy without the clipboard API did not copy the text or lost the focus",
+  );
   // Refused clipboard access, where the browser also refuses copying the selection, leaves the text selected for
   // copying by hand.
   await evaluate(
@@ -3793,27 +3824,9 @@ async function savedDataExportScenario(cdp, origin, profile) {
     true,
     "The refused copy did not select the text",
   );
-  // Without the clipboard API, as over plain HTTP, the selected text copies the older way, and focus stays on Copy.
   await evaluate(
     cdp,
-    `delete document.execCommand; window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
-  );
-  await physicalClick(cdp, "[data-export-copy]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `window.__copied === document.querySelector('[data-export-text]').value && document.activeElement === document.querySelector('[data-export-copy]')`,
-    ),
-    true,
-    "Copy without the clipboard API did not copy the text or lost the focus",
-  );
-  await evaluate(
-    cdp,
-    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
+    `delete document.execCommand; window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
   );
   await physicalClick(cdp, "[data-export-copy]");
   await waitFor(
