@@ -1329,18 +1329,42 @@ export class Evaluator {
 
   public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
     const descriptor = this.#buildPreparedReference(expression);
-    // A collection call in an index can remove an ancestor of the selected value, so that the path no longer leads
-    // there from the binding. Such a reference is detached now, as its first use would detach it, so that a checkpoint
-    // taken before that use stays valid.
-    if (!descriptor.detached && this.#referenceEpoch !== 0) {
-      try {
-        this.#resolveDescriptor(descriptor, expression.span);
-      } catch (error) {
-        if (!(error instanceof RuntimeFault)) throw error;
-        return serializePreparedReference({ ...descriptor, detached: true });
-      }
+    return serializePreparedReference(this.#restorableDescriptor(descriptor, expression.span));
+  }
+
+  /**
+   * Restore validation needs the path of a stored reference to lead somewhere from its captured root and, while it is
+   * attached, from its binding. Either can fall behind: an index can add the value it names after the root was
+   * captured, or remove an ancestor of that value from the binding, and a reference extended from an earlier one keeps
+   * that one's root, which lacks what a function call since then has added. A reference whose binding no longer leads
+   * there is detached, as its first use would detach it, and fails now if its captured root falls short as well, as
+   * that use would fail. An attached reference whose captured root falls short captures the root it resolves through.
+   */
+  #restorableDescriptor(
+    descriptor: PreparedReferenceDescriptor,
+    span: SourceSpan,
+  ): PreparedReferenceDescriptor {
+    if (descriptor.detached) return descriptor;
+    if (!this.#resolves(descriptor, span)) {
+      const detached = { ...descriptor, detached: true };
+      this.#resolveDescriptor(detached, span);
+      return detached;
     }
-    return serializePreparedReference(descriptor);
+    if (this.#resolves({ ...descriptor, detached: true }, span)) return descriptor;
+    return {
+      ...descriptor,
+      capturedRoot: this.#resolveDescriptor({ ...descriptor, path: [] }, span),
+    };
+  }
+
+  #resolves(descriptor: PreparedReferenceDescriptor, span: SourceSpan): boolean {
+    try {
+      this.#resolveDescriptor(descriptor, span);
+      return true;
+    } catch (error) {
+      if (error instanceof RuntimeFault) return false;
+      throw error;
+    }
   }
 
   public validateAssignmentTarget(target: AssignmentTargetPlan): void {
