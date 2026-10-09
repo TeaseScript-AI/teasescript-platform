@@ -688,7 +688,9 @@ test("a fork admits only functions as builtins, and a session keeps the builtins
   });
   // EVIDENCE: fixture: an explicit undefined, which an untyped caller may pass, gives no builtin.
   const explicitlyNone = { answer: undefined } as never;
-  assert.doesNotThrow(() => parent.fork({ capabilities: { builtins: explicitlyNone } }));
+  const withoutAnswer = parent.fork({ capabilities: { builtins: explicitlyNone } });
+  withoutAnswer.run();
+  assert.equal(withoutAnswer.view().failure?.code, "TSR011");
   // The refused fork left the parent usable.
   assert.deepEqual(said(parent.fork()), ["42"]);
   assert.deepEqual(said(parent), ["42"]);
