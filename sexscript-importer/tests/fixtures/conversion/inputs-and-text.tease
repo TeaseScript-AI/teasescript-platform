@@ -62,4 +62,9 @@ for value in 5..=6 {
   say "${position}: ${value}"
   position += 1
 }
+// FirstTimeCuckold episode 2: a button text that reads a stored name shows an empty text for a missing one, as the
+// legacy button did, also where it is an askBoolean's noText.
+if askBoolean "Who controls the key?", yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
+  say "Fine."
+}
 exit
