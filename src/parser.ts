@@ -968,14 +968,15 @@ class Parser {
 
   /**
    * Whether the `(` here, after a `say` statement's mode and skip word, holds the text and pacing of its bounded form: a
-   * comma follows its first value. Grouping parentheses, valid or not, hold one value.
+   * comma follows its first value, also one that recovered from an error, such as a string with a failed interpolation.
+   * Grouping parentheses, valid or not, hold one value.
    */
   *#opensBoundedSayText(): ParseTask<boolean> {
     const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current + 1;
     speculative.#skipNewlines();
     const value = yield* parseChild(speculative.#withinDelimiters(speculative.#parseOr()));
-    if (value === null || speculative.#diagnostics.length > 0) return false;
+    if (value === null) return false;
     speculative.#skipNewlines();
     return speculative.#check(TokenKind.Comma);
   }

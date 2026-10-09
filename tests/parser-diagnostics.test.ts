@@ -137,6 +137,10 @@ test("a statement keeps a string whose interpolation failed, so nothing around i
     ['if "${}" == "x" {\n  say "y"\n}\nexit', "TSP008", ["ifStatement", "exitStatement"]],
     ['showButton "${player.}"\nexit', "TSP010", ["showButtonStatement", "exitStatement"]],
     ['save "key ${1 +}" as 1\nexit', "TSP012", ["saveStatement", "exitStatement"]],
+    // The bounded say form is told by the comma after its text, also when the text recovered from an error.
+    ['say("Hi ${player.}", instant)\nexit', "TSP010", ["sayStatement", "exitStatement"]],
+    // What follows an expression that already reported its error is skipped without another one.
+    ['let value = "${1 < 2 < 3 x}"\nexit', "TSP020", ["letStatement", "exitStatement"]],
   ] as const) {
     const compilation = compileSource(source);
     assert.deepEqual(
