@@ -58,7 +58,7 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
-import { editorFontSize, fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
+import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
@@ -1702,26 +1702,6 @@ function withLegacyMarkup(
   const fileVariables = new Set(
     statements.flatMap((statement) => (statement.kind === "let" ? [statement.name] : [])),
   );
-  // The size the file's editor gave all its texts (editorFontSize), from every text of the file.
-  const texts: string[] = [];
-  const collect = (value: IrExpression): IrExpression => {
-    if (value.kind === "literal" && typeof value.value === "string") texts.push(value.value);
-    if (value.kind === "template")
-      for (const part of value.parts) if ("text" in part) texts.push(part.text);
-    return mapChildren(value, collect);
-  };
-  const visit = (items: readonly IrStatement[]): void => {
-    for (const item of items) {
-      if (item.kind === "function") visit(item.body);
-      mapOwnExpressions(item, collect);
-      withNestedStatements(item, (body) => {
-        visit(body);
-        return body;
-      });
-    }
-  };
-  visit(statements);
-  const editorSize = editorFontSize(texts);
   // The constant texts folded into their spans, whose `let` goes where nothing reads it any more.
   let folded = new Set<string>();
   const markup = (
@@ -1741,8 +1721,8 @@ function withLegacyMarkup(
       (stripsTags || !given.some((part) => "text" in part && SHOWN_HTML_TAG.test(part.text)))
     )
       return value;
-    const parts = withFoldedSpanValues(given, constants, folded, editorSize);
-    const result = legacyHtmlToMarkup(parts, { fragment: !any, editorSize });
+    const parts = withFoldedSpanValues(given, constants, folded);
+    const result = legacyHtmlToMarkup(parts, { fragment: !any });
     if (!result.changed) return value;
     if (result.dropped) dropped += 1;
     return templateOrLiteral(result.parts);
@@ -1771,7 +1751,7 @@ function withLegacyMarkup(
   };
   const converted = convert(statements, new Map());
   if (dropped === 0) return converted;
-  const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, FONT FACE, ALIGN, and the size an editor gave all text (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
+  const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, ALIGN, and FONT FACE with the size an editor writes beside it (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
   context.diagnostics.push({ code: "SX_HTML_LAYOUT", severity: "warning", message, span: null });
   return [
     { kind: "comment", text: `// NOTE SX_HTML_LAYOUT: ${message}`, trailing: false, span: null },
@@ -1825,7 +1805,6 @@ function withFoldedSpanValues(
   parts: readonly TextPart[],
   constants: ReadonlyMap<string, string>,
   folded: Set<string>,
-  editorSize: string | null,
 ): TextPart[] {
   if (constants.size === 0) return [...parts];
   let depth = 0;
@@ -1838,7 +1817,7 @@ function withFoldedSpanValues(
       )) {
         const closing = match[1] === "/";
         if (match[2]!.toLowerCase() === "font") {
-          const size = closing ? null : fontSize(match[0], editorSize);
+          const size = closing ? null : fontSize(match[0]);
           const sized = closing ? (fonts.pop() ?? false) : size !== null && size !== "normal";
           if (!closing) fonts.push(sized);
           if (!sized) continue;

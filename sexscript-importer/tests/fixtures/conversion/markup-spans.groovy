@@ -13,7 +13,5 @@ def spank = { message, spot ->
 	else show("<font size='10'><b>"+message+"\n.1.</b></font>")
 }
 spank("Right cheek", "cheek")
-// Domme SMinder: the Flash editor writes a FACE and its size 6 around every paragraph, which add nothing; its larger
-// size stays.
-show("<TEXTFORMAT LEADING=\"2\"><P ALIGN=\"CENTER\"><FONT FACE=\"FontSans\" SIZE=\"8\" COLOR=\"#FF0000\" LETTERSPACING=\"0\" KERNING=\"1\"><B>Not interested!</B></FONT></P></TEXTFORMAT><TEXTFORMAT LEADING=\"2\"><P ALIGN=\"CENTER\"><FONT FACE=\"FontSans\" SIZE=\"6\" COLOR=\"#FFFFFF\" LETTERSPACING=\"0\" KERNING=\"1\">You have been blocked.</FONT></P></TEXTFORMAT>")
-show("<TEXTFORMAT LEADING=\"2\"><P ALIGN=\"CENTER\"><FONT FACE=\"FontSans\" SIZE=\"6\" COLOR=\"#FFFFFF\" LETTERSPACING=\"0\" KERNING=\"1\">Swipe again.</FONT></P></TEXTFORMAT>")
+// Milovana: the Flash editor wraps every paragraph in a FONT with its FACE and default size, which is no emphasis.
+show("<TEXTFORMAT LEADING=\"2\"><P ALIGN=\"CENTER\"><FONT FACE=\"FontSans\" SIZE=\"6\" COLOR=\"#000000\" LETTERSPACING=\"0\" KERNING=\"0\">You think I have all day to wait for you?</FONT></P></TEXTFORMAT>")

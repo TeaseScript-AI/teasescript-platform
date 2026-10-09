@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { editorFontSize, legacyHtmlToMarkup, type TextPart } from "../src/markup.ts";
+import { legacyHtmlToMarkup, type TextPart } from "../src/markup.ts";
 
 const text = (value: string): TextPart[] => [{ text: value }];
 const converted = (value: string): string =>
@@ -49,14 +49,11 @@ test("entities decode, also without their semicolon, and other ampersands stay",
 
 test("layout tags are dropped and reported, and interpolated values keep their places", () => {
   const value = { kind: "variable" as const, name: "name" };
-  const result = legacyHtmlToMarkup(
-    [
-      { text: '<TEXTFORMAT LEADING="2"><P ALIGN="CENTER"><FONT FACE="Arial" SIZE="6">Hello <b>' },
-      { value },
-      { text: "</b></FONT></P></TEXTFORMAT>" },
-    ],
-    { editorSize: "6" },
-  );
+  const result = legacyHtmlToMarkup([
+    { text: '<TEXTFORMAT LEADING="2"><P ALIGN="CENTER"><FONT FACE="Arial" SIZE="6">Hello <b>' },
+    { value },
+    { text: "</b></FONT></P></TEXTFORMAT>" },
+  ]);
   assert.equal(result.dropped, true);
   assert.deepEqual(result.parts, [{ text: "Hello **" }, { value }, { text: "**" }]);
   // catwoman: a size computed at runtime goes with its tag, and the shown values keep theirs.
@@ -92,29 +89,13 @@ test("a font size becomes a size span on each line, apart from the size of the t
   });
 });
 
-test("the size an editor gave every text is normal, so only the sizes it emphasized remain", () => {
-  const flash = (size: string, body: string): string =>
-    `<TEXTFORMAT LEADING="2"><P ALIGN="CENTER"><FONT FACE="FontSans" SIZE="${size}" COLOR="#FFFFFF">${body}</FONT></P></TEXTFORMAT>`;
+test("a FONT that names a FACE is an editor's text format, whose size is no emphasis", () => {
+  // Milovana: the Flash editor wraps every paragraph in its FACE, its default size, and a colour.
   assert.equal(
-    editorFontSize([
-      flash("6", "a") + flash("6", "b"),
-      flash("8", "c") + flash("6", "d"),
-      '<font size="10">x</font>',
-    ]),
-    "6",
-  );
-  const shown = (value: string): string =>
-    legacyHtmlToMarkup(text(value), { editorSize: "6" })
-      .parts.map((part) => ("text" in part ? part.text : "${…}"))
-      .join("");
-  assert.equal(
-    shown(flash("8", "<B>Not interested!</B>") + flash("6", "You have been blocked.")),
-    "[color=#ffffff][size=x-large]**Not interested!**[/size][/color]\n[color=#ffffff]You have been blocked.[/color]",
-  );
-  // Domme: the editor's size inside a larger one sets the text back to normal.
-  assert.equal(
-    shown(flash("8", '<B>It\'s a M</B><FONT SIZE="6"><B>ATCH</B><FONT SIZE="8"></FONT></FONT>')),
-    "[color=#ffffff][size=x-large]**It's a M**[size=normal]**ATCH**[/size][/size][/color]",
+    converted(
+      '<TEXTFORMAT LEADING="2"><P ALIGN="CENTER"><FONT FACE="FontSans" SIZE="6" COLOR="#000000" LETTERSPACING="0" KERNING="0">Wait for me.</FONT></P></TEXTFORMAT>',
+    ),
+    "[color=#000000]Wait for me.[/color]",
   );
 });
 

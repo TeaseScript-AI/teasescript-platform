@@ -1,4 +1,4 @@
-// NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, FONT FACE, ALIGN, and the size an editor gave all text (2 texts in this file).
+// NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, ALIGN, and FONT FACE with the size an editor writes beside it (1 text in this file).
 // DisciplineClinic Punish spank(): a local text that never changes, inside an HTML span, joins the span's own text,
 // so the span settles around its line breaks and its paragraphs are messages of their own.
 let counting = false
@@ -19,11 +19,6 @@ function spank(message, spot) {
   }
 }
 spank("Right cheek", "cheek")
-// Domme SMinder: the Flash editor writes a FACE and its size 6 around every paragraph, which add nothing; its larger
-// size stays.
-say """
-  [color=#ff0000][size=x-large]**Not interested!**[/size][/color]
-  [color=#ffffff]You have been blocked.[/color]
-"""
-say "[color=#ffffff]Swipe again.[/color]"
+// Milovana: the Flash editor wraps every paragraph in a FONT with its FACE and default size, which is no emphasis.
+say "[color=#000000]You think I have all day to wait for you?[/color]"
 exit

@@ -2,7 +2,7 @@
  * Legacy `show()` text rendered HTML, which TeaseScript `say` shows as written; its markup is TeaseScript message
  * markup (docs/specifications/message-markup.md). Bold, italic, underline, strikethrough, colour, font size, headings,
  * list items, and line breaks keep their meaning; layout-only tags such as TEXTFORMAT, FONT FACE, and ALIGN, and the
- * size an editor gave all its text (editorFontSize), are dropped; entities are decoded, also without their semicolon.
+ * size of an editor's text format (fontSize), are dropped; entities are decoded, also without their semicolon.
  */
 import type { IrExpression } from "./ir.ts";
 
@@ -42,50 +42,29 @@ const SPANS: Readonly<Record<string, string>> = {
 
 const HTML_TAG = /<\/?([a-z][a-z0-9]*)\b[^<>]*>/giu;
 const ENTITY = /&(?:#(\d{1,6});?|#x([0-9a-f]{1,6});?|(nbsp|quot|amp|lt|gt|apos);?)/giu;
-const FONT_SIZE = /\bsize\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+)(?![^\s>]))/iu;
 
 /**
- * The message markup size of a FONT tag's legacy SIZE: 1 and 2 small, 3 normal, 4 large, and 5 or more x-large (HTML
- * sizes end at 7, which a larger one shows). A size other than a whole number, such as `34px`, which legacy ignored,
- * or a value set at runtime, gives null. The editor's own size (editorFontSize) is normal.
+ * The message markup size of a FONT tag's legacy SIZE: 1 and 2 small, 3 normal, 4 large, and 5 or more x-large (legacy
+ * showed a larger size as 7). Null for a size that is no whole number, such as `34px`, which legacy ignored, or a
+ * value set at runtime, and for the size of a FONT that names a FACE: a rich-text editor's text format, which the Flash
+ * editor's htmlText (Countdown Game, Milovana) writes around every paragraph with its default size, where hand-written
+ * HTML names only what it changes.
  */
-export function fontSize(tag: string, editorSize: string | null = null): string | null {
-  const match = FONT_SIZE.exec(tag);
+export function fontSize(tag: string): string | null {
+  const match = /\bsize\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+)(?![^\s>]))/iu.exec(tag);
   const size = match?.[1] ?? match?.[2] ?? match?.[3];
-  if (size === undefined) return null;
-  if (size === editorSize) return "normal";
+  if (size === undefined || /\bface\s*=/iu.test(tag)) return null;
   const level = Number(size);
   return level <= 2 ? "small" : level === 3 ? "normal" : level === 4 ? "large" : "x-large";
 }
 
 /**
- * The size an editor gave every text of a file, which emphasizes nothing. A rich-text editor, such as the Flash one
- * whose htmlText some scripts show, writes a FONT with the FACE, size, and colour around each of its paragraphs, where
- * hand-written HTML names only what it changes; the size most of a file's FONT tags with a FACE set is its editor's.
- */
-export function editorFontSize(texts: Iterable<string>): string | null {
-  const counts = new Map<string, number>();
-  for (const text of texts)
-    for (const [tag] of text.matchAll(/<font\b[^<>]*>/giu)) {
-      if (!/\bface\s*=/iu.test(tag)) continue;
-      const match = FONT_SIZE.exec(tag);
-      const size = match?.[1] ?? match?.[2] ?? match?.[3];
-      if (size !== undefined) counts.set(size, (counts.get(size) ?? 0) + 1);
-    }
-  let editor: string | null = null;
-  for (const [size, count] of counts)
-    if (editor === null || count > counts.get(editor)!) editor = size;
-  return editor;
-}
-
-/**
  * `fragment` is for text that may become part of a longer text, such as a title that the script puts before a
  * message: it keeps its own surrounding whitespace, and only drops whitespace that a tag at its start introduced.
- * `editorSize` is the file's editorFontSize.
  */
 export function legacyHtmlToMarkup(
   parts: readonly TextPart[],
-  options: { fragment?: boolean; editorSize?: string | null } = {},
+  options: { fragment?: boolean } = {},
 ): MarkupResult {
   const values = parts.flatMap((part) => ("value" in part ? [part.value] : []));
   const source = parts.map((part) => ("value" in part ? VALUE : part.text)).join("");
@@ -129,7 +108,7 @@ export function legacyHtmlToMarkup(
         return index < 0 ? "" : open.splice(index, 1)[0]!.close;
       }
       const colour = /\bcolou?r\s*[=:]\s*["']?(#[0-9a-f]{3,8}|[a-z]+)/iu.exec(tag)?.[1];
-      const size = name === "font" ? fontSize(tag, options.editorSize ?? null) : null;
+      const size = name === "font" ? fontSize(tag) : null;
       const around = open.findLast((item) => item.size !== null)?.size ?? "normal";
       const sized = size !== null && size !== around ? `[size=${size}]` : "";
       if (/\b(face|style|align)\b/iu.test(tag) || (size === null && /\bsize\b/iu.test(tag)))
