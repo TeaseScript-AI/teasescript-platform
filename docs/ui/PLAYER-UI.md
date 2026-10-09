@@ -1047,8 +1047,10 @@ Ordinary neutral controls use the shared progression without geometric movement:
 1. default: quiet control surface with `border-subtle`;
 2. hover: `border-default` plus `surface-hover` fill;
 3. pressed/active: `border-strong` plus `surface-pressed` fill;
-4. keyboard focus: a `2px` accent outline with `2px` visible separation and no layout shift. The outline is the only
-   focus mark; components add no separate focus ring. The Player's `2px` separation replaces the shared `1px` baseline;
+4. keyboard focus: a `2px` outline in the neutral `focus-ring` role, the primary text tone, with `2px` visible
+   separation and no layout shift. The outline is the only focus mark; components add no ring of their own. The
+   Player's neutral colour and `2px` separation replace the shared accent and `1px` baseline, so focus looks alike in
+   both modes, does not follow an author's accent, and stays apart from the accent of primary actions;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
 A non-interactive status item is a separate semantic/visual class, not a disabled control.

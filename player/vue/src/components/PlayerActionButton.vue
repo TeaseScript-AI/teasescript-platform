@@ -129,7 +129,7 @@ const material = computed(() =>
   cursor: not-allowed;
 }
 .player-action-button:focus-visible {
-  outline: 2px solid var(--theme-accent-focus);
+  outline: 2px solid var(--theme-focus-ring);
   outline-offset: var(--player-focus-offset);
 }
 @media (prefers-reduced-motion: reduce) {
