@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../plan/model.js";
+import type { InstructionPlan, StartTimerInstruction } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
 import { sameCaptures } from "./capture-validation.js";
@@ -12,6 +12,16 @@ import {
 } from "./activation-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
+
+const SETTLED_TIMER_KEYS = [
+  "timerId",
+  "state",
+  "display",
+  "label",
+  "persist",
+  "repeatDurationMs",
+  "elapsedMs",
+] as const;
 
 const TIMER_KEYS = [
   "timerId",
@@ -70,7 +80,7 @@ export function validTimerAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
-    !validTimerRecord(action.timer, true, now, plan, dueDeadlineMayRemain(snapshot)) ||
+    !validTimerRecord(action.timer, now, plan, dueDeadlineMayRemain(snapshot)) ||
     !validActiveChronology(action.timer, action.createdAtMs, now)
   ) {
     return false;
@@ -168,9 +178,26 @@ function validCurrentRound(timer: Record<string, unknown>, now: number): boolean
   return true;
 }
 
+/** A settled record keeps what a handle reads, and whether the timer persists; it ran no longer than scene time. */
+function validSettledTimerRecord(timer: Record<string, unknown>, now: unknown): boolean {
+  return (
+    hasExactKeys(timer, SETTLED_TIMER_KEYS) &&
+    positiveSafeInteger(timer.timerId) &&
+    (timer.state === "finished" || timer.state === "stopped") &&
+    (timer.display === "visible" || timer.display === "mystery" || timer.display === "hidden") &&
+    (timer.label === null || typeof timer.label === "string") &&
+    typeof timer.persist === "boolean" &&
+    (timer.repeatDurationMs === null ||
+      (validDuration(timer.repeatDurationMs) && timer.repeatDurationMs > 0)) &&
+    validDuration(timer.elapsedMs) &&
+    typeof now === "number" &&
+    withinSceneTime(timer.elapsedMs, now)
+  );
+}
+
+/** An active timer record: running or paused, with its current round. */
 function validTimerRecord(
   timer: Record<string, unknown>,
-  active: boolean,
   now: unknown,
   plan: InstructionPlan | undefined,
   allowDue = false,
@@ -204,7 +231,6 @@ function validTimerRecord(
   switch (timer.state) {
     case "running":
       return (
-        active &&
         timer.remainingMs === null &&
         isValidSessionTime(timer.deadlineMs) &&
         isValidSessionTime(timer.runningSinceMs) &&
@@ -213,19 +239,10 @@ function validTimerRecord(
       );
     case "paused":
       return (
-        active &&
         timer.deadlineMs === null &&
         timer.runningSinceMs === null &&
         validDuration(timer.remainingMs) &&
         timer.remainingMs > 0
-      );
-    case "finished":
-    case "stopped":
-      return (
-        !active &&
-        timer.deadlineMs === null &&
-        timer.remainingMs === null &&
-        timer.runningSinceMs === null
       );
     default:
       return false;
@@ -234,7 +251,9 @@ function validTimerRecord(
 
 /**
  * Each issued timer ID has at most one active or settled record, every handle and every queued or running expiry block
- * has the record of its timer, and queued expiry blocks refer to their timer's own block in scene-time order.
+ * has the record of its timer, and queued expiry blocks refer to their timer's own block in scene-time order: the one an
+ * active record names, or for a settled timer, whose record no longer names it, the block of a timer statement that
+ * could have started it, in one activation with one list of shared variables.
  */
 export function validateTimerState(
   value: Record<string, unknown>,
@@ -248,21 +267,17 @@ export function validateTimerState(
     return;
   }
   const records = new Map<number, Record<string, unknown>>();
+  const settledRecords = new Set<Record<string, unknown>>();
   const settled = value.settledTimers;
   if (!isCanonicalJsonArray(settled)) {
     errors.push("Runtime settledTimers must be an array.");
   } else {
     for (const timer of settled) {
-      if (
-        !isPlainRecord(timer) ||
-        !validTimerRecord(timer, false, value.currentSessionTimeMs, plan) ||
-        typeof value.currentSessionTimeMs !== "number" ||
-        typeof timer.elapsedMs !== "number" ||
-        !withinSceneTime(timer.elapsedMs, value.currentSessionTimeMs)
-      ) {
+      if (!isPlainRecord(timer) || !validSettledTimerRecord(timer, value.currentSessionTimeMs)) {
         errors.push("Runtime settled timer is malformed.");
         continue;
       }
+      settledRecords.add(timer);
       addRecord(records, timer, errors);
     }
   }
@@ -304,6 +319,7 @@ export function validateTimerState(
       .map((frame) => [frame.id, frame.file]),
   );
   for (const record of records.values()) {
+    if (settledRecords.has(record)) continue;
     const root = record.rootScopeId;
     if (
       !nonNegativeSafeInteger(root) ||
@@ -325,6 +341,22 @@ export function validateTimerState(
   }
   let previousDue = -Infinity;
   const oneShotInvocations = new Map<number, number>();
+  // The queued and running blocks of settled timers, checked together below.
+  const settledBlocks = new Map<
+    Record<string, unknown>,
+    { functionId: unknown; count: number; rootScopeId: unknown; captures: unknown }[]
+  >();
+  const addSettledBlock = (
+    record: Record<string, unknown>,
+    functionId: unknown,
+    count: number,
+    rootScopeId: unknown,
+    captures: unknown,
+  ): void => {
+    const blocks = settledBlocks.get(record) ?? [];
+    blocks.push({ functionId, count, rootScopeId, captures });
+    settledBlocks.set(record, blocks);
+  };
   for (const invocation of queue) {
     // Media cue and button invocations share the queue; their ownership is validated with their own state, their
     // order here.
@@ -364,9 +396,10 @@ export function validateTimerState(
       ]) ||
       record === undefined ||
       !positiveSafeInteger(invocation.handlerFunctionId) ||
-      invocation.handlerFunctionId !== record.handlerFunctionId ||
-      invocation.rootScopeId !== record.rootScopeId ||
-      !sameCaptures(invocation.captures, record.captures) ||
+      (!settledRecords.has(record) &&
+        (invocation.handlerFunctionId !== record.handlerFunctionId ||
+          invocation.rootScopeId !== record.rootScopeId ||
+          !sameCaptures(invocation.captures, record.captures))) ||
       !rootFitsFunction(plan, roots, invocation.rootScopeId, invocation.handlerFunctionId) ||
       !positiveSafeInteger(invocation.count) ||
       !isValidSessionTime(invocation.dueAtMs) ||
@@ -381,7 +414,19 @@ export function validateTimerState(
     }
     previousDue = invocation.dueAtMs;
     const { timerId, count } = invocation;
-    if (record.repeat !== true && positiveSafeInteger(timerId) && positiveSafeInteger(count)) {
+    if (settledRecords.has(record)) {
+      addSettledBlock(
+        record,
+        invocation.handlerFunctionId,
+        count,
+        invocation.rootScopeId,
+        invocation.captures,
+      );
+    } else if (
+      record.repeat !== true &&
+      positiveSafeInteger(timerId) &&
+      positiveSafeInteger(count)
+    ) {
       oneShotInvocations.set(timerId, (oneShotInvocations.get(timerId) ?? 0) + count);
       if (record.state !== "finished") {
         errors.push("Runtime one-shot timer expiry block requires a finished timer.");
@@ -403,14 +448,17 @@ export function validateTimerState(
       const dueAtMs = frame.timerInterruption.dueAtMs;
       if (
         record === undefined ||
-        record.handlerFunctionId !== frame.functionId ||
-        record.rootScopeId !== frame.rootScopeId ||
-        !sameCaptures(frame.captures, record.captures) ||
+        (!settledRecords.has(record) &&
+          (record.handlerFunctionId !== frame.functionId ||
+            record.rootScopeId !== frame.rootScopeId ||
+            !sameCaptures(frame.captures, record.captures))) ||
         (typeof dueAtMs === "number" &&
           positiveSafeInteger(record.timerId) &&
           dueAtMs < (createdAt.get(record.timerId) ?? 0))
       ) {
         errors.push("Runtime timer expiry-block frame does not belong to its timer.");
+      } else if (settledRecords.has(record)) {
+        addSettledBlock(record, frame.functionId, 1, frame.rootScopeId, frame.captures);
       } else if (record.repeat !== true && positiveSafeInteger(record.timerId)) {
         const id = record.timerId;
         oneShotInvocations.set(id, (oneShotInvocations.get(id) ?? 0) + 1);
@@ -423,6 +471,42 @@ export function validateTimerState(
   // A timer that does not repeat expires once, so its block is queued or running at most once.
   if ([...oneShotInvocations.values()].some((count) => count > 1)) {
     errors.push("Runtime one-shot timer has more than one expiry block invocation.");
+  }
+  // The blocks of one settled timer run one block in one activation with one list of shared variables. A timer
+  // statement that uses that block, persists alike, and has a label exactly when the timer has one could have started
+  // it; plans may share a block between statements. A timer that does not repeat finished before its block runs, once.
+  let startsByBlock: Map<unknown, StartTimerInstruction[]> | undefined;
+  const startsUsing = (functionId: unknown): readonly StartTimerInstruction[] => {
+    if (startsByBlock === undefined) {
+      startsByBlock = new Map();
+      for (const instruction of plan?.instructions ?? []) {
+        if (instruction?.kind !== "startTimer" || instruction.handlerFunctionId === null) continue;
+        const starts = startsByBlock.get(instruction.handlerFunctionId) ?? [];
+        starts.push(instruction);
+        startsByBlock.set(instruction.handlerFunctionId, starts);
+      }
+    }
+    return startsByBlock.get(functionId) ?? [];
+  };
+  for (const [record, blocks] of settledBlocks) {
+    const first = blocks[0]!;
+    let runs = 0;
+    for (const block of blocks) runs += block.count;
+    const fits = (start: StartTimerInstruction): boolean =>
+      start.persist === record.persist &&
+      (start.label === null) === (record.label === null) &&
+      (start.repeat || (runs === 1 && record.state === "finished"));
+    if (
+      blocks.some(
+        (block) =>
+          block.functionId !== first.functionId ||
+          block.rootScopeId !== first.rootScopeId ||
+          !sameCaptures(block.captures, first.captures),
+      ) ||
+      (plan !== undefined && !startsUsing(first.functionId).some(fits))
+    ) {
+      errors.push("Runtime settled timer blocks do not belong to one timer statement.");
+    }
   }
   if ((value.status === "halted" || value.status === "ready") && queue.length > 0) {
     errors.push("Runtime pending timer expiry blocks require an active session.");

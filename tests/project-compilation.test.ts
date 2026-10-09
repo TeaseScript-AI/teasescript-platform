@@ -271,7 +271,6 @@ test("a checkpoint runs code of a file only in an activation of that file", () =
 
   // A queued expiry block of another file would run with main.tease's variables.
   const queued = mutableCopy(expired);
-  queued.settledTimers[0]!.handlerFunctionId = foreign.id;
   queued.pendingTimerHandlers[0]!.handlerFunctionId = foreign.id;
   assert.equal(validateRuntimeSnapshot(queued, timers).valid, false);
   assert.throws(() =>

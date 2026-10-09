@@ -91,8 +91,8 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import { validateMediaState } from "./media-validation.js";
 import {
   cloneTimer,
+  type RuntimeSettledTimerSnapshot,
   type RuntimeTimerHandlerInvocationSnapshot,
-  type RuntimeTimerSnapshot,
 } from "./timers.js";
 import {
   cloneMedia,
@@ -118,7 +118,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 63;
+export const RUNTIME_SNAPSHOT_VERSION = 64;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -420,7 +420,7 @@ export interface RuntimeSnapshot {
    * Finished or stopped timers that a handle or a queued or running expiry block still reaches; a public operation drops
    * the others before it returns. Active timers are background actions.
    */
-  readonly settledTimers: RuntimeTimerSnapshot[];
+  readonly settledTimers: RuntimeSettledTimerSnapshot[];
   nextTimerId: number;
   /**
    * Queued interrupt blocks: timer expiry blocks, media cue blocks, and clicked permanent buttons. They run one at a
@@ -740,7 +740,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.preparedSayOutput === null
         ? null
         : clonePreparedSayOutput(snapshot.preparedSayOutput),
-    settledTimers: snapshot.settledTimers.map(cloneTimer),
+    settledTimers: snapshot.settledTimers.map((timer) => ({ ...timer })),
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({
       ...invocation,
