@@ -371,10 +371,11 @@ class Lexer {
     outerBlock: boolean,
   ): ParseTask<"closed" | "stringEnd" | "eof"> {
     let braceDepth = 0;
-    // The brackets, parentheses, and braces still open inside the interpolation. The outer string cannot end inside
+    // The brackets, parentheses, and braces still open inside the interpolation. A single-line string cannot end inside
     // one, so a quote there starts a nested string, such as `"y"` in `${[showPermanentButton "x" { say "y" }].length}`,
     // when the line still has the quotes that close it and the outer string. Otherwise, as outside them, a quote after
-    // a value ends the outer string, as in `"${[1, 2"` and `"${name"`.
+    // a value ends the outer string, as in `"${[1, 2"` and `"${name"`. In a block string only `"""` can end it, so a
+    // lone quote is always nested there.
     let openDelimiters = 0;
     while (!this.#isAtEnd()) {
       if (this.#peek() === "}" && braceDepth === 0) {
@@ -386,7 +387,7 @@ class Lexer {
       }
       if (
         this.#isStringDelimiter(outerBlock) &&
-        !(openDelimiters > 0 && (outerBlock || this.#quotesFollowOnLine())) &&
+        !(openDelimiters > 0 && !outerBlock && this.#quotesFollowOnLine()) &&
         !this.#canStartNestedString()
       ) {
         this.#report(

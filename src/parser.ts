@@ -185,6 +185,11 @@ interface SharedParse {
    * the program; where only text written out in quotes is allowed, they count as failed, without a further error.
    */
   readonly recoveredStrings: WeakSet<StringLiteral>;
+  /**
+   * For each newline token, the index of the first newline of its run and of the token after the run, so that skipping
+   * a run, or giving it back after a missing closer, costs the same at every level of nesting.
+   */
+  readonly newlineRuns: { readonly starts: Int32Array; readonly ends: Int32Array };
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -304,6 +309,7 @@ class Parser {
       closers: null,
       sayValues: new Map(),
       recoveredStrings: new WeakSet(),
+      newlineRuns: newlineRuns(tokens),
     },
   ) {
     this.#shared = shared;
@@ -4694,7 +4700,8 @@ class Parser {
     code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
     message: string,
   ): void {
-    while (this.#current > 0 && this.#previous().kind === TokenKind.Newline) this.#current -= 1;
+    if (this.#current > 0 && this.#previous().kind === TokenKind.Newline)
+      this.#current = this.#shared.newlineRuns.starts[this.#current - 1]!;
     this.#reportInsertion(code, message);
   }
 
@@ -4811,10 +4818,10 @@ class Parser {
     );
   }
 
+  /** Newline tokens delimit statements unless a caller explicitly skips them. */
   #skipNewlines(): void {
-    while (this.#match(TokenKind.Newline)) {
-      // Newline tokens delimit statements unless a caller explicitly skips them.
-    }
+    if (this.#check(TokenKind.Newline))
+      this.#current = this.#shared.newlineRuns.ends[this.#current]!;
   }
 
   #skipContinuationNewlines(): void {
@@ -5139,6 +5146,17 @@ function delimiterClosers(tokens: readonly Token[]): Map<number, number> {
     }
   });
   return closers;
+}
+
+function newlineRuns(tokens: readonly Token[]): SharedParse["newlineRuns"] {
+  const starts = new Int32Array(tokens.length);
+  const ends = new Int32Array(tokens.length);
+  const newline = (index: number) => tokens[index]?.kind === TokenKind.Newline;
+  for (let index = 0; index < tokens.length; index += 1)
+    starts[index] = newline(index) && newline(index - 1) ? starts[index - 1]! : index;
+  for (let index = tokens.length - 1; index >= 0; index -= 1)
+    ends[index] = !newline(index) ? index : newline(index + 1) ? ends[index + 1]! : index + 1;
+  return { starts, ends };
 }
 
 function bracketContexts(tokens: readonly Token[]): boolean[] {

@@ -141,6 +141,13 @@ test("a quote inside brackets or a block of an interpolation starts a nested str
     recovered.tokens.slice(-4).map((token) => token.kind),
     [TokenKind.StringEnd, TokenKind.Newline, TokenKind.KeywordExit, TokenKind.EndOfFile],
   );
+  // A block string ends only at `"""`, which inside brackets also keeps ending it, so the next line still parses.
+  const block = parse('say """${[1, 2"""\nlet = 5\nexit');
+  assert.deepEqual(
+    block.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL005", "TSP017", "TSP013"],
+  );
+  assert.equal(block.program.statements.at(-1)?.kind, "exitStatement");
 });
 
 test("keeps exact ordered diagnostics for malformed nested strings", () => {
