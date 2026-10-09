@@ -261,13 +261,15 @@ async function copy() {
     return;
   }
   selectLines(shown.map(({ element }) => element));
-  // A refused copy says why in the tooltip, open at once (the selection route's focus change closed it), until it
-  // closes as tooltips do.
+  // A refused copy says why in the tooltip, open at once (the selection route's focus change closed it). The label
+  // stays while the tooltip is open, and as long as a copy's does once it closed.
   copyStatus.value = "failed";
   copyTooltipOpen.value = true;
 }
 watch(copyTooltipOpen, (open) => {
-  if (!open && copyStatus.value === "failed") copyStatus.value = "";
+  if (copyStatus.value !== "failed") return;
+  clearTimeout(copiedTimer);
+  if (!open) copiedTimer = setTimeout(() => (copyStatus.value = ""), 1500);
 });
 </script>
 

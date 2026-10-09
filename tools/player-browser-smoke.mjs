@@ -1714,7 +1714,7 @@ async function randomPickerScenario(cdp, origin) {
     5_000,
     "A refused copy claimed to copy",
   );
-  // The click closes the tooltip, which then opens again to say why nothing was copied.
+  // After the mouse click, the tooltip says why nothing was copied.
   await waitFor(
     cdp,
     `document.querySelector('[data-slot="tooltip-content"]')?.textContent.trim().startsWith("Copying is not available here") === true`,
@@ -1725,6 +1725,27 @@ async function randomPickerScenario(cdp, origin) {
     await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
     true,
     "A refused copy did not select the lines in view",
+  );
+  // Escape and at once Enter on Copy, which still has focus, refuse again: the label still says why.
+  for (const [key, code] of [
+    ["Escape", 27],
+    ["Enter", 13],
+  ])
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key,
+        code: key,
+        windowsVirtualKeyCode: code,
+      });
+  await delay(40);
+  assertEqual(
+    await value(
+      cdp,
+      `document.activeElement === ${copyButton} && ${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
+    ),
+    true,
+    "A refused copy retried at once by key lost its explanation",
   );
   await evaluate(
     cdp,

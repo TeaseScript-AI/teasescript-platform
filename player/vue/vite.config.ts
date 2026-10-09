@@ -6,7 +6,7 @@ import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 import ts from "typescript-vue";
 import { registerTS } from "vue/compiler-sfc";
-import { rekaScrollThumbPatch } from "./reka-scroll-thumb-patch";
+import { rekaScrollThumbPatch } from "./reka-scroll-thumb-patch.ts";
 
 /** The build's identity for debug exports: the commit and whether it had uncommitted changes, `null` when unknown. */
 function buildIdentity(mode: string) {
