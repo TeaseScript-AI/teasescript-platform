@@ -89,6 +89,30 @@ test("a font size becomes a size span on each line, apart from the size of the t
   });
 });
 
+test("a colour or underline span settles on each line and nests inside the spans around it", () => {
+  // PainStacks: a colour around several paragraphs colours each line that has text.
+  assert.equal(
+    converted("<b>status</b>\n\n<span style='color: #696969';>waiting\n\ncountdown to end</span>"),
+    "**status**\n\n[color=#696969]waiting[/color]\n\n[color=#696969]countdown to end[/color]",
+  );
+  // SissyPlaytimeExposure: a span that closes before one opened inside it closes that one first.
+  assert.equal(
+    converted('<font color="#ee389f"><b>Sissy, you are exposed! <br> Views: 3</font></b>'),
+    "[color=#ee389f]**Sissy, you are exposed!**[/color]\n [color=#ee389f]**Views: 3**[/color]",
+  );
+  // interrogation: the bold that its heading never closed, and a colour that the text never closed, end with it.
+  assert.equal(
+    converted("<h1><font color=red><b>Kneel</font></h1></b>"),
+    "# [color=red]**Kneel**[/color]",
+  );
+  assert.equal(converted("<u>first<br>second</u>"), "[u]first[/u]\n[u]second[/u]");
+  // A span that opens again after the one around it closed waits for the next text.
+  assert.equal(
+    converted("<b>one <font color=red>two</b> three</font>"),
+    "**one [color=red]two[/color]** [color=red]three[/color]",
+  );
+});
+
 test("a FONT that names a FACE is an editor's text format, whose size is no emphasis", () => {
   // Milovana: the Flash editor wraps every paragraph in its FACE, its default size, and a colour.
   assert.equal(

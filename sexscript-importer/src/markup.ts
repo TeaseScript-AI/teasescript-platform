@@ -38,6 +38,7 @@ const SPANS: Readonly<Record<string, string>> = {
   strike: "~~",
   s: "~~",
   del: "~~",
+  u: "[u]",
 };
 
 const HTML_TAG = /<\/?([a-z][a-z0-9]*)\b[^<>]*>/giu;
@@ -101,13 +102,13 @@ export function legacyHtmlToMarkup(
       return closing ? "\n" : `\n${"#".repeat(Math.min(Number(name[1]), 3))} `;
     const span = SPANS[name];
     if (span !== undefined) return `${closing ? CLOSE : OPEN}${span}`;
-    if (name === "u") return closing ? "[/u]" : "[u]";
     if (name === "font" || name === "span") {
       if (closing) {
         const index = open.findLastIndex((item) => item.tag === name);
         return index < 0 ? "" : open.splice(index, 1)[0]!.close;
       }
       const colour = /\bcolou?r\s*[=:]\s*["']?(#[0-9a-f]{3,8}|[a-z]+)/iu.exec(tag)?.[1];
+      const coloured = colour === undefined ? "" : `[color=${colour.toLowerCase()}]`;
       const size = name === "font" ? fontSize(tag) : null;
       const around = open.findLast((item) => item.size !== null)?.size ?? "normal";
       const sized = size !== null && size !== around ? `[size=${size}]` : "";
@@ -115,12 +116,12 @@ export function legacyHtmlToMarkup(
         dropped = true;
       open.push({
         tag: name,
-        close: (sized === "" ? "" : `${CLOSE}${sized}`) + (colour === undefined ? "" : "[/color]"),
+        close:
+          (sized === "" ? "" : `${CLOSE}${sized}`) + (coloured === "" ? "" : `${CLOSE}${coloured}`),
         size,
       });
       return (
-        (colour === undefined ? "" : `[color=${colour.toLowerCase()}]`) +
-        (sized === "" ? "" : `${OPEN}${sized}`)
+        (coloured === "" ? "" : `${OPEN}${coloured}`) + (sized === "" ? "" : `${OPEN}${sized}`)
       );
     }
     dropped = true;
@@ -154,20 +155,27 @@ export function legacyHtmlToMarkup(
   return { parts: result, changed: true, dropped };
 }
 
-/** The closing delimiter of a span: the same delimiter for bold, italic, and strikethrough, `[/size]` for a size. */
+/**
+ * The closing delimiter of a span: the same delimiter for bold, italic, and strikethrough, `[/u]`, `[/color]`, or
+ * `[/size]` for a tag.
+ */
 function closer(mark: string): string {
-  return mark.startsWith("[size=") ? "[/size]" : mark;
+  return mark.startsWith("[") ? mark.replace(/^\[([a-z]+).*$/u, "[/$1]") : mark;
 }
 
 /**
- * Markup spans need text right inside their delimiters and end at a line break, so spaces inside move out, a span
- * closes before each line break and opens again on the next line that has text, and an empty span disappears; a line
- * without text, such as the blank line between paragraphs, gets no delimiters. A bold, italic, or strikethrough span
- * inside one of its own kind adds nothing, as in HTML, so only the outer one has delimiters, also where a legacy text
- * never closed it; a size inside another size changes it.
+ * Markup spans need text right inside their delimiters, end at a line break, and cannot cross, so spaces inside move
+ * out, a span closes before each line break and opens again on the next line that has text, a span that closes while
+ * one opened inside it is still open closes that one first and opens it again before the next text, and an empty span
+ * disappears; a line without text, such as the blank line between paragraphs, gets no delimiters. A bold, italic,
+ * strikethrough, or underline span inside one of its own kind adds nothing, as in HTML, so only the outer one has
+ * delimiters, also where a legacy text never closed it; a colour or size inside another changes it.
  */
 function settleSpans(text: string): string {
-  const pattern = new RegExp(`([${OPEN}${CLOSE}])(\\*\\*|\\*|~~|\\[size=[a-z-]+\\])`, "gu");
+  const pattern = new RegExp(
+    `([${OPEN}${CLOSE}])(\\*\\*|\\*|~~|\\[u\\]|\\[(?:color|size)=[#0-9a-z-]+\\])`,
+    "gu",
+  );
   const tokens: Array<{ open: boolean; mark: string } | string> = [];
   let last = 0;
   for (const match of text.matchAll(pattern)) {
@@ -181,7 +189,15 @@ function settleSpans(text: string): string {
   const stack: string[] = [];
   let pending: string[] = [];
   const written = (): string[] => stack.slice(0, stack.length - pending.length);
-  const closing = (): string => [...written()].reverse().map(closer).join("");
+  // The output with the given spans closed, innermost first, before its trailing spaces.
+  const closed = (spans: readonly string[]): string => {
+    const trailing = /\s*$/u.exec(output)![0];
+    return (
+      output.slice(0, output.length - trailing.length) +
+      [...spans].reverse().map(closer).join("") +
+      trailing
+    );
+  };
   // How many more spans of a kind are open inside the one on the stack.
   const inner = new Map<string, number>();
   for (const token of tokens) {
@@ -190,18 +206,19 @@ function settleSpans(text: string): string {
       lines.forEach((line, index) => {
         if (index > 0) {
           // Close the spans this line opened at the line break and reopen them on the next line with text.
-          output += closing() + "\n";
+          output = closed(written()) + "\n";
           pending = [...stack];
         }
-        if (line === "") return;
         const leading = /^\s*/u.exec(line)![0];
-        output += leading + pending.join("") + line.slice(leading.length);
+        output += leading;
+        if (leading === line) return;
+        output += pending.join("") + line.slice(leading.length);
         pending = [];
       });
       continue;
     }
     if (token.open) {
-      if (stack.includes(token.mark) && !token.mark.startsWith("["))
+      if (stack.includes(token.mark) && !token.mark.includes("="))
         inner.set(token.mark, (inner.get(token.mark) ?? 0) + 1);
       else {
         stack.push(token.mark);
@@ -216,15 +233,17 @@ function settleSpans(text: string): string {
     }
     const index = stack.lastIndexOf(token.mark);
     if (index < 0) continue;
-    stack.splice(index, 1);
     const unwritten = pending.lastIndexOf(token.mark);
     if (unwritten >= 0) {
       // The span held no text.
+      stack.splice(index, 1);
       pending.splice(unwritten, 1);
       continue;
     }
-    const trailing = /\s*$/u.exec(output)![0];
-    output = output.slice(0, output.length - trailing.length) + closer(token.mark) + trailing;
+    // The spans opened inside it close with it and open again before the next text.
+    output = closed(written().slice(index));
+    stack.splice(index, 1);
+    pending = stack.slice(index);
   }
-  return output + closing();
+  return closed(written());
 }

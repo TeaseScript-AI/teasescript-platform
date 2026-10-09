@@ -346,12 +346,15 @@ function dedent(piece: string): string {
  * Whether a text's blank lines lay it out rather than separate paragraphs: two or more lines with columns aligned by
  * runs of spaces or tabs, a ruled line of `-`, `=`, `*`, and the like, also in bold or italic, an empty box, a table row with two or more `|`,
  * or a block of value rows (isValueRow), three or more, or two that make up half of the text, as in a heading over
- * scores or settings. Size spans, `[size=x-large]**.......**[/size]`, are no part of a line.
+ * scores or settings. The tags of underline, colour, and size spans, `[size=x-large]**.......**[/size]`, are no part of
+ * a line.
  */
 function isLayout(text: string): boolean {
   const lines = text
     .split("\n")
-    .map((line) => line.replace(/\[size=[a-z-]+\]|\[\/size\]/gu, "").trim())
+    .map((line) =>
+      line.replace(/\[(?:u|(?:color|size)=[#0-9a-z-]+)\]|\[\/(?:u|color|size)\]/gu, "").trim(),
+    )
     .filter((line) => line !== "");
   const aligned = lines.filter(
     (line) => /\S {3,}\S/u.test(line) || /: {2,}\S/u.test(line) || /\S\t+\S/u.test(line),
