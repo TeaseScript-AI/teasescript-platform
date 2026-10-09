@@ -1114,9 +1114,9 @@ class SemanticValidator {
     this.#report(
       semanticCode.invalidTimerHandleMember,
       use === "call"
-        ? `Timer handles have no method '${name.name}'; use pause(), resume(), or stop().`
+        ? `Timer handles have no method '${name.name}'. Use pause(), resume(), or stop().`
         : use === "assign"
-          ? `Timer handle property '${name.name}' cannot be assigned; assign remaining, display, or repeatDuration.`
+          ? `Timer handle property '${name.name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
           : `Timer handles have no property '${name.name}'.`,
       name.span,
     );
@@ -1133,8 +1133,8 @@ class SemanticValidator {
       this.#report(
         semanticCode.invalidCameraHandleMember,
         use === "call"
-          ? `Camera views have no method '${name.name}'; hide them with hideCamera.`
-          : `Camera views have no property '${name.name}'; use placement.`,
+          ? `Camera views have no method '${name.name}'. Hide them with hideCamera.`
+          : `Camera views have no property '${name.name}'. Use the placement property.`,
         name.span,
       );
       return;
@@ -1170,9 +1170,9 @@ class SemanticValidator {
       this.#report(
         semanticCode.invalidMediaHandleMember,
         use === "call"
-          ? `Media handles have no method '${name.name}'; use pause(), resume(), or stop().`
+          ? `Media handles have no method '${name.name}'. Use pause(), resume(), or stop().`
           : use === "assign"
-            ? `Media handle property '${name.name}' cannot be assigned; assign position, remaining, or volume.`
+            ? `Media handle property '${name.name}' cannot be assigned. You can assign position, remaining, or volume.`
             : `Media handles have no property '${name.name}'.`,
         name.span,
       );

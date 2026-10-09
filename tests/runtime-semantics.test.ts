@@ -281,6 +281,10 @@ test("errors for first, last, and random on empty lists and sets", () => {
       result.errors.map((error) => [error.code, error.span.start.offset, error.span.end.offset]),
       [[code, start, start + `values.${property}`.length]],
     );
+    assert.equal(
+      result.errors[0]?.message,
+      `Cannot read 'values.${property}': 'values' is empty. Check 'values.length' first.`,
+    );
   }
 });
 

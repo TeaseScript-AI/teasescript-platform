@@ -591,9 +591,10 @@ export class Evaluator {
                 ["first", "last", "random"].includes(expression.name)
               ) {
                 if (base.items.length === 0)
-                  throw fault(
-                    expression.name === "random" ? "TSR019" : "TSR018",
-                    `Cannot read '.${expression.name}' from an empty collection.`,
+                  throw emptyCollection(
+                    expression.name,
+                    base,
+                    this.#receiverLabel(expression.object),
                     expression.span,
                   );
                 const index =
@@ -621,7 +622,12 @@ export class Evaluator {
               } else if (isMessageHandle(base)) {
                 // A message's text is state of the message, outside the value that holds the handle, so the
                 // reference keeps the text read now, as it would keep a text variable's value.
-                const text = this.#getProperty(base, expression.name, expression.span);
+                const text = this.#getProperty(
+                  base,
+                  expression.name,
+                  expression.span,
+                  expression.object,
+                );
                 frame.descriptor = {
                   rootFrameId: null,
                   rootName: null,
@@ -632,7 +638,12 @@ export class Evaluator {
                 frame.value = text;
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
-                frame.value = this.#getProperty(base, expression.name, expression.span);
+                frame.value = this.#getProperty(
+                  base,
+                  expression.name,
+                  expression.span,
+                  expression.object,
+                );
               }
               result = {
                 value: frame.value,
@@ -643,7 +654,7 @@ export class Evaluator {
               pending.pop();
               continue;
             }
-            this.#assertIndexable(frame.value, expression.span);
+            this.#assertIndexable(frame.value, expression.object, expression.span);
             frame.epoch = this.#referenceEpoch;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
@@ -664,8 +675,13 @@ export class Evaluator {
           }
           // EVIDENCE: invariant: index reference stage 1 validates and retains the list or dict receiver.
           const object = frame.value as SerializableRuntimeList;
-          const index = this.#index(result.value, expression.index.span);
-          this.#assertIndex(object, index, expression.index.span);
+          const index = this.#listPosition(
+            object,
+            expression.object,
+            expression.index,
+            result.value,
+            "read",
+          );
           frame.descriptor!.path.push({ kind: "index", index });
           result = {
             value: object.items[index]!,
@@ -883,7 +899,12 @@ export class Evaluator {
             pending.push(evaluationFrame(expression.object));
             continue;
           }
-          value = this.#getProperty(result.value, expression.name, expression.span);
+          value = this.#getProperty(
+            result.value,
+            expression.name,
+            expression.span,
+            expression.object,
+          );
           break;
         case "index":
           if (frame.stage === 0) {
@@ -893,7 +914,7 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
-            this.#assertIndexable(frame.value, expression.span);
+            this.#assertIndexable(frame.value, expression.object, expression.span);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
@@ -907,10 +928,15 @@ export class Evaluator {
             break;
           }
           {
-            const index = this.#index(result.value, expression.index.span);
             // EVIDENCE: invariant: stage 1 validates and retains the index receiver.
             const object = frame.value as SerializableRuntimeList;
-            this.#assertIndex(object, index, expression.index.span);
+            const index = this.#listPosition(
+              object,
+              expression.object,
+              expression.index,
+              result.value,
+              "read",
+            );
             value = object.items[index]!;
           }
           break;
@@ -1235,13 +1261,9 @@ export class Evaluator {
         this.#assignMessageProperty(object, target.name, value, target.span);
         return;
       }
-      throw fault(
-        "TSR003",
-        "Only objects, speakers, timer, media, and message handles, and camera views have assignable properties.",
-        target.span,
-      );
+      throw this.#noAssignableProperties(target.object, object, target.span);
     }
-    if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
       // A new key is added at the end; an existing key keeps its position.
       const key = this.#dictKey(this.evaluate(target.index), target.index.span);
@@ -1261,10 +1283,14 @@ export class Evaluator {
         this.#traceVariableChange("assignment", receiverDescriptor, target.span);
       return;
     }
-    if (!isList(object))
-      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
-    const index = this.#index(this.evaluate(target.index), target.index.span);
-    this.#assertIndex(object, index, target.index.span);
+    if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
+    const index = this.#listPosition(
+      object,
+      target.object,
+      target.index,
+      this.evaluate(target.index),
+      "assign",
+    );
     if (receiverDescriptor !== null && !receiverDescriptor.detached) {
       const mutationStep: PreparedReferenceStep = { kind: "index", index };
       detachPreparedReferencesForMutation(this.snapshot, {
@@ -1309,24 +1335,17 @@ export class Evaluator {
         !isMessageHandle(object) &&
         !isCameraView(object)
       ) {
-        throw fault(
-          "TSR003",
-          "Only objects, speakers, timer and media handles, and camera views have assignable properties.",
-          target.span,
-        );
+        throw this.#noAssignableProperties(target.object, object, target.span);
       }
       return;
     }
-    if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
       this.#dictKey(this.evaluate(target.index), target.index.span);
       return;
     }
-    if (!isList(object)) {
-      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
-    }
-    const index = this.#index(this.evaluate(target.index), target.index.span);
-    this.#assertIndex(object, index, target.index.span);
+    if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
+    this.#listPosition(object, target.object, target.index, this.evaluate(target.index), "assign");
   }
 
   public validateCallReceiver(
@@ -1337,14 +1356,14 @@ export class Evaluator {
     if (isCameraView(receiver))
       throw fault(
         "TSR016",
-        `Camera views have no method '${method}'; hide them with hideCamera.`,
+        `Camera views have no method '${method}'. Hide them with hideCamera.`,
         span,
       );
     if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
       if (!["pause", "resume", "stop"].includes(method)) {
         throw fault(
           "TSR016",
-          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'.`,
+          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'. Use pause(), resume(), or stop().`,
           span,
         );
       }
@@ -1357,7 +1376,11 @@ export class Evaluator {
     }
     if (isTemporal(receiver)) {
       if (!hasTemporalMethod(receiver, method))
-        throw fault("TSR016", `Unsupported method '${method}'.`, span);
+        throw fault(
+          "TSR016",
+          `${describeRuntimeValue(receiver).replace(/^a/u, "A")} has no method '${method}'.`,
+          span,
+        );
       return;
     }
     if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
@@ -1384,9 +1407,7 @@ export class Evaluator {
             "take",
             "takeLast",
           ]);
-    if (!supported.has(method)) {
-      throw fault("TSR016", `Unsupported method '${method}'.`, span);
-    }
+    if (!supported.has(method)) throw fault("TSR016", noCollectionMethod(receiver, method), span);
   }
 
   #buildPreparedReference(expression: ExpressionPlan): PreparedReferenceDescriptor {
@@ -1959,7 +1980,7 @@ export class Evaluator {
       if (name !== undefined)
         throw fault(
           "TSR015",
-          `${expression.callee.name}() takes its arguments without names; remove '${name}:'.`,
+          `${expression.callee.name}() takes its arguments without names. Remove '${name}:'.`,
           expression.span,
         );
       return callStringMethod(receiver, expression.callee.name, positional, expression.span);
@@ -1981,6 +2002,7 @@ export class Evaluator {
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
+        expression.callee.object,
         expression.callee.name,
         positional,
         named,
@@ -2001,6 +2023,7 @@ export class Evaluator {
   /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
   #callCollection(
     receiver: SerializableRuntimeValue,
+    receiverPlan: ExpressionPlan,
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
@@ -2010,13 +2033,18 @@ export class Evaluator {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
       throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
-    if (Object.keys(named).length !== 0)
-      throw fault("TSR015", "Collection methods accept positional arguments only.", span);
+    const namedArgument = Object.keys(named)[0];
+    if (namedArgument !== undefined)
+      throw fault(
+        "TSR015",
+        `${name}() takes its arguments without names. Remove '${namedArgument}:'.`,
+        span,
+      );
     const expect = (count: number): void => {
       if (positional.length !== count)
         throw fault(
           "TSR028",
-          `Expected ${count} positional argument(s), received ${positional.length}.`,
+          `${name}() takes ${count === 0 ? "no arguments" : count === 1 ? "one argument" : `${count} arguments`}, but this call has ${positional.length === 0 ? "none" : positional.length}.`,
           span,
         );
     };
@@ -2061,7 +2089,7 @@ export class Evaluator {
               span,
             );
           default:
-            throw fault("TSR016", `Unsupported method '${name}'.`, span);
+            throw fault("TSR016", noCollectionMethod(receiver, name), span);
         }
       }
       switch (name) {
@@ -2093,7 +2121,7 @@ export class Evaluator {
           else {
             this.#warn(
               "TSW002",
-              "list.remove(value) found no matching value; the list was left unchanged.",
+              "remove(...) found no matching value, so the list is unchanged.",
               span,
             );
           }
@@ -2101,8 +2129,14 @@ export class Evaluator {
         }
         case "removeAt": {
           expect(1);
-          const index = this.#index(positional[0]!, span);
-          this.#assertIndex(receiver, index, span);
+          const index = this.#listPosition(
+            receiver,
+            receiverPlan,
+            null,
+            positional[0]!,
+            "remove",
+            span,
+          );
           return this.#removeListItem(receiver, index);
         }
         case "removeFirst":
@@ -2181,7 +2215,7 @@ export class Evaluator {
           return texts.join(separator);
         }
         default:
-          throw fault("TSR016", `Unsupported method '${name}'.`, span);
+          throw fault("TSR016", noCollectionMethod(receiver, name), span);
       }
     } catch (error) {
       if (error instanceof RuntimeFault) throw error;
@@ -2200,7 +2234,7 @@ export class Evaluator {
     const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
     const name = callee.name;
     const span = expression.span;
-    if (!DICT_METHODS.has(name)) throw fault("TSR016", `Dicts have no method '${name}'.`, span);
+    if (!DICT_METHODS.has(name)) throw fault("TSR016", noCollectionMethod(receiver, name), span);
     const names = Object.keys(named);
     const expected = name === "clear" ? 0 : 1;
     if (
@@ -2282,7 +2316,11 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault("TSR016", `Timer handles have no method '${name}'.`, span);
+      throw fault(
+        "TSR016",
+        `Timer handles have no method '${name}'. Use pause(), resume(), or stop().`,
+        span,
+      );
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
       throw fault("TSR028", `Timer ${name}() takes no arguments.`, span);
@@ -2345,7 +2383,7 @@ export class Evaluator {
     } else {
       throw fault(
         "TSR003",
-        `Timer handle property '${name}' cannot be assigned; assign remaining, display, or repeatDuration.`,
+        `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`,
         span,
       );
     }
@@ -2379,7 +2417,11 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault("TSR016", `Media handles have no method '${name}'.`, span);
+      throw fault(
+        "TSR016",
+        `Media handles have no method '${name}'. Use pause(), resume(), or stop().`,
+        span,
+      );
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
       throw fault("TSR028", `Media ${name}() takes no arguments.`, span);
@@ -2415,7 +2457,7 @@ export class Evaluator {
     if (name !== "position" && name !== "remaining") {
       throw fault(
         "TSR003",
-        `Media handle property '${name}' cannot be assigned; assign position, remaining, or volume.`,
+        `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`,
         span,
       );
     }
@@ -2447,7 +2489,7 @@ export class Evaluator {
     if (name !== "placement")
       throw fault(
         "TSR003",
-        `Camera view property '${name}' cannot be assigned; assign placement.`,
+        `Camera view property '${name}' cannot be assigned. You can assign placement.`,
         span,
       );
     if (value !== "window" && value !== "stage")
@@ -2488,7 +2530,7 @@ export class Evaluator {
     if (name !== "text")
       throw fault(
         "TSR003",
-        `Message handle property '${name}' cannot be assigned; assign text.`,
+        `Message handle property '${name}' cannot be assigned. You can assign text.`,
         span,
       );
     if (typeof value !== "string")
@@ -2558,15 +2600,19 @@ export class Evaluator {
     value: SerializableRuntimeList | SerializableRuntimeSet,
     name: string,
     span: SourceSpan,
+    collection: ExpressionPlan | null,
   ): SerializableRuntimeValue {
     if (name === "length") return value.items.length;
-    if (name === "first" || name === "last") {
-      if (value.items.length === 0)
-        throw fault("TSR018", `Cannot read '.${name}' from an empty collection.`, span);
+    if (value.items.length === 0 && (name === "first" || name === "last" || name === "random"))
+      throw emptyCollection(name, value, this.#optionalLabel(collection), span);
+    if (name === "first" || name === "last")
       return value.items[name === "first" ? 0 : value.items.length - 1]!;
-    }
     if (name === "random") return this.#randomItem(value.items, span, "collectionRandom");
-    throw fault("TSR017", `Unknown collection property '${name}'.`, span);
+    throw fault(
+      "TSR017",
+      `${isList(value) ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`,
+      span,
+    );
   }
 
   #getSpeakerProperty(
@@ -2580,7 +2626,8 @@ export class Evaluator {
     } else if (property === undefined && name === "shortTitle") {
       property = speaker.properties.find((item) => item.name === "title")?.value;
     }
-    if (property === undefined) throw fault("TSR017", `Unknown property '${name}'.`, span);
+    if (property === undefined)
+      throw fault("TSR017", `Speaker '${speaker.identifier}' has no property '${name}'.`, span);
     return property;
   }
 
@@ -2588,9 +2635,11 @@ export class Evaluator {
     object: SerializableRuntimeObject,
     name: string,
     span: SourceSpan,
+    plan: ExpressionPlan | null,
   ): SerializableRuntimeValue {
     const value = getSerializableProperty(object, name);
-    if (value === undefined) throw fault("TSR017", `Unknown property '${name}'.`, span);
+    if (value === undefined)
+      throw fault("TSR017", noObjectProperty(object, name, this.#optionalLabel(plan)), span);
     return value;
   }
 
@@ -2775,11 +2824,11 @@ export class Evaluator {
 
   #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
     this.#expectBuiltinArguments("chance", call, 1);
-    const percent = call.positional[0];
+    const percent = call.positional[0]!;
     if (typeof percent !== "number" || percent < 0 || percent > 100) {
       throw fault(
         "TSR039",
-        "chance(percent) requires a finite percentage from 0 through 100.",
+        `chance(...) needs a percentage from 0 through 100, not ${describeShownValue(percent)}.`,
         call.span,
       );
     }
@@ -3079,7 +3128,7 @@ export class Evaluator {
     if (call.positional.length !== count || Object.keys(call.named).length !== 0) {
       throw fault(
         "TSR028",
-        `${name} expects ${count} positional argument(s) and no named arguments.`,
+        `${name}(...) takes ${count === 1 ? "one argument, without a name" : `${count} arguments, without names`}.`,
         call.span,
       );
     }
@@ -3141,23 +3190,30 @@ export class Evaluator {
     operation: RuntimeDebugRandomOperation,
   ): SerializableRuntimeValue {
     if (items.length === 0)
-      throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
+      throw fault(
+        "TSR019",
+        "Cannot select '.random' from an empty collection. Check its length first.",
+        span,
+      );
     const item = items[this.#drawIndex(span, operation, items)]!;
     this.trace?.randomResult(item);
     return item;
   }
 
+  /** `name` of `value`, which `object` gives where the plan has it, to name it in a failure. */
   #getProperty(
     value: SerializableRuntimeValue,
     name: string,
     span: SourceSpan,
+    object: ExpressionPlan | null = null,
   ): SerializableRuntimeValue {
-    if (isObject(value)) return this.#getObjectProperty(value, name, span);
+    if (isObject(value)) return this.#getObjectProperty(value, name, span, object);
     if (this.trace !== null) this.#readState(value, name);
     if (isSpeakerReference(value)) {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
-    if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (isList(value) || isSet(value))
+      return this.#getCollectionProperty(value, name, span, object);
     if (typeof value === "string") {
       if (name === "length") return stringLength(value);
       throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
@@ -3167,14 +3223,18 @@ export class Evaluator {
       if (property === undefined)
         throw fault(
           "TSR017",
-          `Dicts have no property '${name}'; use length, keys, or values, or read a value as dict[key].`,
+          `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${this.#optionalLabel(object) ?? "dict"}[${JSON.stringify(name)}]'.`,
           span,
         );
       return property;
     }
     if (isCameraView(value)) {
       if (name !== "placement")
-        throw fault("TSR017", `Camera views have no property '${name}'; use placement.`, span);
+        throw fault(
+          "TSR017",
+          `Camera views have no property '${name}'. Use the placement property.`,
+          span,
+        );
       return this.#cameraView().placement;
     }
     if (isMediaHandle(value)) {
@@ -3206,7 +3266,7 @@ export class Evaluator {
         throw fault(
           "TSR017",
           value.kind === "timestamp"
-            ? `Timestamps have no property '${name}'; convert with toDateTime() to read local fields.`
+            ? `Timestamps have no property '${name}'. Convert it with toDateTime() to read local fields.`
             : `This ${value.kind} has no property '${name}'.`,
           span,
         );
@@ -3224,17 +3284,20 @@ export class Evaluator {
     }
     if (isMessageHandle(value)) {
       if (name !== "text")
-        throw fault("TSR017", `Message handles have no property '${name}'; use text.`, span);
+        throw fault(
+          "TSR017",
+          `Message handles have no property '${name}'. Use the text property.`,
+          span,
+        );
       return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }
 
   /** Only lists and dicts are indexed. */
-  #assertIndexable(value: SerializableRuntimeValue, span: SourceSpan): void {
-    if (isSet(value)) throw fault("TSR004", "Sets are not indexable.", span);
-    if (!isList(value) && !isDict(value))
-      throw fault("TSR008", "Only lists and dicts can be indexed.", span);
+  #assertIndexable(value: SerializableRuntimeValue, plan: ExpressionPlan, span: SourceSpan): void {
+    if (isSet(value)) throw this.#notIndexable("TSR004", plan, value, span);
+    if (!isList(value) && !isDict(value)) throw this.#notIndexable("TSR008", plan, value, span);
   }
 
   #dictKey(value: SerializableRuntimeValue, span: SourceSpan): string {
@@ -3264,6 +3327,11 @@ export class Evaluator {
     return entry.value;
   }
 
+  /** How the source spells the value `plan` gives, where there is a plan, or `null`. */
+  #optionalLabel(plan: ExpressionPlan | null): string | null {
+    return plan === null ? null : this.#receiverLabel(plan);
+  }
+
   /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
   #receiverLabel(plan: ExpressionPlan): string | null {
     if (plan.kind !== "preparedReference") return planLabel(plan);
@@ -3279,15 +3347,96 @@ export class Evaluator {
     return descriptor.rootName === null ? null : [descriptor.rootName, ...names].join(".");
   }
 
-  #index(value: SerializableRuntimeValue, span: SourceSpan): number {
-    if (typeof value !== "number" || !Number.isInteger(value))
-      throw fault("TSR024", "A list index must be an integer.", span);
-    return value;
+  /**
+   * The position `value` gives in `list`, which `receiver` gives: `TSR024` unless it is a whole number and `TSR025` unless
+   * the list has it. `indexPlan` is the index as written, or `null` for an argument such as of `removeAt(...)`.
+   */
+  #listPosition(
+    list: SerializableRuntimeList,
+    receiver: ExpressionPlan,
+    indexPlan: ExpressionPlan | null,
+    value: SerializableRuntimeValue,
+    use: "read" | "assign" | "remove",
+    span: SourceSpan = indexPlan!.span,
+  ): number {
+    const whole = typeof value === "number" && Number.isInteger(value);
+    if (whole && value >= 0 && value < list.items.length) return value;
+    // A label is only written for the failure.
+    const indexLabel =
+      indexPlan === null
+        ? null
+        : indexPlan.kind === "literal"
+          ? typeof indexPlan.value === "number"
+            ? String(indexPlan.value)
+            : null
+          : planLabel(indexPlan);
+    if (!whole) {
+      const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
+      const fix =
+        typeof value === "number"
+          ? " Round it with floor(...), round(...), or ceil(...) first."
+          : value === null
+            ? ` Check that ${indexLabel === null ? "the index" : `'${indexLabel}'`} is not null first.`
+            : typeof value === "string" && numberFromText(value) !== undefined
+              ? " Convert the text with toInteger(...) first."
+              : "";
+      throw fault(
+        "TSR024",
+        `A list index must be a whole number (integer), but ${subject} is ${describeShownValue(value)}.${fix}`,
+        span,
+      );
+    }
+    const length = list.items.length;
+    const owner = this.#receiverLabel(receiver);
+    const named = owner === null ? "the list" : `'${owner}'`;
+    const action = `Cannot ${use === "assign" ? "assign to" : use} ${owner === null || indexLabel === null ? `index ${value}` : `'${owner}[${indexLabel}]'`}`;
+    const given =
+      owner === null || indexLabel === null || indexLabel === String(value)
+        ? ""
+        : `'${indexLabel}' is ${value}, and `;
+    throw fault(
+      "TSR025",
+      length === 0
+        ? `${action}: ${given}${named} is empty. Check ${owner === null ? "its length" : `'${owner}.length'`} first.`
+        : `${action}: ${given}${named} has ${length === 1 ? "1 element, so its only index is 0" : `${length} elements, so its indexes run from 0 through ${length - 1}`}. Check the index against ${owner === null ? "the list's length" : `'${owner}.length'`} first.`,
+      span,
+    );
   }
 
-  #assertIndex(list: SerializableRuntimeList, index: number, span: SourceSpan): void {
-    if (index < 0 || index >= list.items.length)
-      throw fault("TSR025", `List index ${index} is outside the valid range.`, span);
+  /** `TSR004` for a set, and `code` for any other value, which `plan` gives, that is not a list or dict to index. */
+  #notIndexable(
+    code: "TSR004" | "TSR005" | "TSR008",
+    plan: ExpressionPlan,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): RuntimeFault {
+    const label = this.#receiverLabel(plan);
+    const subject = label === null ? "this" : `'${label}'`;
+    return isSet(value)
+      ? fault(
+          "TSR004",
+          `Only a list or a dict can be indexed, but ${subject} is a set. Copy it into a list with toList() first.`,
+          span,
+        )
+      : fault(
+          code,
+          `Only a list or a dict can be indexed, but ${subject} is ${describeShownValue(value)}.`,
+          span,
+        );
+  }
+
+  /** `TSR003` for a property assignment on a value, which `plan` gives, that has no properties to assign. */
+  #noAssignableProperties(
+    plan: ExpressionPlan,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): RuntimeFault {
+    const label = this.#receiverLabel(plan);
+    return fault(
+      "TSR003",
+      `Only objects, speakers, camera views, and handles for timers, media, and messages have assignable properties, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.`,
+      span,
+    );
   }
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
@@ -3564,6 +3713,47 @@ function isZero(value: SerializableRuntimeValue): boolean {
   return value === 0 || (isDuration(value) && durationFamily(durationParts(value)) === "zero");
 }
 
+/** A method a list, set, or dict does not have, in the compiler's wording. */
+function noCollectionMethod(receiver: SerializableRuntimeValue, name: string): string {
+  if (!isDict(receiver)) return `${isSet(receiver) ? "Sets" : "Lists"} have no method '${name}'.`;
+  return name === "add"
+    ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
+    : `Dicts have no method '${name}'. Use contains, remove, clear, or get.`;
+}
+
+/** `TSR018` for `.first` or `.last`, or `TSR019` for `.random`, of an empty list or set the source may spell `label`. */
+function emptyCollection(
+  name: string,
+  collection: SerializableRuntimeList | SerializableRuntimeSet,
+  label: string | null,
+  span: SourceSpan,
+): RuntimeFault {
+  return fault(
+    name === "random" ? "TSR019" : "TSR018",
+    label === null
+      ? `Cannot read '.${name}' from an empty ${isSet(collection) ? "set" : "list"}. Check its length first.`
+      : `Cannot read '${label}.${name}': '${label}' is empty. Check '${label}.length' first.`,
+    span,
+  );
+}
+
+/** A property an object, which the source may spell `label`, does not have, with the first ten it has. */
+function noObjectProperty(
+  object: SerializableRuntimeObject,
+  name: string,
+  label: string | null,
+): string {
+  const subject = label === null ? "This object" : `'${label}'`;
+  const names = object.properties.slice(0, 10).map((property) => `'${property.name}'`);
+  const more = object.properties.length - names.length;
+  if (names.length === 0) return `${subject} has no properties, so it has no '${name}'.`;
+  const listed =
+    names.length === 1
+      ? `Its only property is ${names[0]}`
+      : `Its properties are ${more > 0 ? `${names.join(", ")}, and ${more} more` : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`}`;
+  return `${subject} has no property '${name}'. ${listed}.`;
+}
+
 /** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */
 export function planLabel(plan: ExpressionPlan): string | null {
   const names: string[] = [];
@@ -3656,11 +3846,7 @@ function scriptReference(
   span: SourceSpan,
 ): SerializableScriptReference {
   if (positional.length !== 1 || Object.keys(named).some((name) => name !== "label")) {
-    throw fault(
-      "TSR028",
-      "script expects 1 positional argument (path) and the optional named argument label:.",
-      span,
-    );
+    throw fault("TSR028", "script(...) takes one path and an optional 'label:'.", span);
   }
   const text = (value: SerializableRuntimeValue, part: string): string => {
     if (typeof value === "string") return value;

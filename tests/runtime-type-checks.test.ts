@@ -177,6 +177,97 @@ test("a condition, comparison, or loop value of the wrong kind names the value a
   }
 });
 
+test("an index or member that a value does not have names the value, its bounds, and the fix", () => {
+  for (const [statements, code, message, span] of [
+    [
+      "let items = [1, 2, 3]\nlet i = pick(3)\nsay items[i]",
+      "TSR025",
+      "Cannot read 'items[i]': 'i' is 3, and 'items' has 3 elements, so its indexes run from 0 through 2. Check the index against 'items.length' first.",
+      "i",
+    ],
+    [
+      "let items = [1, 2]\nitems[pick(5)] = 1",
+      "TSR025",
+      "Cannot assign to index 5: 'items' has 2 elements, so its indexes run from 0 through 1. Check the index against 'items.length' first.",
+      "pick(5)",
+    ],
+    [
+      "let items = pick([])\nsay items[0]",
+      "TSR025",
+      "Cannot read 'items[0]': 'items' is empty. Check 'items.length' first.",
+      "0",
+    ],
+    [
+      "let items = [1]\nlet i = pick(1.5)\nsay items[i]",
+      "TSR024",
+      "A list index must be a whole number (integer), but 'i' is 1.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "i",
+    ],
+    [
+      "let tags = pick(set[1])\nsay tags[0]",
+      "TSR004",
+      "Only a list or a dict can be indexed, but 'tags' is a set. Copy it into a list with toList() first.",
+      "tags[0]",
+    ],
+    [
+      "let level = pick(5)\nsay level[0]",
+      "TSR008",
+      "Only a list or a dict can be indexed, but 'level' is 5.",
+      "level[0]",
+    ],
+    [
+      "let level = pick(5)\nlevel.name = 1",
+      "TSR003",
+      "Only objects, speakers, camera views, and handles for timers, media, and messages have assignable properties, but 'level' is 5.",
+      "level.name",
+    ],
+    [
+      "let door = pick({ open: true, code: 1 })\nsay door.lock",
+      "TSR017",
+      "'door' has no property 'lock'. Its properties are 'open' and 'code'.",
+      "door.lock",
+    ],
+    [
+      "let empty = pick({})\nsay empty.lock",
+      "TSR017",
+      "'empty' has no properties, so it has no 'lock'.",
+      "empty.lock",
+    ],
+    [
+      "let wide = pick({ a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, g: 1, h: 1, i: 1, j: 1, k: 1, l: 1 })\nsay wide.lock",
+      "TSR017",
+      "'wide' has no property 'lock'. Its properties are 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', and 2 more.",
+      "wide.lock",
+    ],
+    [
+      "speaker vera {}\nlet who = pick(vera)\nsay who.mood",
+      "TSR017",
+      "Speaker 'vera' has no property 'mood'.",
+      "who.mood",
+    ],
+    [
+      'let items = pick([1])\nsay items["1"]',
+      "TSR024",
+      'A list index must be a whole number (integer), but this is text (string) "1". Convert the text with toInteger(...) first.',
+      '"1"',
+    ],
+    [
+      "let items = pick([1])\nsay items.size",
+      "TSR017",
+      "Lists have no property 'size'. Use length, first, last, or random.",
+      "items.size",
+    ],
+    [
+      "let items = [1]\nitems.add(value: pick(1))",
+      "TSR015",
+      "add() takes its arguments without names. Remove 'value:'.",
+      "items.add(value: pick(1))",
+    ],
+  ] as const) {
+    assert.deepEqual(failure(`${PICK}${statements}\nexit`), [code, message, span], statements);
+  }
+});
+
 test("a value with unknown parts is checked part by part", () => {
   for (const [statements, message] of [
     [

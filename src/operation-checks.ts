@@ -120,7 +120,7 @@ export function memberProblems(
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
   const fix =
     type.kind === "scalar" && TEXT_MEMBERS.has(name)
-      ? " Text operations need text; convert the value first with toString(...)."
+      ? " Convert it to text first with toString(...)."
       : "";
   return problem(
     `${capitalized(describeValue(type))} has no ${call === null ? "property" : "method"} '${name}'.${fix}`,
@@ -135,7 +135,7 @@ function shapeProblems(member: TextMember, call: CallExpression): OperationProbl
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${member.name}() takes its arguments without names; remove '${named.name.name}:'.`,
+        message: `${member.name}() takes its arguments without names. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -644,7 +644,7 @@ export function collectionMethodProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its arguments without names; remove '${named.name.name}:'.`,
+        message: `${name}() takes its arguments without names. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
