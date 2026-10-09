@@ -2862,7 +2862,7 @@ stopAudio                    // stops both
 sound of the session, including sounds started in another file, in the order they started, as `stop()` on each handle
 would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
 A blocking `playAudio` stopped this way from a timer or cue block continues once that block returns. Video, the Stage
-image, the camera view, and timers are unaffected; without a running or paused sound, `stopAudio` does nothing.
+image, the camera view, and timers are unaffected. Without a running or paused sound, `stopAudio` does nothing.
 
 ### Failures, cleanup, and restore
 
