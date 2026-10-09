@@ -220,8 +220,6 @@ export type Source =
   /** A variable the code assigns; `counter` when an assignment adds to or subtracts from its own value. */
   | { readonly kind: "variable"; readonly name: string; readonly counter: boolean };
 
-/** Instructions looked back over for the store of a temporary a condition reads ({@link DataFlow.heldAt}). */
-const HELD_WINDOW = 200;
 /** Getters of the current date and time. */
 // getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
 const CLOCK_GETTERS = new Set([
@@ -370,6 +368,8 @@ export class DataFlow {
   readonly #jumpTargets = new Set<number>();
   /** Each function's own code, by its ID ({@link Code}); made when first needed. */
   #code: Map<number, Code> | null = null;
+  /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
+  readonly #stores = new Map<number, number[]>();
 
   /**
    * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
@@ -391,6 +391,18 @@ export class DataFlow {
     for (const instruction of instructions)
       for (const target of [instruction.target, instruction.continueTarget])
         if (typeof target === "number") this.#jumpTargets.add(target);
+    instructions.forEach((instruction, index) => {
+      const stored =
+        instruction.kind === "storeTemporary"
+          ? instruction.temporaryId
+          : instruction.kind === "callFunction"
+            ? instruction.destinationTemporary
+            : null;
+      if (typeof stored !== "number") return;
+      const known = this.#stores.get(stored) ?? [];
+      known.push(index);
+      this.#stores.set(stored, known);
+    });
     instructions.forEach((instruction, index) => {
       if (
         instruction.kind !== "interaction" ||
@@ -473,41 +485,39 @@ export class DataFlow {
 
   /**
    * What a temporary may hold at an instruction, with the index of the store that put it there: the expression of the
-   * nearest store before it in the same function, and of earlier stores too while a jump goes past the later one (a
-   * condition `a and b` lowers to a temporary that holds `a`, then `b` only when `a` holds; `load(k, default: f())` to
-   * one that holds the load, then `f()`'s result only when the load gives nothing). A call's result is
-   * `{ kind: "callResult", functionId, call }` with the call's index, which {@link flowOf} reads as the function's result.
-   * Null when they are not all found within a short way back.
+   * nearest store of it before the instruction, and of earlier stores too while a jump between the earlier store and the
+   * later one goes past the later one (a condition `a and b` lowers to a temporary that holds `a`, then `b` only when
+   * `a` holds; `load(k, default: f())` to one that holds the load, then `f()`'s result only when the load gives
+   * nothing). A temporary lives within one expression, from its first store on, so no jump goes past that one. A call's
+   * result is `{ kind: "callResult", functionId, call }` with the call's index, which {@link flowOf} reads as the
+   * function's result. Null when there is no store before the instruction in its function.
    */
   heldAt(temporaryId: number, at: number): { value: Data; index: number }[] | null {
+    const stores = this.#stores.get(temporaryId) ?? [];
     const owner = this.functionAt(at);
     const held: { value: Data; index: number }[] = [];
-    for (let index = at - 1; index >= 0 && index >= at - HELD_WINDOW; index -= 1) {
-      const instruction = record(this.#instructions[index]);
-      // Another function's code, or another file's: the `end` that closes a file's own code.
-      if (this.functionAt(index) !== owner || instruction.kind === "end") return null;
-      if (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId)
-        held.push({ value: record(instruction.value), index });
-      else if (
-        instruction.kind === "callFunction" &&
-        instruction.destinationTemporary === temporaryId
-      )
-        held.push({
-          value: { kind: "callResult", functionId: instruction.functionId, call: index },
-          index,
-        });
-      else continue;
-      if (!this.#jumpedOver(index, at)) return held;
+    let nearest = stores.length - 1;
+    while (nearest >= 0 && stores[nearest]! >= at) nearest -= 1;
+    for (let store = nearest; store >= 0; store -= 1) {
+      const index = stores[store]!;
+      if (this.functionAt(index) !== owner) return null;
+      const instruction = this.#instructions[index]!;
+      held.push({
+        value:
+          instruction.kind === "callFunction"
+            ? { kind: "callResult", functionId: instruction.functionId, call: index }
+            : record(instruction.value),
+        index,
+      });
+      if (store === 0 || !this.#jumpedOver(stores[store - 1]!, index, at)) return held;
     }
     return null;
   }
 
-  /** Whether a jump a short way before instruction `index`, in its function, goes past it to at most `at`. */
-  #jumpedOver(index: number, at: number): boolean {
-    const owner = this.functionAt(index);
-    for (let from = index - 1; from >= 0 && from >= index - HELD_WINDOW; from -= 1) {
-      if (this.functionAt(from) !== owner) return false;
-      const target = this.#instructions[from]!.target;
+  /** Whether a jump after instruction `from` and before `index` goes past `index` to at most `at`. */
+  #jumpedOver(from: number, index: number, at: number): boolean {
+    for (let jump = from + 1; jump < index; jump += 1) {
+      const target = this.#instructions[jump]!.target;
       if (typeof target === "number" && target > index && target <= at) return true;
     }
     return false;
@@ -1270,22 +1280,28 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     }
   }
   // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`; of a temporary's
-  // truth read through, of what it was read through to.
-  const through = (value: Data): Data =>
+  // truth read through, of what it was read through to, each value apart, so that keys one names are not taken for keys
+  // another names.
+  const masked = (value: Data): Data =>
     value.kind === "temporary" && read.has(Number(value.temporaryId))
-      ? { kind: "readThrough", values: read.get(Number(value.temporaryId)) }
+      ? { kind: "literal", value: null }
       : Object.fromEntries(
           Object.entries(value).map(([key, item]) => [
             key,
             Array.isArray(item)
-              ? item.map((each: unknown) => (isRecord(each) ? through(each) : each))
+              ? item.map((each: unknown) => (isRecord(each) ? masked(each) : each))
               : isRecord(item)
-                ? through(item)
+                ? masked(item)
                 : item,
           ]),
         );
-  const expression = read.size === 0 || !isRecord(condition) ? condition : through(condition);
-  for (const found of flow.sourcesOf(expression)) {
+  const parts: unknown[] =
+    read.size === 0 || !isRecord(condition)
+      ? [condition]
+      : [masked(condition), ...[...read.values()].flat()];
+  for (const [found, expression] of parts.flatMap((part) =>
+    flow.sourcesOf(part).map((found) => [found, part] as const),
+  )) {
     const source = keyed(found, expression);
     if (source.kind !== "storage" && source.kind !== "clock") continue;
     const known = goals.some(

@@ -785,6 +785,8 @@ test(
       const written =
         'function ready(ignore) {\n  return load("gate", default: false)\n}\nsave false as "gate"\n' +
         'function count(ignore) {\n  return load("n", default: 0)\n}\nsave randomInteger(0..3) as "n"\n' +
+        'function tick(ignore) {\n  return 0\n}\nfunction packed(thing) {\n  return load("pack.${thing}", default: 0) > 0\n}\n' +
+        'save 1 as "pack.knife"\n' +
         'save true as "flag"\nlet item = "knife"\nsave true as "gear.knife"\nshowButton "Check"\n' +
         `if ${condition} {\n  say "Through."\n}\nexit\n`;
       const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
@@ -799,7 +801,10 @@ test(
         sources: new Map([["main.tease", written]]),
         diagnostics: [],
       })
-        .coverage.unvisitedBranches.filter((entry) => entry.line === 13)
+        .coverage.unvisitedBranches.filter(
+          (entry) =>
+            entry.line === written.split("\n").findIndex((line) => line.startsWith("if ")) + 1,
+        )
         .sort((left, right) => left.instruction - right.instruction);
     };
     const needsOf = (entry: { parts: { needs: string }[] } | undefined) =>
@@ -822,6 +827,20 @@ test(
     assert.ok(
       fallback.some((needs) => needs.includes("stored flag != true")),
       JSON.stringify(fallback),
+    );
+    // A fallback whose argument takes many instructions to compute is still read as the load's fallback.
+    const far = gated(
+      `load("flag", default: ready(${Array(100).fill("tick(0)").join(" + ")}))`,
+    ).map(needsOf);
+    assert.ok(
+      far.some((needs) => needs.includes("stored flag != true")),
+      JSON.stringify(far),
+    );
+    // Keys of one pattern that two parts name are each that key.
+    const both = gated('load("pack.${item}", default: 0) > 2 or packed("gun")').at(-1);
+    assert.deepEqual(
+      [...(both?.dependsOn ?? [])].filter((key) => key.startsWith("stored pack")).sort(),
+      ["stored pack.gun", "stored pack.knife"],
     );
     const keyed = gated('ready(0) and load("gear.${item}", default: false)');
     assert.ok(
