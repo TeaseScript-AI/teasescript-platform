@@ -1470,7 +1470,7 @@ export class Evaluator {
         if (entry === undefined)
           throw fault(
             "TSR053",
-            internalFault("A prepared reference points to a dict entry that no longer exists."),
+            `The dict entry this statement changes no longer exists: something in the same statement removed the key ${quotedText(messageText(step.key))}. Make the change in a separate statement.`,
             span,
           );
         value = entry.value;
@@ -1481,9 +1481,7 @@ export class Evaluator {
         if (step.index < 0 || step.index >= value.items.length) {
           throw fault(
             "TSR025",
-            internalFault(
-              `A prepared reference points to list position ${step.index}, which no longer exists.`,
-            ),
+            `The list element this statement changes no longer exists: something in the same statement removed position ${step.index}. Make the change in a separate statement.`,
             span,
           );
         }
@@ -1492,7 +1490,7 @@ export class Evaluator {
       }
       throw fault(
         "TSR008",
-        internalFault("A prepared reference points to a list position that no longer exists."),
+        "The list this statement changes was replaced while the statement ran. Make the change in a separate statement.",
         span,
       );
     }
@@ -1964,10 +1962,12 @@ export class Evaluator {
         // A core built-in's own failure already says what to do; a host's comes with the built-in's name.
         if (!hostBuiltin && error instanceof RuntimeFault)
           throw fault("TSR012", error.message, expression.span);
-        const message = messageText(error instanceof Error ? error.message : String(error));
+        const message = messageText(error instanceof Error ? error.message : String(error)).trim();
+        const reason =
+          message === "" ? "" : `: ${/[.!?]$/u.test(message) ? message : `${message}.`}`;
         throw fault(
           "TSR012",
-          `The built-in function '${name}' failed: ${message.replace(/[.!?]?$/u, ".")} Check the values the script passes to '${name}'. If they are correct, report this with a debug export.`,
+          `The built-in function '${name}' failed${reason === "" ? "." : reason} Check the values the script passes to '${name}'. If they are correct, report this with a debug export.`,
           expression.span,
         );
       }
@@ -2056,9 +2056,10 @@ export class Evaluator {
             { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
+    const callee = planLabel(expression.callee);
     throw fault(
       "TSR014",
-      internalFault("The plan calls something that is not a function or a method."),
+      `Only a function or a method can be called, but ${callee === null ? "this" : `'${callee}'`} is neither. Call a function by its name instead.`,
       expression.callee.span,
     );
   }
@@ -2884,7 +2885,7 @@ export class Evaluator {
       throw fault(
         "TSR020",
         internalFault(
-          `The random source returned ${describeShownValue(random)}, but it must return a number that is at least 0 and less than 1.`,
+          `The random source returned ${typeof random === "number" ? String(random) : random === null ? "null" : `a value of type ${typeof random}`}, but it must return a number that is at least 0 and less than 1.`,
         ),
         span,
       );

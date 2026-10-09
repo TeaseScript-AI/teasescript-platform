@@ -1536,10 +1536,10 @@ restart, and report the failure with its debug export.
 | `TSR008` | An index on a value that is not a list or dict. | Index only lists and dicts. |
 | `TSR009` | An operator that cannot combine its operands, such as values of different kinds, durations of different families, a date moved by clock time, or a calendar duration divided by zero. | Check or convert the operand the message names. |
 | `TSR010` | A named argument given twice. _Defect._ | Report it. |
-| `TSR011` | A built-in function the host does not provide. | Run the script in a host that provides it. |
+| `TSR011` | A built-in function the host does not provide. _Defect._ | Report it. |
 | `TSR012` | A built-in function failed: a core one such as `randomInteger(...)` on its argument, with its own message, or a host one for the reason the message gives. | Correct what the message names, or report a host failure with a debug export. |
 | `TSR013` | A host built-in returned a value a script cannot hold. | Report it to the host. |
-| `TSR014` | A call of something that is not a function or a supported method. | Call a function or a method the value has. |
+| `TSR014` | A call of something that is not a function or a method, such as `items[0]()`. | Call a function by its name. |
 | `TSR015` | Named arguments where a call takes only positional ones. | Remove the names. |
 | `TSR016` | A method the value does not have. | Use a method the message names. |
 | `TSR017` | A property the value does not have. | Use a property the message names. |
@@ -1548,9 +1548,9 @@ restart, and report the failure with its debug export.
 | `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive). | Report it to the host. |
 | `TSR021` | A value that cannot be shown as text, such as a dict or a list inside a list. | Select an element or a property. |
 | `TSR022` | A speaker whose `displayName` is empty. | Give it a name, or leave `displayName` out. |
-| `TSR023` | A speaker that is not declared. | Declare the speaker. |
+| `TSR023` | A speaker that the session does not have. _Defect._ | Report it. |
 | `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
-| `TSR025` | A list index or text position outside the valid range, or a text end before its start. | Check it against `length`, and an end against its start, first. |
+| `TSR025` | A list index or text position outside the valid range, a text end before its start, or a list element that a statement changes but that the same statement removed. | Check it against `length`, and an end against its start, first. |
 | `TSR026` | A condition or an `and`, `or`, or `not` operand that is not true or false. | Compare explicitly, as in `x != 0`. |
 | `TSR027` | An arithmetic operand or range bound that is not a number. | Check for null, or convert numeric text with `toNumber(...)`. |
 | `TSR028` | Too many or too few arguments, or arguments in the wrong form. | Write the call as the message shows. |
@@ -1558,7 +1558,7 @@ restart, and report the failure with its debug export.
 | `TSR031` | A value from the host with a cycle or another shape a script value cannot have. | Report it to the host. |
 | `TSR033` | Leaving the root scope. _Defect._ | Report it. |
 | `TSR034` | An assignment that replaces a speaker. | Change the speaker's properties instead. |
-| `TSR035` | An operation the engine does not support for its operands, such as `in` without a range. | Check the operands' kinds. |
+| `TSR035` | An operation the engine does not support for its operands, such as `in` without a range. _Defect._ | Report it. |
 | `TSR036` | Arithmetic without a finite result: division or remainder by zero, a number or duration too large, a math function outside its domain, or a regression whose points all have the same x. | Check that the divisor is not 0, use smaller values, or pass values the function accepts. |
 | `TSR037` | The instruction budget of one run is used up, usually by a loop that neither waits nor ends. | Add a wait, or check the loop's condition. |
 | `TSR039` | A numeric argument outside its range, such as `chance(150)` or a negative weight. | Pass a value in the range the message gives. |
@@ -1575,7 +1575,7 @@ restart, and report the failure with its debug export.
 | `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a timer label or display, a media volume, a camera placement, a message's text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
 | `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
 | `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
-| `TSR053` | A handle or prepared reference that no longer refers to anything, or whose state is malformed. | Report it. |
+| `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed. | Make the change in a separate statement, or report a malformed state. |
 | `TSR054` | A storage key that is not text. | Write the key as text. |
 | `TSR055` | A `save` of a value that exists only in this session: a timer, media, or message handle, a speaker, a camera view, or a permanent button. | Save plain data, and recreate the session value after loading. |
 | `TSR057` | A count or text argument that a text method or `take(...)` cannot use, such as a negative count or empty text. | Pass the kind of value the message names. |
