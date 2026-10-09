@@ -384,7 +384,12 @@ session's start) gives each instruction the number of decisions (conditions and 
 the largest region of code play has not reached yet (of at least ten instructions), measured again at each analysis.
 A step that brings a state nearer to that region shares a lead toward it, as closeness to a comparison does, for 40
 expansions; once the region is reached or its lead spent, the next largest region not tried yet is. It is off by
-default: on the units measured it gained nothing. Directed work (attempts and expansions in the first place) takes at
+default: on the units measured it gained nothing. Needed writes (on by default; `--no-needed-writes`) use the same map
+for one target at a time: when a missed way needs a stored value that no explored state stored, each save of its key
+that can store it (a literal that is the value, or a computed one) and that play has not run yet is aimed at in turn,
+before any region guidance picks, with the same 40-expansion lead. Once a state runs the save, the storage it leaves
+takes the chain toward the value on. The report counts the saves found, those led toward, and those reached then
+(`search.neededWrites`). Directed work (attempts and expansions in the first place) takes at
 most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
 of what steps cost. With `--no-depth-phases`, starting next visits takes at most another third, apart from it, from
 the storage of the first ten completed sessions, and a session number goes before the next one in the search order.
