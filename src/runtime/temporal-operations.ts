@@ -18,6 +18,7 @@ import {
   formatIsoDateTime,
   formatIsoTime,
   formatIsoTimestamp,
+  isoWeek,
   isoWeekdayNumber,
   isValidEpochMilliseconds,
   localFields,
@@ -208,6 +209,10 @@ export function temporalProperty(
         return weekdayName(value);
       case "weekdayNumber":
         return isoWeekdayNumber(value);
+      case "weekNumber":
+        return isoWeek(value).weekNumber;
+      case "weekYear":
+        return isoWeek(value).weekYear;
     }
   }
   if (value.kind !== "date") {

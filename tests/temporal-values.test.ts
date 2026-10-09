@@ -96,6 +96,35 @@ test("ISO text converts to date and time values whose fields, ISO text, and Unix
   );
 });
 
+test("weekNumber and weekYear give the ISO 8601 week, whose Thursday decides the year", () => {
+  const weeks = (dates: readonly string[]) =>
+    runSays(
+      [
+        ...dates.map(
+          (date) => `say "\${toDate("${date}").weekNumber} \${toDate("${date}").weekYear}"`,
+        ),
+        'let dt = toDateTime("2026-10-09T23:30")',
+        'say "${dt.weekNumber} ${dt.weekYear}"',
+        "exit",
+      ].join("\n"),
+    );
+  // Derived by hand: 2024-12-30 is the Monday before Thursday 2025-01-02, and 2021-01-01 the Friday after Thursday
+  // 2020-12-31. A 400-year cycle is whole weeks, so 0000-01-01 and 9999-12-31 fall like 2000-01-01 and 1999-12-31, both
+  // in week 52 of 1999. 2026-01-01 is a Thursday, so week 41 of 2026 starts on Monday 2026-10-05.
+  assert.deepEqual(
+    weeks([
+      "2024-12-30",
+      "2025-01-01",
+      "2021-01-01",
+      "2021-01-04",
+      "2020-12-31",
+      "0000-01-01",
+      "9999-12-31",
+    ]),
+    ["1 2025", "1 2025", "53 2020", "1 2021", "53 2020", "52 -1", "52 9999", "41 2026"],
+  );
+});
+
 test("text known only at runtime converts, falls back to default:, or fails with a reason", () => {
   assert.deepEqual(
     runSays(

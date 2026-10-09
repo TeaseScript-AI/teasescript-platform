@@ -165,6 +165,7 @@ test("date and time values have read-only fields and methods by kind", () => {
         "    let fields: integer = day.year + day.month + day.day + day.weekdayNumber",
         "    let clockFields: integer = clock.hour + clock.minute + clock.second + clock.millisecond",
         "    let both: integer = dinner.year + dinner.millisecond",
+        "    let weeks: integer = day.weekNumber + day.weekYear + dinner.weekNumber + dinner.weekYear",
         "    let name: string = dinner.weekday",
         "    let texts: string[] = [day.toISO(), clock.formatTime(), dinner.formatDateTime(), started.formatDate()]",
         "    let moment: timestamp = dinner.toTimestamp()",
