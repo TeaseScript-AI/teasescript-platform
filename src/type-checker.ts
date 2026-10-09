@@ -728,16 +728,12 @@ class TypeChecker {
   readonly #knownValues = new Map<Expression, StaticScalar | undefined>();
 
   /**
-   * Each operation that gives a value of unknown type because an operand's type is unknown, with its operand types and
-   * result rule, so a place with a written type can tell when no result could fit it, as `/` never gives text.
+   * Each arithmetic operation that gives a value of unknown type because an operand's type is unknown, with the types it
+   * can give, so a place with a written type can tell when none of them could fit it, as `/` never gives text. An
+   * operand that is such an operation itself stands for the types it can give, any other operand of unknown type for
+   * every type an operator takes.
    */
-  readonly #unknownOperations = new Map<
-    Expression,
-    {
-      readonly operands: readonly StaticType[];
-      readonly result: (...values: StaticType[]) => StaticType | undefined;
-    }
-  >();
+  readonly #unknownOperations = new Map<Expression, readonly StaticType[]>();
 
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
@@ -1977,7 +1973,10 @@ class TypeChecker {
     const result = "type" in outcome ? outcome.type : undefined;
     if (result !== undefined && isScalar(value, "calendarDuration"))
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
-    if (result !== undefined && !isKnown(result)) return;
+    if (result !== undefined && !isKnown(result)) {
+      if (place.inferred === undefined) this.#checkUnknownCompound(place, kept, statement);
+      return;
+    }
     if (result === undefined) {
       const [first, second] = [resolved(kept), resolved(value)];
       if (operator === "+" && first.kind === "list" && second.kind === "list") {
@@ -2029,6 +2028,45 @@ class TypeChecker {
   }
 
   /**
+   * Reports `+=` or `-=` with an operation of unknown result when no type that operation can give, added to or
+   * subtracted from any type the place may hold, could fit the place's written type, as text never comes from `/`.
+   */
+  #checkUnknownCompound(place: Place, kept: StaticType, statement: AssignmentStatement): void {
+    const operation = unwrap(statement.value);
+    const given = this.#unknownOperations.get(operation);
+    const held = members(resolved(nonNullType(kept)));
+    if (
+      given === undefined ||
+      given.length === 0 ||
+      (operation.kind !== "binaryExpression" && operation.kind !== "unaryExpression") ||
+      !held.every(isKnown)
+    )
+      return;
+    const operator = statement.operator === "+=" ? "+" : "-";
+    const fits = held.some((member) =>
+      given.some((type) => {
+        const result = arithmeticType(operator, member, type);
+        return result !== undefined && mayFit(place.type, result);
+      }),
+    );
+    if (fits) return;
+    const results = union([...given]);
+    const text = operationText(statement.value);
+    const target = expressionLabel(statement.target);
+    const fix =
+      operator === "+" && held.some((member) => isScalar(member, "string"))
+        ? text === null || target === null
+          ? ' Put the whole calculation inside "${" and "}" instead.'
+          : ` Put the result in the text instead, as in '${target} += "\${${text}}"'.`
+        : operandFix(nonNullType(kept), results, statement);
+    this.#report(
+      typeCode.typeMismatch,
+      `${place.subject}, so the result of '${operation.operator}', which is ${describeValue(results)}, cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${fix}`,
+      statement.value.span,
+    );
+  }
+
+  /**
    * Stores a value in a place that keeps a type: reports a mismatch, or records what the value decides. A list, set, or
    * object literal is checked part by part, so the message points at the element or property that does not fit. A
    * place that is only checked, such as a parameter at a call, keeps its type unchanged: `decides` is false.
@@ -2062,6 +2100,21 @@ class TypeChecker {
           this.#storeTask({ ...place, type: fitting }, expression, value, decides),
         );
         return;
+      }
+      // An element that an operation of unknown result gives, which the elements of no member could hold, cannot fit.
+      if (candidates.length > 1) {
+        const elements = union(candidates.map((candidate) => candidate.element));
+        for (const element of literalElements(literal)) {
+          const unfit = this.#unfitResults(element, this.#typeOf(element), elements);
+          if (unfit === undefined) continue;
+          const text = operationText(element);
+          this.#report(
+            typeCode.typeMismatch,
+            `${place.subject}, so it cannot contain the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${members(elements).some((member) => isScalar(member, "string")) ? (text === null ? ' To show it as text, put the whole calculation inside "${" and "}".' : ` To show it as text, write "\${${text}}".`) : place.label === null ? " Change its type so its elements can hold that result." : ` Change the type of '${place.label}' so its elements can hold that result.`}`,
+            element.span,
+          );
+          return;
+        }
       }
     }
     if (
@@ -4412,8 +4465,15 @@ class TypeChecker {
       result,
     );
     if ("type" in outcome) {
-      if (!isKnown(outcome.type) && this.diagnostics.length === reported)
-        this.#unknownOperations.set(expression, { operands, result });
+      if (
+        !isKnown(outcome.type) &&
+        this.diagnostics.length === reported &&
+        !["<", "<=", ">", ">="].includes(operator)
+      )
+        this.#unknownOperations.set(
+          expression,
+          this.#possibleResults(operands, expression, result),
+        );
       return outcome.type;
     }
     const command = this.#timeOperands.get(expression);
@@ -4439,27 +4499,44 @@ class TypeChecker {
     if (isKnown(value) || !isKnown(type)) return undefined;
     if (operated.kind !== "binaryExpression" && operated.kind !== "unaryExpression")
       return undefined;
-    const operation = this.#unknownOperations.get(operated);
-    if (operation === undefined) return undefined;
-    const [lefts, rights] = operation.operands.map((operand) =>
+    const results = this.#unknownOperations.get(operated);
+    if (
+      results === undefined ||
+      results.length === 0 ||
+      results.some((result) => mayFit(type, result))
+    )
+      return undefined;
+    return { operator: operated.operator, results: union(results) };
+  }
+
+  /**
+   * The types an operation of unknown result can give: every combination of its operands' members, where an operand of
+   * unknown type stands for what the operation that gives it can give, or else for every type an operator takes.
+   */
+  #possibleResults(
+    operands: readonly StaticType[],
+    expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
+    result: (...values: StaticType[]) => StaticType | undefined,
+  ): readonly StaticType[] {
+    const expressions =
+      expression.kind === "binaryExpression"
+        ? [expression.left, expression.right]
+        : [expression.operand];
+    const [lefts, rights] = operands.map((operand, index) =>
       members(resolved(nonNullTypeForUse(operand))).flatMap((member) =>
-        isKnown(member) ? [member] : OPERAND_KINDS,
+        isKnown(member)
+          ? [member]
+          : (this.#unknownOperations.get(unwrap(expressions[index]!)) ?? OPERAND_KINDS),
       ),
     );
     const results: StaticType[] = [];
     for (const left of lefts!)
       for (const right of rights ?? [undefined]) {
-        const result = right === undefined ? operation.result(left) : operation.result(left, right);
-        if (result !== undefined) results.push(result);
+        const type = right === undefined ? result(left) : result(left, right);
+        if (type !== undefined && !results.some((known) => sameType(known, type)))
+          results.push(type);
       }
-    // A number may be whole when the script runs, and then it fits a whole number (integer).
-    const fits = (result: StaticType): boolean =>
-      isAssignable(type, result) ||
-      (isScalar(result, "number") &&
-        members(resolved(type)).some((member) => isScalar(member, "integer")));
-    return results.length > 0 && !results.some(fits)
-      ? { operator: operated.operator, results: union(results) }
-      : undefined;
+    return results;
   }
 
   /**
@@ -6861,6 +6938,15 @@ function isWhileTrue(
 
 /** Methods that change the list or set they are called on. */
 /** The value kinds an operand of unknown type might be, to tell whether a known operand could combine with any. */
+/** Whether a value of type `result` may fit a place of type `type` when the script runs, where a number may be whole. */
+function mayFit(type: StaticType, result: StaticType): boolean {
+  return (
+    isAssignable(type, result) ||
+    (isScalar(result, "number") &&
+      members(resolved(type)).some((member) => isScalar(member, "integer")))
+  );
+}
+
 const OPERAND_KINDS: readonly StaticType[] = [
   INTEGER_TYPE,
   NUMBER_TYPE,
