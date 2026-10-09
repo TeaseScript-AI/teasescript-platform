@@ -1,3 +1,12 @@
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
 // A variable reused in straight-line code for values of several types, each assigned before it is read, splits by
 // type.
 let responseBoolean = false
@@ -39,9 +48,10 @@ function debugImages {
 // NOTE SX_PLACEHOLDER_TYPE line 23: Groovy started 'actions' as 0 and later stored a list (string[]); TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where 0 was read.
 let actions: string[] = []
 function offer {
-  actions = ["Nothing"]
+  actions = ["Nothing", "Work"]
   // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
   actions += ["Use Torch"]
+  actions = sexscriptLegacyListMinus(actions, ["Work"])
 }
 offer()
 say actions[1]

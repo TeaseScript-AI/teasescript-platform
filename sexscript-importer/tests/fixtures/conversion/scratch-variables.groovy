@@ -21,6 +21,6 @@ def debugImages = { ->
 }
 // A 0 placeholder that later holds lists starts as an empty list too (Banjo).
 def actions = 0
-def offer = { -> actions = ["Nothing"]; actions = actions + ["Use Torch"] }
+def offer = { -> actions = ["Nothing", "Work"]; actions = actions + ["Use Torch"]; actions = actions - ["Work"] }
 offer()
 show(actions[1])

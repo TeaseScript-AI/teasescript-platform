@@ -138,6 +138,11 @@ for c in sexscriptLegacyItems(picked) {
 }
 // Removing a part from text in place drops its first occurrence (Banjo's gear).
 let gear = " Torch. Rope. Torch. "
+function loadGear {
+  // NOTE SX_LOAD_KEEPS_VALUE line 36: Groovy stored null in 'gear' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  gear = load "game.gear", default: gear
+}
 gear = sexscriptLegacyTextMinus(gear, " Torch. ")
+gear = sexscriptLegacyTextMinus(gear, " Rope. ")
 say "Gear:${gear}"
 exit

@@ -262,11 +262,12 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   }
-  // Groovy list - value is a list without the value, and text - part text without the part.
+  // Groovy list - value is a list without the value, and text - part text without the part; a null left side failed.
   if (operator === "-") {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
-    if (onlyOf(left, STRING) && left !== 0) return STRING;
+    if (onlyOf(left, STRING | NULL) && left & STRING) return STRING;
+    if (asNode(node.right)?.kind === "list" && left & LIST && !(left & STRING)) return LIST;
   }
   if (operator === "*") {
     // Groovy `text * n` and `list * n` repeat the text or the list's elements.
@@ -292,6 +293,8 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   if (left === 0 || right === 0) return left | right;
   // Groovy list + anything is list concatenation or append, even when the right side is a string.
   if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
+  // A number takes no list, so a list literal joins a left side that may be a list and is no text (Banjo's 0 start).
+  if (asNode(node.right)?.kind === "list" && left & LIST && !(left & STRING)) return LIST;
   if (onlyOf(left, STRING | NULL) && left & STRING) return STRING;
   if (onlyOf(right, STRING | NULL) && right & STRING) return STRING;
   if (onlyOf(left, NUMBER) && onlyOf(right, NUMBER)) return NUMBER;

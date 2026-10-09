@@ -5938,10 +5938,14 @@ function lowerAssignment(
     ];
   }
   const removesElement = context.elementRemovals.has(node);
+  const targetType = inferType(targetNode, context.types);
   if (
     operator === "-=" &&
     variableTarget !== null &&
-    (removesElement || isListType(inferType(targetNode, context.types)))
+    (removesElement ||
+      isListType(targetType) ||
+      // A list literal is taken only from a list (lowerBinaryExpression).
+      (right.kind === "list" && (targetType & LIST) !== 0 && (targetType & STRING) === 0))
   ) {
     const difference = lowerListDifference(
       { kind: "binary", span: node.span, operator: "-", left: targetNode, right },
@@ -10548,6 +10552,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (context.elementRemovals.has(node)) return lowerListDifference(node, context, true);
   if (operator === "-" && isListType(inferType(asNode(node.left), context.types)))
     return lowerListDifference(node, context);
+  // Groovy took a list literal only from a list, so a left side that may be a list is one: a variable that starts as a
+  // 0 placeholder (Banjo's `locationActions - ["Work"]`).
+  const leftType = operator === "-" ? inferType(asNode(node.left), context.types) : 0;
+  if (
+    operator === "-" &&
+    asNode(node.right)?.kind === "list" &&
+    (leftType & LIST) !== 0 &&
+    (leftType & STRING) === 0
+  )
+    return lowerListDifference(node, context);
   if (operator === "-") {
     const removed = textRemoval(node, context);
     if (removed !== undefined) return removed;
@@ -11663,7 +11677,8 @@ function textRemoval(node: AstNode, context: LowerContext): IrExpression | null 
   const rightNode = asNode(node.right);
   if (leftNode === null || rightNode === null) return undefined;
   const left = inferType(leftNode, context.types);
-  if (!onlyOf(left, STRING) || left === 0) return undefined;
+  // A null left side failed in Groovy, so text or null is text (Banjo's `gear` after a loadString).
+  if (!onlyOf(left, STRING | NULL) || (left & STRING) === 0) return undefined;
   const text = lowerExpression(leftNode, context);
   const part = lowerExpression(rightNode, context);
   if (text === null || part === null) return null;

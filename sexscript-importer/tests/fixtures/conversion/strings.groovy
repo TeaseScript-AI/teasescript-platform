@@ -33,5 +33,7 @@ def picked = getSelectedValue("Pick one?", ["none", "red"]) == "none" ? null : "
 for (c in picked) show(c)
 // Removing a part from text in place drops its first occurrence (Banjo's gear).
 def gear = " Torch. Rope. Torch. "
+def loadGear = { -> gear = loadString("game.gear") }
 gear -= " Torch. "
+gear = gear - " Rope. "
 show("Gear:" + gear)
