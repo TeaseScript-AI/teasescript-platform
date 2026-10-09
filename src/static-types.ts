@@ -134,13 +134,15 @@ export interface PartOrigin {
  * What a number derives from: origins that merge without copying, so a long sum stays cheap, and that keep every
  * origin they merged, so no dependency of a widening is lost.
  */
-class Origins implements Iterable<Origin> {
-  readonly #origin: Origin | undefined;
-  readonly #parts: readonly Origins[];
+export class Origins implements Iterable<Origin> {
+  /** The origin of a group of one. */
+  readonly origin: Origin | undefined;
+  /** The groups this one merged. */
+  readonly parts: readonly Origins[];
 
   private constructor(origin: Origin | undefined, parts: readonly Origins[]) {
-    this.#origin = origin;
-    this.#parts = parts;
+    this.origin = origin;
+    this.parts = parts;
   }
 
   static of(origin: Origin): Origins {
@@ -161,11 +163,11 @@ class Origins implements Iterable<Origin> {
       const group = pending.pop()!;
       if (seen.has(group)) continue;
       seen.add(group);
-      if (group.#origin !== undefined && !found.has(group.#origin)) {
-        found.add(group.#origin);
-        yield group.#origin;
+      if (group.origin !== undefined && !found.has(group.origin)) {
+        found.add(group.origin);
+        yield group.origin;
       }
-      for (const part of group.#parts) pending.push(part);
+      for (const part of group.parts) pending.push(part);
     }
   }
 }
@@ -1010,8 +1012,8 @@ function* numberPathsTask(
 /** The integers inside a value, through elements and properties, each with its path and what it derives from. */
 export function integerParts(
   type: StaticType,
-): { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] {
-  const parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] = [];
+): { readonly path: readonly string[]; readonly origins: Origins }[] {
+  const parts: { readonly path: readonly string[]; readonly origins: Origins }[] = [];
   runCompileTask(integerPartsTask(type, [], parts));
   return parts;
 }
@@ -1019,7 +1021,7 @@ export function integerParts(
 function* integerPartsTask(
   typeToSearch: StaticType,
   path: readonly string[],
-  parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[],
+  parts: { readonly path: readonly string[]; readonly origins: Origins }[],
 ): CompileTask<void> {
   const type = resolved(nonNullType(typeToSearch));
   if (isScalar(type, "integer")) {
