@@ -558,6 +558,9 @@ no line is labelled `unreachable` (`staticContradictions`).
 
 The report `<out>/<unit>.json` has these parts:
 
+- what was run: the unit's `contentHash` and `converter` commit; the `explorer` commit (`git describe` of the
+  sources, or `SX_EXPLORER_COMMIT` for a copy of them without the repository, else `unknown`); `seed`, the budgets,
+  `maxStates`, `strategies` (each search strategy on or off), and `untilStalled`;
 - for a unit that compiles, a `catalog` block for the importer catalog's Explorer column: `coveragePercent` by play,
   the counts of `crashes` and `traps`, `firstCrash` (`code`, `path`, `line`, `message`, and `chosen` when only play
   with chosen random outcomes reached it) and `firstTrap` (`location`) or `null`, and `reach`, the coverable lines by

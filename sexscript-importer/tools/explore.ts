@@ -120,6 +120,9 @@ interface ReportHeader {
   /** The work budget in runtime operations, or null without one. */
   budgetOps: number | null;
   maxStates: number;
+  /** The search strategies of the run, each on or off, and whether it ran until it stalled. */
+  strategies: Record<string, boolean>;
+  untilStalled: boolean;
   exploredAt: string;
   compile: { ok: boolean; errors: string[] };
 }
@@ -497,6 +500,10 @@ async function exploreUnit(
     budgetSeconds: settings.budgetSeconds,
     budgetOps: settings.budgetOps,
     maxStates: settings.maxStates,
+    strategies: Object.fromEntries(
+      STRATEGIES.map((name) => [name, settings.strategies[name] === true]),
+    ),
+    untilStalled: settings.untilStalled,
     exploredAt: new Date().toISOString(),
     compile: { ok: unit.plan !== null, errors: unit.errors.slice(0, 20) },
   };
@@ -623,7 +630,13 @@ async function converterCommit(dir: string): Promise<string | null> {
   }
 }
 
+/**
+ * The explorer's commit: `SX_EXPLORER_COMMIT` when set, as for a copy of the sources without the repository; else what
+ * `git describe` says of the sources here; else "unknown".
+ */
 function explorerCommit(): string {
+  const given = process.env.SX_EXPLORER_COMMIT;
+  if (given !== undefined && given !== "") return given;
   try {
     return execFileSync(
       "git",
