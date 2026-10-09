@@ -503,6 +503,17 @@ interface PlacePath {
   readonly path: readonly string[];
 }
 
+/**
+ * Whether a path, written as a key of {@link Widened}, is one of `keys` or lies inside one of them: whether it or one of
+ * the paths that lead to it is in `keys`, where `""` is the whole variable.
+ */
+function withinKeys(path: string, keys: ReadonlySet<string>): boolean {
+  if (keys.has("") || keys.has(path)) return true;
+  for (let end = path.indexOf("."); end !== -1; end = path.indexOf(".", end + 1))
+    if (keys.has(path.slice(0, end))) return true;
+  return false;
+}
+
 /** A part of a variable that a store added to or decided, with its path there (see `TypeChecker.#rewiden`). */
 interface ChangedPart {
   readonly path: readonly string[];
@@ -2412,15 +2423,9 @@ class TypeChecker {
     this.#unappliedWidening.delete(root);
     const decided = this.#decide(root, variable.type);
     const parts = whole ? [[]] : [changed.path, ...decided];
-    // The keys of the widened paths inside a part start with the part's key and a dot (see `Widened`).
-    const keys = parts.map((part) => part.join("."));
-    const inside = keys.map((key) => `${key}.`);
+    const keys = new Set(parts.map((part) => part.join(".")));
     for (const path of this.#widened.get(root)?.keys() ?? [])
-      if (
-        path !== "" &&
-        keys.some((key, index) => key === "" || path === key || path.startsWith(inside[index]!))
-      )
-        widenPath(variable.type, path.split("."));
+      if (path !== "" && withinKeys(path, keys)) widenPath(variable.type, path.split("."));
     for (const part of parts)
       ownPartOriginsAt(variable.type, (path) => this.#partOrigin(root, path), part);
   }
