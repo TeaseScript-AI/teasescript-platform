@@ -291,8 +291,8 @@ export function temporalMethod(
 
 /**
  * Ordering and arithmetic with a date or time operand (V30 §35, ADR 0026), or `undefined` when neither operand is one.
- * No operator reads a zone: exact durations apply only to an absolute date and time, and whole days and calendar units
- * to local dates.
+ * No operator reads a zone: exact durations apply only to an absolute date and time, and calendar units only to local
+ * dates and dates and times.
  */
 export function temporalBinary(
   operator: string,

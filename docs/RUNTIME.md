@@ -1545,7 +1545,7 @@ restart, and report the failure with its debug export.
 | `TSR006` | An unknown name. _Defect._ | Report it. |
 | `TSR007` | An object or speaker with the same property twice. _Defect._ | Report it. |
 | `TSR008` | An index on a value that is not a list or dict, or on a list that the same statement replaced. | Index only lists and dicts, and make such a change in a separate statement. |
-| `TSR009` | An operator that cannot combine its operands, such as values of different kinds, a calendar duration beside a duration or of another family, a date or a date and time moved by a duration, or a calendar duration divided by zero. | Check or convert the operand the message names. |
+| `TSR009` | An operator that cannot combine its operands, such as values of different kinds, a calendar duration ordered against or divided by a duration or one of another family, a date or a date and time moved by a duration, or a calendar duration divided by zero. | Check or convert the operand the message names. |
 | `TSR010` | A named argument given twice. _Defect._ | Report it. |
 | `TSR011` | A call of a built-in function the host does not provide, or, in a plan compiled before `TSV019` rejected it, of a name that is not a function, such as `(x)()`. | Call a function by its name. |
 | `TSR012` | A host built-in failed. | Check the values the script passes, or report a host failure with a debug export. |

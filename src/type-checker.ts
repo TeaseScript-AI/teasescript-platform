@@ -1951,6 +1951,8 @@ class TypeChecker {
             arithmeticType(operator, a, b),
           );
     const result = "type" in outcome ? outcome.type : undefined;
+    if (result !== undefined && isScalar(value, "calendarDuration"))
+      this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
     if (result !== undefined && !isKnown(result)) return;
     if (result === undefined) {
       const [first, second] = [resolved(kept), resolved(value)];
@@ -4202,21 +4204,7 @@ class TypeChecker {
     };
     let problem: string | number | AnyDuration | undefined;
     if (operator === "+" || operator === "-") {
-      // A local date or date and time moves by a known calendar duration only without exact time.
-      const b =
-        isScalar(left, "date", "datetime") && rightDuration
-          ? duration(expression.right)
-          : undefined;
-      if (b !== undefined && isCalendar(b) && b.milliseconds !== 0) {
-        this.#report(
-          typeCode.invalidOperand,
-          isScalar(left, "date")
-            ? `A date moves only by calendar units, not by ${formatDuration(b)}. A date has no clock time, so leave out the ${formatDuration(b.milliseconds)}.`
-            : `A date and time moves only by calendar units, not by ${formatDuration(b)}. Convert it with toAbsoluteDateTime() for elapsed time.`,
-          expression.span,
-        );
-        return;
-      }
+      if (rightDuration) this.#checkLocalCalendarOffset(left, expression.right, expression.span);
     } else if (leftDuration && rightDuration) {
       // A calendar duration beside an exact one is a type error of its own.
       if (isScalar(left, "calendarDuration") !== isScalar(right, "calendarDuration")) return;
@@ -4241,6 +4229,29 @@ class TypeChecker {
     }
     if (typeof problem === "string")
       this.#report(typeCode.invalidOperand, `'${operator}': ${problem}.`, expression.span);
+  }
+
+  /**
+   * Reports a known calendar duration with exact time that moves a local date or date and time (ADR 0026 §5), as in
+   * `day + (1 calendar day + 1 h)` or `day += 1 calendar day + 1 h`.
+   */
+  #checkLocalCalendarOffset(target: StaticType, operand: Expression, span: SourceSpan): void {
+    if (!isScalar(target, "date", "datetime")) return;
+    const value = this.#known(operand);
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      !isCalendar(value) ||
+      value.milliseconds === 0
+    )
+      return;
+    this.#report(
+      typeCode.invalidOperand,
+      isScalar(target, "date")
+        ? `A date moves only by calendar units, not by ${formatDuration(value)}. A date has no clock time, so leave out the ${formatDuration(value.milliseconds)}.`
+        : `A date and time moves only by calendar units, not by ${formatDuration(value)}. Convert it with toAbsoluteDateTime() for elapsed time.`,
+      span,
+    );
   }
 
   /**

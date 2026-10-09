@@ -307,7 +307,7 @@ test("dates move by calendar units with clamping, and subtract to calendar days"
       "24",
     ],
   );
-  // A date moves only by calendar units, also by a whole number of exact days.
+  // A date moves only by calendar units, even when an exact duration is a whole number of days.
   assert.deepEqual(diagnostics('let d = toDate("2026-10-04") + 1 day\nexit'), [
     ["TSV043", "A date moves only by calendar units. Write '1 calendar day'."],
   ]);
@@ -320,6 +320,27 @@ test("dates move by calendar units with clamping, and subtract to calendar days"
       "A date moves only by calendar units, not by 1 calendar month 2 h. A date has no clock time, so leave out the 2 h.",
     ],
   ]);
+  // A compound assignment checks a known calendar duration as the operator does.
+  for (const [declaration, kind] of [
+    ['let d = toDate("2026-10-09")', "A date"],
+    ['let d = toDateTime("2026-10-09T18:00")', "A date and time"],
+  ])
+    for (const operator of ["+=", "-="]) {
+      const diagnostics = compileSource(
+        `${declaration}\nd ${operator} 1 calendar day + 1 h\nexit`,
+      ).diagnostics;
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message.split(",")[0]]),
+        [["TSV043", `${kind} moves only by calendar units`]],
+        `${declaration} ${operator}`,
+      );
+    }
+  assert.deepEqual(
+    says(
+      'let d = toDate("2026-10-09")\nd += 1 calendar day\nd -= 2 calendar days\nsay d.toISO()\nexit',
+    ),
+    ["2026-10-08"],
+  );
   for (const duration of ["dynamic(1 day)", "dynamic(1 calendar day + 2 h)"])
     assert.equal(
       runtimeFailure(`${DYNAMIC}let d = toDate("2026-10-04") + ${duration}\nexit`),
