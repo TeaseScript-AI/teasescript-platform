@@ -617,7 +617,7 @@ export function playerRuntimeForeground(
       return Object.freeze({
         kind: "ask-image",
         accessibleName,
-        hint: action.ui.hint ?? "",
+        hint: action.ui.hint ?? "Add an image…",
         allowFile: action.ui.allowFile,
         allowCamera: action.ui.allowCamera,
         types: action.ui.types,

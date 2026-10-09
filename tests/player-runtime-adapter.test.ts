@@ -780,6 +780,15 @@ test("an image request is presented, survives a restore while it waits, and show
   assert.equal(answerPlayerRuntimeImage(answered.session, reference, store), null);
 });
 
+test("an image request without a hint shows the default hint, and an explicitly empty one stays empty", () => {
+  const hintOf = (source: string) => {
+    const presented = playerRuntimeForeground(createPlayerRuntimeSession(source));
+    return presented?.kind === "ask-image" ? presented.hint : null;
+  };
+  assert.equal(hintOf('let pick = askImage("Show me.")\nexit'), "Add an image…");
+  assert.equal(hintOf('let pick = askImage("Show me.", hint: "")\nexit'), "");
+});
+
 test("runtime adapter leaves evaluated persistent writes pending until acknowledgement", () => {
   const initial = [{ key: "answer.2", value: "previous" }];
   const session = createPlayerRuntimeSession(

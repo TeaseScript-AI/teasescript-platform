@@ -635,11 +635,9 @@ function submit(source: "input" | "button") {
           :placeholder="
             formEditor
               ? formEditor.hint
-              : imageRequest
-                ? imageRequest.hint || 'Add an image…'
-                : foreground && 'hint' in foreground
-                  ? foreground.hint
-                  : 'Type your response…'
+              : foreground && 'hint' in foreground
+                ? foreground.hint
+                : 'Type your response…'
           "
           :attach="attach"
           :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"
