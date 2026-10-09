@@ -2371,7 +2371,8 @@ class TypeChecker {
 
   /**
    * Whether every part of a value fits a type, looking into nested list, set, and dict literals, whose own types are
-   * not decided until a place gives them one. It reports nothing and changes no type.
+   * not decided until a place gives them one, and at what an operation of unknown result can give. It reports nothing
+   * and changes no type.
    */
   *#fitsTask(type: StaticType, expression: Expression): CompileTask<boolean> {
     const literal = unwrap(expression);
@@ -2379,8 +2380,10 @@ class TypeChecker {
       literal.kind !== "listLiteral" &&
       literal.kind !== "setLiteral" &&
       literal.kind !== "dictLiteral"
-    )
-      return isAssignable(type, this.#typeOf(expression));
+    ) {
+      const value = this.#typeOf(expression);
+      return isAssignable(type, value) && this.#unfitResults(expression, value, type) === undefined;
+    }
     const kind = literalCollectionKind(literal);
     for (const member of members(nonNullType(type))) {
       if (member.kind === "unknown" || member.kind === "open") return true;
@@ -2446,9 +2449,24 @@ class TypeChecker {
       this.#reportMayBe(collectionExpression, collections[1]!, [collections[0]!]);
       return;
     }
-    const passing = collections.filter((_, index) => isAssignable(places[index]!.type, value));
+    // A part of unknown type fits a member only if a result of an operation that gives it could.
+    const unknownParts = containsType(value, (part) => part.kind === "unknown");
+    const passing: StaticType[] = [];
+    for (const [index, member] of collections.entries())
+      if (
+        isAssignable(places[index]!.type, value) &&
+        (!unknownParts || (yield* compileChild(this.#fitsTask(places[index]!.type, expression))))
+      )
+        passing.push(member);
     if (passing.length === collections.length) {
       for (const place of places) yield* compileChild(this.#storeTask(place, expression, value));
+      return;
+    }
+    // Which member holds the collection is known only when the script runs, which checks such a value then.
+    if (passing.length > 0 && unknownParts) {
+      for (const [index, place] of places.entries())
+        if (passing.includes(collections[index]!))
+          yield* compileChild(this.#storeTask(place, expression, value));
       return;
     }
     if (passing.length > 0) {

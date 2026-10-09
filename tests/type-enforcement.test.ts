@@ -696,6 +696,33 @@ test("an operation on a value the compiler cannot know is rejected where no resu
   );
 });
 
+test("a union of collections takes an operation result that one of its members can hold, in either order", () => {
+  // The member that holds the value is known only when the script runs, which checks the value then.
+  const run = (...body: string[]): string[] => {
+    const source = [
+      "function f(x) {",
+      ...body.map((line) => `    ${line}`),
+      "}",
+      "f(8)",
+      "exit",
+    ].join("\n");
+    assert.deepEqual(mismatches(source), [], source);
+    const result = runValidSource(source);
+    assert.equal(result.snapshot.failure, null, source);
+    return result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  };
+  for (const members of ["string[] | number[]", "number[] | string[]"])
+    assert.deepEqual(run(`let ys: ${members} = [x / 4]`, "say ys"), ["[2]"], members);
+  assert.deepEqual(run("let ys: string set | number set = set[x / 4]", "say ys"), ["[2]"]);
+  assert.deepEqual(run("let ys: string dict | number dict = dict{ a: x / 4 }", "say ys"), [
+    'dict{ "a": 2 }',
+  ]);
+  assert.deepEqual(
+    run("let rows: string[][] | number[][] = [[1.5]]", "rows.add([x / 4])", "say rows"),
+    ["[[1.5], [2]]"],
+  );
+});
+
 test("type inference handles deeply nested expressions without native recursion", () => {
   const source = `let total = ${Array.from({ length: 20_000 }, () => "1").join(" + ")}\ntotal = 2\nexit`;
   assert.deepEqual(compileSource(source).diagnostics, []);
