@@ -229,6 +229,18 @@ function removedPrefillName(kind: InteractionExpression["interactionKind"]): str
   return kind === "choice" || kind === "form" ? null : "default";
 }
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
+const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.LeftParenthesis,
+  TokenKind.LeftBracket,
+  TokenKind.LeftBrace,
+  TokenKind.InterpolationStart,
+]);
+const CLOSING_TOKENS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.RightParenthesis,
+  TokenKind.RightBracket,
+  TokenKind.RightBrace,
+  TokenKind.InterpolationEnd,
+]);
 /** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
 const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([
   "stringLiteral",
@@ -3831,7 +3843,7 @@ class Parser {
             "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
             name.span,
           );
-          this.#synchronizeStatement();
+          this.#skipInteractionRest();
         } else if (
           !this.#isInteractionChoiceTerminator() &&
           !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace))
@@ -3841,7 +3853,7 @@ class Parser {
             "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
             this.#peek().span,
           );
-          this.#synchronizeStatement();
+          this.#skipInteractionRest();
         }
         break;
       }
@@ -4567,6 +4579,26 @@ class Parser {
       !this.#check(TokenKind.EndOfFile) &&
       !(stopAtRightBrace && this.#check(TokenKind.RightBrace))
     ) {
+      this.#advance();
+    }
+  }
+
+  /**
+   * Skips the rest of a malformed compact interaction: to the end of its statement, or inside a grouping to the
+   * grouping's closing delimiter, which the grouping then reads, so the statements after it still parse.
+   */
+  #skipInteractionRest(): void {
+    if (!this.#insideDelimiters) {
+      this.#synchronizeStatement();
+      return;
+    }
+    let depth = 0;
+    while (!this.#check(TokenKind.EndOfFile)) {
+      if (OPENING_TOKENS.has(this.#peek().kind)) depth += 1;
+      else if (CLOSING_TOKENS.has(this.#peek().kind)) {
+        if (depth === 0) return;
+        depth -= 1;
+      }
       this.#advance();
     }
   }

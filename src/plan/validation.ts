@@ -1650,10 +1650,12 @@ function validatePreparedInteractionUi(
                 "values",
                 "accessibleName",
                 ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+                ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
               ];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
+    ("booleanPrefill" in ui && (ui.booleanPrefill !== true || !("prefillTemporary" in ui))) ||
     (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
   ) {
     errors.push(

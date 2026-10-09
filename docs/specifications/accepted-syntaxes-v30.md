@@ -2176,7 +2176,9 @@ compact and parenthesized forms mean the same, `as speaker` comes before the arg
 instead be named `message:`, is said once by the asking speaker before the buttons open. The question and the button
 texts are evaluated once, in written order, and accept what a field text accepts. `prefill: true` or `prefill: false`
 preselects the Yes or No button as `choose` preselects one ([§19](#preselected-button)): it is marked and Space
-activates it, but it is never chosen by itself. Without `prefill:` neither button is preselected.
+activates it, but it is never chosen by itself. Without `prefill:` neither button is preselected. As for another ask's
+prefill, one that is `null` or blank text when the buttons open preselects none, and any other value that is not `true`
+or `false` is a runtime error before they open.
 
 ### Multiple boolean choices
 

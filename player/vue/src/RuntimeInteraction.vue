@@ -625,6 +625,11 @@ function submit(source: "input" | "button") {
           :disabled="!foreground && !pacing"
           :pacing="!foreground && !!pacing"
           :preselected="preselected !== undefined"
+          :buttons-only="
+            foreground?.kind === 'choose' ||
+            foreground?.kind === 'show-button' ||
+            (foreground?.kind === 'form' && !formEditor)
+          "
           :fresh-after="presentedAt"
           :submitting="submitting || readingImage"
           :placeholder="

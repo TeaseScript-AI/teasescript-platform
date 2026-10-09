@@ -819,10 +819,10 @@ Standard keyboard behavior is:
 - `Enter` submits;
 - `Shift+Enter` inserts a newline;
 - Space in the empty composer activates the preselected button: a `showButton`, or the button that `prefill:` of
-  `choose` or `askBoolean` preselects; without one it activates nothing, and while a text, number, or date field waits
+  `choose` or `askBoolean` preselects; without one it does nothing, and while a text, number, or date field waits
   it types. A focused button keeps its own Space: it activates that button, and a focused form toggle flips without
   submitting the form;
-- Enter and that Space act only on a fresh press, one that began after the interaction appeared and is not a held key's
+- Enter, in the input or on Send, and that Space act only on a fresh press, one that began after the interaction appeared and is not a held key's
   repeat, so the Space that skips a message never also answers the button that appears after it, and a held Enter
   never submits the next field;
 - a future user preference may invert or otherwise refine that choice;

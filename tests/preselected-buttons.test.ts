@@ -11,6 +11,7 @@ import {
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
@@ -73,6 +74,50 @@ test("a prefill no button has preselects none and warns in Debug, and the script
     "TSW017 No button has the prefill value (\"Leave\"), so none is preselected. 'prefill:' gives a button's value, not its text.",
   ]);
   assert.equal(session.state.status, "waiting");
+});
+
+test("an askBoolean prefill known only at runtime is true or false, null or blank text preselects none, and else it fails", () => {
+  const plan = compileValidPlan(
+    'function ask(p) {\n    return askBoolean "Ready?", prefill: p\n}\nlet a = ask(value)\nexit',
+    { globals: ["value"] },
+  );
+  for (const [value, shown] of [
+    [true, ["Yes*", "No"]],
+    [false, ["Yes", "No*"]],
+    [null, ["Yes", "No"]],
+    ["  ", ["Yes", "No"]],
+  ] as const) {
+    const { snapshot, events } = run(
+      plan,
+      createFreshRuntimeSnapshot(plan, { globals: { value } }),
+    );
+    const action = snapshot.foregroundAction;
+    const ui = action?.kind === "interaction" ? action.ui : null;
+    assert.ok(ui?.kind === "choice", String(value));
+    assert.deepEqual(
+      ui.options.map((option, index) => `${option.text}${index === ui.preselected ? "*" : ""}`),
+      shown,
+      String(value),
+    );
+    assert.equal(
+      events.some((event) => event.kind === "developerWarning"),
+      false,
+      String(value),
+    );
+    assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true, String(value));
+  }
+  for (const value of [5, "yes"]) {
+    const { snapshot } = run(plan, createFreshRuntimeSnapshot(plan, { globals: { value } }));
+    assert.equal(snapshot.foregroundAction, null, String(value));
+    assert.deepEqual(
+      [snapshot.failure?.code, snapshot.failure?.message],
+      [
+        "TSR052",
+        `The prefill of askBoolean must be true or false, not ${value === 5 ? "a number" : "text (string)"}.`,
+      ],
+      String(value),
+    );
+  }
 });
 
 test("a restored choice keeps its preselected button, and one that does not fit its prefill is rejected", () => {
@@ -140,6 +185,12 @@ test("choose takes prefill: once, after its options, and askBoolean's prefill is
   assert.deepEqual(errors("let a = choose 1, 2, prefill: 1, 3"), [
     "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
   ]);
+  // Inside a grouping the error ends at its closing delimiter, so the next statement still parses.
+  const grouped = "let a = (choose 1, 2, prefill: 1, prefill: 2)\nlet b = 3";
+  assert.deepEqual(errors(grouped), [
+    "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+  ]);
+  assert.equal(parse(`${grouped}\nexit`).program.statements.length, 3);
   assert.deepEqual(errors('let a = askBoolean "Q", prefill: null'), [
     "The prefill of askBoolean must be true or false, not null. Remove 'prefill:' to preselect no button.",
   ]);

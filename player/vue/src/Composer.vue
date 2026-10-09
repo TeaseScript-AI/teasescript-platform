@@ -22,6 +22,8 @@ const props = withDefaults(
     pacing?: boolean;
     /** A preselected button waits; Space in the empty input activates it. */
     preselected?: boolean;
+    /** Only buttons wait, no field: Space in the empty input types nothing, and activates only a preselected button. */
+    buttonsOnly?: boolean;
     /**
      * When the waiting interaction appeared, as a `performance.now()` time: a key pressed earlier, or held down, does
      * not submit it or activate its button.
@@ -44,6 +46,7 @@ const props = withDefaults(
     feedback: "",
     pacing: false,
     preselected: false,
+    buttonsOnly: false,
     freshAfter: 0,
     attach: null,
   },
@@ -102,10 +105,20 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key === playerKeys.skipPacing.key && props.pacing && empty) {
     event.preventDefault();
     emit("skip");
-  } else if (event.key === playerKeys.preselectedButton.key && props.preselected && empty) {
+  } else if (
+    event.key === playerKeys.preselectedButton.key &&
+    (props.preselected || props.buttonsOnly) &&
+    empty
+  ) {
     event.preventDefault();
-    if (fresh) emit("activate");
+    if (props.preselected && fresh) emit("activate");
   }
+}
+
+/** Send keeps the fresh-press rule of Enter in the input: a held Enter or an earlier press does not submit again. */
+function guardSendKey(event: KeyboardEvent): void {
+  if (event.key === "Enter" && (event.repeat || event.timeStamp < props.freshAfter))
+    event.preventDefault();
 }
 
 function updateFromPicker(event: Event): void {
@@ -304,6 +317,7 @@ defineExpose({ focusInput, selectInput });
           variant="default"
           class="composer-send"
           :disabled="disabled || submitting"
+          @keydown="guardSendKey"
           @pointerdown="preserveEditingFocus"
           @mousedown="keepMouseEditingFocus"
         >

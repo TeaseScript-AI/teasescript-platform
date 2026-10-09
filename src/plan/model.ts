@@ -758,6 +758,11 @@ export type PreparedInteractionUiPayload =
       readonly values: readonly (PreparedInteractionChoiceValue | null)[];
       /** Holds the evaluated `prefill:`, whose first button with that value is preselected when the choice opens. */
       readonly prefillTemporary?: number;
+      /**
+       * `askBoolean`: its prefill must be `true` or `false`, and `null` or blank text preselects none, as for an ask;
+       * any other value fails as the choice would open. Without it, a value no button has warns.
+       */
+      readonly booleanPrefill?: true;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

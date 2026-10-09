@@ -4829,17 +4829,27 @@ async function preselectScenario(cdp, origin) {
     "1",
     "Space answered a choice without prefill",
   );
-  await evaluate(
-    cdp,
-    `${input}.value = ''; ${input}.dispatchEvent(new Event('input', { bubbles: true }))`,
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "",
+    "Space typed into a composer that only buttons wait for",
   );
   await physicalClick(cdp, "[data-foreground-controls] button");
-  // A held Enter does not submit the prefill of the field that just opened; a fresh Enter does.
+  // A held Enter, in the input or on Send, does not submit the prefill of the field that just opened; a fresh Enter does.
   await waitFor(cdp, `${input}.value === 'Ada'`, 8_000, "askText did not open with its prefill");
   await evaluate(cdp, `${input}.focus()`);
   await heldKey("Enter", "Enter", 13, "\r");
   await delay(300);
   assertEqual(await value(cdp, `${input}.value`), "Ada", "A held Enter submitted the prefill");
+  await evaluate(cdp, `document.querySelector('.composer-send').focus()`);
+  await heldKey("Enter", "Enter", 13, "\r");
+  await delay(300);
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "Ada",
+    "A held Enter on Send submitted the prefill",
+  );
+  await evaluate(cdp, `${input}.focus()`);
   for (const type of ["keyDown", "keyUp"])
     await cdp.call("Input.dispatchKeyEvent", {
       type,

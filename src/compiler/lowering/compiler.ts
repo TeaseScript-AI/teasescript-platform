@@ -1978,7 +1978,9 @@ export class InstructionCompiler {
         kind: "choice",
         optionsTemporary,
         values: [null, null],
-        ...(prefillTemporary === undefined ? {} : { prefillTemporary }),
+        ...(prefillTemporary === undefined
+          ? {}
+          : { prefillTemporary, booleanPrefill: true as const }),
         accessibleName: { kind: "localizedDefault", key: "chooseOption" },
       },
       expression.span,

@@ -1214,7 +1214,12 @@ function executePlannedInstruction(
         );
       }
       if (materialized.warning !== undefined) {
-        assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
+        // The pacing gate settled above took its sequence already.
+        assertEventSequenceCapacity(
+          snapshot,
+          requiredEventSequences - (backgroundGate === undefined ? 0 : 1) + 1,
+          instruction.span,
+        );
         events.push(
           Object.freeze({
             kind: "developerWarning",
@@ -1573,7 +1578,17 @@ function materializeInteractionUi(
     }
     const options = expandChoiceOptions(source.value.items, prepared.values, temporalContext, span);
     let preselected: number | null | undefined = null;
-    if (prepared.prefillTemporary !== undefined) {
+    if (prepared.prefillTemporary !== undefined && prepared.booleanPrefill === true) {
+      // askBoolean: true or false preselects its button, and null or blank text none, as for an ask's prefill (V30 §20).
+      const prefill = read(prepared.prefillTemporary).value;
+      if (typeof prefill === "boolean") preselected = preselectedChoice(options, prefill);
+      else if (prefill !== null && !(typeof prefill === "string" && isBlankTextAnswer(prefill)))
+        throw fault(
+          "TSR052",
+          `The prefill of askBoolean must be true or false, not ${describeRuntimeValue(prefill)}.`,
+          span,
+        );
+    } else if (prepared.prefillTemporary !== undefined) {
       const prefill = read(prepared.prefillTemporary).value;
       preselected = preselectedChoice(options, prefill);
       // A value no button has preselects none; the script goes on, and Debug shows why (owner decision, 2026-10-08).
