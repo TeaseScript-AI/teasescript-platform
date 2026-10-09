@@ -441,8 +441,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
   const clock = useRuntimeSceneClock(session, () => device.sample(), held);
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
-  // gives none, so what was admitted before the stop and runs only now does nothing.
-  const observeForInput = () => (stopped.value ? null : clock.observe());
+  // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
+  // cause the error, so the stop is checked again after it.
+  const observeForInput = () => {
+    if (stopped.value) return null;
+    const current = clock.observe();
+    return stopped.value ? null : current;
+  };
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );

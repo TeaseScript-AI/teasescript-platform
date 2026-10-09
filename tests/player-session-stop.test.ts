@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, nextTick, type Ref } from "vue";
+import { effectScope, nextTick, watch, type Ref } from "vue";
 import { createServer } from "vite";
 
 import type { DebugRecorder } from "../player/debug-recorder.js";
@@ -246,6 +246,53 @@ test("input admitted just before a Player error does not run after it", async (c
   await pressing;
   await settle();
   assert.deepEqual(said(host), []);
+});
+
+test("an observation whose publish causes a Player error admits neither the input nor a jump", async (context) => {
+  stubBrowser(context);
+  const { host, time } = mount(context, () => {
+    const host = usePlayerSession({ capabilities: { camera: false } });
+    return { host, time: useDevelopmentTime(host, { autoSkip: false }, () => {}) };
+  });
+  // A component that fails while it renders the observed session, as Vue reports it to the Player at once.
+  let failing = false;
+  mount(context, () =>
+    watch(
+      host.session,
+      () => {
+        if (!failing) return;
+        failing = false;
+        host.reportHostError(new TypeError("A component failed."));
+      },
+      { flush: "sync" },
+    ),
+  );
+  host.prepare(() =>
+    runtime.createPlayerRuntimeSession(
+      'showPermanentButton "Help" {\n  say "pressed", instant\n}\nwait 5 s\nsay "waited", instant\nshowButton "Done"\nexit',
+    ),
+  );
+  await host.activate();
+  const [button] = host.permanentButtons.value;
+  assert.ok(button);
+  // Time passes, so the press's observation publishes a session.
+  await settle(5);
+  failing = true;
+  await host.pressPermanentButton(button.buttonId);
+  assert.equal(host.stopped.value, true);
+  await settle();
+  assert.deepEqual(said(host), []);
+
+  host.prepare(() =>
+    runtime.createPlayerRuntimeSession('wait 5 s\nsay "waited", instant\nshowButton "Done"\nexit'),
+  );
+  await host.activate();
+  await settle(5);
+  failing = true;
+  await time.advanceBy(10_000);
+  assert.equal(host.stopped.value, true);
+  assert.deepEqual(said(host), []);
+  assert.ok(host.session.value!.state.observedSessionTimeMs < 5000);
 });
 
 test("a photo used in the same task as a Player error does not answer", async (context) => {
