@@ -6,6 +6,7 @@ import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 import ts from "typescript-vue";
 import { registerTS } from "vue/compiler-sfc";
+import { rekaScrollThumbPatch } from "./reka-scroll-thumb-patch";
 
 /** The build's identity for debug exports: the commit and whether it had uncommitted changes, `null` when unknown. */
 function buildIdentity(mode: string) {
@@ -44,7 +45,9 @@ export default defineConfig(({ mode }) => ({
   base: "/player/",
   define: { __PLAYER_BUILD__: JSON.stringify(buildIdentity(mode)) },
   root: fileURLToPath(new URL(".", import.meta.url)),
-  plugins: [tailwindcss(), vue()],
+  plugins: [tailwindcss(), vue(), { ...rekaScrollThumbPatch(), apply: "build" }],
+  // The development server pre-bundles reka-ui, so the patch applies there.
+  optimizeDeps: { rolldownOptions: { plugins: [rekaScrollThumbPatch()] } },
   publicDir: false,
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   build: {
