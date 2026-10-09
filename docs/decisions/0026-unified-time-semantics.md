@@ -58,9 +58,8 @@ A `duration` is exact. `d`/`day`/`days` is 24 hours and `w`/`week`/`weeks` is 16
 A calendar step puts `calendar` before its unit: `1 calendar day`, `2 calendar weeks`, `1 calendar month`,
 `1 calendar year`. `calendar` takes the short forms `d`, `w`, `mo`, and `y` and every long form. Its value is a
 `calendarDuration`. `month` and `year`, also `mo` and `y`, without `calendar` are compile errors that suggest it. `m`
-remains invalid. Units still follow numeric literals, and after `wait` and the short `timer` a unit still applies to
-the whole duration expression. `calendar` is a unit word only where a unit can stand; elsewhere it is an ordinary name,
-as in `p.calendar.month`.
+remains invalid. `calendar` is a unit word only where a unit can stand; elsewhere it is an ordinary name, as in
+`p.calendar.month`.
 
 A calendar amount counts a week as 7 days and a year as 12 months, and must give whole days and months:
 `0.5 calendar years` is 6 months, `2 calendar weeks / 2` is 7 calendar days, and `1.5 calendar days` and
@@ -100,16 +99,16 @@ Operators never read a time zone.
 | Operation | Result |
 | --- | --- |
 | `date ± C` with a zero exact offset | `date`: months, then days |
-| `date ± D` | `date`, when D is a whole number of days such as `1 day`, `2 weeks`, or `0 s` |
 | `datetime ± C` with a zero exact offset | `datetime`: months, then days, with the same clock time |
 | `absoluteDateTime ± D` | `absoluteDateTime` |
 | `absoluteDateTime - absoluteDateTime` | D |
-| `date - date` | D, a whole number of days |
+| `date - date` | C, a whole number of calendar days |
 
 Adding months to a day that the target month lacks gives that month's last day, as before. Every other combination is
 an error with a diagnostic that names a route that works:
 
-- `date ± D` that is not a whole number of days, and `date ± C` with a nonzero exact offset;
+- `date ± D`, also a whole number of days, and `date ± C` with a nonzero exact offset: use calendar units, as in
+  `getDate() + 1 calendar day`;
 - `datetime ± D`, `datetime ± C` with a nonzero exact offset, and `datetime - datetime`: convert to `absoluteDateTime` for
   elapsed time, or use calendar units or `toDate(...)` for local dates;
 - `absoluteDateTime ± C`: convert to a `datetime` first;
@@ -119,7 +118,7 @@ an error with a diagnostic that names a route that works:
 let local = getDateTime()
 let later = (local.toAbsoluteDateTime() + 2 h).toDateTime()   // 2 elapsed hours later, as local time
 let sameClock = local + 1 calendar day                         // the same clock time on the next date
-let dinner = toDateTime(getDate() + 1 day, toTime("18:00"))
+let dinner = toDateTime(getDate() + 1 calendar day, toTime("18:00"))
 let week = getAbsoluteDateTime() + 1 week                      // 168 hours from now
 ```
 
@@ -128,12 +127,18 @@ ordering across kinds is an error. Known invalid combinations are compile errors
 `toAbsoluteDateTime()` and `toDateTime()` keep converting through the player's current zone. `wait`, timers, and the
 other consumers of an exact duration take a `duration` and reject a `calendarDuration`.
 
-### 6. Stored values
+### 6. Display
 
-A `save` value written before this change is upgraded when it is read, never dropped: a `timestamp` becomes an
-`absoluteDateTime` with the same moment, and a duration with calendar months or days becomes a `calendarDuration` with
-the same months, days, and exact time. An exact duration stays a `duration`. Plans, snapshots, and checkpoints follow the
-existing format-revision rule: an older revision is refused with a clear message, and no data is deleted.
+A `duration` displays in days, hours, minutes, and seconds, without weeks: `2 days + 6 h` shows `2 d 6 h` and `2 weeks`
+shows `14 d`. A `calendarDuration` is normalized, weeks into days and 12 months into a year, and every calendar part is
+marked: `1 calendar month + 16 calendar days` shows `1 calendar month 16 calendar days`.
+
+### 7. Stored values
+
+Stored values are not converted. A `save` value written before this change, such as a `timestamp` or a duration with
+calendar months or days, fails validation when it is read, and `load` returns its default. Plans, snapshots, and
+checkpoints follow the existing format-revision rule: an older revision is refused, and a session kept in an older
+format shows Start.
 
 ## Not decided
 
@@ -152,9 +157,9 @@ These parts of the #512 time proposal remain open:
 
 - [V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps) describes the implemented
   language and gains each part of this decision in the change that implements it.
-- Source with the `timestamp` names or with `month` or `year` without `calendar` stops compiling, and so does
-  `datetime` arithmetic with exact durations. The SexScript importer emits the new forms.
-- A `1 day` that meant a calendar day on a `datetime` is now a compile error, not a silent one-hour shift.
+- Source with the `timestamp` names or with `month` or `year` without `calendar` stops compiling, and so does `date`
+  and `datetime` arithmetic with a `duration`. The SexScript importer emits the new forms.
+- A `1 day` that meant a calendar day on a `date` or `datetime` is now a compile error, not a silent one-hour shift.
 - Each part bumps the plan, snapshot, and checkpoint revisions whose contracts it changes.
 
 ## Alternatives considered
@@ -163,6 +168,7 @@ These parts of the #512 time proposal remain open:
   common "a week from now" on a moment is an error.
 - Local arithmetic on `datetime` without a zone (`datetime + 2 h` moves the displayed fields): useful for calendar grids,
   but a `duration` then no longer means time that passed.
-- `date ± D` as an error too: forces `calendar` on the most common date step, while a date without clock or zone can only
-  mean whole days.
-- Dropping old `save` values that fail validation: the loss is silent and hits player progress.
+- `date ± D` with a whole number of days, as in `getDate() + 1 day`: shorter for the most common date step, but a
+  `day` would then mean a calendar day on a date and 24 hours elsewhere.
+- Converting old `save` values when they are read: keeps progress across the change, but adds a conversion path to
+  every reader of saved data before any release has saved data to keep.
