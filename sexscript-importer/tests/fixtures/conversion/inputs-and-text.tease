@@ -11,7 +11,7 @@ while true {
     break
   }
   say "Then wait."
-  timer 10
+  timer 10 s
 }
 wait 500 ms
 if name != "" {

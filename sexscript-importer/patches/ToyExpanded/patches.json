@@ -286,6 +286,13 @@
       "category": "b",
       "reason": "has(i) read the player's toy chest through a key built from the toy (\"toys.$i\"), so profile generation, which collects literal keys, never asked for the toy chest and every toy-gated branch stayed unreachable. Read the distribution's toys this script asks about by their own keys in ownsToy(i), keeping the built key for any other, and has(i) keeps its other checks (toy.toys.$i and DEFAULTTOYS).",
       "diff": "profile-toys.diff"
+    },
+    {
+      "id": "lounge-wait-due",
+      "layer": "source",
+      "category": "e",
+      "reason": "When the next event falls due while the player is still at an earlier button, such as the introduction's (a second session that the player leaves waiting), the lounge loop passes showButton a negative wait, Math.min(cycleTime, e.event.time - getTime()); the legacy player's button.wait threw IllegalArgumentException on it, which nothing caught (MainFrame.showButtonFromScript), so the script failed, and TeaseScript rejects the timeout as well (TSR050). Wait at least 0, so the loop goes on to run the due event at once.",
+      "diff": "lounge-wait-due.diff"
     }
   ]
 }

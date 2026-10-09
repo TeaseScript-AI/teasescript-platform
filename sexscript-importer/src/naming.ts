@@ -1,8 +1,15 @@
 import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 
-/** `timestamp` becomes a protected type name with the date and time values of #532, which main lacks yet. */
-const PROTECTED: ReadonlySet<string> = new Set([...TEASESCRIPT_PROTECTED_NAMES, "timestamp"]);
+/**
+ * `timestamp` becomes a protected type name with the date and time values of #532, which main lacks yet, and
+ * `absoluteDateTime` with time model 2 (time-model.ts).
+ */
+const PROTECTED: ReadonlySet<string> = new Set([
+  ...TEASESCRIPT_PROTECTED_NAMES,
+  "timestamp",
+  "absoluteDateTime",
+]);
 
 /** A TeaseScript identifier (V30 §2); Groovy also allows `$` and other letters. */
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;

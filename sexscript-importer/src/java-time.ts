@@ -23,6 +23,7 @@ import {
 } from "./java-ast.ts";
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
 import { NUMBER, onlyOf } from "./types.ts";
+import { timeModel } from "./time-model.ts";
 
 export type TemporalKind = "calendar" | "date";
 
@@ -324,6 +325,12 @@ const binary = (operator: string, left: IrExpression, right: IrExpression): IrEx
   right,
 });
 const literal = (value: number | string): IrExpression => ({ kind: "literal", value });
+const method = (target: IrExpression, name: string): IrExpression => ({
+  kind: "methodCall",
+  target,
+  name,
+  arguments: [],
+});
 
 /** The moment of Unix time 0, from which a number of milliseconds counts. */
 const EPOCH = call("toTimestamp", literal("1970-01-01T00:00:00Z"));
@@ -541,10 +548,11 @@ function dateArithmetic(
   if (!numberOperand(operand, analysis)) return undefined;
   const days = host.lower(operand);
   if (days === null) return null;
+  // Groovy added calendar days in the JVM's zone: the same clock time, 23 or 25 hours apart across a clock change.
   return binary(
     operator,
     date,
-    binary("*", whole(days), { kind: "duration", value: 1, unit: "day" }),
+    binary("*", whole(days), { kind: "duration", value: 1, unit: "day", calendar: true }),
   );
 }
 
@@ -579,11 +587,16 @@ export function temporalConstructor(
       binary(
         "+",
         call("toDate", literal("1900-01-01")),
-        binary("*", year!, { kind: "duration", value: 1, unit: "year" }),
+        binary("*", year!, { kind: "duration", value: 1, unit: "year", calendar: true }),
       ),
-      binary("*", month!, { kind: "duration", value: 1, unit: "month" }),
+      binary("*", month!, { kind: "duration", value: 1, unit: "month", calendar: true }),
     ),
-    binary("*", binary("-", day!, literal(1)), { kind: "duration", value: 1, unit: "day" }),
+    binary("*", binary("-", day!, literal(1)), {
+      kind: "duration",
+      value: 1,
+      unit: "day",
+      calendar: true,
+    }),
   );
   const midnight = call("toDateTime", date, call("toTime", literal("00:00")));
   if (hours === undefined) return midnight;
@@ -631,7 +644,14 @@ export function temporalStatement(
       if (args.length !== 2 || unit === undefined) return null;
       const amount = host.lower(args[1]!);
       if (amount === null) return null;
-      const duration: IrExpression = { kind: "duration", value: 1, unit };
+      // Calendar added date fields as calendar steps and time fields as elapsed time.
+      const calendar = unit === "day" || unit === "week" || unit === "month" || unit === "year";
+      const duration: IrExpression = {
+        kind: "duration",
+        value: 1,
+        unit,
+        ...(calendar ? { calendar: true as const } : {}),
+      };
       // A negative literal amount subtracts, as `realStart - 15 * 1 min`.
       const negative =
         amount.kind === "literal" && typeof amount.value === "number" && amount.value < 0
@@ -639,9 +659,14 @@ export function temporalStatement(
           : amount.kind === "unary" && amount.operator === "-" && amount.value.kind === "literal"
             ? amount.value
             : null;
-      if (negative !== null)
-        return assign(binary("-", target, binary("*", whole(negative), duration)));
-      return assign(binary("+", target, binary("*", whole(amount), duration)));
+      const step = (base: IrExpression): IrExpression =>
+        negative !== null
+          ? binary("-", base, binary("*", whole(negative), duration))
+          : binary("+", base, binary("*", whole(amount), duration));
+      // Time model 2 adds elapsed time to a moment only, so the date and time goes through its moment and back.
+      if (!calendar && timeModel() === 2)
+        return assign(method(step(method(target, "toTimestamp")), "toDateTime"));
+      return assign(step(target));
     }
     case "set": {
       const index = TIME_FIELDS.findIndex((time) => time === field);

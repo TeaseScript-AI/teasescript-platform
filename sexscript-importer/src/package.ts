@@ -1696,7 +1696,7 @@ const RESERVED_IDS = new Set([
   ..."null choose speaker say as label goto call end exit fallback global tagged save load delete is".split(
     " ",
   ),
-  ..."string boolean integer number date time datetime timestamp duration list dict object range media script timer".split(
+  ..."string boolean integer number date time datetime timestamp absoluteDateTime duration list dict object range media script timer".split(
     " ",
   ),
 ]);

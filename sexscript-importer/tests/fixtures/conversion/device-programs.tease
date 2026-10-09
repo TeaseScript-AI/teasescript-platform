@@ -58,7 +58,7 @@ if lock_start != "" {
 }
 // NOTE SX_DEVICE_STATE line 8: useFile() ran the device command in estim_start on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Estim: RUNNING".
 sexscriptLegacyShowDevice("Estim", "RUNNING")
-wait 2
+wait 2 s
 // NOTE SX_DEVICE_STATE line 10: useFile() ran the device command in estim_finish on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Estim: STOPPED".
 sexscriptLegacyShowDevice("Estim", "STOPPED")
 // NOTE SX_DEVICE_STATE line 11: useFile() ran the device command in arm_finish on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Lock: UNLOCKED".

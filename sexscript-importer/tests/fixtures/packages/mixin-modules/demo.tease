@@ -52,7 +52,7 @@ function loadPauseModule {
 }
 function pause {
   lastPause = sexscriptLegacyRandom(rounds - 2) + 1
-  wait lastPause
+  wait lastPause s
   stopAudio
 }
 // NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
@@ -68,7 +68,7 @@ let enabled = false
 // A field that a module reads keeps the button's seconds.
 let reaction: number = 0
 function pauseCycle(delay, cycleValue = 60) {
-  wait delay / cycleValue
+  wait delay / cycleValue s
 }
 loadModules()
 setupLaterModule()

@@ -2,7 +2,7 @@
 let startTime = getTimestamp().toSeconds()
 let waitedTime = getTimestamp().toSeconds() - startTime
 // NOTE SX_BUSY_COUNTDOWN line 4: The legacy loop redrew a countdown as fast as it could until the time was up; it became a visible timer over the same time, whose display replaces the redrawn text.
-timer 5
+timer 5 s
 say "Time is up"
 // A limit given at run time may be already reached, such as a negative typed time: the loop did not run then.
 function waitFor(limit) {
@@ -10,7 +10,7 @@ function waitFor(limit) {
   let waited = getTimestamp().toSeconds() - started
   // NOTE SX_BUSY_COUNTDOWN line 15: The legacy loop redrew a countdown as fast as it could until the time was up; it became a visible timer over the same time, whose display replaces the redrawn text.
   if limit > 0 {
-    timer limit
+    timer limit s
   }
 }
 waitFor(2)

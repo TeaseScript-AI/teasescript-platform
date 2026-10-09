@@ -1,5 +1,6 @@
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import { timeModel, timeName } from "./time-model.ts";
 
 export function emitTease(program: MigrationProgram): string {
   const lines: string[] = [];
@@ -93,14 +94,24 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       lines.push(`${pad}}`);
       return;
     case "wait": {
-      const unit = statement.unit === "ms" ? " ms" : "";
-      lines.push(
-        `${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}${unit}`,
-      );
+      // Every duration names its unit (#512). The unit after `wait` and `timer` applies to the whole expression, unless
+      // the expression ends with a number, which takes it itself: `a + 2 s` is `a + (2 s)`.
+      const duration = emitExpression(statement.duration);
+      const command = statement.visible ? "timer" : "wait";
+      if (statement.unit === null) lines.push(`${pad}${command} ${duration}`);
+      else {
+        const whole =
+          statement.duration.kind !== "literal" && /(^|[^\w.])\d+(\.\d+)?$/u.test(duration)
+            ? `(${duration})`
+            : duration;
+        lines.push(`${pad}${command} ${whole} ${statement.unit}`);
+      }
       return;
     }
     case "showButton":
-      lines.push(`${pad}${emitButton(statement.label, statement.timeout)}`);
+      lines.push(
+        `${pad}${emitButton(statement.label, statement.timeout, statement.durationTimeout === true)}`,
+      );
       return;
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
@@ -304,7 +315,11 @@ export function emitExpression(expression: IrExpression): string {
           ? `${expression.value}.0`
           : String(expression.value);
     case "duration":
-      return `${expression.value} ${expression.unit}`;
+      // Time model 2 writes calendar steps with `calendar`, as every month and year is one (time-model.ts).
+      return timeModel() === 2 &&
+        (expression.calendar === true || expression.unit === "month" || expression.unit === "year")
+        ? `${expression.value} calendar ${expression.unit}`
+        : `${expression.value} ${expression.unit}`;
     case "template": {
       const flat = flatParts(expression.parts);
       if (flat.every((part) => "text" in part))
@@ -372,7 +387,7 @@ export function emitExpression(expression: IrExpression): string {
       // A dict read with a default (#536).
       if (expression.dict === true && expression.name === "get" && args.length === 2)
         return `${operand(expression.target, POSTFIX)}.get(${args[0]}, default: ${args[1]})`;
-      return `${operand(expression.target, POSTFIX)}.${expression.name}(${args.join(", ")})`;
+      return `${operand(expression.target, POSTFIX)}.${timeName(expression.name)}(${args.join(", ")})`;
     }
     case "load":
       // Inside a larger expression a read takes its bounded form, `load("k", default: null) == null` (V30 §25); a
@@ -429,7 +444,7 @@ export function emitExpression(expression: IrExpression): string {
       const named = Object.entries(expression.named).map(
         ([name, value]) => `${name}: ${emitExpression(value)}`,
       );
-      return `${expression.name}(${[...positional, ...named].join(", ")})`;
+      return `${timeName(expression.name)}(${[...positional, ...named].join(", ")})`;
     }
   }
 }
@@ -661,9 +676,28 @@ function menuOptions(options: ReadonlyArray<() => string>): string {
   return [first, ...rest.map((option) => `${inner}${option}`)].join(",\n");
 }
 
-/** Compact `showButton` with its optional timeout option (#531). */
-function emitButton(label: IrExpression, timeout: IrExpression | null): string {
-  return `showButton ${emitExpression(label)}${timeout === null ? "" : `, timeout: ${emitExpression(timeout)}`}`;
+/** Compact `showButton` with its optional timeout option (#531), a legacy number of seconds with its unit (#512). */
+function emitButton(
+  label: IrExpression,
+  timeout: IrExpression | null,
+  durationTimeout = false,
+): string {
+  if (timeout === null) return `showButton ${emitExpression(label)}`;
+  const value = durationTimeout ? timeout : inSeconds(timeout);
+  return `showButton ${emitExpression(label)}, timeout: ${emitExpression(value)}`;
+}
+
+/** A number of seconds as a duration: `30 s`, or `t * 1 s` for a value known at runtime. */
+function inSeconds(value: IrExpression): IrExpression {
+  if (value.kind === "duration") return value;
+  if (value.kind === "literal" && typeof value.value === "number")
+    return { kind: "duration", value: value.value, unit: "s" };
+  return {
+    kind: "binary",
+    operator: "*",
+    left: value,
+    right: { kind: "duration", value: 1, unit: "s" },
+  };
 }
 
 /** A complete statement value, where a compact choice, button, read, or ask needs no parentheses. */

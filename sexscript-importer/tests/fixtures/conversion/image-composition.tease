@@ -19,7 +19,7 @@ function zoomIn(picture) {
     let frame = null
     // NOTE SX_IMAGE_COMPOSITION line 18: The legacy function drew the image it was given into a frame in memory and showed the frame; TeaseScript cannot compose images yet, so the image itself is shown.
     showImage picture
-    wait 0.1
+    wait 0.1 s
   }
 }
 zoomIn("puzzle/cat.jpg")

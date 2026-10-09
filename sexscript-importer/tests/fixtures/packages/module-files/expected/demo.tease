@@ -25,7 +25,7 @@ global boost = 1.5
 global title = ""
 title = load "demo.title", default: ""
 function pauseCycle(delay, cycleValue = 60) {
-  wait delay / cycleValue
+  wait delay / cycleValue s
 }
 loadModules()
 setupLaterModule()

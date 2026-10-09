@@ -300,7 +300,8 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
               bin(
                 "+",
                 call("toDate", v("value")),
-                bin("*", v("days"), { kind: "duration", value: 1, unit: "day" }),
+                // A date moves by calendar days only (time model 2).
+                bin("*", v("days"), { kind: "duration", value: 1, unit: "day", calendar: true }),
               ),
               v("time"),
             ),

@@ -89,15 +89,25 @@ export type IrStatement =
   /**
    * `visible` shows a countdown (`timer`). `afterText` marks a literal wait right after a text that is longer than 1.5
    * times the text's reading time and stays (withReadingTimes), which withParagraphs shortens when it splits the text.
+   * `unit` is that of the number `duration`, or null where `duration` is a duration value (withElapsedDurations).
    */
   | (IrBase & {
       kind: "wait";
       duration: IrExpression;
       visible: boolean;
-      unit: "s" | "ms";
+      unit: "s" | "ms" | null;
       afterText?: true;
     })
-  | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
+  /**
+   * `timeout` is a number of seconds, or a duration where it is a duration literal or `durationTimeout` marks it
+   * (withElapsedDurations).
+   */
+  | (IrBase & {
+      kind: "showButton";
+      label: IrExpression;
+      timeout: IrExpression | null;
+      durationTimeout?: true;
+    })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   /**
    * `target = showPermanentButton label { }` (V30 §28): a button without an action, its ID kept in `target`; `persist`
@@ -331,11 +341,16 @@ export type IrExpression =
     }
   /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }
-  /** A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). */
+  /**
+   * A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). `calendar`
+   * marks a calendar step, the same clock time a number of days later, which time model 2 writes `1 calendar day`,
+   * where its plain `day` and `week` are exact (time-model.ts).
+   */
   | {
       kind: "duration";
       value: number;
       unit: "s" | "ms" | "min" | "h" | "day" | "week" | "month" | "year";
+      calendar?: true;
     }
   /**
    * A `say` used as a value: it shows its text as a `say` statement does and gives the message's handle, whose `text`

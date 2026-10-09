@@ -1,7 +1,7 @@
 // The shared functions of this helper class are static closures that the scripts call like methods.
 global function showWait(msg, tmo = 5) {
   say msg
-  wait tmo
+  wait tmo s
 }
 // A default before a required parameter applies only to calls that leave it out; these calls pass it.
 global function rounds(count, msg) {

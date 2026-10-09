@@ -45,7 +45,7 @@ JARs), so only a new or changed file starts a JVM. The cache lives in `~/.cache/
 ## Usage
 
 ```sh
-node src/cli.ts convert [--accepted[=forms]] /path/to/script.groovy > script.tease
+node src/cli.ts convert [--accepted[=forms]] [--time-model 1|2] /path/to/script.groovy > script.tease
 node src/cli.ts convert-package [--compile] [--accepted[=forms]] /path/to/legacy/scripts /path/to/output
 node src/cli.ts report [--compile | --run] [--accepted[=forms]] /path/to/legacy/scripts > report.json
 node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
@@ -85,6 +85,13 @@ the link in the chat and a button, and an image composition its base image. Lega
 dialog's Cancel gave null. `--accepted` (every form) or `--accepted=showPopup,openUrl,chooseFile,layeredScene`
 emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
 stand-ins.
+
+`--time-model 2` (or `TIME_MODEL=2`; `convert-corpus.ts` passes it on to every unit) targets the time model that #512
+is building, which `main` does not compile yet (`src/time-model.ts`): `getAbsoluteDateTime()` and
+`toAbsoluteDateTime(...)` for the timestamp family, `n * 1 calendar day` (and `calendar` months and years) where legacy
+stepped by calendar days and wherever a date moves, and elapsed time on a date and time through its moment
+(`c = (c.toAbsoluteDateTime() + 50 * 1 min).toDateTime()` for `Calendar.add(Calendar.MINUTE, 50)`). The default stays
+model 1 until `main` has model 2.
 
 A legacy count of the images in a package folder becomes a tag query (#572): when a package lists an images folder,
 `convert-package` gives each of its images a generated XMP sidecar (`x.jpg.xmp`) with one tag for its full legacy

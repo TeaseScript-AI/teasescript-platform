@@ -18,9 +18,13 @@ import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions, type FinalPackageInput } from "./report.ts";
 import { loadRepositoryProjectRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
+import { selectTimeModel } from "./time-model.ts";
 
 const [command, ...givenArgs] = process.argv.slice(2);
 // `report --package <dir>` also checks a converted package as written (`finalPackage`).
+// `--time-model 2` targets the time model main is building (time-model.ts).
+const timeModelFlag = givenArgs.indexOf("--time-model");
+if (timeModelFlag >= 0) selectTimeModel(givenArgs.splice(timeModelFlag, 2)[1]);
 const packageFlag = givenArgs.indexOf("--package");
 const finalPackageDir = packageFlag < 0 ? null : (givenArgs[packageFlag + 1] ?? "");
 const rawArgs =
@@ -58,7 +62,7 @@ if (command === "inventory") {
     (finalPackageDir !== null && !compileRequested)
   ) {
     fail(
-      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--accepted[=ids]] [--keep-paragraphs] <ast.json|script.groovy|source-dir> [...]",
+      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--accepted[=ids]] [--keep-paragraphs] [--time-model 1|2] <ast.json|script.groovy|source-dir> [...]",
     );
   }
   const files = await readReportInputs(args);
@@ -82,7 +86,7 @@ if (command === "inventory") {
 } else if (command === "convert") {
   if (args.length !== 1)
     fail(
-      "Usage: node src/cli.ts convert [--accepted[=ids]] [--keep-paragraphs] <script.groovy|ast.json>",
+      "Usage: node src/cli.ts convert [--accepted[=ids]] [--keep-paragraphs] [--time-model 1|2] <script.groovy|ast.json>",
     );
   const input = args[0]!;
   const parsed = input.toLowerCase().endsWith(".groovy")
@@ -94,7 +98,7 @@ if (command === "inventory") {
 } else if (command === "convert-package") {
   if (args.length !== 2) {
     fail(
-      "Usage: node src/cli.ts convert-package [--compile] [--accepted[=ids]] [--keep-paragraphs] <source-dir> <output-dir>",
+      "Usage: node src/cli.ts convert-package [--compile] [--accepted[=ids]] [--keep-paragraphs] [--time-model 1|2] <source-dir> <output-dir>",
     );
   }
   const compiler = compileRequested ? await loadRepositoryProjectCompiler() : undefined;

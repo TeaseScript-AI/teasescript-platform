@@ -49,6 +49,8 @@ export function withElapsedDurations(
   const writes = new Map<IrStatement, Variable>();
   const comparisons = new Map<Binary, Variable>();
   const direct = new Set<Binary>();
+  // The variable that each wait or button timeout reads.
+  const waits = new Map<IrStatement, Variable>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const numberOnly = (): Variable => ({
@@ -147,13 +149,11 @@ export function withElapsedDurations(
       }
       case "wait":
       case "showButton": {
-        const read = item.kind === "wait" ? item.duration : item.timeout;
-        const found =
-          read?.kind === "variable" && (item.kind !== "wait" || item.unit === "s")
-            ? scope.resolve(read.name)
-            : undefined;
+        const read = waitRead(item);
+        const found = read === null ? undefined : scope.resolve(read.name);
         if (found === undefined) break;
         found.waits += 1;
+        waits.set(item, found);
         if (item.kind === "showButton") expression(item.label, scope);
         return;
       }
@@ -253,10 +253,27 @@ export function withElapsedDurations(
           );
         } else if (next.kind === "assign") next = { ...next, value: durationValue(next.value) };
       }
+      // A wait or a timeout that reads a variable now holding a duration takes it as it is.
+      const variable = waits.get(item);
+      if (variable !== undefined && converted(variable)) {
+        if (next.kind === "wait") next = { ...next, unit: null };
+        else if (next.kind === "showButton") next = { ...next, durationTimeout: true };
+      }
       current = item;
       return mapOwnExpressions(next, rewriteExpression);
     });
   return rewrite(statements);
+}
+
+/** The variable a wait of seconds or a button's timeout reads, or null. */
+function waitRead(item: IrStatement): Extract<IrExpression, { kind: "variable" }> | null {
+  const read =
+    item.kind === "wait" && item.unit === "s"
+      ? item.duration
+      : item.kind === "showButton"
+        ? item.timeout
+        : null;
+  return read?.kind === "variable" ? read : null;
 }
 
 class Scope {

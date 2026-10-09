@@ -68,8 +68,8 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
     emitTease(program),
     [
       'say "Hello"',
-      "wait 2",
-      "timer 3",
+      "wait 2 s",
+      "timer 3 s",
       'showImage "scene/one.jpg"',
       "hideImage",
       'playAudio "bell.mp3"',
@@ -303,7 +303,7 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
   const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
   const timeoutProgram = lowerParsedFile(timeoutSource);
   assert.deepEqual(timeoutProgram.diagnostics, []);
-  assert.equal(emitTease(timeoutProgram), 'showButton "Quick", timeout: 3\nexit\n');
+  assert.equal(emitTease(timeoutProgram), 'showButton "Quick", timeout: 3 s\nexit\n');
 
   const assignedSource = file([
     {

@@ -37,7 +37,7 @@ function shock(message, shocks) {
   say message
   // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
   for it in 1..=floor(shocks) {
-    wait 1
+    wait 1 s
   }
 }
 function scriptCallback4 {
@@ -56,5 +56,5 @@ if askBoolean "Hurry?" {
   // TODO SX_CLOSURE_DISCOVERY line 29: Closure wait is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
   // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
 }
-wait 1
+wait 1 s
 exit
