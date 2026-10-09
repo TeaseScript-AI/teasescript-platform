@@ -386,6 +386,23 @@ test("escapeMarkup round trips every syntax-significant construct as literal tex
   assert.equal(parseMessageMarkup(twice).visibleText, once);
 });
 
+test("escapeMarkup escapes a long text exactly, also where a surrogate pair or an escape meets a chunk's end", () => {
+  // The contract: a backslash before every backslash and every syntax-significant character, nothing else changed.
+  const expected = (text: string) => text.replace(/[\\*~`[\]()#>\-.:]/g, "\\$&");
+  const unit = "a-😀\uD800[b]\uDC00:";
+  for (const length of [0, 1, 8191, 8192, 8193, 16_384, 50_001]) {
+    for (const offset of [0, 1, 2]) {
+      const text = unit
+        .repeat(Math.ceil((length + offset) / unit.length))
+        .slice(offset, offset + length);
+      assert.equal(escapeMarkup(text), expected(text), `length ${length}, offset ${offset}`);
+    }
+  }
+  const long = "*".repeat(100_000) + "x";
+  assert.equal(escapeMarkup(long), "\\*".repeat(100_000) + "x");
+  assert.equal(parseMessageMarkup(escapeMarkup(long)).visibleText, long);
+});
+
 test("retains unknown backslash pairs and never exposes protected syntax in a second pass", () => {
   const markup = parseMessageMarkup("\\q \\*x\\* https\\://example.com");
   assert.equal(markup.visibleText, "\\q *x* https://example.com");
