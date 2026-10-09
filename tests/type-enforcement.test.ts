@@ -1025,7 +1025,7 @@ test("a list or set literal of known types holds one type, also in nested lists 
   assert.deepEqual(mismatches('let values = ["Level", 2, 3.5]\nexit'), [
     [
       "TSV044",
-      "This list mixes text (string) and a whole number (integer). A list holds one type; to keep both, declare a union type, as in 'let values: (string | number)[] = ...'.",
+      "This list mixes text (string) and a whole number (integer). A list holds one type. To keep both, declare a union type, as in 'let values: (string | number)[] = ...'.",
       '["Level", 2, 3.5]',
     ],
   ]);
@@ -1035,7 +1035,7 @@ test("a list or set literal of known types holds one type, also in nested lists 
   ]);
   assert.deepEqual(
     mismatches('let people = [{ name: 1 }, { name: "Ada" }]\nexit')[0]?.[1],
-    "This list mixes objects whose property 'name' holds a whole number (integer) in one and text (string) in another. A list holds one type; give 'name' one type in every element.",
+    "This list mixes objects whose property 'name' holds a whole number (integer) in one and text (string) in another. A list holds one type. Give 'name' one type in every element.",
   );
   // A declared element type checks each element instead, and unknown elements leave the element type unknown.
   assert.deepEqual(

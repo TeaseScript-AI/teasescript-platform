@@ -524,7 +524,7 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   assert.deepEqual(diagnostics('let mixed = dict{ a: 1, b: "x" }\nexit'), [
     [
       "TSV044",
-      "This dict mixes a whole number (integer) and text (string). A dict holds one type; to keep both, declare a union type, as in 'let mixed: (integer | string) dict = ...'.",
+      "This dict mixes a whole number (integer) and text (string). A dict holds one type. To keep both, declare a union type, as in 'let mixed: (integer | string) dict = ...'.",
       'dict{ a: 1, b: "x" }',
     ],
   ]);
@@ -599,7 +599,7 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
       ],
       [
         "TSV022",
-        "get(...) has no parameter 'fallback'; its only named argument is 'default:'.",
+        "get(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
         "fallback",
       ],
       ["TSV020", "contains(key) takes one key.", "c.contains()"],

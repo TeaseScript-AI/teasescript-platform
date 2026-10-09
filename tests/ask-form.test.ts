@@ -162,11 +162,11 @@ test("askForm reports what the compiler can see is wrong", () => {
     // At the time limit the answers are submitted as they stand, so each written field starts with one.
     [
       'askForm fields: { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
-      `askForm field 'n': onTimeout: "submit" needs a value in every field; give it value:.`,
+      `askForm field 'n': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
     ],
     [
       'askForm fields: dict { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
-      `askForm field 'n': onTimeout: "submit" needs a value in every field; give it value:.`,
+      `askForm field 'n': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
     ],
   ];
   for (const [form, message] of cases) {
@@ -525,8 +525,8 @@ test("a written dict of fields types each entry by what it shows", () => {
   );
   // One dict has one number kind for fields without `type:`.
   assert.deepEqual(diagnostics('let r = askForm fields: dict { "a": 1, "b": 2.5 }'), [
-    `askForm field 'a': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
-    `askForm field 'b': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+    `askForm field 'a': its dict mixes whole and decimal numbers. Add type: "integer" or type: "number".`,
+    `askForm field 'b': its dict mixes whole and decimal numbers. Add type: "integer" or type: "number".`,
   ]);
 });
 

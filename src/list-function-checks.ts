@@ -169,8 +169,8 @@ function shape(
         kind: "unknownNamedArgument",
         message:
           names.length === 0
-            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'; its named arguments are ${names.map((one) => `${one}:`).join(" and ")}.`,
+            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
+            : `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${names.map((one) => `'${one}:'`).join(" and ")}.`,
         span: argument.name.span,
       });
   const count = call.arguments.filter((argument) => argument.kind === "positionalArgument").length;
@@ -422,7 +422,7 @@ function weightedType(context: Context): StaticType {
     if (weight !== undefined)
       problem(
         context,
-        `${name}(...) of a dict takes its weights from the dict; remove weight:.`,
+        `${name}(...) of a dict takes its weights from the dict. Remove 'weight:'.`,
         weight,
       );
     else valueKind(context, value.element, ["number"], source);
