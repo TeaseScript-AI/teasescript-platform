@@ -10363,15 +10363,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       if (part !== null) return part;
     }
     // Groovy `list[[0, 2]]` is the list of the elements at those positions, as Concentration's `allScores[[0, 1, 2, 3]]`.
-    const positions =
-      indexNode.kind === "list" ? nodeArray(indexNode.items).map(constantValue) : [];
+    const listed = indexNode.kind === "list" ? nodeArray(indexNode.items).map(constantValue) : [];
+    const positions = listed.filter(
+      (position): position is number =>
+        typeof position === "number" && Number.isInteger(position) && position >= 0,
+    );
     if (
       targetNode !== null &&
       !context.writeTargets.has(node) &&
       positions.length > 0 &&
-      positions.every(
-        (position) => typeof position === "number" && Number.isInteger(position) && position >= 0,
-      ) &&
+      positions.length === listed.length &&
       // A parameter of unknown type, as Concentration's, was given a list.
       (isKnownListExpression(targetNode, context) ||
         inferType(targetNode, context.types) === UNKNOWN) &&
@@ -10382,7 +10383,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         items: positions.map((position) => ({
           kind: "index",
           target,
-          index: { kind: "literal", value: position as number },
+          index: { kind: "literal", value: position },
         })),
       };
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
@@ -14838,19 +14839,16 @@ function folderNamePattern(
   folderValues: readonly IrExpression[],
 ): ((folderTexts: readonly string[]) => RegExp | null) | null {
   if (node?.kind !== "gstring") return null;
-  const strings: unknown[] = Array.isArray(node.strings) ? node.strings : [];
+  const parts: unknown[] = Array.isArray(node.strings) ? node.strings : [];
+  const strings = parts.filter((part): part is string => typeof part === "string");
   const positions = nodeArray(node.values).map((value) => {
     const name = variableName(value);
     return folderValues.findIndex((part) => part.kind === "variable" && part.name === name);
   });
-  if (
-    positions.length === 0 ||
-    positions.includes(-1) ||
-    !strings.every((part) => typeof part === "string")
-  )
+  if (positions.length === 0 || positions.includes(-1) || strings.length !== parts.length)
     return null;
   return (folderTexts) => {
-    const source = (strings as string[])
+    const source = strings
       .map((part, index) =>
         index < positions.length ? `${part}${folderTexts[positions[index]!] ?? ""}` : part,
       )
