@@ -489,8 +489,11 @@ Concrete points the migration surfaced in TeaseScript itself:
   `absoluteDateTime` from `getAbsoluteDateTime()` (#759, formerly `timestamp`) is the fixed moment for "how long ago".
   Legacy code measured elapsed time in Unix seconds (`getTime()`, 18 scripts), so it uses
   `getAbsoluteDateTime().toSeconds()`, while fields and formats keep the local
-  getters. `day` and `week` are calendar units like `month` and `year` (`1 day` is tomorrow's same local clock time),
-  so legacy arithmetic in seconds stays exact: the importer keeps such values as numbers and emits no `day` or `week`.
+  getters. Legacy arithmetic in seconds stays exact numbers. A legacy calendar step, Groovy's `date + n` or
+  `Calendar.add` of a day, month, or year field, keeps the same local clock time across a daylight-saving change, so it
+  becomes `n * 1 calendar day` (or a `calendar` month or year; #763), also on a `date`, which moves by calendar units
+  only; `Calendar.add` of a time field was elapsed time, which moves the moment:
+  `c = (c.toAbsoluteDateTime() + n * 1 min).toDateTime()`. A difference of dates counts calendar days, `(a - b).days`.
 - **No absoluteDateTime from a number (#532).** Domme3 stores the chastity start as Unix seconds
   (`save("domme3.chastitystart", getTime())`) and later formats it (`new Date((long)chastitystart * 1000)`, 3 sites).
   #532 converts an absoluteDateTime to seconds but builds none from a number, because seconds and milliseconds would be
