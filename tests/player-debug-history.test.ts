@@ -8,6 +8,7 @@ import {
   type DebugHistoryRestore,
   type DebugHistorySpill,
 } from "../player/debug-history.js";
+import { openDebugHistorySpill } from "../player/debug-history-indexeddb.js";
 import {
   createPlayerRuntimeSession,
   playerRuntimeForeground,
@@ -216,6 +217,37 @@ test("without a spill store, or after it failed, points stop at the memory budge
     );
     assert.deepEqual(playerRuntimeSnapshot(atFirst), firstSnapshot);
   }
+});
+
+test("the spill store opens without crypto.randomUUID, which plain-HTTP pages lack", async () => {
+  // Browsers offer crypto.randomUUID only in secure contexts; Debug over plain HTTP on a local network must still spill
+  // its history beyond the memory budget.
+  const names: string[] = [];
+  const factory = {
+    open(name: string) {
+      names.push(name);
+      const request: { result: unknown; onsuccess: ((event: Event) => void) | null } = {
+        result: {},
+        onsuccess: null,
+      };
+      queueMicrotask(() => request.onsuccess?.(new Event("success")));
+      return request;
+    },
+  };
+  const original = Object.getOwnPropertyDescriptor(crypto, "randomUUID");
+  Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+  try {
+    // EVIDENCE: opening a spill store only opens its database by name and waits for success, which this fake reports.
+    assert.notEqual(await openDebugHistorySpill(factory as IDBFactory), null);
+  } finally {
+    if (original) Object.defineProperty(crypto, "randomUUID", original);
+    else Reflect.deleteProperty(crypto, "randomUUID");
+  }
+  assert.equal(names.length, 1);
+  assert.match(
+    names[0]!,
+    /^teasescript-debug-history-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+  );
 });
 
 test("a state that cannot be read back is reported, and the history stays as it was", async () => {
