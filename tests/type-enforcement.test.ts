@@ -737,6 +737,52 @@ test("a union of collections takes an operation result that one of its members c
     );
 });
 
+test("an operation of unknown result keeps the types it can give, also inside another operation or a compound assignment", () => {
+  const inFunction = (...body: string[]): string =>
+    ["function f(x, z) {", ...body.map((line) => `    ${line}`), "}", "f(8, 2)", "exit"].join("\n");
+  // `x / 4` gives a number or a duration, so adding `z` to it never gives text either.
+  assert.deepEqual(mismatches(inFunction("let y: string = (x / 4) + z", "say y")), [
+    [
+      "TSV041",
+      "'y' is declared as string, so it cannot start as the result of '+', which is a number or a duration or a calendar duration. To show it as text, put the whole calculation inside \"${\" and \"}\".",
+      "(x / 4) + z",
+    ],
+  ]);
+  assert.deepEqual(mismatches(inFunction('let y: string = "a"', "y += x / 4", "say y")), [
+    [
+      "TSV041",
+      "'y' holds text (string), so the result of '/', which is a number or a duration or a calendar duration, cannot be added to it. Put the result in the text instead, as in 'y += \"${x / 4}\"'.",
+      "x / 4",
+    ],
+  ]);
+  // No member of a union of collections can hold it.
+  assert.deepEqual(mismatches(inFunction("let ys: string[] | boolean[] = [x / 4]", "say ys")), [
+    [
+      "TSV041",
+      "'ys' is declared as string[] | boolean[], so it cannot contain the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+      "x / 4",
+    ],
+  ]);
+  // A result that may fit is checked when the script runs.
+  assert.deepEqual(
+    mismatches(
+      inFunction(
+        "let text: string = x + z",
+        "let whole: integer = 1",
+        "whole += x / 4",
+        "let ratio: number = 1",
+        "ratio -= (x * 2) / z",
+        "let span: duration = 1 s",
+        "span += x * z",
+        'let more: string = "a"',
+        "more += x",
+        "say text",
+      ),
+    ),
+    [],
+  );
+});
+
 test("type inference handles deeply nested expressions without native recursion", () => {
   const source = `let total = ${Array.from({ length: 20_000 }, () => "1").join(" + ")}\ntotal = 2\nexit`;
   assert.deepEqual(compileSource(source).diagnostics, []);
