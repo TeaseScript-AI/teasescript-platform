@@ -115,10 +115,15 @@ test("a default that cannot be saved is a compile error", () => {
     errors('let greeting = say "Hi"\nlet x = load "k", default: greeting\nexit')[0]?.[1] ?? "",
     /cannot be saved\. Use the message's text instead, as in 'default: greeting\.text'\.$/u,
   );
-  assert.match(
-    errors('let greeting = say "Hi"\nlet x = load "k", default: [greeting]\nexit')[0]?.[1] ?? "",
-    /cannot be saved\. Use the message's text instead\.$/u,
-  );
+  for (const source of [
+    'let greeting = say "Hi"\nlet x = load "k", default: [greeting]\nexit',
+    'let greeting = say "Hi"\nlet greetings = [greeting]\nlet x = load "k", default: greetings\nexit',
+  ])
+    assert.match(
+      errors(source)[0]?.[1] ?? "",
+      /cannot be saved\. Use the message's text instead\.$/u,
+      source,
+    );
   // A list of plain values, such as the options of a button, can be saved.
   assert.deepEqual(codes('let options = load "options", default: ["Yes", "No"]\nexit'), []);
 });

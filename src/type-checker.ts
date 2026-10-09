@@ -3116,7 +3116,8 @@ class TypeChecker {
             const given = unwrap(expression.defaultValue);
             const fix = !containsType(fallback, (part) => part.kind === "messageHandle")
               ? "Give a default such as a number, a text, or a list of numbers or texts."
-              : given.kind === "identifier"
+              : given.kind === "identifier" &&
+                  resolved(nonNullType(fallback)).kind === "messageHandle"
                 ? `Use the message's text instead, as in 'default: ${given.name}.text'.`
                 : "Use the message's text instead.";
             this.#report(
