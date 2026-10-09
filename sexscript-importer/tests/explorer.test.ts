@@ -773,8 +773,9 @@ test(
       across.every((need) => !/[!=]= true/u.test(need)),
       JSON.stringify(across),
     );
-    // Copies nested deeper than are followed ask nothing either; a call's result is what the function returns, not
-    // every value its temporary held; and a key the condition names stays that key, not its pattern.
+    // Copies nested deeper than are followed ask nothing either, and what they read stays a dependency; a call's result
+    // is what the function returns, not every value its temporary held; a stored value with a fallback call is asked
+    // for as well as the call's result; and a key the condition names stays that key, not its pattern.
     const deep = nested(`${"true and (".repeat(9)}pick(0) > 2${")".repeat(9)}`);
     assert.ok(
       deep.every((need) => !/[!=]= true/u.test(need)),
@@ -783,6 +784,7 @@ test(
     const gated = (condition: string) => {
       const written =
         'function ready(ignore) {\n  return load("gate", default: false)\n}\nsave false as "gate"\n' +
+        'function count(ignore) {\n  return load("n", default: 0)\n}\nsave randomInteger(0..3) as "n"\n' +
         'save true as "flag"\nlet item = "knife"\nsave true as "gear.knife"\nshowButton "Check"\n' +
         `if ${condition} {\n  say "Through."\n}\nexit\n`;
       const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
@@ -796,24 +798,30 @@ test(
         maxStates: 100_000,
         sources: new Map([["main.tease", written]]),
         diagnostics: [],
-      }).coverage.unvisitedBranches;
+      })
+        .coverage.unvisitedBranches.filter((entry) => entry.line === 13)
+        .sort((left, right) => left.instruction - right.instruction);
     };
-    const called = gated('ready(0) and load("flag", default: false)').map((entry) =>
-      entry.parts.map((part) => part.needs),
-    );
+    const needsOf = (entry: { parts: { needs: string }[] } | undefined) =>
+      (entry?.parts ?? []).map((part) => part.needs);
+    const outer = gated(`${"true and (".repeat(9)}count(0) > 2${")".repeat(9)}`).at(-1);
+    assert.ok(outer?.dependsOn.includes("stored n"), JSON.stringify(outer));
     assert.ok(
-      called.some((needs) => needs.includes("stored gate == true")),
-      JSON.stringify(called),
+      needsOf(outer).every((need) => !/[!=]= true/u.test(need)),
+      JSON.stringify(outer),
     );
+    // The call's own test asks for its result; the whole condition for the result and the stored value.
+    const [guard, ...rest] = gated('ready(0) and load("flag", default: false)');
+    assert.deepEqual(needsOf(guard), ["stored gate == true"]);
     assert.ok(
-      called.every(
-        (needs) =>
-          !(
-            needs.includes("stored flag == true") &&
-            needs.some((need) => need.startsWith("stored gate"))
-          ),
-      ),
-      JSON.stringify(called),
+      rest.some((entry) => needsOf(entry).includes("stored flag == true")),
+      JSON.stringify(rest.map(needsOf)),
+    );
+    // `flag` is saved true, so the way missed is the false one: the stored value itself is asked for.
+    const fallback = gated('load("flag", default: ready(0))').map(needsOf);
+    assert.ok(
+      fallback.some((needs) => needs.includes("stored flag != true")),
+      JSON.stringify(fallback),
     );
     const keyed = gated('ready(0) and load("gear.${item}", default: false)');
     assert.ok(

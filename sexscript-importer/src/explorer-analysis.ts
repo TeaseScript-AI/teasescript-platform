@@ -472,24 +472,45 @@ export class DataFlow {
   }
 
   /**
-   * What a temporary holds at an instruction, as far as the nearest store before it in the same function tells: the
-   * expression stored (a condition `a and b` lowers to a temporary that holds `a`, then `b`, or another temporary for a
-   * part of it), or for a call's result `{ kind: "callResult", functionId, call }` with the call's index, which
-   * {@link flowOf} reads as the function's result; null when none is found within a short way back. A jump may skip that store, so it says what
-   * kind of value the temporary holds, not which.
+   * What a temporary may hold at an instruction, with the index of the store that put it there: the expression of the
+   * nearest store before it in the same function, and of earlier stores too while a jump goes past the later one (a
+   * condition `a and b` lowers to a temporary that holds `a`, then `b` only when `a` holds; `load(k, default: f())` to
+   * one that holds the load, then `f()`'s result only when the load gives nothing). A call's result is
+   * `{ kind: "callResult", functionId, call }` with the call's index, which {@link flowOf} reads as the function's result.
+   * Null when they are not all found within a short way back.
    */
-  heldAt(temporaryId: number, at: number): Data | null {
+  heldAt(temporaryId: number, at: number): { value: Data; index: number }[] | null {
     const owner = this.functionAt(at);
+    const held: { value: Data; index: number }[] = [];
     for (let index = at - 1; index >= 0 && index >= at - HELD_WINDOW; index -= 1) {
       const instruction = record(this.#instructions[index]);
       // Another function's code, or another file's: the `end` that closes a file's own code.
       if (this.functionAt(index) !== owner || instruction.kind === "end") return null;
       if (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId)
-        return isRecord(instruction.value) ? instruction.value : null;
-      if (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId)
-        return { kind: "callResult", functionId: instruction.functionId, call: index };
+        held.push({ value: record(instruction.value), index });
+      else if (
+        instruction.kind === "callFunction" &&
+        instruction.destinationTemporary === temporaryId
+      )
+        held.push({
+          value: { kind: "callResult", functionId: instruction.functionId, call: index },
+          index,
+        });
+      else continue;
+      if (!this.#jumpedOver(index, at)) return held;
     }
     return null;
+  }
+
+  /** Whether a jump a short way before instruction `index`, in its function, goes past it to at most `at`. */
+  #jumpedOver(index: number, at: number): boolean {
+    const owner = this.functionAt(index);
+    for (let from = index - 1; from >= 0 && from >= index - HELD_WINDOW; from -= 1) {
+      if (this.functionAt(from) !== owner) return false;
+      const target = this.#instructions[from]!.target;
+      if (typeof target === "number" && target > index && target <= at) return true;
+    }
+    return false;
   }
 
   /**
@@ -1157,39 +1178,46 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     source.kind === "storage" && at !== undefined
       ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
       : source;
-  // A temporary's truth compared with `true` or `false` is read through what the nearest stores before the condition
-  // put there, also through a temporary copied into it, as the temporary itself merges every value it ever held. A truth
-  // the code computes, as a short-circuit `a and b` or `a or b` lowers to, holds what the way taken left there: no stored
-  // value to make true, so the atom is left out and what it reads stays a dependency (below). A value the code tests
-  // (`load(...) and f()`), or a call's result, is the atom's subject instead. A chain of copies too long to follow is
-  // left out too.
-  const roots: unknown[] = [];
-  let resolved = false;
+  // A temporary's truth compared with `true` or `false` is read through what the stores before the condition that can
+  // reach it put there, also through temporaries copied into it, as the temporary itself merges every value it ever
+  // held. A truth the code computes, as a short-circuit `a and b` or `a or b` lowers to, holds what the way taken left
+  // there: no stored value to make true, so it is left out and what it reads stays a dependency (below). A value the code
+  // tests (`load(...) and f()`), or a call's result, is an atom's subject instead. A temporary copied further than
+  // followed is left out too, and stays a dependency as it is.
+  const read = new Map<number, Data[]>();
+  const leaves = (temporaryId: number, before: number, depth: number): Data[] | "deep" | null => {
+    if (depth === 0) return "deep";
+    const held = flow.heldAt(temporaryId, before);
+    if (held === null) return null;
+    const found: Data[] = [];
+    for (const { value, index } of held) {
+      if (value.kind !== "temporary" || typeof value.temporaryId !== "number") {
+        found.push(value);
+        continue;
+      }
+      const inner = leaves(value.temporaryId, index, depth - 1);
+      if (inner === null || inner === "deep") return inner;
+      found.push(...inner);
+    }
+    return found;
+  };
   const atoms = atomsFor(condition, wanted, true).flatMap((atom): Atom[] => {
-    let subject = record(atom.subject);
+    const subject = record(atom.subject);
     if (
       at === undefined ||
       atom.against !== undefined ||
       typeof atom.constant !== "boolean" ||
-      subject.kind !== "temporary"
-    ) {
-      roots.push(atom.subject);
+      subject.kind !== "temporary" ||
+      typeof subject.temporaryId !== "number"
+    )
       return [atom];
-    }
-    let held: Data | null = null;
-    for (let depth = 0; depth < 8 && subject.kind === "temporary"; depth += 1) {
-      if (typeof subject.temporaryId !== "number") break;
-      held = flow.heldAt(subject.temporaryId, at);
-      if (held === null) {
-        roots.push(atom.subject);
-        return [atom];
-      }
-      subject = record(held);
-    }
-    resolved = true;
-    if (subject.kind === "temporary") return [];
-    roots.push(held);
-    return comparesTruth(held) ? [] : [{ ...atom, subject: held }];
+    const found = leaves(subject.temporaryId, at, 8);
+    if (found === null) return [atom];
+    if (found === "deep") return [];
+    read.set(subject.temporaryId, found);
+    return found
+      .filter((value) => !comparesTruth(value))
+      .map((value) => ({ ...atom, subject: value }));
   });
   for (const atom of atoms) {
     if (atom.against !== undefined) {
@@ -1241,11 +1269,23 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       goals.push({ source, candidates, comparison });
     }
   }
-  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`; with a temporary's
+  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`; of a temporary's
   // truth read through, of what it was read through to.
-  for (const [found, expression] of (resolved ? roots : [condition]).flatMap((root) =>
-    flow.sourcesOf(root).map((found) => [found, root] as const),
-  )) {
+  const through = (value: Data): Data =>
+    value.kind === "temporary" && read.has(Number(value.temporaryId))
+      ? { kind: "readThrough", values: read.get(Number(value.temporaryId)) }
+      : Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [
+            key,
+            Array.isArray(item)
+              ? item.map((each: unknown) => (isRecord(each) ? through(each) : each))
+              : isRecord(item)
+                ? through(item)
+                : item,
+          ]),
+        );
+  const expression = read.size === 0 || !isRecord(condition) ? condition : through(condition);
+  for (const found of flow.sourcesOf(expression)) {
     const source = keyed(found, expression);
     if (source.kind !== "storage" && source.kind !== "clock") continue;
     const known = goals.some(
