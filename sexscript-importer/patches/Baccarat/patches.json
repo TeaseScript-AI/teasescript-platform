@@ -13,6 +13,13 @@
       "category": "b",
       "reason": "ChooseDeck listed the subfolders of images/Bcards with eachFile and isDirectory() to offer the card decks; TeaseScript cannot list folders, and the folder-listing rule only finds images by their folder's tag. DeckNames is the list of the deck folders the package holds.",
       "diff": "deck-folders.diff"
+    },
+    {
+      "id": "obey-rules-default",
+      "layer": "source",
+      "category": "e",
+      "reason": "Settings the rules menu turns off and saves come back on at the next start: they are read as loadBoolean(key) ?: true, and Groovy elvis treats a saved false like a missing value. Read the saved value, and take true only where nothing is saved.",
+      "diff": "obey-rules-default.diff"
     }
   ]
 }
