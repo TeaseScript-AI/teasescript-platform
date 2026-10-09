@@ -96,6 +96,21 @@ export interface ParseResult {
   /** The file's `---` header, or `null` when it has none. */
   readonly header: ScriptHeader | null;
   readonly diagnostics: readonly Diagnostic[];
+  /**
+   * Every statement and media cue the parser read, also one it could not read and left out of the program, and the
+   * inside of every statement block. Language tooling finds the statement at a position with them.
+   */
+  readonly statementRanges: readonly StatementRange[];
+}
+
+/**
+ * Source offsets of a statement, from its first token to the line break, `}`, or end of file that ended it, or of the
+ * inside of a statement block, from after its `{` to its `}` or the end of file.
+ */
+export interface StatementRange {
+  readonly kind: "statement" | "block";
+  readonly start: number;
+  readonly end: number;
 }
 
 // Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
@@ -200,7 +215,18 @@ interface ParsedSayValue {
   readonly parts: SayParts | null;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
+  /** The statement ranges its parse recorded. */
+  readonly ranges: RangeSegment;
   readonly recovered: boolean;
+}
+/**
+ * The statement ranges from `from` up to `to` in `list`, which only grows. A parser that reuses a `say` value lists its
+ * segment rather than a copy of its ranges, so a value nested in others is not copied into each of them.
+ */
+interface RangeSegment {
+  readonly list: readonly (StatementRange | RangeSegment)[];
+  readonly from: number;
+  readonly to: number;
 }
 /** The compact interaction commands other than `choose`, and the kind of answer each asks for. */
 const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionKind"]> = new Map([
@@ -274,11 +300,17 @@ export function parse(source: string): ParseResult {
     program,
     header: header.header,
     diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
+    statementRanges: Object.freeze(parser.statementRanges()),
   });
 }
 
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
+  /**
+   * A speculative parser keeps its own, so only the statements of the parse that counts are listed, also those of a
+   * `say` value it reuses.
+   */
+  readonly #statementRanges: (StatementRange | RangeSegment)[] = [];
   #current = 0;
   #commaLookahead: {
     readonly at: number;
@@ -319,21 +351,31 @@ class Parser {
     return this.#diagnostics;
   }
 
+  /** The statement ranges, with those of each reused `say` value in its place, read once without recursion. */
+  public statementRanges(): readonly StatementRange[] {
+    const ranges: StatementRange[] = [];
+    const pending: RangeSegment[] = [
+      { list: this.#statementRanges, from: 0, to: this.#statementRanges.length },
+    ];
+    for (let segment = pending.pop(); segment !== undefined; segment = pending.pop()) {
+      for (let index = segment.from; index < segment.to; index += 1) {
+        const entry = segment.list[index]!;
+        if ("list" in entry) pending.push(entry);
+        else ranges.push(entry);
+      }
+    }
+    return ranges;
+  }
+
   public parseProgram(): Program {
     const statements: Statement[] = [];
     this.#skipNewlines();
     while (!this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const statement = runParse(this.#parseStatement());
       if (statement !== null) statements.push(statement);
-      if (this.#current === startIndex) this.#advance();
-
-      if (this.#recoveredAtStatementBoundary) {
-        this.#recoveredAtStatementBoundary = false;
-      } else {
-        this.#finishStatement(false);
-      }
-      this.#skipNewlines();
+      this.#endStatement(startIndex, diagnosticCount, false);
     }
 
     return Object.freeze({
@@ -800,6 +842,7 @@ class Parser {
     );
     if (known !== undefined) {
       this.#diagnostics.push(...known.diagnostics);
+      this.#statementRanges.push(known.ranges);
       this.#current = known.end;
       this.#recoveredAtStatementBoundary = known.recovered;
       return known.parts;
@@ -811,12 +854,14 @@ class Parser {
       recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
     };
     const diagnosticCount = this.#diagnostics.length;
+    const rangeCount = this.#statementRanges.length;
     const parts = yield* parseChild(this.#parseSayParts(false));
     parsed.push({
       ...context,
       parts,
       end: this.#current,
       diagnostics: this.#diagnostics.slice(diagnosticCount),
+      ranges: { list: this.#statementRanges, from: rangeCount, to: this.#statementRanges.length },
       recovered: this.#recoveredAtStatementBoundary,
     });
     this.#shared.sayValues.set(start, parsed);
@@ -1487,23 +1532,12 @@ class Parser {
     const statements: Statement[] = [];
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const statement = yield* parseChild(this.#parseStatement());
       if (statement !== null) statements.push(statement);
-      if (this.#current === startIndex) this.#advance();
-      if (this.#recoveredAtStatementBoundary) {
-        this.#recoveredAtStatementBoundary = false;
-      } else {
-        this.#finishStatement(true);
-      }
-      this.#skipNewlines();
+      this.#endStatement(startIndex, diagnosticCount, true);
     }
-    if (!this.#match(TokenKind.RightBrace)) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedRightBrace,
-        "Expected '}' to close the block.",
-      );
-      return null;
-    }
+    if (!this.#closeBlock(leftBrace)) return null;
     const span = spanFrom(leftBrace.span, this.#previous().span);
     return Object.freeze({ kind: "block", statements: Object.freeze(statements), span });
   }
@@ -2213,6 +2247,7 @@ class Parser {
     const cues: MediaCue[] = [];
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const cueStart = this.#isMediaCueStart();
       if (cueStart !== cueMode) {
         this.#reportToken(
@@ -2228,21 +2263,9 @@ class Parser {
         const statement = yield* parseChild(this.#parseStatement());
         if (statement !== null) statements.push(statement);
       }
-      if (this.#current === startIndex) this.#advance();
-      if (this.#recoveredAtStatementBoundary) {
-        this.#recoveredAtStatementBoundary = false;
-      } else {
-        this.#finishStatement(true);
-      }
-      this.#skipNewlines();
+      this.#endStatement(startIndex, diagnosticCount, true);
     }
-    if (!this.#match(TokenKind.RightBrace)) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedRightBrace,
-        "Expected '}' to close the block.",
-      );
-      return false;
-    }
+    if (!this.#closeBlock(leftBrace)) return false;
     const span = spanFrom(leftBrace.span, this.#previous().span);
     return cueMode
       ? Object.freeze({ kind: "cues", cues: Object.freeze(cues), span })
@@ -3052,23 +3075,12 @@ class Parser {
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const statement = yield* parseChild(this.#parseStatement());
       if (statement !== null) statements.push(statement);
-      if (this.#current === startIndex) this.#advance();
-      if (this.#recoveredAtStatementBoundary) {
-        this.#recoveredAtStatementBoundary = false;
-      } else {
-        this.#finishStatement(true);
-      }
-      this.#skipNewlines();
+      this.#endStatement(startIndex, diagnosticCount, true);
     }
-    if (!this.#match(TokenKind.RightBrace)) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedRightBrace,
-        "Expected '}' to close the block.",
-      );
-      return null;
-    }
+    if (!this.#closeBlock(leftBrace)) return null;
     return Object.freeze({
       kind: "block",
       statements: Object.freeze(statements),
@@ -4731,12 +4743,56 @@ class Parser {
     this.#reportInsertion(code, message);
   }
 
+  /**
+   * Ends the statement of a statement list that started at token `start` at the line break, `}`, or end of file after
+   * it, records its range, and skips the line breaks before the next statement. `diagnosticCount` is the number of
+   * diagnostics before it.
+   */
+  #endStatement(start: number, diagnosticCount: number, inBlock: boolean): void {
+    if (this.#current === start) this.#advance();
+    // Recovery has already stopped at the next statement.
+    if (this.#recoveredAtStatementBoundary) this.#recoveredAtStatementBoundary = false;
+    else this.#finishStatement(inBlock);
+    let end = this.#current;
+    // A statement with an error may be unfinished, such as one that ends in a comma or misses a list's `]`, so it also
+    // holds the line breaks after it, where an author completes it, as a recovered one does.
+    if (this.#diagnostics.length > diagnosticCount && this.tokens[end]!.kind === TokenKind.Newline)
+      end = this.#shared.newlineRuns.ends[end]!;
+    this.#statementRanges.push(
+      Object.freeze({
+        kind: "statement",
+        start: this.tokens[start]!.span.start.offset,
+        end: this.tokens[end]!.span.start.offset,
+      }),
+    );
+    this.#skipNewlines();
+  }
+
+  /** Reads the `}` of the statement block opened by `leftBrace`, or reports it missing, and records the block's range. */
+  #closeBlock(leftBrace: Token): boolean {
+    const closed = this.#match(TokenKind.RightBrace);
+    if (!closed)
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedRightBrace,
+        "Expected '}' to close the block.",
+      );
+    this.#statementRanges.push(
+      Object.freeze({
+        kind: "block",
+        start: leftBrace.span.end.offset,
+        end: (closed ? this.#previous() : this.#peek()).span.start.offset,
+      }),
+    );
+    return closed;
+  }
+
+  /** Stops at the line break, `}`, or end of file after a statement, reporting and skipping the rest of its line. */
   #finishStatement(inBlock: boolean): void {
-    if (this.#check(TokenKind.Newline)) {
-      this.#skipNewlines();
-      return;
-    }
-    if (this.#check(TokenKind.EndOfFile) || (inBlock && this.#check(TokenKind.RightBrace))) {
+    if (
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.EndOfFile) ||
+      (inBlock && this.#check(TokenKind.RightBrace))
+    ) {
       return;
     }
     this.#reportInsertion(
