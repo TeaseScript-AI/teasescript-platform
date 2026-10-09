@@ -5,7 +5,8 @@ import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 /**
  * Asynchronous timer state. The enclosing background action owns an ADR 0016 action ID for ordering and events; the
  * timer ID is the separate identity behind opaque handles. No Player completion targets a timer, and its settlements
- * do not replace `lastSettlement`. A settled record stays while a handle or one of its blocks still reaches it.
+ * do not replace `lastSettlement`. A settled record stays while a handle or one of its blocks still reaches it, and
+ * keeps only what a handle reads.
  */
 export type RuntimeTimerState = "running" | "paused" | "finished" | "stopped";
 
@@ -25,11 +26,11 @@ export interface RuntimeTimerSnapshot {
   readonly persist: boolean;
   readonly handlerFunctionId: number | null;
   /**
-   * The root of the activation that started the timer, kept after it settles. A non-persistent timer goes when that
-   * activation is left; the expiry block runs in it.
+   * The root of the activation that started the timer. A non-persistent timer goes when that activation is left; the
+   * expiry block runs in it.
    */
   readonly rootScopeId: number;
-  /** The variables its expiry block shares with the code that started it; kept after it settles, owning nothing. */
+  /** The variables its expiry block shares with the code that started it. */
   readonly captures: readonly RuntimeCaptureSnapshot[];
   /** Present only for a repeating range without a `repeatDuration` override. */
   range: RuntimeTimerRangeSnapshot | null;
@@ -58,6 +59,40 @@ export interface RuntimeTimerSnapshot {
 }
 
 /**
+ * What a handle still reads once a timer finished or stopped: its state, presentation, label, later-round duration, and
+ * the time it ran. `persist` stays because leaving the activation that started a non-persistent timer drops its queued
+ * expiry blocks; the rounds, range, and block go when it settles.
+ */
+export interface RuntimeSettledTimerSnapshot {
+  readonly timerId: number;
+  readonly state: "finished" | "stopped";
+  readonly display: DelayDisplay;
+  readonly label: string | null;
+  readonly persist: boolean;
+  readonly repeatDurationMs: number | null;
+  readonly elapsedMs: number;
+}
+
+/** The record a timer handle refers to: the active one, or what remains once the timer settled. */
+export type TimerHandleRecord = RuntimeTimerSnapshot | RuntimeSettledTimerSnapshot;
+
+/** The settled record of a finished or stopped timer. */
+export function settledTimerRecord(timer: RuntimeTimerSnapshot): RuntimeSettledTimerSnapshot {
+  if (timer.state !== "finished" && timer.state !== "stopped") {
+    throw new Error("Only a finished or stopped timer can settle.");
+  }
+  return {
+    timerId: timer.timerId,
+    state: timer.state,
+    display: timer.display,
+    label: timer.label,
+    persist: timer.persist,
+    repeatDurationMs: timer.repeatDurationMs,
+    elapsedMs: timer.elapsedMs,
+  };
+}
+
+/**
  * Expired rounds whose expiry block still has to run. Consecutive expiries of the same timer share one entry, so a
  * long catch-up of a fast repeating timer stays compact; each counted expiry still runs the block once.
  */
@@ -82,13 +117,13 @@ export interface TimerWarning {
   readonly message: string;
 }
 
-function timerRemainingMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
+function timerRemainingMs(timer: TimerHandleRecord, nowMs: number): number {
   if (timer.state === "running") return Math.max(0, timer.deadlineMs! - nowMs);
   if (timer.state === "paused") return timer.remainingMs!;
   return 0;
 }
 
-function timerElapsedMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
+function timerElapsedMs(timer: TimerHandleRecord, nowMs: number): number {
   return timer.state === "running"
     ? timer.elapsedMs + Math.max(0, Math.min(nowMs, timer.deadlineMs!) - timer.runningSinceMs!)
     : timer.elapsedMs;
@@ -109,7 +144,7 @@ function rebaseRunningPeriod(timer: RuntimeTimerSnapshot, nowMs: number): void {
   timer.anchoredRounds = null;
 }
 
-export function pauseTimer(timer: RuntimeTimerSnapshot, nowMs: number): TimerWarning | null {
+export function pauseTimer(timer: TimerHandleRecord, nowMs: number): TimerWarning | null {
   if (timer.state === "paused") return null;
   if (timer.state !== "running") return settledWarning(timer, "pause()");
   timer.elapsedMs = timerElapsedMs(timer, nowMs);
@@ -121,7 +156,7 @@ export function pauseTimer(timer: RuntimeTimerSnapshot, nowMs: number): TimerWar
   return null;
 }
 
-export function resumeTimer(timer: RuntimeTimerSnapshot, nowMs: number): TimerWarning | null {
+export function resumeTimer(timer: TimerHandleRecord, nowMs: number): TimerWarning | null {
   if (timer.state === "running") return null;
   if (timer.state !== "paused") return settledWarning(timer, "resume()");
   timer.deadlineMs = nowMs + timer.remainingMs!;
@@ -140,10 +175,10 @@ export function stopTimer(timer: RuntimeTimerSnapshot, nowMs: number): void {
 }
 
 export function setTimerDisplay(
-  timer: RuntimeTimerSnapshot,
+  timer: TimerHandleRecord,
   display: DelayDisplay,
 ): TimerWarning | null {
-  if (timer.state === "finished" || timer.state === "stopped") {
+  if (timer.state !== "running" && timer.state !== "paused") {
     return settledWarning(timer, "display");
   }
   timer.display = display;
@@ -151,11 +186,11 @@ export function setTimerDisplay(
 }
 
 export function setTimerRepeatDuration(
-  timer: RuntimeTimerSnapshot,
+  timer: TimerHandleRecord,
   durationMs: number,
   nowMs: number,
 ): TimerWarning | null {
-  if (timer.state === "finished" || timer.state === "stopped") {
+  if (timer.state !== "running" && timer.state !== "paused") {
     return settledWarning(timer, "repeatDuration");
   }
   // The current round keeps its deadline; later rounds use the new length from a new anchor.
@@ -172,11 +207,11 @@ export function setTimerRepeatDuration(
  * old remaining time cannot make the total negative. Returns `expired` when the round must end now.
  */
 export function setTimerRemaining(
-  timer: RuntimeTimerSnapshot,
+  timer: TimerHandleRecord,
   requestedMs: number,
   nowMs: number,
 ): TimerWarning | "expired" | null {
-  if (timer.state === "finished" || timer.state === "stopped") {
+  if (timer.state !== "running" && timer.state !== "paused") {
     return settledWarning(timer, "remaining");
   }
   const remainingMs = Math.max(0, requestedMs);
@@ -289,7 +324,7 @@ export function skipSilentRounds(
 
 /** Handle property reads; `undefined` means the property does not exist. */
 export function timerProperty(
-  timer: RuntimeTimerSnapshot,
+  timer: TimerHandleRecord,
   name: string,
   nowMs: number,
 ): SerializableRuntimeValue | undefined {
@@ -321,7 +356,7 @@ function settle(timer: RuntimeTimerSnapshot, state: "finished" | "stopped"): voi
   timer.anchoredRounds = null;
 }
 
-function settledWarning(timer: RuntimeTimerSnapshot, operation: string): TimerWarning {
+function settledWarning(timer: TimerHandleRecord, operation: string): TimerWarning {
   return {
     code: "TSW010",
     message: `Timer ${operation} has no effect because the timer is already ${timer.state}.`,

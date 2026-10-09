@@ -204,7 +204,7 @@ import {
   setTimerRemaining,
   setTimerRepeatDuration,
   timerProperty,
-  type RuntimeTimerSnapshot,
+  type TimerHandleRecord,
   type TimerWarning,
 } from "./timers.js";
 import {
@@ -2347,7 +2347,7 @@ export class Evaluator {
     return null;
   }
 
-  #timer(handle: SerializableTimerHandle, span: SourceSpan): RuntimeTimerSnapshot {
+  #timer(handle: SerializableTimerHandle, span: SourceSpan): TimerHandleRecord {
     const timer = timerRecord(this.snapshot, handle.timerId);
     if (timer === undefined)
       throw fault(

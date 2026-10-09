@@ -14,9 +14,11 @@ import type { RandomControl } from "../random-control.js";
 import type { RuntimeSnapshot } from "../state.js";
 import {
   expireTimerRound,
+  settledTimerRecord,
   stopTimer,
   type RuntimeTimerRangeSnapshot,
   type RuntimeTimerSnapshot,
+  type TimerHandleRecord,
 } from "../timers.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
 
@@ -70,7 +72,7 @@ export function activeTimerAction(
 export function timerRecord(
   snapshot: RuntimeSnapshot,
   timerId: number,
-): RuntimeTimerSnapshot | undefined {
+): TimerHandleRecord | undefined {
   return (
     activeTimerAction(snapshot, timerId)?.timer ??
     snapshot.settledTimers.find((timer) => timer.timerId === timerId)
@@ -78,7 +80,7 @@ export function timerRecord(
 }
 
 /**
- * Removes a finished or stopped timer from background work, retains its handle data, and publishes its
+ * Removes a finished or stopped timer from background work, keeps what its handle reads, and publishes its
  * `actionCompleted`. Timer settlements are not retained as `lastSettlement` because no Player completion targets them.
  */
 function settleTimerAction(
@@ -94,7 +96,7 @@ function settleTimerAction(
   assertEventSequenceCapacity(snapshot, 1);
   const completionEventSequence = takeSequence(snapshot, 1);
   snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
-  snapshot.settledTimers.push(action.timer);
+  snapshot.settledTimers.push(settledTimerRecord(action.timer));
   sweepRetainedScopes(snapshot, false);
   const settlement: RuntimeTimerSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
@@ -183,7 +185,7 @@ export function stopAllTimersForSessionEnd(snapshot: RuntimeSnapshot): void {
     if (action.kind !== "timer") continue;
     stopTimer(action.timer, snapshot.currentSessionTimeMs);
     snapshot.backgroundActions.splice(index, 1);
-    snapshot.settledTimers.push(action.timer);
+    snapshot.settledTimers.push(settledTimerRecord(action.timer));
   }
   snapshot.pendingTimerHandlers.length = 0;
 }

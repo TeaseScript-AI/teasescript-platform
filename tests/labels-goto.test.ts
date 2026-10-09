@@ -113,6 +113,27 @@ test("a goto stops non-persistent timers, and persistent timers keep running", (
   assert.deepEqual(stopped, ["stopped"]);
 });
 
+test("a block's goto drops the queued blocks of finished non-persistent timers and keeps persistent ones", () => {
+  // Both one-shot timers finish at 1 s while the third timer's block runs, so their blocks wait; its goto then leaves
+  // the activation that started them.
+  const result = assertRuntimeResumeEquivalent(
+    [
+      'timer(duration: 1, async: true, display: "hidden") { say "dropped" }',
+      'timer(duration: 1, async: true, display: "hidden", persist: true) { say "kept" }',
+      'timer(duration: 500 ms, async: true, display: "hidden") {',
+      "    wait 1",
+      "    goto onward",
+      "}",
+      "wait 5",
+      "exit",
+      "label onward",
+      "wait 1",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(outputs(result.events), ["say kept", "exit"]);
+});
+
 test("media keeps playing across a goto", () => {
   const result = assertRuntimeResumeEquivalent(
     ['let music = playAudio async "music.mp3"', "goto next", "label next", "wait 1", "exit"].join(
