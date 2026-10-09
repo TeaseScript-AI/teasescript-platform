@@ -181,6 +181,7 @@ import {
 } from "./value-predicates.js";
 import {
   assertValueType,
+  describeShownValue,
   describeValue as describeTypedValue,
   matchesValueType,
   storedValueMismatch,
@@ -927,7 +928,12 @@ export class Evaluator {
           }
           if (expression.operator === "not") {
             if (typeof result.value !== "boolean")
-              throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
+              throw notBoolean(
+                "'not' needs true or false (boolean)",
+                expression.operand,
+                result.value,
+                expression.operand.span,
+              );
             value = !result.value;
           } else if (isDuration(result.value)) {
             const parts = durationParts(result.value);
@@ -971,7 +977,12 @@ export class Evaluator {
               frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
               if (typeof frame.value !== "boolean")
-                throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+                throw notBoolean(
+                  `'${expression.operator}' needs true or false (boolean) values`,
+                  expression.left,
+                  frame.value,
+                  expression.left.span,
+                );
               if (expression.operator === "and" ? !frame.value : frame.value) {
                 value = frame.value;
                 break;
@@ -1631,7 +1642,12 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.operator === "and" || expression.operator === "or") {
       if (typeof right !== "boolean")
-        throw fault("TSR026", "Expected a boolean value.", expression.right.span);
+        throw notBoolean(
+          `'${expression.operator}' needs true or false (boolean) values`,
+          expression.right,
+          right,
+          expression.right.span,
+        );
       return right;
     }
     if (expression.operator === "==" || expression.operator === "!=") {
@@ -1665,11 +1681,7 @@ export class Evaluator {
         (typeof left !== "number" || typeof right !== "number") &&
         (typeof left !== "string" || typeof right !== "string")
       ) {
-        throw fault(
-          "TSR009",
-          "Comparison operands must both be numbers or both be strings.",
-          expression.span,
-        );
+        throw notComparable(expression, left, right);
       }
       if (expression.operator === "<") return left < right;
       if (expression.operator === "<=") return left <= right;
@@ -1813,7 +1825,13 @@ export class Evaluator {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
       if (isConversionName(name))
-        return this.#conversionBuiltin(name, positional, named, expression.span);
+        return this.#conversionBuiltin(
+          name,
+          positional,
+          named,
+          expression.arguments[0]?.value,
+          expression.span,
+        );
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
@@ -2781,7 +2799,11 @@ export class Evaluator {
     this.#expectBuiltinArguments("randomInteger", call, 1);
     const range = call.positional[0]!;
     if (!isRange(range)) {
-      throw fault("TSR040", "randomInteger(range) requires a range value.", call.span);
+      throw fault(
+        "TSR040",
+        `randomInteger(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
+        call.span,
+      );
     }
     return this.randomIntegerInRange(range, call.span, "randomInteger(range)", "randomInteger");
   }
@@ -2793,10 +2815,14 @@ export class Evaluator {
     subject: string,
     operation: RuntimeDebugRandomOperation,
   ): number {
-    assertIntegerRange(range, span);
+    assertIntegerRange(range, subject, span);
     const length = rangeLength(range);
     if (length < 1) {
-      throw fault("TSR041", `${subject} requires a non-empty range.`, span);
+      throw fault(
+        "TSR041",
+        `${subject} needs a range that holds at least one whole number, but ${rangeText(range)} holds none. Check that the range is not empty first.`,
+        span,
+      );
     }
     let drawn = this.#draw(span, operation, length, range, (draw) =>
       sampleRangeInteger(draw, range, length),
@@ -2818,6 +2844,7 @@ export class Evaluator {
     name: ConversionName,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
+    argument: ExpressionPlan | undefined,
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const extra = Object.keys(named).find((key) => key !== "default");
@@ -2849,16 +2876,7 @@ export class Evaluator {
         `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    const shown = typeof value === "string" ? ` ${JSON.stringify(messageText(value))}` : "";
-    const reason =
-      typeof value === "string" && isTemporalConversionResult(result)
-        ? (temporalTextProblem(result, value) ?? "")
-        : "";
-    throw fault(
-      "TSR058",
-      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}${reason}. Give a fallback with default: if the value may not convert.`,
-      span,
-    );
+    throw fault("TSR058", conversionFailure(name, result, value, argument), span);
   }
 
   /** The converted value, or `undefined` when `value` cannot be converted. */
@@ -3421,12 +3439,6 @@ function notNumber(
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): RuntimeFault {
-  const received =
-    typeof value === "string"
-      ? `text (string) ${quotedText(messageText(value))}`
-      : typeof value === "boolean"
-        ? `${value} (boolean)`
-        : describeRuntimeValue(value);
   const fix =
     value === null
       ? `Check that ${operand === null ? "the value" : `'${operand}'`} is not null before using it.`
@@ -3435,7 +3447,65 @@ function notNumber(
         : "Use a number instead.";
   return fault(
     "TSR027",
-    `${subject} needs a number${operand === null ? place : ` for '${operand}'`}, but received ${received}. ${fix}`,
+    `${subject} needs a number${operand === null ? place : ` for '${operand}'`}, but received ${describeShownValue(value)}. ${fix}`,
+    span,
+  );
+}
+
+/**
+ * Why `value` does not convert to `result`, and what to do: a comparison for `toBoolean` of a number or text, `join()`
+ * for a collection of shown values, and otherwise a `default:` fallback.
+ */
+function conversionFailure(
+  name: ConversionName,
+  result: ConversionResult,
+  value: SerializableRuntimeValue,
+  argument: ExpressionPlan | undefined,
+): string {
+  const label = (argument === undefined ? null : planLabel(argument)) ?? "value";
+  const fallback = " Give a fallback with 'default:' if the value may not convert.";
+  const shown = describeShownValue(value);
+  // `toBoolean` keeps 1, 0, and other texts invalid: an explicit comparison says what the script means.
+  if (result === "boolean" && typeof value !== "string")
+    return typeof value === "number"
+      ? `toBoolean(...) converts text and true or false (boolean), not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
+      : `toBoolean(...) converts text and true or false (boolean), not ${shown}.${fallback}`;
+  const failed = `${name}(...) cannot convert ${shown} to ${describeConversionResult(result)}`;
+  if (typeof value === "string") {
+    if (result === "boolean")
+      return `${failed}. The text must be "true" or "false". Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
+    if (isTemporalConversionResult(result))
+      return `${failed}${temporalTextProblem(result, value) ?? ""}.${fallback}`;
+    if (result !== "string")
+      return `${failed}. The text must be a number such as 2.5 or -3.${fallback}`;
+  }
+  if (result === "string" && (isList(value) || isSet(value) || isDict(value))) {
+    const items = isDict(value) ? value.entries.map((entry) => entry.value) : value.items;
+    if (items.every(isVisibleScalar))
+      return `${failed}. Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
+  }
+  return `${failed}.${fallback}`;
+}
+
+/**
+ * `TSR026`: `rule`, such as "A condition must be true or false (boolean)", with the value `plan` gave instead and, where
+ * the source spells it, the compiler's fix.
+ */
+export function notBoolean(
+  rule: string,
+  plan: ExpressionPlan,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): RuntimeFault {
+  const label = plan.kind === "literal" ? null : planLabel(plan);
+  let fix = "";
+  if (value === null || typeof value === "number" || typeof value === "string")
+    fix = ` Compare it instead${label === null ? "" : `, such as '${label} ${value === null ? "== true" : typeof value === "number" ? "> 0" : '!= ""'}'`}.`;
+  else if (isList(value) || isSet(value) || isDict(value))
+    fix = ` Check its length instead${label === null ? "" : `, such as '${label}.length > 0'`}.`;
+  return fault(
+    "TSR026",
+    `${rule}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.${fix}`,
     span,
   );
 }
@@ -3495,7 +3565,7 @@ function isZero(value: SerializableRuntimeValue): boolean {
 }
 
 /** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */
-function planLabel(plan: ExpressionPlan): string | null {
+export function planLabel(plan: ExpressionPlan): string | null {
   const names: string[] = [];
   let current = plan;
   for (;;) {
@@ -3707,15 +3777,58 @@ function rangeLength(range: SerializableRuntimeRange): number {
   return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
 }
 
-function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): void {
+/** `TSR045` unless `range` has whole-number bounds and a length that a number counts exactly. */
+export function assertIntegerRange(
+  range: SerializableRuntimeRange,
+  subject: string,
+  span: SourceSpan,
+): void {
   const length = rangeLength(range);
   if (
     !Number.isSafeInteger(range.start) ||
     !Number.isSafeInteger(range.end) ||
     !Number.isSafeInteger(length)
   ) {
-    throw fault("TSR045", "Range iteration requires safe integer bounds.", span);
+    throw fault(
+      "TSR045",
+      !Number.isInteger(range.start) || !Number.isInteger(range.end)
+        ? `${subject} needs a range of whole numbers, but this range is ${rangeText(range)}. Round its bounds with floor(...), round(...), or ceil(...) first.`
+        : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
+      span,
+    );
   }
+}
+
+/** A range as the source writes it, such as `1..=6`. */
+function rangeText(range: SerializableRuntimeRange): string {
+  return `${withoutNegativeZero(range.start)}${range.inclusive ? "..=" : ".."}${withoutNegativeZero(range.end)}`;
+}
+
+/**
+ * `TSR009`: `<`, `<=`, `>`, or `>=` with operands that are not two numbers or two texts, with the values and, for null or
+ * numeric text, the fix.
+ */
+function notComparable(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+): RuntimeFault {
+  let fix = "";
+  if (left === null || right === null) {
+    const label = planLabel(left === null ? expression.left : expression.right);
+    fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
+  } else if (
+    (typeof left === "number" &&
+      typeof right === "string" &&
+      numberFromText(right) !== undefined) ||
+    (typeof right === "number" && typeof left === "string" && numberFromText(left) !== undefined)
+  )
+    fix = " Convert the text with toNumber(...) first.";
+  return fault(
+    "TSR009",
+    `'${expression.operator}' compares two numbers, two texts, or two durations, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,
+    expression.span,
+  );
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

@@ -464,9 +464,9 @@ function candidateConversionProblem(
         return `toString(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that toString(...) converts.`;
     }
     return type.kind === "list" || type.kind === "set"
-      ? `toString(...) cannot convert ${describeValue(type)}; use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
+      ? `toString(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
-        ? `toString(...) cannot convert ${describeValue(type)}; use .values.join() to combine its values as text.`
+        ? `toString(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`
         : `toString(...) converts text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
@@ -485,14 +485,14 @@ function candidateConversionProblem(
     if (isScalar(type, "string"))
       return text === undefined || booleanFromText(text) !== undefined
         ? undefined
-        : `toBoolean(...) cannot convert ${JSON.stringify(text)}; the text must be "true" or "false".`;
+        : `toBoolean(...) cannot convert ${JSON.stringify(text)}. The text must be "true" or "false".`;
     return `toBoolean(...) converts text and true or false (boolean), not ${describeValue(type)}.${isScalar(type, "integer", "number") ? " Compare the number instead, such as value != 0." : ""}`;
   }
   if (isScalar(type, "integer", "number")) return undefined;
   if (isScalar(type, "string"))
     return text === undefined || numberFromText(text) !== undefined
       ? undefined
-      : `${name}(...) cannot convert ${JSON.stringify(text)}; the text must be a number such as 2.5 or -3.`;
+      : `${name}(...) cannot convert ${JSON.stringify(text)}. The text must be a number such as 2.5 or -3.`;
   return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : ""}`;
 }
 

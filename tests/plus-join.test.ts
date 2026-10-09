@@ -204,7 +204,7 @@ test("+ on values known only when the script runs joins them or fails with the f
     ),
     [
       "TSR058",
-      "An element of 'items' holds a whole number (integer), so it cannot take text (string).",
+      `An element of 'items' holds a whole number (integer), so it cannot take text (string) "a".`,
     ],
   );
   assert.equal(

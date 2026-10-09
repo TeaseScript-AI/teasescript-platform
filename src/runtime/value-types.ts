@@ -1,7 +1,10 @@
 import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
+import { booleanFromText, numberFromText, withoutNegativeZero } from "../conversions.js";
+import { durationParts, formatDuration } from "../duration.js";
 import { RuntimeFault } from "./errors.js";
 import { messageText } from "./text-length.js";
+import { quotedText } from "./value-text.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import {
@@ -35,13 +38,46 @@ export function assertValueType(
 ): void {
   const mismatch = findTypeMismatch(value, check.type);
   if (mismatch === null) return;
-  const part =
-    mismatch.path === "" ? "" : ` with ${describeValue(mismatch.value)} at ${mismatch.path}`;
+  const taken =
+    mismatch.path === ""
+      ? describeShownValue(value)
+      : `${describeValue(value)} with ${typeof mismatch.value === "number" ? `${describeValue(mismatch.value)} ` : ""}${describeShownValue(mismatch.value)} at ${mismatch.path}`;
   throw new RuntimeFault(
     "TSR058",
-    `${capitalize(check.place)} holds ${describeType(check.type)}, so it cannot take ${describeValue(value)}${part}.`,
+    `${capitalize(check.place)} holds ${describeType(check.type)}, so it cannot take ${taken}.${typeFix(mismatch)}`,
     copySpan(span),
   );
+}
+
+/**
+ * A value as a message shows it: text, a number, true or false, or a duration with its bounded value, such as
+ * `text (string) "3"`, and any other value by its kind.
+ */
+export function describeShownValue(value: SerializableRuntimeValue): string {
+  if (typeof value === "string") return `text (string) ${quotedText(messageText(value))}`;
+  if (typeof value === "number") return String(withoutNegativeZero(value));
+  if (typeof value === "boolean") return `${value} (boolean)`;
+  if (isDuration(value)) return formatDuration(durationParts(value));
+  return describeValue(value);
+}
+
+/** How to make the part that does not fit fit: round a fraction, convert text, or check for null. */
+function typeFix({ value, type }: TypeMismatch): string {
+  const kinds = new Set(
+    type.kind === "union" ? type.members.map((member) => member.kind) : [type.kind],
+  );
+  if (value === null) return " Check that the value is not null first.";
+  if (typeof value === "number" && kinds.has("integer") && !kinds.has("number"))
+    return " Round it with floor(...), round(...), or ceil(...) first.";
+  if (typeof value === "string") {
+    if ((kinds.has("integer") || kinds.has("number")) && numberFromText(value) !== undefined)
+      return ` Convert the text with ${kinds.has("number") ? "toNumber" : "toInteger"}(...) first.`;
+    if (kinds.has("boolean") && booleanFromText(value) !== undefined)
+      return " Convert the text with toBoolean(...) first.";
+  }
+  if ((typeof value === "number" || typeof value === "boolean") && kinds.has("string"))
+    return " Convert it with toString(...) first.";
+  return "";
 }
 
 /** Whether a value fits a type: the answer of `value is T`, by the same matcher as the runtime type checks. */
@@ -69,6 +105,8 @@ export function storedValueMismatch(
 
 interface TypeMismatch {
   readonly value: SerializableRuntimeValue;
+  /** The type the part does not fit. */
+  readonly type: TypePlan;
   /** The path from the checked value to the part that does not fit, such as `[2].locked`; empty for the value. */
   readonly path: string;
 }
@@ -107,7 +145,11 @@ function findTypeMismatch(value: SerializableRuntimeValue, type: TypePlan): Type
     fits = result;
     if (frame.type.kind === "union") unions -= 1;
     if (!fits && unions === 0 && mismatch === null)
-      mismatch = { value: frame.value, path: frames.map((outer) => outer.step).join("") };
+      mismatch = {
+        value: frame.value,
+        type: frame.type,
+        path: frames.map((outer) => outer.step).join(""),
+      };
     frames.pop();
   }
   return fits ? null : mismatch;

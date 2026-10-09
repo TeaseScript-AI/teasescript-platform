@@ -385,7 +385,7 @@ test("a saved value the compiler cannot know is checked against its key's type w
   };
   const misfit = [
     "TSR058",
-    'Storage key "level" holds a whole number (integer), so it cannot take text (string).',
+    'Storage key "level" holds a whole number (integer), so it cannot take text (string) "x".',
   ];
   // A value of unknown type, also under a computed key that equals a key a load gives a type.
   assert.deepEqual(
@@ -483,7 +483,7 @@ test("a default the compiler cannot know takes the key's declared type and is ch
     [result.snapshot.failure?.code, result.snapshot.failure?.message],
     [
       "TSR058",
-      'Storage key "k" holds a whole number (integer) or null, so it cannot take text (string).',
+      'Storage key "k" holds a whole number (integer) or null, so it cannot take text (string) "bad".',
     ],
   );
   assert.deepEqual(result.snapshot.scriptStorage, []);

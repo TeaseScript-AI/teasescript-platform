@@ -6,6 +6,7 @@ import type { TemporalContext } from "../temporal.js";
 import {
   type DelayDisplay,
   type DurationUnitPlan,
+  type ExpressionPlan,
   type Instruction,
   type InstructionPlan,
   type InteractionAccessibleName,
@@ -38,7 +39,10 @@ import {
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
   type Evaluator,
+  assertIntegerRange,
   findBinding,
+  notBoolean,
+  planLabel,
   RuntimeExecutionContext,
   type RuntimeCapabilities,
 } from "./evaluator.js";
@@ -198,7 +202,8 @@ import {
 import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
-import { assertValueType } from "./value-types.js";
+import { assertValueType, describeShownValue } from "./value-types.js";
+import { numberFromText } from "../conversions.js";
 import {
   describeRuntimeValue,
   isDate,
@@ -908,7 +913,12 @@ function executePlannedInstruction(
     case "jumpIfFalse": {
       const condition = evaluator.evaluate(instruction.condition);
       if (typeof condition !== "boolean") {
-        throw fault("TSR026", "Expected a boolean value.", instruction.condition.span);
+        throw notBoolean(
+          "A condition must be true or false (boolean)",
+          instruction.condition,
+          condition,
+          instruction.condition.span,
+        );
       }
       evaluator.trace?.branch(condition, instruction.target, instruction.span);
       snapshot.nextInstruction = condition ? snapshot.nextInstruction + 1 : instruction.target;
@@ -926,7 +936,13 @@ function executePlannedInstruction(
     case "storeTemporary": {
       const value = evaluator.evaluate(instruction.value);
       if (instruction.expectBoolean && typeof value !== "boolean") {
-        throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
+        // Only the operands of a lowered 'and' or 'or' expect true or false.
+        throw notBoolean(
+          "'and' and 'or' need true or false (boolean) values",
+          instruction.value,
+          value,
+          instruction.value.span,
+        );
       }
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
@@ -2149,13 +2165,8 @@ function executeLoopStart(
     const scopeDepth = snapshot.frames.length;
     if (instruction.loopKind === "repeat") {
       const value = evaluator.evaluate(instruction.expression);
-      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-        throw fault(
-          "TSR043",
-          "repeat requires a non-negative integer count.",
-          instruction.expression.span,
-        );
-      }
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+        throw badRepeatCount(instruction.expression, value);
       frame = {
         kind: "repeat",
         loopId: instruction.loopId,
@@ -2174,9 +2185,10 @@ function executeLoopStart(
       const evaluated = evaluator.evaluate(instruction.expression);
       const pair = instruction.valueVariable !== undefined;
       if (pair && !isDict(evaluated)) {
+        const label = planLabel(instruction.expression);
         throw fault(
           "TSR044",
-          "for key, value requires a dict source.",
+          `'for ${instruction.variable}, ${instruction.valueVariable}' goes through the keys and values of a dict, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
           instruction.expression.span,
         );
       }
@@ -2186,13 +2198,14 @@ function executeLoopStart(
           ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
           : evaluated;
       if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
+        const label = planLabel(instruction.expression);
         throw fault(
           "TSR044",
-          "for requires a list, set, dict, or range source.",
+          `A 'for' loop goes through a list, set, dict, or range, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
           instruction.expression.span,
         );
       }
-      if (isRange(source)) assertIntegerRange(source, instruction.expression.span);
+      if (isRange(source)) assertIntegerRange(source, "A 'for' loop", instruction.expression.span);
       frame = {
         kind: "for",
         loopId: instruction.loopId,
@@ -2242,7 +2255,12 @@ function executeLoopStart(
   if (frame.kind === "while") {
     const condition = evaluator.evaluate(instruction.expression);
     if (typeof condition !== "boolean") {
-      throw fault("TSR026", "Expected a boolean value.", instruction.expression.span);
+      throw notBoolean(
+        "A condition must be true or false (boolean)",
+        instruction.expression,
+        condition,
+        instruction.expression.span,
+      );
     }
     if (!condition) {
       snapshot.loopFrames.pop();
@@ -2344,15 +2362,25 @@ function rangeLength(range: SerializableRuntimeRange): number {
   return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
 }
 
-function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): void {
-  const length = rangeLength(range);
-  if (
-    !Number.isSafeInteger(range.start) ||
-    !Number.isSafeInteger(range.end) ||
-    !Number.isSafeInteger(length)
-  ) {
-    throw fault("TSR045", "Range iteration requires safe integer bounds.", span);
-  }
+/** `TSR043` for a `repeat` count that is not a whole number of at least 0, with the fix for the value it is. */
+function badRepeatCount(plan: ExpressionPlan, value: SerializableRuntimeValue): RuntimeFault {
+  const label = planLabel(plan);
+  let fix = "";
+  if (value === null)
+    fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
+  else if (typeof value === "number")
+    fix = !Number.isInteger(value)
+      ? " Round it with floor(...), round(...), or ceil(...) first."
+      : value < 0
+        ? " Check that it is at least 0 first."
+        : " Use a smaller count.";
+  else if (typeof value === "string" && numberFromText(value) !== undefined)
+    fix = " Convert the text with toInteger(...) first.";
+  return fault(
+    "TSR043",
+    `A repeat count must be a whole number (integer) of at least 0, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.${fix}`,
+    plan.span,
+  );
 }
 
 function readTemporary(
@@ -3096,7 +3124,7 @@ export function timerDurationMs(
   const drawn =
     range === null || range.start < 0
       ? value
-      : evaluator.randomIntegerInRange(range, span, "timer", "duration");
+      : evaluator.randomIntegerInRange(range, span, "A timer", "duration");
   const amount =
     isDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)

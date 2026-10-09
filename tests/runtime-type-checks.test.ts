@@ -35,58 +35,58 @@ test("each typed place rejects a value of another type that the compiler cannot 
   for (const [statements, message, span] of [
     [
       'let count: integer = pick("x")',
-      "'count' holds a whole number (integer), so it cannot take text (string).",
+      `'count' holds a whole number (integer), so it cannot take text (string) "x".`,
       'pick("x")',
     ],
     [
       "let count = 1\ncount = pick(2.5)",
-      "'count' holds a whole number (integer), so it cannot take a number.",
+      "'count' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
       "pick(2.5)",
     ],
     [
       "let count = 1\ncount += pick(0.5)",
-      "'count' holds a whole number (integer), so it cannot take a number.",
+      "'count' holds a whole number (integer), so it cannot take 1.5. Round it with floor(...), round(...), or ceil(...) first.",
       "count += pick(0.5)",
     ],
     [
       'let items = [1, 2]\nitems[1] = pick("x")',
-      "An element of 'items' holds a whole number (integer), so it cannot take text (string).",
+      `An element of 'items' holds a whole number (integer), so it cannot take text (string) "x".`,
       'pick("x")',
     ],
     [
       'let door = { locked: true }\ndoor.locked = pick("no")',
-      "Property 'door.locked' holds true or false (boolean), so it cannot take text (string).",
+      `Property 'door.locked' holds true or false (boolean), so it cannot take text (string) "no".`,
       'pick("no")',
     ],
     [
       'let items = [1]\nitems.add(pick("x"))',
-      "An element of 'items' holds a whole number (integer), so it cannot take text (string).",
+      `An element of 'items' holds a whole number (integer), so it cannot take text (string) "x".`,
       'pick("x")',
     ],
     [
       'let tags = set["a"]\ntags.add(pick(1))',
-      "An element of 'tags' holds text (string), so it cannot take a whole number (integer).",
+      "An element of 'tags' holds text (string), so it cannot take 1. Convert it with toString(...) first.",
       "pick(1)",
     ],
     [
       "function shout(times = 1) {\n    return times\n}\nshout(times: pick(0.5))",
-      "Parameter 'times' of 'shout' holds a whole number (integer), so it cannot take a number.",
+      "Parameter 'times' of 'shout' holds a whole number (integer), so it cannot take 0.5. Round it with floor(...), round(...), or ceil(...) first.",
       "pick(0.5)",
     ],
     [
       'function rest(seconds: number = pick("long")) {\n    return seconds\n}\nrest()',
-      "Parameter 'seconds' of 'rest' holds a number, so it cannot take text (string).",
+      `Parameter 'seconds' of 'rest' holds a number, so it cannot take text (string) "long".`,
       'pick("long")',
     ],
     [
       // A `return` of an unknown value leaves an inferred result unknown, so the receiving place checks it.
       'function level(known: boolean) {\n    if known {\n        return 1\n    }\n    return pick("high")\n}\nlet count: integer = level(false)',
-      "'count' holds a whole number (integer), so it cannot take text (string).",
+      `'count' holds a whole number (integer), so it cannot take text (string) "high".`,
       "level(false)",
     ],
     [
       "function score(base): integer {\n    return pick(base)\n}\nscore(2.5)",
-      "The result of 'score' holds a whole number (integer), so it cannot take a number.",
+      "The result of 'score' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
       "pick(base)",
     ],
   ] as const) {
@@ -121,19 +121,75 @@ test("an arithmetic operand that is not a number names the operand, the value, a
   }
 });
 
+test("a condition, comparison, or loop value of the wrong kind names the value and the fix", () => {
+  for (const [statements, code, message, span] of [
+    [
+      "let ready = pick(null)\nif ready {\n}",
+      "TSR026",
+      "A condition must be true or false (boolean), but 'ready' is null. Compare it instead, such as 'ready == true'.",
+      "ready",
+    ],
+    [
+      "let count = pick(3)\nwhile count {\n}",
+      "TSR026",
+      "A condition must be true or false (boolean), but 'count' is 3. Compare it instead, such as 'count > 0'.",
+      "count",
+    ],
+    [
+      'let answer = pick("yes")\nsay true and answer',
+      "TSR026",
+      `'and' needs true or false (boolean) values, but 'answer' is text (string) "yes". Compare it instead, such as 'answer != ""'.`,
+      "answer",
+    ],
+    [
+      // An operand beside a call is kept until the call returns, and checked there.
+      "let level = pick(1)\nsay level or pick(2) > 1",
+      "TSR026",
+      "'and' and 'or' need true or false (boolean) values, but 'level' is 1. Compare it instead, such as 'level > 0'.",
+      "level",
+    ],
+    [
+      "let score = pick(null)\nsay score < 10",
+      "TSR009",
+      "'<' compares two numbers, two texts, or two durations, but these are null and 10. Check that 'score' is not null first.",
+      "score < 10",
+    ],
+    [
+      "let times = pick(2.5)\nrepeat times {\n}",
+      "TSR043",
+      "A repeat count must be a whole number (integer) of at least 0, but 'times' is 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "times",
+    ],
+    [
+      "let items = pick(5)\nfor item in items {\n}",
+      "TSR044",
+      "A 'for' loop goes through a list, set, dict, or range, but 'items' is 5. To count up to it, write a range, such as '1..=items'.",
+      "items",
+    ],
+    [
+      "let last = pick(2.5)\nfor step in 1..last {\n}",
+      "TSR045",
+      "A 'for' loop needs a range of whole numbers, but this range is 1..2.5. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "1..last",
+    ],
+  ] as const) {
+    assert.deepEqual(failure(`${PICK}${statements}\nexit`), [code, message, span], statements);
+  }
+});
+
 test("a value with unknown parts is checked part by part", () => {
   for (const [statements, message] of [
     [
       "let values: integer[] = [pick(1), pick(true)]",
-      "'values' holds a list (integer[]), so it cannot take a list with true or false (boolean) at [1].",
+      "'values' holds a list (integer[]), so it cannot take a list with true (boolean) at [1].",
     ],
     [
       'let grid = [[1]]\ngrid = pick([[1], [2, pick("x")]])',
-      "'grid' holds a list (integer[][]), so it cannot take a list with text (string) at [1][1].",
+      `'grid' holds a list (integer[][]), so it cannot take a list with text (string) "x" at [1][1].`,
     ],
     [
       'let door = { locked: true, code: 1 }\ndoor = pick({ code: 2, locked: "no" })',
-      "'door' holds an object, so it cannot take an object with text (string) at .locked.",
+      `'door' holds an object, so it cannot take an object with text (string) "no" at .locked.`,
     ],
     [
       "let door = { locked: true }\ndoor = pick([true])",
@@ -141,11 +197,11 @@ test("a value with unknown parts is checked part by part", () => {
     ],
     [
       "let doors = [{ locked: true }]\ndoors.add(pick({ locked: 1 }))",
-      "An element of 'doors' holds an object, so it cannot take an object with a whole number (integer) at .locked.",
+      "An element of 'doors' holds an object, so it cannot take an object with a whole number (integer) 1 at .locked.",
     ],
     [
       "let best = null\nbest = 1\nbest = pick(2.5)",
-      "'best' holds a whole number (integer) or null, so it cannot take a number.",
+      "'best' holds a whole number (integer) or null, so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
     ],
   ] as const) {
     assert.deepEqual(
@@ -234,7 +290,10 @@ test("a checked value from an interaction is checked when the answer resumes the
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, waiting))).snapshot;
   for (const [submittedText, outcome] of [
     ["3", "3"],
-    ["2.5", "'count' holds a whole number (integer), so it cannot take a number."],
+    [
+      "2.5",
+      "'count' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+    ],
   ] as const) {
     const direct = answer(waiting, submittedText);
     const resumed = answer(restored(), submittedText);
@@ -377,7 +436,7 @@ test("deep values and types are checked without exhausting the native stack", ()
     });
     assert.equal(failures[0], null);
     assert.equal(failures[1].code, 'TSR058');
-    assert.ok(failures[1].message.endsWith('so it cannot take a list with text (string) at ' + '[0]'.repeat(depth) + '.'));
+    assert.ok(failures[1].message.endsWith('so it cannot take a list with text (string) "x" at ' + '[0]'.repeat(depth) + '.'));
   `;
   const child = spawnSync(
     process.execPath,

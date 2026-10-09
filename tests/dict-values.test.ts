@@ -291,7 +291,7 @@ test("for key, value takes a dict, a text key, and the dict's value type, which 
   // A source the compiler cannot know is checked when the loop starts.
   assert.deepEqual(failure(`${DYNAMIC}for key, value in dynamic([1]) {\n}\nexit`), [
     "TSR044",
-    "for key, value requires a dict source.",
+    "'for key, value' goes through the keys and values of a dict, but this is a list. Go through a list with one variable.",
   ]);
 });
 
@@ -406,14 +406,14 @@ test("typed storage keeps a dict and its entry order, and a typed load checks ev
     ),
     [
       "TSR058",
-      `'counts' holds a dict (integer dict), so it cannot take a dict with text (string) at ["a"].`,
+      `'counts' holds a dict (integer dict), so it cannot take a dict with text (string) "x" at ["a"].`,
     ],
   );
   assert.deepEqual(
     failure(`${DYNAMIC}let counts: integer dict = dict{}\ncounts["a"] = dynamic("x")\nexit`),
     [
       "TSR058",
-      "A value of 'counts' holds a whole number (integer), so it cannot take text (string).",
+      `A value of 'counts' holds a whole number (integer), so it cannot take text (string) "x".`,
     ],
   );
 });
@@ -560,7 +560,10 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   // A default the compiler cannot know is checked when the script runs, also where nothing stores the result.
   assert.deepEqual(
     failure(`${DYNAMIC}let c: integer dict = dict{}\nsay c.get("z", default: dynamic("x"))\nexit`),
-    ["TSR058", "A value of 'c' holds a whole number (integer), so it cannot take text (string)."],
+    [
+      "TSR058",
+      `A value of 'c' holds a whole number (integer), so it cannot take text (string) "x".`,
+    ],
   );
   // The result is a copy of the default: it has the default's type, but its values are its own.
   assert.deepEqual(

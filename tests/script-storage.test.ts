@@ -832,15 +832,15 @@ test("a load the compiler cannot type is checked where its value is stored", () 
   // A load checks a default it cannot know against its own type before the variable takes it.
   assert.deepEqual(failure('let backup: number = load("missing", default: identity("backup"))'), [
     "TSR058",
-    'Storage key "missing" holds a number or null, so it cannot take text (string).',
+    'Storage key "missing" holds a number or null, so it cannot take text (string) "backup".',
   ]);
   assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k" + "", default: 0'), [
     "TSR058",
-    "'assigned' holds a number, so it cannot take text (string).",
+    `'assigned' holds a number, so it cannot take text (string) "stored".`,
   ]);
   assert.deepEqual(failure('let indirect: number = identity(load "k" + "", default: null)'), [
     "TSR058",
-    "'indirect' holds a number, so it cannot take text (string).",
+    `'indirect' holds a number, so it cannot take text (string) "stored".`,
   ]);
 
   const optional = plan(
