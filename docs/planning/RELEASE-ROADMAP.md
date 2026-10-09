@@ -230,60 +230,16 @@ subsystems may still have different maturity levels.
     devices.
   - **Reference:** Issue #421 and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
-- [ ] **Consider: fix known non-breaking compiler and runtime defects**
-  - **Outcome:** Decide whether to fix these known defects.
-    - The lexer fails on a string inside a command block inside `${...}` interpolation.
-    - `timer async` in a parameter default fails plan validation with TSC006.
-    - After a missing `)` in a call, such as `f("a"`, parser recovery skips the next statement and its errors.
-    - The late-image browser test waits a fixed 500 ms instead of for an explicit completion signal.
-    - A decided value with an unrelated open part, such as `{n: 1, unused: null}`, does not pass its decision to a copy.
-    - `for k, v in dict{ a: null } { v = 1 }` gives TSV041, because the `null` element makes `v` a strict `null` place.
-    - Without a plan, `validateRuntimeSnapshot` and `cloneRuntimeSnapshot` reject a valid active loop.
-    - A TSV046 constant-test warning nested in already unreachable code is no longer reported.
-    - The type checker does not count `sort` or `shuffle` as a write to a shared list.
-    - The `debugCountdownScenario` smoke step sometimes times out waiting for Settings to close.
-    - `RUNTIME.md` says a typed refusal changes nothing, but one can clean up unreachable live-message records.
-    - That cleanup traverses state-sized values whenever such records exist.
-    - `fork` and `createRuntimeSession` accept a non-function builtin, which fails only when called, with TSR012.
-    - The checkpoint validator admits a `range` on a repeating timer whose duration was a constant.
-
-- [ ] **Consider: known performance leftovers**
-  - **Outcome:** Decide whether to remove these known performance costs.
-    - `t[0] = 7` and `t.add(f())` still copy the whole collection each time they run.
-    - Type checking an object that grows one property at a time rescans it quadratically.
-    - A retained function scope keeps all its variables, not only the shared ones, which enlarges every snapshot.
-    - Each storage-key typing round is a full project type check, which slows compiling storage-heavy scripts.
-    - SipHash hashing and per-operation work such as `cloneMedia` each take about a tenth of CPU time in long runs.
-
-- [ ] **Consider: Player robustness and browser fixes**
-  - **Outcome:** Decide whether to fix these Player robustness and browser problems.
-    - In WebKit (Safari), saving an askImage photo fails, for a cause not yet found.
-    - The shared dialog close icon is 16 px, below the 44 px touch target.
-    - After a fatal Player error, scheduling continues and a camera from a failed Start stays on until the page closes.
-    - The debug export does not mask a forward-slash network path such as `//server/share/x`.
-    - A state over about 536 MB of JSON throws a native error at the save boundary instead of a structured failure.
-    - Firefox warns about a scroll-linked effect from the Reka UI ScrollArea thumb, which may trail a frame.
-
 - [ ] **Consider: Player polish and fidelity**
   - **Outcome:** Decide whether to make these Player refinements.
     - A permanent button click adds no line to the transcript.
-    - An askImage with an explicitly empty hint still shows "Add an image…".
-    - An unresolvable speaker avatar falls back to the letter avatar without a warning.
-    - When cycle options share a value, the submit bubble falls back to one plain line instead of exact lines.
-    - Recorded answers do not say whether Enter, the Send button, or a button click gave them.
-    - After a refused copy, a mouse click closes its tooltip, so mouse users see only the selected lines.
     - Choice buttons and askForm toggles show their hover fill at once, while other Player buttons fade it in.
-    - The random draw picker's scrolling outcome list clips the keyboard focus outline at its edges.
+    - The shared dialog close icon is 16 px, below the 44 px touch target.
 
 - [ ] **Consider: check literal media paths at compile time, as a warning**
   - **Outcome:** Decide whether to check literal media paths against the package files at compile time and warn about
     a missing file.
     - A misspelled literal image path shows up only at runtime, as a missing-media warning.
-
-- [ ] **Consider: language-tooling refinements**
-  - **Outcome:** Decide whether to make these language-tooling refinements.
-    - "Show whole block" in the random draw picker always widens to the top-level statement around the draw.
-    - The token fallback crosses lines, so `let y = ` after an `askText` line still shows askText help.
 
 ## Release Candidate
 
