@@ -363,12 +363,22 @@ watch(
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
     await nextTick();
+    // A control outside the interaction that this update removed, such as Start, leaves focus unowned as well.
+    const releasedFocus =
+      !ownedFocus &&
+      active instanceof HTMLElement &&
+      !active.isConnected &&
+      (document.activeElement === null || document.activeElement === document.body) &&
+      hoverAvailable.value;
     // Progression may restore composer focus, but must not steal it from Tools/dialogs.
-    if ((ownedFocus || returnToChoice || unownedFocus) && (foreground.value || pacing.value)) {
+    if (
+      (ownedFocus || returnToChoice || unownedFocus || releasedFocus) &&
+      (foreground.value || pacing.value)
+    ) {
       if (wasEditing) focusInput();
       // A date or time control and the text field replace each other; the editing focus Send kept moves to the new one.
       else if (composerFocused && !root.value?.contains(document.activeElement)) focusInput();
-      else if (unownedFocus) {
+      else if (unownedFocus || releasedFocus) {
         // Default focus is not keyboard navigation, so it must not reveal a navigation outline.
         document.documentElement.dataset.playerKeyboardFocus = "false";
         focusInput();
