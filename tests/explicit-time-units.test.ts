@@ -285,6 +285,17 @@ test("a name after a say mode or skip word stays the text, also when it is a uni
     ['let s = "Hi"\nsay bubble(color: "red") s, instant', "Hi", "bubble"],
     ['let h = "Hi"\nsay prose h, instant', "Hi", "prose"],
     ['let ms = "Hi"\nsay skippable ms, instant', "Hi", "bubble"],
+    // A month or a year written out after a value asks for 'calendar', but after a mode, a skip word, or a speaker it
+    // is the text too.
+    ['let months = "Hi"\nsay skippable months, instant', "Hi", "bubble"],
+    ['let year = "Hi"\nsay bubble() year, instant', "Hi", "bubble"],
+    ['let y = "Hi"\nsay prose y, instant', "Hi", "prose"],
+    [
+      'speaker narrator { displayName: "Narrator" }\nlet months = "Hi"\nsay as narrator months, instant',
+      "Hi",
+      "bubble",
+    ],
+    ['let mo = "Hi"\nlet shown = say unskippable mo, instant', "Hi", "bubble"],
     // Without a mode or skip word before it, the unit belongs to the value, also to a member, an element, or a call
     // named like one.
     ["let n = 3\nsay n s, instant", "3 seconds", "bubble"],
