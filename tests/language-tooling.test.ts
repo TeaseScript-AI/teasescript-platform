@@ -227,8 +227,9 @@ test("formatter leaves malformed and incomplete source untouched", () => {
 
 test("signature help ignores punctuation inside say strings and tracks grammar slots", () => {
   // Compare slot names, not positions, so adding an accepted slot to a signature does not shift the expectations.
-  const activeSlot = (source: string) => {
-    const document = createLanguageDocument("file:///main.tease", source);
+  // `after` follows the cursor.
+  const activeSlot = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
     const help = languageSignatureHelp(document, languagePositionAt(document, source.length));
     return help === null ? null : help.parameters[help.activeParameter];
   };
@@ -254,6 +255,17 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText("Q"'), "question");
   assert.equal(activeSlot('askText("Q", prefill: pick(hint: 1'), "prefill");
   assert.equal(activeSlot('say "${askText("Q", hint: '), "hint");
+  // Its `)` ends it, so what follows belongs to the enclosing construct, if any.
+  assert.equal(activeSlot('let more = askInteger("How many?", prefill: 3) + '), null);
+  assert.equal(activeSlot('let more = askInteger as mistress ("How many?") + '), null);
+  assert.equal(activeSlot('askText("Q", prefill: askText("Default") + '), "prefill");
+  assert.equal(activeSlot('say askText("Q") + '), "text");
+  // Before its `)`, as an editor that closes brackets leaves the cursor, the ask is still open.
+  assert.equal(activeSlot("askText(", ")"), "question");
+  assert.equal(activeSlot('askText("Q", hint: ', ")"), "hint");
+  assert.equal(activeSlot('askText("Q", prefill: askText(', "))"), "question");
+  assert.equal(activeSlot('askText("Q", prefill: askText("D"', "))"), "question");
+  assert.equal(activeSlot('askText("Q", prefill: askText("D")', ")"), "prefill");
   assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
   assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");

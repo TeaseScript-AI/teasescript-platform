@@ -534,9 +534,10 @@ function locateCompactCommand(
       return { command, range: token.span };
     }
   }
+  // A token that starts at the cursor, such as the `)` an editor adds when it closes a bracket, is after it.
   const before = tokens.filter(
     (token) =>
-      token.span.start.offset <= offset &&
+      token.span.start.offset < offset &&
       token.kind !== TokenKind.Newline &&
       token.kind !== TokenKind.EndOfFile,
   );
@@ -545,23 +546,44 @@ function locateCompactCommand(
 
 /**
  * The nearest command that no later closing delimiter has ended, found in one backward pass: a closing delimiter whose
- * opener lies before a command ends that command.
+ * opener lies before a command ends that command, and so does the `)` of an ask's own parentheses.
  */
 function nearestOpenCompactCommand(
   tokens: readonly Token[],
 ): { command: CompactCommand; range: LanguageRange } | null {
   let unmatchedClosers = 0;
+  // The positions of the opening delimiters that a later closing delimiter matches.
+  const closed = new Set<number>();
   for (let index = tokens.length - 1; index >= 0; index -= 1) {
     const token = tokens[index]!;
     if (CLOSING_DELIMITERS.has(token.kind)) unmatchedClosers += 1;
-    else if (OPENING_DELIMITERS.has(token.kind))
+    else if (OPENING_DELIMITERS.has(token.kind)) {
+      if (unmatchedClosers > 0) closed.add(index);
       unmatchedClosers = Math.max(0, unmatchedClosers - 1);
-    else if (unmatchedClosers === 0) {
+    } else if (unmatchedClosers === 0) {
       const command = tokenToCompactCommand(token);
-      if (command !== null) return { command, range: token.span };
+      if (command !== null && !closed.has(askArgumentsOpener(command, tokens, index + 1)))
+        return { command, range: token.span };
     }
   }
   return null;
+}
+
+/**
+ * The position of the `(` that opens an ask's own arguments, as the parser reads it: at `after`, the token right after
+ * the ask, or after its `as speaker`. It is -1 for another command or an ask without parentheses.
+ */
+function askArgumentsOpener(
+  command: CompactCommand,
+  tokens: readonly Token[],
+  after: number,
+): number {
+  if (command === "say" || command === "showButton" || command === "choose") return -1;
+  const opener =
+    tokens[after]?.kind === TokenKind.KeywordAs && tokens[after + 1]?.kind === TokenKind.Identifier
+      ? after + 2
+      : after;
+  return tokens[opener]?.kind === TokenKind.LeftParenthesis ? opener : -1;
 }
 
 function containsOffset(span: SourceSpan, offset: number): boolean {
@@ -628,14 +650,9 @@ function activeParameterFor(
     command === "showButton"
   ) {
     // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
-    // command ends the command, so later options belong to the enclosing construct. A `(` right after an ask or its
-    // `as speaker` opens the ask's own arguments, as the parser reads it, and its `)` ends the ask.
-    const speakerLength =
-      tail[0]?.kind === TokenKind.KeywordAs && tail[1]?.kind === TokenKind.Identifier ? 2 : 0;
-    const argumentsStart =
-      command !== "showButton" && tail[speakerLength]?.kind === TokenKind.LeftParenthesis
-        ? speakerLength + 1
-        : 0;
+    // command ends the command, so later options belong to the enclosing construct. The `)` of an ask's own
+    // parentheses ends the ask.
+    const argumentsStart = askArgumentsOpener(command, tail, 0) + 1;
     let active = 1;
     let depth = 0;
     for (const [index, token] of tail.entries()) {
