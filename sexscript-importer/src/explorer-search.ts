@@ -27,7 +27,14 @@ import {
   type Slot,
 } from "./explorer-analysis.ts";
 import { FAR, TreasureMap } from "./explorer-guidance.ts";
-import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "./explorer-time.ts";
+import {
+  clockModel,
+  exactPart,
+  flipGap,
+  holdsAt,
+  storedHolds,
+  timeContext,
+} from "./explorer-time.ts";
 import {
   EPOCH_MS,
   failureOf,
@@ -456,10 +463,11 @@ export interface UnvisitedBranch {
   /** The missed way: `true`/`false` for a condition, `enter`/`exit` for a loop. */
   missed: "true" | "false" | "enter" | "exit";
   /**
-   * For a `switch` case, whose condition text is its pattern: `case`; the text of what the switch compares; and when that
-   * is one part of the date or time, read exactly, the part (`hour`, `weekdayNumber`, ...).
+   * For a `switch` case, whose condition text is its pattern: the kind of case (one value, several as in `case 3, 4`, or
+   * a range); the text of what the switch compares; and when that is exactly one part of the date or time, the part
+   * (`hour`, `weekdayNumber`, ...).
    */
-  case?: true;
+  case?: "value" | "values" | "range";
   subject?: string;
   clockPart?: string;
   /** The first instruction and line of the missed way. */
@@ -1522,14 +1530,28 @@ function combination(condition: unknown, wanted: boolean): "all" | "any" | "mixe
     : "mixed";
 }
 
-/** A `switch` case: its subject, held in a temporary, compared with the case's pattern. */
-function isCase(condition: unknown): boolean {
+/**
+ * The form of a `switch` case: its subject, held in a temporary, compared with one value (`==`), several (an `or` of
+ * those), or a range (`in`); null for another form. An `if` can have the same form (`level() == 5`), so whether the
+ * script wrote `case` is told by its text.
+ */
+function caseForm(
+  condition: unknown,
+): { kind: "value" | "values" | "range"; temporary: number } | null {
   const value = record(condition);
-  return (
-    value.kind === "binary" &&
+  const left = record(value.left);
+  if (value.kind !== "binary") return null;
+  if (
     (value.operator === "==" || value.operator === "in") &&
-    record(value.left).kind === "temporary"
-  );
+    left.kind === "temporary" &&
+    typeof left.temporaryId === "number"
+  )
+    return { kind: value.operator === "in" ? "range" : "value", temporary: left.temporaryId };
+  if (value.operator !== "or") return null;
+  const [first, second] = [caseForm(value.left), caseForm(value.right)];
+  return first !== null && second !== null && first.temporary === second.temporary
+    ? { kind: "values", temporary: first.temporary }
+    : null;
 }
 
 /**
@@ -4165,15 +4187,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     watched,
     routeOf,
     session.randomChoices,
-    (instruction) => {
-      const [comparison, ...others] = times?.comparisons.get(instruction) ?? [];
-      return comparison !== undefined &&
-        others.length === 0 &&
-        comparison.exact &&
-        comparison.parts.size === 1
-        ? [...comparison.parts][0]
-        : undefined;
-    },
+    (subject) => (times === null ? null : exactPart(subject, times)),
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -4904,7 +4918,7 @@ function lineCoverage(
   watched: ReadonlyMap<string, readonly Watch[]>,
   routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
-  clockPartOf: (instruction: number) => string | undefined,
+  clockPartOf: (subject: unknown) => string | null,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -5037,16 +5051,31 @@ function lineCoverage(
     }
     return found;
   };
-  /** The text of what each `switch` compares, by the temporary its cases read. */
-  const subjects = new Map<number, string>();
-  instructions.forEach((instruction, index) => {
-    if (instruction.kind !== "storeTemporary" || typeof instruction.temporaryId !== "number")
-      return;
-    const span = compactSpan(record(instruction.value).span);
+  /**
+   * A condition the script wrote as a `switch` case: its form, and what the switch compares, from where the switch
+   * stored it, the nearest store of its temporary before the case (with its text, and the part of the clock it is).
+   */
+  const caseAt = (index: number, condition: unknown): Partial<UnvisitedBranch> => {
+    const form = caseForm(condition);
+    const span = compactSpan(record(condition).span);
     const source = sources.get(files[index]!);
-    if (span !== null && source !== undefined)
-      subjects.set(instruction.temporaryId, short(source.slice(span.start, span.end)));
-  });
+    if (form === null || span === null || source === undefined) return {};
+    if (!/\bcase\s*$/u.test(source.slice(Math.max(0, span.start - 40), span.start))) return {};
+    for (let at = index - 1; at >= 0; at -= 1) {
+      const stored = instructions[at]!;
+      if (stored.kind !== "storeTemporary" || stored.temporaryId !== form.temporary) continue;
+      const subject = compactSpan(record(stored.value).span);
+      const part = clockPartOf(stored.value);
+      return {
+        case: form.kind,
+        ...(subject === null || files[at] !== files[index]
+          ? {}
+          : { subject: short(source.slice(subject.start, subject.end)) }),
+        ...(part === null ? {} : { clockPart: part }),
+      };
+    }
+    return { case: form.kind };
+  };
   /** The lines behind each missed way, by its place in `unvisitedBranches`. */
   const regions: Set<string>[] = [];
   const watchOf = new Map<Goal, Watch>();
@@ -5164,15 +5193,7 @@ function lineCoverage(
       line: lineOf[index] ?? 0,
       condition: conditionText(instruction, files[index]!, sources),
       missed: wayName(instruction, way),
-      ...(isCase(condition)
-        ? {
-            case: true as const,
-            ...(subjects.has(Number(record(record(condition).left).temporaryId))
-              ? { subject: subjects.get(Number(record(record(condition).left).temporaryId))! }
-              : {}),
-            ...(clockPartOf(index) === undefined ? {} : { clockPart: clockPartOf(index)! }),
-          }
-        : {}),
+      ...(instruction.kind === "jumpIfFalse" ? caseAt(index, condition) : {}),
       targetInstruction: missedTarget ? target : index + 1,
       targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,
       reach: label,

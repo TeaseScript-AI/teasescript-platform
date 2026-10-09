@@ -735,11 +735,15 @@ test(
     const ranged = branch(16);
     const hour = branch(28);
     assert.deepEqual(ranged && [ranged.case, ranged.subject, ranged.clockPart], [
-      true,
+      "range",
       "volume",
       undefined,
     ]);
-    assert.deepEqual(hour && [hour.case, hour.subject, hour.clockPart], [true, "hourNow", "hour"]);
+    assert.deepEqual(hour && [hour.case, hour.subject, hour.clockPart], [
+      "value",
+      "hourNow",
+      "hour",
+    ]);
     // `encore` waits behind both missed ways; its four lines (its own and three) count under the case, which has more
     // behind it.
     assert.ok(loud !== undefined && ranged !== undefined);
@@ -764,6 +768,50 @@ test(
 );
 
 test(
+  "the creator's report words each kind of missed way as the script writes it: an if on a call, several values, a case that always matched, a clock range up to its end, arithmetic on the clock, a switch on a draw, and a loop never entered",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'function level {\n  return 1\n}\nlet volume = 2\nlet pick = choose soft: "Soft", softer: "Softer"\n' +
+      'if pick == "softer" {\n  volume = 1\n}\nif level() == 5 {\n  say "Five."\n}\nswitch volume {\n  case 7, 8 {\n' +
+      '    say "Seven or eight."\n  }\n  default {\n    say "Other."\n  }\n}\nlet steady = 3\nswitch steady {\n' +
+      '  case 3 {\n    say "Steady."\n  }\n  default {\n    say "Never steady."\n  }\n}\n' +
+      'let hourNow = getDateTime().hour\nshowButton "Check"\nswitch hourNow {\n  case 25..30 {\n    say "Late."\n  }\n' +
+      '  default {\n    say "Any."\n  }\n}\nswitch getDateTime().hour + 100 {\n  case 5 {\n    say "Shifted."\n  }\n' +
+      '  default {\n    say "Unshifted."\n  }\n}\nswitch randomInteger(0..3) {\n  case 7 {\n    say "Lucky."\n  }\n' +
+      '  default {\n    say "Unlucky."\n  }\n}\nwhile volume > 50 {\n  volume -= 1\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3000,
+      maxStates: 100_000,
+      later: true,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const report = playtestReport(
+      JSON.parse(JSON.stringify({ unit: "dial", compile: { ok: true }, ...result })),
+    );
+    for (const entry of [
+      "`level() == 5` being true",
+      "`volume` is one of `7, 8`",
+      "`steady` is not `3`",
+      "the hour of day is 25–29 (`hourNow` in `25..30`)",
+      "`getDateTime().hour + 100` is `5`",
+      "entering the loop on `volume > 50`",
+    ])
+      assert.ok(report.includes(entry), `${entry}\n${report}`);
+    assert.ok(!report.includes("the hour of day is 5"), report);
+    const random = /### Behind a random draw[^#]*/u.exec(report)?.[0] ?? "";
+    assert.ok(random.includes("`randomInteger(0..3)` is `7`"), report);
+  },
+);
+
+test(
   "the closest state to a missed way's part is read where the condition's function runs, as a value of the constant's type, and of alternatives the nearest unmet one keeps the way closed",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
@@ -782,7 +830,7 @@ test(
       budgetMs: Infinity,
       budgetOps: 600,
       maxStates: 100_000,
-      sources: new Map(),
+      sources: new Map([["main.tease", source]]),
       diagnostics: [],
     });
     const branch = (line: number) =>
@@ -810,7 +858,7 @@ test(
     // A whole number compared with `true` is never `true`: no closest value is made up.
     assert.deepEqual(shown(26), [["flag == true", "unmeasured", undefined]]);
     assert.equal(branch(26)?.best, undefined);
-    assert.equal(branch(30)?.case, true);
+    assert.deepEqual(branch(30) && [branch(30)!.case, branch(30)!.subject], ["value", "pick"]);
   },
 );
 

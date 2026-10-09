@@ -318,6 +318,43 @@ function clockReads(
   return found;
 }
 
+/**
+ * The one part of the date or time an expression is, exactly: `getDateTime().hour`, a helper whose only return is that
+ * part, or a variable set only to one of those; null for anything else, such as arithmetic on a part.
+ */
+export function exactPart(
+  expression: unknown,
+  model: ClockModel,
+  temporaries: ReadonlyMap<number, Data> = new Map(),
+): string | null {
+  const value = record(expression);
+  const held = (item: Data) =>
+    item.kind === "temporary" && typeof item.temporaryId === "number"
+      ? record(temporaries.get(item.temporaryId))
+      : item;
+  if (value.kind === "temporary") {
+    const stored = held(value);
+    return stored === value ? null : exactPart(stored, model, temporaries);
+  }
+  if (value.kind === "property" && PARTS.has(String(value.name)))
+    return clockCall(held(record(value.object))) ? String(value.name) : null;
+  if (value.kind === "call" && record(value.callee).kind === "identifier") {
+    const helper = model.helpers.get(calleeName(value) ?? "");
+    return helper?.exact === true ? helper.part : null;
+  }
+  if (
+    value.kind === "identifier" &&
+    typeof value.name === "string" &&
+    !model.ambiguous.has(value.name)
+  ) {
+    const defined = model.definitions.get(value.name);
+    return defined === undefined || defined.prior !== null
+      ? null
+      : exactPart(defined.value, model, defined.temporaries);
+  }
+  return null;
+}
+
 /** The variable an assignment to a part of it changes (`items[0] = 1` changes `items`); null for another target. */
 function targetRoot(target: Data): string | null {
   if (target.kind === "identifier" && typeof target.name === "string") return target.name;

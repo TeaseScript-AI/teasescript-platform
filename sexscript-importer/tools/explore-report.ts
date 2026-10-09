@@ -171,10 +171,13 @@ const GROUPS: readonly { source: string; title: string; about: string }[] = [
   },
 ];
 
-/** A condition that draws at random itself, by the language's random functions (`percentChance`, `.random`, ...). */
+/**
+ * A condition that draws at random itself, by the language's random functions (`percentChance`, `.random`, ...), or a
+ * case of a `switch` on such a draw.
+ */
 function drawsAtRandom(branch: Fields): boolean {
-  return /\b(?:chance|percentChance|random\w*)\s*\(|\.random\b/u.test(
-    text(fields(branch.condition).text),
+  return [text(fields(branch.condition).text), text(branch.subject)].some((written) =>
+    /\b(?:chance|percentChance|random\w*)\s*\(|\.random\b/u.test(written),
   );
 }
 
@@ -189,26 +192,33 @@ const CLOCK_PARTS: Readonly<Record<string, string>> = {
   weekdayNumber: "the weekday number",
 };
 
-/** A missed `switch` case: what the switch compares against the case as written, and for one part of the clock, in words. */
+/**
+ * A missed `switch` case: what the switch compares against the case as written (one value, several, or a range), and
+ * for exactly one part of the clock, in words. An older report marks every case `true`, ranges included.
+ */
 function caseShown(branch: Fields, holds: boolean): string {
   const pattern = text(fields(branch.condition).text) || "?";
   const subject = text(branch.subject);
+  const kind =
+    branch.case === true ? (/\.\./u.test(pattern) ? "range" : "value") : text(branch.case);
   if (subject === "") return `the case \`${pattern}\`${holds ? "" : " not matching"}`;
-  // `switch true` lists conditions as its cases.
-  if (subject === "true" || subject === "false")
-    return `\`${pattern}\` being ${String((subject === "true") === holds)}`;
-  const range = /^(-?\d+)\.\.([=<])(-?\d+)$/u.exec(pattern);
-  const written =
-    range === null
-      ? `\`${subject}\` ${holds ? "is" : "is not"} \`${pattern}\``
-      : `\`${subject}\` ${holds ? "in" : "not in"} \`${pattern}\``;
+  const [yes, no] =
+    kind === "range"
+      ? ["in", "not in"]
+      : kind === "values"
+        ? ["is one of", "is none of"]
+        : ["is", "is not"];
+  const written = `\`${subject}\` ${holds ? yes : no} \`${pattern}\``;
   const part = CLOCK_PARTS[text(branch.clockPart)];
   if (part === undefined) return written;
+  // A whole-number range as a reader says it: `18..=21` and `18..22` are both 18–21.
+  const range = /^(-?\d+)\.\.(=?)(-?\d+)$/u.exec(pattern);
   const values =
-    range === null
-      ? pattern
-      : `${range[1]}–${range[2] === "=" ? range[3] : String(Number(range[3]) - 1)}`;
-  return `${part} ${holds ? "is" : "is not"} ${values} (${written})`;
+    kind === "range" && range !== null
+      ? `${range[1]}–${range[2] === "=" ? range[3] : String(Number(range[3]) - 1)}`
+      : pattern;
+  const [partYes, partNo] = kind === "range" ? ["is", "is not"] : [yes, no];
+  return `${part} ${holds ? partYes : partNo} ${values} (${written})`;
 }
 
 /** The lines behind a missed way that the report counts for it: each line once (older reports: all behind it). */
@@ -231,9 +241,13 @@ function missedWay(branch: Fields, measurable: boolean): string {
   const condition = fields(branch.condition);
   const written = text(condition.text) || "?";
   const shown =
-    branch.case === true
+    branch.case !== undefined
       ? caseShown(branch, branch.missed === "true")
-      : `\`${written}\` being ${branch.missed === "true" ? "true" : "false"}`;
+      : branch.missed === "enter"
+        ? `entering the loop on \`${written}\``
+        : branch.missed === "exit"
+          ? `leaving the loop on \`${written}\``
+          : `\`${written}\` being ${branch.missed === "true" ? "true" : "false"}`;
   const behind = ownLines(branch);
   const best = fields(branch.best);
   const needs = text(best.needs);
