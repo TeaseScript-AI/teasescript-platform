@@ -59,7 +59,7 @@ import {
   type DebugHistorySpill,
 } from "../../debug-history.js";
 import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
-import { DebugRecorder } from "../../debug-recorder.js";
+import { DebugRecorder, type DebugRecording } from "../../debug-recorder.js";
 import {
   capturedMediaReferencesInJson,
   keptPhotoReferences,
@@ -199,6 +199,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   // Records every session's engine calls from Start, in every build, for a debug export (DEBUGGER.md "Debug export").
   const recorder = new DebugRecorder();
+  // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
+  // recorder anew at a restored state.
+  let failureRecording: DebugRecording | null = null;
+  /** The recording a debug export shows: the one up to a Player error, else the recorder's. */
+  const exportedRecording = () => failureRecording ?? recorder.recording();
   // Rewind histories that pages which ended without deleting theirs left behind go now.
   if (options.debugHistorySpill === undefined) void sweepDebugHistories();
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
@@ -1501,6 +1506,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ) {
     // An unmounted Player publishes nothing.
     if (disposed) return;
+    // Nothing runs after a Player error, so the recording is still the one up to the error until it begins anew here.
+    if (stopped.value && failureRecording === null) failureRecording = recorder.recording();
     const next = create({ recorder, debugMode });
     start(next, state.paused);
     rewoundGeneration = generation.value;
@@ -1701,6 +1708,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. */
   function startFrom(pending: Activation) {
     hostError.value = null;
+    failureRecording = null;
     let next: PlayerRuntimeSession;
     try {
       next = pending.begin();
@@ -1828,8 +1836,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     scriptScope: scriptStorage?.scope ?? null,
     reviewSavedDataImport,
     importSavedData,
-    /** The current or last session's recorded engine calls for a debug export, or `null` before any Start. */
-    debugRecording: () => recorder.recording(),
+    /**
+     * The current or last session's recorded engine calls for a debug export, after a Player error those up to it until
+     * the next Start, or `null` before any Start.
+     */
+    debugRecording: exportedRecording,
     /** The error name of an exception of the Player itself, or `null`. */
     hostError: computed(() => hostError.value),
     /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */
@@ -1847,7 +1858,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // The shown state, after a call that threw rebuilt from the recorded calls; without it, the export has no session
       // state, so it never presents an earlier state as the one shown.
       const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
-      const recording = recorder.recording();
+      const recording = exportedRecording();
       const frozen = {
         build: playerBuildIdentity,
         package: options.debugPackage ?? { id: null, version: null },

@@ -219,7 +219,8 @@ with it.
   with their text in the state Forward restores.
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
-  begin anew at every restored state, so a replay never mixes branches.
+  begin anew at every restored state, so a replay never mixes branches. After a Player error, rewinding does not replace
+  what the debug export replays: the export keeps the recording up to the error until the next Start.
 
 ## Debug export
 
