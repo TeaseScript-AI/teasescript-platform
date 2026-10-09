@@ -286,10 +286,24 @@ test("gives the range of every statement up to its line break, and of every bloc
     ["statement", 'if true {\n  say "b"\n}'],
     ["block", '\n  say "b"\n'],
     ["statement", 'say "b"'],
-    // A statement that misses something at its end holds the line breaks after it.
+    // A statement with an error, which may be unfinished, holds the line breaks after it.
     ["statement", 'let answer = askText "Q", hint:\n\n'],
     ["statement", "exit"],
   ]);
+  // Also the statements in a `say` value that the parser read once, for a check, and reused.
+  const reused =
+    "function word(text) {\n  return text\n}\nsay (say(word(timer async 1 s {\n  exit\n})))\nexit";
+  const braces = [reused.indexOf("{\n  exit"), reused.indexOf("})))")];
+  assert.deepEqual(
+    [...parse(reused).statementRanges]
+      .filter((range) => range.start > braces[0]! && range.end <= braces[1]!)
+      .sort((left, right) => left.start - right.start)
+      .map((range) => [range.kind, reused.slice(range.start, range.end)]),
+    [
+      ["block", "\n  exit\n"],
+      ["statement", "exit"],
+    ],
+  );
 });
 
 test("preserves decoded block values and forms", () => {

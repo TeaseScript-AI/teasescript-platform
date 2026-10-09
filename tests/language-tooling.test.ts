@@ -323,6 +323,7 @@ test("editor help reads only the statement the parser finds at the cursor", () =
     ["hint", "askText"],
   );
   // An unfinished command also holds the line breaks after it, where the author completes it.
+  assert.deepEqual(help('let answer = askText "Q",\n  ', "\nexit"), ["question", "askText"]);
   assert.deepEqual(help('let answer = askText "Q", hint:\n  ', "\nexit"), ["hint", "askText"]);
   assert.deepEqual(help('let pick = choose [\n  "a",\n  '), ["options", "choose"]);
 });

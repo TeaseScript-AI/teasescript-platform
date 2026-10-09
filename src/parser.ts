@@ -215,6 +215,15 @@ interface ParsedSayValue {
   readonly parts: SayParts | null;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
+  /**
+   * The statement ranges its parse recorded: `list` from `from` up to `to`. `list` only grows, so a nested value shares
+   * it rather than copying its ranges into every value around it.
+   */
+  readonly ranges: {
+    readonly list: readonly StatementRange[];
+    readonly from: number;
+    readonly to: number;
+  };
   readonly recovered: boolean;
 }
 /** The compact interaction commands other than `choose`, and the kind of answer each asks for. */
@@ -295,10 +304,11 @@ export function parse(source: string): ParseResult {
 
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
-  /** A speculative parser keeps its own, so only the statements of the parse that counts are listed. */
+  /**
+   * A speculative parser keeps its own, so only the statements of the parse that counts are listed, also those of a
+   * `say` value it reuses.
+   */
   readonly #statementRanges: StatementRange[] = [];
-  /** The furthest source offset that a diagnostic reported. */
-  #furthestDiagnostic = -1;
   #current = 0;
   #commaLookahead: {
     readonly at: number;
@@ -348,9 +358,10 @@ class Parser {
     this.#skipNewlines();
     while (!this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const statement = runParse(this.#parseStatement());
       if (statement !== null) statements.push(statement);
-      this.#endStatement(startIndex, false);
+      this.#endStatement(startIndex, diagnosticCount, false);
     }
 
     return Object.freeze({
@@ -363,7 +374,7 @@ class Parser {
   *#parseStatement(): ParseTask<Statement | null> {
     const misplacedHeader = readMisplacedHeader(this.tokens, this.#current);
     if (misplacedHeader !== null) {
-      this.#addDiagnostics(misplacedHeader.diagnostic);
+      this.#diagnostics.push(misplacedHeader.diagnostic);
       this.#current = misplacedHeader.next;
       return null;
     }
@@ -816,7 +827,9 @@ class Parser {
         value.recoveredAtStatementBoundary === this.#recoveredAtStatementBoundary,
     );
     if (known !== undefined) {
-      this.#addDiagnostics(...known.diagnostics);
+      this.#diagnostics.push(...known.diagnostics);
+      const { list, from, to } = known.ranges;
+      for (let index = from; index < to; index += 1) this.#statementRanges.push(list[index]!);
       this.#current = known.end;
       this.#recoveredAtStatementBoundary = known.recovered;
       return known.parts;
@@ -828,12 +841,14 @@ class Parser {
       recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
     };
     const diagnosticCount = this.#diagnostics.length;
+    const rangeCount = this.#statementRanges.length;
     const parts = yield* parseChild(this.#parseSayParts(false));
     parsed.push({
       ...context,
       parts,
       end: this.#current,
       diagnostics: this.#diagnostics.slice(diagnosticCount),
+      ranges: { list: this.#statementRanges, from: rangeCount, to: this.#statementRanges.length },
       recovered: this.#recoveredAtStatementBoundary,
     });
     this.#shared.sayValues.set(start, parsed);
@@ -1504,9 +1519,10 @@ class Parser {
     const statements: Statement[] = [];
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const statement = yield* parseChild(this.#parseStatement());
       if (statement !== null) statements.push(statement);
-      this.#endStatement(startIndex, true);
+      this.#endStatement(startIndex, diagnosticCount, true);
     }
     if (!this.#closeBlock(leftBrace)) return null;
     const span = spanFrom(leftBrace.span, this.#previous().span);
@@ -2218,6 +2234,7 @@ class Parser {
     const cues: MediaCue[] = [];
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const cueStart = this.#isMediaCueStart();
       if (cueStart !== cueMode) {
         this.#reportToken(
@@ -2233,7 +2250,7 @@ class Parser {
         const statement = yield* parseChild(this.#parseStatement());
         if (statement !== null) statements.push(statement);
       }
-      this.#endStatement(startIndex, true);
+      this.#endStatement(startIndex, diagnosticCount, true);
     }
     if (!this.#closeBlock(leftBrace)) return false;
     const span = spanFrom(leftBrace.span, this.#previous().span);
@@ -3045,9 +3062,10 @@ class Parser {
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
+      const diagnosticCount = this.#diagnostics.length;
       const statement = yield* parseChild(this.#parseStatement());
       if (statement !== null) statements.push(statement);
-      this.#endStatement(startIndex, true);
+      this.#endStatement(startIndex, diagnosticCount, true);
     }
     if (!this.#closeBlock(leftBrace)) return null;
     return Object.freeze({
@@ -4714,20 +4732,18 @@ class Parser {
 
   /**
    * Ends the statement of a statement list that started at token `start` at the line break, `}`, or end of file after
-   * it, records its range, and skips the line breaks before the next statement.
+   * it, records its range, and skips the line breaks before the next statement. `diagnosticCount` is the number of
+   * diagnostics before it.
    */
-  #endStatement(start: number, inBlock: boolean): void {
+  #endStatement(start: number, diagnosticCount: number, inBlock: boolean): void {
     if (this.#current === start) this.#advance();
     // Recovery has already stopped at the next statement.
     if (this.#recoveredAtStatementBoundary) this.#recoveredAtStatementBoundary = false;
     else this.#finishStatement(inBlock);
     let end = this.#current;
-    // A statement that misses something at its end, such as a value after `hint:` or a list's `]`, also holds the line
-    // breaks after it, where an author completes it, as a recovered one does.
-    if (
-      this.tokens[end]!.kind === TokenKind.Newline &&
-      this.#furthestDiagnostic >= this.tokens[end]!.span.start.offset
-    )
+    // A statement with an error may be unfinished, such as one that ends in a comma or misses a list's `]`, so it also
+    // holds the line breaks after it, where an author completes it, as a recovered one does.
+    if (this.#diagnostics.length > diagnosticCount && this.tokens[end]!.kind === TokenKind.Newline)
       end = this.#shared.newlineRuns.ends[end]!;
     this.#statementRanges.push(
       Object.freeze({
@@ -4894,7 +4910,7 @@ class Parser {
     message: string,
   ): void {
     const position = this.#peek().span.start;
-    this.#addDiagnostics(
+    this.#diagnostics.push(
       createDiagnostic(
         DiagnosticSeverity.Error,
         code,
@@ -4917,14 +4933,7 @@ class Parser {
     message: string,
     span: SourceSpan,
   ): void {
-    this.#addDiagnostics(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
-  }
-
-  #addDiagnostics(...diagnostics: readonly Diagnostic[]): void {
-    for (const diagnostic of diagnostics) {
-      this.#diagnostics.push(diagnostic);
-      this.#furthestDiagnostic = Math.max(this.#furthestDiagnostic, diagnostic.span.start.offset);
-    }
+    this.#diagnostics.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
   }
 
   #match(kind: TokenKind): boolean {
