@@ -775,6 +775,7 @@ class TypeChecker {
         }[];
       }
     | { readonly kind: "dict"; readonly start: StaticType | null; readonly answer: StaticType }
+    | { readonly kind: "unknown" }
   >();
 
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
@@ -1148,6 +1149,10 @@ class TypeChecker {
             : null;
     };
     for (const [expression, form] of this.#forms) {
+      if (form.kind === "unknown") {
+        shapes.set(expression, form);
+        continue;
+      }
       if (form.kind === "dict") {
         shapes.set(expression, {
           kind: "dict",
@@ -3373,7 +3378,9 @@ class TypeChecker {
           `'fields:' takes an object or dict of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
           fields.expression.span,
         );
-      this.#forms.set(expression, { kind: "object", fields: [] });
+      // Fields the compiler cannot know, such as an untyped parameter's, may be an object or a dict: the form takes the
+      // shape of the value when it opens.
+      this.#forms.set(expression, { kind: "unknown" });
       return UNKNOWN_TYPE;
     }
     const literal = unwrap(fields.expression);

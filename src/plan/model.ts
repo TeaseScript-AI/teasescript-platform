@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 74;
+export const INSTRUCTION_PLAN_VERSION = 75;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -790,7 +790,9 @@ export type PreparedInteractionUiPayload =
  * The result shape of a prepared form, with what only the compiler knows: whether a number written as a field's start
  * (or as its descriptor's `value:`, `min:`, or `max:`) is an `integer` or a `number`, which decides the field's kind
  * when the field has no `type:`. A runtime number does not record it. An object form lists it by field name; a dict
- * form has one for all its fields, or `null` when its fields must say `type:` for numbers.
+ * form has one for all its fields, or `null` when its fields must say `type:` for numbers. When the compiler does not
+ * know whether `fields:` is an object or a dict, the form is `unknown` and takes the shape of the value it reads, whose
+ * numbers must say `type:`.
  */
 export type PreparedFormShape =
   | {
@@ -808,6 +810,7 @@ export type PreparedFormShape =
       /** The answer type the compiler gave every field, which the form checks when it opens; `null` for any. */
       readonly answer: TypePlan | null;
     }
+  | { readonly kind: "unknown" }
   | { readonly kind: "booleanList" };
 export type FormNumericKind = "integer" | "number";
 

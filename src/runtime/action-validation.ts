@@ -48,6 +48,7 @@ import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interact
 import {
   formAnswerMismatch,
   formRequestValue,
+  formShapeFits,
   isFormUi,
   validFormResult,
   validFormState,
@@ -1199,10 +1200,10 @@ function validInteractionResultForInstruction(
       // A cancelled form returns `null`; its settlement shows it had a cancel button.
       (result === null ||
         (isFormResult(result) &&
-          result.kind ===
-            (instruction.preparedUi.shape.kind === "booleanList"
-              ? "list"
-              : instruction.preparedUi.shape.kind)))
+          formShapeFits(
+            instruction.preparedUi.shape,
+            result.kind === "list" ? "booleanList" : result.kind,
+          )))
     );
   return (
     instruction.expectedResult === "string" &&
@@ -1532,7 +1533,7 @@ function preparedInteractionUiMatchesAction(
     // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured request above.
     const captured = request as SerializableRuntimeValue;
     return (
-      actual.shape === prepared.shape.kind &&
+      formShapeFits(prepared.shape, actual.shape) &&
       serializableEquals(captured, formRequestValue(actual)) &&
       formAnswerMismatch(actual.fields, prepared.shape) === null
     );
@@ -2202,7 +2203,7 @@ function preparedUiFitsPresentedUi(
     );
   // The request temporary is cleared after completion; the recorded request was checked by its shape.
   if (prepared.kind === "image") return true;
-  if (prepared.kind === "form") return ui.shape === prepared.shape.kind;
+  if (prepared.kind === "form") return formShapeFits(prepared.shape, ui.shape);
   return (
     Array.isArray(ui.options) &&
     buttonsFitWrittenValues(prepared.values, ui.options) &&

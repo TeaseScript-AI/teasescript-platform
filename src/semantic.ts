@@ -1427,7 +1427,7 @@ class SemanticValidator {
           this.#report(
             semanticCode.invalidLoopSource,
             statement.valueVariable === null
-              ? "A for-loop source must be a list, set, or integer range."
+              ? "A for-loop source must be a list, set, dict, or integer range."
               : "A for-loop with a key and a value goes through a dict.",
             statement.iterable.span,
           );
