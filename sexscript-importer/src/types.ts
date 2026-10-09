@@ -156,6 +156,8 @@ const LIST_CONSTRUCTORS = new Set([
   "java.util.LinkedList",
   "Vector",
   "java.util.Vector",
+  "LinkedBlockingQueue",
+  "java.util.concurrent.LinkedBlockingQueue",
 ]);
 
 const ARITHMETIC_OPERATORS = new Set(["-", "*", "/", "%", "**"]);

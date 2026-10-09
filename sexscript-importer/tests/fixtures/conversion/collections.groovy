@@ -69,3 +69,6 @@ def paces = [240, 240, 240]
 paces[[0, 2]] = 100 + getRandom(20)
 def firstPaces = paces[[0, 1]]
 show("Stages " + stages + " " + paces + " " + firstPaces.size())
+// A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
+def replies = new java.util.concurrent.LinkedBlockingQueue<String>()
+if (replies.size() == 0) show("No replies yet")

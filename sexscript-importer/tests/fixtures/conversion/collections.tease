@@ -206,4 +206,9 @@ for position2 in [0, 2] {
 }
 let firstPaces = [paces[0], paces[1]]
 say "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces.length}"
+// A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
+let replies = []
+if replies.length == 0 {
+  say "No replies yet"
+}
 exit
