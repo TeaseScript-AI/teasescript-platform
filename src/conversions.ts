@@ -81,8 +81,8 @@ export function isTemporalConversionResult(
 }
 
 /**
- * Why `text` does not convert to a date or time value, as the end of a sentence (`: February 2026 has 28 days` or
- * `; the text must be ISO date text such as ...`), or `undefined` when it converts.
+ * Why `text` does not convert to a date or time value, as the end of a sentence (`: February 2026 has 28 days`) or a
+ * sentence of its own (`. The text must be ISO date text such as ...`), or `undefined` when it converts.
  */
 export function temporalTextProblem(
   result: TemporalConversionResult,
@@ -91,7 +91,7 @@ export function temporalTextProblem(
   const conversion = TEMPORAL_CONVERSIONS[result];
   const parsed = conversion.parse(text);
   if (parsed.ok) return undefined;
-  return parsed.reason === null ? `; the text must be ${conversion.text}` : `: ${parsed.reason}`;
+  return parsed.reason === null ? `. The text must be ${conversion.text}` : `: ${parsed.reason}`;
 }
 
 /** A plain-language description of a conversion result, such as "a whole number (integer)". */

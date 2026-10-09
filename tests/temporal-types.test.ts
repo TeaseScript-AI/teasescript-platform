@@ -70,7 +70,7 @@ test("constant text that is not a valid value is a compile error, also with a de
   const cases = [
     [
       'toDate("4-10-2026")',
-      'toDate(...) cannot convert "4-10-2026"; the text must be ISO date text such as "2026-10-04".',
+      'toDate(...) cannot convert "4-10-2026". The text must be ISO date text such as "2026-10-04".',
     ],
     [
       'toDate("2026-02-30", default: toDate("2026-01-01"))',
@@ -78,15 +78,15 @@ test("constant text that is not a valid value is a compile error, also with a de
     ],
     [
       'toTime("2:30 PM")',
-      'toTime(...) cannot convert "2:30 PM"; the text must be ISO time text such as "14:30".',
+      'toTime(...) cannot convert "2:30 PM". The text must be ISO time text such as "14:30".',
     ],
     [
       'toDateTime("2026-10-04T18:00Z")',
-      'toDateTime(...) cannot convert "2026-10-04T18:00Z"; the text must be local ISO date and time text without an offset, such as "2026-10-04T18:00".',
+      'toDateTime(...) cannot convert "2026-10-04T18:00Z". The text must be local ISO date and time text without an offset, such as "2026-10-04T18:00".',
     ],
     [
       'toTimestamp("2026-10-04T12:30")',
-      'toTimestamp(...) cannot convert "2026-10-04T12:30"; the text must be ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z".',
+      'toTimestamp(...) cannot convert "2026-10-04T12:30". The text must be ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z".',
     ],
   ] as const;
   for (const [call, message] of cases) {

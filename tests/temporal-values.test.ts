@@ -117,7 +117,7 @@ test("text known only at runtime converts, falls back to default:, or fails with
   assert.equal(notIso?.code, "TSR058");
   assert.equal(
     notIso?.message,
-    'toTime(...) cannot convert text (string) "2:30 PM" to a time; the text must be ISO time text such as "14:30". Give a fallback with default: if the value may not convert.',
+    `toTime(...) cannot convert text (string) "2:30 PM" to a time. The text must be ISO time text such as "14:30". Give a fallback with 'default:' if the value may not convert.`,
   );
 });
 

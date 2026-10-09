@@ -697,7 +697,7 @@ function dateProblem(date: DateFields): string | null {
 }
 
 function timeProblem(time: TimeFields): string | null {
-  if (time.hour === 24) return "there is no hour 24; midnight is 00:00";
+  if (time.hour === 24) return "there is no hour 24. Midnight is 00:00";
   if (time.hour > 23) return `there is no hour ${time.hour}`;
   if (time.minute > 59) return `there is no minute ${time.minute}`;
   if (time.second > 59) return `there is no second ${time.second}`;

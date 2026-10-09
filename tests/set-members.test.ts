@@ -213,7 +213,7 @@ test("collections nest in every direction", () => {
   );
   assert.deepEqual(failure(`${DYNAMIC}let groups: integer[] set = dynamic(set[["x"]])\nexit`), [
     "TSR058",
-    "'groups' holds a set (integer[] set), so it cannot take a set with text (string) at [0][0].",
+    `'groups' holds a set (integer[] set), so it cannot take a set with text (string) "x" at [0][0].`,
   ]);
 });
 
