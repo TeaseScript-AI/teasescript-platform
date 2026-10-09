@@ -487,6 +487,8 @@ export class Session {
   readonly #seed: number;
   /** Per instruction, the constants it compares with; computed at the first ask. */
   #literals: Literals[] | undefined;
+  /** The function each instruction is in, by its ID; 0 for a file's own code. */
+  #functionOf: Int32Array | undefined;
 
   constructor(engine: Engine, plan: Data, seed: number) {
     this.#engine = engine;
@@ -597,7 +599,11 @@ export class Session {
     const until = this.#nextDeadline(runtime, view);
     if (action.kind === "interaction") {
       const ui = record(action.ui);
-      const literals = this.#nearbyLiterals(runtime, action);
+      const literals = this.#nearbyLiterals(
+        runtime,
+        action,
+        ui.kind === "text" || ui.kind === "number",
+      );
       const ask = typeof action.owningInstruction === "number" ? action.owningInstruction : null;
       const directed = ask === null ? [] : (this.directedAnswers.get(ask) ?? []);
       const expressions = ask === null ? undefined : this.comparedWith.get(ask);
@@ -926,20 +932,48 @@ export class Session {
   /**
    * The constants the code compares with near an ask: around the asking instruction and around the return point of
    * every call that leads to it, nearest first, so that an ask in a helper function also gets its caller's constants.
+   * For a typed ask, each place looks only in its own function, and nearness counts the instructions that compare with
+   * a constant (see {@link MAX_LITERALS}); at equal nearness the ask comes before its callers, and code before a place
+   * before code after it. For a timed button it counts instructions, which keeps a comparison right after where a helper
+   * returns ahead of the helper's own code.
    */
-  #nearbyLiterals(runtime: Runtime, action: Data): Literals {
-    this.#literals ??= this.#instructions.map(comparedLiterals);
-    const positions = [
-      action.owningInstruction,
-      ...runtime.callReturnInstructions().toReversed(),
-    ].filter((position): position is number => typeof position === "number");
+  #nearbyLiterals(runtime: Runtime, action: Data, typed: boolean): Literals {
+    const all = (this.#literals ??= this.#instructions.map(comparedLiterals));
+    const owner = (this.#functionOf ??= functionsOf(this.#plan, this.#instructions.length));
+    const compares = (index: number) => {
+      const literals = all[index];
+      return (
+        literals !== undefined &&
+        literals.numbers.length + literals.strings.length + literals.durations.length > 0
+      );
+    };
+    // Per place: itself, then the comparing instructions within the window on each side, nearest first.
+    const places = [action.owningInstruction, ...runtime.callReturnInstructions().toReversed()]
+      .filter((position): position is number => typeof position === "number")
+      .map((position) => {
+        const before: number[] = [];
+        const after: number[] = [];
+        // A typed ask's place looks only in its own function: the code laid out next to it is another's.
+        const own = (index: number) =>
+          !typed || (compares(index) && owner[index] === owner[position]);
+        for (let distance = 1; distance <= LITERAL_WINDOW; distance += 1) {
+          // Without comparison counting, every instruction counts: one that compares nothing holds an empty place.
+          if (own(position - distance)) before.push(position - distance);
+          if (own(position + distance)) after.push(position + distance);
+        }
+        return { position, before, after };
+      });
     const found: Literals = { numbers: [], strings: [], durations: [] };
-    for (let distance = 0; distance <= LITERAL_WINDOW; distance += 1) {
-      for (const position of positions) {
-        for (const index of distance === 0
+    const most = Math.max(
+      0,
+      ...places.map(({ before, after }) => Math.max(before.length, after.length)),
+    );
+    for (let nearness = 0; nearness <= most; nearness += 1) {
+      for (const { position, before, after } of places) {
+        for (const index of nearness === 0
           ? [position]
-          : [position - distance, position + distance]) {
-          const literals = this.#literals[index];
+          : [before[nearness - 1], after[nearness - 1]]) {
+          const literals = index === undefined ? undefined : all[index];
           if (literals === undefined) continue;
           for (const value of literals.numbers)
             if (!found.numbers.includes(value)) found.numbers.push(value);
@@ -1073,11 +1107,26 @@ interface Literals extends Constants {
 
 /** Instructions searched on each side of an ask and of each return point for compared constants. */
 const LITERAL_WINDOW = 40;
-/** Compared constants tried per ask and type, nearest first. */
+/**
+ * Compared constants tried per ask or timed button and type, nearest first: for a typed ask by how many instructions
+ * that compare with a constant lie between, so that code without such comparisons (a list, a loop of `say`s) does not
+ * reorder those within the window.
+ */
 const MAX_LITERALS = 3;
 const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">="]);
 /** Text methods whose literal argument an answer can match. */
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
+
+/** The function each instruction is in, by its ID (its entry to end instruction); 0 for a file's own code. */
+function functionsOf(plan: Data, length: number): Int32Array {
+  const owner = new Int32Array(length);
+  for (const definition of list(plan.functions)) {
+    const end = Math.min(Number(definition.endInstruction), length - 1);
+    for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+      owner[index] = Number(definition.id);
+  }
+  return owner;
+}
 
 /**
  * The literals an instruction's expressions compare with (`x < 10`, `answer == "yes"`, `answer.contains("no")`,
