@@ -63,11 +63,17 @@ async function main() {
       lateImage.release = () => handleRequest(request, response);
       return;
     }
-    if (request.url === DEBUG_HISTORY_MODULE_URL) {
-      void readFile(new URL("../dist/player/debug-history-indexeddb.js", import.meta.url)).then(
+    // The spill store's module and the compiled Player modules it imports.
+    const smokeModule = /^\/smoke\/([a-z-]+\.js)$/u.exec(request.url ?? "");
+    if (smokeModule !== null) {
+      void readFile(new URL(`../dist/player/${smokeModule[1]}`, import.meta.url)).then(
         (module) => {
           response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
           response.end(module);
+        },
+        () => {
+          response.writeHead(404);
+          response.end();
         },
       );
       return;
