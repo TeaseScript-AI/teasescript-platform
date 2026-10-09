@@ -797,10 +797,11 @@ test("a parameter default starts its timer only when the argument is left out", 
       "function make(n, t = timer async 1 s { n += 1",
       '  say "made ${n}" }) {',
       "  wait 2 s",
+      '  say "body ${n}"',
       "  return t",
       "}",
       "let first = make(1)",
-      "let second = make(2, own)",
+      "let second = make(5, own)",
       'say "${first.state} ${second.state}"',
       "exit",
     ].join("\n"),
@@ -808,7 +809,7 @@ test("a parameter default starts its timer only when the argument is left out", 
   );
   assert.deepEqual(
     events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["made 2", "finished running"],
+    ["made 2", "body 2", "body 5", "finished running"],
   );
 });
 
