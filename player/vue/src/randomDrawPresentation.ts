@@ -148,9 +148,10 @@ export const CONTEXT_ROWS = 7;
 /**
  * The code of the file a draw at `site` is in, highlighted with the compiler's own lexer: every line, with the draw
  * marked; `enclosing` is the range "Show whole" fits: the default lines around the draw together with the function the
- * draw is in, or for code outside functions, the top-level statement it is in, or the whole file when that is a single
- * line. `enclosing` is `null` when the default lines already show it. The whole file is lexed, never a fragment, so a
- * partial function is no problem; a file the lexer reports problems in shows as plain text.
+ * draw is in, or for code outside functions, the smallest statement or block of several lines around it that the
+ * default lines do not show whole, or the whole file when none of several lines is around it. `enclosing` is `null`
+ * when the default lines already show it. The whole file is lexed, never a fragment, so a partial function is no
+ * problem; a file the lexer reports problems in shows as plain text.
  */
 export function randomDrawCode(
   source: string,
@@ -177,7 +178,7 @@ export function randomDrawCode(
     lines[number - 1] = markLine(lines[number - 1]!, starts[number - 1]!, mark);
   const half = (CONTEXT_ROWS - 1) / 2;
   const context = [Math.max(1, site.line - half), Math.min(starts.length, site.line + half)];
-  const range = enclosingRange(file.spans, site, starts.length);
+  const range = enclosingRange(file.spans, site, starts.length, context);
   return {
     lines,
     enclosing:
@@ -336,10 +337,10 @@ function markLine(
   return { number: line.number, segments };
 }
 
-/** Every function's span and every top-level statement's, in the parser's zero-based lines and columns. */
+/** Every function's span and every statement's and statement block's, in the parser's zero-based lines and columns. */
 interface EnclosingSpans {
   readonly functions: readonly SourceSpan[];
-  readonly statements: readonly SourceSpan[];
+  readonly blocks: readonly SourceSpan[];
 }
 
 /** The spans `enclosingRange` chooses from, or `null` when the file does not parse. */
@@ -349,6 +350,7 @@ function enclosingSpans(source: string): EnclosingSpans | null {
   // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
   // reaches.
   const functions: SourceSpan[] = [];
+  const blocks: SourceSpan[] = [];
   const pending: unknown[] = [parsed.program.statements];
   while (pending.length > 0) {
     const node = pending.pop();
@@ -363,21 +365,26 @@ function enclosingSpans(source: string): EnclosingSpans | null {
       readonly kind?: unknown;
       readonly span?: SourceSpan;
     };
-    if (record.kind === "functionDeclaration" && record.span !== undefined)
-      functions.push(record.span);
+    if (record.span !== undefined && typeof record.kind === "string") {
+      if (record.kind === "functionDeclaration") functions.push(record.span);
+      else if (record.kind === "block" || record.kind.endsWith("Statement"))
+        blocks.push(record.span);
+    }
     for (const key in record) if (key !== "span") pending.push(record[key]);
   }
-  return { functions, statements: parsed.program.statements.map((statement) => statement.span) };
+  return { functions, blocks };
 }
 
 /**
- * The lines of the function the draw is in, the innermost; outside functions, of the top-level statement it is in
- * when that spans several lines, otherwise of the whole file. `null` when the file does not parse.
+ * The lines of the function the draw is in, the innermost; outside functions, of the smallest statement or block of
+ * several lines around it that the `context` lines do not show whole, or of the whole file when none of several lines
+ * is around it. `null` when the file does not parse, or when the `context` lines show every one around it.
  */
 function enclosingRange(
   spans: EnclosingSpans | null,
   site: RandomSite,
   lineCount: number,
+  context: readonly number[],
 ): {
   readonly kind: "function" | "block" | "file";
   readonly from: number;
@@ -401,8 +408,17 @@ function enclosingRange(
       found = span;
   if (found !== undefined)
     return { kind: "function", from: found.start.line + 1, to: found.end.line + 1 };
-  const statement = spans.statements.find(contains);
-  if (statement !== undefined && statement.end.line > statement.start.line)
-    return { kind: "block", from: statement.start.line + 1, to: statement.end.line + 1 };
-  return { kind: "file", from: 1, to: lineCount };
+  // Spans around the draw nest, so the one of the fewest lines is the innermost.
+  let block: SourceSpan | undefined;
+  let severalLines = false;
+  for (const span of spans.blocks) {
+    if (!contains(span) || span.end.line === span.start.line) continue;
+    severalLines = true;
+    if (span.start.line + 1 >= context[0]! && span.end.line + 1 <= context[1]!) continue;
+    if (block === undefined || span.end.line - span.start.line < block.end.line - block.start.line)
+      block = span;
+  }
+  if (block !== undefined)
+    return { kind: "block", from: block.start.line + 1, to: block.end.line + 1 };
+  return severalLines ? null : { kind: "file", from: 1, to: lineCount };
 }
