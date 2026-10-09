@@ -235,6 +235,12 @@ test("an index or member that a value does not have names the value, its bounds,
       "a[1][a.removeLast().length - 1]",
     ],
     [
+      "let level = 1\nsay (level)()",
+      "TSR011",
+      "'level' is 1, not a function, so it cannot be called. Call a function by its name instead.",
+      "level",
+    ],
+    [
       "let a = [[1]]\na[0]()",
       "TSR014",
       "Only a function or a method can be called, but this is neither. Call a function by its name instead.",

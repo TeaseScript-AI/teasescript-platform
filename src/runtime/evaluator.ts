@@ -1916,9 +1916,13 @@ export class Evaluator {
       // called, so it need not be registered then.
       const recorded = hostBuiltin ? this.control?.replayedBuiltin() : undefined;
       if (hostBuiltin && builtin === undefined && recorded === undefined) {
+        // A parenthesized variable reaches here as a call of its name.
+        const bound = this.binding(name);
         throw fault(
           "TSR011",
-          internalFault(`The Playroom does not provide the built-in function '${name}'.`),
+          bound === undefined
+            ? internalFault(`The Playroom does not provide the built-in function '${name}'.`)
+            : `'${name}' is ${describeShownValue(bound.value)}, not a function, so it cannot be called. Call a function by its name instead.`,
           expression.callee.span,
         );
       }
@@ -1964,7 +1968,7 @@ export class Evaluator {
           throw fault("TSR012", error.message, expression.span);
         const message = messageText(error instanceof Error ? error.message : String(error)).trim();
         const reason =
-          message === "" ? "" : `: ${/[.!?]$/u.test(message) ? message : `${message}.`}`;
+          message === "" ? "" : `: ${/[.!?…]$/u.test(message) ? message : `${message}.`}`;
         throw fault(
           "TSR012",
           `The built-in function '${name}' failed${reason === "" ? "." : reason} Check the values the script passes to '${name}'. If they are correct, report this with a debug export.`,
@@ -2056,7 +2060,7 @@ export class Evaluator {
             { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
-    const callee = planLabel(expression.callee);
+    const callee = expression.callee.kind === "literal" ? null : planLabel(expression.callee);
     throw fault(
       "TSR014",
       `Only a function or a method can be called, but ${callee === null ? "this" : `'${callee}'`} is neither. Call a function by its name instead.`,
