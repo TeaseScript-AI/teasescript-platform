@@ -52,6 +52,11 @@ function count(value: unknown): number {
   return typeof value === "number" ? value : 0;
 }
 
+/** A whole number as a reader reads it, with thousands separated. */
+function figure(value: unknown): string {
+  return count(value).toLocaleString("en");
+}
+
 function plural(amount: number, one: string, many = `${one}s`): string {
   return `${amount} ${amount === 1 ? one : many}`;
 }
@@ -243,15 +248,15 @@ export function playtestReport(report: Fields): string {
     `An automatic playtester played this script for ${count(search.operations).toLocaleString("en")} engine steps, over ` +
       `${plural(visits, "visit")}: it pressed every button, picked every option, typed the answers the script compares ` +
       `with, came back later and at other times, and also chose the outcomes of random draws. It reached ` +
-      `${count(coverage.visitedLines)} of the ${count(coverage.coverableLines)} lines that can run (${count(coverage.percent)}%).` +
+      `${figure(coverage.visitedLines)} of the ${figure(coverage.coverableLines)} lines that can run (${count(coverage.percent)}%).` +
       (search.stoppedBy === "exhausted"
         ? " It tried everything it could think of."
         : " It stopped at its step budget, so more play may reach more."),
     "",
     `- Crashes: ${crashes.length}`,
     `- Loops with no way out: ${traps.length}`,
-    `- Lines not reached: ${count(reach.unknown)}${count(reach.clock) > 0 ? `, and ${count(reach.clock)} reached only by setting the clock` : ""}`,
-    `- Lines that can never run: ${count(reach.unreachable)}`,
+    `- Lines not reached: ${figure(reach.unknown)}${count(reach.clock) > 0 ? `, and ${count(reach.clock)} reached only by setting the clock` : ""}`,
+    `- Lines that can never run: ${figure(reach.unreachable)}`,
   );
   if (count(reach.chosen) > 0)
     lines.push(
@@ -359,7 +364,8 @@ export function playtestReport(report: Fields): string {
     }
     for (const [reason, files] of reasons) {
       const places = [...files].map(
-        ([file, ranges]) => `- \`${file}\`: lines ${ranges.join(", ")}`,
+        ([file, ranges]) =>
+          `- \`${file}\`: ${ranges.length === 1 && !ranges[0]!.includes("-") ? "line" : "lines"} ${ranges.join(", ")}`,
       );
       const explained =
         reason === "no execution path from the session start"
