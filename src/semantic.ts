@@ -57,7 +57,7 @@ import {
 } from "./expression-children.js";
 import { DURATION_UNIT_MILLISECONDS, durationLiteralValue, isCalendar } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
-import { COLLECTION_CHANGES, rootName } from "./operation-checks.js";
+import { COLLECTION_CHANGES, noteSharing, rootName, type Sharing } from "./operation-checks.js";
 import {
   globMatches,
   isPathGlob,
@@ -219,8 +219,8 @@ export interface FileSemanticResult {
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
   /** The variables each timer, media, or button block shares with the code that created it (V30 §14). */
   readonly captures: ReadonlyMap<Block, readonly string[]>;
-  /** The declarations of the shared variables that a block assigns or changes. */
-  readonly sharedWrites: ReadonlySet<VariableSite>;
+  /** The declarations of the shared variables that a block assigns or changes in place, with how. */
+  readonly sharedWrites: ReadonlyMap<VariableSite, Sharing>;
   /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
   checkInitialization(freshLabels: ReadonlySet<string>, flow: StatementFlow): readonly Diagnostic[];
 }
@@ -281,7 +281,7 @@ export function validateProjectSemantics(
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
-      sharedWrites: validators[index]?.sharedWrites ?? new Set<VariableSite>(),
+      sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
       reachableEntries: (flow: StatementFlow) =>
         validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
       checkInitialization: (freshLabels: ReadonlySet<string>, flow: StatementFlow) =>
@@ -760,13 +760,16 @@ class SemanticValidator {
   /** The variables each block shares with the code that created it, by its block, for the lowering. */
   readonly captures = new Map<Block, readonly string[]>();
 
-  /** The declarations of the variables that a block shares and assigns, so a suspension may change them (V30 §13). */
-  readonly sharedWrites = new Set<VariableSite>();
+  /**
+   * The declarations of the variables that a block shares and assigns or changes in place, so a suspension may change
+   * them (V30 §13).
+   */
+  readonly sharedWrites = new Map<VariableSite, Sharing>();
 
   /** Records that the running block assigns or changes `name`, when that is a variable it shares. */
-  #recordSharedWrite(name: string | null, scope: SemanticScope): void {
+  #recordSharedWrite(name: string | null, scope: SemanticScope, how: Sharing): void {
     const site = name === null ? undefined : scope.sharedSite(name);
-    if (site !== undefined) this.sharedWrites.add(site);
+    if (site !== undefined) noteSharing(this.sharedWrites, site, how);
   }
 
   /**
@@ -1773,7 +1776,7 @@ class SemanticValidator {
   }
 
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
-    this.#recordSharedWrite(rootName(target), scope);
+    this.#recordSharedWrite(rootName(target), scope, "assigns");
     if (target.kind === "identifier") {
       if (target.name === "debugMode") {
         this.#report(
@@ -1993,7 +1996,7 @@ class SemanticValidator {
           method.kind === "propertyAccessExpression" &&
           COLLECTION_CHANGES.has(method.property.name)
         )
-          this.#recordSharedWrite(rootName(method.object), scope);
+          this.#recordSharedWrite(rootName(method.object), scope, "changes");
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
