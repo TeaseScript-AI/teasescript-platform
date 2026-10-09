@@ -3092,7 +3092,7 @@ function unwrapParentheses(expression: Expression): Expression {
   return expression;
 }
 
-/** What `speaker` in a say or `debugMode` is, the names that are values without a binding, or `null`. */
+/** What `speaker` is where a speaker is current, or what `debugMode` is: names that are values without a binding. */
 function unboundValue(name: string, contextualSpeaker: string | null): string | null {
   if (name === "speaker" && contextualSpeaker !== null) return "the current speaker";
   return name === "debugMode" ? "a read-only value" : null;
