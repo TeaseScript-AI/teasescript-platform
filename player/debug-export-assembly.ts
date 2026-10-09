@@ -465,7 +465,10 @@ function recordedAnswers(recording: DebugRecording | null): unknown[] {
   });
 }
 
-/** The photos a session used, with where: recorded image answers and captures, and saved values. */
+/**
+ * The photos a session used, with where: recorded image answers and captures, and saved values: those given, which the
+ * state shown has, and those of the recording's anchor and end, which its replay holds. A saved photo counts once.
+ */
 export function debugPhotoUses(
   recording: DebugRecording | null,
   savedValues: readonly { readonly value: Parameters<typeof capturedMediaReferences>[0] }[],
@@ -488,9 +491,16 @@ export function debugPhotoUses(
     if (payload["kind"] === "captured" && isRecord(media) && typeof media["reference"] === "string")
       add(media["reference"], { relation: "capture", operation: operation.seq, actionId });
   }
-  for (const entry of savedValues)
-    for (const reference of capturedMediaReferences(entry.value))
-      add(reference, { relation: "savedValue", operation: null, actionId: null });
+  const saved = new Set<string>();
+  for (const values of [
+    savedValues,
+    recording?.anchorSnapshot.scriptStorage ?? [],
+    recording?.endSnapshot.scriptStorage ?? [],
+  ])
+    for (const entry of values)
+      for (const reference of capturedMediaReferences(entry.value)) saved.add(reference);
+  for (const reference of saved)
+    add(reference, { relation: "savedValue", operation: null, actionId: null });
   return uses;
 }
 

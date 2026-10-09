@@ -200,6 +200,27 @@ test("replay data needs its prerequisites, and turning one off turns it off", ()
   );
 });
 
+test("a saved photo only the replay's state holds is offered too, and a saved photo counts once", () => {
+  const recorder = new DebugRecorder();
+  // Saved under two keys when the recording begins, the photo is deleted before the state shown.
+  const session = createPlayerRuntimeSession(
+    'delete "picture"\ndelete "copy"\nshowButton "Done"\nexit',
+    {
+      recorder,
+      scriptStorage: [
+        { key: "picture", value: reference },
+        { key: "copy", value: reference },
+      ],
+    },
+  );
+  const shown = playerRuntimeSnapshot(session).scriptStorage;
+  assert.deepEqual(shown, []);
+  assert.deepEqual(
+    [...debugPhotoUses(recorder.recording(), shown)],
+    [[reference, [{ relation: "savedValue", operation: null, actionId: null }]]],
+  );
+});
+
 test("with everything chosen, the export replays the failure and carries the photo and its use", async () => {
   const { session, recorder } = failedSession();
   const frozen = candidate(session, recorder);
