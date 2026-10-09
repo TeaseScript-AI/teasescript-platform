@@ -1702,6 +1702,8 @@ function withLegacyMarkup(
   const fileVariables = new Set(
     statements.flatMap((statement) => (statement.kind === "let" ? [statement.name] : [])),
   );
+  // The constant texts folded into their spans, whose `let` goes where nothing reads it any more.
+  let folded = new Set<string>();
   const markup = (
     value: IrExpression,
     any: boolean,
@@ -1719,7 +1721,7 @@ function withLegacyMarkup(
       (stripsTags || !given.some((part) => "text" in part && SHOWN_HTML_TAG.test(part.text)))
     )
       return value;
-    const parts = withFoldedSpanValues(given, constants);
+    const parts = withFoldedSpanValues(given, constants, folded);
     const result = legacyHtmlToMarkup(parts, { fragment: !any });
     if (!result.changed) return value;
     if (result.dropped) dropped += 1;
@@ -1732,8 +1734,10 @@ function withLegacyMarkup(
     return items.map((statement) => {
       if (statement.kind === "function") {
         const own = constantTexts(statement, fileVariables);
+        folded = new Set();
+        const converted = convert(statement.body, own);
         const body = withoutNestedSpans(
-          withoutUnreadLets(convert(statement.body, own), own),
+          withoutUnreadLets(converted, folded),
           statement,
           fileVariables,
         );
@@ -1800,6 +1804,7 @@ function constantTexts(
 function withFoldedSpanValues(
   parts: readonly TextPart[],
   constants: ReadonlyMap<string, string>,
+  folded: Set<string>,
 ): TextPart[] {
   if (constants.size === 0) return [...parts];
   let depth = 0;
@@ -1809,8 +1814,11 @@ function withFoldedSpanValues(
         depth = Math.max(0, depth + (match[1] === "/" ? -1 : 1));
       return part;
     }
-    const constant = part.value.kind === "variable" ? constants.get(part.value.name) : undefined;
-    return depth > 0 && constant !== undefined ? { text: constant } : part;
+    const name = part.value.kind === "variable" ? part.value.name : "";
+    const constant = constants.get(name);
+    if (depth === 0 || constant === undefined) return part;
+    folded.add(name);
+    return { text: constant };
   });
 }
 
@@ -1931,10 +1939,10 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-/** The statements without the `let` of a constant text that nothing reads any more. */
+/** The statements without the `let` of a folded constant text (`names`) that nothing reads any more. */
 function withoutUnreadLets(
   statements: IrStatement[],
-  constants: ReadonlyMap<string, string>,
+  constants: ReadonlySet<string>,
 ): IrStatement[] {
   if (constants.size === 0) return statements;
   const read = new Set<string>();
