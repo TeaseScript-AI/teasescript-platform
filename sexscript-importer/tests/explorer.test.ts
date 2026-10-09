@@ -1021,6 +1021,50 @@ test(
 );
 
 test(
+  "with depth phases, a next session still comes after a first session that ends in its first step, and in a return window a later session reads",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const missed = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const result = explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 100,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        cells: true,
+        later: true,
+        depthPhases: true,
+      });
+      return result.coverage.files.flatMap((file) =>
+        file.unvisited.filter((range) => range.reach === "unknown").map((range) => range.lines),
+      );
+    };
+    // The first session saves and ends without an input: the second is still started from what it saved.
+    assert.deepEqual(
+      missed(
+        'let events = load "events", default: []\nif events.contains("saved") {\n  say "Welcome back."\n}\n' +
+          'save ["saved"] as "events"\nexit\n',
+      ),
+      [],
+    );
+    // The window the player must come back in is read by a later session: next sessions start in it too.
+    assert.deepEqual(
+      missed(
+        'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
+          'if last > 0 {\n  if away >= 7200 and away <= 18000 {\n    say "Welcome back."\n  }\n  exit\n}\n' +
+          'save getTimestamp().toSeconds() as "last"\nexit\n',
+      ),
+      [],
+    );
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

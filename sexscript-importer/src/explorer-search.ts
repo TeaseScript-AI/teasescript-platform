@@ -2141,8 +2141,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let playWork = 0;
   let explorationWork = 0;
   const pendingSeeds: number[] = [];
-  /** Lines reached first and condition ways taken first so far, by any step. */
+  /**
+   * Lines reached first and condition ways taken first so far, by any step; and by the session number of the step, with
+   * the first session's start and a corpus replay too, which no play work is charged for.
+   */
   let gainCount = 0;
+  const depthNew: number[] = [];
   /** A storage a session of `depth` left that a session of the next depth can start from. */
   const seedLeft = (depth: number): void => {
     pendingSeeds[depth + 1] = (pendingSeeds[depth + 1] ?? 0) + 1;
@@ -2305,6 +2309,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         if (line < 0) continue;
         if (lineFirst[line] === 0) {
           gainCount += 1;
+          depthNew[depth] = (depthNew[depth] ?? 0) + 1;
           lineFirst[line] = depth;
           lineFirstWork[line] = depthWork[depth] ?? 0;
           lineLeast[line] = depth;
@@ -2370,11 +2375,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         step.forced,
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
-    const newWay = step.ways.some((way) => waysTaken[way] === 0);
-    if (newWay) {
-      depthWays[depth] = (depthWays[depth] ?? 0) + 1;
-      gainCount += 1;
-    }
+    const newWays = step.ways.filter((way) => waysTaken[way] === 0).length;
+    const newWay = newWays > 0;
+    depthWays[depth] = (depthWays[depth] ?? 0) + newWays;
+    depthNew[depth] = (depthNew[depth] ?? 0) + newWays;
+    gainCount += newWays;
     for (const way of step.ways) waysTaken[way] = 1;
     if (step.newInstructions > 0) progressed("code");
     else if (newWay) progressed("ways");
@@ -3194,7 +3199,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const deepest = depthOf(deepestOpen);
     const idle = depthFrontier!.sizeOf(deepestOpen) === 0 && (pendingSeeds[deepestOpen] ?? 0) === 0;
     if (
-      deepest.gain > 0 &&
+      (depthNew[deepestOpen] ?? 0) > 0 &&
       (pendingSeeds[deepestOpen + 1] ?? 0) > 0 &&
       (idle ||
         (deepest.owed <= 0 &&
@@ -3228,7 +3233,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (open.length === 0) {
       const next = deepestOpen + 1;
       const opens =
-        depthOf(deepestOpen).gain > 0 && (pendingSeeds[next] ?? 0) > 0
+        (depthNew[deepestOpen] ?? 0) > 0 && (pendingSeeds[next] ?? 0) > 0
           ? next
           : Array.from(
               { length: frontierOf.deepest - deepestOpen },
@@ -3294,10 +3299,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     startedFrom.add(entry.key);
     pendingSeeds[depth] = Math.max(0, (pendingSeeds[depth] ?? 0) - 1);
     for (const value of valuesOfLeft.get(best) ?? []) seen.add(value);
-    depthOf(depth).seeds += 1;
     const work = session.operations;
     const gain = gainCount;
-    visitFrom(entry, entry.key, completedKeys.has(entry.key));
+    const before = starts.length;
+    const completed = completedKeys.has(entry.key);
+    if (!completed) quitVisits += 1;
+    visitFrom(entry, entry.key, completed);
+    depthOf(depth).seeds += starts.length - before;
     charge(depth, session.operations - work, gainCount - gain, exploring);
     return true;
   };
@@ -3418,14 +3426,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const learned = [...clockAfter.values()].reduce((sum, after) => sum + after.size, 0);
     if (later && learned > learnedAtOrigins) {
       learnedAtOrigins = learned;
+      // With depth phases, all of them, as play work of the depth they start.
       for (const { key, entry, snapshot, now, begun } of sessionOrigins) {
-        if (!withinNextShare()) break;
+        if (!phased && !withinNextShare()) break;
         const work = session.operations;
+        const gain = gainCount;
         const steps = sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
         for (const gap of steps)
           startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
         timeStepsTaken.sessions += steps.length;
         nextWork += session.operations - work;
+        if (phased) {
+          charge(entry.sessions + 1, session.operations - work, gainCount - gain, false);
+          depthOf(entry.sessions + 1).seeds += steps.length;
+        }
         scheduled = scheduled || steps.length > 0;
       }
     }
@@ -3967,6 +3981,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const stop = spent();
       if (stop !== null) {
         stoppedBy = stop;
+        if (turn !== null && !leading)
+          charge(
+            turn.depth,
+            session.operations - workBefore,
+            gainCount - gainBefore,
+            turn.exploring,
+          );
         break search;
       }
       const tried = node.chosen ? JSON.stringify(input) : "";
