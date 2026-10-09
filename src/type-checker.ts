@@ -7161,7 +7161,7 @@ function isTemporal(type: StaticType): boolean {
 /** The type of a read-only field of a date or time value (V30 §35); a timestamp has none. */
 function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
   if (kind === "date" || kind === "datetime") {
-    if (name === "year" || name === "month" || name === "day") return INTEGER_TYPE;
+    if (["year", "month", "day", "weekNumber", "weekYear"].includes(name)) return INTEGER_TYPE;
     if (name === "weekday") return WEEKDAY_TYPE;
     if (name === "weekdayNumber") return WEEKDAY_NUMBER_TYPE;
   }

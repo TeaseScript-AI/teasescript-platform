@@ -3978,6 +3978,8 @@ today.month
 today.day
 today.weekday           // "Saturday"
 today.weekdayNumber     // Monday is 1, Sunday is 7
+today.weekNumber        // the ISO week, 1 to 53
+today.weekYear          // the year that ISO week belongs to
 
 now.hour
 now.minute
@@ -3985,8 +3987,11 @@ now.second
 now.millisecond
 ```
 
-A `datetime` has all of these fields. `weekday` is the English weekday name; comparing it with text that is not an
-English weekday name gives a compile warning. Values hold whole milliseconds.
+A `datetime` has all of these fields, and a `timestamp` none: convert it first, as in `started.toDateTime().hour`.
+`weekday` is the English weekday name; comparing it with text that is not an English weekday name gives a compile
+warning. `weekNumber` and `weekYear` follow ISO 8601, not the player's locale: a week starts on Monday, and week 1 holds
+the year's first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is week 53 of 2020. The week year of
+0000-01-01 is -1. Values hold whole milliseconds.
 
 ### Durations
 

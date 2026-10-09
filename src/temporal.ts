@@ -94,6 +94,21 @@ export function weekdayName(date: DateFields): string {
 }
 
 /**
+ * The ISO 8601 week of a date and the year it belongs to (ADR 0026): weeks start on Monday, and week 1 holds the year's
+ * first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is week 53 of 2020. The week year of 0000-01-01 is -1.
+ */
+export function isoWeek(date: DateFields): {
+  readonly weekYear: number;
+  readonly weekNumber: number;
+} {
+  // The Thursday of the date's week lies in its week year.
+  const thursday = daysFromEpoch(date) + 4 - isoWeekdayNumber(date);
+  const weekYear = dateFromEpochDays(thursday).year;
+  const firstOfYear = daysFromEpoch({ year: weekYear, month: 1, day: 1 });
+  return { weekYear, weekNumber: Math.floor((thursday - firstOfYear) / 7) + 1 };
+}
+
+/**
  * A date moved by whole months and then whole days (V30 §35): a day the target month lacks becomes its last day, so
  * January 31 plus one month is February 28 or 29. `undefined` outside the years 0000 to 9999.
  */
