@@ -956,7 +956,7 @@ class DepthFrontier {
     return this.#chosen.size;
   }
 
-  /** The open states of a depth, and those of them whose step reached new code. */
+  /** The open states of a depth, and its fresh ones: play states whose step reached new code, not resumed. */
   sizeOf(depth: number): number {
     return this.#depths[depth]?.size ?? 0;
   }
@@ -978,7 +978,9 @@ class DepthFrontier {
     const depth = this.#depthOf(node);
     while (this.#depths.length <= depth) this.#depths.push(this.#make());
     this.#depths[depth]!.push(node, rank);
-    if (rank[2] === 0 && !this.#freshNodes.has(node)) {
+    // Fresh: a play state (not resumed from a corpus, not on the clock) whose step reached new code, which comes first
+    // in its depth's queue.
+    if (rank[0] === 0 && rank[1] === 1 && rank[2] === 0 && !this.#freshNodes.has(node)) {
       this.#freshNodes.add(node);
       this.#fresh[depth] = (this.#fresh[depth] ?? 0) + 1;
     }
@@ -1662,6 +1664,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const randomTried = new Set<string>();
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
+  /** With directed random: the steps with an outcome that gives a compared constant, which go before `chosenSteps`. */
+  const directedSteps: { node: number; input: ExplorerInput }[] = [];
   let chosenAt = 0;
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
@@ -1763,10 +1767,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           if (Number.isInteger(near) && near >= min && near <= max) numbers.add(near);
       return [...numbers].map((value) => ({ kind: "number", value }));
     }
+    // A weighted pick's candidate of weight 0 is never drawn.
     const candidates: unknown[] = Array.isArray(support.candidates) ? support.candidates : [];
+    const weights: unknown[] = Array.isArray(support.weights) ? support.weights : [];
     return candidates.flatMap((candidate, index) =>
-      (typeof candidate === "string" && constants.strings.has(candidate)) ||
-      (typeof candidate === "number" && constants.numbers.has(candidate))
+      (support.kind !== "weighted" || Number(weights[index]) > 0) &&
+      ((typeof candidate === "string" && constants.strings.has(candidate)) ||
+        (typeof candidate === "number" && constants.numbers.has(candidate)))
         ? [{ kind: "index", index }]
         : [],
     );
@@ -2597,17 +2604,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       let taken = 0;
       // The outcomes that give what conditions compare with come first, all of them; then representative ones.
       const directed = directedOutcomes(draw);
-      for (const outcome of [
+      for (const [index, outcome] of [
         ...directed,
         ...engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives,
-      ]) {
+      ].entries()) {
         if (taken === RANDOM_ALTERNATIVES + directed.length) break;
         const tried = `${context} ${draw.site} ${JSON.stringify(outcome)}`;
         if (randomTried.has(tried)) continue;
         randomTried.add(tried);
         taken += 1;
         const others = (input.random ?? []).filter((choice) => choice.drawId !== draw.drawId);
-        chosenSteps.push({
+        (index < directed.length ? directedSteps : chosenSteps).push({
           node: node.id,
           input: {
             ...input,
@@ -3317,12 +3324,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /**
    * Starts a next session of `depth` from the storage a session of the depth before left, of those not started from:
-   * the one with the most compared values no session of `depth` started from had, completed sessions' first. False
-   * when none is left.
+   * the one with the most compared values no session of `depth` started from had, completed sessions' first. With
+   * `varied`, only from one that has such a value. False when none is left (with `varied`: none such).
    */
   const seededValues: Set<string>[] = [];
   const valuesOfLeft = new Map<number, readonly string[]>();
-  const startSeed = (depth: number, exploring: boolean): boolean => {
+  const startSeed = (depth: number, exploring: boolean, varied: boolean): boolean => {
     const seen = (seededValues[depth] ??= new Set());
     let best: number | null = null;
     let bestNew = -1;
@@ -3346,6 +3353,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       pendingSeeds[depth] = 0;
       return false;
     }
+    if (varied && bestNew <= 0) return false;
     const entry = left[best]!;
     startedFrom.add(entry.key);
     pendingSeeds[depth] = Math.max(0, (pendingSeeds[depth] ?? 0) - 1);
@@ -3915,9 +3923,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       continue;
     }
     // With random choices, steps with another random outcome take their share, and all the work when no state is open.
-    if (chosenAt < chosenSteps.length && (frontier.size === 0 || withinChosenShare())) {
-      runChosen(chosenSteps[chosenAt]!);
-      chosenAt += 1;
+    if (
+      (directedSteps.length > 0 || chosenAt < chosenSteps.length) &&
+      (frontier.size === 0 || withinChosenShare())
+    ) {
+      const directed = directedSteps.shift();
+      if (directed !== undefined) runChosen(directed);
+      else runChosen(chosenSteps[chosenAt++]!);
       continue;
     }
     // With depth phases, the states with a lead first, then those after a chosen outcome in their turn, then the depth
@@ -3936,7 +3948,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         } else if (
           depthFrontier.freshOf(turn.depth) === 0 &&
           (pendingSeeds[turn.depth] ?? 0) > 0 &&
-          startSeed(turn.depth, turn.exploring)
+          startSeed(turn.depth, turn.exploring, depthFrontier.sizeOf(turn.depth) > 0)
         )
           continue;
         else if (depthFrontier.sizeOf(turn.depth) === 0) continue;

@@ -66,6 +66,16 @@ const HEAP_GROWING = "--heap-growing-percent";
 const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
 /** Missed ways the summary lists per unit, by the code behind them. */
 const WORKING_TOWARD_ROWS = 8;
+/** Session numbers shown one by one; the later ones are shown together. */
+const SESSION_ROWS = 10;
+/** A chain's result, in words. */
+const CHAIN_RESULTS: Readonly<Record<string, string>> = {
+  reached: "reached",
+  holds: "storage holds the value, the way not reached",
+  queued: "still going at the end",
+  limit: "stopped at the session limit",
+  stopped: "stopped, no route came closer",
+};
 
 /** The search strategies a corpus records, in one order. */
 const STRATEGIES = [
@@ -880,9 +890,6 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
   return `${lines.join("\n")}\n`;
 }
 
-/** Session numbers shown one by one; the later ones are shown together. */
-const SESSION_ROWS = 10;
-
 /**
  * What each session number added: its sessions, its share of the operations, the lines and ways it reached first, its
  * marginal gain (lines first reached in the last quarter of its operations, per 1,000 of them), and its states that came
@@ -949,7 +956,10 @@ function sessionDepths(
   ];
 }
 
-/** With depth phases: when each session number opened, and its share of the play work and the lines it reached first. */
+/**
+ * With depth phases: when each session number opened, and its share of the play work and the lines and condition ways it
+ * reached first.
+ */
 function depthPhases(phases: Readonly<Record<string, unknown>>): string[] {
   if (!Array.isArray(phases.openedAt)) return [];
   const work = Array.isArray(phases.playOperations) ? phases.playOperations.map(count) : [];
@@ -1007,15 +1017,6 @@ function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): stri
     }),
   ];
 }
-
-/** A chain's result, in words. */
-const CHAIN_RESULTS: Readonly<Record<string, string>> = {
-  reached: "reached",
-  holds: "storage holds the value, the way not reached",
-  queued: "still going at the end",
-  limit: "stopped at the session limit",
-  stopped: "stopped, no route came closer",
-};
 
 /** A chain's route: where it goes, its inputs, and its progress per operation over its replays. */
 function routeText(route: Readonly<Record<string, unknown>>): string {

@@ -406,8 +406,8 @@ Depth phases (on by default) let the search decide how play work goes to session
 a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the lines and
 condition ways those reach first) are measured as the run goes. The first session goes first. The next depth opens when
 the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its average,
-or has nothing left; only a depth that reached something new opens another, and only when a completed session of it
-left storage to start from. States whose step reached new code go first in any open depth, as without phases. Apart
+or has nothing left; only a depth that reached something new opens another, and only when a session of it left
+storage to start from (a completed one's; with `--quit-anywhere`, any). States whose step reached new code go first in any open depth, as without phases. Apart
 from those, a newly opened depth first gets a quarter of the work of the depth before it; then the open depth with the
 most gain per operation in the last quarter of its work gets play, and an eighth of play goes to
 the other open depths in turn, the one explored least first, so that an earlier depth gets work back when it gains
