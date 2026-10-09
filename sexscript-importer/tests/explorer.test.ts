@@ -1142,39 +1142,6 @@ test(
 );
 
 test(
-  "with random choices, a draw assigned to a variable that conditions compare with constants also offers the outcomes that give those constants",
-  { skip: "reason" in engineResult ? engineResult.reason : false },
-  () => {
-    assert.ok("engine" in engineResult);
-    const { engine } = engineResult;
-    // One task in forty, and one mood in five: the representative outcomes of a range of forty miss twenty-seven.
-    const source =
-      'showButton "Begin"\nlet task = randomInteger(1..40)\n' +
-      'let mood = ["calm", "stern", "playful", "strict", "warm"].random\nshowButton "Go on"\n' +
-      'if task == 27 {\n  say "Task twenty-seven: the rare one."\n}\n' +
-      'if mood == "strict" {\n  say "A strict mood."\n}\nexit\n';
-    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
-    assert.ok(isRecord(plan));
-    const result = explore(engine, plan, {
-      seed: 1,
-      budgetMs: Infinity,
-      budgetOps: 3000,
-      maxStates: 100_000,
-      sources: new Map([["main.tease", source]]),
-      diagnostics: [],
-      cells: true,
-      randomChoices: true,
-    });
-    assert.deepEqual(
-      result.coverage.files.flatMap((file) =>
-        file.unvisited.filter((range) => range.reach === "unknown").map((range) => range.lines),
-      ),
-      [],
-    );
-  },
-);
-
-test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

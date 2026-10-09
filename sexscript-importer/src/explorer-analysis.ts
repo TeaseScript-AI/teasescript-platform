@@ -282,7 +282,7 @@ const HELPER_DEPTH = 3;
  * A storage key: its text, or for a template such as `"script${i}.time"` a pattern with {@link KEY_PLACEHOLDER} for
  * each computed part.
  */
-export function keyText(expression: unknown): string | null {
+function keyText(expression: unknown): string | null {
   const literal = literalText(expression);
   if (literal !== null) return literal;
   const value = record(expression);

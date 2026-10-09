@@ -16,7 +16,6 @@ import {
   goalsFor,
   KEY_PLACEHOLDER,
   keyMatcher,
-  keyText,
   namesIn,
   callsClock,
   successors,
@@ -1664,8 +1663,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const randomTried = new Set<string>();
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
-  /** With directed random: the steps with an outcome that gives a compared constant, which go before `chosenSteps`. */
-  const directedSteps: { node: number; input: ExplorerInput }[] = [];
   let chosenAt = 0;
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
@@ -1703,81 +1700,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   const allConstants = new Map(constants);
   for (const [index, found] of fixed) allConstants.set(index, found.value);
-  const slots = comparedSlots(flow, instructions);
-  const cells = options.cells === false ? null : new Cells(slots);
-  /**
-   * With random choices, by draw site (`path:line:column` of the call or property that draws): the numbers and texts
-   * conditions compare the variable or stored key it is assigned to with. A draw also gets those outcomes, and the
-   * numbers next to each, as other outcomes: directed random.
-   */
-  const siteConstants = new Map<string, { numbers: Set<number>; strings: Set<string> }>();
-  if (chooses)
-    instructions.forEach((instruction, index) => {
-      const target = record(instruction.target);
-      const name =
-        instruction.kind === "declareBinding" || instruction.kind === "declareGlobal"
-          ? instruction.name
-          : instruction.kind === "assign"
-            ? typeof instruction.target === "string"
-              ? instruction.target
-              : target.kind === "identifier"
-                ? target.name
-                : null
-            : null;
-      const key = instruction.kind === "storageWrite" ? keyText(instruction.key) : null;
-      if (typeof name !== "string" && key === null) return;
-      const constants = { numbers: new Set<number>(), strings: new Set<string>() };
-      for (const slot of slots) {
-        if (slot.length) continue;
-        const matches =
-          slot.kind === "binding" ? slot.name === name : key !== null && keyMatcher(slot.name)(key);
-        if (!matches) continue;
-        for (const number of slot.numbers) constants.numbers.add(number);
-        for (const text of slot.strings) constants.strings.add(text);
-      }
-      if (constants.numbers.size === 0 && constants.strings.size === 0) return;
-      const walk = (value: unknown): void => {
-        if (Array.isArray(value)) return value.forEach(walk);
-        if (!isRecord(value)) return;
-        const span = record(value.span);
-        if (
-          (value.kind === "call" || value.kind === "property") &&
-          typeof span.sl === "number" &&
-          typeof span.sc === "number"
-        )
-          siteConstants.set(`${files[index]}:${span.sl + 1}:${span.sc + 1}`, constants);
-        for (const [field, item] of Object.entries(value)) if (field !== "span") walk(item);
-      };
-      walk(instruction.value);
-    });
-  /** With directed random: the outcomes of a draw that give a compared constant, or a number next to one. */
-  const directedOutcomes = (draw: Data): Data[] => {
-    const constants = siteConstants.get(String(draw.site));
-    const support = record(draw.support);
-    if (constants === undefined) return [];
-    if (
-      support.kind === "integer" &&
-      typeof support.min === "number" &&
-      typeof support.max === "number"
-    ) {
-      const { min, max } = support;
-      const numbers = new Set<number>();
-      for (const constant of constants.numbers)
-        for (const near of [constant, constant - 1, constant + 1])
-          if (Number.isInteger(near) && near >= min && near <= max) numbers.add(near);
-      return [...numbers].map((value) => ({ kind: "number", value }));
-    }
-    // A weighted pick's candidate of weight 0 is never drawn.
-    const candidates: unknown[] = Array.isArray(support.candidates) ? support.candidates : [];
-    const weights: unknown[] = Array.isArray(support.weights) ? support.weights : [];
-    return candidates.flatMap((candidate, index) =>
-      (support.kind !== "weighted" || Number(weights[index]) > 0) &&
-      ((typeof candidate === "string" && constants.strings.has(candidate)) ||
-        (typeof candidate === "number" && constants.numbers.has(candidate)))
-        ? [{ kind: "index", index }]
-        : [],
-    );
-  };
+  const cells = options.cells === false ? null : new Cells(comparedSlots(flow, instructions));
   const elseIfs =
     options.realign === true ? elseIfChains(instructions) : new Map<number, number[]>();
   // With guidance, the map of the plan, measured again from what play has not reached at each analysis.
@@ -2602,19 +2525,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     for (const draw of next.draws.slice(0, RANDOM_DRAWS_PER_STEP)) {
       if (typeof draw.drawId !== "number" || typeof draw.site !== "string") continue;
       let taken = 0;
-      // The outcomes that give what conditions compare with come first, all of them; then representative ones.
-      const directed = directedOutcomes(draw);
-      for (const [index, outcome] of [
-        ...directed,
-        ...engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives,
-      ].entries()) {
-        if (taken === RANDOM_ALTERNATIVES + directed.length) break;
+      for (const outcome of engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives) {
+        if (taken === RANDOM_ALTERNATIVES) break;
         const tried = `${context} ${draw.site} ${JSON.stringify(outcome)}`;
         if (randomTried.has(tried)) continue;
         randomTried.add(tried);
         taken += 1;
         const others = (input.random ?? []).filter((choice) => choice.drawId !== draw.drawId);
-        (index < directed.length ? directedSteps : chosenSteps).push({
+        chosenSteps.push({
           node: node.id,
           input: {
             ...input,
@@ -3923,13 +3841,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       continue;
     }
     // With random choices, steps with another random outcome take their share, and all the work when no state is open.
-    if (
-      (directedSteps.length > 0 || chosenAt < chosenSteps.length) &&
-      (frontier.size === 0 || withinChosenShare())
-    ) {
-      const directed = directedSteps.shift();
-      if (directed !== undefined) runChosen(directed);
-      else runChosen(chosenSteps[chosenAt++]!);
+    if (chosenAt < chosenSteps.length && (frontier.size === 0 || withinChosenShare())) {
+      runChosen(chosenSteps[chosenAt]!);
+      chosenAt += 1;
       continue;
     }
     // With depth phases, the states with a lead first, then those after a chosen outcome in their turn, then the depth
