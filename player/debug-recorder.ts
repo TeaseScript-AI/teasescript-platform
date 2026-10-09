@@ -316,7 +316,7 @@ export class DebugRecorder {
       const exact = captureExternalData(args).ok;
       // Written without recursion, so a deeply nested argument is recorded like any other.
       const json = exact ? debugExportJson(args) : "";
-      // Reading an argument, such as an accessor, may run host code.
+      // Reading an argument, such as a proxy, may run host code.
       if (owner !== this.#owner) return null;
       if (!exact) {
         this.#skip("A call's arguments could not be copied exactly.", input);
