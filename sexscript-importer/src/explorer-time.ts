@@ -475,7 +475,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
       }
     };
     const end = Number(definition.endInstruction);
-    for (let index = Number(definition.entryInstruction); index <= end; index += 1) {
+    for (let index = Number(definition.entryInstruction); index < end; index += 1) {
       walk(instructions[index]);
       if (instructions[index]?.kind === "returnValue")
         returns.push(record(instructions[index]!.value));

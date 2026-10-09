@@ -49,7 +49,7 @@ export class TreasureMap {
     const shared = new Map<number, number>();
     functions.forEach((definition, place) => {
       const end = Number(definition.endInstruction);
-      for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+      for (let index = Number(definition.entryInstruction); index < end; index += 1)
         if (
           instructions[index]?.kind === "returnValue" ||
           instructions[index]?.kind === "returnVoid"

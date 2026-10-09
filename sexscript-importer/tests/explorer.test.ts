@@ -729,12 +729,50 @@ test(
       nested(
         '(load("left", default: 0) > 0 and pick(0) > 0) or (load("third", default: 0) > 0 and pick(0) > 2)',
       ),
+      nested('(load("left", default: 0) > 0 and pick(0) > 0) != true'),
     ]) {
       assert.ok(
-        needs.every((need) => !/[!=]= true|stored right <= 0/u.test(need)),
+        needs.every(
+          (need) => !/(left|right|third) [!=]= (true|false)|stored right <= 0/u.test(need),
+        ),
         JSON.stringify(needs),
       );
     }
+    // A stored value the code tests as the last part, or loads with a default a call gives, is asked to be true: the
+    // value itself, not every value the temporary held before.
+    const tested = nested('pick(0) > 2 and load("flag", default: false)');
+    assert.ok(tested.includes("stored flag == true"), JSON.stringify(tested));
+    assert.ok(
+      tested.every((need) => !need.startsWith("stored right ==")),
+      JSON.stringify(tested),
+    );
+    // In a file after another file's function, the condition's own stores are found.
+    const other = 'if load("left", default: 0) > 0 and pick(0) > 0 {\n  say "Both."\n}\nexit\n';
+    const { plan: files } = engine.compileProject(
+      [
+        {
+          path: "main.tease",
+          source:
+            'global function pick(ignore) {\n  return load("right", default: 0)\n}\nsave 1 as "right"\n' +
+            'showButton "Go"\ngoto "other.tease"\n',
+        },
+        { path: "other.tease", source: other },
+      ],
+      { builtins: [] },
+    );
+    assert.ok(isRecord(files));
+    const across = explore(engine, files, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["other.tease", other]]),
+      diagnostics: [],
+    }).coverage.unvisitedBranches.flatMap((entry) => entry.parts.map((part) => part.needs));
+    assert.ok(
+      across.every((need) => !/[!=]= true/u.test(need)),
+      JSON.stringify(across),
+    );
   },
 );
 

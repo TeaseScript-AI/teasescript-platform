@@ -66,8 +66,9 @@ export function successors(
   const entry = (id: unknown) => functions[Number(id) - 1]?.entryInstruction;
   const functionOf = new Map<number, number>();
   for (const definition of functions) {
+    // A function's instructions run from its entry up to, not including, its end.
     const end = Number(definition.endInstruction);
-    for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+    for (let index = Number(definition.entryInstruction); index < end; index += 1)
       functionOf.set(index, Number(definition.id));
   }
   const returnPoints = new Map<number, number[]>();
@@ -384,7 +385,7 @@ export class DataFlow {
     const functionOf = this.#functionOf;
     for (const definition of functions) {
       const end = Number(definition.endInstruction);
-      for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+      for (let index = Number(definition.entryInstruction); index < end; index += 1)
         functionOf.set(index, Number(definition.id));
     }
     for (const instruction of instructions)
@@ -479,8 +480,9 @@ export class DataFlow {
   heldAt(temporaryId: number, at: number): unknown {
     const owner = this.functionAt(at);
     for (let index = at - 1; index >= 0 && index >= at - HELD_WINDOW; index -= 1) {
-      if (this.functionAt(index) !== owner) return null;
       const instruction = record(this.#instructions[index]);
+      // Another function's code, or another file's: the `end` that closes a file's own code.
+      if (this.functionAt(index) !== owner || instruction.kind === "end") return null;
       if (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId)
         return instruction.value;
       if (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId)
@@ -1141,22 +1143,24 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     source.kind === "storage" && at !== undefined
       ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
       : source;
-  // A temporary that holds a truth the code computes, as a short-circuit `a and b` or `a or b` lowers to, holds what
-  // the way taken to the condition left there: no stored value to make true. Its atom is left out; the keys and clock
-  // it reads stay as dependencies (below).
-  const atoms = atomsFor(condition, wanted, true).filter((atom) => {
-    const subject = record(atom.subject);
-    if (
-      at === undefined ||
-      atom.against !== undefined ||
-      atom.operator !== "==" ||
-      atom.constant !== true ||
-      subject.kind !== "temporary" ||
-      typeof subject.temporaryId !== "number"
-    )
-      return true;
-    const held = record(flow.heldAt(subject.temporaryId, at));
-    return !comparesTruth(held) && held.kind !== "temporary";
+  // A temporary's truth compared with `true` or `false` is read through what the nearest stores before the condition
+  // put there, also through a temporary copied into it. A truth the code computes, as a short-circuit `a and b` or
+  // `a or b` lowers to, holds what the way taken left there: no stored value to make true, so the atom is left out and
+  // the keys and clock it reads stay dependencies (below). A value the code tests (`load(...) and f()`) is the atom's
+  // subject instead of the temporary, which merges every value it held. A call's result stays as it was.
+  const atoms = atomsFor(condition, wanted, true).flatMap((atom): Atom[] => {
+    let subject = record(atom.subject);
+    if (at === undefined || atom.against !== undefined || typeof atom.constant !== "boolean")
+      return [atom];
+    let held: unknown = null;
+    for (let depth = 0; depth < 8 && subject.kind === "temporary"; depth += 1) {
+      if (typeof subject.temporaryId !== "number") break;
+      held = flow.heldAt(subject.temporaryId, at);
+      if (held === null) return [atom];
+      subject = record(held);
+    }
+    if (held === null) return [atom];
+    return comparesTruth(held) ? [] : [{ ...atom, subject: held }];
   });
   for (const atom of atoms) {
     if (atom.against !== undefined) {

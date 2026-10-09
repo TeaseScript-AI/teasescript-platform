@@ -2061,7 +2061,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   for (const definition of list(plan.functions))
     for (
       let index = Number(definition.entryInstruction);
-      index <= Number(definition.endInstruction);
+      index < Number(definition.endInstruction);
       index += 1
     )
       functionAt[index] = Number(definition.id);
