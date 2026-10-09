@@ -7,7 +7,7 @@
  *          [--workers 1|2] [--until-stalled]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
- *          [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>
+ *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -21,10 +21,10 @@
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
  * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too), and conjunctive
- * steering (a way that needs all parts of its condition is steered to by their summed distance), and random choices (the
- * explorer also chooses other outcomes of random draws) are on by default (`--no-cells`, `--no-later`,
- * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
- * off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
+ * steering (a way that needs all parts of its condition is steered to by their summed distance), random choices (the
+ * explorer also chooses other outcomes of random draws), and depth phases (play work goes to session numbers by their
+ * gain per operation) are on by default (`--no-cells`, `--no-later`, `--no-progress-leads`, `--no-compared-answers`,
+ * `--no-realign`, `--no-conjunctive`, `--no-random-choices`, `--no-depth-phases` switch them off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -78,6 +78,7 @@ const STRATEGIES = [
   "guidance",
   "randomChoices",
   "quitAnywhere",
+  "depthPhases",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -142,6 +143,7 @@ async function main(args: string[]): Promise<void> {
       guidance: { type: "boolean", default: false },
       "random-choices": { type: "boolean", default: true },
       "quit-anywhere": { type: "boolean", default: false },
+      "depth-phases": { type: "boolean", default: true },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -199,7 +201,7 @@ async function main(args: string[]): Promise<void> {
         "         [--workers 1|2] [--until-stalled]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
-        "         [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -245,6 +247,7 @@ async function main(args: string[]): Promise<void> {
             guidance: values.guidance,
             randomChoices: values["random-choices"],
             quitAnywhere: values["quit-anywhere"],
+            depthPhases: values["depth-phases"],
           },
         },
         out,
@@ -293,6 +296,7 @@ interface RunSettings {
     guidance: boolean;
     randomChoices: boolean;
     quitAnywhere: boolean;
+    depthPhases: boolean;
   };
 }
 
@@ -856,6 +860,7 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     }
     lines.push(
       ...sessionDepths(fields(fields(report.search).bySession), fields(coverage.bySession)),
+      ...depthPhases(fields(fields(report.search).phases)),
     );
     lines.push(...workingToward(records(coverage.unvisitedBranches)));
     lines.push(
@@ -941,6 +946,30 @@ function sessionDepths(
       (files.length === 0
         ? ""
         : `; most in ${files.map((file) => `\`${text(file.path)}\` ${count(file.notFirst)}`).join(", ")}`),
+  ];
+}
+
+/** With depth phases: when each session number opened, and its share of the play work and the lines it reached first. */
+function depthPhases(phases: Readonly<Record<string, unknown>>): string[] {
+  if (!Array.isArray(phases.openedAt)) return [];
+  const work = Array.isArray(phases.playOperations) ? phases.playOperations.map(count) : [];
+  const gain = Array.isArray(phases.playGain) ? phases.playGain.map(count) : [];
+  const total = work.reduce((sum, value) => sum + value, 0);
+  const opened = phases.openedAt
+    .map((at, index) => ({ at, session: index + 1 }))
+    .filter(({ at, session }) => typeof at === "number" && session > 1)
+    .slice(0, SESSION_ROWS - 1);
+  return [
+    `- Depth phases: ${opened.length === 0 ? "only session 1 opened" : opened.map(({ at, session }) => `session ${session} opened after ${count(at)} operations`).join(", ")}; ` +
+      `play work by session ${work
+        .slice(0, SESSION_ROWS)
+        .map(
+          (value, index) =>
+            `${index + 1}: ${total === 0 ? 0 : Math.round((value / total) * 100)}% (${gain[index] ?? 0} new)`,
+        )
+        .join(
+          ", ",
+        )}; exploration turns ${total === 0 ? 0 : Math.round((count(phases.explorationOperations) / total) * 100)}%`,
   ];
 }
 

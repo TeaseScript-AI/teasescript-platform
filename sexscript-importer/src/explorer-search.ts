@@ -116,6 +116,12 @@ const RANDOM_DRAWS_PER_STEP = 4;
  */
 const CHOSEN_SHARE = 1 / 16;
 /**
+ * With depth phases: the share of play work that goes to the open depths other than the one gaining most, each in turn,
+ * so that a depth whose gain rises again is seen. An eighth, as for a chain's routes: most work goes to the depth gaining
+ * most, and every open depth is measured again now and then.
+ */
+const DEPTH_EXPLORE_SHARE = 1 / 8;
+/**
  * Until stalled: the operations without progress after which a run stops, at least, and more per coverable line; and
  * how many times the longest stretch without progress that progress still ended the window grows to.
  */
@@ -309,6 +315,18 @@ export interface ExploreOptions {
    * the values of the keys conditions compare and their changes in its session. Off by default.
    */
   readonly quitAnywhere?: boolean;
+  /**
+   * Depth phases: the search decides how its play work goes to session numbers (depths) by their gain per operation,
+   * new lines and condition ways, instead of fixed shares. A new player's first session goes first; the next depth opens
+   * when the deepest open one levels off (in the last quarter of its play work, under half its average gain per
+   * operation) and left storage of completed sessions to start from, and then gets a quarter of that depth's work first.
+   * After that the open depth with the most gain per operation in the last quarter of its own work gets play, and an
+   * eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets
+   * work back when it gains again. A depth starts a next session (from the storage with the most compared values no
+   * session of that depth started from had) when none of its open states reached new code. Directed work and random
+   * outcomes keep their shares. Off by default.
+   */
+  readonly depthPhases?: boolean;
   /**
    * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
    * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
@@ -650,6 +668,18 @@ export interface ExploreResult {
       waysFirst: number[];
       closer: number[];
     };
+    /**
+     * With depth phases, by session number as `bySession`: the operations at which each depth opened (null for one that
+     * did not), the play work of its expansions and next sessions, the lines and ways they reached first, the next
+     * sessions it started, and the play work of exploration turns in all.
+     */
+    phases?: {
+      openedAt: (number | null)[];
+      playOperations: number[];
+      playGain: number[];
+      nextSessions: number[];
+      explorationOperations: number;
+    };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -877,6 +907,101 @@ class SplitFrontier {
     return this.#chosen.size > 0 && (this.#play.size === 0 || this.#turn())
       ? this.#chosen.pop()
       : this.#play.pop();
+  }
+}
+
+/**
+ * Open states with depth phases ({@link ExploreOptions.depthPhases}): those with a lead, those after a chosen random
+ * outcome, and the others by their session number, each in its own queue, so that the search chooses the depth to
+ * expand. A depth also counts its open states whose step reached new code.
+ */
+class DepthFrontier {
+  readonly #lead: Pick<Frontier, "size" | "push" | "pop">;
+  readonly #chosen: Pick<Frontier, "size" | "push" | "pop">;
+  readonly #depths: Pick<Frontier, "size" | "push" | "pop">[] = [];
+  readonly #fresh: number[] = [];
+  readonly #freshNodes = new Set<number>();
+  readonly #make: () => Pick<Frontier, "size" | "push" | "pop">;
+  readonly #depthOf: (node: number) => number;
+  readonly #isChosen: (node: number) => boolean;
+  #size = 0;
+
+  constructor(
+    make: (chosen: boolean) => Pick<Frontier, "size" | "push" | "pop">,
+    depthOf: (node: number) => number,
+    isChosen: (node: number) => boolean,
+  ) {
+    this.#lead = make(false);
+    this.#chosen = make(true);
+    this.#make = () => make(false);
+    this.#depthOf = depthOf;
+    this.#isChosen = isChosen;
+  }
+
+  get size(): number {
+    return this.#size;
+  }
+
+  get leads(): number {
+    return this.#lead.size;
+  }
+
+  get chosen(): number {
+    return this.#chosen.size;
+  }
+
+  /** The open states of a depth, and those of them whose step reached new code. */
+  sizeOf(depth: number): number {
+    return this.#depths[depth]?.size ?? 0;
+  }
+
+  freshOf(depth: number): number {
+    return this.#fresh[depth] ?? 0;
+  }
+
+  /** The deepest depth with a queue. */
+  get deepest(): number {
+    return this.#depths.length - 1;
+  }
+
+  /** Queues a state at `rank` (see `order`): by its lead (`rank[1]` 0), its chosen outcome, or else its depth. */
+  push(node: number, rank: readonly number[]): void {
+    this.#size += 1;
+    if (this.#isChosen(node)) return this.#chosen.push(node, rank);
+    if (rank[1] === 0) return this.#lead.push(node, rank);
+    const depth = this.#depthOf(node);
+    while (this.#depths.length <= depth) this.#depths.push(this.#make());
+    this.#depths[depth]!.push(node, rank);
+    if (rank[2] === 0 && !this.#freshNodes.has(node)) {
+      this.#freshNodes.add(node);
+      this.#fresh[depth] = (this.#fresh[depth] ?? 0) + 1;
+    }
+  }
+
+  popLead(): number | undefined {
+    return this.#taken(this.#lead.pop());
+  }
+
+  popChosen(): number | undefined {
+    return this.#taken(this.#chosen.pop());
+  }
+
+  /** The first state with a lead, else after a chosen outcome, else of the shallowest depth. */
+  pop(): number | undefined {
+    if (this.#lead.size > 0) return this.popLead();
+    const depth = this.#depths.findIndex((queue) => queue !== undefined && queue.size > 0);
+    return depth >= 0 ? this.popDepth(depth) : this.popChosen();
+  }
+
+  popDepth(depth: number): number | undefined {
+    const node = this.#taken(this.#depths[depth]?.pop());
+    if (node !== undefined && this.#freshNodes.delete(node)) this.#fresh[depth]! -= 1;
+    return node;
+  }
+
+  #taken(node: number | undefined): number | undefined {
+    if (node !== undefined) this.#size -= 1;
+    return node;
   }
 }
 
@@ -1120,6 +1245,20 @@ class Cells {
       this.expansions.push(0);
     }
     return { cell, values, novel, fresh };
+  }
+
+  /** The compared values of a storage: each stored key a slot matches, with its value's bucket for that slot. */
+  storageValues(entries: readonly StorageEntry[]): string[] {
+    const values: string[] = [];
+    for (const { key, value } of entries) {
+      let slots = this.#byKey.get(key);
+      if (slots === undefined) {
+        slots = this.#patterns.filter(({ matches }) => matches(key)).map(({ slot }) => slot);
+        this.#byKey.set(key, slots);
+      }
+      for (const slot of slots) values.push(`${slot}:${key}=${bucket(this.slots[slot]!, value)}`);
+    }
+    return values;
   }
 }
 
@@ -1601,15 +1740,26 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         : cells.expansions[node.cell]!;
   const queue = (expansions: (cell: number) => number): Pick<Frontier, "size" | "push" | "pop"> =>
     cells === null ? new Frontier() : new CellFrontier((node) => nodes[node]!.cell, expansions);
-  // Also for a corpus whose paths chose outcomes: their states keep to their share as well.
-  const frontier = session.randomChoices
-    ? new SplitFrontier(
-        queue((cell) => cells?.expansions[cell] ?? 0),
-        queue((cell) => chosenExpansions[cell] ?? 0),
+  const phased = options.depthPhases === true;
+  const depthFrontier = phased
+    ? new DepthFrontier(
+        (chosen) =>
+          queue((cell) => (chosen ? chosenExpansions[cell] : cells?.expansions[cell]) ?? 0),
+        (node) => starts[nodes[node]!.start]!.session,
         (node) => nodes[node]!.chosen,
-        () => withinChosenShare(),
       )
-    : queue((cell) => cells?.expansions[cell] ?? 0);
+    : null;
+  // Also for a corpus whose paths chose outcomes: their states keep to their share as well.
+  const frontier: Pick<Frontier, "size" | "push" | "pop"> =
+    depthFrontier ??
+    (session.randomChoices
+      ? new SplitFrontier(
+          queue((cell) => cells?.expansions[cell] ?? 0),
+          queue((cell) => chosenExpansions[cell] ?? 0),
+          (node) => nodes[node]!.chosen,
+          () => withinChosenShare(),
+        )
+      : queue((cell) => cells?.expansions[cell] ?? 0));
   const crashes = new Map<string, CrashReport>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
@@ -1893,6 +2043,41 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       lineIds[index] = id;
     });
   }
+  /**
+   * With depth phases ({@link ExploreOptions.depthPhases}), per depth: the play work its expansions and next sessions
+   * took, the lines and condition ways they reached first, marks of both at each analysis pass, its work in exploration
+   * turns, the work it still gets first after it opened, and the next sessions it started; then the deepest open depth,
+   * the operations at which each depth opened, all play work, the work of exploration turns, and the storages left to
+   * start a next session of each depth from.
+   */
+  const depths: {
+    work: number;
+    gain: number;
+    readonly marks: { work: number; gain: number }[];
+    explored: number;
+    owed: number;
+    seeds: number;
+  }[] = [];
+  const depthOf = (depth: number) =>
+    (depths[depth] ??= {
+      work: 0,
+      gain: 0,
+      marks: [{ work: 0, gain: 0 }],
+      explored: 0,
+      owed: 0,
+      seeds: 0,
+    });
+  let deepestOpen = 1;
+  const openedAt: number[] = [0, 0];
+  let playWork = 0;
+  let explorationWork = 0;
+  const pendingSeeds: number[] = [];
+  /** Lines reached first and condition ways taken first so far, by any step. */
+  let gainCount = 0;
+  /** A storage a session of `depth` left that a session of the next depth can start from. */
+  const seedLeft = (depth: number): void => {
+    pendingSeeds[depth + 1] = (pendingSeeds[depth + 1] ?? 0) + 1;
+  };
   const lineFirst = new Uint16Array(lineFiles.length);
   const lineFirstWork = new Float64Array(lineFiles.length);
   const lineLeast = new Uint16Array(lineFiles.length);
@@ -2050,6 +2235,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const line = lineIds[instruction] ?? -1;
         if (line < 0) continue;
         if (lineFirst[line] === 0) {
+          gainCount += 1;
           lineFirst[line] = depth;
           lineFirstWork[line] = depthWork[depth] ?? 0;
           lineLeast[line] = depth;
@@ -2116,7 +2302,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
     const newWay = step.ways.some((way) => waysTaken[way] === 0);
-    if (newWay) depthWays[depth] = (depthWays[depth] ?? 0) + 1;
+    if (newWay) {
+      depthWays[depth] = (depthWays[depth] ?? 0) + 1;
+      gainCount += 1;
+    }
     for (const way of step.ways) waysTaken[way] = 1;
     if (step.newInstructions > 0) progressed("code");
     else if (newWay) progressed("ways");
@@ -2214,6 +2403,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         completedLeft.push(left.length - 1);
         completedKeys.add(key);
       }
+      if (node.status === "completed" || quitAnywhere) seedLeft(starts[node.start]!.session);
       return;
     }
     if (node.status !== "completed" || completedKeys.has(key)) return;
@@ -2225,6 +2415,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       sessions: starts[node.start]!.session,
     });
     completedLeft.push(left.length - 1);
+    if (!quitAnywhere) seedLeft(starts[node.start]!.session);
   };
 
   /**
@@ -2871,6 +3062,167 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return guard;
   };
 
+  /** A next visit from the storage a state left: a minute later, and in the windows of the comparisons read. */
+  const visitFrom = (entry: (typeof left)[number], key: string, completed: boolean): void => {
+    if (quitAnywhere)
+      for (const cell of cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage))
+        seedCells.add(cell);
+    const work = session.operations;
+    if (later) {
+      // A minute later; then in the windows of the clock comparisons sessions read (`sessionGaps`), as its first
+      // state reads them; a day later when none can be read.
+      const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
+      const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
+      const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
+      const now = wallEnd[first.node.id]!;
+      // A quit visit gets the windows read so far once, not again as sessions read more.
+      if (snapshot !== null && completed) sessionOrigins.push({ key, entry, snapshot, now, begun });
+      const steps =
+        snapshot === null
+          ? []
+          : sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
+      for (const gap of steps)
+        startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
+      timeStepsTaken.sessions += steps.length;
+      if (steps.length === 0 && readsClock)
+        startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
+    } else
+      startSession(
+        {
+          origin: entry.node,
+          storage: entry.entries,
+          wallClockMs: EPOCH_MS,
+          session: entry.sessions + 1,
+        },
+        null,
+      );
+    nextWork += session.operations - work;
+  };
+
+  /** With depth phases: a depth's gain per operation in the last quarter of its own play work (as marked). */
+  const recentRate = (depth: number): number => {
+    const known = depthOf(depth);
+    if (known.work === 0) return Infinity;
+    const from = known.marks.findLast((mark) => mark.work <= known.work * 0.75) ?? known.marks[0]!;
+    return (known.gain - from.gain) / (known.work - from.work);
+  };
+  /** Opens the depths down to `depth`; the deepest gets `owed` play work first. */
+  const openDepth = (depth: number, owed: number): void => {
+    for (let next = deepestOpen + 1; next <= depth; next += 1) openedAt[next] = session.operations;
+    deepestOpen = depth;
+    depthOf(depth).owed = owed;
+  };
+  /**
+   * At each analysis pass: marks each depth's work and gain, and opens the next depth when the deepest open one levels
+   * off (in the last quarter of its work, at most half its average gain per operation) and storage to start from is left.
+   */
+  const markDepths = (): void => {
+    for (const known of depths)
+      if (known !== undefined && known.work > known.marks.at(-1)!.work)
+        known.marks.push({ work: known.work, gain: known.gain });
+    // A depth with nothing left to expand or start from has levelled off too; one that reached nothing new opens none.
+    const deepest = depthOf(deepestOpen);
+    const idle = depthFrontier!.sizeOf(deepestOpen) === 0 && (pendingSeeds[deepestOpen] ?? 0) === 0;
+    if (
+      deepest.gain > 0 &&
+      (pendingSeeds[deepestOpen + 1] ?? 0) > 0 &&
+      (idle ||
+        (deepest.owed <= 0 &&
+          deepest.work > 0 &&
+          recentRate(deepestOpen) <= deepest.gain / deepest.work / 2))
+    )
+      openDepth(deepestOpen + 1, deepest.work / 4);
+  };
+  const charge = (depth: number, work: number, gain: number, exploring: boolean): void => {
+    const known = depthOf(depth);
+    known.work += work;
+    known.gain += gain;
+    known.owed -= work;
+    playWork += work;
+    if (!exploring) return;
+    known.explored += work;
+    explorationWork += work;
+  };
+  /**
+   * The depth whose play goes next, among the open ones with open states or storage to start from, and whether it is
+   * an exploration turn; when the open depths have nothing left, the next depth with something opens; null when none.
+   */
+  const chooseDepth = (): { depth: number; exploring: boolean } | null => {
+    const frontierOf = depthFrontier!;
+    const has = (depth: number) => frontierOf.sizeOf(depth) > 0 || (pendingSeeds[depth] ?? 0) > 0;
+    const open: number[] = [];
+    for (let depth = 1; depth <= deepestOpen; depth += 1) if (has(depth)) open.push(depth);
+    // Nothing left in the open depths: the next with open states opens, such as states of chain sessions, or the next
+    // one to start from when the deepest open one reached something new.
+    if (open.length === 0) {
+      const next = deepestOpen + 1;
+      const opens =
+        depthOf(deepestOpen).gain > 0 && (pendingSeeds[next] ?? 0) > 0
+          ? next
+          : Array.from(
+              { length: frontierOf.deepest - deepestOpen },
+              (_, index) => next + index,
+            ).find((depth) => frontierOf.sizeOf(depth) > 0);
+      if (opens === undefined) return null;
+      openDepth(opens, 0);
+      open.push(opens);
+    }
+    const owed = open.findLast((depth) => depthOf(depth).owed > 0);
+    if (owed !== undefined) return { depth: owed, exploring: false };
+    const [best, ...others] = open.sort(
+      (left, right) => recentRate(right) - recentRate(left) || left - right,
+    );
+    if (others.length > 0 && explorationWork < playWork * DEPTH_EXPLORE_SHARE) {
+      const [least] = others.sort(
+        (left, right) => depthOf(left).explored - depthOf(right).explored || left - right,
+      );
+      return { depth: least!, exploring: true };
+    }
+    return { depth: best!, exploring: false };
+  };
+  /**
+   * Starts a next session of `depth` from the storage a session of the depth before left, of those not started from:
+   * the one with the most compared values no session of `depth` started from had, completed sessions' first. False
+   * when none is left.
+   */
+  const seededValues: Set<string>[] = [];
+  const valuesOfLeft = new Map<number, readonly string[]>();
+  const startSeed = (depth: number, exploring: boolean): boolean => {
+    const seen = (seededValues[depth] ??= new Set());
+    let best: number | null = null;
+    let bestNew = -1;
+    const consider = (index: number) => {
+      const entry = left[index]!;
+      if (entry.sessions !== depth - 1 || startedFrom.has(entry.key)) return;
+      let values = valuesOfLeft.get(index);
+      if (values === undefined) {
+        values = cells?.storageValues(entry.entries) ?? [];
+        valuesOfLeft.set(index, values);
+      }
+      const fresh = values.filter((value) => !seen.has(value)).length;
+      if (fresh > bestNew) {
+        best = index;
+        bestNew = fresh;
+      }
+    };
+    for (const index of completedLeft) consider(index);
+    if (quitAnywhere) left.forEach((_, index) => consider(index));
+    if (best === null) {
+      pendingSeeds[depth] = 0;
+      return false;
+    }
+    const entry = left[best]!;
+    startedFrom.add(entry.key);
+    pendingSeeds[depth] = Math.max(0, (pendingSeeds[depth] ?? 0) - 1);
+    for (const value of valuesOfLeft.get(best) ?? []) seen.add(value);
+    depthOf(depth).seeds += 1;
+    const work = session.operations;
+    const gain = gainCount;
+    visitFrom(entry, entry.key, completedKeys.has(entry.key));
+    charge(depth, session.operations - work, gainCount - gain, exploring);
+    return true;
+  };
+
   /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
   const analyze = (): boolean => {
     storageMaps.clear();
@@ -2937,45 +3289,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
       scheduled = schedule(code, target) || scheduled;
     });
-    /** A next visit from the storage a state left: a minute later, and in the windows of the comparisons read. */
-    const visitFrom = (entry: (typeof left)[number], key: string, completed: boolean): void => {
-      if (quitAnywhere)
-        for (const cell of cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage))
-          seedCells.add(cell);
-      const work = session.operations;
-      if (later) {
-        // A minute later; then in the windows of the clock comparisons sessions read (`sessionGaps`), as its first
-        // state reads them; a day later when none can be read.
-        const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
-        const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
-        const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
-        const now = wallEnd[first.node.id]!;
-        // A quit visit gets the windows read so far once, not again as sessions read more.
-        if (snapshot !== null && completed)
-          sessionOrigins.push({ key, entry, snapshot, now, begun });
-        const steps =
-          snapshot === null
-            ? []
-            : sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
-        for (const gap of steps)
-          startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
-        timeStepsTaken.sessions += steps.length;
-        if (steps.length === 0 && readsClock)
-          startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
-      } else
-        startSession(
-          {
-            origin: entry.node,
-            storage: entry.entries,
-            wallClockMs: EPOCH_MS,
-            session: entry.sessions + 1,
-          },
-          null,
-        );
-      nextWork += session.operations - work;
-    };
-    // A few next sessions from what completed sessions stored, as the player's next visit.
-    for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
+    // A few next sessions from what completed sessions stored, as the player's next visit; with depth phases, a depth
+    // starts them when it needs one (see `startSeed`).
+    for (; !phased && nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
       // With quit-anywhere next visits, completed ones have their own count.
       if (
         (quitAnywhere
@@ -2994,7 +3310,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     // With quit-anywhere next visits, one per pass from the storage of a state a session did not complete: the one with
     // the most stored cells no next visit started from had.
-    if (quitAnywhere && quitVisits < MAX_QUIT_SESSIONS && withinNextShare()) {
+    if (!phased && quitAnywhere && quitVisits < MAX_QUIT_SESSIONS && withinNextShare()) {
       let best: number | null = null;
       let bestNew = 0;
       left.forEach((entry, index) => {
@@ -3428,6 +3744,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       sinceAnalysis = 0;
       analyzedAt = performance.now();
       analyzedOps = session.operations;
+      if (phased) markDepths();
       analyze();
       guide();
     }
@@ -3457,14 +3774,41 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       chosenAt += 1;
       continue;
     }
-    if (frontier.size === 0) {
+    // With depth phases, the states with a lead first, then those after a chosen outcome in their turn, then the depth
+    // chosen; a depth whose open states reached no new code starts a next session first when it can.
+    let turn: { depth: number; exploring: boolean } | null = null;
+    let picked: number | undefined;
+    if (depthFrontier !== null) {
+      if (depthFrontier.leads > 0) picked = depthFrontier.popLead();
+      else if (depthFrontier.chosen > 0 && withinChosenShare()) picked = depthFrontier.popChosen();
+      else {
+        turn = chooseDepth();
+        if (turn === null) {
+          if (depthFrontier.chosen > 0) picked = depthFrontier.popChosen();
+          else if (analyze()) continue;
+          else break;
+        } else if (
+          depthFrontier.freshOf(turn.depth) === 0 &&
+          (pendingSeeds[turn.depth] ?? 0) > 0 &&
+          startSeed(turn.depth, turn.exploring)
+        )
+          continue;
+        else if (depthFrontier.sizeOf(turn.depth) === 0) continue;
+        else picked = depthFrontier.popDepth(turn.depth);
+      }
+    } else if (frontier.size === 0) {
       if (analyze()) continue;
       break;
-    }
-    const node = nodes[frontier.pop()!]!;
+    } else picked = frontier.pop();
+    const node = nodes[picked!]!;
     if (node.status !== "open") continue;
+    // With depth phases, a state whose lead was spent goes back to its depth.
+    if (depthFrontier !== null && turn === null && !node.chosen && !leads(node)) {
+      frontier.push(node.id, order(node));
+      continue;
+    }
     // A lead that was spent, or whose target was reached, gives its states back their own place.
-    if (node.lead !== null && !leads(node) && frontier.size > 0) {
+    if (depthFrontier === null && node.lead !== null && !leads(node) && frontier.size > 0) {
       const own = order(node);
       const next = frontier.pop()!;
       frontier.push(next, order(nodes[next]!));
@@ -3476,6 +3820,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const leading = leads(node);
     if (leading && node.lead !== null) node.lead.remaining -= 1;
     let refunded = false;
+    const workBefore = session.operations;
+    const gainBefore = gainCount;
     // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
     const tagged = store.getTagged(node.id);
     const base = tagged === null ? replayTo(node) : restore(node, tagged);
@@ -3589,6 +3935,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         at.inputs.add(inputKey(input));
       }
     }
+    if (turn !== null && !leading)
+      charge(turn.depth, session.operations - workBefore, gainCount - gainBefore, turn.exploring);
     if (cut) {
       node.status = "open";
       node.left = inputs.filter((input) => node.tried?.has(JSON.stringify(input)) !== true);
@@ -3688,7 +4036,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
   const sessionCount = Math.max(0, ...starts.map((start) => start.session));
   working(depthNow);
-  const bySessionNumber = (value: (depth: number) => number) =>
+  const bySessionNumber = <T>(value: (depth: number) => T): T[] =>
     Array.from({ length: sessionCount }, (_, index) => value(index + 1));
   const bySession = {
     started: bySessionNumber(() => 0),
@@ -3854,6 +4202,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         replays,
       },
       bySession,
+      ...(phased
+        ? {
+            phases: {
+              openedAt: bySessionNumber((depth) => openedAt[depth] ?? null),
+              playOperations: bySessionNumber((depth) => depths[depth]?.work ?? 0),
+              playGain: bySessionNumber((depth) => depths[depth]?.gain ?? 0),
+              nextSessions: bySessionNumber((depth) => depths[depth]?.seeds ?? 0),
+              explorationOperations: explorationWork,
+            },
+          }
+        : {}),
       ...(cells === null ? {} : { cells: cells.stats }),
       ...(map === null
         ? {}

@@ -386,7 +386,21 @@ A step that brings a state nearer to that region shares a lead toward it, as clo
 expansions; once the region is reached or its lead spent, the next largest region not tried yet is. It is off by
 default: on the units measured it gained nothing. Directed work (attempts and expansions in the first place) takes at
 most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
-of what steps cost; starting next visits takes at most another third, apart from it.
+of what steps cost. With `--no-depth-phases`, starting next visits takes at most another third, apart from it, from
+the storage of the first ten completed sessions, and a session number goes before the next one in the search order.
+
+Depth phases (on by default) let the search decide how play work goes to session numbers, the depth of a session from
+a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the lines and
+condition ways those reach first) are measured as the run goes. The first session goes first. The next depth opens when
+the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its average,
+or has nothing left; only a depth that reached something new opens another, and only when a completed session of it
+left storage to start from. A newly opened depth first gets a quarter of the work of the depth before it. Then the
+open depth with the most gain per operation in the last quarter of its work gets play, and an eighth of play goes to
+the other open depths in turn, the one explored least first, so that an earlier depth gets work back when it gains
+again. A depth starts a next session when none of its open states reached new code: from the storage a completed
+session of the depth before left, the one with the most compared values (each compared key's value bucket, as cells
+read them) no session of that depth started from yet. Directed work and random outcomes keep their shares. The report
+gives, per session number, when it opened and its play work, gain, and next sessions (`search.phases`).
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,

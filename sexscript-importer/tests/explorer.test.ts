@@ -973,6 +973,54 @@ test(
 );
 
 test(
+  "with depth phases, a new player's first session goes first until it levels off, then the next session numbers get play work, so content behind steps that reach nothing new in later sessions is reached",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // The first visit goes round a menu without end; the second and third visits each need six presses that run the
+    // same code again before their content.
+    const source =
+      'let visits = load "fx.visits", default: 0\nif visits == 0 {\n  say "Welcome."\n  let rounds = 0\n' +
+      '  let going = true\n  while going {\n    let pick = choose again: "Again", done: "Done"\n' +
+      '    if pick == "done" {\n      going = false\n    }\n    rounds += 1\n  }\n}\n' +
+      'if visits >= 1 {\n  for step in 1..=6 {\n    showButton "Next"\n  }\n  say "Return content."\n}\n' +
+      'if visits >= 2 {\n  for step in 1..=6 {\n    showButton "On"\n  }\n  say "Third visit."\n}\n' +
+      'save visits + 1 as "fx.visits"\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 4000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      cells: true,
+      depthPhases: true,
+    });
+    const visited = (text: string) => {
+      const line = source.split("\n").findIndex((written) => written.includes(text)) + 1;
+      const file = result.coverage.files.find((entry) => entry.path === "main.tease");
+      return !(file?.unvisited ?? []).some(({ lines }) => {
+        const [from = 0, to = from] = lines.split("-").map(Number);
+        return from <= line && line <= to;
+      });
+    };
+    assert.ok(visited("Return content."));
+    assert.ok(visited("Third visit."));
+    const phases = result.search.phases;
+    assert.ok(phases !== undefined);
+    // Session 2 opened after session 1 had play work, and session 3 after session 2; each reached its own lines first.
+    const [first, second = null, third = null] = phases.openedAt;
+    assert.ok(first === 0 && second !== null && third !== null && second > 0 && third > second);
+    assert.ok(phases.playGain[1]! > 0 && phases.playGain[2]! > 0);
+    // A session number that reached nothing new opens no deeper one.
+    assert.ok(phases.openedAt.length < 6);
+  },
+);
+
+test(
   "with forward time, the player continues just past when a clock condition read after a prompt comes out the other way: an hour, a minute, a month, a window of elapsed time, a helper's hour, also without cells",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
