@@ -225,6 +225,12 @@ test("ordering, equality, and set membership compare kind and value", () => {
     `${DYNAMIC}let wrong = dynamic(toDate("2026-10-04")) < dynamic(toTime("14:30"))\nexit`,
   );
   assert.equal(failure?.code, "TSR009");
+  assert.equal(
+    failureOf(
+      `${DYNAMIC}let wrong = dynamic(toAbsoluteDateTime("2026-10-04T12:00:00Z")) < dynamic(toDate("2026-10-04"))\nexit`,
+    )?.message,
+    "'<' orders two values of the same kind, such as two dates or two absolute dates and times, but these are an absolute date and time and a date.",
+  );
 });
 
 test("sort, min, and max order date and time values of one kind", () => {
