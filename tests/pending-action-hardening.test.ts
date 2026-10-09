@@ -169,7 +169,7 @@ test("a settled final delay runs into exit canonically across execute, event ste
 });
 
 test("zero waits remain immediate, also right before exit", () => {
-  const terminalZero = plan("wait 0\nexit");
+  const terminalZero = plan("wait 0 s\nexit");
   const zeroResult = run(terminalZero, createFreshRuntimeSnapshot(terminalZero));
   assert.equal(zeroResult.snapshot.status, "halted");
   assert.equal(zeroResult.snapshot.nextActionId, 1);
@@ -180,7 +180,7 @@ test("zero waits remain immediate, also right before exit", () => {
     ["exit"],
   );
 
-  const visible = plan('wait 0\nsay "visible"\nexit');
+  const visible = plan('wait 0 s\nsay "visible"\nexit');
   const visibleResult = run(visible, createImmediatePacingRuntimeSnapshot(visible));
   assert.equal(visibleResult.snapshot.nextActionId, 1);
   assert.equal(visibleResult.snapshot.foregroundAction, null);
@@ -261,7 +261,7 @@ test("every settlement relationship is validated and valid replay is preserved",
 
 test("wait keeps representable fractional delays and fails precision-losing deadlines before an action request", () => {
   const conversions: ReadonlyArray<readonly [string, number]> = [
-    ["wait 0.5", 500],
+    ["wait 0.5 s", 500],
     ["wait 0.5 ms", 0.5],
     ["wait 0.0005 s", 0.5],
     ["wait 0.000008333333333333334 min", 0.5],
@@ -352,7 +352,7 @@ test("wait uses the keyword path, and validation rejects forged ownership and mi
       delay.foregroundAction?.kind === "delay" && delay.foregroundAction.deadlineMs === 1000,
     );
   }
-  assert.equal(compileSource("wait (1 + 2)\nexit").diagnostics.length, 0);
+  assert.equal(compileSource("wait (1 + 2) s\nexit").diagnostics.length, 0);
 
   const functionWait = waiting("function pause { wait 1 ms }\npause()\nexit");
   const forgedOwner = mutable(functionWait.snapshot);

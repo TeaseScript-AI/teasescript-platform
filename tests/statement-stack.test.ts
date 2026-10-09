@@ -28,7 +28,7 @@ test("nested statements traverse each stage and resume active scopes on a constr
         }
         prefix+=open;suffix=close+suffix;
       }
-      let body='result=randomInteger(1..9)\nwait 1\nsay result, instant\n';
+      let body='result=randomInteger(1..9)\nwait 1 s\nsay result, instant\n';
       if(family==='else if') body='if true {\n'+body+'}\n';
       let source='let result=0\n'+prefix+body+suffix+'say "done", instant\nexit';
       if(family==='function') source='let result=0\nfunction work {\n'+prefix+body+suffix+'return result\n}\nlet answer=work()\nsay answer, instant\nexit';

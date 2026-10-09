@@ -74,7 +74,7 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Generalized elapsed-duration range precision and locale-aware duration presentation beyond the implemented slice.
 - Final scheduled-event author syntax and object/handle API under specification §36.
 - The time features that [ADR 0026](decisions/0026-unified-time-semantics.md#not-decided) leaves open: anchored
-  conversion with explicit zones, units after arbitrary expressions, duration asks, and `waitUntil`.
+  conversion with explicit zones, duration asks, and `waitUntil`.
 
 ## Editor and authoring
 

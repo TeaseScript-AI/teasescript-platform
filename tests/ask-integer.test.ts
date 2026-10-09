@@ -172,7 +172,7 @@ test("a handed-off askInteger result must be a safe whole number", () => {
     'let level = 7\nlet count = askInteger "How many?", prefill: level',
   ]) {
     const plan = compileValidPlan(
-      `timer async 1 { say "handler", 2 }\n${ask}\nsay count, instant\nexit`,
+      `timer async 1 s { say "handler", 2 s }\n${ask}\nsay count, instant\nexit`,
     );
     let snapshot = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
     snapshot = run(plan, observeTime(plan, snapshot, 1_000).snapshot).snapshot;

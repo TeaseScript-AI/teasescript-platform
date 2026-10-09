@@ -808,7 +808,7 @@ say "Fixed text"
 say "Text with ${playerName}"
 say message
 say greetings
-wait 2
+wait 2 s
 playAudio "door.mp3"
 ```
 
@@ -1205,8 +1205,9 @@ Every other change of type is explicit:
 - Booleans and numbers never convert into each other.
 - A number never becomes an `integer` by itself; `round`, `floor`, or `ceil` makes it whole.
 - A duration needs a unit: `let pause: duration = 5`, `pause = 10`, and `pause + 5` are compile errors that suggest
-  `5 s`. A bare number counts as seconds only in commands that expect a time: `wait`, `timer`, the `showButton`
-  timeout, and media positions.
+  `5 s`. So does a number where a command expects a time, as in `wait 5`, `timer 10`, `timeout: 30`, `say "x", 3`, or
+  `startAt: 30`. A number never counts as seconds ([§27](#27-timers),
+  [ADR 0026](../decisions/0026-unified-time-semantics.md#8-explicit-units-for-time-quantities)).
 
 Values become visible text in `${...}` and `say` as described in [§8](#8-strings-and-interpolation).
 
@@ -2342,7 +2343,7 @@ let answers = askForm "Ready?", fields: { ready: false }
 let took = getAbsoluteDateTime() - asked
 ```
 
-`timeout:`, a number of seconds or an elapsed duration as for `showButton` ([§21](#21-blocking-button)), with
+`timeout:`, an exact duration greater than zero as for `showButton` ([§21](#21-blocking-button)), with
 `onTimeout: "submit"` or `onTimeout: "cancel"`, gives the form a time limit; each needs the other. When it is reached
 the form closes without a transcript line: `"submit"` returns the answers as they stand, without the text still being
 edited, and needs a value in every field from the start, which the compiler checks for fields written where the form
@@ -2672,7 +2673,7 @@ including `as speaker` and `background:`:
 
 ```text
 showButton "Continue"
-showButton "Continue", timeout: 5
+showButton "Continue", timeout: 5 s
 let elapsed = showButton "Continue", timeout: 30 s
 if elapsed < 2 s {
     say "That was quick."
@@ -2681,18 +2682,19 @@ if elapsed < 2 s {
 
 Rules:
 
-- `timeout` is optional. A bare number counts seconds, as for `wait` and `timer` ([§27](#27-timers)); an elapsed
-  duration such as `500 ms` or `2 min` may also be used. `5` and `5 s` are the same timeout.
+- `timeout` is optional and an exact duration such as `5 s`, `500 ms`, or `2 min`. A number without a unit is a compile
+  error that names the fix, as for `wait` and `timer` ([§27](#27-timers)).
 - Without a timeout, the command waits until the user clicks.
 - With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
   button without a chat message.
 - The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-and-durations)),
   measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
-  timeout; a timeout of `5` returns `5 s`.
+  timeout.
 - If the caller does not need the elapsed time, the return value may be ignored.
-- A zero, negative, or non-numeric timeout, or a calendar duration, is an error. The compiler rejects a timeout
-  it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime error.
-- The parenthesized forms `showButton("Continue", 5)` and `showButton(text: "Continue", timeout: 5)` are deferred
+- A zero or negative timeout, a value that is not a duration, or a calendar duration, is an error. The compiler rejects
+  a timeout it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime
+  error.
+- The parenthesized forms `showButton("Continue", 5 s)` and `showButton(text: "Continue", timeout: 5 s)` are deferred
   until parenthesized interaction calls are needed.
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
@@ -2749,7 +2751,7 @@ let music = playAudio(
 ```
 
 `file` is required and evaluates to a reference string or `null`; `async` is the literal `true` or `false`. `startAt`,
-`endAt`, `at`, and `beforeEnd` accept non-negative exact durations or numbers of seconds. `startAt` and `endAt` default
+`endAt`, `at`, and `beforeEnd` accept non-negative exact durations. `startAt` and `endAt` default
 to the start and end of the file and define the active playback range; a supplied `endAt` must be later than
 `startAt`, and the effective end is limited to the source duration. `volume` is a number from `0` through `1` and
 defaults to `1`.
@@ -3117,7 +3119,7 @@ compiler can see it, and runtime error `TSR044` otherwise. A list has no two-var
 
 ```text
 while player.health > 0 {
-    wait 1
+    wait 1 s
 }
 ```
 
@@ -3331,36 +3333,44 @@ timer and shares its clock, checkpoint, and restore behavior.
 ### Short form
 
 ```text
-wait 10                                   // hidden, blocking
-timer 10                                  // visible, blocking
-timer mystery 5..10 "Hold"                // mystery, blocking, labelled
+wait 10 s                                 // hidden, blocking
+timer 10 s                                // visible, blocking
+timer mystery (5..10) s "Hold"            // mystery, blocking, labelled
 timer async 30 s "Deadline" { ... }       // visible, asynchronous, with an expiry block
 let t = timer async hidden 2 min { ... }  // keeps the handle
 ```
 
-`timer [async] [visible|mystery|hidden] <duration> [unit] ["label"] [{ expiry block }]`: the execution modifier
+`timer [async] [visible|mystery|hidden] <duration> ["label"] [{ expiry block }]`: the execution modifier
 comes first, then the presentation, the duration, an optional string-literal label, and the expiry block. Omitted
 modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden` are recognized only directly after
 `timer`; write `timer (hidden)` to use a variable of that name as the duration.
 
-A duration is a bare number of seconds, a [§35](#35-date-time-and-durations) elapsed duration such as
-`500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
-`5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
-evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
-immediately.
+The duration is an exact duration with its unit ([§35](#durations)), such as `500 ms`, `2 min`, or `n s`. A number
+without a unit is a compile error that names the fix, such as `wait 5 s` for `wait 5`, and a runtime error when the
+compiler cannot see it ([ADR 0026](../decisions/0026-unified-time-semantics.md#8-explicit-units-for-time-quantities)).
+A unit after a number belongs to that number alone, so `wait 15 + randomInteger(0..35) s` adds a number and a duration,
+which is an error. Write `wait (15 + randomInteger(0..35)) s` instead.
+
+A wait or timer also takes a range with an exact unit after it, `wait (1..3) s`, `timer (1..=4) h`, or
+`wait (100..500) ms`, or a range in a variable, `timer r min`. It counts whole units, so `wait (1..3) min` waits 1 or 2
+minutes like `wait randomInteger(1..3) min`. It is drawn from the session RNG after the operands are evaluated: once for
+a wait, and once per round for a timer. A calendar unit after a range is an error, as for any calendar duration. The
+range needs its parentheses: in `timer 5..10 s` the unit belongs to `10` alone, which is a compile error that suggests
+them. A negative duration is an error, and `wait 0 s` and `timer 0 s` continue immediately.
 
 ### Named form
 
 ```text
-let beat = timer(duration: 1..=3, async: true, display: "mystery", label: "Beat", repeat: true, persist: true) {
+let beat = timer(duration: (1..=3) s, async: true, display: "mystery", label: "Beat", repeat: true, persist: true) {
     say "Beat."
 }
 ```
 
 The named form carries the same fields plus `repeat` and `persist`. `async`, `repeat`, and `persist` are the
-literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. `display`
-defaults to `visible`, and an expression must evaluate to `"visible"`, `"mystery"`, or `"hidden"` for blocking and
-asynchronous timers alike.
+literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. `duration`
+is a duration, or a range with its unit after it, such as `duration: (5..=10) s` or `duration: r s`, which is drawn for
+each round as in the short form. `display` defaults to `visible`, and an expression must evaluate to `"visible"`,
+`"mystery"`, or `"hidden"` for blocking and asynchronous timers alike.
 
 ### Blocking and asynchronous timers
 
@@ -3465,18 +3475,18 @@ time. A script plays the same however late or often the Player observes time: ev
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
 Scene time is measured in milliseconds, including fractional milliseconds, up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
-longer than that can never end; the compiler rejects one it can see, such as `wait 1e15`, and any other is a runtime
+longer than that can never end; the compiler rejects one it can see, such as `wait 1e15 s`, and any other is a runtime
 error.
 
 A `wait` runs alongside the pacing of the message before it, so the script goes on after the longer of the two
-([`RUNTIME.md`](../RUNTIME.md#instant-0-and-wait)). Warning `TSV060` (owner decision, 2026-10-08), on the `wait`, marks
-one that therefore adds no time unless the player skips the message: a `wait` of a known non-zero duration that is the
-next statement after a `say` without its own pacing (`instant` or seconds), in the same block, and is shorter than the
-message's reading time at the default reading speed. That reading time is the shortest the message can take: the default
-smart pacing of its visible text when the compiler knows all of the text, and otherwise the base delay alone, as a value
-the compiler cannot know may change which markup the text holds and so hide any of the rest. Comments and blank lines
-are no statements. Not checked are a `wait` after another statement or a label, after a `say` that ends a branch or loop
-body, after a message used as a value, and one whose duration is not known:
+([`RUNTIME.md`](../RUNTIME.md#instant-0-s-and-wait)). Warning `TSV060` (owner decision, 2026-10-08), on the `wait`,
+marks one that therefore adds no time unless the player skips the message: a `wait` of a known non-zero duration that is
+the next statement after a `say` without its own pacing (`instant` or a duration), in the same block, and is shorter
+than the message's reading time at the default reading speed. That reading time is the shortest the message can take:
+the default smart pacing of its visible text when the compiler knows all of the text, and otherwise the base delay
+alone, as a value the compiler cannot know may change which markup the text holds and so hide any of the rest. Comments
+and blank lines are no statements. Not checked are a `wait` after another statement or a label, after a `say` that ends
+a branch or loop body, after a message used as a value, and one whose duration is not known:
 
 ```text
 for i in 1..=10 {
@@ -4005,6 +4015,13 @@ the year's first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is wee
 | Exact (`duration`) | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours`, `d`/`day`/`days`, `w`/`week`/`weeks` | Elapsed time: `1 day` is always 24 hours and `1 week` 168 hours |
 | Calendar (`calendarDuration`) | `calendar` before `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same clock time that many dates, weeks, months, or years later, never a fixed number of hours |
 
+A unit follows a number literal, a name, a member such as `p.delay` or `list[i]`, a call, or parentheses, and gives the
+number before it that unit: `count s`, `(count / 2) min`, `randomInteger(5..=10) s`, `count * 1 h`, and
+`count calendar months` ([ADR 0026](../decisions/0026-unified-time-semantics.md#8-explicit-units-for-time-quantities)).
+It binds tighter than `*` and `+`, so `a + b s` is `a + (b s)`, and `(a + b) s` gives the sum the unit. The value
+before a unit must be a number: a known other value is a compile error and any other a runtime error. One duration has
+one unit: `5 s ms` and `1 h 30 min` are errors, and parts are added with `+`, as in `1 h + 30 min`.
+
 Both long forms are accepted for any number: `1 seconds` and `2 day`. `month` and `year` (and `mo` and `y`) without
 `calendar` are compile errors that suggest it, and `m` is not a duration unit, because it would be ambiguous between
 minutes and months. `calendar` is a unit word only where a unit can stand; elsewhere it is an ordinary name. A calendar
@@ -4026,9 +4043,9 @@ ordering or dividing one by the other is an error. Zero belongs to every family,
 A calendar duration has the read-only parts `.months`, `.days`, and `.exactOffset` (a duration); `.days` counts calendar
 days and is not a length. A duration has no parts: divide it by a unit, as in `elapsed / 1 day`.
 
-`wait`, timers, the `showButton` timeout, media positions and repeat budgets, and assignments to timer and media
-`remaining`, `position`, and `repeatDuration` take a duration; a calendar duration there is a compile error when its type
-is known, and otherwise a runtime error.
+`wait`, timers, `say` pacing, the `showButton` and `askForm` timeouts, media positions and repeat budgets, and
+assignments to timer and media `remaining`, `position`, and `repeatDuration` take a duration; a calendar duration there
+is a compile error when its type is known, and otherwise a runtime error.
 
 ### Arithmetic and comparison
 

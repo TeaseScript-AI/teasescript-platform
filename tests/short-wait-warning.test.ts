@@ -53,30 +53,30 @@ test("a wait shorter than the message before it gets TSV060, which names both ti
 
 test("the reading time is the default smart pacing of the visible text, and a wait as long adds time", () => {
   // "Ready, set": 2 words take longer than 10 characters, so 1.5 s + 2 × 0.3 s; markup does not count.
-  assert.deepEqual(shortWaits('say "**Ready**, *set*"\nwait 2'), ["2: 2 / 2.1"]);
-  assert.deepEqual(shortWaits('say "**Ready**, *set*"\nwait 2.1'), []);
+  assert.deepEqual(shortWaits('say "**Ready**, *set*"\nwait 2 s'), ["2: 2 / 2.1"]);
+  assert.deepEqual(shortWaits('say "**Ready**, *set*"\nwait 2.1 s'), []);
   // 40 characters of one word take longer than one word: 1.5 s + 40 × 0.03 s.
-  assert.deepEqual(shortWaits(`say "${"a".repeat(40)}"\nwait 2.5`), ["2: 2.5 / 2.7"]);
+  assert.deepEqual(shortWaits(`say "${"a".repeat(40)}"\nwait 2.5 s`), ["2: 2.5 / 2.7"]);
   // A block string counts its lines' text.
-  assert.deepEqual(shortWaits('say """\n    One\n    two\n    """\nwait 2'), ["5: 2 / 2.1"]);
+  assert.deepEqual(shortWaits('say """\n    One\n    two\n    """\nwait 2 s'), ["5: 2 / 2.1"]);
   // Interpolated values the compiler knows count with their text.
-  assert.deepEqual(shortWaits('say "${2 + 2} apples"\nwait 2'), ["2: 2 / 2.1"]);
+  assert.deepEqual(shortWaits('say "${2 + 2} apples"\nwait 2 s'), ["2: 2 / 2.1"]);
   // A value it cannot know may change which markup the text holds, so only the base delay counts.
-  assert.deepEqual(shortWaits('let name = "Ada"\nsay "${name}"\nwait 1.4'), ["3: 1.4 / 1.5"]);
-  assert.deepEqual(shortWaits('let name = "Ada"\nsay "${name}"\nwait 1.5'), []);
+  assert.deepEqual(shortWaits('let name = "Ada"\nsay "${name}"\nwait 1.4 s'), ["3: 1.4 / 1.5"]);
+  assert.deepEqual(shortWaits('let name = "Ada"\nsay "${name}"\nwait 1.5 s'), []);
   assert.deepEqual(
-    shortWaits('let name = "Ada"\nsay "Hello ${name}, welcome to the house"\nwait 2'),
+    shortWaits('let name = "Ada"\nsay "Hello ${name}, welcome to the house"\nwait 2 s'),
     [],
   );
-  assert.deepEqual(shortWaits('let line = "Hello there"\nsay line\nwait 1'), ["3: 1 / 1.5"]);
+  assert.deepEqual(shortWaits('let line = "Hello there"\nsay line\nwait 1 s'), ["3: 1 / 1.5"]);
 });
 
 test("a value the compiler cannot know may hide the text around it, so a wait that adds time gets no warning", () => {
   for (const source of [
     // The value makes a link of the address, so only "x" shows.
-    'let name = "x"\nsay "[${name}](https://example.com/a/long/path)"\nwait 2\nsay "next"\nexit',
+    'let name = "x"\nsay "[${name}](https://example.com/a/long/path)"\nwait 2 s\nsay "next"\nexit',
     // The value completes a weight tag, so the tag does not show.
-    'let weight = "light"\nsay "[weight=${weight}]x[/weight]"\nwait 2\nsay "next"\nexit',
+    'let weight = "light"\nsay "[weight=${weight}]x[/weight]"\nwait 2 s\nsay "next"\nexit',
   ]) {
     const compiled = compileSource(source);
     assert.deepEqual(compiled.diagnostics, [], source);
@@ -102,15 +102,15 @@ test("a known wait in any unit or as a duration value is checked, after any kind
         "wait 1 min / 120",
         "function beat {",
         '    say "Four"',
-        "    wait 1",
+        "    wait 1 s",
         "}",
         "timer async 5 s {",
         '    say "Five"',
-        "    wait 1",
+        "    wait 1 s",
         "}",
         "if true {",
         '    say "Six"',
-        "    wait 1",
+        "    wait 1 s",
         "}",
       ].join("\n"),
     ),
@@ -121,19 +121,19 @@ test("a known wait in any unit or as a duration value is checked, after any kind
 test("a wait that sets the timing, or one the compiler cannot measure, gets no TSV060", () => {
   for (const source of [
     // The message has its own pacing.
-    'say "One", instant\nwait 0.5',
-    'say "One", 0\nwait 0.5',
-    'say "One", 3\nwait 0.5',
+    'say "One", instant\nwait 0.5 s',
+    'say "One", 0 s\nwait 0.5 s',
+    'say "One", 3 s\nwait 0.5 s',
     // The wait's duration is not known, or never adds time.
-    'let beat = 0.5\nsay "One"\nwait beat',
-    'say "One"\nwait 0',
+    'let beat = 0.5 s\nsay "One"\nwait beat',
+    'say "One"\nwait 0 s',
     // Something runs in between, or the wait is in another block.
-    'say "One"\nlet beat = 1\nwait 0.5',
-    'say "One"\nlabel later\nwait 0.5',
-    'if true {\n    say "One"\n}\nwait 0.5',
-    'for i in 1..=2 {\n    wait 0.5\n    say "One"\n}',
+    'say "One"\nlet beat = 1\nwait 0.5 s',
+    'say "One"\nlabel later\nwait 0.5 s',
+    'if true {\n    say "One"\n}\nwait 0.5 s',
+    'for i in 1..=2 {\n    wait 0.5 s\n    say "One"\n}',
     // A message used as a value is not checked.
-    'let message = say "One"\nwait 0.5',
+    'let message = say "One"\nwait 0.5 s',
   ])
     assert.deepEqual(shortWaits(source), [], source);
 });

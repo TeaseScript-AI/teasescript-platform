@@ -208,7 +208,7 @@ test("captures keep source order inside expressions and as discarded statements"
 
 test("a timer expiry block waits until a pending capture settles", () => {
   const { plan, snapshot } = started(
-    "let fired = false\ntimer async 1 {\n  fired = true\n}\nlet photo = takePhoto()\nwait 5\nexit",
+    "let fired = false\ntimer async 1 s {\n  fired = true\n}\nlet photo = takePhoto()\nwait 5 s\nexit",
   );
   const late = observeTime(plan, snapshot, 2000);
   assert.equal(late.snapshot.foregroundAction?.kind, "capture");
@@ -276,7 +276,7 @@ test("a restored capture result must match its canonical settlement until the sc
 });
 
 test("a capture reserves its events on top of what active actions still need", () => {
-  const plan = compileValidPlan("timer async 1\nlet photo = takePhoto()\nexit");
+  const plan = compileValidPlan("timer async 1 s\nlet photo = takePhoto()\nexit");
   let snapshot = createFreshRuntimeSnapshot(plan);
   while (plan.instructions[snapshot.nextInstruction]?.kind !== "capture")
     snapshot = executeInstruction(plan, snapshot).snapshot;

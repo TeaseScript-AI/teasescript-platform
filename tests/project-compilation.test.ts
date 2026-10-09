@@ -260,8 +260,8 @@ function mutableCopy(snapshot: RuntimeSnapshot): Mutable<RuntimeSnapshot> {
 
 test("a checkpoint runs code of a file only in an activation of that file", () => {
   const timers = compiledPlan([
-    { path: "main.tease", source: 'timer async 1 { say "main handler" }\nwait 5\nexit' },
-    { path: "other.tease", source: 'timer async 1 { say "other handler" }\nexit' },
+    { path: "main.tease", source: 'timer async 1 s { say "main handler" }\nwait 5 s\nexit' },
+    { path: "other.tease", source: 'timer async 1 s { say "other handler" }\nexit' },
   ]);
   const otherStart = timers.files[1]!.startInstruction;
   const foreign = timers.functions.find((definition) => definition.entryInstruction >= otherStart)!;

@@ -33,42 +33,43 @@ function projectReport(files: Readonly<Record<string, string>>): string[] {
 }
 
 test("a while true or label loop with no way out is a warning, which does not prevent a plan", () => {
-  const [warning] = compileSource("while true { wait 1 }\nexit").diagnostics;
+  const [warning] = compileSource("while true { wait 1 s }\nexit").diagnostics;
   assert.deepEqual(
     [warning?.severity, warning?.code, warning?.message],
     ["warning", "TSV058", NO_WAY_OUT],
   );
   // The exit after the loop never runs, which is the separate ending error.
-  assert.deepEqual(report("while true { wait 1 }\nexit").diagnostics, [
+  assert.deepEqual(report("while true { wait 1 s }\nexit").diagnostics, [
     "1 warning TSV058",
     "2 error TSV053",
   ]);
-  assert.deepEqual(report('label again\nsay "Again", instant\nwait 1\ngoto again').diagnostics, [
+  assert.deepEqual(report('label again\nsay "Again", instant\nwait 1 s\ngoto again').diagnostics, [
     "4 warning TSV058",
     "4 error TSV053",
   ]);
   // On a path that otherwise ends, the warning on `while true` or the `goto` back is all there is.
   for (const [loop, line] of [
-    ["while true { wait 1 }", 3],
-    ["while (true) {\n    wait 1\n}", 3],
-    ['label again\nsay "Again", instant\nwait 1\ngoto again', 6],
+    ["while true { wait 1 s }", 3],
+    ["while (true) {\n    wait 1 s\n}", 3],
+    ['label again\nsay "Again", instant\nwait 1 s\ngoto again', 6],
     // Asking, showing, and engine functions that only compute a value are no way out.
     ['while true {\n    let mood = choose "Good", "Bad"\n    say mood\n}', 3],
-    ['while true {\n    say "You rolled ${randomInteger(1..6)}", instant\n    wait 1\n}', 3],
+    ['while true {\n    say "You rolled ${randomInteger(1..6)}", instant\n    wait 1 s\n}', 3],
     // A timer block without a way out does not end the loop.
-    ['timer async 5 s { say "Hurry" }\nwhile true { wait 1 }', 4],
-    ["function idle {\n    while true { wait 1 }\n}\nidle()\nexit", 4],
+    ['timer async 5 s { say "Hurry" }\nwhile true { wait 1 s }', 4],
+    ["function idle {\n    while true { wait 1 s }\n}\nidle()\nexit", 4],
   ] as const)
     assert.deepEqual(report(QUIT + loop), { diagnostics: [`${line} warning TSV058`], plan: true });
   // The warning marks the loop's first line, `while (true)`.
-  const parenthesized = compileSource(QUIT + "while (true) {\n    wait 1\n}").diagnostics[0]!.span;
+  const parenthesized = compileSource(QUIT + "while (true) {\n    wait 1 s\n}").diagnostics[0]!
+    .span;
   assert.deepEqual(
     [parenthesized.start.column, parenthesized.end.line, parenthesized.end.column],
     [0, 2, 12],
   );
   // A loop that never runs is not reported, as one after a loop that never ends, or the `goto` back after it.
   assert.deepEqual(
-    report(QUIT + "label again\nwhile true { wait 1 }\nwhile true { wait 2 }\ngoto again")
+    report(QUIT + "label again\nwhile true { wait 1 s }\nwhile true { wait 2 s }\ngoto again")
       .diagnostics,
     ["4 warning TSV058"],
   );
@@ -81,14 +82,14 @@ test("a way out anywhere in the loop, also nested or in a branch never taken, si
       {},
     ],
     [
-      'while true {\n    let answer = choose "Continue", "Stop"\n    if answer == "Stop" { goto done }\n    wait 1\n}\nlabel done\nexit',
+      'while true {\n    let answer = choose "Continue", "Stop"\n    if answer == "Stop" { goto done }\n    wait 1 s\n}\nlabel done\nexit',
       {},
     ],
     [
-      'label again\nsay "Again"\nlet answer = choose "Again", "Stop"\nif answer == "Stop" { exit }\nwait 1\ngoto again',
+      'label again\nsay "Again"\nlet answer = choose "Again", "Stop"\nif answer == "Stop" { exit }\nwait 1 s\ngoto again',
       {},
     ],
-    [`${QUIT}while true {\n    if false { break }\n    wait 1\n}`, {}],
+    [`${QUIT}while true {\n    if false { break }\n    wait 1 s\n}`, {}],
     [
       `${QUIT}while true {\n    for n in 1..3 {\n        switch n {\n            case 2 { if answer == "Play" { exit } }\n        }\n    }\n}`,
       {},
@@ -96,7 +97,7 @@ test("a way out anywhere in the loop, also nested or in a branch never taken, si
     [`${QUIT}while true {\n    if answer == "Play" { end }\n}`, {}],
     ["function wander {\n    while true { return }\n}\nwander()\nexit", {}],
     // A call of an author, host, or library function may end the session.
-    [`function rest { wait 1 }\n${QUIT}while true { rest() }`, {}],
+    [`function rest { wait 1 s }\n${QUIT}while true { rest() }`, {}],
     [`${QUIT}while true { vibrate() }`, { builtins: ["vibrate"] }],
     [`${QUIT}while true { say escapeMarkup(answer) }`, {}],
     // Recursion is not one of the loops checked.
@@ -106,7 +107,7 @@ test("a way out anywhere in the loop, also nested or in a branch never taken, si
   assert.deepEqual(
     projectReport({
       "main.tease": `${QUIT}while true { call "chapter.tease" }`,
-      "chapter.tease": "wait 1\nend",
+      "chapter.tease": "wait 1 s\nend",
     }),
     [],
   );
@@ -116,7 +117,7 @@ test("a label loop is an unconditional top-level goto back to an earlier label",
   for (const source of [
     `${QUIT}label again\nsay "Again"\nif answer == "Play" { goto again }\nexit`,
     `${QUIT}label again\nsay "Again"\nrepeat 2 { goto again }`,
-    `${QUIT}goto later\nlabel later\nwait 1\nexit`,
+    `${QUIT}goto later\nlabel later\nwait 1 s\nexit`,
   ])
     assert.deepEqual(report(source), { diagnostics: [], plan: true }, source);
 });
@@ -128,13 +129,13 @@ test("a timer or media block with a way out silences the warning in every file o
     "function stop { exit }\ntimer async 2 s { stop() }",
   ])
     assert.deepEqual(
-      report(`${block}\n${QUIT}while true { wait 1 }`),
+      report(`${block}\n${QUIT}while true { wait 1 s }`),
       { diagnostics: [], plan: true },
       block,
     );
   const closed = {
-    "main.tease": `${QUIT}call "chapter.tease"\nwhile true { wait 1 }`,
-    "chapter.tease": "label again\nwait 1\ngoto again",
+    "main.tease": `${QUIT}call "chapter.tease"\nwhile true { wait 1 s }`,
+    "chapter.tease": "label again\nwait 1 s\ngoto again",
   };
   assert.deepEqual(
     projectReport({

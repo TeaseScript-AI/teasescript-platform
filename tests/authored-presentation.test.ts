@@ -99,7 +99,7 @@ function option(value) {
   calls = "\${calls}\${value}"
   return value
 }
-say prose(color: option("red"), align: option("left")) option("text"), 0
+say prose(color: option("red"), align: option("left")) option("text"), 0 s
 say calls, instant
 exit
 `,

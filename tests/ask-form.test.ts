@@ -161,11 +161,11 @@ test("askForm reports what the compiler can see is wrong", () => {
     ['askForm fields: { on: false }, hint: ["a"]', "A list cannot be an input hint."],
     // At the time limit the answers are submitted as they stand, so each written field starts with one.
     [
-      'askForm fields: { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
+      'askForm fields: { n: { type: "integer" } }, timeout: 1 s, onTimeout: "submit"',
       `askForm field 'n': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
     ],
     [
-      'askForm fields: dict { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
+      'askForm fields: dict { n: { type: "integer" } }, timeout: 1 s, onTimeout: "submit"',
       `askForm field 'n': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
     ],
   ];
@@ -761,7 +761,7 @@ test("a form with a time limit settles by itself, with its answers as they stand
   }
   // A field the form cannot see from the start must still have a value when the form opens.
   const computed = compileValidPlan(
-    'let level = dict {}\nlevel["x"] = { type: "integer" }\nlet a = askForm fields: level, timeout: 5, onTimeout: "submit"\nexit',
+    'let level = dict {}\nlevel["x"] = { type: "integer" }\nlet a = askForm fields: level, timeout: 5 s, onTimeout: "submit"\nexit',
   );
   assert.equal(
     run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure?.message,

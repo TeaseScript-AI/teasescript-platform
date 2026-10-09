@@ -1,4 +1,5 @@
-import type { DelayDisplay } from "../plan/model.js";
+import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
+import type { DelayDisplay, DurationUnitPlan } from "../plan/model.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 
@@ -11,10 +12,12 @@ import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 export type RuntimeTimerState = "running" | "paused" | "finished" | "stopped";
 
 export interface RuntimeTimerRangeSnapshot {
-  /** Whole seconds; a repeating timer redraws its next round from this range. */
+  /** Whole units of `unit`; a repeating timer redraws its next round from this range. */
   readonly start: number;
   readonly end: number;
   readonly inclusive: boolean;
+  /** The unit after the range in the source. */
+  readonly unit: DurationUnitPlan;
 }
 
 export interface RuntimeTimerSnapshot {
@@ -108,7 +111,7 @@ export interface RuntimeTimerHandlerInvocationSnapshot {
 }
 
 export interface TimerRoundDraw {
-  /** Draws a whole number of seconds from a validated non-empty range. */
+  /** Draws a whole number of the range's units from a validated non-empty range. */
   (range: RuntimeTimerRangeSnapshot): number;
 }
 
@@ -226,6 +229,13 @@ export function setTimerRemaining(
   return remainingMs === 0 ? "expired" : null;
 }
 
+/** The length of a repeating timer's next round without a `repeatDuration`: drawn anew from its range, if any. */
+function nextRoundMs(timer: RuntimeTimerSnapshot, draw: TimerRoundDraw): number {
+  return timer.range === null
+    ? timer.roundDurationMs
+    : draw(timer.range) * DURATION_UNIT_MILLISECONDS[timer.range.unit];
+}
+
 /**
  * Ends the current round at `endedAtMs`. A repeating timer starts its next round at that moment, so catch-up after a
  * late observation keeps the original schedule; a paused timer stays paused with a full next round. An anchored
@@ -242,9 +252,7 @@ export function expireTimerRound(
     return;
   }
   if (timer.state !== "running") {
-    timer.roundDurationMs =
-      timer.repeatDurationMs ??
-      (timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000);
+    timer.roundDurationMs = timer.repeatDurationMs ?? nextRoundMs(timer, draw);
     timer.remainingMs = timer.roundDurationMs;
     return;
   }
@@ -262,9 +270,7 @@ export function expireTimerRound(
     return;
   }
   // The next round is drawn before the timer changes, so a paused draw leaves the timer as it was.
-  const roundDurationMs =
-    timer.repeatDurationMs ??
-    (timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000);
+  const roundDurationMs = timer.repeatDurationMs ?? nextRoundMs(timer, draw);
   timer.elapsedMs = timerElapsedMs(timer, endedAtMs);
   timer.runningSinceMs = endedAtMs;
   timer.roundDurationMs = roundDurationMs;

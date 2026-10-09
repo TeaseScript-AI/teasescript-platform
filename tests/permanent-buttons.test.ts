@@ -136,7 +136,7 @@ test("clicks run their button's block while the script waits, also from a checkp
     'showPermanentButton "Add one" {',
     "    count += 1",
     '    say "one: ${count}", instant',
-    "    wait 1",
+    "    wait 1 s",
     "}",
     'showPermanentButton "Add one" {',
     "    count += 10",
@@ -147,16 +147,16 @@ test("clicks run their button's block while the script waits, also from a checkp
     "}",
     'showPermanentButton "Pause", persist: true {',
     '    say "paused"',
-    "    wait 2",
+    "    wait 2 s",
     '    say "resumed"',
     "}",
     'say "waiting"',
-    "wait 30",
+    "wait 30 s",
     'say "never stopped"',
     "exit",
     "label stopped",
     'say "stopped at ${count}"',
-    "wait 5",
+    "wait 5 s",
     'say "done"',
     "exit",
   ].join("\n");
@@ -246,13 +246,13 @@ test("a busy, removed, unknown, early, or malformed click changes nothing", () =
     [
       'let busy = showPermanentButton "Busy" {',
       '    say "busy", instant',
-      "    wait 1",
+      "    wait 1 s",
       "}",
       'let gone = showPermanentButton "Gone" {',
       "}",
       "removePermanentButton(gone)",
-      'timer async 2 { say "timer" }',
-      "wait 10",
+      'timer async 2 s { say "timer" }',
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
@@ -297,11 +297,11 @@ test("removePermanentButton removes a button and its queued click, but not a blo
       "    removePermanentButton(b)",
       "}",
       'showPermanentButton "Remove A" {',
-      "    wait 1",
+      "    wait 1 s",
       "    removePermanentButton(a)",
       "}",
       "say a",
-      "wait 10",
+      "wait 10 s",
       "exit",
     ].join("\n"),
   );
@@ -340,12 +340,15 @@ test("a button belongs to the file entry that showed it unless it persists, and 
         '    say "dropped"',
         "}",
         'call "room.tease"',
-        "wait 1",
+        "wait 1 s",
         'goto "hall.tease"',
       ].join("\n"),
     },
-    { path: "room.tease", source: 'showPermanentButton "Room" {\n    say "room"\n}\nwait 1\nend' },
-    { path: "hall.tease", source: 'showPermanentButton "Quit" {\n    exit\n}\nwait 10\nexit' },
+    {
+      path: "room.tease",
+      source: 'showPermanentButton "Room" {\n    say "room"\n}\nwait 1 s\nend',
+    },
+    { path: "hall.tease", source: 'showPermanentButton "Quit" {\n    exit\n}\nwait 10 s\nexit' },
   ]);
   // A function's button belongs to its caller's entry, and a call keeps the caller's buttons.
   assert.deepEqual(session.buttons(), ["Help", "Kept", "Dropped", "Room"]);
@@ -455,7 +458,7 @@ test("a parameter default shows its button only when the argument is left out", 
       "let second = make(other)",
       "say first",
       "say second, instant",
-      "wait 1",
+      "wait 1 s",
       "exit",
     ].join("\n"),
     {
@@ -477,7 +480,7 @@ test("a block a parameter default shows may change variables when the script wai
     "}",
     "let made = make()",
     "if value is number {",
-    "    wait 1",
+    "    wait 1 s",
     '    say "${value + 1}"',
     "}",
     "exit",
@@ -516,7 +519,7 @@ test("mixing permanent buttons with other values suggests no unwritable type", (
 
 test("restore rejects button state the runtime cannot produce", () => {
   const session = new Session(
-    'let a = showPermanentButton "A" {\n    wait 1\n}\nshowPermanentButton "B" {\n}\nwait 10\nexit',
+    'let a = showPermanentButton "A" {\n    wait 1 s\n}\nshowPermanentButton "B" {\n}\nwait 10 s\nexit',
   );
   session.press(2);
   assert.deepEqual(validateRuntimeSnapshot(session.snapshot, session.plan).errors, []);
@@ -552,7 +555,7 @@ test("restore rejects button state the runtime cannot produce", () => {
 
 test("the Player shows a session's buttons, inactive while their block runs, and none once it ends", () => {
   let session = createPlayerRuntimeSession(
-    'showPermanentButton "Count" {\n    wait 1\n}\nshowPermanentButton "Quit" {\n    exit\n}\nwait 10\nexit',
+    'showPermanentButton "Count" {\n    wait 1 s\n}\nshowPermanentButton "Quit" {\n    exit\n}\nwait 10 s\nexit',
   );
   assert.deepEqual(playerRuntimePermanentButtons(session.state), [
     { buttonId: 1, label: "Count", busy: false },

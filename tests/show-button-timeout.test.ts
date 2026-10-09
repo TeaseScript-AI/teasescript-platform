@@ -66,7 +66,7 @@ function playerMessages(session: PlayerRuntimeSession): string[] {
 
 test("a click before the timeout returns the elapsed scene time as a duration", () => {
   const source =
-    'let elapsed = showButton "Continue", timeout: 5\nif elapsed < 2 s { say "That was quick.", instant }\nexit';
+    'let elapsed = showButton "Continue", timeout: 5 s\nif elapsed < 2 s { say "That was quick.", instant }\nexit';
   for (const { clickAtMs, quick } of [
     { clickAtMs: 1_500, quick: true },
     { clickAtMs: 2_500, quick: false },
@@ -89,7 +89,7 @@ test("a click before the timeout returns the elapsed scene time as a duration", 
 
 test("a reached timeout removes the button without a chat message and returns the timeout", () => {
   for (const { timeout, milliseconds } of [
-    { timeout: "5", milliseconds: 5_000 },
+    { timeout: "5 s", milliseconds: 5_000 },
     { timeout: "500 ms", milliseconds: 500 },
     { timeout: "0.25 min", milliseconds: 15_000 },
     { timeout: "limit", milliseconds: 2_000 },
@@ -125,7 +125,7 @@ test("without a timeout the button waits for the click however late time is obse
 });
 
 test("an ignored result keeps the button result-free", () => {
-  for (const source of ['showButton "Continue", timeout: 2', 'showButton "Continue"']) {
+  for (const source of ['showButton "Continue", timeout: 2 s', 'showButton "Continue"']) {
     const plan = compileValidPlan(`${source}\nsay "Next", instant\nexit`);
     const instruction = plan.instructions.find((candidate) => candidate.kind === "interaction");
     assert.equal(instruction?.kind, "interaction");
@@ -133,7 +133,7 @@ test("an ignored result keeps the button result-free", () => {
     assert.equal(instruction.expectedResult, "none", source);
   }
   let session = createPlayerRuntimeSession(
-    'showButton "Continue", timeout: 2\nsay "Next", instant\nexit',
+    'showButton "Continue", timeout: 2 s\nsay "Next", instant\nexit',
   );
   session = observe(session, 2_000);
   assert.equal(session.state.status, "halted");
@@ -148,8 +148,8 @@ test("options appear in either order and evaluate in source order", () => {
   const record =
     'let order = ""\nfunction record(value) {\n  order = "${order}${value} "\n  return value\n}';
   for (const { options, order } of [
-    { options: 'timeout: record(3), background: record("gold")', order: "Go 3 gold " },
-    { options: 'background: record("gold"), timeout: record(3)', order: "Go gold 3 " },
+    { options: 'timeout: record(3 s), background: record("gold")', order: "Go 3 seconds gold " },
+    { options: 'background: record("gold"), timeout: record(3 s)', order: "Go gold 3 seconds " },
   ]) {
     let session = createPlayerRuntimeSession(
       `${record}\nspeaker guide { name: "Guide" }\nlet result = { elapsed: showButton as guide record("Go"), ${options} }\nexit`,
@@ -168,7 +168,7 @@ test("options appear in either order and evaluate in source order", () => {
 
 test("a button works as a value inside interpolation", () => {
   const session = observe(
-    createPlayerRuntimeSession('say "You waited ${showButton "Go", timeout: 1}.", instant\nexit'),
+    createPlayerRuntimeSession('say "You waited ${showButton "Go", timeout: 1 s}.", instant\nexit'),
     1_000,
   );
   assert.equal(session.state.status, "halted");
@@ -177,21 +177,21 @@ test("a button works as a value inside interpolation", () => {
 
 test("the compiler rejects a timeout it can see is invalid and names the fix", () => {
   for (const { source, code, fix } of [
-    { source: 'showButton "Go", timeout: 0', code: "TSV011", fix: "Remove 'timeout:'" },
-    { source: 'showButton "Go", timeout: -1', code: "TSV011", fix: "Remove 'timeout:'" },
+    { source: 'showButton "Go", timeout: 0 s', code: "TSV011", fix: "Remove 'timeout:'" },
+    { source: 'showButton "Go", timeout: -1 s', code: "TSV011", fix: "Remove 'timeout:'" },
     { source: 'let e = showButton "Go", timeout: 0 ms', code: "TSV011", fix: "Remove 'timeout:'" },
     { source: 'showButton "Go", timeout: -2 s', code: "TSV011", fix: "Remove 'timeout:'" },
     { source: 'showButton "Go", timeout: 2 min - 150 s', code: "TSV011", fix: "Remove 'timeout:'" },
-    { source: 'showButton "Go", timeout: 1e308', code: "TSV011", fix: "shorter timeout" },
+    { source: 'showButton "Go", timeout: 1e15 s', code: "TSV011", fix: "shorter timeout" },
     // An overflowing step is the language-wide overflow error, even when later arithmetic would bring the value back.
-    { source: 'showButton "Go", timeout: 1e308 * 10', code: "TSV050", fix: "smaller values" },
+    { source: 'showButton "Go", timeout: 1e300 s * 1e10', code: "TSV050", fix: "shorter duration" },
     {
       source: 'showButton "Go", timeout: 1e300 h / 1e-300',
       code: "TSV050",
       fix: "shorter duration",
     },
     {
-      source: 'showButton "Go", timeout: 1 / (1e308 * 10) + 1',
+      source: 'showButton "Go", timeout: (1 / (1e308 * 10) + 1) * 1 s',
       code: "TSV050",
       fix: "smaller values",
     },
@@ -205,19 +205,21 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
       code: "TSV011",
       fix: "shorter timeout",
     },
-    { source: 'showButton "Go", timeout: "5"\nexit', code: "TSV043", fix: "a number of seconds" },
+    { source: 'showButton "Go", timeout: 5\nexit', code: "TSV043", fix: "such as '5 s'" },
+    { source: 'let n = 5\nshowButton "Go", timeout: n\nexit', code: "TSV043", fix: "'n s'" },
+    { source: 'showButton "Go", timeout: "5"\nexit', code: "TSV043", fix: "such as '30 s'" },
     {
       source: 'let t = true\nshowButton "Go", timeout: t\nexit',
       code: "TSV043",
-      fix: "a number of seconds",
+      fix: "such as '30 s'",
     },
-    { source: 'showButton "Go", timeout: [5]\nexit', code: "TSV043", fix: "a number of seconds" },
+    { source: 'showButton "Go", timeout: [5]\nexit', code: "TSV043", fix: "such as '30 s'" },
     {
       source: 'showButton "Go", timeout: 2 calendar days\nexit',
       code: "TSV043",
       fix: "A calendar day or month has no fixed length",
     },
-    { source: 'showButton "Go", timeout: 1, timeout: 2', code: "TSP032", fix: "one timeout:" },
+    { source: 'showButton "Go", timeout: 1 s, timeout: 2 s', code: "TSP032", fix: "one timeout:" },
     { source: 'showButton "Go", 5', code: "TSP032", fix: "background: and timeout:" },
     { source: 'showButton("Go", 5)', code: "TSP032", fix: "Parenthesized" },
     { source: 'showButton "Go", timeout:', code: "TSP028", fix: "timeout: 500 ms" },
@@ -240,13 +242,17 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
 
 test("a timeout the compiler cannot know fails at runtime before the button appears", () => {
   for (const { source, message } of [
-    { source: "let limit = 0", message: "greater than zero" },
-    { source: "let limit = -3", message: "greater than zero" },
+    { source: "let limit = 0 s", message: "greater than zero" },
+    { source: "let limit = -3 s", message: "greater than zero" },
     {
       source: 'function pick(value) {\n  return value\n}\nlet limit = pick("5")',
       message: "greater than zero",
     },
-    { source: "let limit = 1e300", message: "too long for scene time to reach" },
+    {
+      source: "function pick(value) {\n  return value\n}\nlet limit = pick(5)",
+      message: "a duration",
+    },
+    { source: "let limit = 1e300 s", message: "too long for scene time to reach" },
   ]) {
     const plan = compileValidPlan(`${source}\nlet elapsed = showButton "Go", timeout: limit\nexit`);
     const result = run(plan, createFreshRuntimeSnapshot(plan));
@@ -260,7 +266,9 @@ test("a timeout the compiler cannot know fails at runtime before the button appe
 });
 
 test("a checkpoint while the button is shown resumes with its original start and deadline", () => {
-  let session = createPlayerRuntimeSession('let elapsed = showButton "Continue", timeout: 5\nexit');
+  let session = createPlayerRuntimeSession(
+    'let elapsed = showButton "Continue", timeout: 5 s\nexit',
+  );
   session = observe(session, 1_200);
   const restorePoint = createPlayerRuntimeRestorePoint(session);
   const clicked = restorePlayerRuntimeSession(restorePoint);
@@ -275,9 +283,9 @@ test("a checkpoint while the button is shown resumes with its original start and
   assert.deepEqual(binding(playerRuntimeSnapshot(timedOut), "elapsed"), seconds(5_000));
 
   for (const source of [
-    'let elapsed = showButton "Continue", timeout: 2\nsay "Waited ${elapsed}.", instant\nexit',
-    'speaker guide { name: "Guide" }\nsay "Ready?"\nshowButton as guide "Continue", timeout: 1.5, background: "gold"\nwait 1\nexit',
-    'timer async 1 { wait 5 }\nlet elapsed = showButton "Continue", timeout: 3\nsay "${elapsed}"\nexit',
+    'let elapsed = showButton "Continue", timeout: 2 s\nsay "Waited ${elapsed}.", instant\nexit',
+    'speaker guide { name: "Guide" }\nsay "Ready?"\nshowButton as guide "Continue", timeout: 1.5 s, background: "gold"\nwait 1 s\nexit',
+    'timer async 1 s { wait 5 s }\nlet elapsed = showButton "Continue", timeout: 3 s\nsay "${elapsed}"\nexit',
   ]) {
     assertRuntimeResumeEquivalent(source);
   }
@@ -302,20 +310,20 @@ test("a timeout reached during catch-up matches observing every deadline on time
     {
       // The script continues at the timeout, not at the late observation.
       source:
-        'let elapsed = showButton "Go", timeout: 2\nwait 1\nsay "Done after ${elapsed}."\nexit',
+        'let elapsed = showButton "Go", timeout: 2 s\nwait 1 s\nsay "Done after ${elapsed}."\nexit',
       onTime: [2_000, 3_000],
     },
     {
       // An expiry block suspends the button past its deadline; the button times out when the block returns.
       source:
-        'timer async 1 { wait 5 }\nlet elapsed = showButton "Go", timeout: 3\nsay "After ${elapsed}."\nexit',
+        'timer async 1 s { wait 5 s }\nlet elapsed = showButton "Go", timeout: 3 s\nsay "After ${elapsed}."\nexit',
       onTime: [1_000, 6_000],
     },
     {
       // A block that returns before the deadline leaves the button to time out on schedule; the block's paced
       // message is consumed when the button returns.
       source:
-        'timer async 1 { say "Tick." }\nlet elapsed = showButton "Go", timeout: 3\nsay "After ${elapsed}."\nexit',
+        'timer async 1 s { say "Tick." }\nlet elapsed = showButton "Go", timeout: 3 s\nsay "After ${elapsed}."\nexit',
       onTime: [1_000, 3_000],
     },
   ]) {
@@ -328,7 +336,9 @@ test("a timeout reached during catch-up matches observing every deadline on time
     assert.deepEqual(settlementKinds(late.events), ["timedOut"]);
   }
   // Suspended by the block, the button is inert, and the Player observes only the block's own deadline.
-  const plan = compileValidPlan('timer async 1 { wait 5 }\nshowButton "Go", timeout: 3\nexit');
+  const plan = compileValidPlan(
+    'timer async 1 s { wait 5 s }\nshowButton "Go", timeout: 3 s\nexit',
+  );
   const suspended = playAt(plan, createFreshRuntimeSnapshot(plan), [1_000]).snapshot;
   assert.equal(suspended.foregroundAction?.kind, "delay");
   assert.deepEqual(playerRuntimeDeadlines(playerStateOf(plan, suspended)), [6_000]);
@@ -336,7 +346,7 @@ test("a timeout reached during catch-up matches observing every deadline on time
 
 test("a button consumes the pacing gate before it, and its timeout starts when it appears", () => {
   const plan = compileValidPlan(
-    'say "Ready?", 2\nlet elapsed = showButton "Go", timeout: 3\nsay "Waited ${elapsed}.", instant\nexit',
+    'say "Ready?", 2 s\nlet elapsed = showButton "Go", timeout: 3 s\nsay "Waited ${elapsed}.", instant\nexit',
   );
   const shown = run(plan, createFreshRuntimeSnapshot(plan));
   const gate = shown.events.find(
@@ -353,7 +363,7 @@ test("a button consumes the pacing gate before it, and its timeout starts when i
 });
 
 test("a click that arrives after the timeout does not revive the button", () => {
-  const plan = compileValidPlan('let elapsed = showButton "Go", timeout: 1\nexit');
+  const plan = compileValidPlan('let elapsed = showButton "Go", timeout: 1 s\nexit');
   const shown = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   const actionId = shown.foregroundAction!.actionId;
   const timedOut = observeTime(plan, shown, 1_000).snapshot;
@@ -391,7 +401,7 @@ function rejects(plan: InstructionPlan, snapshot: unknown): boolean {
 }
 
 test("plan and snapshot validation reject malformed button results and timing", () => {
-  const plan = compileValidPlan('let elapsed = showButton "Go", timeout: 5\nexit');
+  const plan = compileValidPlan('let elapsed = showButton "Go", timeout: 5 s\nexit');
   const shown = createImmediatePacingRuntimeSnapshot(plan);
   const waiting = run(plan, shown).snapshot;
   const action = waiting.foregroundAction!;
@@ -463,7 +473,7 @@ test("plan and snapshot validation reject malformed button results and timing", 
   );
 
   // A valued button's result is consumed right after it, as for any result interaction.
-  const consumed = compileValidPlan('let elapsed = showButton "Go", timeout: 1\nwait 1\nexit');
+  const consumed = compileValidPlan('let elapsed = showButton "Go", timeout: 1 s\nwait 1 s\nexit');
   const at = consumed.instructions.findIndex((candidate) => candidate.kind === "interaction");
   const wait = consumed.instructions.find((candidate) => candidate.kind === "wait")!;
   const skipped = consumed.instructions.map((candidate, index) =>

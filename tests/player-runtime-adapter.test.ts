@@ -330,7 +330,7 @@ test("runtime adapter selects the rendered button even when two buttons return t
 
 test("runtime adapter routes pacing skip and explicit time through canonical operations", () => {
   let session = createPlayerRuntimeSession(
-    'say unskippable "First", 10\nsay skippable "Second", 10\nwait 20 s\nexit',
+    'say unskippable "First", 10 s\nsay skippable "Second", 10 s\nwait 20 s\nexit',
   );
   const firstGate = playerRuntimePacingGate(session);
   assert.equal(firstGate?.skippable, false);
@@ -666,7 +666,7 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
       "    music.position = 3 s",
       "  }",
       "}",
-      "wait 10",
+      "wait 10 s",
       'say "done ${music.position} ${music.elapsed}", instant',
       "exit",
     ].join("\n"),

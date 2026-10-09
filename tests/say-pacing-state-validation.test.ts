@@ -135,7 +135,7 @@ test("older pacing gate promotes after a newer delay settlement and resumes prep
 });
 
 test("explicit exit cleans released pacing lineage without admitting forged pacing work", () => {
-  const compiled = plan('say "first", 5\nsay "second", 5\nexit');
+  const compiled = plan('say "first", 5 s\nsay "second", 5 s\nexit');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -176,8 +176,8 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
 
 test("branch-local and nested explicit exits reject forged retained pacing work", () => {
   for (const source of [
-    'say "first", 5\nif true { exit }\nsay "never", instant',
-    'say "first", 5\nif true { if true { exit } }\nsay "never", instant',
+    'say "first", 5 s\nif true { exit }\nsay "never", instant',
+    'say "first", 5 s\nif true { if true { exit } }\nsay "never", instant',
   ]) {
     const compiled = plan(source);
     const created = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
@@ -205,7 +205,7 @@ test("prepared say text retains caller temporaries through a suspended text call
       "  wait 1 ms",
       '  return "hello"',
       "}",
-      "function pace { paceCalls = paceCalls + 1\nreturn 1 }",
+      "function pace { paceCalls = paceCalls + 1\nreturn 1 s }",
       'say "${prefix()}${textValue()}", pace()',
       "exit",
     ].join("\n"),
@@ -266,10 +266,10 @@ test("prepared say text retains caller temporaries through a suspended text call
 
 test("prepared say temporary values reject malformed top-level and caller state", () => {
   const source = [
-    'speaker vera { title: "Captain"\ndelay: 1 }',
+    'speaker vera { title: "Captain"\ndelay: 1 s }',
     "speaker other {}",
     'function textValue { return "hello" }',
-    "function pace { return 1 }",
+    "function pace { return 1 s }",
     'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
     "exit",
   ].join("\n");
@@ -433,10 +433,10 @@ test("prepared say temporary values reject malformed top-level and caller state"
 
   const suspended = plan(
     [
-      'speaker vera { title: "Captain"\ndelay: 1 }',
+      'speaker vera { title: "Captain"\ndelay: 1 s }',
       "speaker other {}",
       'function textValue { return "hello" }',
-      "function pace { wait 1 ms\nreturn 1 }",
+      "function pace { wait 1 ms\nreturn 1 s }",
       'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
       "exit",
     ].join("\n"),
@@ -508,8 +508,8 @@ test("say pacing expression temporaries restore behind an older pacing gate", ()
   const compiled = plan(
     [
       "function pace(value) { return value }",
-      'say "first", 5',
-      'say "second", pace(5)',
+      'say "first", 5 s',
+      'say "second", pace(5 s)',
       "exit",
     ].join("\n"),
   );
@@ -549,7 +549,7 @@ test("prepared say text is live instead of its already-consumed source expressio
   const compiled = plan(
     [
       'function textValue { return "hello" }',
-      "function pace { return 1 }",
+      "function pace { return 1 s }",
       "say textValue(), pace()",
       "exit",
     ].join("\n"),
@@ -598,7 +598,7 @@ test("prepared say text is live instead of its already-consumed source expressio
 });
 
 test("pacing creation provenance requires a positive historical scope depth", () => {
-  const rootPlan = plan('say "root", 5\nexit');
+  const rootPlan = plan('say "root", 5 s\nexit');
   const root = executeInstruction(rootPlan, createFreshRuntimeSnapshot(rootPlan)).snapshot;
   assert.equal(root.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(root.backgroundActions[0]?.scopeDepth, 1);
@@ -613,7 +613,7 @@ test("pacing creation provenance requires a positive historical scope depth", ()
   assert.equal(validateRuntimeSnapshot(zeroDepth, rootPlan).valid, false);
   assert.throws(() => createCheckpoint(rootPlan, zeroDepth));
 
-  const functionPlan = plan('function f { say "inside", 5 }\nf()\nexit');
+  const functionPlan = plan('function f { say "inside", 5 s }\nf()\nexit');
   const unwound = runUntilExit(functionPlan, createFreshRuntimeSnapshot(functionPlan)).snapshot;
   assert.equal(functionPlan.instructions[unwound.nextInstruction]?.kind, "exit");
   assert.equal(unwound.frames.length, 1);
@@ -889,7 +889,7 @@ test("persisted arrays reject custom own keys that JSON would omit", () => {
 });
 
 test("ready snapshots reject pacing progress", () => {
-  const compiled = plan('say "first", 5\nexit');
+  const compiled = plan('say "first", 5 s\nexit');
   const afterSay = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
   const forged = structuredClone(afterSay.snapshot);
   forged.status = "ready";

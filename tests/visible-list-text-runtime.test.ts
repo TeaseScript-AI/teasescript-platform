@@ -75,7 +75,7 @@ test("say shows lists, sets, and objects in code-like notation without message m
 test("say notation survives prepared pacing and checkpoint resume", () => {
   const source = [
     "function pause {",
-    "    return 0",
+    "    return 0 s",
     "}",
     'say [{ a: "**a**", b: [1] }], pause()',
     "exit",
@@ -111,14 +111,14 @@ test("say shows a timer handle with its current state, also after checkpoint res
     'let beat = timer(duration: 10 s, async: true, label: "Beat")',
     "let plain = timer(duration: 10 s, async: true)",
     "wait 3 s",
-    "say [beat, plain], 0",
+    "say [beat, plain], 0 s",
     "beat.pause()",
-    "say beat, 0",
+    "say beat, 0 s",
     "plain.stop()",
-    "say plain, 0",
+    "say plain, 0 s",
     "beat.resume()",
     "wait 8 s",
-    "say beat, 0",
+    "say beat, 0 s",
     "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source);
@@ -137,14 +137,14 @@ test("say shows a media handle with its current state, also after checkpoint res
   const source = [
     'let music = playAudio(file: "music.mp3", async: true)',
     "wait 12 s",
-    "say [music], 0",
+    "say [music], 0 s",
     "music.pause()",
-    "say music, 0",
+    "say music, 0 s",
     "music.stop()",
-    "say music, 0",
+    "say music, 0 s",
     'let beep = playAudio(file: "beep.mp3", async: true)',
     "wait 61 s",
-    "say beep, 0",
+    "say beep, 0 s",
     "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 60_000 });

@@ -353,7 +353,7 @@ Long-running punishments, assignments, continuous-personality schedules, or othe
 For the selected blocking-wait direction:
 
 ```tease
-wait 10      // exactly 10 seconds
+wait 10 s
 wait 250 ms
 wait 1.5 s
 wait 2 min
@@ -362,12 +362,12 @@ wait 0.5 h
 
 Rules:
 
-- a bare number means seconds;
+- a number needs a unit, as in `wait 10 s`; without one it is an error ([ADR 0026](0026-unified-time-semantics.md#8-explicit-units-for-time-quantities));
 - exact elapsed-time units for blocking waits are `ms`, `s`, `min`, and `h`;
 - decimal durations are accepted;
 - fractionally valued milliseconds remain valid runtime numbers;
 - a browser wake-up scheduler may round its requested wake delay upward, but the runtime compares the supplied observation against the canonical deadline;
-- `wait 0` completes immediately without allocating an action ID, settlement, or action event;
+- `wait 0 s` completes immediately without allocating an action ID, settlement, or action event;
 - a statically provable negative duration is a compile-time error;
 - a negative runtime result is a structured runtime failure;
 - `NaN`, infinity, unsupported magnitude, and deadline overflow are rejected;
@@ -486,7 +486,7 @@ Every implemented pending-action kind requires shared state-machine coverage plu
 - restore after deadline;
 - fractional-millisecond deadline;
 - browser wake-up later than the exact deadline;
-- `wait 0` creates no action or settlement;
+- `wait 0 s` creates no action or settlement;
 - negative runtime duration;
 - non-finite, unsupported-magnitude, and overflowing duration/deadline;
 - backward time observation does not extend the action;

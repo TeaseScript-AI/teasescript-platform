@@ -103,6 +103,8 @@ import {
   formatDuration,
   isCalendar,
   scaleDuration,
+  unitValue,
+  UNIT_OPERANDS,
   type AnyDuration,
 } from "./duration.js";
 import {
@@ -701,6 +703,12 @@ class TypeChecker {
   /** The names each function's parameters and body mention, found when first needed. */
   readonly #namesUsed = new Map<FunctionType, ReadonlySet<string>>();
 
+  /**
+   * The duration of a `wait` or a timer, written after `wait`, `timer`, or `duration:`. Its operator errors suggest
+   * grouping before the unit, and a calendar unit after a range is refused like any calendar duration there.
+   */
+  readonly #timeOperands = new Map<Expression, "wait" | "timer" | "duration:">();
+
   /** Timer, media, and button blocks to check after their file's functions, with the scope and file they belong to. */
   readonly #handlers: {
     readonly block: Block;
@@ -1249,7 +1257,9 @@ class TypeChecker {
         this.#suspend();
         return true;
       case "waitStatement":
-        yield* compileChild(this.#timeTask(statement.duration, statement.unit !== null, scope));
+        yield* compileChild(
+          this.#timeTask(statement.duration, "wait", statement.unit !== null, scope),
+        );
         this.#suspend();
         return true;
       case "timerStatement":
@@ -1647,10 +1657,13 @@ class TypeChecker {
     if (statement.presentation !== null)
       yield* compileChild(this.#expressionTask(statement.presentation, scope));
     yield* compileChild(this.#expressionTask(statement.value, scope));
-    if (statement.pacing !== null && statement.pacing !== "instant")
-      yield* compileChild(
-        this.#requireTask(statement.pacing, scope, isNumeric, "Say pacing is a number of seconds"),
+    if (statement.pacing !== null && statement.pacing !== "instant") {
+      const pacing = statement.pacing;
+      const type = yield* compileChild(this.#expressionTask(pacing, scope));
+      this.#reportNonDuration(pacing, type, "Say pacing is a duration or instant", "3 s", () =>
+        unitFix(pacing),
       );
+    }
   }
 
   /** A `let`, or the start value of a `global`, which declares the global in the project's names. */
@@ -2962,9 +2975,7 @@ class TypeChecker {
         if (typeof value === "string")
           this.#report(
             typeCode.invalidOperand,
-            expression.calendar && (expression.unit === "d" || expression.unit === "w")
-              ? `${value}. Use whole calendar days, or exact hours such as '${formatNumberText(expression.amount.value * (expression.unit === "d" ? 24 : 168))} h'.`
-              : `${value}. Use whole calendar months.`,
+            calendarAmountMessage(value, expression.unit, expression.amount.value),
             expression.span,
           );
         return expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
@@ -3059,6 +3070,47 @@ class TypeChecker {
       }
       case "callExpression":
         return yield* compileChild(this.#callTask(expression, scope));
+      case "unitExpression": {
+        const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
+        const value = nonNullTypeForUse(operand);
+        const type = expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
+        // A wait or timer then refuses it as a calendar duration.
+        if (
+          expression.calendar &&
+          resolved(value).kind === "range" &&
+          this.#timeOperands.has(expression)
+        )
+          return type;
+        // A known amount must give whole calendar days or months, like a literal.
+        const amount = this.#known(expression.operand);
+        const known = typeof amount === "number" ? unitValue(amount, expression) : undefined;
+        if (typeof amount === "number" && typeof known === "string")
+          this.#report(
+            typeCode.invalidOperand,
+            calendarAmountMessage(known, expression.unit, amount),
+            expression.span,
+          );
+        const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
+        this.#reportUnless(
+          operand,
+          isNumeric,
+          expression.operand,
+          "A unit follows a number",
+          () => {
+            if (isScalar(value, "duration", "calendarDuration"))
+              return ` Remove the '${unit}' after it.`;
+            if (resolved(value).kind !== "range") return ` Use a number before the '${unit}'.`;
+            // A wait refuses a calendar range, so the example takes the exact unit of the same name, if any.
+            const range = expressionText(expression.operand);
+            const exact =
+              expression.unit === "mo" || expression.unit === "y" ? null : expression.unit;
+            return range === null || exact === null
+              ? " Only a wait or timer takes a range with a unit."
+              : ` Only a wait or timer takes a range with a unit, as in 'wait ${range} ${exact}'.`;
+          },
+        );
+        return type;
+      }
       case "unaryExpression": {
         if (expression.operator === "not")
           return yield* compileChild(this.#valueOfConditionTask(expression, scope));
@@ -3336,14 +3388,11 @@ class TypeChecker {
             value,
             `'${name.name}:' takes text or a button object { text, background? }`,
           );
-      } else if (name.name === "timeout")
-        this.#reportUnless(
-          type,
-          (member) => isNumeric(member) || isScalar(member, "duration"),
-          value,
-          "'timeout:' takes a number of seconds or a duration, such as 30 s",
+      } else if (name.name === "timeout") {
+        this.#reportNonDuration(value, type, "An askForm timeout is a duration", "30 s", () =>
+          unitFix(value),
         );
-      else if (name.name === "onTimeout")
+      } else if (name.name === "onTimeout")
         this.#reportUnless(
           type,
           (member) => isScalar(member, "string"),
@@ -4313,9 +4362,11 @@ class TypeChecker {
       result,
     );
     if ("type" in outcome) return outcome.type;
+    const command = this.#timeOperands.get(expression);
     this.#report(
       typeCode.invalidOperand,
-      operatorMessage(operator, expression, outcome.failed),
+      (command === undefined ? null : groupedUnitMessage(command, expression, outcome.failed)) ??
+        operatorMessage(operator, expression, outcome.failed),
       expression.span,
     );
     return UNKNOWN_TYPE;
@@ -5617,11 +5668,12 @@ class TypeChecker {
       const type = yield* compileChild(this.#expressionTask(option.value, scope));
       if (option.name === "background") this.#checkBackground(option.value, type);
       else {
-        this.#reportUnless(
-          type,
-          (member) => isNumeric(member) || isScalar(member, "duration"),
+        this.#reportNonDuration(
           option.value,
-          "A showButton timeout is a duration such as '30 s', or a number of seconds",
+          type,
+          "A showButton timeout is a duration",
+          "30 s",
+          () => unitFix(option.value),
         );
       }
     }
@@ -5843,31 +5895,76 @@ class TypeChecker {
 
   // Commands ---------------------------------------------------------------------------------------------------------
 
-  /** A time in a command that expects one: a duration, or a number of seconds; with an explicit unit, a number. */
-  *#timeTask(expression: Expression, unit: boolean, scope: Scope): CompileTask<StaticType> {
+  /** A time in a command that expects one: a duration; with a unit after it, a number. */
+  *#timeTask(
+    expression: Expression,
+    command: "wait" | "media",
+    unit: boolean,
+    scope: Scope,
+  ): CompileTask<StaticType> {
+    if (command === "wait") this.#timeOperands.set(expression, "wait");
     const type = yield* compileChild(this.#expressionTask(expression, scope));
-    this.#reportTime(expression, type, unit);
+    this.#reportTime(expression, type, command, unit);
     return type;
   }
 
-  #reportTime(expression: Expression, type: StaticType, unit: boolean, range = false): void {
-    const isRange = (member: StaticType): boolean => range && resolved(member).kind === "range";
-    if (unit)
+  /**
+   * A time is an exact duration; a number never counts as seconds (ADR 0026 §8). A wait or timer keeps the exact unit
+   * after its duration apart, which then is a number, or a range of whole units.
+   */
+  #reportTime(
+    expression: Expression,
+    type: StaticType,
+    command: "wait" | "timer" | "named timer" | "media",
+    unit: boolean,
+  ): void {
+    const isRange = (member: StaticType): boolean =>
+      command !== "media" && resolved(member).kind === "range";
+    if (unit) {
       this.#reportUnless(
         type,
         (member) => isNumeric(member) || isRange(member),
         expression,
         "A time before a unit is a number",
       );
-    else
-      this.#reportUnless(
-        type,
-        (member) => isNumeric(member) || isScalar(member, "duration") || isRange(member),
-        expression,
-        range
-          ? "A timer duration is a duration such as '30 s', a number of seconds, or a range of whole seconds"
-          : "A time is a duration such as '30 s', or a number of seconds",
-      );
+      return;
+    }
+    const range = resolved(nonNullTypeForUse(type)).kind === "range";
+    this.#reportNonDuration(
+      expression,
+      type,
+      command === "media"
+        ? "A media position is a duration"
+        : `A ${command === "wait" ? "wait" : "timer"} takes a duration`,
+      "30 s",
+      () => timeUnitFix(expression, command, range),
+    );
+  }
+
+  /**
+   * Reports a known value that is not a duration where a time is expected. A number, or a range, gets the fix that gives
+   * it a unit, and any other value the `example` of a duration.
+   */
+  #reportNonDuration(
+    expression: Expression,
+    type: StaticType,
+    rule: string,
+    example: string,
+    fix: () => string,
+  ): void {
+    const value = nonNullTypeForUse(type);
+    const unitless = isNumeric(value) || resolved(value).kind === "range";
+    this.#reportUnless(
+      type,
+      (member) => isScalar(member, "duration"),
+      expression,
+      rule,
+      // A calendar duration gets the reason it has no fixed length instead.
+      () =>
+        isScalar(value, "calendarDuration")
+          ? ""
+          : ` ${unitless ? fix() : `Use a duration such as '${example}'.`}`,
+    );
   }
 
   *#timerTask(timer: TimerParts, scope: Scope): CompileTask<void> {
@@ -5880,9 +5977,15 @@ class TypeChecker {
           "A timer display is text (string)",
         ),
       );
-    // A timer also accepts a range of whole seconds, written directly or held in a variable.
+    // With a unit, a timer also takes a range of whole units, written directly or held in a variable.
+    this.#timeOperands.set(timer.duration, timer.form === "short" ? "timer" : "duration:");
     const duration = yield* compileChild(this.#expressionTask(timer.duration, scope));
-    this.#reportTime(timer.duration, duration, timer.unit !== null, true);
+    this.#reportTime(
+      timer.duration,
+      duration,
+      timer.form === "short" ? "timer" : "named timer",
+      timer.unit !== null,
+    );
     if (timer.label !== null)
       this.#checkShownText(
         timer.label,
@@ -5943,7 +6046,7 @@ class TypeChecker {
             "Repeat is true, false, or a duration",
           ),
         );
-      } else yield* compileChild(this.#timeTask(operand, false, scope));
+      } else yield* compileChild(this.#timeTask(operand, "media", false, scope));
     }
     for (const block of mediaHandlerBlocks(media))
       this.#pendHandler(block, media.async ? selfHandle : null, scope);
@@ -7716,6 +7819,25 @@ function handleMemberMessage(
     : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
 }
 
+/**
+ * `wait 15 + randomInteger(0..35) s` gives the unit to the call alone, so a number is added to a duration: the whole
+ * expression goes in parentheses with the unit after them (ADR 0026 §8).
+ */
+function groupedUnitMessage(
+  command: "wait" | "timer" | "duration:",
+  expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
+  operands: readonly StaticType[],
+): string | null {
+  if (expression.kind !== "binaryExpression" || operands.length !== 2) return null;
+  const right = expression.right;
+  if (right.kind !== "durationLiteral" && right.kind !== "unitExpression") return null;
+  if (!isNumeric(operands[0]!) || !isScalar(operands[1]!, "duration")) return null;
+  const left = expressionText(expression.left);
+  const amount = expressionText(right.kind === "durationLiteral" ? right.amount : right.operand);
+  if (left === null || amount === null) return null;
+  return `A duration and a number cannot be combined with '${expression.operator}'. Put the expression in parentheses with the unit after them, such as '${command} (${left} ${expression.operator} ${amount}) ${right.unit}'.`;
+}
+
 function operatorMessage(
   operator: string,
   expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
@@ -7854,6 +7976,16 @@ function plainText(expression: Expression): string | null {
 }
 
 /** A number as a fix shows it, without float noise. */
+/**
+ * Why a calendar amount gives no whole days or months, with the fix: whole calendar units, or exact hours for days and
+ * weeks (V30 §35).
+ */
+function calendarAmountMessage(reason: string, unit: string, amount: number): string {
+  return unit === "d" || unit === "w"
+    ? `${reason}. Use whole calendar days, or exact hours such as '${formatNumberText(amount * (unit === "d" ? 24 : 168))} h'.`
+    : `${reason}. Use whole calendar months.`;
+}
+
 function formatNumberText(value: number): string {
   return String(Number(value.toFixed(3)));
 }
@@ -7895,13 +8027,122 @@ function temporalPairFix(
   return "";
 }
 
-/** Give a bare number a unit: `'5 s'` for a literal, else multiplication by one second. */
+/** Give a time without a unit one, as a unit follows a number (ADR 0026 §8), in the command it is written in. */
+function timeUnitFix(
+  expression: Expression,
+  command: "wait" | "timer" | "named timer" | "media",
+  range: boolean,
+): string {
+  if (command === "media") return unitFix(expression);
+  const form = unitForm(expression);
+  const written = command === "named timer" ? "duration:" : command;
+  return form === null
+    ? "Put the expression in parentheses with a unit after them."
+    : `Give the ${range ? "range" : "number"} a unit, such as '${written} ${form}'.`;
+}
+
+/** Give a number a unit: `'5 s'`, `'count s'`, or `'(count + 1) s'`. */
 function unitFix(number: Expression | null): string {
-  const literal = number === null ? null : unwrap(number);
-  if (literal?.kind === "numberLiteral")
-    return `Give the number a unit, such as '${literal.raw} s'.`;
-  const label = number === null ? null : expressionLabel(number);
-  return `Give the number a unit, such as '${label ?? "n"} * 1 s'.`;
+  const form = number === null ? "5 s" : unitForm(number);
+  return form === null
+    ? "Put the expression in parentheses with a unit after them."
+    : `Give the number a unit, such as '${form}'.`;
+}
+
+/**
+ * An expression with `unit` after it as the source would need it: directly after a number literal, a name, a member,
+ * a call, or parentheses, and otherwise after added parentheses. `null` when the expression is too long to show.
+ */
+function unitForm(expression: Expression, unit = "s"): string | null {
+  const text = expressionText(expression);
+  if (text === null) return null;
+  return expression.kind === "numberLiteral" || UNIT_OPERANDS.has(expression.kind)
+    ? `${text} ${unit}`
+    : `(${text}) ${unit}`;
+}
+
+/**
+ * An expression as source text, for a fix that shows it: literals, names, members, calls, and operators. `null` for
+ * any other expression, and for one longer than a message can show.
+ */
+function expressionText(expression: Expression, depth = 0): string | null {
+  if (depth > 6) return null;
+  const child = (node: Expression): string | null => expressionText(node, depth + 1);
+  const all = (nodes: readonly (string | null)[]): nodes is readonly string[] =>
+    nodes.every((node) => node !== null);
+  let text: string | null = null;
+  switch (expression.kind) {
+    case "numberLiteral":
+      text = expression.raw;
+      break;
+    case "identifier":
+      text = expression.name;
+      break;
+    case "durationLiteral":
+      text = `${expression.amount.raw} ${expression.calendar ? "calendar " : ""}${expression.unit}`;
+      break;
+    case "stringLiteral": {
+      const plain = plainText(expression);
+      text = plain === null ? null : `"${plain}"`;
+      break;
+    }
+    case "propertyAccessExpression": {
+      const object = child(expression.object);
+      text = object === null ? null : `${object}.${expression.property.name}`;
+      break;
+    }
+    case "parenthesizedExpression": {
+      const inner = child(expression.expression);
+      text = inner === null ? null : `(${inner})`;
+      break;
+    }
+    case "indexExpression": {
+      const parts = [child(expression.object), child(expression.index)];
+      text = all(parts) ? `${parts[0]}[${parts[1]}]` : null;
+      break;
+    }
+    case "unitExpression": {
+      const operand = child(expression.operand);
+      text =
+        operand === null
+          ? null
+          : `${operand} ${expression.calendar ? "calendar " : ""}${expression.unit}`;
+      break;
+    }
+    case "unaryExpression": {
+      const operand = child(expression.operand);
+      text =
+        operand === null
+          ? null
+          : `${expression.operator === "not" ? "not " : expression.operator}${operand}`;
+      break;
+    }
+    case "binaryExpression": {
+      const parts = [child(expression.left), child(expression.right)];
+      text = all(parts) ? `${parts[0]} ${expression.operator} ${parts[1]}` : null;
+      break;
+    }
+    case "rangeExpression": {
+      const parts = [child(expression.start), child(expression.end)];
+      text = all(parts) ? `${parts[0]}${expression.inclusive ? "..=" : ".."}${parts[1]}` : null;
+      break;
+    }
+    case "callExpression": {
+      if (expression.arguments.length > 6) return null;
+      const parts = [
+        child(expression.callee),
+        ...expression.arguments.map((argument) => {
+          const value = child(argument.value);
+          return value === null || argument.kind === "positionalArgument"
+            ? value
+            : `${argument.name.name}: ${value}`;
+        }),
+      ];
+      text = all(parts) ? `${parts[0]}(${parts.slice(1).join(", ")})` : null;
+      break;
+    }
+  }
+  return text !== null && text.length <= 60 ? text : null;
 }
 
 /**

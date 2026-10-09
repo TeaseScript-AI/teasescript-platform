@@ -829,35 +829,44 @@ class SemanticValidator {
         );
       }
     }
-    const duration = unwrapParentheses(timer.duration);
-    if (timer.unit !== null && duration.kind === "durationLiteral") {
+    this.#validateDelayDuration("timer", timer.duration, timer.unit, timer.repeat);
+    if (timer.handler !== null) this.#pendHandler(timer.handler, "timer", null, scope);
+  }
+
+  /**
+   * The checks of a `wait` or timer duration that the compiler can see: a second unit, a range of whole units, and a
+   * length below zero, zero for a repeating round, or beyond scene time. A range without a unit is a type error.
+   */
+  #validateDelayDuration(
+    command: "wait" | "timer",
+    written: Expression,
+    unit: DurationUnit | null,
+    repeat: boolean,
+  ): void {
+    const duration = unwrapParentheses(written);
+    if (unit !== null && duration.kind === "durationLiteral") {
       this.#report(
         semanticCode.invalidTimer,
-        "This duration already has a unit.",
-        timer.duration.span,
+        `This duration already has a unit. Remove the '${unit}' after it.`,
+        written.span,
       );
     }
     if (duration.kind === "rangeExpression") {
+      if (unit === null) return;
       const start = staticNumber(duration.start);
       const end = staticNumber(duration.end);
-      if (timer.unit !== null && timer.unit !== "s") {
+      if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
         this.#report(
           semanticCode.invalidRangeOperand,
-          "A timer range counts whole seconds. Other units are not supported for ranges yet.",
-          timer.duration.span,
-        );
-      } else if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          "A statically known timer range must have integer second bounds.",
+          `A ${command} range counts whole units, so its bounds must be whole numbers.`,
           duration.span,
         );
-      } else if (start !== undefined && start < (timer.repeat ? 1 : 0)) {
+      } else if (start !== undefined && start < (repeat ? 1 : 0)) {
         this.#report(
           semanticCode.invalidRangeOperand,
-          timer.repeat
-            ? "A repeating timer range must start at one second or more."
-            : "A timer range must not start below zero seconds.",
+          repeat
+            ? "A repeating timer range must start at 1 or more."
+            : `A ${command} range must not start below 0.`,
           duration.span,
         );
       } else if (
@@ -867,40 +876,38 @@ class SemanticValidator {
       ) {
         this.#report(
           semanticCode.invalidRangeOperand,
-          "A timer range must contain at least one whole second.",
+          `A ${command} range must contain at least one whole number.`,
           duration.span,
         );
       } else if (
         start !== undefined &&
-        !(start * DURATION_UNIT_MILLISECONDS.s <= Number.MAX_SAFE_INTEGER)
+        !(start * DURATION_UNIT_MILLISECONDS[unit] <= Number.MAX_SAFE_INTEGER)
       ) {
         // Every draw is at least the lower bound.
         this.#report(
           semanticCode.invalidRepeatCount,
-          "This timer is too long for scene time to reach. Use a shorter duration.",
+          `This ${command} is too long for scene time to reach. Use a shorter duration.`,
           duration.span,
         );
       }
     } else {
-      const known =
-        duration.kind === "durationLiteral" ? duration.amount.value : staticNumber(duration);
-      if (known !== undefined && (known < 0 || (timer.repeat && known === 0))) {
+      const known = knownMilliseconds(written, unit);
+      if (known !== undefined && (known < 0 || (repeat && known === 0))) {
         this.#report(
           semanticCode.invalidRepeatCount,
-          timer.repeat
+          repeat
             ? "A repeating timer duration must be greater than zero."
-            : "Timer duration must not be negative.",
-          timer.duration.span,
+            : `${command === "wait" ? "Wait" : "Timer"} duration must not be negative.`,
+          written.span,
         );
-      } else if (beyondSceneTime(timer.duration, timer.unit)) {
+      } else if (beyondSceneTime(written, unit)) {
         this.#report(
           semanticCode.invalidRepeatCount,
-          "This timer is too long for scene time to reach. Use a shorter duration.",
-          timer.duration.span,
+          `This ${command} is too long for scene time to reach. Use a shorter duration.`,
+          written.span,
         );
       }
     }
-    if (timer.handler !== null) this.#pendHandler(timer.handler, "timer", null, scope);
   }
 
   /** The button text is checked like any shown text; the click action runs later, like a timer expiry block. */
@@ -1041,10 +1048,7 @@ class SemanticValidator {
       this.#pendHandler(block, "media", media.async ? selfHandle : null, captures);
   }
 
-  /**
-   * A media position is a duration or a number of seconds that is not negative. Returns its static value in
-   * milliseconds when known.
-   */
+  /** A media position is a duration that is not negative. Returns its static value in milliseconds when known. */
   #validateMediaPosition(expression: Expression | null, name: string): number | undefined {
     if (expression === null) return undefined;
     const known = staticDurationMs(expression);
@@ -1057,7 +1061,7 @@ class SemanticValidator {
     ) {
       this.#report(
         semanticCode.invalidMedia,
-        `${name} must be a duration such as '30 s' or a number of seconds.`,
+        `${name} must be a duration such as '30 s'.`,
         expression.span,
       );
     }
@@ -1295,30 +1299,7 @@ class SemanticValidator {
         return;
       case "waitStatement": {
         this.#validateExpression(statement.duration, scope, null);
-        if (
-          statement.unit !== null &&
-          unwrapParentheses(statement.duration).kind === "durationLiteral"
-        ) {
-          this.#report(
-            semanticCode.invalidTimer,
-            "This duration already has a unit.",
-            statement.duration.span,
-          );
-        }
-        const known = staticNumber(statement.duration);
-        if (known !== undefined && known < 0) {
-          this.#report(
-            semanticCode.invalidRepeatCount,
-            "Wait duration must not be negative.",
-            statement.duration.span,
-          );
-        } else if (beyondSceneTime(statement.duration, statement.unit)) {
-          this.#report(
-            semanticCode.invalidRepeatCount,
-            "This wait is too long for scene time to reach. Use a shorter duration.",
-            statement.duration.span,
-          );
-        }
+        this.#validateDelayDuration("wait", statement.duration, statement.unit, false);
         return;
       }
       case "timerStatement":
@@ -1858,7 +1839,11 @@ class SemanticValidator {
     scope: SemanticScope,
     contextualSpeaker: string | null,
   ): CompileTask<void> {
-    while (expression.kind === "parenthesizedExpression" || expression.kind === "unaryExpression") {
+    while (
+      expression.kind === "parenthesizedExpression" ||
+      expression.kind === "unaryExpression" ||
+      expression.kind === "unitExpression"
+    ) {
       expression =
         expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
     }
@@ -2232,7 +2217,7 @@ class SemanticValidator {
     yield* compileChild(this.#validateExpressionTask(parts.value, scope, contextualSpeaker));
     if (parts.pacing !== null && parts.pacing !== "instant") {
       yield* compileChild(this.#validateExpressionTask(parts.pacing, scope, contextualSpeaker));
-      const known = staticNumber(parts.pacing);
+      const known = knownMilliseconds(parts.pacing, null);
       if (known !== undefined && known < 0) {
         this.#report(
           semanticCode.invalidRepeatCount,
@@ -2956,7 +2941,7 @@ function isIndefiniteRepeatValue(repeat: MediaParts["repeat"]): boolean {
   return repeat?.kind === "value" && isTrueLiteral(repeat.value);
 }
 
-/** A statically known media position in milliseconds: a duration literal or a number of seconds. */
+/** A statically known media position or repeat duration in milliseconds, from a duration literal. */
 function staticDurationMs(expression: Expression): number | undefined {
   let current = unwrapParentheses(expression);
   let sign = 1;
@@ -2964,13 +2949,10 @@ function staticDurationMs(expression: Expression): number | undefined {
     if (current.operator === "-") sign = -sign;
     current = unwrapParentheses(current.operand);
   }
-  if (current.kind === "durationLiteral") {
-    // A calendar duration has no fixed length, so it gives no media position.
-    const value = durationLiteralValue(current);
-    return typeof value === "string" || isCalendar(value) ? undefined : sign * value.milliseconds;
-  }
-  const seconds = staticNumber(expression);
-  return seconds === undefined ? undefined : seconds * 1_000;
+  if (current.kind !== "durationLiteral") return undefined;
+  // A calendar duration has no fixed length, so it gives no media position.
+  const value = durationLiteralValue(current);
+  return typeof value === "string" || isCalendar(value) ? undefined : sign * value.milliseconds;
 }
 
 /** A statically evident wrong value for an assignable timer handle property. */
@@ -3038,14 +3020,16 @@ function isDefinitelyNonText(expression: Expression): boolean {
 }
 
 /**
- * The milliseconds of a known wait, timer, or timeout duration: a number counts seconds, or `unit`, and a duration its
- * own milliseconds. `undefined` when the value is not known or not a finite quantity.
+ * The milliseconds of a known wait, timer, timeout, or pacing duration: a number of a timer's `unit`, or a duration
+ * without one. `undefined` when the value is not known or not a finite quantity, and for a number without a unit, which
+ * the type check reports.
  */
 function knownMilliseconds(expression: Expression, unit: DurationUnit | null): number | undefined {
   const known = staticQuantity(expression);
   if (known === undefined) return undefined;
-  if (typeof known === "number") return known * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
-  // A duration with a trailing unit is a type error of its own, and a calendar duration has no fixed length.
+  if (typeof known === "number")
+    return unit === null ? undefined : known * DURATION_UNIT_MILLISECONDS[unit];
+  // A duration with a unit after it is a type error of its own, and a calendar duration has no fixed length.
   return unit === null && !isCalendar(known) ? known.milliseconds : undefined;
 }
 

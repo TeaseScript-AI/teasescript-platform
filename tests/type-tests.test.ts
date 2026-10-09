@@ -76,7 +76,7 @@ test("a type test is true exactly when the value may be stored in a place of tha
   );
   assert.deepEqual(
     sayTexts(
-      `${DYNAMIC}speaker vera {}\nlet voice = dynamic(vera)\nlet clock = dynamic(timer async 5)\nsay "\${voice is speaker} \${clock is timer} \${clock is media} \${voice is not speaker}"\nexit`,
+      `${DYNAMIC}speaker vera {}\nlet voice = dynamic(vera)\nlet clock = dynamic(timer async 5 s)\nsay "\${voice is speaker} \${clock is timer} \${clock is media} \${voice is not speaker}"\nexit`,
     ),
     ["true true false false"],
   );
@@ -167,12 +167,12 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
     [["TSV041", "v"]],
   );
   assert.deepEqual(
-    errors(`${union}${change}if v is integer {\n    wait 1\n    let i: integer = v\n}\nexit`),
+    errors(`${union}${change}if v is integer {\n    wait 1 s\n    let i: integer = v\n}\nexit`),
     [["TSV041", "v"]],
   );
   // Nothing else assigns `v`, so a wait keeps it narrowed.
   assert.deepEqual(
-    errors(`${union}if v is integer {\n    wait 1\n    let i: integer = v\n}\nexit`),
+    errors(`${union}if v is integer {\n    wait 1 s\n    let i: integer = v\n}\nexit`),
     [],
   );
   // At most one block of a `switch` runs: each starts from the facts before it, and they meet after it.
@@ -256,7 +256,7 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
 });
 
 test("media pacing and loading, and handle writes, cancel narrowing where a handler may run", () => {
-  const shared = 'let reward: integer | string = 1\ntimer async 1 {\n    reward = "changed"\n}\n';
+  const shared = 'let reward: integer | string = 1\ntimer async 1 s {\n    reward = "changed"\n}\n';
   const music = 'let music = playAudio async "a.mp3"\n';
   for (const body of [
     'if reward is integer {\n    let clip = playAudio async "a.mp3"\n    let result: integer = reward\n}',
@@ -269,7 +269,7 @@ test("media pacing and loading, and handle writes, cancel narrowing where a hand
 });
 
 test("takePhoto() gives text or null and cancels narrowing while the Player captures", () => {
-  const shared = 'let reward: integer | string = 1\ntimer async 1 {\n    reward = "changed"\n}\n';
+  const shared = 'let reward: integer | string = 1\ntimer async 1 s {\n    reward = "changed"\n}\n';
   assert.deepEqual(
     errors(
       `${shared}if reward is integer {\n    let photo = takePhoto()\n    let result: integer = reward\n}\nexit`,
@@ -420,7 +420,7 @@ test("a type test inside parentheses or brackets continues before '|', and 'is' 
     'let m = (playAudio async "a.mp3" {\n    let passed = 1 is integer\n    [1].removeLast()\n})\nexit',
   ])
     assert.deepEqual(errors(source), [], source);
-  assert.notDeepEqual(errors('let t = (timer async 0 """${1 is integer\n    | string}""")'), []);
+  assert.notDeepEqual(errors('let t = (timer async 0 s """${1 is integer\n    | string}""")'), []);
   assert.deepEqual(diagnostics("let x = set[1]\nlet passed = x is set[1]"), [
     ["error", "TSP021", "'is' checks a type. Use '==' to compare values.", "set[1]"],
   ]);
