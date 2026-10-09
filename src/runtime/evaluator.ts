@@ -9,6 +9,7 @@ import {
   temporalConverted,
   temporalNow,
   temporalMethod,
+  calendarDurationProperty,
   temporalProperty,
 } from "./temporal-operations.js";
 import { normalizeColor } from "../color.js";
@@ -3409,15 +3410,14 @@ export class Evaluator {
       return property;
     }
     if (isCalendarDuration(value)) {
-      // The components of a calendar duration (ADR 0026); `.days` counts calendar days and is not a length.
-      if (name === "months") return value.months;
-      if (name === "days") return value.days;
-      if (name === "exactOffset") return exactDuration(value.milliseconds);
-      throw fault(
-        "TSR017",
-        `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
-        span,
-      );
+      const property = calendarDurationProperty(value, name);
+      if (property === undefined)
+        throw fault(
+          "TSR017",
+          `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
+          span,
+        );
+      return property;
     }
     if (isDuration(value)) throw fault("TSR017", durationPropertyMessage(name), span);
     if (isTemporal(value)) {

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { MEDIA_PROPERTIES } from "../src/runtime/media.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import { TIMER_PROPERTIES } from "../src/runtime/timers.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("resume equivalence preserves list warnings and collection state", () => {
@@ -209,6 +211,60 @@ test("a prepared receiver that leads nowhere fails with a checkpoint that resume
       change,
     );
   }
+});
+
+test("a prepared receiver through any property that its value does not hold resumes from every checkpoint", () => {
+  // The receiver `subject.<property>` is prepared before its index runs, which then fails, as no such property is a list.
+  const dateFields = ["year", "month", "day", "weekday", "weekdayNumber", "weekNumber", "weekYear"];
+  const timeFields = ["hour", "minute", "second", "millisecond"];
+  const cases: [setup: string, properties: readonly string[]][] = [
+    ['let subject = dynamic("abc")', ["length"]],
+    ["let subject = dynamic(1 calendar month)", ["months", "days", "exactOffset"]],
+    ['let subject = dynamic(toDate("2026-10-05"))', dateFields],
+    ['let subject = dynamic(toTime("20:15"))', timeFields],
+    [
+      'let subject = dynamic(toDateTime(toDate("2026-10-05"), toTime("20:15")))',
+      [...dateFields, ...timeFields],
+    ],
+    [
+      'let clock = timer async 10 s {\n    say "done"\n}\nlet subject = dynamic(clock)',
+      [...TIMER_PROPERTIES, "state.length"],
+    ],
+    ['let sound = playAudio async "a.mp3"\nlet subject = dynamic(sound)', [...MEDIA_PROPERTIES]],
+    ["let view = showCamera stage\nlet subject = dynamic(view)", ["placement"]],
+  ];
+  for (const [setup, properties] of cases)
+    for (const property of properties) {
+      const result = assertRuntimeResumeEquivalent(
+        [
+          "function dynamic(value) {",
+          "    return value",
+          "}",
+          setup,
+          `let probe = subject.${property}[dynamic(0)]`,
+          "exit",
+        ].join("\n"),
+        { scenarioName: `${setup}: ${property}`, ending: "failed", mediaDurationMs: 1_000 },
+      );
+      // Not TSR017: the runtime read the property while preparing the receiver.
+      assert.equal(result.finalSnapshot.failure?.code, "TSR008", `${setup}: ${property}`);
+    }
+  // A receiver that a method uses keeps working through such a property.
+  const said = assertRuntimeResumeEquivalent(
+    [
+      "function dynamic(value) {",
+      "    return value",
+      "}",
+      'let day = toDate("2026-10-05")',
+      'say day.weekday.startsWith(dynamic("Mon"))',
+      "exit",
+    ].join("\n"),
+    { scenarioName: "weekday startsWith" },
+  );
+  assert.deepEqual(
+    said.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["true"],
+  );
 });
 
 test("resume equivalence preserves deterministic random advancement", () => {
