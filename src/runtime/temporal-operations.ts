@@ -1,5 +1,6 @@
 import {
   calendarDuration,
+  exactDuration,
   formatDuration,
   isCalendar,
   negateDuration,
@@ -38,6 +39,7 @@ import {
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type {
+  SerializableRuntimeCalendarDuration,
   SerializableRuntimeDate,
   SerializableRuntimeDateTime,
   SerializableRuntimeDuration,
@@ -187,6 +189,20 @@ export function combinedDateAndTime(
     second: time.second,
     millisecond: time.millisecond,
   };
+}
+
+/**
+ * A component of a calendar duration (ADR 0026), or `undefined` when it has no such component. `days` counts calendar
+ * days and is not a length.
+ */
+export function calendarDurationProperty(
+  value: SerializableRuntimeCalendarDuration,
+  name: string,
+): SerializableRuntimeValue | undefined {
+  if (name === "months") return value.months;
+  if (name === "days") return value.days;
+  if (name === "exactOffset") return exactDuration(value.milliseconds);
+  return undefined;
 }
 
 /** A field of a date, time, or datetime, or `undefined` when the value has no such field. */
