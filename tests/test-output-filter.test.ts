@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -139,4 +139,37 @@ test("filter refuses a path that matches no test file before Node runs any", () 
   ]);
   assert.equal(option.status, 0, option.stderr);
   assert.match(option.stdout, /ℹ pass 1/);
+});
+
+test("filter refuses a pattern whose only matches are in a node_modules folder, which Node leaves out", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  const source = `
+    import test from "node:test";
+    test("passing test", () => {});
+  `;
+  mkdirSync(resolve(directory, "node_modules"));
+  mkdirSync(resolve(directory, "tests"));
+  writeFileSync(resolve(directory, "node_modules/vendored.test.mjs"), source);
+  writeFileSync(resolve(directory, "tests/own.test.mjs"), source);
+  const filter = (pattern: string) =>
+    spawnSync(process.execPath, [filterPath, pattern], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+  try {
+    const vendored = filter("node_modules/*.test.mjs");
+    assert.equal(vendored.status, 1, vendored.stderr);
+    assert.match(vendored.stderr, /no test file matches 'node_modules\/\*\.test\.mjs'/);
+    assert.doesNotMatch(vendored.stdout, /ℹ tests/);
+
+    // A pattern that also matches a file outside node_modules runs that file, as Node does.
+    const both = filter("*/*.test.mjs");
+    assert.equal(both.status, 0, both.stderr);
+    assert.match(both.stdout, /ℹ tests 1/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
