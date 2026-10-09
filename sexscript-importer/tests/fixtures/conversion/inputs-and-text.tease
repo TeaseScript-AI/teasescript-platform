@@ -1,4 +1,4 @@
-let name = askText "What is your name?"
+let name = askText("What is your name?").replace("\n", " ")
 let weight = askNumber "Your weight?", prefill: 0
 say "Hello ${name}, you said ${weight}."
 say "Choose a task"
@@ -40,12 +40,12 @@ let stored = load "question", default: ""
 if stored != "" {
   say stored
 }
-let answer = askText
+let answer = askText().replace("\n", " ")
 // A question that may be null elsewhere needs no test right after it was set to text.
 stored = "Ready now?"
 let ready = askBoolean stored
 // A character of a text is its one-character substring, also counted from the end.
-let code = askText "Square?", prefill: "B4"
+let code = askText("Square?", prefill: "B4").replace("\n", " ")
 say "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}"
 // Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
 function honorific {

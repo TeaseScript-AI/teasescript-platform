@@ -3,7 +3,7 @@ speaker system {
 }
 function sexscriptLegacyAskOnce(key, question) {
   if load(key, default: null) == null {
-    save (askText as system question) as key
+    save (askText as system (question).replace("\n", " ")) as key
   }
   return load key, default: null
 }

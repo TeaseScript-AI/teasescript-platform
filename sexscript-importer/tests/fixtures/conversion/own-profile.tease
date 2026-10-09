@@ -1,4 +1,4 @@
 // A script that asks the name itself and saves it needs no profile prompt.
-save askText "What is your name?", prefill: "pet" as "intro.name"
+save askText("What is your name?", prefill: "pet").replace("\n", " ") as "intro.name"
 say "Hello, ${load("intro.name", default: "")}"
 exit

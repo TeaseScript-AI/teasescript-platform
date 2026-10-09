@@ -385,7 +385,7 @@ export function emitExpression(expression: IrExpression): string {
         expression.speaker === undefined
           ? expression.input
           : `${expression.input} as ${expression.speaker} `;
-      return `${asked}(${askArguments(expression).join(", ")})`;
+      return `${asked}(${askArguments(expression).join(", ")})${singleLine(expression) ? SINGLE_LINE : ""}`;
     }
     case "choice":
     case "listChoice":
@@ -682,8 +682,22 @@ function emitValue(expression: IrExpression): string {
     : emitExpression(expression);
 }
 
-/** `askText`, `askInteger default: 3`, `askText as system` (V30 §20). */
+/**
+ * A text answer with its line breaks as spaces: legacy getString's field held one line, and a line break in an answer
+ * that the script shows inside a markup span would end the span (message-markup.md), or would change a comparison.
+ */
+const SINGLE_LINE = `.replace("\\n", " ")`;
+
+function singleLine(expression: Extract<IrExpression, { kind: "input" }>): boolean {
+  return expression.input === "askText" && expression.unread !== true;
+}
+
+/**
+ * `askInteger default: 3`, `askBoolean as system` (V30 §20); an `askText` whose line breaks become spaces takes its
+ * parenthesized form (SINGLE_LINE).
+ */
 function compactInput(expression: Extract<IrExpression, { kind: "input" }>): string {
+  if (singleLine(expression)) return emitExpression(expression);
   const asked =
     expression.speaker === undefined
       ? expression.input

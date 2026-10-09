@@ -67,7 +67,7 @@ function fill(answer) {
 }
 let savedFilled: boolean? = load "game.filled", default: null
 let filled = sexscriptLegacyValue(savedFilled)
-filled = fill(askText("Fill?", prefill: "text"))
+filled = fill(askText("Fill?", prefill: "text").replace("\n", " "))
 save true as "game.filled"
 say "Filled ${filled == null}"
 // A read of a key whose type nothing tells, which a list of a known type takes as a new item, reads the items' empty

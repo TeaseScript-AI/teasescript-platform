@@ -10,7 +10,7 @@ while true {
   if not answered {
     break
   }
-  name = askText "What is your name?", prefill: "slave"
+  name = askText("What is your name?", prefill: "slave").replace("\n", " ")
 }
 let conditional = name.length > 3
 if conditional {

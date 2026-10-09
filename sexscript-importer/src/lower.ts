@@ -6572,7 +6572,8 @@ function lowerCallStatement(
         ? expression.left
         : expression;
     context.ignoredInputs += 1;
-    return [{ kind: "let", name: `ignoredAnswer${context.ignoredInputs}`, value: answer, span }];
+    const value = answer.kind === "input" ? { ...answer, unread: true as const } : answer;
+    return [{ kind: "let", name: `ignoredAnswer${context.ignoredInputs}`, value, span }];
   }
   switch (call.name) {
     case "setInfos":

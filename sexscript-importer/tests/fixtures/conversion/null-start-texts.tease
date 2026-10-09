@@ -8,7 +8,7 @@ function sexscriptLegacyCastText(value): string? {
 // compares it with null or passes it on, and Groovy truth treats null like the empty text and false.
 let name = ""
 function ask {
-  name = askText "Your name?"
+  name = askText("Your name?").replace("\n", " ")
 }
 let finished = false
 if name == "" {
@@ -53,7 +53,7 @@ let answer: string? = null
 if answer == "" {
   say "No answer"
 }
-answer = askText "Answer?"
+answer = askText("Answer?").replace("\n", " ")
 let hint: string? = null
 function remind(text = hint) {
   say "Hint: ${text}"
