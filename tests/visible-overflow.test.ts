@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
 function diagnostics(source: string): string[] {
@@ -152,4 +156,96 @@ test("a wait or timer that scene time cannot reach is a compile error that names
     );
     assert.deepEqual(rest, [], source);
   }
+});
+
+test("at the last scene time, a positive wait, timer, timeout, or timer round fails with advice that can work", () => {
+  const last = Number.MAX_SAFE_INTEGER;
+  // Runs until the script stops, letting scene time reach each wait's deadline.
+  const failure = (source: string, initialSessionTimeMs = last) => {
+    const plan = compileValidPlan(source);
+    let result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { initialSessionTimeMs }));
+    while (result.snapshot.status === "waiting" && result.snapshot.foregroundAction !== null) {
+      result = observeTime(plan, result.snapshot, last);
+      result = run(plan, result.snapshot);
+    }
+    return result.snapshot.failure;
+  };
+  const round =
+    "Scene time has reached its limit, so this timer cannot continue. Stop it, or set its remaining time to 0 s.";
+  for (const [source, code, message, initialSessionTimeMs] of [
+    [
+      "wait 1\nexit",
+      "TSR050",
+      "Scene time has reached its limit, so this wait cannot run. Remove it.",
+    ],
+    [
+      "timer 1\nexit",
+      "TSR050",
+      "Scene time has reached its limit, so this timer cannot run. Remove it, or set its duration to 0 s.",
+    ],
+    [
+      "let t = timer async 1\nexit",
+      "TSR050",
+      "Scene time has reached its limit, so this timer cannot run. Remove it, or set its duration to 0 s.",
+    ],
+    [
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nexit",
+      "TSR050",
+      "Scene time has reached its limit, so this timer cannot run. Remove it.",
+    ],
+    [
+      'let elapsed = showButton "Go", timeout: 5\nexit',
+      "TSR050",
+      "Scene time has reached its limit, so this showButton timeout cannot run. Remove 'timeout:' to wait without a time limit.",
+    ],
+    [
+      'let answers = askForm fields: { n: { type: "integer", value: 1 } }, timeout: 1, onTimeout: "submit"\nexit',
+      "TSR052",
+      "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
+    ],
+    ["let t = timer async 5\nt.pause()\nwait 10\nt.resume()\nexit", "TSR050", round, last - 10_000],
+    [
+      "let t = timer async 5\nt.pause()\nwait 10\nt.remaining = 3 s\nexit",
+      "TSR050",
+      round,
+      last - 10_000,
+    ],
+    [
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10\nt.resume()\nexit",
+      "TSR050",
+      "Scene time has reached its limit, so this timer cannot continue. Stop it.",
+      last - 10_000,
+    ],
+  ] as const) {
+    const failed = failure(source, initialSessionTimeMs);
+    assert.equal(failed?.code, code, source);
+    assert.equal(failed?.message, message, source);
+  }
+  // The advice works: no wait, a timer of 0 s, a form without a time limit, a stopped repeating timer, and a timer
+  // whose remaining time is zero.
+  assert.equal(failure("wait 0\nexit"), null);
+  assert.equal(failure("let t = timer async 0 s\nt.stop()\nexit"), null);
+  const untimed = compileValidPlan(
+    'let answers = askForm fields: { n: { type: "integer", value: 1 } }\nexit',
+  );
+  const opened = run(
+    untimed,
+    createImmediatePacingRuntimeSnapshot(untimed, { initialSessionTimeMs: last }),
+  ).snapshot;
+  assert.equal(opened.failure, null);
+  assert.equal(opened.foregroundAction?.kind, "interaction");
+  assert.equal(
+    failure(
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10\nt.stop()\nexit",
+      last - 10_000,
+    ),
+    null,
+  );
+  assert.equal(
+    failure(
+      "let t = timer async 5\nt.pause()\nwait 10\nt.remaining = 0 s\nt.resume()\nexit",
+      last - 10_000,
+    ),
+    null,
+  );
 });

@@ -673,6 +673,10 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     }),
   );
   assert.equal(overflowResult.snapshot.status, "failed");
+  assert.equal(
+    overflowResult.snapshot.failure?.message,
+    "Scene time has reached its limit, so this say cannot pause. Use 'instant' instead.",
+  );
   assert.equal(overflowResult.snapshot.rng.state, 77);
   assert.deepEqual(
     overflowResult.events.map((event) => event.kind),
@@ -705,6 +709,11 @@ test("collection changes and random draws of a rejected say roll back, directly 
       seed: 77,
     });
     assert.equal(finalSnapshot.failure?.code, "TSR050", source);
+    assert.equal(
+      finalSnapshot.failure?.message,
+      "Say pacing must not be negative, but this is -1.",
+      source,
+    );
     assert.deepEqual(
       events.map((event) => event.kind),
       ["runtimeFailure"],
@@ -736,6 +745,10 @@ test("say output that evaluates no expression stages atomically, directly and af
   }
   const rejectedResult = run(rejected, beforeSay);
   assert.equal(rejectedResult.snapshot.failure?.code, "TSR050");
+  assert.equal(
+    rejectedResult.snapshot.failure?.message,
+    "Scene time has reached its limit, so this say cannot pause. Use 'instant' instead.",
+  );
   assert.deepEqual(rejectedResult.snapshot.warnedSpeakerIds, []);
   assert.deepEqual(rejectedResult.snapshot.backgroundActions, []);
   assert.deepEqual(

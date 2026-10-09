@@ -156,6 +156,7 @@ import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
+  MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import {
   describeRuntimeValue,
@@ -2384,7 +2385,7 @@ export class Evaluator {
       return null;
     }
     if (name === "resume" && timer.state === "paused") {
-      assertRepresentableRound(now, timer.remainingMs!, span);
+      assertRepresentableRound(now, timer.remainingMs!, timer.repeat, span);
     }
     const warning = name === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
     if (warning !== null) this.#warn(warning.code, warning.message, span);
@@ -2418,7 +2419,7 @@ export class Evaluator {
       exactDurationMilliseconds(value, `Timer ${name}`, span);
       if (name === "remaining") {
         if (timer.state === "running" || timer.state === "paused") {
-          assertRepresentableRound(now, Math.max(0, value.milliseconds), span);
+          assertRepresentableRound(now, Math.max(0, value.milliseconds), timer.repeat, span);
         }
         warning = setTimerRemaining(timer, value.milliseconds, now);
       } else {
@@ -3872,7 +3873,20 @@ export function planLabel(plan: ExpressionPlan): string | null {
 }
 
 /** A running round must end at a supported session time strictly after a positive remaining time starts. */
-function assertRepresentableRound(nowMs: number, remainingMs: number, span: SourceSpan): void {
+function assertRepresentableRound(
+  nowMs: number,
+  remainingMs: number,
+  repeat: boolean,
+  span: SourceSpan,
+): void {
+  // A repeating timer whose remaining time becomes 0 s starts another positive round.
+  if (remainingMs > 0 && nowMs === MAX_RUNTIME_SESSION_TIME_MS) {
+    throw fault(
+      "TSR050",
+      `Scene time has reached its limit, so this timer cannot continue. ${repeat ? "Stop it." : "Stop it, or set its remaining time to 0 s."}`,
+      span,
+    );
+  }
   const deadlineMs = nowMs + remainingMs;
   if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
     throw fault(

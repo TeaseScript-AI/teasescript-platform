@@ -1583,7 +1583,7 @@ restart, and report the failure with its debug export.
 | `TSR047` | Calls nested deeper than the call-depth limit. | End the recursion sooner. |
 | `TSR048` | Inconsistent parameter state. _Defect._ | Report it. |
 | `TSR049` | A required parameter without a value. _Defect._ | Report it. |
-| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a timer label or display, a media volume, a camera placement, a message's text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
+| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, a camera placement, a message's text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
 | `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
 | `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
 | `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed. | Make the change in a separate statement, or report a malformed state. |
