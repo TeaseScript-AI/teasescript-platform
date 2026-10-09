@@ -17,12 +17,26 @@ function shortWaits(source: string): string[] {
   return result.diagnostics.flatMap((diagnostic) => {
     if (diagnostic.code !== "TSV060") return [];
     assert.equal(diagnostic.severity, "warning");
-    const numbers = /takes at least ([\d.]+) s to read, so this ([\d.]+) s wait/.exec(
+    const times = /takes at least (.+) to read, so this wait of (.+) adds no time/.exec(
       diagnostic.message,
     );
-    assert.ok(numbers, diagnostic.message);
-    return [`${diagnostic.span.start.line + 1}: ${numbers[2]} / ${numbers[1]}`];
+    assert.ok(times, diagnostic.message);
+    return [`${diagnostic.span.start.line + 1}: ${seconds(times[2]!)} / ${seconds(times[1]!)}`];
   });
+}
+
+const UNIT_SECONDS: Readonly<Record<string, number>> = {
+  minute: 60,
+  second: 1,
+  millisecond: 0.001,
+};
+
+/** A displayed duration, such as `1 minute 2.5 seconds` or `500 milliseconds`, as seconds. */
+function seconds(shown: string): string {
+  let total = 0;
+  for (const [, amount, unit] of shown.matchAll(/([\d.]+) (minute|second|millisecond)s?/gu))
+    total += Number(amount) * (UNIT_SECONDS[unit!] ?? Number.NaN);
+  return String(Number(total.toFixed(3)));
 }
 
 test("a wait shorter than the message before it gets TSV060, which names both times and what to do", () => {
@@ -33,7 +47,7 @@ test("a wait shorter than the message before it gets TSV060, which names both ti
   assert.equal(warning.span.start.line + 1, 3);
   assert.equal(
     warning.message,
-    "At the default reading speed, the previous message takes at least 1.5 s to read, so this 0.5 s wait adds no time unless the player skips the message. Add `instant` to that `say` to make the wait the only pause, or remove the wait.",
+    "At the default reading speed, the previous message takes at least 1.5 seconds to read, so this wait of 500 milliseconds adds no time unless the player skips the message. Add `instant` to that `say` to make the wait the only pause, or remove the wait.",
   );
 });
 

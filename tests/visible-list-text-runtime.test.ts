@@ -30,7 +30,7 @@ test("interpolation selects one list element at every evaluation", () => {
     [0, 0.5, 0.9],
   );
   assert.equal(scalars.result.snapshot.failure, null);
-  assert.deepEqual(sayTexts(scalars.result), ["true, null, 1 min 30 s"]);
+  assert.deepEqual(sayTexts(scalars.result), ["true, null, 1 minute 30 seconds"]);
 });
 
 test("say shows lists, sets, and objects in code-like notation without message markup", () => {
@@ -43,7 +43,7 @@ test("say shows lists, sets, and objects in code-like notation without message m
     ['say ["He said \\"hi\\""]\nexit', '["He said \\"hi\\""]'],
     ["say []\nexit", "[]"],
     ["say {}\nexit", "{}"],
-    ["say [90 seconds]\nexit", "[1 min 30 s]"],
+    ["say [90 seconds]\nexit", "[1 minute 30 seconds]"],
     ["say set[2, 1, 2]\nexit", "[2, 1]"],
     ["say [2.50, -0, 1e21]\nexit", "[2.5, 0, 1e+21]"],
     [
@@ -125,8 +125,8 @@ test("say shows a timer handle with its current state, also after checkpoint res
   assert.deepEqual(
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
     [
-      '[<timer "Beat", 7 s left>, <timer, 7 s left>]',
-      '<timer "Beat", paused, 7 s left>',
+      '[<timer "Beat", 7 seconds left>, <timer, 7 seconds left>]',
+      '<timer "Beat", paused, 7 seconds left>',
       "<timer, stopped>",
       '<timer "Beat", finished>',
     ],
@@ -151,8 +151,8 @@ test("say shows a media handle with its current state, also after checkpoint res
   assert.deepEqual(
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
     [
-      '[<media "music.mp3", playing at 12 s>]',
-      '<media "music.mp3", paused at 12 s>',
+      '[<media "music.mp3", playing at 12 seconds>]',
+      '<media "music.mp3", paused at 12 seconds>',
       '<media "music.mp3", stopped>',
       '<media "beep.mp3", finished>',
     ],

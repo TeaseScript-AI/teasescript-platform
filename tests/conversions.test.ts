@@ -45,7 +45,7 @@ test("conversions turn text into numbers and true or false, and scalars into tex
       "2.5 -4 1000 0.5 0 7",
       "2 -2 2 -2 12 0",
       "true false false",
-      "[text] [2.5] [0] [true] [null] [1 min 30 s]",
+      "[text] [2.5] [0] [true] [null] [1 minute 30 seconds]",
       "003",
     ],
   );

@@ -104,7 +104,7 @@ test("values the compiler cannot know fail at runtime with the cause, the values
     [
       "let n = 0\nsay 1 s / n\nexit",
       "TSR036",
-      "Division by zero: 1 s / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
+      "Division by zero: 1 second / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
     ],
     [
       "let n = 0\nsay 1 calendar month / n\nexit",
@@ -114,7 +114,7 @@ test("values the compiler cannot know fail at runtime with the cause, the values
     [
       "let n = 1e305\nsay 1 h * n\nexit",
       "TSR036",
-      "1 h * 1e+305 gives a duration too long to represent. Use smaller values.",
+      "1 hour * 1e+305 gives a duration too long to represent. Use smaller values.",
     ],
   ] as const) {
     assert.deepEqual(diagnostics(source), [], source);

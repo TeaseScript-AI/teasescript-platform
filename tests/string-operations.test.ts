@@ -101,7 +101,13 @@ test("split keeps empty parts, replace is literal, and list join converts scalar
         "exit",
       ].join("\n"),
     ),
-    ["5 a+b++c+", "$&.b.$&", "red, blue | 2, 0 | true, false | 1 min 30 s", "", "null | null, a"],
+    [
+      "5 a+b++c+",
+      "$&.b.$&",
+      "red, blue | 2, 0 | true, false | 1 minute 30 seconds",
+      "",
+      "null | null, a",
+    ],
   );
 });
 
@@ -592,7 +598,7 @@ test("an operation that would make a text longer than any text can be fails with
     [
       `${doubled(28, "\\n")}\nlet t = timer(duration: 1 s, async: true, label: s)\nsay t, instant\nexit`,
       6,
-      `Text too long: say would make about 536,870,932 characters, ${limit}`,
+      `Text too long: say would make about 536,870,937 characters, ${limit}`,
     ],
   ] as const) {
     const failure = runValidSource(source).snapshot.failure;

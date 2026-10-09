@@ -551,7 +551,7 @@ test("a button that times out while a timer block runs records its timeout as th
     (step) => step.kind === "input",
   )!;
   assert.deepEqual(input.detail?.kind === "input" && input.detail.outcome, "timedOut");
-  assert.equal(input.preview, "3 s");
+  assert.equal(input.preview, "3 seconds");
 });
 
 test("a media block's own handle is its first variable", () => {
@@ -637,7 +637,7 @@ test("speaker and handle properties are state that every name for them reads", (
   assertComplete(played);
   const [byName, contextual, remaining, repeat] = causes(
     played.trace,
-    outputOf(played, "Bea Bea 2 s 5 s"),
+    outputOf(played, "Bea Bea 2 seconds 5 seconds"),
   );
   for (const interpolation of [byName!, contextual!]) {
     const steps = lineage(played.trace, interpolation.id);
@@ -683,11 +683,11 @@ test("an overwritten property value is no cause of the value that replaced it", 
       ].join("\n"),
     );
     assertComplete(played);
-    const steps = lineage(played.trace, outputOf(played, "Current 2 s").id);
+    const steps = lineage(played.trace, outputOf(played, "Current 2 seconds").id);
     const values = steps.map((step) => step.preview);
     assert.ok(steps.some((step) => step.target === "current"));
     assert.ok(steps.some((step) => step.target === "kept"));
-    for (const overwritten of ['"Discarded"', '"Original"', "3 s"])
+    for (const overwritten of ['"Discarded"', '"Original"', "3 seconds"])
       assert.ok(!values.includes(overwritten), `${overwritten} is no cause (alias: ${viaAlias})`);
     assert.ok(!steps.some((step) => step.target === "discarded" || step.target === "lost"));
   }

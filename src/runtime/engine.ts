@@ -3393,7 +3393,7 @@ function startTimer(
   const zeroRoundFault = () =>
     fault(
       "TSR050",
-      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : `${range.start} s`}. Use a duration of at least 1 s.`,
+      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : formatDuration(range.start * 1_000)}. Use a duration of at least 1 second.`,
       instruction.duration.span,
     );
   // A range that allows a zero-length round is rejected before its first round is drawn.
@@ -3710,7 +3710,7 @@ function startMedia(
   if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
     throw fault(
       "TSR050",
-      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? "0 s" : describeShownValue(startAt)}.`,
+      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? formatDuration(0) : describeShownValue(startAt)}.`,
       instruction.endAt.span,
     );
   }

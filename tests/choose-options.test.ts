@@ -233,7 +233,7 @@ test("an option returns its value with its own type", () => {
   const cases = [
     ["let n = choose [5, 10, 15]", 1, "10", "[10]"],
     ["let n = choose 5, 10", 1, "10", "[10]"],
-    ["let n = choose [1 min, 90 seconds]", 1, "1 min 30 s", "[1 min 30 s]"],
+    ["let n = choose [1 min, 90 seconds]", 1, "1 minute 30 seconds", "[1 minute 30 seconds]"],
     ["let n = choose true, false", 1, "false", "[false]"],
     ["let n = choose null", 0, "null", "[null]"],
     ['let n = choose [{ text: 5, background: "gold" }]', 0, "5", "[5]"],
@@ -752,7 +752,7 @@ test("comparing a choice result with a value no button returns is a warning", ()
     );
   assert.match(
     warnings("let d = choose 1 s, 2 s\nlet same = d == 3 s\nexit")[0]?.[2] ?? "",
-    /1 s or 2 s/,
+    /1 second or 2 seconds/,
   );
   assert.deepEqual(
     warned("let value: duration | integer = choose 1 s, 2\nlet same = value == 3 s\nexit"),
@@ -760,7 +760,7 @@ test("comparing a choice result with a value no button returns is a warning", ()
       [
         "TSV046",
         "value == 3 s",
-        "'value' is always 1 s or 2 here, so this comparison is always false.",
+        "'value' is always 1 second or 2 here, so this comparison is always false.",
       ],
     ],
   );
