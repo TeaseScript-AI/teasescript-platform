@@ -1508,14 +1508,30 @@ class Parser {
     return Object.freeze({ kind: "block", statements: Object.freeze(statements), span });
   }
 
-  /** The source of the tokens from `start` up to `end`, with one space where the source separates two of them. */
+  /**
+   * The source of the tokens from `start` up to `end`, with one space where the source separates two of them. A line
+   * break between tokens separates them too, but not right after an opening bracket or before a closing one; one inside
+   * a token, as in a block string, stays.
+   */
   #sourceText(start: number, end: number): string {
     let text = "";
+    let previous: Token | null = null;
+    let lineBreak = false;
     for (let index = start; index < end; index += 1) {
       const token = this.tokens[index]!;
-      if (index > start && token.span.start.offset > this.tokens[index - 1]!.span.end.offset)
+      if (token.kind === TokenKind.Newline) {
+        lineBreak = true;
+        continue;
+      }
+      if (
+        previous !== null &&
+        token.span.start.offset > previous.span.end.offset &&
+        !(lineBreak && (OPENING_TOKENS.has(previous.kind) || CLOSING_TOKENS.has(token.kind)))
+      )
         text += " ";
       text += token.lexeme;
+      previous = token;
+      lineBreak = false;
     }
     return text;
   }
@@ -3453,6 +3469,7 @@ class Parser {
   }
 
   *#parsePostfix(): ParseTask<Expression | null> {
+    const start = this.#current;
     let expression = yield* parseChild(this.#parsePrimary());
     while (expression !== null) {
       if (this.#match(TokenKind.Dot)) {
@@ -3519,7 +3536,7 @@ class Parser {
       }
       break;
     }
-    return expression === null ? null : this.#parseUnitSuffix(expression);
+    return expression === null ? null : this.#parseUnitSuffix(expression, start);
   }
 
   /**
@@ -3528,7 +3545,7 @@ class Parser {
    * It binds tighter than `*` and `+`, so `a + b s` is `a + (b s)`. One duration has one unit: a second unit or a
    * second amount right after it is an error, and parts are added with `+`.
    */
-  #parseUnitSuffix(expression: Expression): Expression {
+  #parseUnitSuffix(expression: Expression, start: number): Expression {
     let result = expression;
     const token = this.#peek();
     if (UNIT_OPERANDS.has(expression.kind) && token.kind === TokenKind.Identifier) {
@@ -3551,13 +3568,18 @@ class Parser {
         token.lexeme === "calendar" && after.kind === TokenKind.Identifier
           ? calendarDurationUnit(after.lexeme)
           : undefined;
-      // A month or a year without `calendar` stays an ordinary name here, as before units followed names.
+      // A month or a year written out needs `calendar` here too. A short `mo` or `y` stays a name, as in `${x y}`.
+      const withoutCalendar =
+        token.lexeme.length > 2 ? calendarDurationUnit(token.lexeme) : undefined;
       if (exact !== undefined) {
         this.#advance();
         result = withUnit({ calendar: false, unit: exact }, token);
       } else if (calendar !== undefined) {
         this.#advance();
         result = withUnit({ calendar: true, unit: calendar }, this.#advance());
+      } else if (withoutCalendar !== undefined) {
+        this.#reportCalendarUnitWithoutCalendar(this.#sourceText(start, this.#current), token);
+        result = withUnit({ calendar: true, unit: withoutCalendar }, this.#advance());
       }
     }
     if (result.kind !== "durationLiteral" && result.kind !== "unitExpression") return result;
@@ -3695,13 +3717,17 @@ class Parser {
     if (exact !== undefined) return literal({ calendar: false, unit: exact }, this.#advance());
     const calendar = calendarDurationUnit(token.lexeme);
     if (calendar === undefined) return amount;
-    // Only months and years remain: days and weeks are exact units.
+    this.#reportCalendarUnitWithoutCalendar(amount.raw, token);
+    return literal({ calendar: true, unit: calendar }, this.#advance());
+  }
+
+  /** A month or a year after `amount` without `calendar`; days and weeks are exact units. */
+  #reportCalendarUnitWithoutCalendar(amount: string, unit: Token): void {
     this.#reportToken(
       parserDiagnosticCode.unsupportedDurationUnit,
-      `A ${calendar === "mo" ? "month" : "year"} has no fixed length. Write '${amount.raw} calendar ${token.lexeme}'.`,
-      token,
+      `A ${calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"} has no fixed length. Write '${amount} calendar ${unit.lexeme}'.`,
+      unit,
     );
-    return literal({ calendar: true, unit: calendar }, this.#advance());
   }
 
   *#parsePrimary(): ParseTask<Expression | null> {
