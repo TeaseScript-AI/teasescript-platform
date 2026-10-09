@@ -222,6 +222,20 @@ export type Source =
 
 /** Conversions whose result is the number their argument holds. */
 const KEEPS_NUMBER = new Set(["toInteger", "toNumber"]);
+
+/**
+ * Whether a load can give a truth: one typed as a boolean or with a boolean default; one of an open type, which a
+ * script may have saved as a truth; not one typed as or defaulting to another kind of value. Other expressions can.
+ */
+function maybeTruth(expression: Data): boolean {
+  if (expression.kind !== "storageLoad") return true;
+  const type = record(expression.type);
+  if (typeof type.kind === "string") return type.kind === "boolean";
+  const fallback = record(expression.default);
+  return (
+    fallback.kind !== "literal" || fallback.value === null || typeof fallback.value === "boolean"
+  );
+}
 /** Getters of the current date and time. */
 // getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
 const CLOCK_GETTERS = new Set([
@@ -371,12 +385,11 @@ export class DataFlow {
   /** Each function's own code, by its ID ({@link Code}); made when first needed. */
   #code: Map<number, Code> | null = null;
   /**
-   * The expressions assigned to each variable, by name, its declaration's included; null for a parameter, a loop
-   * variable, or a variable a part of which is assigned.
+   * The values assigned to each variable, by name, its declaration's included, with their instructions: for a parameter
+   * `{ kind: "parameter" }`, which reads no key, for a loop variable `{ kind: "element", of }` and for an assignment to
+   * a part of it `{ kind: "part", of }`, which read the keys of what they come from but are none of its values.
    */
-  readonly #assigned = new Map<string, Data[] | null>();
-  /** {@link holdsStored} for variables, by name and key; false while one is being worked out. */
-  readonly #holds = new Map<string, boolean>();
+  readonly #assigned = new Map<string, { value: Data; index: number }[]>();
   /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
   readonly #stores = new Map<number, number[]>();
 
@@ -489,66 +502,76 @@ export class DataFlow {
 
   /**
    * Whether an expression's value is a stored key's value (`key` as {@link sourcesOf} names it, a pattern for a
-   * template): its load, a conversion of such that keeps its number (`toInteger`), a variable whose every assignment
-   * that reads the key is such (a value from elsewhere, such as a random draw, may also be assigned), or a temporary
-   * that holds such at instruction `at` (a `switch` on a load). A comparison of such a value with a constant compares
-   * the stored value; of anything else computed from it, such as `todo - done` or a count added to, it does not.
+   * template): its load, a conversion of such that keeps its number (`toInteger`), a truth such compared with `true`, a
+   * variable whose every assignment that reads the key is such (a value from elsewhere, such as a random draw, may also
+   * be assigned), a temporary that holds such at instruction `at` (a `switch` on a load), or a call's result whose
+   * every returned value that reads the key is such. A comparison of such a value with a constant compares the stored
+   * value; of anything else computed from it, such as `todo - done` or a count added to, it does not. A variable or
+   * function met again while this is worked out (`x = x`, a function that calls itself) holds what its other values
+   * hold.
    */
-  holdsStored(expression: unknown, key: string, at: number | undefined): boolean {
+  holdsStored(
+    expression: unknown,
+    key: string,
+    at: number | undefined,
+    open: ReadonlySet<string> = new Set(),
+  ): boolean {
     const value = record(expression);
     // Of several values the expression may take, those that read the key, at least one, are all the stored value.
-    const all = (values: { value: unknown; at: number | undefined }[]) => {
+    const all = (name: string, values: { value: unknown; at: number | undefined }[]) => {
+      if (open.has(name)) return true;
+      const inner = new Set([...open, name]);
       const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
       return (
-        reading.length > 0 && reading.every((each) => this.holdsStored(each.value, key, each.at))
+        reading.length > 0 &&
+        reading.every((each) => this.holdsStored(each.value, key, each.at, inner))
       );
     };
-    // Once per variable or function and key; false while it is worked out, as for a function that calls itself.
-    const memo = (name: string, work: () => boolean) => {
-      const known = this.#holds.get(`${name}\u0000${key}`);
-      if (known !== undefined) return known;
-      this.#holds.set(`${name}\u0000${key}`, false);
-      const holds = work();
-      this.#holds.set(`${name}\u0000${key}`, holds);
-      return holds;
-    };
-    if (value.kind === "group") return this.holdsStored(value.expression, key, at);
+    if (value.kind === "group") return this.holdsStored(value.expression, key, at, open);
     if (value.kind === "storageLoad") return keyText(value.key) === key;
-    if (value.kind === "identifier" && typeof value.name === "string") {
-      const assigned = this.#assigned.get(value.name);
-      return (
-        assigned !== null &&
-        memo(value.name, () =>
-          all((assigned ?? []).map((each) => ({ value: each, at: undefined }))),
-        )
+    if (value.kind === "identifier" && typeof value.name === "string")
+      return all(
+        `variable ${value.name}`,
+        (this.#assigned.get(value.name) ?? []).map((each) => ({
+          value: each.value,
+          at: each.index,
+        })),
       );
-    }
     if (value.kind === "call" && KEEPS_NUMBER.has(calleeName(value) ?? "")) {
       const [only, ...rest] = list(value.arguments);
-      return only !== undefined && rest.length === 0 && this.holdsStored(only.value, key, at);
+      return only !== undefined && rest.length === 0 && this.holdsStored(only.value, key, at, open);
     }
-    // A truth compared with `true` is that truth (`load(k) == true`).
+    // A truth compared with `true` is that truth (`load(k) == true`), when it can be a truth.
     if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
       const truth = value.operator === "==";
-      const [side, other] = [record(value.left), record(value.right)];
-      if (other.kind === "literal" && other.value === truth) return this.holdsStored(side, key, at);
-      if (side.kind === "literal" && side.value === truth) return this.holdsStored(other, key, at);
-      return false;
+      const [left, right] = [record(value.left), record(value.right)];
+      const side =
+        right.kind === "literal" && right.value === truth
+          ? left
+          : left.kind === "literal" && left.value === truth
+            ? right
+            : null;
+      return side !== null && maybeTruth(side) && this.holdsStored(side, key, at, open);
     }
     if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
       const held = this.heldAt(value.temporaryId, at);
-      return held !== null && all(held.map((store) => ({ value: store.value, at: store.index })));
+      return (
+        held !== null &&
+        all(
+          `temporary ${value.temporaryId}`,
+          held.map((store) => ({ value: store.value, at: store.index })),
+        )
+      );
     }
     // A call's result: what the function returns.
     if (value.kind === "callResult" && typeof value.functionId === "number") {
       const id = value.functionId;
-      return memo(`function ${id}`, () =>
-        all(
-          this.#instructions.flatMap((instruction, index) =>
-            instruction.kind === "returnValue" && this.functionAt(index) === id
-              ? [{ value: instruction.value, at: index }]
-              : [],
-          ),
+      return all(
+        `function ${id}`,
+        this.#instructions.flatMap((instruction, index) =>
+          instruction.kind === "returnValue" && this.functionAt(index) === id
+            ? [{ value: instruction.value, at: index }]
+            : [],
         ),
       );
     }
@@ -997,8 +1020,14 @@ export class DataFlow {
   }
 
   #recordLoads(plan: Data, instructions: readonly Data[]): void {
-    const assign = (name: string, value: unknown) => {
+    const assigned = (name: string, value: Data, index: number) => {
+      const known = this.#assigned.get(name) ?? [];
+      known.push({ value, index });
+      this.#assigned.set(name, known);
+    };
+    const assign = (name: string, value: unknown, index: number) => {
       const expression = record(value);
+      assigned(name, expression, index);
       const key = expression.kind === "storageLoad" ? literalText(expression.key) : null;
       const fallback = record(expression.default);
       const literal = expression.default == null ? null : scalar(fallback.value);
@@ -1009,9 +1038,6 @@ export class DataFlow {
           ? null
           : { key, fallback: literal };
       const only = expression.kind === "literal" ? (scalar(expression.value) ?? null) : null;
-      const assigned = this.#assigned.get(name);
-      if (assigned === undefined) this.#assigned.set(name, [expression]);
-      else assigned?.push(expression);
       const fixed = this.#literals.get(name);
       this.#literals.set(name, fixed === undefined || fixed === only ? only : null);
       const known = this.#loads.get(name);
@@ -1028,31 +1054,33 @@ export class DataFlow {
         if (typeof parameter.name === "string") {
           this.#loads.set(parameter.name, null);
           this.#literals.set(parameter.name, null);
-          this.#assigned.set(parameter.name, null);
+          assigned(parameter.name, { kind: "parameter" }, Number(definition.entryInstruction));
         }
-    for (const instruction of instructions) {
-      if (instruction.kind === "loopStart" && typeof instruction.variable === "string") {
-        this.#loads.set(instruction.variable, null);
-        this.#literals.set(instruction.variable, null);
-        this.#assigned.set(instruction.variable, null);
-      }
+    instructions.forEach((instruction, index) => {
+      if (instruction.kind === "loopStart")
+        for (const name of [instruction.variable, instruction.valueVariable])
+          if (typeof name === "string") {
+            this.#loads.set(name, null);
+            this.#literals.set(name, null);
+            assigned(name, { kind: "element", of: instruction.expression }, index);
+          }
       if (
         (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
         typeof instruction.name === "string"
       )
-        assign(instruction.name, instruction.value);
+        assign(instruction.name, instruction.value, index);
       if (instruction.kind === "assign") {
         const target = record(instruction.target);
         const name = targetName(instruction.target);
-        if (name === null) continue;
-        if (target.kind === "identifier") assign(name, instruction.value);
+        if (name === null) return;
+        if (target.kind === "identifier") assign(name, instruction.value, index);
         else {
           this.#loads.set(name, null);
           this.#literals.set(name, null);
-          this.#assigned.set(name, null);
+          assigned(name, { kind: "part", of: instruction.value }, index);
         }
       }
-    }
+    });
   }
 
   #addsToItself(name: string, value: unknown): boolean {
@@ -1322,10 +1350,13 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     const subject = record(atom.subject);
     const lengthOf = subject.kind === "property" && subject.name === "length";
     const holds = atom.wanted ? atom.operator : negate(atom.operator);
-    // A key template that names one key may name a key the condition also reads by its text: one goal for both.
+    // A key template that names one key may name a key the condition also reads by its text: one goal for both, which
+    // compares the stored value only when every read of it is the value itself.
     const keys = new Set<string>();
-    for (const found of flow.sourcesOf(atom.subject)) {
-      const source = keyed(found, atom.subject);
+    const sources = flow
+      .sourcesOf(atom.subject)
+      .map((found) => ({ found, source: keyed(found, atom.subject) }));
+    for (const { source } of sources) {
       if (source.kind === "storage" && keys.has(source.key)) continue;
       if (source.kind === "storage") keys.add(source.key);
       // A stored value is measured, and its values tried, only where the condition compares the value itself, not one
@@ -1335,8 +1366,12 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
           subject.kind === "identifier" &&
           subject.name === source.name) ||
         (source.kind === "storage" &&
-          found.kind === "storage" &&
-          flow.holdsStored(atom.subject, found.key, at));
+          sources.every(
+            (each) =>
+              each.source.kind !== "storage" ||
+              each.source.key !== source.key ||
+              (each.found.kind === "storage" && flow.holdsStored(atom.subject, each.found.key, at)),
+          ));
       const candidates =
         source.kind === "storage" && !itself
           ? []

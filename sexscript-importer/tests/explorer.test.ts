@@ -11,6 +11,7 @@ import {
   DataFlow,
   exactMilliseconds,
   type Goal,
+  goalsFor,
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
@@ -920,6 +921,67 @@ test(
       ),
     );
     assert.ok(needsAt("7").includes("stored trip.stage == 7"), JSON.stringify(needsAt("7")));
+    // The goals of the last condition of a source's own code, for its true way: a stored key with its comparison, if any.
+    const compared = (written: string) => {
+      const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(compiled));
+      const instructions = Array.isArray(compiled.instructions)
+        ? compiled.instructions.filter(isRecord)
+        : [];
+      // Functions' code comes after the file's own.
+      const own = Math.min(
+        instructions.length,
+        ...(Array.isArray(compiled.functions) ? compiled.functions.filter(isRecord) : []).map(
+          (definition) => Number(definition.entryInstruction),
+        ),
+      );
+      const at = instructions.findLastIndex(
+        (instruction, index) => instruction.kind === "jumpIfFalse" && index < own,
+      );
+      return goalsFor(new DataFlow(compiled, instructions), instructions[at]!.condition, true, at)
+        .filter((goal) => goal.source.kind === "storage")
+        .map((goal) =>
+          goal.source.kind === "storage"
+            ? `${goal.source.key}${goal.comparison === null ? "" : ` ${goal.comparison.operator} ${String(goal.comparison.shown)}`}`
+            : "",
+        );
+    };
+    const shown = 'if x > 7 {\n  say "Yes"\n}\nexit\n';
+    // Through a helper's result held in a variable, a parameter overwritten with the value, and a copy of itself beside
+    // another function's parameter of the same name.
+    assert.deepEqual(
+      compared(
+        `function read(ignore) {\n  return load("n", default: 0)\n}\nlet x = read(0)\n${shown}`,
+      ),
+      ["n > 7"],
+    );
+    assert.deepEqual(
+      compared(
+        'function read(x) {\n  x = load("n", default: 0)\n  return x\n}\nif read(0) > 7 {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["n > 7"],
+    );
+    assert.deepEqual(
+      compared(
+        'function other(x) {\n  return x\n}\nfunction reader(ignore) {\n  let x = load("n", default: 0)\n  x = x\n  return x\n}\n' +
+          'if reader(0) > 7 {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["n > 7"],
+    );
+    // Not where one read of the key is computed from it, nor a number compared with `true`.
+    assert.deepEqual(
+      compared(
+        'function read(thing) {\n  if load("mode", default: false) {\n    return load("pack.${thing}", default: 0)\n  }\n' +
+          '  return load("pack.knife", default: 0) + 1\n}\nif read("knife") > 7 {\n  say "Yes"\n}\nexit\n',
+      ).filter((goal) => goal.startsWith("pack")),
+      ["pack.knife"],
+    );
+    assert.deepEqual(
+      compared('let x = load("n", default: 0) == true\nif x == true {\n  say "Yes"\n}\nexit\n'),
+      ["n"],
+    );
   },
 );
 
