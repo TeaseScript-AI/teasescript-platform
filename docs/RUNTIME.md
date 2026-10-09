@@ -1541,14 +1541,14 @@ restart, and report the failure with its debug export.
 | `TSR015` | Named arguments where a call takes only positional ones. | Remove the names. |
 | `TSR016` | A method the value does not have. | Use a method the message names. |
 | `TSR017` | A property the value does not have. | Use a property the message names. |
-| `TSR018` | Too few elements: an empty list, or fewer values than a statistic needs. | Check the length first. |
+| `TSR018` | Too few elements: an empty collection, or fewer values than a statistic needs. | Check the length first. |
 | `TSR019` | A random selection from an empty list or set. | Check that it has an element first. |
 | `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive). | Report it to the host. |
 | `TSR021` | A value that cannot be shown as text, such as a dict or a list inside a list. | Select an element or a property. |
 | `TSR022` | A speaker without a display name. | Give the speaker a name. |
 | `TSR023` | A speaker that is not declared. | Declare the speaker. |
-| `TSR024` | A list index that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`. |
-| `TSR025` | A list index or text position outside the valid range. | Check it against `length` first. |
+| `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
+| `TSR025` | A list index or text position outside the valid range, or a text end before its start. | Check it against `length`, and an end against its start, first. |
 | `TSR026` | A condition or an `and`, `or`, or `not` operand that is not true or false. | Compare explicitly, as in `x != 0`. |
 | `TSR027` | An arithmetic operand or range bound that is not a number. | Check for null, or convert numeric text with `toNumber(...)`. |
 | `TSR028` | Too many or too few arguments, or arguments in the wrong form. | Write the call as the message shows. |
@@ -1563,14 +1563,14 @@ restart, and report the failure with its debug export.
 | `TSR040` | `randomInteger(...)` without a range. | Pass a range such as `1..=6`. |
 | `TSR041` | A random selection from an empty range. | Use a range that holds at least one number. |
 | `TSR042` | Loop state that does not match the plan. _Defect._ | Report it. |
-| `TSR043` | A `repeat` count that is not a whole number of at least 0. | Round or check the count first. |
-| `TSR044` | A `for` loop over a value it cannot go through. | Loop over a list, set, dict, or range. |
+| `TSR043` | A `repeat` count that is not a whole number of at least 0, or that is too large to count exactly. | Round, check, or reduce the count first. |
+| `TSR044` | A `for` loop over a value it cannot go through, or a `for` with two variables over something other than a dict. | Loop over a list, set, dict, or range, and use two variables only for a dict. |
 | `TSR045` | A range loop whose bounds are not safe whole numbers. | Use smaller whole-number bounds. |
 | `TSR046` | A missing temporary value. _Defect._ | Report it. |
 | `TSR047` | Calls nested deeper than the call-depth limit. | End the recursion sooner. |
 | `TSR048` | Inconsistent parameter state. _Defect._ | Report it. |
 | `TSR049` | A required parameter without a value. _Defect._ | Report it. |
-| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a timer label or display, a media volume, a camera placement, or a message's text. | Use a value the message names. |
+| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a timer label or display, a media volume, a camera placement, a message's text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
 | `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
 | `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
 | `TSR053` | A handle or prepared reference that no longer refers to anything, or whose state is malformed. | Report it. |
@@ -1579,7 +1579,7 @@ restart, and report the failure with its debug export.
 | `TSR057` | A count or text argument that a text method or `take(...)` cannot use, such as a negative count or empty text. | Pass the kind of value the message names. |
 | `TSR058` | A value that does not fit the type of its receiving place, such as a typed variable, parameter, result, form field, or conversion. | Convert or check the value, or declare a type that includes it. |
 | `TSR059` | A built-in argument of the wrong kind. | Pass the kind the message names. |
-| `TSR060` | A collection operation whose elements or argument have the wrong kind. | Make the elements one kind the operation takes. |
+| `TSR060` | A collection operation whose elements or argument have the wrong kind, or whose elements lack the property it reads. | Make the elements one kind the operation takes, or name a property they have. |
 | `TSR061` | A dict without the key that is read. | Check with `contains(...)` first, or use `get(key, default: value)`. |
 | `TSR062` | A dict key that is not text. | Write the key as text. |
 | `TSR063` | A date or time that cannot be computed or shown, such as a year outside the supported range. | Use a date and time in the range the message gives. |
@@ -1592,7 +1592,7 @@ restart, and report the failure with its debug export.
 | `TSR080` | A tag's number compared with something other than a number. | Compare it with a number. |
 | `TSR081` | A tag query option that is not a list of tag names. | Pass tag names, such as `"bedroom"`. |
 | `TSR082` | No file or image has the tags of a query. | Relax the query, or add files with those tags. |
-| `TSR083` | `takePhoto(tags:)` with something other than tags. | Pass tags such as `"bedroom"` or `"punishment: 4"`. |
+| `TSR083` | `takePhoto(tags:)` with something other than tags, or with two numbers for one tag. | Pass tags such as `"bedroom"` or `"punishment: 4"`, with one number per tag. |
 | `TSR084` | A text longer than the maximum text length. | Build a shorter text. |
 | `TSR100` | Instruction-plan data that fails validation. | Compile the script again. |
 | `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance. | Restore a valid checkpoint or start a new session. |

@@ -71,15 +71,19 @@ test("duration arithmetic and cross-unit comparisons follow V30 section 35", () 
 test("mixing plain numbers with durations fails instead of guessing a unit", () => {
   const arithmetic = "Add or subtract two durations, or multiply or divide a duration by a number.";
   for (const [declaration, expression, message] of [
-    ["let n = 1", "1 s + n", `'+' cannot combine a duration and a number. ${arithmetic}`],
-    ["let n = 1", "n - 1 s", `'-' cannot combine a number and a duration. ${arithmetic}`],
-    ["let n = 2", "n / 1 s", `'/' cannot combine a number and a duration. ${arithmetic}`],
+    ["let n = 1", "1 s + n", `'+' cannot combine a duration (1 s) and a number (1). ${arithmetic}`],
+    ["let n = 1", "n - 1 s", `'-' cannot combine a number (1) and a duration (1 s). ${arithmetic}`],
+    ["let n = 2", "n / 1 s", `'/' cannot combine a number (2) and a duration (1 s). ${arithmetic}`],
     [
       "let n = 2",
       "1 s < n",
-      "'<' cannot compare a duration with a number. Use a duration on both sides.",
+      "'<' cannot compare a duration (1 s) with a number (2). Use a duration on both sides.",
     ],
-    ["let d = 1 s", "d * d", `'*' cannot combine a duration and a duration. ${arithmetic}`],
+    [
+      "let d = 1 s",
+      "d * d",
+      `'*' cannot combine a duration (1 s) and a duration (1 s). ${arithmetic}`,
+    ],
   ] as const) {
     const source = `${declaration}\nsay "\${${expression}}"\nexit`;
     assert.deepEqual(diagnostics(source), ["TSV043"], source);

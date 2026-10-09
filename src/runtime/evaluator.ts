@@ -1798,8 +1798,8 @@ export class Evaluator {
     throw fault(
       "TSR009",
       ["<", "<=", ">", ">="].includes(operator)
-        ? `'${operator}' cannot compare ${describeRuntimeValue(left)} with ${describeRuntimeValue(right)}. Use a duration on both sides.`
-        : `'${operator}' cannot combine ${describeRuntimeValue(left)} and ${describeRuntimeValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
+        ? `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use a duration on both sides.`
+        : `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
       span,
     );
   }
@@ -3475,6 +3475,13 @@ function noArithmeticResult(
     `${label === null ? values : `${subject} is ${values}, which`} gives ${what} to represent. Use smaller values.`,
     expression.span,
   );
+}
+
+/** An operand's kind, with the value of a number or duration, such as `a duration (1 s)`. */
+function kindAndValue(value: SerializableRuntimeValue): string {
+  return typeof value === "number" || isDuration(value)
+    ? `${describeRuntimeValue(value)} (${operandText(value)})`
+    : describeRuntimeValue(value);
 }
 
 /** A number or duration operand as a message shows it. */
