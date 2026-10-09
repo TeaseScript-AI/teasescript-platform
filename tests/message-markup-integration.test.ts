@@ -54,6 +54,8 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
       "[1]",
       "escapeMarkup(...) needs text, not a list. Use .join() to combine its elements as text.",
     ],
+    // `.join()` cannot join a list of lists.
+    ["[[1]]", "escapeMarkup(...) needs text, not a list."],
     ["null", "escapeMarkup(...) needs text, not null."],
   ] as const) {
     const source = `function dynamic(value) { return value }\nsay escapeMarkup(dynamic(${argument})), instant\nexit`;

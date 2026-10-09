@@ -3207,7 +3207,7 @@ export class Evaluator {
     if (typeof text !== "string")
       throw fault(
         "TSR059",
-        `escapeMarkup(...) needs text, not ${describeRuntimeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) ? " Use .join() to combine its elements as text." : ""}`,
+        `escapeMarkup(...) needs text, not ${describeRuntimeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
         call.span,
       );
     // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
