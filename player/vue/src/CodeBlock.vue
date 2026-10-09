@@ -367,19 +367,10 @@ async function copy() {
   opacity: 0;
   transition: opacity 120ms ease;
 }
+/* As in the title bar's group: each tool's hover fill and focus outline frame the whole tool. */
 .code-block-tools :deep(button) {
   block-size: calc(var(--player-top-control-size) - 2px);
-  border-radius: 0;
-}
-.code-block-tools > :first-child,
-.code-block-tools > :first-child :deep(button) {
-  border-start-start-radius: calc(var(--tools-radius) - 1px);
-  border-end-start-radius: calc(var(--tools-radius) - 1px);
-}
-.code-block-tools > :last-child,
-.code-block-tools > :last-child :deep(button) {
-  border-start-end-radius: calc(var(--tools-radius) - 1px);
-  border-end-end-radius: calc(var(--tools-radius) - 1px);
+  border-radius: calc(var(--tools-radius) - 1px);
 }
 /* Only while the pointer is over the block, or a tool has keyboard focus: a click in the code then moving away hides
    them. */
