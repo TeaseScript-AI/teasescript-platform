@@ -5996,6 +5996,65 @@ function lowerAssignment(
       },
     ];
   }
+  // Groovy `list[[1, 3]] = value`, also written `list[1, 3] = value`, set each of those positions to the one value, as
+  // campdrain's rounds do; those positions had to exist.
+  if (
+    operator === "=" &&
+    target.kind === "index" &&
+    target.dict !== true &&
+    target.index.kind === "list" &&
+    target.index.items.length > 0
+  ) {
+    const once = isPure(right, context) ? null : freshName("value", context);
+    const position = freshName("position", context);
+    return [
+      ...(once === null ? [] : [{ kind: "let" as const, name: once, value, span }]),
+      {
+        kind: "for",
+        variable: position,
+        collection: target.index,
+        body: [
+          {
+            kind: "assign",
+            target: { ...target, index: { kind: "variable", name: position } },
+            operator: "=",
+            value: once === null ? value : { kind: "variable", name: once },
+            span,
+          },
+        ],
+        span,
+      },
+    ];
+  }
+  // A Java array of texts, as `split()` gives, kept the text of a number written into it: `bm2[0] = bm2.size() - 6`.
+  const arrayKey =
+    targetNode.kind === "binary" && targetNode.operator === "["
+      ? bindingKey(asNode(targetNode.left), context.bindings)
+      : null;
+  const arrayValues = arrayKey === null ? [] : (context.assignedValues.get(arrayKey) ?? []);
+  const valueType = inferType(right, context.types);
+  if (
+    operator === "=" &&
+    target.kind === "index" &&
+    arrayValues.length > 0 &&
+    arrayValues.every(
+      (assigned) =>
+        assigned.kind === "methodCall" &&
+        constantString(assigned.method) === "split" &&
+        onlyOf(inferType(asNode(assigned.object), context.types), STRING),
+    ) &&
+    valueType !== 0 &&
+    onlyOf(valueType, NUMBER | BOOLEAN)
+  )
+    return [
+      {
+        kind: "assign",
+        target,
+        operator: "=",
+        value: { kind: "template", parts: [{ value }] },
+        span,
+      },
+    ];
   const grown =
     operator === "=" ? growingListWrite(targetNode, right, target, value, span, context) : null;
   if (grown !== null) return grown;
@@ -10289,6 +10348,27 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       const part = slice();
       if (part !== null) return part;
     }
+    // Groovy `list[[0, 2]]` is the list of the elements at those positions, as Concentration's `allScores[[0, 1, 2, 3]]`.
+    const positions =
+      indexNode.kind === "list" ? nodeArray(indexNode.items).map(constantValue) : [];
+    if (
+      targetNode !== null &&
+      !context.writeTargets.has(node) &&
+      positions.length > 0 &&
+      positions.every(
+        (position) => typeof position === "number" && Number.isInteger(position) && position >= 0,
+      ) &&
+      isKnownListExpression(targetNode, context) &&
+      isRepeatableExpression(targetNode)
+    )
+      return {
+        kind: "list",
+        items: positions.map((position) => ({
+          kind: "index",
+          target,
+          index: { kind: "literal", value: position as number },
+        })),
+      };
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
     if (
       targetNode !== null &&

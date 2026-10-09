@@ -239,8 +239,9 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     // A text read by a position or a range is text, as the lowering reads a text that may be null.
     const target = inferType(asNode(node.left), environment);
     if (onlyOf(target, STRING | NULL) && (target & STRING) !== 0) return STRING;
-    // A list read by a range is the list of those elements; a receiver whose type is pending adds none yet.
-    if (asNode(node.right)?.kind === "range")
+    // A list read by a range, or by a list of positions, is the list of those elements; a receiver whose type is
+    // pending adds none yet.
+    if (asNode(node.right)?.kind === "range" || asNode(node.right)?.kind === "list")
       return target === 0
         ? 0
         : onlyOf(target, LIST | NULL) && (target & LIST) !== 0

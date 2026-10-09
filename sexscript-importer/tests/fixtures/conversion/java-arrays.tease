@@ -26,4 +26,11 @@ say "Counts ${counts[1]}"
 // TODO SX_JAVA_ARRAY_TYPE line 13: A Java char[] converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.
 // | def letters = new char[2]
 let letters = []
+// The texts split() gives are a Java String[], which kept a number written into it as its text (MandysBlackmail).
+// NOTE SX_SPLIT_TRAILING_EMPTY line 15: Java split() drops trailing empty parts; TeaseScript split() keeps them.
+let record = "20,1,Mandy".split(",")
+if record[0] == "20" {
+  record[0] = "${record.length - 6}"
+}
+say "Progress ${record[0]}"
 exit
