@@ -542,104 +542,39 @@ function locateCompactCommand(
 }
 
 /**
- * The tokens, without line breaks, of the statement that `tokens`, those before the cursor, end in: back to the last
- * line break that ends a statement. A line break inside a group closed before the cursor goes on with the statement, and
- * so does one that `endsStatement` does not end it at, as in an ask whose options continue on the next line.
+ * The tokens, without line breaks, after the last line that starts with a statement keyword, such as `let` or `if`,
+ * among `tokens`, those before the cursor. Such a line always starts a new statement, while a line that starts
+ * otherwise may go on with an earlier one, as the options of an ask may.
  */
 function statementTokens(tokens: readonly Token[]): readonly Token[] {
-  let closers = 0;
-  let index = tokens.length;
-  while (index > 0) {
-    index -= 1;
-    const kind = tokens[index]!.kind;
-    if (kind === TokenKind.Newline) {
-      const end = index;
-      // A run of line breaks, such as blank lines, is passed once.
-      while (index > 0 && tokens[index - 1]!.kind === TokenKind.Newline) index -= 1;
-      if (closers === 0 && endsStatement(tokens, index - 1))
-        return withoutLineBreaks(tokens.slice(end + 1));
-    } else if (CLOSING_DELIMITERS.has(kind)) closers += 1;
-    else if (OPENING_DELIMITERS.has(kind)) closers = Math.max(0, closers - 1);
+  let start = 0;
+  for (let index = 1; index < tokens.length; index += 1) {
+    // A keyword before a colon is a label, as in `repeat: true`.
+    if (
+      tokens[index - 1]!.kind === TokenKind.Newline &&
+      STATEMENT_KEYWORDS.has(tokens[index]!.kind) &&
+      tokens[index + 1]?.kind !== TokenKind.Colon
+    )
+      start = index;
   }
-  return withoutLineBreaks(tokens);
+  return tokens.slice(start).filter((token) => token.kind !== TokenKind.Newline);
 }
 
-/**
- * Whether a line break after the token at `last` ends a statement. It does not after a token that continues one, such as
- * a comma, a colon, or an operator, nor inside a `(`, `[`, or object `{` that the statement opened before it and has not
- * closed. The search for such a group stops at a block's `{` and at the line break that ended the statement before, so
- * an unfinished earlier statement does not make the later ones go on.
- */
-function endsStatement(tokens: readonly Token[], last: number): boolean {
-  if (last < 0) return true;
-  if (CONTINUING_TOKENS.has(tokens[last]!.kind)) return false;
-  let closers = 0;
-  for (let index = last; index >= 0; index -= 1) {
-    const kind = tokens[index]!.kind;
-    if (CLOSING_DELIMITERS.has(kind)) closers += 1;
-    else if (OPENING_DELIMITERS.has(kind)) {
-      if (closers === 0) return !opensValue(tokens, index);
-      closers -= 1;
-    } else if (kind === TokenKind.Newline && closers === 0) {
-      while (index > 0 && tokens[index - 1]!.kind === TokenKind.Newline) index -= 1;
-      if (index === 0 || !CONTINUING_TOKENS.has(tokens[index - 1]!.kind)) return true;
-    }
-  }
-  return true;
-}
-
-/**
- * Whether the opening delimiter at `index` starts part of a value: any but a `{` that starts a block. An object's `{`
- * follows a token that continues a statement, `return`, or `dict`.
- */
-function opensValue(tokens: readonly Token[], index: number): boolean {
-  if (tokens[index]!.kind !== TokenKind.LeftBrace) return true;
-  let before = index - 1;
-  while (before >= 0 && tokens[before]!.kind === TokenKind.Newline) before -= 1;
-  const token = tokens[before];
-  return (
-    token !== undefined &&
-    (CONTINUING_TOKENS.has(token.kind) ||
-      token.kind === TokenKind.KeywordReturn ||
-      (token.kind === TokenKind.Identifier && token.lexeme === "dict"))
-  );
-}
-
-function withoutLineBreaks(tokens: readonly Token[]): readonly Token[] {
-  return tokens.filter((token) => token.kind !== TokenKind.Newline);
-}
-
-/** The tokens after which a statement goes on past a line break. */
-const CONTINUING_TOKENS: ReadonlySet<TokenKind> = new Set([
-  TokenKind.Comma,
-  TokenKind.Colon,
-  TokenKind.LeftParenthesis,
-  TokenKind.LeftBracket,
-  TokenKind.KeywordAs,
-  TokenKind.KeywordAnd,
-  TokenKind.KeywordOr,
-  TokenKind.KeywordNot,
-  TokenKind.KeywordIn,
-  TokenKind.KeywordIs,
-  TokenKind.Dot,
-  TokenKind.RangeExclusive,
-  TokenKind.RangeInclusive,
-  TokenKind.Question,
-  TokenKind.Pipe,
-  TokenKind.Plus,
-  TokenKind.Minus,
-  TokenKind.PlusEqual,
-  TokenKind.MinusEqual,
-  TokenKind.Star,
-  TokenKind.Slash,
-  TokenKind.Percent,
-  TokenKind.Equal,
-  TokenKind.EqualEqual,
-  TokenKind.BangEqual,
-  TokenKind.Less,
-  TokenKind.LessEqual,
-  TokenKind.Greater,
-  TokenKind.GreaterEqual,
+/** The keywords that only start a statement, never go on with one. */
+const STATEMENT_KEYWORDS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.KeywordSpeaker,
+  TokenKind.KeywordWait,
+  TokenKind.KeywordExit,
+  TokenKind.KeywordLet,
+  TokenKind.KeywordIf,
+  TokenKind.KeywordElse,
+  TokenKind.KeywordRepeat,
+  TokenKind.KeywordFor,
+  TokenKind.KeywordWhile,
+  TokenKind.KeywordBreak,
+  TokenKind.KeywordContinue,
+  TokenKind.KeywordFunction,
+  TokenKind.KeywordReturn,
 ]);
 
 /**

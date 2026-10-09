@@ -283,6 +283,13 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
     activeSlot('if ready {\n    askText "Q", hint: (\n        "a"\n    )\n}\nlet y = '),
     null,
   );
+  // A line that starts with a statement keyword starts a new statement, also after an unfinished one.
+  assert.equal(activeSlot('askText "Q", hint:\nlet y = '), null);
+  assert.equal(activeSlot('let old = askText("Q"\nlet a = 1\nlet y = '), null);
+  assert.equal(activeSlot('let x = askText("Q"\n    , prefill: "A"\n    , hint: '), "hint");
+  assert.equal(activeSlot("let x = askText {\n    text: "), "question");
+  // A keyword before a colon is a label.
+  assert.equal(activeSlot('let x = askText {\n    text: "Q",\n    repeat: '), "question");
   assert.equal(activeSlot('askInteger "How many?", hint: "1 to 10", prefill: '), "prefill");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "question");
   assert.equal(activeSlot('let answer = askText "${askNumber prefill: 3}"'), "question");
