@@ -82,7 +82,7 @@ playVideo async "videos/intro.mp4"
 playVideo async "clips/scene.mp4"
 // A prefill that may be blank opens the input without a default then, as the legacy empty field did.
 let draft = ""
-let answer = askText "Your name?", default: draft
+let answer = askText "Your name?", prefill: draft
 say "Hello ${answer}"
 // A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
 function checkPhoto(snapfile) {

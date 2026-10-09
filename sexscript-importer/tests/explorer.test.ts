@@ -486,7 +486,7 @@ test(
     const lines = (from: number) =>
       Array.from({ length: 45 }, (_, index) => `  say "Line ${from + index}."`).join("\n");
     const helper = start(
-      `function askCode {\n${lines(1)}\n  let answer = askInteger default: 0\n${lines(100)}\n  return answer\n}\n` +
+      `function askCode {\n${lines(1)}\n  let answer = askInteger prefill: 0\n${lines(100)}\n  return answer\n}\n` +
         'let code = askCode()\nif code == 4321 {\n  say "Opened."\n}\nexit\n',
     );
     const answers = helper.session
@@ -802,7 +802,7 @@ test(
     assert.equal(reached.audit?.result, "spiral");
     // A way on the line of its condition stays unknown when nothing is left to try: not complete.
     const hidden = run(
-      'let n = askInteger "Number?", default: 0\nif n * n == 1522756 { say "Hit." }\nexit\n',
+      'let n = askInteger "Number?", prefill: 0\nif n * n == 1522756 { say "Hit." }\nexit\n',
     );
     assert.deepEqual([hidden.stoppedBy, hidden.audit?.result], ["exhausted", "stalled"]);
   },
@@ -1741,7 +1741,7 @@ test(
     // for its answers, so that only a directed attempt gives it.
     const padding = Array.from({ length: 60 }, (_, index) => `say "Padding ${index}."\n`).join("");
     const directed =
-      `let n = askInteger default: 0\n${padding}if n == 1234 {\n  if chance(25) {\n    say "Lucky."\n  } else {\n` +
+      `let n = askInteger prefill: 0\n${padding}if n == 1234 {\n  if chance(25) {\n    say "Lucky."\n  } else {\n` +
       '    say "Unlucky."\n  }\n}\nexit\n';
     const steered = run(directed, true);
     assert.ok(steered.directed.attempts > 0);

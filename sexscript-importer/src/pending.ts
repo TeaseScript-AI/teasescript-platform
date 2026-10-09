@@ -146,6 +146,8 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
         return {
           ...value,
           ...(value.question === undefined ? {} : { question: expression(value.question) }),
+          ...(value.yesText === undefined ? {} : { yesText: expression(value.yesText) }),
+          ...(value.noText === undefined ? {} : { noText: expression(value.noText) }),
           ...(value.fields === undefined ? {} : { fields: expression(value.fields) }),
           ...(value.submit === undefined ? {} : { submit: expression(value.submit) }),
           ...(value.outro === undefined ? {} : { outro: expression(value.outro) }),
@@ -315,7 +317,7 @@ export function pendingHostFunctions(
     ["showBackgroundImage", () => null],
     ["showOverlayImage", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
-    ["askBooleans", (_, named) => named.defaults ?? emptyList],
+    ["askBooleans", (_, named) => named.prefill ?? emptyList],
     ["openUrl", () => null],
     // As when the player cancels the file chooser.
     ["chooseFile", () => null],

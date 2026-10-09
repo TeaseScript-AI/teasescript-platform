@@ -311,9 +311,13 @@ export type IrExpression =
    */
   | {
       kind: "input";
-      input: "askText" | "askNumber" | "askInteger" | "askForm";
+      input: "askText" | "askNumber" | "askInteger" | "askBoolean" | "askForm";
       question?: IrExpression;
+      /** The value the field starts with, written `prefill:` (#713). */
       defaultValue?: IrExpression;
+      /** An `askBoolean`'s button texts where they are not "Yes" and "No" (#712). */
+      yesText?: IrExpression;
+      noText?: IrExpression;
       /** The fields of an `askForm` (V30 §20 Forms): an object or a dict of fields. */
       fields?: IrExpression;
       /** The text of an `askForm`'s submit button. */

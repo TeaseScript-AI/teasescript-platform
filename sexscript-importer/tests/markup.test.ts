@@ -20,6 +20,13 @@ test("legacy HTML in shown text becomes message markup", () => {
   );
   // A span ends at a line break, so it closes before it and opens again after it.
   assert.equal(converted("<b>one<br>two</b>"), "**one**\n**two**");
+  // Banjo_LarasDigSite: the blank line between paragraphs in a span gets no delimiters, so the paragraphs stay apart.
+  assert.equal(
+    converted("<i>DAY 3\n\nYou gather your gear and get off the bus.</i>"),
+    "*DAY 3*\n\n*You gather your gear and get off the bus.*",
+  );
+  // spinthebottle: a second <i> where </i> was meant adds nothing, as in HTML, and the span closes at the end.
+  assert.equal(converted("<i>Ann said: well done<i>"), "*Ann said: well done*");
   assert.equal(
     converted("<h1>Title</h1>Body<ul><li>first</li><li>second</li></ul>"),
     "# Title\nBody\n- first\n- second",

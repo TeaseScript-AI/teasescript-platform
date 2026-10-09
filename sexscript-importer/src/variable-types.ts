@@ -2234,7 +2234,13 @@ export function expressionType(
           kind: value.fields?.kind === "object" && value.fields.dict !== true ? "object" : "dict",
         };
       return scalar(
-        value.input === "askText" ? "string" : value.input === "askInteger" ? "integer" : "number",
+        value.input === "askText"
+          ? "string"
+          : value.input === "askInteger"
+            ? "integer"
+            : value.input === "askBoolean"
+              ? "boolean"
+              : "number",
       );
     case "range":
       return { kind: "range" };
@@ -2608,6 +2614,8 @@ export function mapChildren(
       return {
         ...value,
         ...(value.question === undefined ? {} : { question: map(value.question) }),
+        ...(value.yesText === undefined ? {} : { yesText: map(value.yesText) }),
+        ...(value.noText === undefined ? {} : { noText: map(value.noText) }),
         ...(value.fields === undefined ? {} : { fields: map(value.fields) }),
         ...(value.submit === undefined ? {} : { submit: map(value.submit) }),
         ...(value.outro === undefined ? {} : { outro: map(value.outro) }),

@@ -2,8 +2,7 @@
 // messages, so a text says only what it adds to the one just before it, with whitespace, line breaks, and the earlier
 // text's final punctuation ignored.
 say "I will decide when you get to cum from now on."
-say "Do you accept?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Do you accept?" {
   say "Good."
 }
 // Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
@@ -14,9 +13,9 @@ wait 1
 line.text += "."
 wait 1
 // A question that repeats the text before it asks without saying it again.
-let days = askInteger "How many days?", default: 3
+let days = askInteger "How many days?", prefill: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.
-let name = askText "Your name?", default: "pet"
+let name = askText "Your name?", prefill: "pet"
 say "Hello ${name}."
 showImage "kneel.jpg"
 say "Kneel."

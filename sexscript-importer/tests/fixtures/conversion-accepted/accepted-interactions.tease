@@ -8,11 +8,9 @@ function sexscriptLegacyShowButton(text, timeout) {
   }
   return (showButton text, timeout: timeout) / 1 s
 }
-say "Are you ready?"
-let ready = (choose yes: "Yes", no: "No") == "yes"
-say "Really?"
-let sure = (choose yes: "Yes, Mistress", no: "No") == "yes"
-let count = askInteger "How many?", default: 10
+let ready = askBoolean "Are you ready?"
+let sure = askBoolean "Really?", yesText: "Yes, Mistress"
+let count = askInteger "How many?", prefill: 10
 showPopup "Session starts now"
 showButton "Quick!", timeout: 3
 // A zero timeout showed the button for its 10 ms safety margin and returned 0.
@@ -62,7 +60,7 @@ if photo != null {
   showImage photo
 }
 // With the accepted forms selected, getBooleans asks every question in one form and getFile opens the file chooser.
-let kit = askBooleans(message: "Which toys do you have?", texts: ["Paddle", "Crop"], defaults: [true, false])
+let kit = askBooleans "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
 if kit[1] == true {
   say "Bring the crop"
 }

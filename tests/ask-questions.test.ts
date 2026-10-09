@@ -21,7 +21,7 @@ import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 
 const SPEAKERS = 'speaker mistress {\n  displayName: "Mistress"\n}\nspeaker guide {}\n';
 
-/** Each basic ask with a default it accepts. */
+/** Each basic ask with a prefill it accepts. */
 const ASKS = [
   ["askText", '"Ada"'],
   ["askNumber", "2.5"],
@@ -57,11 +57,11 @@ test("a basic ask says its question as its speaker, then opens its field with th
     for (const [ask, expected] of [
       // The named speaker says the question and asks; `hint:` only labels the field.
       [
-        `${command} as mistress "Question?", hint: "Help", default: ${fallback}`,
+        `${command} as mistress "Question?", hint: "Help", prefill: ${fallback}`,
         ["say mistress: Question?", "field mistress: Help"],
       ],
       [
-        `${command} as mistress ("Question?", default: ${fallback}, hint: "Help")`,
+        `${command} as mistress ("Question?", prefill: ${fallback}, hint: "Help")`,
         ["say mistress: Question?", "field mistress: Help"],
       ],
       // Without one, the default speaker does both, here after `speaker guide`.
@@ -76,15 +76,15 @@ test("a basic ask says its question as its speaker, then opens its field with th
   }
 });
 
-test("the question, hint, and default are evaluated once in written order before the question is said", () => {
+test("the question, hint, and prefill are evaluated once in written order before the question is said", () => {
   for (const [ask, order] of [
     [
-      'askText mark("question"), hint: mark("hint"), default: mark("default")',
-      "question hint default",
+      'askText mark("question"), hint: mark("hint"), prefill: mark("prefill")',
+      "question hint prefill",
     ],
     [
-      'askText(mark("question"), default: mark("default"), hint: mark("hint"))',
-      "question default hint",
+      'askText(mark("question"), prefill: mark("prefill"), hint: mark("hint"))',
+      "question prefill hint",
     ],
   ] as const) {
     const source = [
@@ -192,7 +192,7 @@ test("a question resumes from a checkpoint at every boundary as without one, and
     [
       SPEAKERS,
       'say "Listen", 2',
-      'let name = askText as mistress ("Name ${1 + 1}?", default: askText("Default?"), hint: "Type it")',
+      'let name = askText as mistress ("Name ${1 + 1}?", prefill: askText("Default?"), hint: "Type it")',
       'say "Hello ${name}", instant',
       "exit",
     ].join("\n"),
@@ -203,7 +203,7 @@ test("a question resumes from a checkpoint at every boundary as without one, and
     .flatMap((event) =>
       event.kind === "say" ? [`${event.speaker?.identifier ?? "nobody"}: ${event.text}`] : [],
     );
-  // The asking default comes first and prefills the field; a refused answer says nothing again.
+  // The asking prefill comes first and prefills the field; a refused answer says nothing again.
   assert.deepEqual(said, [
     "nobody: Listen",
     "nobody: Default?",
@@ -221,11 +221,11 @@ test("a question resumes from a checkpoint at every boundary as without one, and
   });
 });
 
-test("hint: and default: each follow a comma once, and a mistake names its fix", () => {
+test("hint: and prefill: each follow a comma once, and a mistake names its fix", () => {
   for (const [ask, error] of [
     ['askText "Q", hint: "a", hint: "b"', "TSP032 0:32 Duplicate askText option 'hint'."],
     ['askText "Q" hint: "a"', "TSP017 0:20 Expected ',' before 'hint:'."],
-    ['askText "Q", default: "d" hint: "a"', "TSP017 0:34 Expected ',' before 'hint:'."],
+    ['askText "Q", prefill: "d" hint: "a"', "TSP017 0:34 Expected ',' before 'hint:'."],
     ['askText "Q", hint:', "TSP028 1:0 Expected hint text after 'hint:'."],
   ] as const) {
     // The error of the next statement shows that parsing recovered there.
@@ -252,11 +252,11 @@ test("a pending ask with a long question restores from its JSON checkpoint", () 
   assert.deepEqual(restored.snapshot, pending.snapshot);
 });
 
-test("validating nested asking defaults takes work in proportion to the plan", () => {
-  // Each question's preparation spans its nested defaults; the clear and bypass checks must not walk each span.
+test("validating nested asking prefills takes work in proportion to the plan", () => {
+  // Each question's preparation spans its nested prefills; the clear and bypass checks must not walk each span.
   const work = (asks: number) => {
     const plan = compileValidPlan(
-      `let answer = ${'askText("Q", default: '.repeat(asks - 1)}askText("Q")${")".repeat(asks - 1)}\nexit`,
+      `let answer = ${'askText("Q", prefill: '.repeat(asks - 1)}askText("Q")${")".repeat(asks - 1)}\nexit`,
     );
     return withValidationTestStatistics((finish) => {
       assert.equal(validateInstructionPlan(JSON.parse(JSON.stringify(plan))).valid, true);

@@ -586,6 +586,7 @@ class SemanticValidator {
           "takePhoto",
           "showCamera",
           "hideCamera",
+          "stopAudio",
           "showPermanentButton",
           "askImage",
           // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
@@ -1346,6 +1347,7 @@ class SemanticValidator {
       case "hideImageStatement":
       case "showCameraStatement":
       case "hideCameraStatement":
+      case "stopAudioStatement":
         return;
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
@@ -2292,6 +2294,10 @@ class SemanticValidator {
       for (const element of content.elements)
         this.#validateChoiceObject(unwrapParentheses(element), option.value);
     }
+    if (expression.prefill !== null)
+      yield* compileChild(
+        this.#validateExpressionTask(expression.prefill, scope, contextualSpeaker),
+      );
     if (empty)
       this.#report(
         semanticCode.invalidInteractionChoice,

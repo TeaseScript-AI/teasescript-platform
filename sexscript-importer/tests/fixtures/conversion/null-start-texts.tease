@@ -14,8 +14,7 @@ let finished = false
 if name == "" {
   ask()
 }
-say "Finished?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Finished?" {
   finished = true
 }
 if not finished {

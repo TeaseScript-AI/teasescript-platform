@@ -15,7 +15,7 @@ import { parse } from "../src/parser.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 
-/** Each basic ask with a default it accepts, an answer, and how `say` shows that answer. */
+/** Each basic ask with a prefill it accepts, an answer, and how `say` shows that answer. */
 const ASKS = [
   { command: "askText", fallback: '"Ada"', answer: "Bea", shown: "Bea" },
   { command: "askNumber", fallback: "2.5", answer: "1.5", shown: "1.5" },
@@ -55,21 +55,21 @@ test("a parenthesized basic ask compiles to the plan of its compact form", () =>
       [`${command}()`, command],
       [`${command}("Question?")`, `${command} "Question?"`],
       [
-        `${command}("Question?", hint: "Help", default: ${fallback})`,
-        `${command} "Question?", hint: "Help", default: ${fallback}`,
+        `${command}("Question?", hint: "Help", prefill: ${fallback})`,
+        `${command} "Question?", hint: "Help", prefill: ${fallback}`,
       ],
       [
-        `${command}(default: ${fallback}, hint: question())`,
-        `${command} default: ${fallback}, hint: question()`,
+        `${command}(prefill: ${fallback}, hint: question())`,
+        `${command} prefill: ${fallback}, hint: question()`,
       ],
-      [`${command}(default: ${fallback})`, `${command} default: ${fallback}`],
+      [`${command}(prefill: ${fallback})`, `${command} prefill: ${fallback}`],
       [
-        `${command}(question(), default: ${fallback})`,
-        `${command} question(), default: ${fallback}`,
+        `${command}(question(), prefill: ${fallback})`,
+        `${command} question(), prefill: ${fallback}`,
       ],
       [
-        `${command} as mistress (\n    "Question?",\n    default: ${fallback}\n)`,
-        `${command} as mistress "Question?",\n    default: ${fallback}`,
+        `${command} as mistress (\n    "Question?",\n    prefill: ${fallback}\n)`,
+        `${command} as mistress "Question?",\n    prefill: ${fallback}`,
       ],
     ]) {
       assert.equal(planWithoutSpans(bounded!), planWithoutSpans(compact!), bounded);
@@ -80,8 +80,8 @@ test("a parenthesized basic ask compiles to the plan of its compact form", () =>
 test("each parenthesized basic ask completes after a checkpoint restore like its compact form", () => {
   for (const { command, fallback, answer: text, ...ask } of ASKS) {
     const transcripts = [
-      `${command}("When?", hint: "Pick", default: ${fallback})`,
-      `${command} "When?", hint: "Pick", default: ${fallback}`,
+      `${command}("When?", hint: "Pick", prefill: ${fallback})`,
+      `${command} "When?", hint: "Pick", prefill: ${fallback}`,
     ].map((expression) => {
       const session = start(`let result = ${expression}\nsay result, instant\nexit`);
       const foreground = playerRuntimeForeground(session);
@@ -112,9 +112,9 @@ test("each parenthesized basic ask completes after a checkpoint restore like its
 test("a parenthesized ask ends at its ')' inside larger expressions", () => {
   let session = start(
     [
-      'let more = askInteger("How many?", default: 3) + 1',
+      'let more = askInteger("How many?", prefill: 3) + 1',
       'let record = { name: askText("Name?"), default: 1 }',
-      'let nested = askText("Again?", default: askText("Default?"))',
+      'let nested = askText("Again?", prefill: askText("Default?"))',
       'let stored = load(askText("Key?"), default: "none")',
       'say "${more} ${record.name} ${record.default} ${nested} ${stored}", instant',
       "exit",
@@ -131,7 +131,7 @@ test("a parenthesized ask ends at its ')' inside larger expressions", () => {
     ]);
     session = answer(session, text);
   }
-  // The nested default asks first and prefills the outer ask.
+  // The nested prefill asks first and prefills the outer ask.
   assert.deepEqual(asked, [
     ["How many?", "3"],
     ["Name?", null],
@@ -144,7 +144,7 @@ test("a parenthesized ask ends at its ')' inside larger expressions", () => {
 });
 
 test("a parenthesized ask records its command, speaker, arguments, and closing parenthesis", () => {
-  const source = 'let result = askText as mistress ("Question?", default: "Ada", hint: "Help")';
+  const source = 'let result = askText as mistress ("Question?", prefill: "Ada", hint: "Help")';
   const parsed = parse(source);
   assert.deepEqual(parsed.diagnostics, []);
   const statement = parsed.program.statements[0];
@@ -159,12 +159,12 @@ test("a parenthesized ask records its command, speaker, arguments, and closing p
   assert.deepEqual(offsets(ask.asSpan ?? undefined), [asStart, asStart + 2]);
   assert.deepEqual(offsets(ask.speaker?.span), at("mistress"));
   assert.deepEqual(offsets(ask.question?.span), at('"Question?"'));
-  assert.deepEqual(offsets(ask.defaultValue?.span), at('"Ada"'));
+  assert.deepEqual(offsets(ask.prefill?.span), at('"Ada"'));
   assert.deepEqual(offsets(ask.hint?.span), at('"Help"'));
   assert.deepEqual(offsets(ask.span), [source.indexOf("askText"), source.length]);
 });
 
-test("a parenthesized ask takes one question and the options 'hint:' and 'default:', and names what is wrong", () => {
+test("a parenthesized ask takes one question and the options 'hint:' and 'prefill:', and names what is wrong", () => {
   const errors = (source: string) =>
     compileSource(`${PRELUDE}${source}\nlet = 1\nsay question()\nexit`)
       .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
@@ -177,15 +177,15 @@ test("a parenthesized ask takes one question and the options 'hint:' and 'defaul
   for (const [source, error] of [
     [
       'let v = askText("a", "b")',
-      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'default:'.",
+      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'prefill:'.",
     ],
     [
       'let v = askNumber("a", help: "b")',
-      "TSP032 0:23 Unknown askNumber option 'help'; use 'default:' or 'hint:'.",
+      "TSP032 0:23 Unknown askNumber option 'help'; use 'prefill:' or 'hint:'.",
     ],
     [
-      'let v = askDate("a", default: 1, default: 2)',
-      "TSP032 0:33 Duplicate askDate option 'default'.",
+      'let v = askDate("a", prefill: 1, prefill: 2)',
+      "TSP032 0:33 Duplicate askDate option 'prefill'.",
     ],
     [
       'let v = askTime("a") as mistress',

@@ -1,4 +1,4 @@
-/** Answer rules shared by default answers, plan and checkpoint validation, and interaction completion. */
+/** Answer rules shared by prefills, plan and checkpoint validation, and interaction completion. */
 
 import {
   formatIsoDate,
@@ -31,7 +31,7 @@ export function isIntegerAnswerText(text: string): boolean {
   return /^[+-]?\d+$/u.test(text);
 }
 
-/** The text that prefills `askNumber` for a finite default number; submitting it returns the same number. */
+/** The text that prefills `askNumber` for a finite prefill number; submitting it returns the same number. */
 export function numberAnswerText(value: number): string {
   return String(Object.is(value, -0) ? 0 : value);
 }
@@ -80,7 +80,7 @@ export function temporalAnswer(kind: TemporalAnswerKind, text: string): Temporal
   }
 }
 
-/** The ISO text that prefills a date or time field for a default answer; submitting it returns the same value. */
+/** The ISO text that prefills a date or time field for a prefill value; submitting it returns the same value. */
 export function temporalAnswerText(value: TemporalAnswer): string {
   switch (value.kind) {
     case "date":

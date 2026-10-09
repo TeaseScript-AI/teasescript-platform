@@ -34,13 +34,13 @@ export function namedAskArguments(
 }
 
 /**
- * The operands of an ask in evaluation order: the question, then `hint:` and `default:` in the order they are written,
- * or every named argument of an ask that keeps them.
+ * The operands of an ask in evaluation order: the question, then `hint:` and `prefill:` in the order they are written,
+ * or every named argument of an ask that keeps them. For `choose`, the `prefill:` that follows its options.
  */
 export function askOperands(expression: InteractionExpression): readonly Expression[] {
   if (hasNamedAskArguments(expression))
     return namedAskArguments(expression).map((argument) => argument.value);
-  const named = [expression.hint, expression.defaultValue].filter(
+  const named = [expression.hint, expression.prefill].filter(
     (operand): operand is Expression => operand !== null,
   );
   if (named.length === 2 && named[1]!.span.start.offset < named[0]!.span.start.offset)

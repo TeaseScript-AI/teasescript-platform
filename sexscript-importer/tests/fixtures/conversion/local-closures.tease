@@ -43,7 +43,7 @@ function shock(message, shocks) {
 function scriptCallback4 {
   return shock("Ouch", 2)
 }
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean {
   let note = "Careful"
   // TODO SX_CLOSURE_DISCOVERY line 24: Closure warn is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
   // | def warn = { -> show(note) }
@@ -52,8 +52,7 @@ if (choose yes: "Yes", no: "No") == "yes" {
 if punish != null and punish != "" {
   sexscriptLegacyCall(punish, [])
 }
-say "Hurry?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Hurry?" {
   // TODO SX_CLOSURE_DISCOVERY line 29: Closure wait is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
   // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
 }

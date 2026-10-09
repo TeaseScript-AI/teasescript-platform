@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 71;
+export const INSTRUCTION_PLAN_VERSION = 73;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -161,6 +161,7 @@ export type Instruction =
   | ShowPermanentButtonInstruction
   | StorageWriteInstruction
   | PlayMediaInstruction
+  | StopAudioInstruction
   | InteractionInstruction
   | CaptureInstruction
   | GotoInstruction
@@ -543,6 +544,11 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly destinationTemporary: number | null;
 }
 
+/** `stopAudio`: stops every running or paused audio in start order, as `stop()` on each handle does. */
+export interface StopAudioInstruction extends InstructionBase {
+  readonly kind: "stopAudio";
+}
+
 export type InteractionKind =
   "button" | "text" | "number" | "choice" | "temporal" | "image" | "form";
 /**
@@ -586,14 +592,14 @@ export type InteractionUiPayload =
   | {
       readonly kind: "text";
       readonly hint: string | null;
-      /** Answer text that prefills the field; submitting it unchanged answers with the default. */
+      /** Answer text that prefills the field; submitting it unchanged answers with the prefill. */
       readonly prefill?: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "number";
       readonly hint: string | null;
-      /** Answer text that prefills the field; submitting it unchanged answers with the default. */
+      /** Answer text that prefills the field; submitting it unchanged answers with the prefill. */
       readonly prefill?: string;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
@@ -603,13 +609,18 @@ export type InteractionUiPayload =
       readonly kind: "temporal";
       readonly temporalKind: InteractionTemporalKind;
       readonly hint: string | null;
-      /** The default answer as ISO text; submitting it unchanged answers with the default. */
+      /** The prefill as ISO text; submitting it unchanged answers with the prefill. */
       readonly prefill?: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "choice";
       readonly options: readonly InteractionChoiceOption[];
+      /**
+       * The position of the preselected button, the first whose value is the `prefill:` of `choose` or `askBoolean`: it
+       * is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
+       */
+      readonly preselected?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -718,14 +729,14 @@ export type PreparedInteractionUiPayload =
   | {
       readonly kind: "text";
       readonly hintTemporary: number | null;
-      /** Holds the evaluated default answer until the field opens, then its prefill text, or `null` for none. */
+      /** Holds the evaluated prefill until the field opens, then its prefill text, or `null` for none. */
       readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "number";
       readonly hintTemporary: number | null;
-      /** Holds the evaluated default answer until the field opens, then its prefill text, or `null` for none. */
+      /** Holds the evaluated prefill until the field opens, then its prefill text, or `null` for none. */
       readonly prefillTemporary?: number;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
@@ -735,7 +746,7 @@ export type PreparedInteractionUiPayload =
       readonly kind: "temporal";
       readonly temporalKind: InteractionTemporalKind;
       readonly hintTemporary: number | null;
-      /** Holds the evaluated default answer until the field opens, then its ISO prefill text, or `null` for none. */
+      /** Holds the evaluated prefill until the field opens, then its ISO prefill text, or `null` for none. */
       readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
@@ -745,6 +756,13 @@ export type PreparedInteractionUiPayload =
       readonly optionsTemporary: number;
       /** The authored value of each option, or `null`. Its length is the authored option count. */
       readonly values: readonly (PreparedInteractionChoiceValue | null)[];
+      /** Holds the evaluated `prefill:`, whose first button with that value is preselected when the choice opens. */
+      readonly prefillTemporary?: number;
+      /**
+       * `askBoolean`: its prefill must be `true` or `false`, and `null` or blank text preselects none, as for an ask;
+       * any other value fails as the choice would open. Without it, a value no button has warns.
+       */
+      readonly booleanPrefill?: true;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
@@ -760,7 +778,7 @@ export type PreparedInteractionUiPayload =
       readonly kind: "form";
       /**
        * An object holding the written arguments of the form by name: `fields`, an object or dict, and optionally `hint`,
-       * `submit`, `cancel`, `outro`, `timeout`, and `onTimeout`; for `askBooleans`, `texts` and `defaults` instead of `fields`. When the form opens, it holds the
+       * `submit`, `cancel`, `outro`, `timeout`, and `onTimeout`; for `askBooleans`, `texts` and `defaults` (its `prefill:`) instead of `fields`. When the form opens, it holds the
        * form's canonical definition instead.
        */
       readonly requestTemporary: number;

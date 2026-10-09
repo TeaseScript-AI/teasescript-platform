@@ -5,18 +5,16 @@ while true {
   if name == "" {
     answered = true
   } else {
-    say "Is ${name} your name?"
-    answered = (choose yes: "Yes", no: "No") != "yes"
+    answered = not askBoolean("Is ${name} your name?")
   }
   if not answered {
     break
   }
-  name = askText "What is your name?", default: "slave"
+  name = askText "What is your name?", prefill: "slave"
 }
 let conditional = name.length > 3
 if conditional {
-  say "May I shorten it?"
-  conditional = (choose yes: "Yes", no: "No") == "yes"
+  conditional = askBoolean "May I shorten it?"
 }
 if conditional {
   say "Hello, ${name.substring(0, 3)}"

@@ -1808,8 +1808,12 @@ export class Evaluator {
       }
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
+      const hostBuiltin = !coreBuiltin && !platformPrelude;
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
-      if (!coreBuiltin && !platformPrelude && builtin === undefined) {
+      // While the unit before a paused draw runs again, a host builtin returns its recorded result without being
+      // called, so it need not be registered then.
+      const recorded = hostBuiltin ? this.control?.replayedBuiltin() : undefined;
+      if (hostBuiltin && builtin === undefined && recorded === undefined) {
         throw fault(
           "TSR011",
           `Unknown built-in function '${expression.callee.name}'.`,
@@ -1841,10 +1845,8 @@ export class Evaluator {
           case "escapeMarkup":
             returned = this.#escapeMarkupBuiltin(call);
             break;
-          default: {
-            const recorded = this.control?.replayedBuiltin();
+          default:
             returned = recorded === undefined ? builtin!(call) : recorded;
-          }
         }
       } catch (error) {
         // A pause, or the host's decision callback failing, is not the builtin's failure.
@@ -1883,7 +1885,7 @@ export class Evaluator {
           expression.span,
         );
       }
-      if (!coreBuiltin && !platformPrelude) this.control?.recordBuiltin(copied);
+      if (hostBuiltin) this.control?.recordBuiltin(copied);
       return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {

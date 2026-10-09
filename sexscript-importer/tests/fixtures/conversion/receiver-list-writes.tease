@@ -1,7 +1,6 @@
 // A function result and list elements are not proven to be lists; Groovy has these changes only on lists and sets.
 function pick(a, b) {
-  say "First deck?"
-  if (choose yes: "Yes", no: "No") == "yes" {
+  if askBoolean "First deck?" {
     return a
   } else {
     return b

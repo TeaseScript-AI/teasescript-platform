@@ -887,7 +887,7 @@ test(
       // A list case holding a range keeps Groovy's membership test.
       assert.match(output, /\[1\.\.=3, 5\]\.contains\(/u);
       // Legacy showed a number default as text; a map default has no text form.
-      assert.match(output, /^let code = askText "Code\?", default: "42"$/mu);
+      assert.match(output, /^let code = askText "Code\?", prefill: "42"$/mu);
       assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
       // A negative button timeout failed in legacy and is rejected by TeaseScript.
       assert.match(output, /^\/\/ TODO SX_BUTTON_TIMEOUT line 14: /mu);

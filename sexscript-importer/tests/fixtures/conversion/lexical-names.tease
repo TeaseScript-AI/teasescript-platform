@@ -35,8 +35,7 @@ sleep()
 // NOTE SX_UNION_TYPE line 11: Groovy let 'playing' hold values of several types; TeaseScript declares it 'boolean | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if playing is boolean { ... }
 let playing: boolean | integer = true
 while (playing is boolean and playing == true) or (playing is number and playing != 0) {
-  say "Stop?"
-  if (choose yes: "Yes", no: "No") == "yes" {
+  if askBoolean "Stop?" {
     playing = 0
   }
 }
@@ -74,7 +73,7 @@ total += 1
 say "Again?"
 // NOTE SX_BINDING_VARIABLE: Groovy kept bonus, which the script assigns without a declaration, in the script's binding; it is declared here with an empty value.
 let bonus = 0
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean {
   bonus = 1
 } else {
   bonus = 2

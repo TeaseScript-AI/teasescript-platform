@@ -411,6 +411,7 @@ export type {
   MediaRepeat,
   PlayMediaExpression,
   PlayMediaStatement,
+  StopAudioStatement,
   SetLiteral,
   DictEntry,
   DictLiteral,
