@@ -1322,25 +1322,28 @@ export class RandomControl {
     if (policy.sites !== null && !policy.sites.has(site)) return natural;
     const view: RandomDrawView = Object.freeze({ drawId, site, kind, support: support(), natural });
     if (policy.decide === null) throw this.#suspension(view);
-    let decision: unknown;
+    // The decision is read completely inside the guard, so whatever the host's code throws, also from reading what
+    // `decide` returned, ends the operation alike.
+    let answer: "natural" | "suspend" | RandomOutcome | { readonly refusal: string };
     try {
-      decision = policy.decide(publishedView(view));
+      const decision: unknown = policy.decide(publishedView(view));
+      const decided = isRecord(decision) ? decision.kind : undefined;
+      if (decided === "natural" || decided === "suspend") answer = decided;
+      else if (isRecord(decision) && decided === "choose") {
+        const outcome = checkedOutcome(view.support, decision.outcome);
+        answer = typeof outcome === "string" ? { refusal: outcome } : outcome;
+      } else
+        answer = {
+          refusal:
+            'A decision is { kind: "natural" }, { kind: "choose", outcome }, or { kind: "suspend" }.',
+        };
     } catch (error) {
       throw new RandomDecisionError(error);
     }
-    if (isRecord(decision) && decision.kind === "natural") return natural;
-    if (isRecord(decision) && decision.kind === "choose") {
-      const outcome = checkedOutcome(view.support, decision.outcome);
-      if (typeof outcome !== "string") return this.#force(drawId, site, kind, outcome);
-      this.refusal = Object.freeze({ drawId, message: outcome });
-      throw this.#suspension(view);
-    }
-    if (isRecord(decision) && decision.kind === "suspend") throw this.#suspension(view);
-    this.refusal = Object.freeze({
-      drawId,
-      message:
-        'A decision is { kind: "natural" }, { kind: "choose", outcome }, or { kind: "suspend" }.',
-    });
+    if (answer === "natural") return natural;
+    if (answer !== "suspend" && !("refusal" in answer))
+      return this.#force(drawId, site, kind, answer);
+    if (answer !== "suspend") this.refusal = Object.freeze({ drawId, message: answer.refusal });
     throw this.#suspension(view);
   }
 

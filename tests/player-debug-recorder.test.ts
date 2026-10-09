@@ -44,6 +44,7 @@ import {
   observeTime,
   type MediaProgressReport,
 } from "../src/index.js";
+import type { RandomDecision } from "../src/runtime/random-control.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const store = { holds: (asked: string, kind: string) => asked === reference && kind === "image" };
@@ -369,25 +370,36 @@ test("a media store that throws during a recorded call leaves the recording inco
 });
 
 test("a random decision that throws during a recorded call leaves the recording incomplete", async () => {
-  const recorder = new DebugRecorder();
-  let session = createPlayerRuntimeSession('wait 1\nlet x = random()\nsay "${x}", instant\nexit', {
-    recorder,
-  });
-  session = observePlayerRuntimeTime(session, 500).session;
-  setPlayerRuntimeRandomControl(session, {
-    decide: () => {
+  // A decision whose field throws is read inside the engine's guard too.
+  const unreadable = (): RandomDecision =>
+    Object.defineProperty({ kind: "natural" }, "kind", {
+      get() {
+        throw new Error("host decision failed");
+      },
+    });
+  for (const decide of [
+    () => {
       throw new Error("host decision failed");
     },
-  });
-  assert.throws(() => observePlayerRuntimeTime(session, 1_000), { name: "RandomDecisionError" });
-  const recording = recorder.recording()!;
-  assert.deepEqual(
-    [recording.complete, recording.reason],
-    [false, "The random decision callback failed during a recorded call."],
-  );
-  // The replay has no decision callback, so it could not throw where the recorded call threw.
-  assert.equal(recording.operations.at(-1)?.thrown, "RandomDecisionError");
-  assert.equal((await replay(recorder)).kind, "incomplete");
+    unreadable,
+  ]) {
+    const recorder = new DebugRecorder();
+    let session = createPlayerRuntimeSession(
+      'wait 1\nlet x = [1, 2, 3].random\nsay "${x}", instant\nexit',
+      { recorder },
+    );
+    session = observePlayerRuntimeTime(session, 500).session;
+    setPlayerRuntimeRandomControl(session, { decide });
+    assert.throws(() => observePlayerRuntimeTime(session, 1_000), { name: "RandomDecisionError" });
+    const recording = recorder.recording()!;
+    assert.deepEqual(
+      [recording.complete, recording.reason],
+      [false, "The random decision callback failed during a recorded call."],
+    );
+    // The replay has no decision callback, so it could not throw where the recorded call threw.
+    assert.equal(recording.operations.at(-1)?.thrown, "RandomDecisionError");
+    assert.equal((await replay(recorder)).kind, "incomplete");
+  }
 });
 
 test("a media store or random decision that throws after the record froze leaves the frozen record as it was", () => {
