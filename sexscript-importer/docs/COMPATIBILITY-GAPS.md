@@ -492,8 +492,9 @@ Concrete points the migration surfaced in TeaseScript itself:
 - **No absoluteDateTime from a number (#532).** Domme3 stores the chastity start as Unix seconds
   (`save("domme3.chastitystart", getTime())`) and later formats it (`new Date((long)chastitystart * 1000)`, 3 sites).
   #532 converts an absoluteDateTime to seconds but builds none from a number, because seconds and milliseconds would be
-  ambiguous, so these stay manual work; storing the absoluteDateTime itself is the TeaseScript way, which needs a package-wide
-  rewrite of the saved value.
+  ambiguous, so the moment is the current one minus the seconds since then,
+  `getAbsoluteDateTime() - (getAbsoluteDateTime().toSeconds() - toInteger(chastitystart)) * 1 s`, which it then formats
+  (`SX_DATE_FROM_SECONDS`); the saved value stays a number.
 - **Calendar day counts** convert with #532's `(date - date).days`: Domme3's `Calendar.DAY_OF_YEAR` seed (1 site)
   becomes `(getDate() - toDate("${getDate().year}-01-01")).days + 1`, which lowers `sleep`.
 - **Compact interactions as values.** A used `showButton` result needs parentheses, `(showButton "Done", timeout: 30)
