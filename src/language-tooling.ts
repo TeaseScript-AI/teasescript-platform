@@ -534,9 +534,10 @@ function locateCompactCommand(
       return { command, range: token.span };
     }
   }
+  // A token that starts at the cursor, such as the `)` an editor adds when it closes a bracket, is after it.
   const before = tokens.filter(
     (token) =>
-      token.span.start.offset <= offset &&
+      token.span.start.offset < offset &&
       token.kind !== TokenKind.Newline &&
       token.kind !== TokenKind.EndOfFile,
   );
