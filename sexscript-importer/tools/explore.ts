@@ -7,7 +7,7 @@
  *          [--workers 1|2] [--until-stalled]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
- *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>
+ *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -90,6 +90,7 @@ const STRATEGIES = [
   "randomChoices",
   "quitAnywhere",
   "depthPhases",
+  "effectRanking",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -155,6 +156,7 @@ async function main(args: string[]): Promise<void> {
       "random-choices": { type: "boolean", default: true },
       "quit-anywhere": { type: "boolean", default: false },
       "depth-phases": { type: "boolean", default: false },
+      "effect-ranking": { type: "boolean", default: false },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -212,7 +214,7 @@ async function main(args: string[]): Promise<void> {
         "         [--workers 1|2] [--until-stalled]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
-        "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -259,6 +261,7 @@ async function main(args: string[]): Promise<void> {
             randomChoices: values["random-choices"],
             quitAnywhere: values["quit-anywhere"],
             depthPhases: values["depth-phases"],
+            effectRanking: values["effect-ranking"],
           },
         },
         out,
@@ -308,6 +311,7 @@ interface RunSettings {
     randomChoices: boolean;
     quitAnywhere: boolean;
     depthPhases: boolean;
+    effectRanking: boolean;
   };
 }
 

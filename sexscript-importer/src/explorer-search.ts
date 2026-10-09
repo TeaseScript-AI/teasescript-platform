@@ -330,6 +330,13 @@ export interface ExploreOptions {
    */
   readonly depthPhases?: boolean;
   /**
+   * Effect ranking (with cells): a play state's cell ranks by the runtime operations its expansions took per productive
+   * one (a step that reached new code, a cell, slot value or change not seen before, or came closer to a comparison a
+   * missed way needs), not by how many expansions it had: a cell whose expansions cost much and find little waits, a cheap
+   * one or one that keeps finding something comes back sooner, and a new cell comes first. Off by default.
+   */
+  readonly effectRanking?: boolean;
+  /**
    * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
    * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
    * a missed way needs. New cells are counted but do not hold a run up: cells of counters keep coming long after
@@ -1111,8 +1118,10 @@ const GROUP = 4;
  */
 class Cells {
   readonly slots: readonly Slot[];
-  /** Expansions by cell. */
+  /** Expansions by cell; and of play states, the runtime operations they took and how many were productive. */
   readonly expansions: number[] = [];
+  readonly work: number[] = [];
+  readonly productive: number[] = [];
   /** Binding slots by name, and storage slots by stored key (found by key or pattern once per key). */
   readonly #byName = new Map<string, number[]>();
   readonly #byKey = new Map<string, readonly number[]>();
@@ -1250,6 +1259,8 @@ class Cells {
       cell = this.#cells.size;
       this.#cells.set(place, cell);
       this.expansions.push(0);
+      this.work.push(0);
+      this.productive.push(0);
     }
     return { cell, values, novel, fresh };
   }
@@ -1747,19 +1758,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    */
   const chosenLoopSeen = new Map<string, number>();
   const chosenExpansions: number[] = [];
-  const expansionsOf = (node: Node): number =>
+  /** A play cell's place in the order: its expansions, or with effect ranking their operations per productive one. */
+  const playRank = (cell: number): number =>
     cells === null
       ? 0
-      : node.chosen
-        ? (chosenExpansions[node.cell] ?? 0)
-        : cells.expansions[node.cell]!;
+      : options.effectRanking === true
+        ? cells.work[cell]! / (1 + cells.productive[cell]!)
+        : cells.expansions[cell]!;
+  const expansionsOf = (node: Node): number =>
+    cells === null ? 0 : node.chosen ? (chosenExpansions[node.cell] ?? 0) : playRank(node.cell);
   const queue = (expansions: (cell: number) => number): Pick<Frontier, "size" | "push" | "pop"> =>
     cells === null ? new Frontier() : new CellFrontier((node) => nodes[node]!.cell, expansions);
   const phased = options.depthPhases === true;
   const depthFrontier = phased
     ? new DepthFrontier(
-        (chosen) =>
-          queue((cell) => (chosen ? chosenExpansions[cell] : cells?.expansions[cell]) ?? 0),
+        (chosen) => queue((cell) => (chosen ? (chosenExpansions[cell] ?? 0) : playRank(cell))),
         (node) => starts[nodes[node]!.start]!.session,
         (node) => nodes[node]!.chosen,
       )
@@ -1769,12 +1782,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     depthFrontier ??
     (session.randomChoices
       ? new SplitFrontier(
-          queue((cell) => cells?.expansions[cell] ?? 0),
+          queue(playRank),
           queue((cell) => chosenExpansions[cell] ?? 0),
           (node) => nodes[node]!.chosen,
           () => withinChosenShare(),
         )
-      : queue((cell) => cells?.expansions[cell] ?? 0));
+      : queue(playRank));
   const crashes = new Map<string, CrashReport>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
@@ -4037,6 +4050,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     if (turn !== null && !leading)
       charge(turn.depth, session.operations - workBefore, gainCount - gainBefore, turn.exploring);
+    if (cells !== null && !node.chosen) {
+      cells.work[node.cell]! += session.operations - workBefore;
+      if (productive) cells.productive[node.cell]! += 1;
+    }
     if (cut) {
       node.status = "open";
       node.left = inputs.filter((input) => node.tried?.has(JSON.stringify(input)) !== true);

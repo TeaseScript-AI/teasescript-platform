@@ -402,6 +402,17 @@ most a third of all runtime operations (fresh sessions, runs, inputs, and automa
 of what steps cost. Without depth phases, starting next visits takes at most another third, apart from it, from the
 storage of the first ten completed sessions, and a session number goes before the next one in the search order.
 
+Effect ranking (`--effect-ranking`, opt-in, with cells) ranks a play state's cell by the runtime operations its
+expansions took per productive one (a step that reached new code, a cell, slot value or change not seen before, or came
+closer to a comparison a missed way needs) instead of by how many expansions it had: a cell whose expansions cost much
+and find little waits, a cheap one or one that keeps finding something comes back sooner, and a new cell still comes
+first. On a focused gate (3 seeds, gate budgets; jewell 6) against the explorer without it, it gained BreatheAcademy
+69.5% → 73.5%, Toy 80.0% → 81.6%, Domme3 50.1% → 50.4% and jewell 47.0% → 47.4%, and lost DisciplineClinic 20.8% →
+20.3% and ToyExpanded 40.8% → 40.2%. It is opt-in because a loop the player cannot leave is unproductive by nature and
+its states wait longer, so traps are found less often: jewell's `cumEdging.tease:32` in 0 of 6 seeds instead of 2
+(`trainEnema.tease:65` in 2 of 6 either way). Content behind a long automatic chain (Domme3's 300 strokes) stays
+unreached either way.
+
 Depth phases (`--depth-phases`, opt-in) let the search decide how play work goes to session numbers, the depth of a
 session from a new player's first. Each depth's work (its play and directed work, and the next sessions it starts) and
 gain (the lines and condition ways any of its steps reach first) are measured as the run goes. The first session goes
