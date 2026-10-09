@@ -797,14 +797,15 @@ test(
 );
 
 test(
-  "a key a helper loads by a template is the one key its argument names at the condition, so other keys of the template are no closest storage",
+  "a key a helper loads by a template, also through a helper it calls, is the one key its argument names at the condition, so other keys of the template are no closest storage",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const source =
       'global ROPE = "rope"\nglobal KNIFE = "knife"\nfunction owns(item) {\n' +
-      '  return load("gear.${item}", default: false) == true\n}\n' +
+      '  return packed(item) or load("gear.${item}", default: false) == true\n}\n' +
+      'function packed(thing) {\n  return load("pack.${thing}", default: false) == true\n}\n' +
       'let pick = choose rope: "Rope", knife: "Knife"\nif pick == "rope" {\n  save true as "gear.${ROPE}"\n' +
       '} else {\n  save false as "gear.${KNIFE}"\n}\nshowButton "Next"\nif owns(KNIFE) {\n' +
       '  say "Sharp."\n}\nexit\n';
@@ -818,11 +819,15 @@ test(
       sources: new Map(),
       diagnostics: [],
     });
-    const sharp = result.coverage.unvisitedBranches.find((entry) => entry.line === 13);
-    assert.deepEqual(sharp?.dependsOn, ["stored gear.knife"]);
+    // Also through the helper `owns` calls with its own parameter.
+    const sharp = result.coverage.unvisitedBranches.find((entry) => entry.line === 16);
+    assert.deepEqual(sharp?.dependsOn, ["stored gear.knife", "stored pack.knife"]);
     assert.deepEqual(
       sharp?.parts.map((part) => [part.needs, part.status, part.closest?.value]),
-      [["stored gear.knife == true", "unmet", "gear.knife = false"]],
+      [
+        ["stored gear.knife == true", "unmet", "gear.knife = false"],
+        ["stored pack.knife == true", "unmeasured", undefined],
+      ],
     );
   },
 );
