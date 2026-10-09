@@ -458,6 +458,7 @@ function recordedAnswers(recording: DebugRecording | null): unknown[] {
         actionId: request["actionId"],
         interactionKind: request["interactionKind"],
         payload: request["payload"],
+        input: operation.input,
         outcome: operation.outcome,
       },
     ];

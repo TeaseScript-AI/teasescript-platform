@@ -6,6 +6,7 @@ import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
+  answeredByPlayerInput,
   answerPlayerRuntimeImage,
   playerRuntimeForeground,
   playerRuntimeForm,
@@ -33,6 +34,7 @@ import type {
   PlayerSpeakerPresentation,
 } from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
+import type { DebugAnswerInput } from "../../debug-export.js";
 import type { CapturedMediaAdmission } from "../../../src/index.js";
 
 /** How the host stores an image file the player chose for `askImage`, and vouches for it. */
@@ -178,10 +180,12 @@ const presentedAt = ref(0);
 function activatePreselected() {
   const target = preselected.value;
   if (target === undefined) return;
-  void complete((session) =>
-    target === null
-      ? activatePlayerRuntimeButton(session)
-      : selectPlayerRuntimeChoice(session, target),
+  void complete(
+    answer("preselectedKey", (session) =>
+      target === null
+        ? activatePlayerRuntimeButton(session)
+        : selectPlayerRuntimeChoice(session, target),
+    ),
   );
 }
 // An image request accepts a file through the paperclip or a drop only while it allows files.
@@ -377,6 +381,15 @@ watch(
   { immediate: true },
 );
 
+// An answer the player gave, whose debug recording keeps how (DEBUGGER.md "Debug export").
+function answer(
+  input: DebugAnswerInput,
+  operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
+) {
+  return (session: PlayerRuntimeSession) =>
+    answeredByPlayerInput(session, input, () => operation(session));
+}
+
 async function complete(
   operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
   refocusInput = true,
@@ -556,7 +569,12 @@ async function submitImage(files: readonly File[], target: ImageRequestIdentity)
 }
 
 function submit(source: "input" | "button") {
-  void complete((session) => submitPlayerRuntimeComposer(session, draft.value), source === "input");
+  void complete(
+    answer(source === "input" ? "enter" : "send", (session) =>
+      submitPlayerRuntimeComposer(session, draft.value),
+    ),
+    source === "input",
+  );
 }
 </script>
 
@@ -586,8 +604,10 @@ function submit(source: "input" | "button") {
                     false,
                   )
               "
-              @submit="complete((session) => submitPlayerRuntimeForm(session, formDraft()))"
-              @cancel="complete(cancelPlayerRuntimeForm)"
+              @submit="
+                complete(answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())))
+              "
+              @cancel="complete(answer('button', cancelPlayerRuntimeForm))"
               @dismiss="complete(dismissPlayerRuntimeFormField, false)"
               @clear="complete(clearPlayerRuntimeFormField, false)"
             />
@@ -598,10 +618,12 @@ function submit(source: "input" | "button") {
               :disabled="submitting"
               @activate="
                 (optionId) =>
-                  complete((session) =>
-                    optionId === null
-                      ? activatePlayerRuntimeButton(session)
-                      : selectPlayerRuntimeChoice(session, optionId),
+                  complete(
+                    answer('button', (session) =>
+                      optionId === null
+                        ? activatePlayerRuntimeButton(session)
+                        : selectPlayerRuntimeChoice(session, optionId),
+                    ),
                   )
               "
             />

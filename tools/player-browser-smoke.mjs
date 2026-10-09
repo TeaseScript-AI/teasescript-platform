@@ -4582,6 +4582,12 @@ async function debugExportScenario(cdp, origin, profile) {
     true,
     "The photo's original bytes",
   );
+  // The name was sent with a click on Send; the picture answers through the picker, whose input is not recorded.
+  assertEqual(
+    JSON.stringify(document.sections.answers.map((answer) => answer.input)),
+    JSON.stringify(["send", null]),
+    "How each answer was given",
+  );
 
   // The dialog fits a narrow screen with touch-sized rows.
   await cdp.call("Input.dispatchKeyEvent", {

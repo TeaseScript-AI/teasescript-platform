@@ -229,14 +229,15 @@ The technical report, always included, locates the failure without runtime value
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
-`version: 5`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+`version: 6`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
 covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
 and `rewindCount`, or `null`), both of which `inspect` prints; the selection and omissions; the canonical checkpoint
 and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
-with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
+with the media store's recorded answers and how the player gave the answer (`input`: Enter in the composer, its Send
+button, a button of the request, or the key that activates the preselected button, else `null`), `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
 `applyExternalStorageEdit` with the edit, `updateInteraction` with the form edit, and `setDebugMode` with whether Debug
 is on, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name and the status the call started from, the random outcomes chosen during it, and the
@@ -265,7 +266,7 @@ where the browser can hash, the incident as the session's actual state shows it,
 marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
 Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
-reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions; session
+reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions with their `input`; session
 text adds the last 50 transcript messages, the Stage image's authored path, media sources, notice messages, and the
 Debug log while the Debug menu is on, and the events with their content: messages and their changes, the player's own
 transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold

@@ -13,6 +13,7 @@ import {
   debugExportJson,
   rebuildRecordedSession,
   type DebugAdmissionQuery,
+  type DebugAnswerInput,
   type DebugOperation,
   type DebugOperationKind,
 } from "./debug-export.js";
@@ -117,6 +118,8 @@ export class DebugRecorder {
   /** The recording once it froze; until then, the recording is the log. */
   #frozen: FrozenRecording | null = null;
   #problem: string | null = null;
+  /** How the player gave the answer the calls being made pass, while `answeredBy` runs them. */
+  #input: DebugAnswerInput | null = null;
 
   constructor(limits: Partial<DebugRecorderLimits> = {}) {
     this.#limits = { ...DEFAULT_LIMITS, ...limits };
@@ -201,6 +204,17 @@ export class DebugRecorder {
     this.#broken = false;
     this.#paused = published.paused;
     return session;
+  }
+
+  /** Runs `answer` and records `input` as how the player gave the answer of each `completeAction` it makes. */
+  answeredBy<T>(input: DebugAnswerInput, answer: () => T): T {
+    const outer = this.#input;
+    this.#input = input;
+    try {
+      return answer();
+    } finally {
+      this.#input = outer;
+    }
   }
 
   /**
@@ -400,6 +414,7 @@ export class DebugRecorder {
       thrown,
       randomChoices: [...(result?.randomChoices ?? [])],
       pausedAt: result?.pausedAt ?? null,
+      input: kind === "completeAction" ? this.#input : null,
     });
     // A failed session still holds its state, so the end is taken now; after a throw it is rebuilt when needed.
     if (thrown !== null) this.#freeze(null);

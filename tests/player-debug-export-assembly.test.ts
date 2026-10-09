@@ -15,6 +15,7 @@ import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
   advancePlayerRuntimeTime,
+  answeredByPlayerInput,
   answerPlayerRuntimeImage,
   applyPlayerRuntimeStorageEdit,
   completePlayerRuntimeStorageWrite,
@@ -50,7 +51,9 @@ function failedSession(answer = SECRET): {
     ].join("\n"),
     { recorder },
   );
-  session = submitPlayerRuntimeComposer(session, answer)!.session;
+  session = answeredByPlayerInput(session, "send", () =>
+    submitPlayerRuntimeComposer(session, answer),
+  )!.session;
   session = answerPlayerRuntimeImage(session, reference, {
     holds: (asked) => asked === reference,
   })!.session;
@@ -211,6 +214,13 @@ test("with everything chosen, the export replays the failure and carries the pho
     ["imageAnswer", "savedValue"],
   );
   assert.ok(JSON.stringify(read.sections["answers"]).includes(SECRET));
+  // How each answer was given, where the Player knows it.
+  const answers = read.sections["answers"];
+  assert.ok(Array.isArray(answers));
+  assert.deepEqual(
+    answers.map((answer: { input?: unknown }) => answer.input),
+    ["send", null],
+  );
   assert.ok(JSON.stringify(read.sections["transcriptTail"]).includes(`Hello ${SECRET}`));
   assert.equal(read.sections["player"] !== undefined, true);
   assert.deepEqual(
@@ -352,19 +362,19 @@ test("replay data is judged by its actual text: escaped whitespace hides nothing
     "C:\\private\\notes.txt",
     "C:/private/notes.txt",
     "\\\\server\\share\\private.txt",
+    "//server/share/private.txt",
     "https://example.com/a/b C:/private/notes.txt",
     "https://example.com/a/b \\\\server\\share\\private.txt",
     "https://example.com/a/b /srv/private/notes.txt",
+    "https://example.com/a/b //server/share/private.txt",
     "\\server\\share\\private.txt",
   ]) {
     const exported = await exportOf(saved);
     assert.equal(exported.checkpoint, null, JSON.stringify(saved));
     const text = await fileText(exported);
-    "//server/share/private.txt",
     for (const part of [
       "ghp_abcdefghijklmnopqrstuvwx",
       "/srv/private",
-    "https://example.com/a/b //server/share/private.txt",
       "/home/player",
       "private/notes",
       "private\\\\notes",

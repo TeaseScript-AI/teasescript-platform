@@ -63,6 +63,7 @@ import {
   type RuntimeMediaSnapshot,
 } from "../src/runtime/media.js";
 import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
+import type { DebugAnswerInput } from "./debug-export.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 import type {
@@ -566,6 +567,18 @@ export function withPlayerRuntimeDebugTrace(
   return session.debugTrace === context
     ? session
     : Object.freeze({ ...session, debugTrace: context });
+}
+
+/**
+ * Runs `answer`, an operation on `session`, so that its debug recording keeps `input` as how the player gave the
+ * answer (DEBUGGER.md "Debug export").
+ */
+export function answeredByPlayerInput<T>(
+  session: PlayerRuntimeSession,
+  input: DebugAnswerInput,
+  answer: () => T,
+): T {
+  return session.recorder === null ? answer() : session.recorder.answeredBy(input, answer);
 }
 
 export function playerRuntimeForeground(
