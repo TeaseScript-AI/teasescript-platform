@@ -125,4 +125,21 @@ switch randomInteger(0..2) {
     }
   }
 }
+// A case whose if and else both return does not run on into the next case, as in Domme3's main menu.
+function implement(choice) {
+  switch choice {
+    case 0 {
+      if load("toys.paddle", default: false) == true {
+        return "paddle"
+      } else {
+        return "hand"
+      }
+    }
+    case 1 {
+      return "crop"
+    }
+  }
+  return "none"
+}
+say "Fetch the ${implement(randomInteger(0..2))}"
 exit

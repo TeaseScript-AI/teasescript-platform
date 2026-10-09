@@ -9636,11 +9636,26 @@ function collectSwitchPath(
     if (body === null) return null;
     const terminal = body.at(-1);
     result.push(...withoutTerminalBreak(body));
-    if ((terminal !== undefined && isSwitchBreak(terminal)) || terminal?.kind === "return")
-      return result;
+    if (leavesCase(terminal)) return result;
   }
   result.push(...withoutTerminalBreak(defaultSource));
   return result;
+}
+
+/**
+ * Whether a case's last statement never lets it fall through to the next case: a return, break, continue, or throw,
+ * also at the end of both branches of an if, as in Domme3's menu, whose cases go to the popup or their script.
+ */
+function leavesCase(statement: AstNode | undefined): boolean {
+  if (statement === undefined) return false;
+  if (["return", "break", "continue", "throw"].includes(statement.kind)) return true;
+  if (statement.kind === "block") return leavesCase(nodeArray(statement.statements).at(-1));
+  return (
+    statement.kind === "if" &&
+    branchStatements(statement.else).length > 0 &&
+    leavesCase(branchStatements(statement.then).at(-1)) &&
+    leavesCase(branchStatements(statement.else).at(-1))
+  );
 }
 
 function switchBodyStatements(node: AstNode | null): AstNode[] | null {
