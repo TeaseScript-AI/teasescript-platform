@@ -7,7 +7,12 @@ import test from "node:test";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
-function runFixtures(fixtures: Record<string, string>, fullOutput = false) {
+/** Runs the filter on `fixtures`, then on `patterns`, which name paths in the same directory without creating them. */
+function runFixtures(
+  fixtures: Record<string, string>,
+  fullOutput = false,
+  patterns: readonly string[] = [],
+) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
@@ -17,6 +22,7 @@ function runFixtures(fixtures: Record<string, string>, fullOutput = false) {
     writeFileSync(fixturePath, source);
     return fixturePath;
   });
+  fixturePaths.push(...patterns.map((pattern) => resolve(directory, pattern)));
 
   try {
     return spawnSync(
@@ -98,4 +104,20 @@ test("filter leaves skipped output and todo totals untouched", () => {
   assert.match(result.stdout, /skipped test/);
   assert.match(result.stdout, /ℹ skipped 1/);
   assert.match(result.stdout, /ℹ todo 1/);
+});
+
+test("filter refuses a path that matches no test file before Node runs any", () => {
+  const passing = `
+    import test from "node:test";
+    test("passing test", () => {});
+  `;
+  const misspelled = runFixtures({ "passing.test.mjs": passing }, false, ["pasing.test.mjs"]);
+  assert.equal(misspelled.status, 1, misspelled.stderr);
+  assert.match(misspelled.stderr, /no test file matches '.*pasing\.test\.mjs'/);
+  assert.doesNotMatch(misspelled.stdout, /ℹ tests/);
+
+  // Node matches path arguments as globs, so a quoted pattern that matches still runs.
+  const pattern = runFixtures({ "passing.test.mjs": passing }, false, ["pass*.test.mjs"]);
+  assert.equal(pattern.status, 0, pattern.stderr);
+  assert.match(pattern.stdout, /ℹ pass 1/);
 });

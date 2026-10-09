@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -18,6 +18,15 @@ const testFiles =
     : readdirSync("dist/tests")
         .filter((file) => file.endsWith(".test.js"))
         .map((file) => join("dist/tests", file));
+
+// Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
+// path beside a valid one would let a focused run pass without running its test.
+const unmatched = arguments_.filter((path) => !path.startsWith("-") && globSync(path).length === 0);
+if (unmatched.length > 0) {
+  for (const path of unmatched)
+    console.error(`test-output-filter: no test file matches '${path}'.`);
+  process.exit(1);
+}
 
 const child = spawn(process.execPath, ["--test", "--test-reporter=spec", ...testFiles], {
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
