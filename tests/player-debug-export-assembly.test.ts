@@ -360,9 +360,11 @@ test("replay data is judged by its actual text: escaped whitespace hides nothing
     const exported = await exportOf(saved);
     assert.equal(exported.checkpoint, null, JSON.stringify(saved));
     const text = await fileText(exported);
+    "//server/share/private.txt",
     for (const part of [
       "ghp_abcdefghijklmnopqrstuvwx",
       "/srv/private",
+    "https://example.com/a/b //server/share/private.txt",
       "/home/player",
       "private/notes",
       "private\\\\notes",

@@ -503,9 +503,10 @@ const CREDENTIAL_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}/gu,
 ];
 // A path outside a URL: a rooted one of at least two parts such as /srv/notes.txt, a drive path such as C:\notes or
-// C:/notes, a network path such as \\server\share (also as \server\share, as message markup shows it), or a file URL.
+// C:/notes, a network path such as \\server\share (also as \server\share, as message markup shows it) or
+// //server/share, or a file URL.
 const PATH_PATTERNS = [
-  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:[\\/][^\s"')]+|\\{1,2}[^\s"'()\\]+\\[^\s"')]+)/gu,
+  /(?:^|[\s"'(=])(?:\/{1,2}[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:[\\/][^\s"')]+|\\{1,2}[^\s"'()\\]+\\[^\s"')]+)/gu,
   /\b[Ff][Ii][Ll][Ee]:\/\/[^\s"')]+/gu,
 ];
 // A URL other than a file URL, whose path is part of an address, not of this computer.
