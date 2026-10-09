@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEBUG_EXPORT_VERSION,
   debugBuildRevisions,
   debugExportFile,
   parseDebugExport,
@@ -14,6 +15,7 @@ import { DebugRecorder } from "../player/debug-recorder.js";
 import {
   activePlayerRuntimeCapture,
   advancePlayerRuntimeTime,
+  answeredByPlayerInput,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
   applyPlayerRuntimeStorageEdit,
@@ -55,7 +57,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   assert.ok(recording);
   const exported: DebugExport = {
     format: "teasescript-debug-export",
-    version: 5,
+    version: DEBUG_EXPORT_VERSION,
     build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
     package: { id: null, version: null, contentHash: null },
     incident: {
@@ -253,6 +255,7 @@ test("each call keeps its own copy of the arguments and the store's answers, als
     thrown: null,
     randomChoices: [],
     pausedAt: null,
+    input: null,
   });
 
   const image = new DebugRecorder();
@@ -264,6 +267,53 @@ test("each call keeps its own copy of the arguments and the store's answers, als
   const answer = image.recording()!.operations.at(-2)!;
   assert.equal(answer.kind, "completeAction");
   assert.deepEqual(answer.admissionQueries, [{ reference, kind: "image", result: true }]);
+});
+
+test("an answer keeps how the player gave it, which the export carries and checks", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'let name = askText "Name"\nlet pick = choose yes: "Yes", no: "No"\nwait 1 s\nexit',
+    { recorder },
+  );
+  session = answeredByPlayerInput(session, "enter", () =>
+    submitPlayerRuntimeComposer(session, "Ada"),
+  )!.session;
+  const foreground = playerRuntimeForeground(session);
+  assert.ok(foreground?.kind === "choose");
+  session = answeredByPlayerInput(session, "button", () =>
+    selectPlayerRuntimeChoice(session, foreground.options[1]!.id),
+  )!.session;
+  session = observePlayerRuntimeTime(session, 1_000).session;
+  assert.equal(session.state.status, "halted");
+  const recorded = (operations: readonly { kind: string; input: unknown }[]) =>
+    operations.map(({ kind, input }) => [kind, input]);
+  // Only the answers carry an input; the run that continues each one does not.
+  const expected = [
+    ["run", null],
+    ["completeAction", "enter"],
+    ["run", null],
+    ["completeAction", "button"],
+    ["run", null],
+    ["observeTime", null],
+    ["run", null],
+  ];
+  assert.deepEqual(recorded(recorder.recording()!.operations), expected);
+
+  const exported = await exportedRecording(recorder);
+  assert.deepEqual(recorded(exported.replay!.operations), expected);
+  assert.equal((await replay(recorder)).kind, "reproduced");
+  const json = JSON.parse(await (await debugExportFile(exported, false)).text());
+  json.replay.operations[0].input = "enter";
+  assert.throws(
+    () => parseDebugExport(JSON.stringify(json)),
+    /\$\.replay\.operations\[0\]\.input belongs only to completeAction/u,
+  );
+  json.replay.operations[0].input = null;
+  json.replay.operations[1].input = "click";
+  assert.throws(
+    () => parseDebugExport(JSON.stringify(json)),
+    /\$\.replay\.operations\[1\]\.input/u,
+  );
 });
 
 test("a recording outgrowing its limits starts again before a Player call and still replays", async () => {
@@ -770,7 +820,7 @@ async function exportedRecording(recorder: DebugRecorder): Promise<DebugExport> 
   const file = await debugExportFile(
     {
       format: "teasescript-debug-export",
-      version: 5,
+      version: DEBUG_EXPORT_VERSION,
       build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
       package: { id: null, version: null, contentHash: null },
       incident: {
