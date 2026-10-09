@@ -734,6 +734,25 @@ test("without a running session, an edit is stored for the next Start", async (c
   assert.equal(host.debugEdits.value, null);
 });
 
+test("a saved value too long to write as text is compared without writing it, so its edit is stored", async (context) => {
+  const large: SerializableRuntimeValue = { kind: "list", items: ["too long"] };
+  const storage = memoryStorage({ k: large });
+  const { host } = createHost(context, storage.provider);
+  await host.loadScriptStorage();
+  // V8 cannot build a text longer than its limit; this list stands for one whose JSON would be longer.
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (value: unknown, ...rest: []) => {
+    if (typeof value === "object" && value !== null && "items" in value)
+      throw new RangeError("Invalid string length");
+    return stringify(value, ...rest);
+  });
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: large }), {
+    kind: "saved",
+    live: false,
+  });
+  assert.deepEqual([...storage.entries], [["k", 2]]);
+});
+
 /** Lets every pending promise reaction and the write report's later task run. */
 async function settleTasks(context: TestContext) {
   for (let turn = 0; turn < 5; turn += 1) await nextTick();

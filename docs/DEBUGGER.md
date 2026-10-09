@@ -90,8 +90,10 @@ which appears when the host persists script storage.
   this Player saved, cleared, or imported them, after another tab of this browser changed this script's values, and on
   Refresh. The running session keeps the copy it loaded at Start, apart from its own edits:
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
-    Advanced: the stored JSON form), checked before it is stored. A value changed meanwhile is reported, not
-    overwritten. The edit is stored in this browser first, showing Saving…; only once that succeeded does a running
+    Advanced: the stored JSON form), checked before it is stored. A value whose stored form would be longer than a text
+    can be opens with an empty field and says so; it can still be replaced or deleted. A value changed meanwhile, as
+    `==` compares it, is reported, not overwritten. The edit is stored in this browser first, showing Saving…; only
+    once that succeeded does a running
     session take it through `applyExternalStorageEdit`, so its next `load` reads it like any saved value, which ignores
     a value of another type than the load's (V30 §25), while values it already loaded stay; when storing fails, nothing
     changes. While the script's own save waits for the browser, Save is disabled ("The script is saving… try again in
