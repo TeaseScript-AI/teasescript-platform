@@ -69,6 +69,8 @@ export interface PlayerForegroundOptionPresentation {
   readonly id: string;
   readonly label: string;
   readonly authoredFill?: string;
+  /** The button `prefill:` preselects: it is marked, and Space activates it. */
+  readonly preselected?: true;
 }
 
 export type PlayerForegroundPresentation =

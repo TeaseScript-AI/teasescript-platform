@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 72;
+export const INSTRUCTION_PLAN_VERSION = 73;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -616,6 +616,11 @@ export type InteractionUiPayload =
   | {
       readonly kind: "choice";
       readonly options: readonly InteractionChoiceOption[];
+      /**
+       * The position of the preselected button, the first whose value is the `prefill:` of `choose` or `askBoolean`: it
+       * is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
+       */
+      readonly preselected?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -751,6 +756,13 @@ export type PreparedInteractionUiPayload =
       readonly optionsTemporary: number;
       /** The authored value of each option, or `null`. Its length is the authored option count. */
       readonly values: readonly (PreparedInteractionChoiceValue | null)[];
+      /** Holds the evaluated `prefill:`, whose first button with that value is preselected when the choice opens. */
+      readonly prefillTemporary?: number;
+      /**
+       * `askBoolean`: its prefill must be `true` or `false`, and `null` or blank text preselects none, as for an ask;
+       * any other value fails as the choice would open. Without it, a value no button has warns.
+       */
+      readonly booleanPrefill?: true;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

@@ -280,7 +280,10 @@ objects (owner decisions on #511). Interaction rules:
 - buttons may repeat values and visible text because selecting a rendered control identifies one button;
 - manually submitted text uses exact visible-text matching without trimming, case folding, locale matching, or Unicode normalization;
 - when repeated visible text makes manual submission ambiguous, the typed attempt is invalid and the player must select a rendered control;
-- fuzzy or natural-language matching is not part of deterministic completion.
+- fuzzy or natural-language matching is not part of deterministic completion;
+- a trailing `prefill:` preselects the first button with that value (owner decision on #512, 2026-10-08;
+  [V30 §19](../specifications/accepted-syntaxes-v30.md#preselected-button)): it is marked and Space activates it, but
+  it is never chosen by itself.
 
 A button or dropdown selection submits the selected button's position to the engine. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns that button's value to the script. The Player application does not supply an independent canonical transcript string.
 

@@ -163,6 +163,27 @@ const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
 });
+/**
+ * The button that Space in the empty composer activates: a `showButton` (`null`), or the button that `prefill:`
+ * preselects; `undefined` without one.
+ */
+const preselected = computed((): string | null | undefined => {
+  const presented = foreground.value;
+  if (presented?.kind === "show-button") return null;
+  if (presented?.kind !== "choose") return undefined;
+  return presented.options.find((option) => option.preselected)?.id;
+});
+/** When the presented interaction appeared: a key pressed earlier, or held down, does not answer it. */
+const presentedAt = ref(0);
+function activatePreselected() {
+  const target = preselected.value;
+  if (target === undefined) return;
+  void complete((session) =>
+    target === null
+      ? activatePlayerRuntimeButton(session)
+      : selectPlayerRuntimeChoice(session, target),
+  );
+}
 // An image request accepts a file through the paperclip or a drop only while it allows files.
 const imageRequest = computed(() =>
   foreground.value?.kind === "ask-image" ? foreground.value : null,
@@ -311,6 +332,7 @@ const { hoverAvailable } = usePlayerConditions();
 watch(
   [actionId, () => props.reset],
   async () => {
+    presentedAt.value = performance.now();
     // Text typed for another action, or for a replaced session, reaches the form only when it shows that field again.
     clearTimeout(draftTimer);
     const active = document.activeElement;
@@ -602,6 +624,13 @@ function submit(source: "input" | "button") {
           v-model="draft"
           :disabled="!foreground && !pacing"
           :pacing="!foreground && !!pacing"
+          :preselected="preselected !== undefined"
+          :buttons-only="
+            foreground?.kind === 'choose' ||
+            foreground?.kind === 'show-button' ||
+            (foreground?.kind === 'form' && !formEditor)
+          "
+          :fresh-after="presentedAt"
           :submitting="submitting || readingImage"
           :placeholder="
             formEditor
@@ -639,6 +668,7 @@ function submit(source: "input" | "button") {
           :feedback="feedback"
           @submit="submit"
           @skip="skipPacing(true)"
+          @activate="activatePreselected"
           @escape="formEditor && complete(dismissPlayerRuntimeFormField, false)"
           @files="submitImage"
         />

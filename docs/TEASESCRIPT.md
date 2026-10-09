@@ -125,7 +125,8 @@ only; in a text or number field it shows only while the field is empty, so a pre
 optional `prefill:` answer starts in the field; the player still submits it, and a cleared field does not fall back to
 it. See [prefilled answers](specifications/accepted-syntaxes-v30.md#prefilled-answers). `askBoolean` says its question the
 same way, then shows two buttons: `yesText:` (default "Yes") returns `true` and `noText:` (default "No") returns
-`false` ([boolean input](specifications/accepted-syntaxes-v30.md#boolean-input)).
+`false`, and `prefill: true` or `prefill: false` preselects one of them
+([boolean input](specifications/accepted-syntaxes-v30.md#boolean-input)).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askBoolean` returns
@@ -152,8 +153,11 @@ let result = choose 1: "Open the door", 2: "Walk away"
 let rounds = choose 5, 10, 15
 let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
 let answer = choose back: "Back", offenses
+let rounds = choose 5, 10, 15, prefill: 10
 ```
 
+A trailing `prefill:` preselects the first button with that value: it is marked, and Space in the empty composer
+activates it, but it is never chosen by itself ([preselected button](specifications/accepted-syntaxes-v30.md#preselected-button)).
 The compact form keeps every option in one statement and separates options with commas. Options with and without a written value may be mixed; until union types arrive (#504), one `choose` may not mix identifier and numeric values before `:`. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices) defines the complete option rules.
 
 `choose` is the author-facing construct. `choice` is the internal interaction/action noun.

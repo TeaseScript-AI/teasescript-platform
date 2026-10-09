@@ -159,9 +159,10 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       await formsScenario(cdp, origin);
+      await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -4767,6 +4768,121 @@ async function permanentButtonsScenario(cdp, origin) {
  * composer; a toggle is a pressed button with a polite status count, a cycle steps through authored colours, and
  * submitting adds one summary line.
  */
+/**
+ * Space in the empty composer activates a preselected button, a `showButton` or the one `prefill:` names, which is
+ * marked, but only with a fresh press: not the press that skipped the message before it, and not a held key's repeat.
+ * Without a preselected button it activates nothing; Space on a focused form toggle flips it; a held Enter submits
+ * nothing.
+ */
+async function preselectScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=preselect`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const input = `document.querySelector('[data-composer-input]')`;
+  const buttons = `[...document.querySelectorAll('[data-foreground-controls] button')]`;
+  const marked = `${buttons}.filter((button) => button.hasAttribute('data-preselected')).map((button) => button.textContent.trim())`;
+  const answers = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
+  const heldKey = (key, code, windowsVirtualKeyCode, text) =>
+    cdp.call("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key,
+      code,
+      windowsVirtualKeyCode,
+      text,
+      autoRepeat: true,
+    });
+  // The Space that skips "First" shows the question and its buttons, but does not answer it.
+  await waitFor(
+    cdp,
+    `${answers}.some((text) => text.includes('First'))`,
+    8_000,
+    "First was not said",
+  );
+  await evaluate(cdp, `${input}.focus()`);
+  await pressSpace(cdp);
+  await waitFor(cdp, `${buttons}.length === 2`, 8_000, "askBoolean did not show its buttons");
+  assertEqual(JSON.stringify(await value(cdp, marked)), '["Yes"]', "prefill: true marks Yes");
+  await heldKey(" ", "Space", 32, " ");
+  await delay(300);
+  assertEqual(await value(cdp, `${buttons}.length`), 2, "A held Space answered askBoolean");
+  assertEqual(await value(cdp, `${input}.value`), "", "Space typed into the composer");
+  // A fresh Space chooses Yes, then continues the showButton, which is always preselected.
+  await pressSpace(cdp);
+  await waitFor(cdp, `${buttons}.map((button) => button.textContent.trim()).join() === 'Next'`);
+  assertEqual(JSON.stringify(await value(cdp, marked)), '["Next"]', "A showButton is marked");
+  await pressSpace(cdp);
+  await waitFor(cdp, `${buttons}.length === 2 && ${buttons}[0].textContent.trim() === '5'`);
+  assertEqual(JSON.stringify(await value(cdp, marked)), '["10"]', "prefill: 10 marks 10");
+  await pressSpace(cdp);
+  // Without a preselected button Space activates nothing.
+  await waitFor(cdp, `${buttons}.length === 2 && ${buttons}[0].textContent.trim() === '1'`);
+  assertEqual(
+    JSON.stringify(await value(cdp, marked)),
+    "[]",
+    "A choice without prefill: is marked",
+  );
+  await pressSpace(cdp);
+  await delay(300);
+  assertEqual(
+    await value(cdp, `${buttons}[0]?.textContent.trim()`),
+    "1",
+    "Space answered a choice without prefill",
+  );
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "",
+    "Space typed into a composer that only buttons wait for",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  // A held Enter, in the input or on Send, does not submit the prefill of the field that just opened; a fresh Enter does.
+  await waitFor(cdp, `${input}.value === 'Ada'`, 8_000, "askText did not open with its prefill");
+  await evaluate(cdp, `${input}.focus()`);
+  await heldKey("Enter", "Enter", 13, "\r");
+  await delay(300);
+  assertEqual(await value(cdp, `${input}.value`), "Ada", "A held Enter submitted the prefill");
+  await evaluate(cdp, `document.querySelector('.composer-send').focus()`);
+  await heldKey("Enter", "Enter", 13, "\r");
+  await delay(300);
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "Ada",
+    "A held Enter on Send submitted the prefill",
+  );
+  await evaluate(cdp, `${input}.focus()`);
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      ...(type === "keyDown" ? { text: "\r" } : {}),
+    });
+  // Space on a focused form toggle flips it and does not submit the form.
+  const toggle = `document.querySelector('[data-form-fields] button')`;
+  await waitFor(cdp, `!!${toggle}`, 8_000, "askBooleans did not open");
+  await evaluate(cdp, `${toggle}.focus()`);
+  await pressSpace(cdp);
+  await waitFor(
+    cdp,
+    `${toggle}.getAttribute('aria-pressed') === 'true'`,
+    5_000,
+    "Space did not flip the toggle",
+  );
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-form-controls]')`),
+    true,
+    "Space submitted the form",
+  );
+  await physicalClick(cdp, "[data-form-actions] button");
+  await waitFor(
+    cdp,
+    `${answers}.some((text) => text.endsWith('true 10 1 Ada')) && ${answers}.at(-1).endsWith('[true, false]')`,
+    8_000,
+    "The answers were not true 10 1 Ada and [true, false]",
+  );
+}
+
 async function formsScenario(cdp, origin) {
   await setViewport(cdp, 390, 700);
   await navigate(cdp, `${origin}/player/?package=forms`);

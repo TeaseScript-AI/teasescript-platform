@@ -1460,7 +1460,7 @@ function validateStaticInteractionUi(
               "types",
               "mime",
             ]
-          : ["kind", "options", "accessibleName"];
+          : ["kind", "options", "accessibleName", ...("preselected" in ui ? ["preselected"] : [])];
   if (
     !hasExactKeys(ui, uiKeys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1593,6 +1593,16 @@ function validateStaticInteractionUi(
         if (typeof value === "string" && value !== option.text)
           countString(value, `${optionPath}.value`);
       }
+      const preselected = "preselected" in ui ? ui.preselected : 0;
+      if (
+        typeof preselected !== "number" ||
+        !Number.isSafeInteger(preselected) ||
+        preselected < 0 ||
+        preselected >= ui.options.length
+      )
+        errors.push(
+          planError("TSC002", "The preselected choice is not a button.", `${path}.preselected`),
+        );
     }
   }
 }
@@ -1634,10 +1644,18 @@ function validatePreparedInteractionUi(
           ? ["kind", "requestTemporary", "accessibleName"]
           : kind === "form"
             ? ["kind", "requestTemporary", "shape", "accessibleName"]
-            : ["kind", "optionsTemporary", "values", "accessibleName"];
+            : [
+                "kind",
+                "optionsTemporary",
+                "values",
+                "accessibleName",
+                ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+                ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
+              ];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
+    ("booleanPrefill" in ui && (ui.booleanPrefill !== true || !("prefillTemporary" in ui))) ||
     (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
   ) {
     errors.push(
@@ -1737,6 +1755,7 @@ function validatePreparedInteractionUi(
   }
   if (kind !== "choice") return;
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
+  if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
   if (
     !Array.isArray(ui.values) ||
     ui.values.length === 0 ||
