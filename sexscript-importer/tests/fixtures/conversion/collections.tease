@@ -214,4 +214,18 @@ let replies = []
 if replies.length == 0 {
   say "No replies yet"
 }
+// An any() whose result goes unused is a loop: a true result, returned or last, stops it, as in campdrain's drains.
+let drainSpeed = 0
+for stroke in 1..=2 {
+  say "Stroke ${stroke}"
+  if load("training.edge", default: false) == true {
+    if askBoolean "Over the edge?" {
+      break
+    }
+    save false as "training.edge"
+    drainSpeed = 5
+    break
+  }
+}
+say "Speed ${drainSpeed}"
 exit
