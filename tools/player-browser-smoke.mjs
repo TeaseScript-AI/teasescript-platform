@@ -34,21 +34,17 @@ const MODEL_PATHS_CATALOG = {
   problems: [],
 };
 
-// A file of a few thousand lines with a draw deep inside a long function, which a loop calls 300 times, for the random
-// draw picker's code and earlier outcomes; generated, as only the lengths and one long line far from the draw matter.
+// A file of a few thousand lines with a draw deep inside a long function, for the random draw picker's code; generated,
+// as only its length and one long line far from the draw matter.
 const LARGE_FILE_LINES = Array.from({ length: 2_000 }, (_, index) => `// Line ${index + 1}.`);
 LARGE_FILE_LINES[0] = "let hit = false";
 LARGE_FILE_LINES[1] = `// ${"A long line. ".repeat(20)}`;
 LARGE_FILE_LINES[1_199] = "function flip {";
 LARGE_FILE_LINES.splice(
   1_499,
-  10,
+  6,
   "    hit = chance(25)",
   "}",
-  "repeat 300 {",
-  "    flip()",
-  "}",
-  'showButton "Again"',
   "flip()",
   'say "Hit: ${hit}", instant',
   'showButton "Done"',
@@ -203,7 +199,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines and hundreds of earlier outcomes, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -1818,17 +1814,14 @@ async function randomPickerScenario(cdp, origin) {
 // In a file of a few thousand lines the picker's code renders only the lines in and near view, and shows like a short
 // file's: the draw's line in the middle, Copy copies the lines in view, it scrolls sideways as far as its widest line,
 // its large view opens on the draw, Show whole function starts at the function's first line, the file's end scrolls
-// into view, and Show less returns to the draw. Hundreds of earlier outcomes likewise render only near view and open at
-// the newest, at the bottom.
+// into view, and Show less returns to the draw.
 async function largeRandomPickerScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const block = `document.querySelector('[data-random-draw-source] [data-code-block]')`;
-  const history = `document.querySelector('[data-random-draw-history] [data-code-block]')`;
   const rendered = (scope) => `document.querySelectorAll('${scope} [data-code-line]').length`;
   const inView = (number) =>
     `(() => { const line = ${block}.querySelector('[data-code-line="${number}"]'); return !!line && line.offsetTop >= ${block}.scrollTop && line.offsetTop + line.offsetHeight <= ${block}.scrollTop + ${block}.clientHeight; })()`;
   const centred = `(() => { const line = ${block}?.querySelector('[data-code-highlight]'); return line?.dataset.codeLine === '1500' && line.offsetTop - ${block}.scrollTop === 3 * line.offsetHeight; })()`;
-  const again = `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === 'Again')`;
   await navigate(cdp, `${origin}/player/?package=large-file&room=debug`);
   await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
   if (!(await value(cdp, `!!document.querySelector('[data-debug-random-active]')`)))
@@ -1892,25 +1885,6 @@ async function largeRandomPickerScenario(cdp, origin) {
   await physicalClick(cdp, "[data-random-draw-expand]");
   await waitFor(cdp, centred, 5_000, "Show less did not return to the draw's line");
 
-  // The other 299 draws at the site go on by themselves; asked again, it lists all 300.
-  await physicalClick(cdp, '[data-random-draw-next-option="random"]');
-  await physicalClick(cdp, "[data-random-draw-natural]");
-  await waitFor(cdp, `!!${again}`, 20_000, "The draws that go on by themselves did not");
-  await physicalClick(cdp, "[data-debug-random-reset]");
-  const point = await evaluate(
-    cdp,
-    `const rect = ${again}.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };`,
-  );
-  for (const type of ["mousePressed", "mouseReleased"])
-    await cdp.call("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
-  await waitFor(
-    cdp,
-    `(() => { const line = ${history}?.querySelector('[data-code-line="300"]'); return !!line && Math.abs(line.offsetTop + line.offsetHeight - ${history}.scrollTop - ${history}.clientHeight) < 1; })()`,
-    8_000,
-    "The earlier outcomes did not open at the newest, at the bottom",
-  );
-  if ((await value(cdp, rendered("[data-random-draw-history]"))) > 100)
-    throw new Error("The picker rendered most of 300 earlier outcomes");
   await physicalClick(cdp, "[data-random-draw-outcome]");
   await waitFor(
     cdp,

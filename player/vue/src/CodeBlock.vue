@@ -20,9 +20,8 @@ import type { CodeLine, CodeTokenClass } from "./randomDrawPresentation";
 // focus; on a touch screen they always show. Copy copies the lines in view, Wrap wraps long lines, which otherwise
 // scroll sideways, and Expand opens all of it large over the page, with the `title` slot as its title. `fill` is the
 // block in that large view: as tall as its lines up to most of the screen, with no grip or Expand. A block of more than
-// `WHOLE_LINES` lines, a few times what is in view, renders only the lines in and near view, as the transcript does, so
-// a large file or a long list of earlier outcomes opens and scrolls quickly; selecting or finding text in the page then
-// reaches only those lines.
+// `WHOLE_LINES` lines renders only the lines in and near view, as the transcript does, so a very large file opens and
+// scrolls quickly; selecting or finding text in the page then reaches only those lines.
 const props = defineProps<{
   lines: readonly CodeLine[];
   /** The block's name, for assistive technology and as the title of its large view. */
@@ -62,7 +61,9 @@ function hangingIndent(line: CodeLine) {
   return width === 0 ? undefined : { paddingInlineStart: `${width}ch`, textIndent: `-${width}ch` };
 }
 
-const WHOLE_LINES = 200;
+// As many as the earlier outcomes keep, so those always render whole: as a windowed block scrolls, each line it renders
+// restyles the whole page, which is slow beside thousands of outcome buttons.
+const WHOLE_LINES = 1000;
 const windowed = computed(() => props.lines.length > WHOLE_LINES);
 const scroller = ref<HTMLElement | null>(null);
 // `--line`, the height of a line not yet rendered; a wrapped line measures more once it renders.
