@@ -693,6 +693,20 @@ function outcomeProblem(support: RandomSupport, outcome: unknown): string | null
 }
 
 /** A detached copy of an outcome the engine checked, holding only its own fields. */
+/**
+ * The outcome a host chose, with each of its own fields read once, also the items of an `order` list, so that the
+ * outcome the engine checks is the one it uses, whatever the host's object does on later reads.
+ */
+function readOnce(outcome: Record<string, unknown>): Record<string, unknown> {
+  // Without a prototype, a field named `__proto__` stays a field.
+  const copy: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(outcome)) {
+    const value = outcome[key];
+    copy[key] = Array.isArray(value) ? Array.from(value) : value;
+  }
+  return copy;
+}
+
 function canonicalOutcome(outcome: RandomOutcome): RandomOutcome {
   switch (outcome.kind) {
     case "number":
@@ -1333,7 +1347,8 @@ export class RandomControl {
       const decided = isRecord(decision) ? decision.kind : undefined;
       if (decided === "natural" || decided === "suspend") answer = decided;
       else if (isRecord(decision) && decided === "choose") {
-        const outcome = checkedOutcome(view.support, decision.outcome);
+        const chosen = decision.outcome;
+        const outcome = checkedOutcome(view.support, isRecord(chosen) ? readOnce(chosen) : chosen);
         answer = typeof outcome === "string" ? { refusal: outcome } : outcome;
       } else
         answer = {

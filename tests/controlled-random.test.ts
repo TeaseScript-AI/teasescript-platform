@@ -786,6 +786,35 @@ test("an exception from reading a decision ends the operation as one from decide
   }
 });
 
+test("a chosen outcome is read once, so the outcome the engine checks is the one it uses", () => {
+  let reads = 0;
+  const outcome: RandomOutcome = { kind: "number", value: 0 };
+  // A host object whose value changes once read: 0.5 passes the check, 7 would not.
+  Object.defineProperty(outcome, "value", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return reads === 1 ? 0.5 : 7;
+    },
+  });
+  const session = createFreshRuntimeSession(
+    compileValidPlan('let a = random()\nsay "${a}", instant\nexit'),
+    {},
+    { randomControl: { decide: () => ({ kind: "choose", outcome }) } },
+  );
+  const result = session.run();
+  assert.equal(reads, 1);
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["0.5"],
+  );
+  assert.deepEqual(
+    result.randomChoices?.map((choice) => choice.outcome),
+    [{ kind: "number", value: 0.5 }],
+  );
+  assert.doesNotThrow(() => restoreRuntimeSession(session.exportCheckpoint()));
+});
+
 test("a run keeps its instruction budget across pauses", () => {
   const plan = compileValidPlan(
     "let n = 0\nwhile n < 1000 {\n  n += randomInteger(1..=2)\n}\nexit",
