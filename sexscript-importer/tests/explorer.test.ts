@@ -10,10 +10,11 @@ import {
   conjunctive,
   DataFlow,
   exactMilliseconds,
+  type Goal,
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
-import { explore, type CorpusEntry } from "../src/explorer-search.ts";
+import { explore, noteOf, type CorpusEntry } from "../src/explorer-search.ts";
 import { playtestReport } from "../tools/explore-report.ts";
 import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
 import {
@@ -607,11 +608,9 @@ test(
       40,
     );
     assert.equal(spiral.search.stoppedBy, "operations");
+    // Every line of the script is reached; the compiler's own end after `exit` is no line of it.
     const file = spiral.coverage.files[0]!;
-    assert.deepEqual(
-      file.unvisited.map((range) => range.reach),
-      ["unreachable"],
-    );
+    assert.deepEqual(file.unvisited, []);
 
     // `n` is compared with 3 and 100: "Go" with `n` below 3, at 3, and between 3 and 100 are three cells, after the two
     // passes of "Round"; `n` changed bucket twice.
@@ -652,6 +651,41 @@ test(
     );
   },
 );
+
+test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
+  const goal = (
+    key: string,
+    candidates: Goal["candidates"] = [],
+    comparison: Goal["comparison"] = null,
+  ): Goal => ({ source: { kind: "storage", key }, candidates, comparison });
+  // `level` was copied once from an older key no session stores; a session did store the level the way needs.
+  const level = goal("tour.level", [], { operator: "==", constant: 2, shown: 2 });
+  const older = goal("tour.oldLevel", [], { operator: "==", constant: 2, shown: 2 });
+  assert.equal(
+    noteOf({
+      goals: [level, older],
+      guards: [],
+      chains: new Map([["tour.level", { best: 0, closest: { distance: 0 } }]]),
+      notes: new Map([[older, "needs tour.oldLevel == 2; no explored session stored it"]]),
+    }),
+    "needs tour.level == 2; a session from storage that has it did not reach the condition",
+  );
+  // A case of a `switch` on a stored value: its own value, not the other value its earlier case must not have.
+  const own = goal("desk.mode", ["inspect"]);
+  const earlier = goal("desk.mode", ["x"]);
+  assert.equal(
+    noteOf({
+      goals: [own, earlier],
+      guards: [{ goals: [earlier] }],
+      chains: new Map(),
+      notes: new Map([
+        [own, 'needs desk.mode = "inspect"; no explored session stored it'],
+        [earlier, 'needs desk.mode = "x"; no explored session stored it'],
+      ]),
+    }),
+    'needs desk.mode = "inspect"; no explored session stored it',
+  );
+});
 
 test(
   "a missed way reports what it depends on, the code behind it, and each part it needs, met or not, with the closest state to the unmet one: a capped counter stays flat, a rising one is still improving",
