@@ -602,8 +602,10 @@ export function unitNeedsStateCopy(
 /* Outcomes                                                                                                         */
 /* ---------------------------------------------------------------------------------------------------------------- */
 
-/** `outcome` as a detached outcome when `support` admits it, otherwise why it does not. */
-/** `outcome` checked for a draw of `support`; `keysOf` is the object whose own keys the outcome's shape counts. */
+/**
+ * `outcome` as a detached outcome when `support` admits it, otherwise why it does not. `keysOf` is the object whose own
+ * keys the outcome's shape counts.
+ */
 export function checkedOutcome(
   support: RandomSupport,
   outcome: unknown,
@@ -699,12 +701,14 @@ function outcomeProblem(support: RandomSupport, outcome: unknown): string | null
 
 /**
  * The fields of an outcome a host chose for a draw of `support`, each read once, so that the outcome the engine checks is
- * the one it uses, whatever the host's object does on later reads: its `kind` and the one field that kind holds, which
- * are all the check reads. The items of an `order` are read by index, only when its length, read once, is the
+ * the one it uses, whatever the host's object does on later reads: its `kind` and, when the draw takes that kind, the
+ * one field it holds, which are all the check reads. The items of an `order` are read by index, only when its length, read once, is the
  * shuffle's; any other `order` is refused on its length. The object's own keys are counted only once these pass.
  */
 function readOnce(outcome: Record<string, unknown>, support: RandomSupport): ReadOutcome {
   const kind = outcome.kind;
+  // As the check does, the field is read only when the kind is the one the draw takes.
+  if (kind !== takenKind(support)) return { kind };
   if (kind === "number" || kind === "boolean") return { kind, value: outcome.value };
   if (kind === "index") return { kind, index: outcome.index };
   if (kind !== "order") return { kind };
@@ -718,6 +722,25 @@ function readOnce(outcome: Record<string, unknown>, support: RandomSupport): Rea
         ? Array.from({ length }, (_, index) => order[index])
         : null,
   };
+}
+
+/** The kind of outcome a draw of `support` takes. */
+function takenKind(support: RandomSupport): RandomOutcome["kind"] {
+  switch (support.kind) {
+    case "chance":
+      return "boolean";
+    case "candidates":
+    case "weighted":
+      return "index";
+    case "order":
+      return "order";
+    case "unit":
+    case "integer":
+    case "normal":
+    case "beta":
+    case "pert":
+      return "number";
+  }
 }
 
 /** The fields of a chosen outcome that its check reads, each read once. */

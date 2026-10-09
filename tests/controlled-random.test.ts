@@ -888,6 +888,46 @@ test("a chosen outcome's keys are counted only after the fields its kind holds p
   );
   assert.match(session.run().randomRefusal?.message ?? "", /random\(\) takes a number/);
   assert.equal(keyLists, 0);
+  const decide = (chosen: Record<string, unknown>) => {
+    const decision: RandomDecision = {
+      kind: "choose",
+      // EVIDENCE: fixture: host outcome objects, some of them malformed.
+      outcome: chosen as RandomOutcome,
+    };
+    const run = createFreshRuntimeSession(
+      compileValidPlan("let a = random()\nexit"),
+      {},
+      { randomControl: { decide: () => decision } },
+    ).run();
+    return run.randomRefusal?.message ?? run.randomChoices?.[0]?.outcome;
+  };
+  // Once the fields pass, the keys are counted, once, and an extra key is refused.
+  const valid = new Proxy<Record<string, unknown>>(
+    { kind: "number", value: 0.5 },
+    {
+      ownKeys(target) {
+        keyLists += 1;
+        return Reflect.ownKeys(target);
+      },
+    },
+  );
+  assert.deepEqual(decide(valid), { kind: "number", value: 0.5 });
+  assert.equal(keyLists, 1);
+  assert.equal(
+    decide({ kind: "number", value: 0.5, extra: 1 }),
+    "An outcome holds only its kind and its value, index, or order.",
+  );
+  // A kind the draw does not take is refused without reading the field it would hold.
+  let valueReads = 0;
+  const boolean = Object.defineProperty({ kind: "boolean" }, "value", {
+    enumerable: true,
+    get() {
+      valueReads += 1;
+      return true;
+    },
+  });
+  assert.match(String(decide(boolean)), /random\(\) takes a number/);
+  assert.equal(valueReads, 0);
 });
 
 test("a run keeps its instruction budget across pauses", () => {
