@@ -52,10 +52,10 @@ function observeEveryDeadline(session: PlayerRuntimeSession, targetMs: number) {
 
 test("a jump gives the session that observing every deadline on time gives", () => {
   const scripts = [
-    'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1\nexit',
-    'let t = timer(duration: 1, async: true, repeat: true)\ntimer async 2 { t.repeatDuration = 10 s }\nwait 5\nsay "${t.remaining} ${t.elapsed}"\nexit',
-    'let t = timer async 3 { say "too late" }\ntimer async 1 {\n  wait 1\n  t.stop()\n}\nwait 10\nexit',
-    'timer async 3 { say "three", instant }\nlet e = showButton "Done", timeout: 5\nsay "after ${e}", instant\ntimer async 2 { say "late", instant }\nlet f = showButton "More"\nexit',
+    'say "a"\nwait 1 s\nlet t = timer async 2 s { say "block" }\nwait 3 s\nsay "b"\nt.stop()\nwait 1 s\nexit',
+    'let t = timer(duration: 1 s, async: true, repeat: true)\ntimer async 2 s { t.repeatDuration = 10 s }\nwait 5 s\nsay "${t.remaining} ${t.elapsed}"\nexit',
+    'let t = timer async 3 s { say "too late" }\ntimer async 1 s {\n  wait 1 s\n  t.stop()\n}\nwait 10 s\nexit',
+    'timer async 3 s { say "three", instant }\nlet e = showButton "Done", timeout: 5 s\nsay "after ${e}", instant\ntimer async 2 s { say "late", instant }\nlet f = showButton "More"\nexit',
   ];
   for (const source of scripts) {
     // Each run needs its own session: one session's derived sessions share one timeline.
@@ -77,11 +77,11 @@ test("a jump gives the session that observing every deadline on time gives", () 
 test("+10 s at a button runs timers and its timeout in scene-time order and shows in elapsed time", () => {
   let session = advancePlayerRuntimeTime(
     createPlayerRuntimeSession(
-      'timer async 3 { say "three", instant }\nlet e = showButton "Done", timeout: 5\nsay "after ${e}", instant\ntimer async 2 { say "late", instant }\nlet f = showButton "More"\nexit',
+      'timer async 3 s { say "three", instant }\nlet e = showButton "Done", timeout: 5 s\nsay "after ${e}", instant\ntimer async 2 s { say "late", instant }\nlet f = showButton "More"\nexit',
     ),
     10_000,
   );
-  assert.deepEqual(said(session), ["three", "after 5 s", "late"]);
+  assert.deepEqual(said(session), ["three", "after 5 seconds", "late"]);
   assert.deepEqual(
     session.events.flatMap((event) =>
       event.kind === "actionCompleted" && event.settlement.actionKind === "timer"
@@ -104,13 +104,13 @@ test("+10 s at a button runs timers and its timeout in scene-time order and show
   session = advancePlayerRuntimeTime(session, 70_000);
   assert.deepEqual(said(activatePlayerRuntimeButton(session)!.session), [
     "Done",
-    "1 min 10 s 1 min 10 s",
+    "1 minute 10 seconds 1 minute 10 seconds",
   ]);
 });
 
 test("a jump waits for a write a block makes, and checkpoints before and after it restore normally", () => {
   const source =
-    'timer async 2 {\n  save 1 as "seen"\n  say "saved", instant\n}\nlet elapsed = showButton "Done"\nsay "Waited ${elapsed}", instant\nexit';
+    'timer async 2 s {\n  save 1 as "seen"\n  say "saved", instant\n}\nlet elapsed = showButton "Done"\nsay "Waited ${elapsed}", instant\nexit';
   const options: PlayerRuntimeSessionOptions = { scriptStorage: [], persistentScriptStorage: true };
   const finish = (session: PlayerRuntimeSession) => {
     const write = pendingPlayerRuntimeStorageWrite(session.state)!;
@@ -141,7 +141,7 @@ test("a jump waits for a write a block makes, and checkpoints before and after i
   assert.equal(continued!.state.status, "halted");
   assert.deepEqual(
     continued!.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["saved", "Waited 15 s"],
+    ["saved", "Waited 15 seconds"],
   );
   assert.deepEqual(
     continued!.events.flatMap((event) =>
@@ -164,8 +164,8 @@ test("a jump plays running audio on at 1× through cues, seeks, pauses, and resu
     "    music.position = 0 s",
     "  }",
     "}",
-    'timer async 1.5 {\n  music.pause()\n  say "paused ${music.position}"\n}',
-    'timer async 2.5 {\n  music.resume()\n  say "resumed ${music.position}"\n}',
+    'timer async 1.5 s {\n  music.pause()\n  say "paused ${music.position}"\n}',
+    'timer async 2.5 s {\n  music.resume()\n  say "resumed ${music.position}"\n}',
     'let e = showButton "Done"',
     "exit",
   ].join("\n");
@@ -191,13 +191,13 @@ test("a jump plays running audio on at 1× through cues, seeks, pauses, and resu
   }
   const jumped = advancePlayerRuntimeTime(loaded(), 3_600);
   assert.deepEqual(said(jumped), [
-    "start 0 s",
-    "cue 1 s",
-    "start 1 s",
-    "paused 500 ms",
-    "resumed 500 ms",
-    "cue 2 s",
-    "start 2 s",
+    "start 0 seconds",
+    "cue 1 second",
+    "start 1 second",
+    "paused 500 milliseconds",
+    "resumed 500 milliseconds",
+    "cue 2 seconds",
+    "start 2 seconds",
   ]);
   assert.deepEqual(canonical(jumped), canonical(sampled));
 });
@@ -261,7 +261,7 @@ test("after a jump the device plays from the jumped playhead and measures on fro
   player.tick(1_000);
   const segment = player.session.state.backgroundActions.find((action) => action.kind === "media");
   player.jump(3_500);
-  assert.deepEqual(player.texts(), ["cue 3 s"]);
+  assert.deepEqual(player.texts(), ["cue 3 seconds"]);
   // The jump stays in the segment, so only the jump moves the element.
   assert.equal(element!.position, 3.5);
   assert.equal(element!.paused, false);
@@ -398,7 +398,7 @@ test("+10 s continues after the host stores a block's write, at the block's scen
   const writes: string[] = [];
   const { player, time, logged } = await mount(
     context,
-    'timer async 2 {\n  save 1 as "seen"\n  say "saved", instant\n}\nlet elapsed = showButton "Done"\nexit',
+    'timer async 2 s {\n  save 1 as "seen"\n  say "saved", instant\n}\nlet elapsed = showButton "Done"\nexit',
     { autoSkip: false },
     {
       scope: "test",
@@ -428,7 +428,7 @@ test("+10 s works during chat pacing, also from a pending save, and not after th
   let answer = () => {};
   const { player, time, logged } = await mount(
     context,
-    'save 1 as "seen"\nsay "First", 20\nsay "Second"\nlet done = showButton "Done"\nexit',
+    'save 1 as "seen"\nsay "First", 20 s\nsay "Second"\nlet done = showButton "Done"\nexit',
     { autoSkip: false },
     {
       scope: "test",
@@ -464,7 +464,7 @@ test("a jump logs only the scene time it advanced, not real time observed while 
   let answer = () => {};
   const { player, time, logged } = await mount(
     context,
-    'save 1 as "seen"\nsay "First", 20\nlet done = showButton "Done"\nexit',
+    'save 1 as "seen"\nsay "First", 20 s\nlet done = showButton "Done"\nexit',
     { autoSkip: false },
     {
       scope: "test",
@@ -492,7 +492,7 @@ test("a jump logs only the scene time it advanced, not real time observed while 
 test("auto-skip completes waits but leaves the player's think time and background timers real", async (context) => {
   const { player } = await mount(
     context,
-    'wait 30\nlet first = showButton "Done"\ntimer async 5 { say "timer", instant }\nlet second = showButton "Again"\nexit',
+    'wait 30 s\nlet first = showButton "Done"\ntimer async 5 s { say "timer", instant }\nlet second = showButton "Again"\nexit',
     { autoSkip: true },
   );
   await later();

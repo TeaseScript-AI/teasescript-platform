@@ -191,7 +191,7 @@ test("a question resumes from a checkpoint at every boundary as without one, and
   const plan = compileValidPlan(
     [
       SPEAKERS,
-      'say "Listen", 2',
+      'say "Listen", 2 s',
       'let name = askText as mistress ("Name ${1 + 1}?", prefill: askText("Default?"), hint: "Type it")',
       'say "Hello ${name}", instant',
       "exit",

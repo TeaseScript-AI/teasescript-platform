@@ -20,16 +20,14 @@ import type { InteractionResultValue, RuntimeInteractionActionSnapshot } from ".
 import { submitForm } from "./form.js";
 
 /**
- * The milliseconds of a `showButton` timeout: a number of seconds or an elapsed duration that is finite and greater
- * than zero. Returns `null` for any other value.
+ * The milliseconds of a `showButton` timeout: an elapsed duration that is finite and greater than zero. Returns `null`
+ * for any other value.
  */
 export function buttonTimeoutMilliseconds(value: unknown): number | null {
   const milliseconds =
-    typeof value === "number"
-      ? value * 1_000
-      : isPlainRecord(value) && value.kind === "duration" && typeof value.milliseconds === "number"
-        ? value.milliseconds
-        : Number.NaN;
+    isPlainRecord(value) && value.kind === "duration" && typeof value.milliseconds === "number"
+      ? value.milliseconds
+      : Number.NaN;
   return milliseconds > 0 && Number.isFinite(milliseconds) ? milliseconds : null;
 }
 

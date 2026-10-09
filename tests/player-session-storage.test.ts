@@ -432,7 +432,7 @@ for (const [name, source, expected] of [
   // Without a queued block, an elapsed background pacing gate settles while the write waits.
   [
     "an elapsed pacing gate settles",
-    'say "before", 1\nsave 1 as "k"\nsay "after", instant\nexit',
+    'say "before", 1 s\nsave 1 as "k"\nsay "after", instant\nexit',
     ["before", "after"],
   ],
   // A due block waits for the write, then runs at its time before the script continues and ends.

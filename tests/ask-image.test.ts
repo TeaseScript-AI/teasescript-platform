@@ -244,7 +244,7 @@ function answeredAgain(plan: InstructionPlan, snapshot: RuntimeSnapshot, actionI
 
 test("a timer expiry block may interrupt askImage, also across a checkpoint, and the same request is answered after it", () => {
   const { plan, snapshot } = started(
-    'let ticks = 0\ntimer async 1 {\n  wait 1\n  ticks = ticks + 1\n}\nlet pick = askImage("Add an image")\nexit',
+    'let ticks = 0\ntimer async 1 s {\n  wait 1 s\n  ticks = ticks + 1\n}\nlet pick = askImage("Add an image")\nexit',
   );
   const id = pendingImage(snapshot).actionId;
   // The expiry block waits while the request is suspended; the checkpoint keeps both.

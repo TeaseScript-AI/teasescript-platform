@@ -2609,7 +2609,7 @@ async function developmentTimeChecks(page) {
     "wait 15 s",
     'let elapsed = showButton "Done"',
     'say "Waited ${elapsed}", instant',
-    'timer async 30 { say "Timer fired", instant }',
+    'timer async 30 s { say "Timer fired", instant }',
     'let again = showButton "Again"',
     "exit",
   ].join("\n");

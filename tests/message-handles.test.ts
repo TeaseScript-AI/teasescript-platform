@@ -232,7 +232,7 @@ test("an append reads the text before its value waits, so a change made meanwhil
 
 test("a text write starts, ends, and moves no pacing, also while the message's own pacing runs", () => {
   const compiled = plan(
-    lines('let line = say "Waiting", 2', 'line.text = "Ready"', 'say "Next", 1', "exit"),
+    lines('let line = say "Waiting", 2 s', 'line.text = "Ready"', 'say "Next", 1 s', "exit"),
   );
   const shown = run(compiled, createFreshRuntimeSnapshot(compiled));
   // The next message still waits for the first one's two seconds.
@@ -245,7 +245,7 @@ test("a text write starts, ends, and moves no pacing, also while the message's o
 
 test("a say staged behind pacing gives its handle only once its message is shown", () => {
   const compiled = plan(
-    lines('say "First", 1', 'let line = say "Second", 2', 'line.text += "!"', "exit"),
+    lines('say "First", 1 s', 'let line = say "Second", 2 s', 'line.text += "!"', "exit"),
   );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
@@ -266,14 +266,14 @@ test("a say staged behind pacing gives its handle only once its message is shown
 
 test("an instant say that supersedes earlier pacing gives its handle at once", () => {
   const compiled = plan(
-    lines('say "First", 1', 'let line = say "Now", instant', 'line.text += "!"', "exit"),
+    lines('say "First", 1 s', 'let line = say "Now", instant', 'line.text += "!"', "exit"),
   );
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.deepEqual(messageTexts(result.events), [["First"], ["Now", "Now!"]]);
 });
 
 test("message handles resume equivalently at every boundary, through waits, a timer block, and pacing", () => {
-  for (const pacing of ["instant", "1"]) {
+  for (const pacing of ["instant", "1 s"]) {
     assertRuntimeResumeEquivalent(
       lines(
         "let count = 0",
@@ -432,7 +432,7 @@ test("restore rejects live messages that are malformed, out of order, or missing
 });
 
 test("restore checks the source a staged say value keeps against its prepared text", () => {
-  const compiled = plan(lines('say "First", 1', 'let line = say "**Second**", 2', "exit"));
+  const compiled = plan(lines('say "First", 1 s', 'let line = say "**Second**", 2 s', "exit"));
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const gate = waiting.foregroundAction;
   assert.ok(gate?.kind === "chatPacingGate" && gate.preparedOutput !== null);

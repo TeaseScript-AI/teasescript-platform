@@ -259,7 +259,7 @@ test("blocks keep shared variables alive across transfers, removal, and a call, 
       source: [
         "function wait3 {",
         "    let n = 0",
-        "    let t = timer(duration: 1, async: true, repeat: true) {",
+        "    let t = timer(duration: 1 s, async: true, repeat: true) {",
         "        n += 1",
         "    }",
         "    timer async 1500 ms {",

@@ -127,6 +127,90 @@ test("a prepared receiver whose index removes its ancestor keeps the value it se
   }
 });
 
+test("a prepared receiver whose index adds the value it names resumes from every checkpoint", () => {
+  // The receiver's root is captured before its index runs, and the index adds the element or entry it names.
+  for (const [setup, change, shown, expected] of [
+    [
+      "let rows = [[0]]\nfunction pick {\n    rows.add([1])\n    return 1\n}",
+      "rows[pick()].add(dynamic(7))",
+      "rows",
+      "[[0], [1, 7]]",
+    ],
+    [
+      'let table = dict{}\nfunction pick {\n    table["added"] = [0]\n    return "added"\n}',
+      "table[pick()].add(dynamic(7))",
+      'table["added"]',
+      "[0, 7]",
+    ],
+    [
+      "let state = { rows: [] }\nfunction pick {\n    state.rows.add([0])\n    return 0\n}",
+      "state.rows[pick()].add(dynamic(7))",
+      "state",
+      "{ rows: [[0, 7]] }",
+    ],
+    [
+      "let rows = [[0]]",
+      "rows[({ grow: rows.add([1]), index: 1 }).index].add(dynamic(7))",
+      "rows",
+      "[[0], [1, 7]]",
+    ],
+    [
+      "let rows = [[0]]",
+      "rows[({ grow: rows.add([1]), index: 1 }).index][0] = dynamic(7)",
+      "rows",
+      "[[0], [7]]",
+    ],
+  ] as const) {
+    const result = assertRuntimeResumeEquivalent(
+      [
+        "function dynamic(value) {",
+        "    return value",
+        "}",
+        setup,
+        change,
+        `say ${shown}`,
+        "exit",
+      ].join("\n"),
+      { scenarioName: change },
+    );
+
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say").map((event) => event.text),
+      [expected],
+      change,
+    );
+  }
+});
+
+test("a prepared receiver that leads nowhere fails with a checkpoint that resumes", () => {
+  // The index adds the selected element to a list that it then removes from `rows`, after `rows` was captured without
+  // that element, so neither `rows` nor its capture leads to the element.
+  for (const change of [
+    "rows[0][({ grow: rows[0].add([0]), drop: rows.removeFirst(), index: 0 }).index].add(dynamic(7))",
+    "rows[0][({ grow: rows[0].add([0]), drop: rows.removeFirst(), index: 0 }).index][0] = dynamic(7)",
+  ]) {
+    const result = assertRuntimeResumeEquivalent(
+      [
+        "function dynamic(value) {",
+        "    return value",
+        "}",
+        "let rows = [[]]",
+        change,
+        "say rows",
+        "exit",
+      ].join("\n"),
+      { scenarioName: change, ending: "failed" },
+    );
+
+    assert.equal(result.finalSnapshot.failure?.code, "TSR025", change);
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say"),
+      [],
+      change,
+    );
+  }
+});
+
 test("resume equivalence preserves deterministic random advancement", () => {
   const result = assertRuntimeResumeEquivalent(
     [

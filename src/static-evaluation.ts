@@ -10,6 +10,7 @@ import {
   formatDuration,
   negateDuration,
   scaleDuration,
+  unitValue,
   type AnyDuration,
 } from "./duration.js";
 import type { SourceSpan } from "./source.js";
@@ -131,6 +132,12 @@ function* staticScalarTask(
       return { value: null };
     case "durationLiteral": {
       const value = durationLiteralValue(expression);
+      return typeof value === "string" ? undefined : finite(value);
+    }
+    case "unitExpression": {
+      const known = yield* compileChild(staticScalarTask(expression.operand));
+      if (typeof known?.value !== "number") return undefined;
+      const value = unitValue(known.value, expression);
       return typeof value === "string" ? undefined : finite(value);
     }
     case "unaryExpression": {
@@ -291,6 +298,7 @@ export function knownOperands(expression: Expression): readonly Expression[] {
     case "parenthesizedExpression":
       return [expression.expression];
     case "unaryExpression":
+    case "unitExpression":
       return [expression.operand];
     case "binaryExpression":
       return ARITHMETIC_OPERATORS.has(expression.operator)
@@ -328,6 +336,13 @@ function knownValue(
     }
     case "parenthesizedExpression":
       return known.get(expression.expression);
+    case "unitExpression": {
+      const value = known.get(expression.operand);
+      if (typeof value !== "number") return undefined;
+      // A duration too long to represent stays known, so that its overflow is reported.
+      const duration = unitValue(value, expression);
+      return typeof duration === "string" ? undefined : duration;
+    }
     case "unaryExpression": {
       const value = known.get(expression.operand);
       if (expression.operator === "-" && typeof value === "number") return -value;

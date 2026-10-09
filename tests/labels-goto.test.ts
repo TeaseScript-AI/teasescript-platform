@@ -72,7 +72,7 @@ test("a goto continues at a label of the file, also from a function or out of lo
 test("a goto from an expiry block abandons the action it interrupted", () => {
   const result = assertRuntimeResumeEquivalent(
     [
-      "timer async 1 {",
+      "timer async 1 s {",
       "    goto late",
       "}",
       "let answer = askText",
@@ -94,8 +94,8 @@ test("a goto from an expiry block abandons the action it interrupted", () => {
 test("a goto stops non-persistent timers, and persistent timers keep running", () => {
   const result = assertRuntimeResumeEquivalent(
     [
-      'let once = timer(duration: 1, async: true, display: "hidden") { say "once" }',
-      'let kept = timer(duration: 1, async: true, display: "hidden", repeat: true, persist: true) {',
+      'let once = timer(duration: 1 s, async: true, display: "hidden") { say "once" }',
+      'let kept = timer(duration: 1 s, async: true, display: "hidden", repeat: true, persist: true) {',
       '    say "kept"',
       "}",
       "goto onward",
@@ -118,16 +118,16 @@ test("a block's goto drops the queued blocks of finished non-persistent timers a
   // the activation that started them.
   const result = assertRuntimeResumeEquivalent(
     [
-      'timer(duration: 1, async: true, display: "hidden") { say "dropped" }',
-      'timer(duration: 1, async: true, display: "hidden", persist: true) { say "kept" }',
+      'timer(duration: 1 s, async: true, display: "hidden") { say "dropped" }',
+      'timer(duration: 1 s, async: true, display: "hidden", persist: true) { say "kept" }',
       'timer(duration: 500 ms, async: true, display: "hidden") {',
-      "    wait 1",
+      "    wait 1 s",
       "    goto onward",
       "}",
-      "wait 5",
+      "wait 5 s",
       "exit",
       "label onward",
-      "wait 1",
+      "wait 1 s",
       "exit",
     ].join("\n"),
   );
@@ -136,7 +136,7 @@ test("a block's goto drops the queued blocks of finished non-persistent timers a
 
 test("media keeps playing across a goto", () => {
   const result = assertRuntimeResumeEquivalent(
-    ['let music = playAudio async "music.mp3"', "goto next", "label next", "wait 1", "exit"].join(
+    ['let music = playAudio async "music.mp3"', "goto next", "label next", "wait 1 s", "exit"].join(
       "\n",
     ),
     { mediaDurationMs: 10_000 },
@@ -223,7 +223,7 @@ test("a variable is used after a label only when every way to the label set it",
   );
   assert.deepEqual(
     codes(
-      "let x = 1\ntimer async 1 { goto later }\nlet y = 2\nwait 2\nlabel later\nsay x\nsay y\nexit",
+      "let x = 1\ntimer async 1 s { goto later }\nlet y = 2\nwait 2 s\nlabel later\nsay x\nsay y\nexit",
     ),
     [["TSV054", 7]],
   );
@@ -277,7 +277,7 @@ test("plan validation keeps gotos on labels and closes each root region with an 
 });
 
 test("a goto that skips a let is found where functions and handlers use the variable", () => {
-  for (const use of ["function read { say x }\nread()", "timer async 1 { say x }\nwait 2"]) {
+  for (const use of ["function read { say x }\nread()", "timer async 1 s { say x }\nwait 2 s"]) {
     assert.deepEqual(codes(`goto later\nlet x = 1\nlabel later\n${use}\nexit`), [["TSV054", 4]]);
   }
   // A goto that cannot run adds no way to the label.
@@ -316,7 +316,7 @@ test("a goto that skips a let is found where functions and handlers use the vari
 
 test("a goto in deeply nested blocks compiles", () => {
   const depth = 10_000;
-  const source = `let x = 1\n${"timer async 1 {\n".repeat(depth)}goto done\n${"}\n".repeat(depth)}label done\nsay x\nexit`;
+  const source = `let x = 1\n${"timer async 1 s {\n".repeat(depth)}goto done\n${"}\n".repeat(depth)}label done\nsay x\nexit`;
   assert.deepEqual(compileSource(source).diagnostics, []);
 });
 
@@ -382,7 +382,7 @@ test("plan validation finds a say presentation or button timeout that a label en
     ],
     files: [{ ...say.files[0]!, rootEndInstruction: 5, endInstruction: 5, labels }],
   });
-  const button = compileValidPlan('let t = 1\nshowButton "Go", timeout: t\nexit');
+  const button = compileValidPlan('let t = 1 s\nshowButton "Go", timeout: t\nexit');
   const [, speaker, label, timeout, interaction, ...rest] = button.instructions;
   assert.equal(timeout?.kind, "storeTemporary");
   const buttonPlan = (step: Instruction, labels: readonly PlanLabel[]): InstructionPlan => ({

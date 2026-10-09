@@ -229,7 +229,7 @@ Special syntax remains official and scarce. For example, accepted forms such as:
 
 ```tease
 say "Hello"
-wait 2
+wait 2 s
 ```
 
 remain parser-recognized syntax unless a later accepted language decision changes them. The compiler may lower such syntax to a public Standard Library entry point, directly to a core instruction, or to a fixed combination. Libraries cannot request new forms such as arbitrary custom commands or blocks merely by exporting a function.

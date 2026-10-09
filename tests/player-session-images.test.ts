@@ -248,7 +248,7 @@ test("each image request that allows only the camera is reported as a Player not
   context.after(() => scope.stop());
   const keys = () => host.notices.value.map((notice) => notice.key);
   const cameraOnly =
-    'timer async 2 {\n  let late = askImage("Timer", allowFile: false)\n}\nlet pick = askImage(allowFile: false)\nexit';
+    'timer async 2 s {\n  let late = askImage("Timer", allowFile: false)\n}\nlet pick = askImage(allowFile: false)\nexit';
   host.prepare(() => createPlayerRuntimeSession(cameraOnly));
   await host.activate();
   await until(() => keys().includes("image-needs-camera"), "the notice was not published");

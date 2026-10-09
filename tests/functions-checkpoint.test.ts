@@ -108,7 +108,7 @@ function callerLoops(snapshot: RuntimeSnapshot, frameIndex: number) {
 
 test("restores calls suspended in nested loops whose outer loop header called a function", () => {
   const size = "function size(n) {\n  return n\n}";
-  const pause = "function pause {\n  wait 1\n}";
+  const pause = "function pause {\n  wait 1 s\n}";
   const nested = [
     size,
     pause,
@@ -133,7 +133,7 @@ test("restores calls suspended in nested loops whose outer loop header called a 
     // Loop control around the suspended calls, and a while loop whose condition calls a function on every pass.
     [
       size,
-      "function pauseFor(seconds = 1) {\n  wait seconds\n  return seconds\n}",
+      "function pauseFor(seconds = 1) {\n  wait seconds s\n  return seconds\n}",
       "function ready(value) {\n  return value < 2\n}",
       "let log = []",
       "let count = 0",
@@ -156,7 +156,7 @@ test("restores calls suspended in nested loops whose outer loop header called a 
       size,
       pause,
       "let ticks = 0",
-      "let t = timer(duration: 1500 ms, async: true, repeat: true) {\n  ticks += 1\n  wait 1\n}",
+      "let t = timer(duration: 1500 ms, async: true, repeat: true) {\n  ticks += 1\n  wait 1 s\n}",
       "function rounds(n) {",
       "  repeat size(n) {",
       "    repeat size(1) {",
@@ -184,7 +184,7 @@ test("resumes a nested-loop call after which a break falls through to the outer 
     plan(
       [
         "function size {\n  return 1\n}",
-        "function pause {\n  wait 1\n}",
+        "function pause {\n  wait 1 s\n}",
         "repeat size() {",
         "  repeat 1 {",
         "    pause()",
@@ -756,7 +756,7 @@ test("rejects a nested-loop continuation without a temporary it still reads", ()
   const compiled = plan(
     [
       "function one {\n  return 1\n}",
-      "function pause {\n  wait 1\n  return 2\n}",
+      "function pause {\n  wait 1 s\n  return 2\n}",
       "function size(n) {\n  return n\n}",
       "repeat size(2) {",
       "  for item in [1, 2] {",

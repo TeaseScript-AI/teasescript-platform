@@ -10,7 +10,7 @@ speaker guide {
 speaker guide
 
 let pulses = 0
-let pulse = timer(duration: 2..=4, async: true, repeat: true, label: "Pulse") {
+let pulse = timer(duration: (2..=4) s, async: true, repeat: true, label: "Pulse") {
     pulses += 1
 }
 let secret = timer async mystery 40 s "Secret"
@@ -31,14 +31,14 @@ say "Thank you, ${name}. ${left} were left on the deadline.", instant
 
 say "The mystery timer pauses for three seconds.", instant
 secret.pause()
-wait 3
+wait 3 s
 secret.resume()
 secret.remaining -= 10 s
 secret.display = "visible"
 say "It is now revealed and ten seconds shorter.", instant
 
 pulse.stop()
-timer 3 "Final countdown"
+timer 3 s "Final countdown"
 say "Done after ${pulses} pulses.", instant
 showButton "Finish"
 exit

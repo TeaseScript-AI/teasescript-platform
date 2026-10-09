@@ -387,7 +387,7 @@ test("handles, speakers, and a typed load default keep their types", () => {
     )[0]?.[0],
     "TSV041",
   );
-  assert.deepEqual(mismatches("let clock = timer async 5\nclock = 3\nexit")[0]?.[0], "TSV041");
+  assert.deepEqual(mismatches("let clock = timer async 5 s\nclock = 3\nexit")[0]?.[0], "TSV041");
   assert.deepEqual(mismatches('let level: integer = load "level", default: "high"\nexit'), [
     [
       "TSV041",
@@ -477,7 +477,7 @@ test("optional types keep their non-null type in operations, elements, and loops
     "function f(n: integer?) {\n    return n + n\n}\nexit",
     // Text joins other text, so beside an operand of unknown type only null needs a check.
     "function f(n: string?, other) {\n    return n + other\n}\nexit",
-    "function f(n: range?) {\n    timer async n\n}\nexit",
+    "function f(n: range?) {\n    timer async n s\n}\nexit",
   ])
     assert.deepEqual(
       mismatches(source).map(([code, message]) => [code, message]),
@@ -942,12 +942,20 @@ test("only integers convert implicitly: division gives a number, and durations n
     "'+' joins text only with other text, not with a whole number (integer). Put the value in the text instead, as in \"Score: ${5}\".",
   );
   assert.deepEqual(codes("let total = true + 1\nexit"), [["TSV043", "true + 1"]]);
-  // Bare numbers count as seconds in commands that expect a time.
+  // A number in a command that expects a time needs a unit; after `wait` and a short `timer` it may follow the number.
   assert.deepEqual(
     codes(
-      'let n = 3\nwait n\nwait n ms\ntimer n\nplayAudio(file: "a.mp3", startAt: n, endAt: 5)\nexit',
+      'let n = 3\nwait n s\nwait n ms\ntimer n s\nplayAudio(file: "a.mp3", startAt: n * 1 s, endAt: 5 s)\nexit',
     ),
     [],
+  );
+  assert.deepEqual(
+    codes('let n = 3\nwait n\ntimer n\nplayAudio(file: "a.mp3", startAt: n, endAt: 5 s)\nexit'),
+    [
+      ["TSV043", "n"],
+      ["TSV043", "n"],
+      ["TSV043", "n"],
+    ],
   );
   assert.deepEqual(codes('wait "soon"\nexit'), [["TSV043", '"soon"']]);
 });
@@ -982,7 +990,7 @@ test("conditions and logical operands are true or false, and operators get value
       ["TSV043", "1.5"],
     ],
   );
-  assert.deepEqual(codes('let t = timer async 5\nsave t as "k"\nlet c = chance("x")\nexit'), [
+  assert.deepEqual(codes('let t = timer async 5 s\nsave t as "k"\nlet c = chance("x")\nexit'), [
     ["TSV043", "t"],
     ["TSV043", '"x"'],
   ]);
@@ -1114,10 +1122,10 @@ test("a loop that certainly runs, or ends only through a return, ends the functi
 });
 
 test("timer ranges and handle members are checked by type, wherever the value comes from", () => {
-  assert.deepEqual(codes("let span = 1..=3\nlet t = timer async span\nexit"), []);
+  assert.deepEqual(codes("let span = 1..=3\nlet t = timer async span s\nexit"), []);
   assert.deepEqual(
     mismatches(
-      "function make {\n    return timer async 1\n}\nlet t = make()\nt.nope()\nt.elapsed = 1 s\nsay t.colour\nexit",
+      "function make {\n    return timer async 1 s\n}\nlet t = make()\nt.nope()\nt.elapsed = 1 s\nsay t.colour\nexit",
     ).map(([code, message, text]) => [code, text, message]),
     [
       ["TSV043", "nope", "Timer handles have no method 'nope'. Use pause(), resume(), or stop()."],
@@ -1255,7 +1263,9 @@ test("a function result, a body, or a copy never changes the types another place
   }
   // A timer block checked after the conversion may fill the source before the conversion runs.
   assert.deepEqual(
-    codes('let a = []\ntimer async 1 { a.add(1) }\nwait 2\nlet b = a.toSet()\nb.add("x")\nexit'),
+    codes(
+      'let a = []\ntimer async 1 s { a.add(1) }\nwait 2 s\nlet b = a.toSet()\nb.add("x")\nexit',
+    ),
     [["TSV041", '"x"']],
   );
   // A mismatch in a copy, or in a part of one, names the variable it was copied from, also when the copy was taken

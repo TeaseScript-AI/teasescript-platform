@@ -1,4 +1,16 @@
-import type { CalendarDurationUnit, DurationLiteral, DurationUnit } from "./ast.js";
+import type { CalendarDurationUnit, DurationLiteral, DurationUnit, Expression } from "./ast.js";
+
+/**
+ * What a unit may follow besides a number literal: a name, a member such as `p.delay` or `list[i]`, a call, or
+ * parentheses (ADR 0026 §8).
+ */
+export const UNIT_OPERANDS: ReadonlySet<Expression["kind"]> = new Set([
+  "identifier",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+  "parenthesizedExpression",
+]);
 
 /** Exact milliseconds per exact unit (ADR 0026): a day is 24 hours and a week 168 hours. */
 export const DURATION_UNIT_MILLISECONDS: Readonly<Record<DurationUnit, number>> = Object.freeze({
@@ -155,7 +167,19 @@ export function calendarDuration(parts: DurationParts): StoredCalendarDuration {
  * months, so `0.5 calendar years` is 6 months while `1.5 calendar days` and `1.5 calendar weeks` are errors.
  */
 export function durationLiteralValue(literal: DurationLiteral): AnyDuration | string {
-  const amount = literal.amount.value;
+  return unitValue(literal.amount.value, literal);
+}
+
+/**
+ * A number with a unit after it, as a duration literal or a unit expression gives it (ADR 0026 §8), or why it has
+ * none: a calendar amount must give whole days or months.
+ */
+export function unitValue(
+  amount: number,
+  literal:
+    | { readonly calendar: false; readonly unit: DurationUnit }
+    | { readonly calendar: true; readonly unit: CalendarDurationUnit },
+): AnyDuration | string {
   if (!literal.calendar) return exactDuration(amount * DURATION_UNIT_MILLISECONDS[literal.unit]);
   switch (literal.unit) {
     case "d":
@@ -284,10 +308,11 @@ function familyAmount(parts: DurationParts, family: "exact" | "days" | "months")
 }
 
 /**
- * Deterministic visible text for a duration (ADR 0026): an exact one in days, hours, minutes, and seconds, such as
- * `2 d 6 h` or `1 min 3.5 s`, and `250 ms` below a second; a calendar one names each calendar part, with 12 months as
- * a year, before any exact offset, such as `1 calendar month 16 calendar days`. Each part keeps its own sign.
- * Locale-aware duration presentation is later Player work.
+ * Deterministic visible text for a duration (ADR 0026), with unit words in full, singular only for exactly 1: an exact
+ * one in days, hours, minutes, and seconds, such as `2 days 6 hours` or `1 minute 3.5 seconds`, and `250 milliseconds`
+ * below a second; a calendar one names each calendar part, with 12 months as a year, before any exact offset, such as
+ * `1 calendar month 16 calendar days`. Each part keeps its own sign. Locale-aware duration presentation is later Player
+ * work.
  */
 export function formatDuration(duration: number | AnyDuration): string {
   if (typeof duration === "number" || !isCalendar(duration))
@@ -309,8 +334,8 @@ function calendarPart(amount: number, unit: "year" | "month" | "day"): string {
 function formatExact(milliseconds: number): string {
   const sign = milliseconds < 0 ? "-" : "";
   let rest = Math.abs(milliseconds);
-  if (rest === 0) return "0 s";
-  if (rest < 1_000) return `${sign}${formatNumber(rest)} ms`;
+  if (rest === 0) return "0 seconds";
+  if (rest < 1_000) return `${sign}${unitAmount(formatNumber(rest), "millisecond")}`;
   const parts: string[] = [];
   const days = Math.floor(rest / 86_400_000);
   rest -= days * 86_400_000;
@@ -318,11 +343,16 @@ function formatExact(milliseconds: number): string {
   rest -= hours * 3_600_000;
   const minutes = Math.floor(rest / 60_000);
   rest -= minutes * 60_000;
-  if (days > 0) parts.push(`${days} d`);
-  if (hours > 0) parts.push(`${hours} h`);
-  if (minutes > 0) parts.push(`${minutes} min`);
-  if (rest > 0) parts.push(`${formatNumber(rest / 1_000)} s`);
+  if (days > 0) parts.push(unitAmount(String(days), "day"));
+  if (hours > 0) parts.push(unitAmount(String(hours), "hour"));
+  if (minutes > 0) parts.push(unitAmount(String(minutes), "minute"));
+  if (rest > 0) parts.push(unitAmount(formatNumber(rest / 1_000), "second"));
   return sign + parts.join(" ");
+}
+
+/** An amount with its unit word in full, singular only for exactly 1. */
+function unitAmount(amount: string, unit: string): string {
+  return `${amount} ${unit}${amount === "1" ? "" : "s"}`;
 }
 
 function formatNumber(value: number): string {

@@ -104,7 +104,7 @@ test("values the compiler cannot know fail at runtime with the cause, the values
     [
       "let n = 0\nsay 1 s / n\nexit",
       "TSR036",
-      "Division by zero: 1 s / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
+      "Division by zero: 1 second / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
     ],
     [
       "let n = 0\nsay 1 calendar month / n\nexit",
@@ -114,7 +114,7 @@ test("values the compiler cannot know fail at runtime with the cause, the values
     [
       "let n = 1e305\nsay 1 h * n\nexit",
       "TSR036",
-      "1 h * 1e+305 gives a duration too long to represent. Use smaller values.",
+      "1 hour * 1e+305 gives a duration too long to represent. Use smaller values.",
     ],
   ] as const) {
     assert.deepEqual(diagnostics(source), [], source);
@@ -130,7 +130,7 @@ test("large values that stay finite still compile", () => {
     "say 9007199254740991 * 2\nexit",
     "say 1e300 * 1e8\nexit",
     "let d = 1 h * 1e9\nexit",
-    "wait 1e12\nexit",
+    "wait 1e12 s\nexit",
   ]) {
     assert.deepEqual(diagnostics(source), [], source);
   }
@@ -138,15 +138,15 @@ test("large values that stay finite still compile", () => {
 
 test("a wait or timer that scene time cannot reach is a compile error that names the fix", () => {
   for (const [source, subject] of [
-    ["wait 1e306", "wait"],
-    ["wait 1e13", "wait"],
+    ["wait (1e15) s", "wait"],
+    ["wait 1e13 s", "wait"],
     ["wait 1e16 ms", "wait"],
-    ["timer 1e306", "timer"],
+    ["timer (1e15) s", "timer"],
     ["timer async 1e16 ms", "timer"],
     // Every draw of a range is at least its lower bound.
-    ["timer 10000000000000..=10000000000001", "timer"],
-    ["timer 10000000000000..10000000000002", "timer"],
-    ["timer(duration: 10000000000000..=10000000000001, async: true, repeat: true)", "timer"],
+    ["timer (10000000000000..=10000000000001) s", "timer"],
+    ["timer (10000000000000..10000000000002) s", "timer"],
+    ["timer(duration: (10000000000000..=10000000000001) s, async: true, repeat: true)", "timer"],
   ] as const) {
     const [reach, ...rest] = compileSource(source).diagnostics;
     assert.equal(reach?.code, "TSV011", source);
@@ -174,17 +174,17 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
     "Scene time has reached its limit, so this timer cannot continue. Stop it, or set its remaining time to 0 s.";
   for (const [source, code, message, initialSessionTimeMs] of [
     [
-      "wait 1\nexit",
+      "wait 1 s\nexit",
       "TSR050",
       "Scene time has reached its limit, so this wait cannot run. Remove it.",
     ],
     [
-      "timer 1\nexit",
+      "timer 1 s\nexit",
       "TSR050",
       "Scene time has reached its limit, so this timer cannot run. Remove it, or set its duration to 0 s.",
     ],
     [
-      "let t = timer async 1\nexit",
+      "let t = timer async 1 s\nexit",
       "TSR050",
       "Scene time has reached its limit, so this timer cannot run. Remove it, or set its duration to 0 s.",
     ],
@@ -194,24 +194,29 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
       "Scene time has reached its limit, so this timer cannot run. Remove it.",
     ],
     [
-      'let elapsed = showButton "Go", timeout: 5\nexit',
+      'let elapsed = showButton "Go", timeout: 5 s\nexit',
       "TSR050",
       "Scene time has reached its limit, so this showButton timeout cannot run. Remove 'timeout:' to wait without a time limit.",
     ],
     [
-      'let answers = askForm fields: { n: { type: "integer", value: 1 } }, timeout: 1, onTimeout: "submit"\nexit',
+      'let answers = askForm fields: { n: { type: "integer", value: 1 } }, timeout: 1 s, onTimeout: "submit"\nexit',
       "TSR052",
       "Scene time has reached its limit, so this askForm timeout cannot run. Remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
     ],
-    ["let t = timer async 5\nt.pause()\nwait 10\nt.resume()\nexit", "TSR050", round, last - 10_000],
     [
-      "let t = timer async 5\nt.pause()\nwait 10\nt.remaining = 3 s\nexit",
+      "let t = timer async 5 s\nt.pause()\nwait 10 s\nt.resume()\nexit",
       "TSR050",
       round,
       last - 10_000,
     ],
     [
-      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10\nt.resume()\nexit",
+      "let t = timer async 5 s\nt.pause()\nwait 10 s\nt.remaining = 3 s\nexit",
+      "TSR050",
+      round,
+      last - 10_000,
+    ],
+    [
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10 s\nt.resume()\nexit",
       "TSR050",
       "Scene time has reached its limit, so this timer cannot continue. Stop it.",
       last - 10_000,
@@ -223,7 +228,7 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
   }
   // The advice works: no wait, a timer of 0 s, a form without a time limit, a stopped repeating timer, and a timer
   // whose remaining time is zero.
-  assert.equal(failure("wait 0\nexit"), null);
+  assert.equal(failure("wait 0 s\nexit"), null);
   assert.equal(failure("let t = timer async 0 s\nt.stop()\nexit"), null);
   const untimed = compileValidPlan(
     'let answers = askForm fields: { n: { type: "integer", value: 1 } }\nexit',
@@ -236,14 +241,14 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
   assert.equal(opened.foregroundAction?.kind, "interaction");
   assert.equal(
     failure(
-      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10\nt.stop()\nexit",
+      "let t = timer(duration: 5 s, async: true, repeat: true)\nt.pause()\nwait 10 s\nt.stop()\nexit",
       last - 10_000,
     ),
     null,
   );
   assert.equal(
     failure(
-      "let t = timer async 5\nt.pause()\nwait 10\nt.remaining = 0 s\nt.resume()\nexit",
+      "let t = timer async 5 s\nt.pause()\nwait 10 s\nt.remaining = 0 s\nt.resume()\nexit",
       last - 10_000,
     ),
     null,

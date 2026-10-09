@@ -89,7 +89,7 @@ test("both checkpoint writers give the same bytes for a suspended session and it
   const source = [
     'speaker vera { title: "Miss" }',
     'let record = { items: [1, 2.5, -0], note: "line\\nbreak" }',
-    "function pause(seconds = 1) {\n  wait seconds\n  return seconds\n}",
+    "function pause(seconds = 1) {\n  wait seconds s\n  return seconds\n}",
     "repeat 2 {",
     '  say as vera "round ${pause()}"',
     "}",

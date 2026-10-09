@@ -19,8 +19,8 @@ save visits as "demo.visits"
 
 showImage "images/playroom.svg"
 let room = playAudio(file: "sounds/room-ambience.wav", async: true, repeat: true, volume: 0.4)
-say unskippable "Eyes on me.", 2
-say unskippable "You move when I tell you. Not before.", 3
+say unskippable "Eyes on me.", 2 s
+say unskippable "You move when I tell you. Not before.", 3 s
 
 if visits > 1 {
     say "Back again. Visit ${visits}. You remember the rules."
@@ -63,7 +63,7 @@ say "The other one is mine. You don't need to know how long."
 
 hold.pause()
 say "I've paused your clock. You hold still anyway."
-wait 4
+wait 4 s
 hold.resume()
 hold.remaining -= 20 s
 say "Twenty seconds less. Don't thank me yet."
@@ -73,7 +73,7 @@ mine.display = "visible"
 say "Fine. You may see mine too. I took thirty seconds off it."
 
 room.pause()
-timer 3 "Stay exactly like that"
+timer 3 s "Stay exactly like that"
 room.resume()
 hold.stop()
 mine.stop()

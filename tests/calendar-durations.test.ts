@@ -75,11 +75,11 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
       ].join("\n"),
     ),
     [
-      "1 d",
-      "14 d",
-      "7 d",
-      "2 d 6 h",
-      "12 h",
+      "1 day",
+      "14 days",
+      "7 days",
+      "2 days 6 hours",
+      "12 hours",
       "1 calendar day",
       "2 calendar days",
       "14 calendar days",
@@ -88,8 +88,8 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
       "1 calendar year 6 calendar months",
       "6 calendar months",
       "1 calendar month",
-      "1 calendar year 2 calendar months 3 calendar days 4 h",
-      "1 calendar day -2 h",
+      "1 calendar year 2 calendar months 3 calendar days 4 hours",
+      "1 calendar day -2 hours",
     ],
   );
   // Calendar months and days are whole after normalizing.
@@ -168,7 +168,7 @@ test("a calendar duration stays one; durations compare by length, calendar durat
         "exit",
       ].join("\n"),
     ),
-    ["14 3 1 h 30 min"],
+    ["14 3 1 hour 30 minutes"],
   );
   assert.deepEqual(diagnostics("let x = 1 calendar day >= 24 h\nexit"), [
     [
@@ -242,11 +242,11 @@ test("sort, min, max, and set operations order durations by length and calendar 
       ].join("\n"),
     ),
     [
-      "[1 d, 3 d, 7 d]",
+      "[1 day, 3 days, 7 days]",
       "[1 calendar month, 1 calendar year, 1 calendar year 6 calendar months]",
       "1 calendar month",
-      "14 d",
-      "[1 d, 2 d, 3 d]",
+      "14 days",
+      "[1 day, 2 days, 3 days]",
       "[1 calendar month]",
       "2",
       "3",
@@ -317,7 +317,7 @@ test("dates move by calendar units with clamping, and subtract to calendar days"
   assert.deepEqual(diagnostics('let d = toDate("2026-10-04") + (1 calendar month + 2 h)\nexit'), [
     [
       "TSV043",
-      "A date moves only by calendar units, not by 1 calendar month 2 h. A date has no clock time, so leave out the 2 h.",
+      "A date moves only by calendar units, not by 1 calendar month 2 hours. A date has no clock time, so leave out the 2 hours.",
     ],
   ]);
   // A compound assignment checks a known calendar duration as the operator does.
@@ -364,7 +364,7 @@ test("a local date and time moves only by calendar units, keeping its clock time
       ].join("\n"),
       AMSTERDAM,
     ),
-    ["2026-03-29T18:00", "2026-04-29T18:00", "2026-02-28T09:00", "2026-03-29T19:00", "23 h"],
+    ["2026-03-29T18:00", "2026-04-29T18:00", "2026-02-28T09:00", "2026-03-29T19:00", "23 hours"],
   );
   const dinner =
     'let dinner = toDateTime("2026-03-28T18:00")\nlet lunch = toDateTime("2026-03-28T12:00")\n';
@@ -495,7 +495,7 @@ test("calendar durations survive checkpoints and choices with their parts", () =
     run(plan, completed.snapshot).events.flatMap((event) =>
       event.kind === "say" ? [event.text] : [],
     ),
-    ["1 calendar month 2 calendar days 3 h", "2 d", "7 calendar days"],
+    ["1 calendar month 2 calendar days 3 hours", "2 days", "7 calendar days"],
   );
 
   // A calendar duration keeps whole days, and an exact duration has no calendar parts.

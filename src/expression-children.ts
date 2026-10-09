@@ -94,6 +94,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
     case "callExpression":
       return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
     case "unaryExpression":
+    case "unitExpression":
       return [expression.operand];
     case "binaryExpression":
       return [expression.left, expression.right];
