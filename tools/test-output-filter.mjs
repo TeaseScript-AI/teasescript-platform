@@ -20,11 +20,17 @@ const testFiles =
         .map((file) => join("dist/tests", file));
 
 // Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
-// path beside a valid one would let a focused run pass without running its test.
-const unmatched = arguments_.filter((path) => !path.startsWith("-") && globSync(path).length === 0);
+// path beside a valid one would let a focused run pass without running its test. An argument right after an option
+// without `=` may be that option's value, as in `--test-concurrency 1`, so it is not checked.
+const unmatched = arguments_.filter((path, index) => {
+  const previous = arguments_[index - 1];
+  const optionValue = previous !== undefined && previous.startsWith("-") && !previous.includes("=");
+  return !path.startsWith("-") && !optionValue && globSync(path).length === 0;
+});
 if (unmatched.length > 0) {
-  for (const path of unmatched)
-    console.error(`test-output-filter: no test file matches '${path}'.`);
+  const lines = unmatched.map((path) => `test-output-filter: no test file matches '${path}'.\n`);
+  // Exiting at once could cut off diagnostics that a pipe has not taken yet.
+  await new Promise((resolve) => process.stderr.write(lines.join(""), resolve));
   process.exit(1);
 }
 
