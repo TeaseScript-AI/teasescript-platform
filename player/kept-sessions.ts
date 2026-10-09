@@ -379,15 +379,17 @@ export function memoryKeptRoomStore(): KeptRoomStore {
   };
 }
 
-const DATABASE_VERSION = 1;
+// 2: keeps each session's plan in a record of its own in `plans`, so keeping a step rewrites only what changed.
+const DATABASE_VERSION = 2;
 const ROOMS = "rooms";
 const SESSIONS = "sessions";
+const PLANS = "plans";
 const EVENTS = "events";
 const MEDIA = "media";
 
 /**
- * Opens the kept sessions of this browser in IndexedDB (`teasescript-kept-sessions`): sessions, events by scope and
- * position, and photos by scope and reference. Each operation is one transaction. Rejects when IndexedDB is unavailable
+ * Opens the kept sessions of this browser in IndexedDB (`teasescript-kept-sessions`): sessions and their plans by scope,
+ * events by scope and position, and photos by scope and reference. Each operation is one transaction. Rejects when IndexedDB is unavailable
  * or refused.
  */
 export async function openIndexedDbKeptSessionStore(
@@ -413,12 +415,22 @@ function openDatabase(name: string, rooms: boolean): Promise<IDBDatabase> {
       return;
     }
     const request = indexedDB.open(name, DATABASE_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
-      if (rooms) database.createObjectStore(ROOMS, { keyPath: "scope" });
-      database.createObjectStore(SESSIONS, { keyPath: "scope" });
-      database.createObjectStore(EVENTS);
-      database.createObjectStore(MEDIA, { keyPath: ["namespace", "reference"] });
+      if (event.oldVersion === 0) {
+        if (rooms) database.createObjectStore(ROOMS, { keyPath: "scope" });
+        database.createObjectStore(SESSIONS, { keyPath: "scope" });
+        database.createObjectStore(EVENTS);
+        database.createObjectStore(MEDIA, { keyPath: ["namespace", "reference"] });
+      } else {
+        // Sessions kept in version 1, each with its plan, are not carried over: their scripts show Start (owner
+        // decision, 2026-10-09). A debug room keeps its saved values and photos; kept sessions' photos go with them.
+        const upgrade = request.transaction!;
+        upgrade.objectStore(SESSIONS).clear();
+        upgrade.objectStore(EVENTS).clear();
+        if (!rooms) upgrade.objectStore(MEDIA).clear();
+      }
+      database.createObjectStore(PLANS, { keyPath: "scope" });
     };
     request.onblocked = () =>
       reject(new DOMException("Kept session storage is blocked.", "InvalidStateError"));
@@ -476,45 +488,57 @@ const got = <T>(request: IDBRequest<T>, then: (value: T) => void) => {
 function indexedDbStore(database: IDBDatabase): KeptSessionStore {
   return {
     session: (scope) =>
-      transact(database, [SESSIONS, EVENTS], "readonly", (transaction, done) =>
+      transact(database, [SESSIONS, PLANS, EVENTS], "readonly", (transaction, done) =>
         got(
           transaction.objectStore(SESSIONS).get(scope),
           (session: Record<string, unknown> | undefined) => {
             if (session === undefined) return done(null);
-            got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (events) =>
-              done({
-                planJson: session["planJson"],
-                snapshotJson: session["snapshotJson"],
-                marks: session["marks"],
-                events,
-              }),
+            got(
+              transaction.objectStore(PLANS).get(scope),
+              (plan: Record<string, unknown> | undefined) =>
+                got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (events) =>
+                  done({
+                    planJson: plan?.["planJson"],
+                    snapshotJson: session["snapshotJson"],
+                    marks: session["marks"],
+                    events,
+                  }),
+                ),
             );
           },
         ),
       ),
+    // The plan never changes while the session runs, so it is written only when it is given, which the session's first
+    // step does, and goes with the session: a later step reads and writes only the snapshot, marks, event count, and new
+    // events, and its plan is there whenever its session is.
     publish: (scope, update) =>
-      transact<void>(database, [SESSIONS, EVENTS], "readwrite", (transaction, _done, fail) => {
-        const sessions = transaction.objectStore(SESSIONS);
-        got(sessions.get(scope), (previous: Record<string, unknown> | undefined) => {
-          const planJson = update.planJson ?? previous?.["planJson"];
-          const eventCount = previous?.["eventCount"] ?? 0;
-          if (typeof planJson !== "string") return fail(noPlan());
-          if (typeof eventCount !== "number" || update.eventsFrom > eventCount)
-            return fail(eventGap());
-          const events = transaction.objectStore(EVENTS);
-          events.delete(eventsFrom(scope, update.eventsFrom));
-          update.events.forEach((event, index) =>
-            events.put(event, [scope, update.eventsFrom + index]),
-          );
-          sessions.put({
-            scope,
-            planJson,
-            snapshotJson: update.snapshotJson,
-            marks: update.marks,
-            eventCount: update.eventsFrom + update.events.length,
+      transact<void>(
+        database,
+        [SESSIONS, PLANS, EVENTS],
+        "readwrite",
+        (transaction, _done, fail) => {
+          const sessions = transaction.objectStore(SESSIONS);
+          if (update.planJson !== null)
+            transaction.objectStore(PLANS).put({ scope, planJson: update.planJson });
+          got(sessions.get(scope), (previous: Record<string, unknown> | undefined) => {
+            if (update.planJson === null && previous === undefined) return fail(noPlan());
+            const eventCount = previous?.["eventCount"] ?? 0;
+            if (typeof eventCount !== "number" || update.eventsFrom > eventCount)
+              return fail(eventGap());
+            const events = transaction.objectStore(EVENTS);
+            events.delete(eventsFrom(scope, update.eventsFrom));
+            update.events.forEach((event, index) =>
+              events.put(event, [scope, update.eventsFrom + index]),
+            );
+            sessions.put({
+              scope,
+              snapshotJson: update.snapshotJson,
+              marks: update.marks,
+              eventCount: update.eventsFrom + update.events.length,
+            });
           });
-        });
-      }),
+        },
+      ),
     media: {
       get: (namespace, reference) =>
         transact(database, [MEDIA], "readonly", (transaction, done) =>
@@ -522,8 +546,14 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
             done(record ?? null),
           ),
         ),
-      // `add`, unlike `put`, fails instead of overwriting an existing record.
+      // `add`, unlike `put`, fails instead of overwriting an existing record. Each keep offers every photo of the
+      // session, so one kept already fails before its bytes are read again.
       add: async (record) => {
+        const key = [record.namespace, record.reference];
+        const kept = await transact<boolean>(database, [MEDIA], "readonly", (transaction, done) =>
+          got(transaction.objectStore(MEDIA).getKey(key), (found) => done(found !== undefined)),
+        );
+        if (kept) throw new DOMException("The photo is stored already.", "ConstraintError");
         const stored = await storableCapturedMedia(record);
         return transact<void>(database, [MEDIA], "readwrite", (transaction) => {
           transaction.objectStore(MEDIA).add(stored);
@@ -545,8 +575,9 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
         ),
     },
     discard: (scope) =>
-      transact<void>(database, [SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
+      transact<void>(database, [SESSIONS, PLANS, EVENTS, MEDIA], "readwrite", (transaction) => {
         transaction.objectStore(SESSIONS).delete(scope);
+        transaction.objectStore(PLANS).delete(scope);
         transaction.objectStore(EVENTS).delete(scopeRange(scope));
         transaction.objectStore(MEDIA).delete(scopeRange(scope));
       }),
@@ -588,15 +619,21 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       checkedEntries(entries);
       // The photos' bytes are read before the transaction starts, which commits once no request of it is pending.
       return Promise.all(photos.map(storableCapturedMedia)).then((stored) =>
-        transact<void>(database, [ROOMS, SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
-          // Nothing of an earlier room may stay; `add` fails when the scope has a room.
-          transaction.objectStore(SESSIONS).delete(scope);
-          transaction.objectStore(EVENTS).delete(scopeRange(scope));
-          transaction.objectStore(MEDIA).delete(scopeRange(scope));
-          transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
-          for (const photo of stored)
-            transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
-        }),
+        transact<void>(
+          database,
+          [ROOMS, SESSIONS, PLANS, EVENTS, MEDIA],
+          "readwrite",
+          (transaction) => {
+            // Nothing of an earlier room may stay; `add` fails when the scope has a room.
+            transaction.objectStore(SESSIONS).delete(scope);
+            transaction.objectStore(PLANS).delete(scope);
+            transaction.objectStore(EVENTS).delete(scopeRange(scope));
+            transaction.objectStore(MEDIA).delete(scopeRange(scope));
+            transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
+            for (const photo of stored)
+              transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
+          },
+        ),
       );
     },
     values: (scope) => ({
@@ -623,11 +660,17 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       clear: () => changeValues(scope, () => []),
     }),
     discard: (scope) =>
-      transact<void>(database, [ROOMS, SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
-        transaction.objectStore(ROOMS).delete(scope);
-        transaction.objectStore(SESSIONS).delete(scope);
-        transaction.objectStore(EVENTS).delete(scopeRange(scope));
-        transaction.objectStore(MEDIA).delete(scopeRange(scope));
-      }),
+      transact<void>(
+        database,
+        [ROOMS, SESSIONS, PLANS, EVENTS, MEDIA],
+        "readwrite",
+        (transaction) => {
+          transaction.objectStore(ROOMS).delete(scope);
+          transaction.objectStore(SESSIONS).delete(scope);
+          transaction.objectStore(PLANS).delete(scope);
+          transaction.objectStore(EVENTS).delete(scopeRange(scope));
+          transaction.objectStore(MEDIA).delete(scopeRange(scope));
+        },
+      ),
   };
 }
