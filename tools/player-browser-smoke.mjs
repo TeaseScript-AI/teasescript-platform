@@ -2632,8 +2632,27 @@ async function debugCountdownScenario(cdp, origin) {
     await physicalClick(cdp, "[data-settings-trigger]");
     await waitFor(cdp, `!!document.querySelector('[data-player-setting="debug-menu"]')`);
     await physicalClick(cdp, '[data-player-setting="debug-menu"]');
-    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
-    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+    // The X is pressed once it stands still with nothing over it. Should Settings stay open, the failure names what
+    // the X's centre hits and which dialogs are open, the evidence an earlier, unreproduced timeout here lacked.
+    await settledClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    try {
+      await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+    } catch {
+      const state = await value(
+        cdp,
+        `(() => {
+          const close = document.querySelector('[data-player-settings] [data-slot="dialog-close"]');
+          const rect = close?.getBoundingClientRect();
+          const hit = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return JSON.stringify({
+            dialogs: [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].map((dialog) => dialog.textContent.trim().slice(0, 40)),
+            settings: document.querySelector('[data-player-settings]')?.getAttribute('data-state') ?? null,
+            hit: hit?.outerHTML.slice(0, 120) ?? null,
+          });
+        })()`,
+      );
+      throw new Error(`Settings did not close: ${state}`);
+    }
   };
   // Scene time runs on in real time between steps, so a countdown may have passed its first seconds.
   const skip = async (expected, failure) => {
