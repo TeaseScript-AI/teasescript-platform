@@ -790,6 +790,29 @@ test("async timers and interrupts resume identically from every checkpoint bound
   );
 });
 
+test("a parameter default starts its timer only when the argument is left out", () => {
+  const { events } = assertRuntimeResumeEquivalent(
+    [
+      'let own = timer async 5 s { say "own" }',
+      "function make(n, t = timer async 1 s { n += 1",
+      '  say "made ${n}" }) {',
+      "  wait 2 s",
+      '  say "body ${n}"',
+      "  return t",
+      "}",
+      "let first = make(1)",
+      "let second = make(5, own)",
+      'say "${first.state} ${second.state}"',
+      "exit",
+    ].join("\n"),
+    { scenarioName: "timer in a parameter default" },
+  );
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["made 2", "body 2", "body 5", "finished running"],
+  );
+});
+
 test("timer actions cannot be completed by the Player", () => {
   const session = new Session("let t = timer async 5 s\nwait 10 s\nexit");
   const timer = session.timers()[0]!;

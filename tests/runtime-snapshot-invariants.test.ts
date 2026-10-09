@@ -101,6 +101,24 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
   }
 });
 
+test("validates loops paused in their bodies with or without the plan", () => {
+  const compiled = plan(
+    "for k, v in dict{ a: 1, b: 2 } {\n  repeat 2 {\n    wait 5 s\n  }\n}\nexit",
+  );
+  const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  assert.equal(snapshot.status, "waiting");
+  assert.equal(snapshot.loopFrames.length, 2);
+  const copy = structuredClone(snapshot);
+  assert.deepEqual(validateRuntimeSnapshot(copy, compiled), { valid: true, errors: [] });
+  assert.deepEqual(validateRuntimeSnapshot(copy), { valid: true, errors: [] });
+  // Without the plan, a loop that runs twice in one context is still refused.
+  // EVIDENCE: fixture: expose the readonly loop ID on a cloned snapshot to repeat the outer loop's ID.
+  (copy.loopFrames[1] as { loopId: number }).loopId = copy.loopFrames[0]!.loopId;
+  assert.deepEqual(validateRuntimeSnapshot(copy).errors, [
+    "Runtime loop frame does not belong to its call context.",
+  ]);
+});
+
 test("validates allocator counters across the safe-integer boundary at snapshot and checkpoint entry", () => {
   const compiled = plan('say "one"\nsay "two"\nexit');
   const fields = ["nextEventSequence", "nextScopeId", "nextSpeakerId", "nextCallFrameId"] as const;
