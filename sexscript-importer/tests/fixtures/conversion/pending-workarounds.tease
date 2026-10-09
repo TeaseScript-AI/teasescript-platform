@@ -3,21 +3,21 @@ speaker system {
 }
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
 // getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
-let toys = askBooleans(message: "Which toys do you have?", texts: ["Paddle", "Crop"], defaults: [true, false])
+let toys = askBooleans "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
 let clothes = [false]
 let owned = [{ label: "Collar" }]
 let collectResult = []
 for it in owned {
   collectResult.add(it.label)
 }
-let answers: boolean[]? = askBooleans(message: "What do you own?", texts: collectResult, defaults: clothes, cancel: "Cancel")
+let answers: boolean[]? = askBooleans "What do you own?", texts: collectResult, prefill: clothes, cancel: "Cancel"
 if answers != null {
   clothes = answers
   save clothes[0] as "clothes.collar"
 } else {
   say "Nothing changed"
 }
-let gags: boolean[]? = askBooleans(message: "Which gags do you have?", texts: ["Ball gag"], defaults: [false], cancel: "Cancel")
+let gags: boolean[]? = askBooleans "Which gags do you have?", texts: ["Ball gag"], prefill: [false], cancel: "Cancel"
 if gags == null or gags[0] == false {
   say "No gag today"
 }

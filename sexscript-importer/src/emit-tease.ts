@@ -222,7 +222,7 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
         lines.push(`${pad}return ${emitExpression(statement.condition)}`);
         return;
       }
-      lines.push(`${pad}if ${emitExpression(statement.condition)} {`);
+      lines.push(`${pad}if ${emitHead(statement.condition)} {`);
       emitStatements(statement.then, lines, depth + 1);
       let alternative = statement.else;
       // Flatten Groovy `else if` chains, which the AST represents as nested if statements.
@@ -231,7 +231,7 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
         alternative.length === 1 && nested?.kind === "if";
         nested = alternative[0]
       ) {
-        lines.push(`${pad}} else if ${emitExpression(nested.condition)} {`);
+        lines.push(`${pad}} else if ${emitHead(nested.condition)} {`);
         emitStatements(nested.then, lines, depth + 1);
         alternative = nested.else;
       }
@@ -243,7 +243,7 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       return;
     }
     case "while":
-      lines.push(`${pad}while ${emitExpression(statement.condition)} {`);
+      lines.push(`${pad}while ${emitHead(statement.condition)} {`);
       emitStatements(statement.body, lines, depth + 1);
       lines.push(`${pad}}`);
       return;
@@ -377,7 +377,7 @@ export function emitExpression(expression: IrExpression): string {
       // whole statement value keeps the compact one (see emitValue).
       return `load(${emitExpression(expression.key)}, default: ${loadDefault(expression)})`;
     case "input": {
-      // Inside a larger expression an ask takes its parenthesized form, `askInteger(default: 0) + 1` (V30 §20); a
+      // Inside a larger expression an ask takes its parenthesized form, `askInteger(prefill: 0) + 1` (V30 §20); a
       // whole statement value keeps the compact one (see emitValue).
       const asked =
         expression.speaker === undefined
@@ -420,6 +420,9 @@ export function emitExpression(expression: IrExpression): string {
       return `${side(expression.left, leftLevel)} ${expression.operator} ${side(expression.right, rightLevel)}`;
     }
     case "call": {
+      // askBooleans takes its message first without a name, as the other asks do (V30 §20).
+      if (isBooleansAsk(expression))
+        return `askBooleans(${booleansArguments(expression).join(", ")})`;
       const positional = expression.positional.map(emitExpression);
       const named = Object.entries(expression.named).map(
         ([name, value]) => `${name}: ${emitExpression(value)}`,
@@ -670,6 +673,8 @@ function emitValue(expression: IrExpression): string {
   if (expression.kind === "load")
     return `load ${operand(expression.key, POSTFIX)}, default: ${loadDefault(expression)}`;
   if (expression.kind === "input") return compactInput(expression);
+  if (expression.kind === "call" && isBooleansAsk(expression))
+    return `askBooleans ${booleansArguments(expression).join(", ")}`;
   return expression.kind === "choice" || expression.kind === "listChoice"
     ? emitChoice(expression)
     : emitExpression(expression);
@@ -682,20 +687,59 @@ function compactInput(expression: Extract<IrExpression, { kind: "input" }>): str
       ? expression.input
       : `${expression.input} as ${expression.speaker}`;
   const args = askArguments(expression);
-  // Without a question, `askInteger default: 3` has no comma (V30 §20).
+  // Without a question, `askInteger prefill: 3` has no comma (V30 §20).
   return args.length === 0 ? asked : `${asked} ${args.join(", ")}`;
 }
 
-/** An ask's question, a form's `fields:`, `submit:`, and `outro:`, and an ask's `default:`, in that order. */
+/**
+ * The head of an `if`, `else if`, or `while`, where the `{` of the block ends a compact ask (V30 §20), so an ask
+ * that is the whole condition, or its negation, keeps its compact form: `if askBoolean "Ready?" {`.
+ */
+function emitHead(condition: IrExpression): string {
+  if (condition.kind === "input") return compactInput(condition);
+  if (
+    condition.kind === "unary" &&
+    condition.operator === "not" &&
+    condition.value.kind === "input"
+  )
+    return `not ${compactInput(condition.value)}`;
+  return emitExpression(condition);
+}
+
+/** An `askBooleans` call with its message named, as the converter writes it. */
+function isBooleansAsk(expression: Extract<IrExpression, { kind: "call" }>): boolean {
+  return (
+    expression.name === "askBooleans" &&
+    expression.local !== true &&
+    expression.positional.length === 0 &&
+    expression.named.message !== undefined
+  );
+}
+
+/** An `askBooleans` call's message first, then its other arguments by name. */
+function booleansArguments(expression: Extract<IrExpression, { kind: "call" }>): string[] {
+  const { message, ...named } = expression.named;
+  return [
+    emitExpression(message!),
+    ...Object.entries(named).map(([name, value]) => `${name}: ${emitExpression(value)}`),
+  ];
+}
+
+/**
+ * An ask's question, an `askBoolean`'s button texts, a form's `fields:`, `submit:`, and `outro:`, and an ask's
+ * `prefill:` (#713), in that order.
+ */
 function askArguments(expression: Extract<IrExpression, { kind: "input" }>): string[] {
   return [
     ...(expression.question === undefined ? [] : [emitExpression(expression.question)]),
+    ...(expression.yesText === undefined ? [] : [`yesText: ${emitExpression(expression.yesText)}`]),
+    ...(expression.noText === undefined ? [] : [`noText: ${emitExpression(expression.noText)}`]),
     ...(expression.fields === undefined ? [] : [`fields: ${emitExpression(expression.fields)}`]),
     ...(expression.submit === undefined ? [] : [`submit: ${emitExpression(expression.submit)}`]),
     ...(expression.outro === undefined ? [] : [`outro: ${emitExpression(expression.outro)}`]),
     ...(expression.defaultValue === undefined
       ? []
-      : [`default: ${emitExpression(expression.defaultValue)}`]),
+      : [`prefill: ${emitExpression(expression.defaultValue)}`]),
   ];
 }
 

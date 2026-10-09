@@ -18,7 +18,7 @@ say "Kneel."
 // An ask's question keeps its last paragraph; the others are said before the ask.
 say "These are the rules."
 say "Count every stroke."
-let strokes = askInteger "How many strokes?", default: 5
+let strokes = askInteger "How many strokes?", prefill: 5
 // Blank lines that lay out columns, a ruled line, or a block of values stay in one message.
 say """
   Your status:

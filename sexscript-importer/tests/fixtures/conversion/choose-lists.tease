@@ -81,8 +81,7 @@ let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
 choices = [{ lbl: "Nothing", act: null }] + choices
 say "Choices ${choices.length}"
 // A menu over a list that a loop builds asks its question after the loop, also one that a ternary computes.
-say "Strict?"
-let strict = (choose yes: "Yes", no: "No") == "yes"
+let strict = askBoolean "Strict?"
 let tasks = [
   { name: "Kneel" },
   { name: "Crawl" }

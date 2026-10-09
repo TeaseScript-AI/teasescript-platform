@@ -47,8 +47,7 @@ function bump {
 // TODO SX_INPUT_PREFILL_EFFECT line 12: getString() computes its pre-filled value with side effects, which legacy ran before showing the question; the question becomes a say before the input, so compute the value explicitly before the question.
 // | def typed = getString("Question", bump())
 let typed = ""
-say "Strict?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Strict?" {
   say "Strict"
 } else {
   say "Gentle"

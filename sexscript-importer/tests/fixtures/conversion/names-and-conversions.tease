@@ -26,8 +26,7 @@ while row < 2 {
   say "Row ${row}"
   row += 1
 }
-say "Again?"
-if (choose yes: "Yes", no: "No") == "yes" {
+if askBoolean "Again?" {
   let rowValue = 5
   say "Row ${rowValue}"
 }

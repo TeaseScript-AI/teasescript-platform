@@ -1643,8 +1643,9 @@ export function lowerParsedFile(
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withReadingTimes(texts, diagnostics);
   texts = withoutRepeatedText(texts, diagnostics);
-  texts = withAskQuestions(texts, diagnostics);
+  // A picked text splits into its paragraphs first, so that an ask after it keeps no question of several paragraphs.
   texts = withParagraphPicks(texts, diagnostics, options.keepParagraphs === true, shared);
+  texts = withAskQuestions(texts, diagnostics);
   texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
   texts = withoutCutReadingTimes(texts, diagnostics);
   const statements = [
@@ -15088,17 +15089,19 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "getBoolean() must have one or three arguments.",
         );
       }
-      // Legacy getBoolean shows its text like show() and then two buttons; the first button means true.
+      // Legacy getBoolean shows its text like show() and then two buttons, the first meaning true, as askBoolean does
+      // (#712); its text becomes the ask's question (withAskQuestions), and the button texts are written where they
+      // are not askBoolean's own "Yes" and "No".
       const labels = args.slice(1);
       const computed = { nodes: call.arguments.slice(1), values: labels };
       if (!pushPrompt(context, node, call.arguments[0]!, args[0]!, null, computed)) return null;
-      const yes = labels[0] ?? { kind: "literal", value: "Yes" };
-      const no = labels[1] ?? { kind: "literal", value: "No" };
+      const own = (label: IrExpression | undefined, text: string): boolean =>
+        label === undefined || (label.kind === "literal" && label.value === text);
       return {
-        kind: "binary",
-        operator: "==",
-        left: { kind: "choice", options: [yes, no], labels: ["yes", "no"] },
-        right: { kind: "literal", value: "yes" },
+        kind: "input",
+        input: "askBoolean",
+        ...(own(labels[0], "Yes") ? {} : { yesText: labels[0]! }),
+        ...(own(labels[1], "No") ? {} : { noText: labels[1]! }),
       };
     }
     case "getBooleans":
@@ -15117,7 +15120,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         named: {
           message: args[0]!,
           texts: args[1]!,
-          defaults: args[2]!,
+          prefill: args[2]!,
           ...(context.cancelBooleans === true
             ? { cancel: { kind: "literal", value: "Cancel" } }
             : {}),

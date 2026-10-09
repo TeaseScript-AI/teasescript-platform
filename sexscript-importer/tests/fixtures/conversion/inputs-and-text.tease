@@ -1,5 +1,5 @@
 let name = askText "What is your name?"
-let weight = askNumber "Your weight?", default: 0
+let weight = askNumber "Your weight?", prefill: 0
 say "Hello ${name}, you said ${weight}."
 say "Choose a task"
 let task = choose 0: "Kneel",
@@ -34,8 +34,7 @@ function menu {
   question = ["Yes", "No"]
 }
 question = "Kneel?"
-say question
-let kneel = (choose yes: "Yes", no: "No") == "yes"
+let kneel = askBoolean question
 // A question read from storage may be null, which kept the current text, so it is still tested.
 let stored = load "question", default: ""
 if stored != "" {
@@ -44,10 +43,9 @@ if stored != "" {
 let answer = askText
 // A question that may be null elsewhere needs no test right after it was set to text.
 stored = "Ready now?"
-say stored
-let ready = (choose yes: "Yes", no: "No") == "yes"
+let ready = askBoolean stored
 // A character of a text is its one-character substring, also counted from the end.
-let code = askText "Square?", default: "B4"
+let code = askText "Square?", prefill: "B4"
 say "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}"
 // Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
 function honorific {
@@ -55,8 +53,7 @@ function honorific {
 }
 let question2 = "Ready, ${honorific()}?"
 let option = "Yes, ${honorific()}"
-say question2
-if (choose yes: option, no: "No") == "yes" {
+if askBoolean question2, yesText: option {
   say "Good."
 }
 // A range goes through its values with their positions.

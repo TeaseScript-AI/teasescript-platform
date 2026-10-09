@@ -51,7 +51,7 @@ say "Four."
 say "Five."
 
 // A computed wait, and a run of waits, stay as they are.
-let n = askInteger "How long?", default: 3
+let n = askInteger "How long?", prefill: 3
 say "Waiting ${n} seconds.", instant
 wait n
 say "Pause", instant

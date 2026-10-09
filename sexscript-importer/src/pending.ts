@@ -315,7 +315,7 @@ export function pendingHostFunctions(
     ["showBackgroundImage", () => null],
     ["showOverlayImage", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
-    ["askBooleans", (_, named) => named.defaults ?? emptyList],
+    ["askBooleans", (_, named) => named.prefill ?? emptyList],
     ["openUrl", () => null],
     // As when the player cancels the file chooser.
     ["chooseFile", () => null],

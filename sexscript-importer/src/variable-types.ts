@@ -2234,7 +2234,13 @@ export function expressionType(
           kind: value.fields?.kind === "object" && value.fields.dict !== true ? "object" : "dict",
         };
       return scalar(
-        value.input === "askText" ? "string" : value.input === "askInteger" ? "integer" : "number",
+        value.input === "askText"
+          ? "string"
+          : value.input === "askInteger"
+            ? "integer"
+            : value.input === "askBoolean"
+              ? "boolean"
+              : "number",
       );
     case "range":
       return { kind: "range" };

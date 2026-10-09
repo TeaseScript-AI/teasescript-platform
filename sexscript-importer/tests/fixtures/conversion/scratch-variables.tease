@@ -4,8 +4,7 @@ let responseBoolean = false
 let responseNumber = 0
 let response = "Start"
 say response
-say "Ready?"
-responseBoolean = (choose yes: "Yes", no: "No") == "yes"
+responseBoolean = askBoolean "Ready?"
 if responseBoolean {
   say "Ready"
 }
