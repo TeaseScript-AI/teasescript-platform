@@ -247,7 +247,7 @@ subsystems may still have different maturity levels.
     - `fork` and `createRuntimeSession` accept a non-function builtin, which fails only when called, with TSR012.
     - The checkpoint validator admits a `range` on a repeating timer whose duration was a constant.
 
-- [ ] **Consider: pre-alpha performance leftovers**
+- [ ] **Consider: known performance leftovers**
   - **Outcome:** Decide whether to remove these known performance costs.
     - `t[0] = 7` and `t.add(f())` still copy the whole collection each time they run.
     - Type checking an object that grows one property at a time rescans it quadratically.
