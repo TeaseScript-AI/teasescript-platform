@@ -548,8 +548,14 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
             done(record ?? null),
           ),
         ),
-      // `add`, unlike `put`, fails instead of overwriting an existing record.
+      // `add`, unlike `put`, fails instead of overwriting an existing record. Each keep offers every photo of the
+      // session, so one kept already fails before its bytes are read again.
       add: async (record) => {
+        const key = [record.namespace, record.reference];
+        const kept = await transact<boolean>(database, [MEDIA], "readonly", (transaction, done) =>
+          got(transaction.objectStore(MEDIA).getKey(key), (found) => done(found !== undefined)),
+        );
+        if (kept) throw new DOMException("The photo is stored already.", "ConstraintError");
         const stored = await storableCapturedMedia(record);
         return transact<void>(database, [MEDIA], "readwrite", (transaction) => {
           transaction.objectStore(MEDIA).add(stored);
