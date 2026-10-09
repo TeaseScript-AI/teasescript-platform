@@ -5950,6 +5950,16 @@ function lowerAssignment(
       ? []
       : [{ kind: "assign", target, operator: "=", value: difference, span }];
   }
+  // Groovy `text -= part` dropped the first occurrence of the part, as `text - part` does (Banjo's gear).
+  if (operator === "-=" && variableTarget !== null) {
+    const removal = textRemoval(
+      { kind: "binary", span: node.span, operator: "-", left: targetNode, right },
+      context,
+    );
+    if (removal === null) return [];
+    if (removal !== undefined)
+      return [{ kind: "assign", target, operator: "=", value: removal, span }];
+  }
   const value =
     right.kind === "map" && variableTarget !== null && operator === "="
       ? namedMapLiteral(targetNode, right, context)

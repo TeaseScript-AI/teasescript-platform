@@ -136,4 +136,8 @@ if (choose 0: "none", 1: "red") == "none" {
 for c in sexscriptLegacyItems(picked) {
   say c
 }
+// Removing a part from text in place drops its first occurrence (Banjo's gear).
+let gear = " Torch. Rope. Torch. "
+gear = sexscriptLegacyTextMinus(gear, " Torch. ")
+say "Gear:${gear}"
 exit
