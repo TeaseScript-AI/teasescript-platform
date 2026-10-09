@@ -69,6 +69,9 @@ test("a missing closing delimiter is reported where its line ends, and the next 
     'let v = dict{ "a": 1',
     'say("a", instant',
     "function g(a, b",
+    // An object or dict left open at the end of its line.
+    "let v = { a: 1,",
+    "let v = dict{",
   ]) {
     const result = parse(`${line}\nlet = 5\nexit`);
     assert.deepEqual(
@@ -85,6 +88,24 @@ test("a missing closing delimiter is reported where its line ends, and the next 
     );
     assert.equal(statementKinds(result).at(-1), "exitStatement", line);
   }
+  // A list left open also misses its first element, which the next line's statement cannot be.
+  for (const line of ["let v = [", "let v = set["])
+    assert.deepEqual(
+      parse(`${line}\nlet = 5\nexit`).diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.line,
+        diagnostic.span.start.column,
+      ]),
+      [
+        ["TSP012", 1, 0],
+        ["TSP017", 0, line.length],
+        ["TSP013", 1, 4],
+      ],
+      line,
+    );
+  // A line that starts with a value or a property named like a statement keyword stays in the literal.
+  for (const source of ['let v = [\n    say "x"\n]\nexit', "let v = {\n    let: 1\n}\nexit"])
+    assert.deepEqual(parse(source).diagnostics, [], source);
 });
 
 test("reports a missing closing brace at EOF once", () => {
