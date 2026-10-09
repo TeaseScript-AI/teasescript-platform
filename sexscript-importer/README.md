@@ -402,23 +402,49 @@ most a third of all runtime operations (fresh sessions, runs, inputs, and automa
 of what steps cost. Without depth phases, starting next visits takes at most another third, apart from it, from the
 storage of the first ten completed sessions, and a session number goes before the next one in the search order.
 
+Effect ranking (`--effect-ranking`, opt-in, with cells) ranks a play state's cell by the runtime operations its
+expansions took per productive one (a step that reached new code, a cell, slot value or change not seen before, or came
+closer to a comparison a missed way needs) instead of by how many expansions it had: a cell whose expansions cost much
+and find little waits, a cheap one or one that keeps finding something comes back sooner, and a new cell still comes
+first. On a focused gate (3 seeds, gate budgets; jewell 6) against the explorer without it, it gained BreatheAcademy
+69.5% → 73.5%, Toy 80.0% → 81.6%, Domme3 50.1% → 50.4% and jewell 47.0% → 47.4%, and lost DisciplineClinic 20.8% →
+20.3% and ToyExpanded 40.8% → 40.2%. It is opt-in because a loop the player cannot leave is unproductive by nature and
+its states wait longer, so traps are found less often: jewell's `cumEdging.tease:32` in 0 of 6 seeds instead of 2
+(`trainEnema.tease:65` in 2 of 6 either way). Content behind a long automatic chain (Domme3's 300 strokes) stays
+unreached either way.
+
 Depth phases (`--depth-phases`, opt-in) let the search decide how play work goes to session numbers, the depth of a
-session from a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the
-lines and condition ways those reach first) are measured as the run goes. The first session goes first. The next depth
-opens when the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its
-average, or has nothing left; only a depth that reached something new opens another, and only when a session of it left
-storage to start from (a completed one's; with `--quit-anywhere`, any). States whose step reached new code go first in
-any open depth, as without phases. Apart from those, a newly opened depth first gets a quarter of the work of the depth
-before it; then the open depth with the most gain per operation in the last quarter of its work gets play, and an
-eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets work
-back when it gains again. A depth starts a next session when none of its open states reached new code, from storage a
-session of the depth before left: the one with the most compared values (each compared key's value bucket, as cells
-read them) no session of that depth started from yet, and while the depth has open states only one that adds such a
-value. Directed work and random outcomes keep their shares. The report gives, per session number, when it opened and
-its play work, gain, and next sessions (`search.phases`). They are opt-in because on the 13-unit gate (3 seeds, gate
-budgets) they gained where a first session levels off early (DisciplineClinic +4.5 points, BreatheAcademy +3.2) but cost
-units whose first session still gains: the second session opens on an early lull in the first, so jewell lost its trap
-loops and 2.3 points, and Domme3 and ToyExpanded 0.8.
+session from a new player's first. Each depth's work (its play and directed work, and the next sessions it starts) and
+gain (the lines and condition ways any of its steps reach first) are measured as the run goes. The first session goes
+first. The next depth opens when the deepest open one levels off, its gain per operation in the last quarter of its own
+work and in the quarter before both at most half its average, or has nothing left; only a depth that reached something
+new opens another, and only when a session of it left storage to start from (a completed one's; with
+`--quit-anywhere`, any). States whose step reached new code go first in any open depth, as without phases. Apart from
+those, a newly opened depth first gets an eighth of the play work of the depth before it; then the open depth with the
+most gain per operation in the last quarter of its work gets play, and an eighth of play goes to the other open depths
+in turn, the one explored least first, so that an earlier depth gets work back when it gains again. A depth starts a
+next session when none of its open states reached new code, from storage a session of the depth before left: the one
+with the most compared values (each compared key's value bucket, as cells read them) no session of that depth started
+from yet, and while the depth has open states only one that adds such a value. Directed work and random outcomes keep
+their shares. The report gives, per session number, when it opened and its play work, gain, and next sessions
+(`search.phases`).
+
+They are opt-in because they cost units whose first session still gains at gate budgets. On the 13-unit gate (3 seeds,
+gate budgets), the first version gained where a first session levels off early (DisciplineClinic +4.5 points,
+BreatheAcademy +3.2), but its second session opened on an early lull in the first: jewell lost its trap loops and 2.3
+points, and Domme3 and ToyExpanded 0.8. Two tuning rounds followed, on a focused gate of those four units (3 seeds;
+jewell 6), measured against the explorer without phases (DisciplineClinic 20.8%, Domme3 50.1%, ToyExpanded 40.8%, jewell
+47.0% with a trap loop found in 5 of 6 seeds):
+
+- Levelling off over two quarter-windows instead of one, and an eighth of the work for a newly opened depth instead of
+  a quarter: DisciplineClinic 23.6% (one seed lost the gain, as its second session opened late), Domme3 50.1%,
+  ToyExpanded 40.0%, jewell 46.0% with a trap loop in 2 of 6 seeds. The second session's play now gained well in jewell,
+  but its first session lost more, also through directed search, which the rates did not count.
+- Rates from all of a depth's work and gain, directed search included, as described above: DisciplineClinic 25.2%,
+  Domme3 50.1%, ToyExpanded 39.4%, jewell 46.5% with a trap loop in 2 of 6 seeds.
+
+The second round keeps DisciplineClinic's gain and Domme3's coverage, but jewell still finds its trap loops less often,
+so phases stay opt-in.
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
@@ -622,9 +648,20 @@ lines), `typed-asks` (compares a typed answer with a constant), and `large` (5,0
 Known limits:
 
 - Content behind a long automatic chain (a loop of waits with nothing else to do, past a hundred waits) waits longer:
-  such a chain's passes share a cell, so they no longer look new. Seen in BreatheAcademy (the ending after its long
-  countdown; −4.3 points in a 13-unit gate, from one seed) and Domme3 (`spanking.tease` 863–878, after a 300-stroke
-  chain). A later step that weighs work per operation or schedules by session depth should check these first.
+  such a chain's passes share a cell, so they no longer look new, and each pass of a hundred waits is one more
+  expansion, while a cell of a large unit gets one or two at gate budgets. Seen in Domme3 (`spanking.tease` 858–873,
+  after `spank(…, 300, 0.5)`, at least 300 waits with a sound each) and once in BreatheAcademy (the ending after its long
+  countdown, now reached in every seed). Three ways to go through such chains sooner were measured and dropped:
+  - walking a chain to its end within one expansion (at most 20 passes of 100 waits): every expansion into a
+    punishment paid the whole chain, up to about 8,000 operations, and DisciplineClinic fell to 29.7% and
+    BreatheAcademy to 73.3%;
+  - giving a chain's states the cell of the state that entered it: the passes still count as that cell's expansions, so
+    the chain sinks after a pass or two (Domme3 858–873 not reached; BreatheAcademy −1.6 points);
+  - following a chain at once, pass after pass, within a sixteenth of all operations: only for chains a step entered
+    with new code, it never followed Domme3's, as `spank()` is code every punishment shares; for every chain, it reached
+    Domme3 858–873 in two of three seeds, with Domme3's coverage unchanged, but cost DisciplineClinic 57 lines
+    consistently (`Punish.tease` 5471–5501, behind its own punishment chains) and jewell 0.7 points. This one is kept
+    as `--follow-chains` (opt-in), for confirming content behind long automatic chains: the only measured way there.
 - A step settles at most 1,000 automatic operations (`MAX_AUTO_OPERATIONS`). An automatic run longer than that, such as
   more than a thousand camera requests in a row, ends the step with the request still pending, and the state is
   reported as stuck although settling could go on.
