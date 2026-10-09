@@ -7,9 +7,9 @@
  *   <converted-root> <out-dir>
  *
  * Each package opens in headless Chromium, one browser at a time, from `<origin>` (default
- * `https://agents.home.arpa:4443`, see `serve-catalog.ts`). A run presses buttons, picks choices, and types answers
- * until the session halts, fails, hangs, or the step limit ends it. A run that reaches the step limit, or four minutes of
- * real time, is `parked` while new prompts kept appearing (a long or endless tease, to be tried again at a higher limit
+ * `https://agents.home.arpa:4443`, see `serve-catalog.ts`). A run presses buttons, picks choices, types answers, and
+ * submits forms until the session halts, fails, hangs, or the step limit ends it. A run that reaches the step limit, or
+ * four minutes of real time, is `parked` while new prompts kept appearing (a long or endless tease, to be tried again at a higher limit
  * with `--steps`), and `loops` when the second half of the run only repeated prompts of the first. With `--clock dev` (the default) the package opens at
  * `/player/?dev&package=<id>&time=skip`, whose development time controls (#615) skip waits, timers, pacing, and audio
  * while no input is pending. With `--clock fake`, the fallback, it opens at `/player/?package=<id>` with Playwright's
@@ -582,6 +582,22 @@ async function playOnce(
         ]);
         await chooser.setFiles(answerImage);
         taken.push(`${state.site} → [picture]`);
+        step += 1;
+      } else if (kind === "form" && state.options.length > 0) {
+        // A form, such as the legacy profile's toggles of owned toys and clothes: every other run switches all toggles
+        // on, the others keep them as offered; then it is submitted, the first of the form's actions.
+        const allOn = run % 2 === 1;
+        if (allOn) {
+          const off = await page.evaluate(
+            () => document.querySelectorAll("[data-form-fields] button[data-state='off']").length,
+          );
+          for (let index = 0; index < off; index += 1)
+            await page.click("[data-form-fields] button[data-state='off'] >> nth=0", {
+              timeout: 5_000,
+            });
+        }
+        taken.push(`${state.site} → [form${allOn ? ", all on" : ""}]`);
+        await page.click("[data-form-actions] button >> nth=0", { timeout: 5_000 });
         step += 1;
       } else if (state.composer !== null) {
         const answers =
