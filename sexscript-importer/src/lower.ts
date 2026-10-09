@@ -17999,26 +17999,37 @@ function withScriptBindings(
   members: ReadonlySet<string> = new Set(),
 ): IrStatement[] {
   if (body === null || context.functionDepth > 0) return statements;
-  const declared = new Set<string>();
+  // A `def` is local to its block, so an assignment where no enclosing block has declared the name writes the binding,
+  // also when a sibling block declares a local of that name (SecretSexScript's `Slot1`).
   const assigned = new Set<string>();
-  const collect = (node: AstNode): void => {
+  const collect = (node: AstNode, scopes: ReadonlyArray<Set<string>>): void => {
     if (node.kind === "closure") return;
-    if (node.kind === "declaration") {
-      const name = variableName(node.left);
-      if (name !== null) declared.add(name);
-    } else if (node.kind === "for") {
-      const name = text(node.variable);
-      if (name !== null) declared.add(name);
-    } else if (node.kind === "binary" && node.operator === "=") {
-      const name = variableName(node.left);
-      if (name !== null) assigned.add(name);
+    if (node.kind === "block" || node.kind === "for") {
+      const scope = new Set<string>();
+      const loopVariable = node.kind === "for" ? text(node.variable) : null;
+      if (loopVariable !== null) scope.add(loopVariable);
+      for (const child of nodeChildren(node)) collect(child, [...scopes, scope]);
+      return;
     }
-    for (const child of nodeChildren(node)) collect(child);
+    if (node.kind === "declaration") {
+      const right = asNode(node.right);
+      if (right !== null) collect(right, scopes);
+      const left = asNode(node.left);
+      for (const target of left?.kind === "arguments" ? nodeArray(left.items) : [left]) {
+        const name = variableName(target);
+        if (name !== null) scopes.at(-1)!.add(name);
+      }
+      return;
+    }
+    if (node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null && !scopes.some((scope) => scope.has(name))) assigned.add(name);
+    }
+    for (const child of nodeChildren(node)) collect(child, scopes);
   };
-  collect(body);
+  collect(body, [new Set()]);
   const names = [...assigned].filter(
     (name) =>
-      !declared.has(name) &&
       !members.has(name) &&
       !context.functions.has(name) &&
       !context.packageFunctions.has(name) &&
@@ -18031,16 +18042,11 @@ function withScriptBindings(
     if (value.kind === "variable" && value.name === name) return true;
     return Object.values(value).some((child) => mentions(child, name));
   };
-  // A name the conversion already declares, such as a destructured variable, keeps its declaration.
-  const lets = new Set<string>();
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(visit);
-    else if (isRecord(value)) {
-      if (value.kind === "let" && typeof value.name === "string") lets.add(value.name);
-      Object.values(value).forEach(visit);
-    }
-  };
-  visit(statements);
+  // A name the conversion already declares at the top, such as a destructured variable, keeps its declaration; a
+  // declaration inside a block is a local of that block, which the binding's declaration renames.
+  const lets = new Set(
+    statements.flatMap((statement) => (statement.kind === "let" ? [statement.name] : [])),
+  );
   const before = new Map<number, string[]>();
   const replaced = new Map<number, IrStatement>();
   for (const name of names) {

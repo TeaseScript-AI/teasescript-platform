@@ -33,3 +33,13 @@ total = 2
 total = total + 1
 if (getBoolean("Again?")) bonus = 1 else bonus = 2
 show("Total " + total + ", bonus " + bonus)
+// A declaration is local to its block, so another block's assignment of the same name writes the binding.
+def slots = [0, 0]
+if (getBoolean("First slot?")) {
+  def slot = 0
+  slots[slot] = 1
+} else {
+  slot = 1
+  slots[slot] = 2
+}
+show("Slots " + slots)
