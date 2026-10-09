@@ -461,7 +461,7 @@ export interface Part {
 }
 
 /**
- * A session chain toward a stored value: the sessions it started, the closest value it reached, its result (`reached`
+ * A session chain toward a stored value: the sessions it ran, the closest value it reached, its result (`reached`
  * the way; storage `holds` what the way needs but a session from it did not reach it; its next session still `queued`
  * when the run ended; stopped at the session `limit`; or `stopped` as no route left brought the value closer), the
  * route it repeats, the routes it replayed (that one too, the most progress per operation first), and its last switches
@@ -1202,7 +1202,7 @@ interface Chain {
   /** The storage entry with that value, as text, and the sessions it took. */
   value: string;
   sessions: number;
-  /** Sessions this chain started. */
+  /** Sessions of this chain that ran (one more may be queued). */
   started: number;
   /** An attempt of this chain is still queued. */
   queued: boolean;
@@ -1266,7 +1266,7 @@ function chainReports(
   routeOf: (node: number) => { at: string; inputs: number },
 ): ChainReport[] {
   return [...(target?.chains ?? [])]
-    .filter(([, chain]) => chain.started > 0)
+    .filter(([, chain]) => chain.started > 0 || chain.queued)
     .map(([key, chain]) => {
       const report = (route: Route): RouteReport => ({
         ...routeOf(route.node),
@@ -1286,10 +1286,10 @@ function chainReports(
         result:
           target?.reach != null && target.reach.label !== "chosen"
             ? "reached"
-            : chain.best === 0
-              ? "holds"
-              : chain.queued
-                ? "queued"
+            : chain.queued
+              ? "queued"
+              : chain.best === 0
+                ? "holds"
                 : chain.started >= MAX_CHAIN
                   ? "limit"
                   : "stopped",
@@ -1905,7 +1905,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    */
   const timeJobs: { node: number | null; start: number }[] = [];
   const chainAttempts: Attempt[] = [];
-  /** A chain's next session right after one that brought its value closer: these go before other attempts. */
+  /**
+   * A chain's next session along a route, right after a session of that chain: these go before other attempts, so that
+   * a route that brings the value closer is repeated at once. A chain's other sessions (from a storage's own session,
+   * or toward the condition once storage holds the value) wait their turn among the chain attempts.
+   */
   const repeatAttempts: Attempt[] = [];
   const clockAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
@@ -2560,6 +2564,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const chain = attempt.chain === undefined ? undefined : target.chains.get(attempt.chain);
     if (chain !== undefined) chain.queued = false;
     if (settled(target)) return;
+    if (chain !== undefined) chain.started += 1;
     attemptCount += 1;
     const work = session.operations;
     // A chain's next session comes from the storage it reached, so its states take no first place of their own.
@@ -2701,7 +2706,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * value closer before, to get closer still: the one with the most progress per operation, now and then another
    * (see {@link chooseRoute}); the storage's own session when no route is known. After a session that came no closer,
    * the other routes in turn; then the chain waits until play leaves a closer storage. `repeat`: right after a session
-   * of the chain, whose next one then goes first.
+   * of the chain, whose next one then goes first when it replays a route (see `repeatAttempts`).
    */
   const chainStep = (code: number, target: Target, goal: Goal, repeat = false): boolean => {
     if (goal.source.kind !== "storage" || settled(target)) return false;
@@ -2790,7 +2795,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       goal,
       ...(route === undefined ? {} : { route }),
     });
-    const queue = repeat ? repeatAttempts : chainAttempts;
     // A session of a route from the closest storage; the storage's own session when no route is known.
     const replay = (choice: { route: string; reason: string } | null): void => {
       const route = choice === null ? undefined : found.routes.get(choice.route)!;
@@ -2805,9 +2809,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         found.route = choice.route;
       }
       if (choice !== null) found.tried.add(choice.route);
-      found.started += 1;
       found.queued = true;
-      queue.push(fromBest(pathTo(nodes, nodes[route?.node ?? best.left.node]!), choice?.route));
+      (repeat && route !== undefined ? repeatAttempts : chainAttempts).push(
+        fromBest(pathTo(nodes, nodes[route?.node ?? best.left.node]!), choice?.route),
+      );
     };
     // A storage closer than the chain's best so far (not its first measure) is progress.
     if (best.distance < found.best && Number.isFinite(found.best)) {
@@ -2825,8 +2830,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         sessions: best.left.sessions,
         queued: true,
       });
-      found.started += 1;
-      queue.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
+      chainAttempts.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
       return true;
     }
     const noted = () => {
