@@ -399,22 +399,26 @@ A step that brings a state nearer to that region shares a lead toward it, as clo
 expansions; once the region is reached or its lead spent, the next largest region not tried yet is. It is off by
 default: on the units measured it gained nothing. Directed work (attempts and expansions in the first place) takes at
 most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
-of what steps cost. With `--no-depth-phases`, starting next visits takes at most another third, apart from it, from
-the storage of the first ten completed sessions, and a session number goes before the next one in the search order.
+of what steps cost. Without depth phases, starting next visits takes at most another third, apart from it, from the
+storage of the first ten completed sessions, and a session number goes before the next one in the search order.
 
-Depth phases (on by default) let the search decide how play work goes to session numbers, the depth of a session from
-a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the lines and
-condition ways those reach first) are measured as the run goes. The first session goes first. The next depth opens when
-the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its average,
-or has nothing left; only a depth that reached something new opens another, and only when a session of it left
-storage to start from (a completed one's; with `--quit-anywhere`, any). States whose step reached new code go first in any open depth, as without phases. Apart
-from those, a newly opened depth first gets a quarter of the work of the depth before it; then the open depth with the
-most gain per operation in the last quarter of its work gets play, and an eighth of play goes to
-the other open depths in turn, the one explored least first, so that an earlier depth gets work back when it gains
-again. A depth starts a next session when none of its open states reached new code: from the storage a completed
-session of the depth before left, the one with the most compared values (each compared key's value bucket, as cells
-read them) no session of that depth started from yet. Directed work and random outcomes keep their shares. The report
-gives, per session number, when it opened and its play work, gain, and next sessions (`search.phases`).
+Depth phases (`--depth-phases`, opt-in) let the search decide how play work goes to session numbers, the depth of a
+session from a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the
+lines and condition ways those reach first) are measured as the run goes. The first session goes first. The next depth
+opens when the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its
+average, or has nothing left; only a depth that reached something new opens another, and only when a session of it left
+storage to start from (a completed one's; with `--quit-anywhere`, any). States whose step reached new code go first in
+any open depth, as without phases. Apart from those, a newly opened depth first gets a quarter of the work of the depth
+before it; then the open depth with the most gain per operation in the last quarter of its work gets play, and an
+eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets work
+back when it gains again. A depth starts a next session when none of its open states reached new code, from storage a
+session of the depth before left: the one with the most compared values (each compared key's value bucket, as cells
+read them) no session of that depth started from yet, and while the depth has open states only one that adds such a
+value. Directed work and random outcomes keep their shares. The report gives, per session number, when it opened and
+its play work, gain, and next sessions (`search.phases`). They are opt-in because on the 13-unit gate (3 seeds, gate
+budgets) they gained where a first session levels off early (DisciplineClinic +4.5 points, BreatheAcademy +3.2) but cost
+units whose first session still gains: the second session opens on an early lull in the first, so jewell lost its trap
+loops and 2.3 points, and Domme3 and ToyExpanded 0.8.
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
@@ -599,7 +603,10 @@ node tools/explore-compare.ts <base-out> <candidate-out> [--favourite <unit>]...
 Each folder holds the reports of one run, or one subfolder per seed (`s1/`, `s2/`, ...). The first table has the
 coverage by seed, how the search stopped, states per second, and the gate: a unit fails when the candidate's mean is
 more than 1 pp below the base's lowest, when a seed the base exhausted is not exhausted at least as well, or when a crash
-or trap the base found is missing. A net change can hide a loss elsewhere, so the second table counts the lines and
+or trap the base found is missing (with how many base seeds found it). Which deep loops and crashes a seed reaches
+varies: a trap or crash the base found in one seed of three is a weak signature, so before a change is held for it, run
+more seeds of that unit on both sides (seeds 4 to 6) and compare how often each side finds it; the change passes when the
+candidate finds it about as often as the base. A net change can hide a loss elsewhere, so the second table counts the lines and
 condition ways each side visited and the other did not, per seed, and the lines consistently lost or gained (visited by
 one side in at least two thirds of the seeds and by the other in none), with their files and ranges and the search
 figures that help explain them (states, sessions, time steps, quit visits, traps, open states, the top hotspot). A

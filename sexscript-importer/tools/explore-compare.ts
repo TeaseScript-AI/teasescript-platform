@@ -244,7 +244,13 @@ function gateTable(base: Side, candidate: Side): string[] {
       const added = [...found("candidate", kind)].filter(
         (signature) => !found("base", kind).has(signature),
       );
-      if (lost.length > 0) fails.push(`lost ${kind} ${lost.join(", ")}`);
+      // How many base seeds found it: one seed in a few is a weak signature (see the README on seed variance).
+      const seeds = (signature: string) =>
+        `base ${runs.filter((run) => run.base[kind].includes(signature)).length} of ${runs.length} seeds`;
+      if (lost.length > 0)
+        fails.push(
+          `lost ${kind} ${lost.map((signature) => `${signature} (${seeds(signature)})`).join(", ")}`,
+        );
       if (added.length > 0) notes.push(`${unit}: new ${kind} ${added.join(", ")}`);
     }
     const rate = (side: "base" | "candidate") =>
