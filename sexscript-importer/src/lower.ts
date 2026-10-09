@@ -6714,6 +6714,8 @@ function lowerCallStatement(
       }));
     }
     case "playSound":
+      // A null file stopped every background sound, as stopSoundThreads() did (FirstTimeCuckold, tutorial).
+      if (args.length === 1 && isNullConstant(args[0])) return [{ kind: "stopAudio", span }];
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "playAudio",
         file: mediaFile(file, "sounds", node, context),
@@ -8180,8 +8182,8 @@ function lowerBackgroundSound(
     };
     return [{ kind: "if", condition: enough, then: [play], else: [], span }];
   }
-  // One pass is the plain form. A file computed at runtime that is null would have stopped all sounds; no corpus
-  // package computes a null one.
+  // One pass is the plain form. A file computed at runtime that is null would have stopped all sounds; ShockReflex can
+  // compute one, only right after a stop.
   const passes = repeatCount?.kind === "literal" && repeatCount.value === 1 ? null : repeatCount;
   return [{ kind: "playAudio", file, async: true, repeatCount: passes, span }];
 }
