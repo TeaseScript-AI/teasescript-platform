@@ -134,11 +134,6 @@ export interface LowerOptions {
   copiedImages?: ReadonlySet<string>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
   globalTypes?: ReadonlyMap<string, number>;
-  /**
-   * Whether the package stops all background sounds somewhere, so background sounds keep their handles. Without
-   * package context, the file itself decides.
-   */
-  stopsBackgroundSounds?: boolean;
   /** Functions whose result some caller uses (packageResultUses); without package context, the file decides. */
   resultUses?: ReadonlySet<string>;
   /** Source names of the package files in each directory, to check that a module loader's directory is complete. */
@@ -230,7 +225,6 @@ interface LowerContext {
   popupTimers: number;
   /** Names of generated variables, kept apart from each other and from authored variables. */
   generatedNames: Set<string>;
-  stopsBackgroundSounds: boolean;
   resultUses: ReadonlySet<string>;
   directoryFiles: ReadonlyMap<string, readonly string[]>;
   scriptPaths: ReadonlyMap<string, string> | null;
@@ -1433,7 +1427,6 @@ export function lowerParsedFile(
     switchValues: 0,
     popupTimers: 0,
     generatedNames: new Set(),
-    stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
     resultUses: options.resultUses ?? packageResultUses([file]),
     directoryFiles: options.directoryFiles ?? new Map(),
     scriptPaths: options.scriptPaths ?? null,
@@ -2569,7 +2562,6 @@ function lowerHelperMethod(
     unreachable: false,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
-    stopsBackgroundSounds: baseContext.stopsBackgroundSounds,
     resultUses: baseContext.resultUses,
     directoryFiles: baseContext.directoryFiles,
     scriptPaths: baseContext.scriptPaths,
@@ -6723,6 +6715,8 @@ function lowerCallStatement(
       }));
     }
     case "playSound":
+      // A null file stopped every background sound, as stopSoundThreads() did (FirstTimeCuckold, tutorial).
+      if (args.length === 1 && isNullConstant(args[0])) return [{ kind: "stopAudio", span }];
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "playAudio",
         file: mediaFile(file, "sounds", node, context),
@@ -6742,9 +6736,7 @@ function lowerCallStatement(
             "stopSoundThreads() must have no arguments.",
           ),
         ];
-      return [
-        { kind: "expression", expression: useHelper(context, "stopBackgroundSounds", []), span },
-      ];
+      return [{ kind: "stopAudio", span }];
     case "save":
       return lowerSave(args, node, span, context);
     case "send":
@@ -8147,11 +8139,9 @@ function lowerBackgroundSound(
   span: SourceSpan | null,
   context: LowerContext,
 ): IrStatement[] {
-  if (args.length === 1 && isNullConstant(args[0])) {
-    return [
-      { kind: "expression", expression: useHelper(context, "stopBackgroundSounds", []), span },
-    ];
-  }
+  // A null file stopped every background sound. stopAudio also stops the other sounds playing, which no corpus package
+  // that stops them has: its only async sounds are its background sounds.
+  if (args.length === 1 && isNullConstant(args[0])) return [{ kind: "stopAudio", span }];
   if (args.length < 1 || args.length > 2 || isNullConstant(args[0])) {
     return [
       unsupportedStatement(
@@ -8181,39 +8171,22 @@ function lowerBackgroundSound(
       typeof repeatCount.value === "number" &&
       Number.isInteger(repeatCount.value) &&
       repeatCount.value >= 1);
-  if (context.stopsBackgroundSounds || !fixedPasses) {
-    // Keep the handle so a later playBackgroundSound(null) can stop this sound; the helper also plays nothing for
-    // fewer than one pass, which `repeat: n times` rejects.
-    const passes = repeatCount ?? { kind: "literal", value: 1 };
-    return [
-      {
-        kind: "expression",
-        expression: useHelper(context, "playBackgroundSound", [file, passes]),
-        span,
-      },
-    ];
+  // A count computed at runtime plays nothing below one pass, which `repeat: n times` rejects (PainStacks' and
+  // ShockJack's shock length).
+  if (!fixedPasses) {
+    const play: IrStatement = { kind: "playAudio", file, async: true, repeatCount, span };
+    const enough: IrExpression = {
+      kind: "binary",
+      operator: ">=",
+      left: repeatCount!,
+      right: { kind: "literal", value: 1 },
+    };
+    return [{ kind: "if", condition: enough, then: [play], else: [], span }];
   }
-  // One pass is the plain form.
+  // One pass is the plain form. A file computed at runtime that is null would have stopped all sounds; ShockReflex can
+  // compute one, only right after a stop.
   const passes = repeatCount?.kind === "literal" && repeatCount.value === 1 ? null : repeatCount;
   return [{ kind: "playAudio", file, async: true, repeatCount: passes, span }];
-}
-
-/**
- * Whether any file stops all background sounds with playBackgroundSound(null) or stopSoundThreads() (owner decision
- * 2026-10-08): a package that never does plays each sound plainly and keeps no handles. A file computed at runtime that
- * is null would have stopped them too; no corpus package that never stops them computes a null one.
- */
-export function packageStopsBackgroundSounds(files: readonly ParsedGroovyFile[]): boolean {
-  let stops = false;
-  for (const file of files) {
-    walkAst(file.root, (node) => {
-      const call = node.kind === "methodCall" ? callParts(node) : null;
-      if (call === null || !call.inherited) return;
-      if (call.name === "stopSoundThreads") stops = true;
-      if (call.name === "playBackgroundSound" && isNullConstant(call.arguments[0])) stops = true;
-    });
-  }
-  return stops;
 }
 
 function lowerSave(

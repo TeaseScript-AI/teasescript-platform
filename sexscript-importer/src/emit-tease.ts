@@ -120,17 +120,19 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       return;
     case "playAudio": {
       const file = emitExpression(statement.file);
-      const handle = statement.handle === undefined ? "" : `let ${statement.handle} = `;
       const play = statement.video === true ? "playVideo" : "playAudio";
       if (statement.repeatCount === null) {
-        lines.push(`${pad}${handle}${play}${statement.async ? " async" : ""} ${file}`);
+        lines.push(`${pad}${play}${statement.async ? " async" : ""} ${file}`);
       } else {
         lines.push(
-          `${pad}${handle}${play}(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
+          `${pad}${play}(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
         );
       }
       return;
     }
+    case "stopAudio":
+      lines.push(`${pad}stopAudio`);
+      return;
     case "save": {
       // An ask keeps its compact form, grouped with its own speaker clause: `save (askText as system) as "key"`
       // (V30 §23).

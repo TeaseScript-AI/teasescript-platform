@@ -443,46 +443,6 @@ test(
   },
 );
 
-// DisciplineClinic Punish slap(): a one-pass spank sound per stroke. The background sound helper keeps the handles of
-// sounds still playing only, so a long punishment does not keep every finished stroke.
-test(
-  "the background sound helper keeps only the handles of sounds still playing",
-  { skip: "reason" in projectResult ? projectResult.reason : false },
-  () => {
-    if (!("runner" in projectResult)) return;
-    const source = [
-      emitTease({
-        sourceName: "sounds.groovy",
-        metadata: null,
-        statements: helperStatements(
-          new Set(["backgroundSounds", "playBackgroundSound", "stopBackgroundSounds"]),
-        ),
-        diagnostics: [],
-      }).trimEnd(),
-      "for it in 1..=40 {",
-      '  sexscriptLegacyPlayBackgroundSound("spank.wav", 1)',
-      "  wait 1.6",
-      "}",
-      'save sexscriptBackgroundSounds.length as "afterStrokes"',
-      'sexscriptLegacyPlayBackgroundSound("music.wav", 100)',
-      "wait 3",
-      'sexscriptLegacyPlayBackgroundSound("spank.wav", 1)',
-      'save sexscriptBackgroundSounds.length as "withMusic"',
-      "sexscriptLegacyStopBackgroundSounds()",
-      'save sexscriptBackgroundSounds.length as "afterStop"',
-      "exit",
-      "",
-    ].join("\n");
-    const storage = new Map<string, RuntimeValue>();
-    const result = projectResult.runner([{ path: "main.tease", source }], {}, { storage });
-    assert.deepEqual(
-      { status: result.status, failure: result.failure },
-      { status: "halted", failure: null },
-    );
-    assert.deepEqual(Object.fromEntries(storage), { afterStrokes: 1, withMusic: 2, afterStop: 0 });
-  },
-);
-
 // A legacy file test reads the package's files at conversion time: a literal path is true or false, a computed one is
 // looked up among the files below its fixed beginning, and a program never exists.
 test(

@@ -270,7 +270,8 @@ function literalWaitMs(wait: Extract<IrStatement, { kind: "wait" }>): number | n
 function readingCovers(statement: IrStatement | undefined): boolean {
   if (statement === undefined) return false;
   if (statement.kind === "say") return statement.instant !== true;
-  if (["showButton", "showImage", "hideImage", "playAudio"].includes(statement.kind)) return true;
+  if (["showButton", "showImage", "hideImage", "playAudio", "stopAudio"].includes(statement.kind))
+    return true;
   const value =
     statement.kind === "let" || statement.kind === "assign" || statement.kind === "save"
       ? statement.value

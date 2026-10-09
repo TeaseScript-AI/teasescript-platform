@@ -205,7 +205,6 @@ export type HelperName =
   | "switchButton"
   | "switchButtonId"
   | "tokenize"
-  | "backgroundSounds"
   | "concat"
   | "count"
   | "indexOf"
@@ -216,10 +215,8 @@ export type HelperName =
   | "max"
   | "menuOptions"
   | "min"
-  | "playBackgroundSound"
   | "random"
   | "shuffled"
-  | "stopBackgroundSounds"
   | "unique"
   | JavaHelperName;
 
@@ -257,8 +254,6 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
     needed.has("times")
   )
     needed.add("value");
-  if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
-  if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
     for (const dependency of javaHelperDependencies(name)) needed.add(dependency);
   return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
@@ -271,9 +266,6 @@ export function allHelperStatements(): IrStatement[] {
 
 const HELPER_ORDER: readonly HelperName[] = [
   "systemSpeaker",
-  "backgroundSounds",
-  "playBackgroundSound",
-  "stopBackgroundSounds",
   "random",
   "loadFirstTrue",
   "value",
@@ -569,78 +561,6 @@ function removeDeviceButton(device: IrExpression): IrStatement[] {
 }
 
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
-  // Legacy background sounds overlapped and playBackgroundSound(null) stopped them all; TeaseScript stops async
-  // media through its handle, so the handles of the sounds still playing are collected.
-  backgroundSounds: {
-    name: "sexscriptBackgroundSounds",
-    build: () => letS("sexscriptBackgroundSounds", { kind: "list", items: [] }),
-  },
-  playBackgroundSound: {
-    name: "sexscriptLegacyPlayBackgroundSound",
-    build: () =>
-      fn(
-        "sexscriptLegacyPlayBackgroundSound",
-        ["file", "passes"],
-        [
-          // A null file stopped all background sounds; fewer than one pass played nothing.
-          ifS(bin("==", v("file"), lit(null)), [
-            {
-              kind: "expression",
-              expression: {
-                kind: "call",
-                name: "sexscriptLegacyStopBackgroundSounds",
-                positional: [],
-                named: {},
-              },
-              span: null,
-            },
-            { kind: "return", value: null, span: null },
-          ]),
-          ifS(bin("<", v("passes"), lit(1)), [{ kind: "return", value: null, span: null }]),
-          {
-            kind: "playAudio",
-            file: v("file"),
-            async: true,
-            repeatCount: v("passes"),
-            handle: "sound",
-            span: null,
-          },
-          // Only a sound still playing or paused needs a stop later; a finished or stopped one is dropped, so a long
-          // session keeps no handle of a sound that has ended.
-          letS("playing", { kind: "list", items: [] }),
-          forS("kept", v("sexscriptBackgroundSounds"), [
-            ifS(
-              bin(
-                "or",
-                bin("==", prop(v("kept"), "state"), lit("running")),
-                bin("==", prop(v("kept"), "state"), lit("paused")),
-              ),
-              [add("playing", v("kept"))],
-            ),
-          ]),
-          add("playing", v("sound")),
-          set(v("sexscriptBackgroundSounds"), v("playing")),
-        ],
-      ),
-  },
-  stopBackgroundSounds: {
-    name: "sexscriptLegacyStopBackgroundSounds",
-    build: () =>
-      fn(
-        "sexscriptLegacyStopBackgroundSounds",
-        [],
-        [
-          forS("sound", v("sexscriptBackgroundSounds"), [
-            {
-              kind: "expression",
-              expression: { kind: "methodCall", target: v("sound"), name: "stop", arguments: [] },
-              span: null,
-            },
-          ]),
-          set(v("sexscriptBackgroundSounds"), { kind: "list", items: [] }),
-        ],
-      ),
-  },
   random: {
     // SexScript getRandom(max) computed (int) (Math.random() * (int) max): 0 for 0, toward zero for a negative
     // max, and 0..99 for null. randomInteger() rejects the empty range 0..0.

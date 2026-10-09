@@ -252,6 +252,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
       case "for":
         return [{ ...item, collection: expression(item.collection), body: statements(item.body) }];
       case "hideImage":
+      case "stopAudio":
       case "break":
       case "continue":
       case "exit":

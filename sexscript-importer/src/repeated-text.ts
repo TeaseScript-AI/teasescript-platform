@@ -327,6 +327,7 @@ function keepsText(statement: IrStatement): boolean {
     case "comment":
     case "blank":
     case "hideImage":
+    case "stopAudio":
       return true;
     case "wait":
       return !hasCall(statement.duration);
@@ -453,6 +454,7 @@ export function withoutRepeatedChainText<
     statement.kind === "comment" ||
     statement.kind === "blank" ||
     statement.kind === "hideImage" ||
+    statement.kind === "stopAudio" ||
     ((statement.kind === "wait" ||
       statement.kind === "showImage" ||
       statement.kind === "playAudio") &&
