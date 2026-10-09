@@ -2697,8 +2697,8 @@ Rules:
 
 ## 22. Stage image, audio, and video
 **Status:** Accepted (Owner decisions on [#445](https://github.com/TeaseScript-AI/teasescript-platform/issues/445)). The
-parser, compiler, deterministic runtime, and checkpoint foundation for image, audio, and video is implemented; Player
-image and audio integration is tracked in #446, and browser video playback is planned.
+parser, compiler, deterministic runtime, and checkpoint foundation for image, audio, and video is implemented; the
+Player shows images and plays audio (#446), and browser video playback is planned.
 
 ### Stage image
 
@@ -3275,10 +3275,11 @@ Rules:
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
-Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, and date
-and time values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a
-permanent language limit. The compiler rejects a default whose type is known and does not fit the declared type.
-Replacement-value recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
+Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, date and
+time values, and `script` references ([§29](#29-script-files-and-paths)), including nested `null`. Wider persistent-data
+support is not yet implemented; this subset is not a permanent language limit. The compiler rejects a default whose type
+is known and does not fit the declared type. Replacement-value recovery under
+[§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
 
@@ -3994,9 +3995,9 @@ English weekday name gives a compile warning. Values hold whole milliseconds.
 | Exact | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours` | Elapsed time; `24 h` is always 24 elapsed hours |
 | Calendar | `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same local clock time that many days, weeks, months, or years later, never a fixed number of hours |
 
-Both long forms are accepted for any number: `1 seconds` and `2 day`. `m` is not a unit, because it would be ambiguous
-between minutes and months. A week is 7 days and a year is 12 months. Adding months or years to a day that the target
-month lacks gives that month's last day: January 31 plus one month is February 28, or 29 in a leap year, and
+Both long forms are accepted for any number: `1 seconds` and `2 day`. `m` is not a duration unit, because it would be
+ambiguous between minutes and months. A week is 7 days and a year is 12 months. Adding months or years to a day that the
+target month lacks gives that month's last day: January 31 plus one month is February 28, or 29 in a leap year, and
 February 29 plus one year is February 28. Months and days are whole after normalizing: `0.5 years` is 6 months, while
 `1.5 days`, `1.5 weeks`, and `1 month * 1.5` are errors, at compile time when the values are known. Exact time keeps
 fractions.

@@ -203,7 +203,7 @@ over-limit data without truncation or partial state mutation.
 `askDate`, `askTime`, and `askDateTime` return date and time values from the Player's controls
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)).
 
-`choose` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; until union types (#504), one choice may not mix those value kinds.
+`choose` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; mixed value types are kept only by a place declared with a union type.
 
 A button or dropdown control supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the stored action. Manually typed choice input uses exact unambiguous visible-text matching.
 

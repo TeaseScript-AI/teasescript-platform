@@ -275,8 +275,8 @@ objects (owner decisions on #511). Interaction rules:
 - all compact options belong to one statement;
 - options are comma-separated;
 - identifiers and finite numeric literals are supported as values before `:` to preserve accepted V30 capability;
-- until union types (#504) allow mixed results in an explicitly union-typed variable, one `choose` uses one kind of
-  value before `:`: identifiers and numeric literals may not be mixed;
+- identifiers and numeric literals may be mixed; values of different types are kept only by a place declared with a
+  union type ([V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices));
 - buttons may repeat values and visible text because selecting a rendered control identifies one button;
 - manually submitted text uses exact visible-text matching without trimming, case folding, locale matching, or Unicode normalization;
 - when repeated visible text makes manual submission ambiguous, the typed attempt is invalid and the player must select a rendered control;
