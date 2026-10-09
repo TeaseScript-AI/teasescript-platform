@@ -522,7 +522,7 @@ test(
     };
     assert.deepEqual(
       timedStart(
-        'let took = getTimestamp().toSeconds()\nshowButton "Edge"\ntook = getTimestamp().toSeconds() - took\n' +
+        'let took = getAbsoluteDateTime().toSeconds()\nshowButton "Edge"\ntook = getAbsoluteDateTime().toSeconds() - took\n' +
           'if took < 5 {\n  say "Too fast."\n}\nexit\n',
       ),
       [
@@ -546,14 +546,14 @@ test(
     // Both clock reads kept in variables time the button between them; a read the variable lost times nothing.
     assert.deepEqual(
       timedStart(
-        'let a = getTimestamp().toSeconds()\nshowButton "One"\nlet b = getTimestamp().toSeconds()\n' +
+        'let a = getAbsoluteDateTime().toSeconds()\nshowButton "One"\nlet b = getAbsoluteDateTime().toSeconds()\n' +
           'if b - a < 5 {\n  say "Fast."\n}\nexit\n',
       ).at(-1),
       { kind: "button", label: "One", afterMs: 6000 },
     );
     assert.deepEqual(
       timedStart(
-        'let a = getTimestamp().toSeconds()\na = 0\nshowButton "Two"\nlet t = getTimestamp().toSeconds() - a\n' +
+        'let a = getAbsoluteDateTime().toSeconds()\na = 0\nshowButton "Two"\nlet t = getAbsoluteDateTime().toSeconds() - a\n' +
           'if t < 5 {\n  say "Fast."\n}\nexit\n',
       ),
       [{ kind: "button", label: "Two" }],
@@ -562,7 +562,7 @@ test(
     for (const update of ["took = 0", "took = took * 2"])
       assert.deepEqual(
         timedStart(
-          'let a = getTimestamp().toSeconds()\nshowButton "Three"\nlet took = getTimestamp().toSeconds() - a\n' +
+          'let a = getAbsoluteDateTime().toSeconds()\nshowButton "Three"\nlet took = getAbsoluteDateTime().toSeconds() - a\n' +
             `${update}\nif took < 5 {\n  say "Fast."\n}\nexit\n`,
         ),
         [{ kind: "button", label: "Three" }],
@@ -1258,9 +1258,9 @@ test(
     // The window the player must come back in is read by a later session: next sessions start in it too.
     assert.deepEqual(
       missed(
-        'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
+        'let last = load "last", default: 0\nlet away = getAbsoluteDateTime().toSeconds() - last\nshowButton "Go"\n' +
           'if last > 0 {\n  if away >= 7200 and away <= 18000 {\n    say "Welcome back."\n  }\n  exit\n}\n' +
-          'save getTimestamp().toSeconds() as "last"\nexit\n',
+          'save getAbsoluteDateTime().toSeconds() as "last"\nexit\n',
       ),
       [],
     );
@@ -1287,7 +1287,7 @@ test(
       ],
       [
         "window",
-        'let start = getTimestamp()\nshowButton "Go"\nlet took = (getTimestamp() - start) / 1 s\n' +
+        'let start = getAbsoluteDateTime()\nshowButton "Go"\nlet took = (getAbsoluteDateTime() - start) / 1 s\n' +
           'if took >= 300 and took < 600 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
@@ -1299,15 +1299,15 @@ test(
       ],
       [
         "exact elapsed",
-        'let start = getTimestamp().toSeconds()\nshowButton "Go"\nlet took = getTimestamp().toSeconds() - start\n' +
+        'let start = getAbsoluteDateTime().toSeconds()\nshowButton "Go"\nlet took = getAbsoluteDateTime().toSeconds() - start\n' +
           'if took == 300 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
       ["session start", 'if getDateTime().hour >= 22 {\n  say "Hit."\n}\nexit\n', true],
       [
         "updated straight on",
-        'let start = getTimestamp().toMilliseconds()\nshowButton "Go"\n' +
-          'let took = getTimestamp().toMilliseconds() - start\ntook = took / 1000\nif took > 600 {\n  say "Hit."\n}\nexit\n',
+        'let start = getAbsoluteDateTime().toMilliseconds()\nshowButton "Go"\n' +
+          'let took = getAbsoluteDateTime().toMilliseconds() - start\ntook = took / 1000\nif took > 600 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
       [
@@ -1323,20 +1323,20 @@ test(
         "global function sexscriptLegacyCompare(left, right) {\n  if left == null {\n    if right == null {\n" +
           "      return 0\n    }\n    return -1\n  }\n  if right == null {\n    return 1\n  }\n  if left < right {\n" +
           '    return -1\n  }\n  if left > right {\n    return 1\n  }\n  return 0\n}\nshowButton "Check"\n' +
-          'if sexscriptLegacyCompare(getTimestamp().toSeconds(), 1790943000) == 0 {\n  say "Hit."\n}\nexit\n',
+          'if sexscriptLegacyCompare(getAbsoluteDateTime().toSeconds(), 1790943000) == 0 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
       [
         "time taken against a bound from the clock",
-        "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
-          'showButton "Check"\nlet took = getTimestamp().toSeconds() - start\ntook = took * 2\nlet bound = limit()\n' +
+        "function limit {\n  return getAbsoluteDateTime().toSeconds() - 1790946000\n}\nlet start = getAbsoluteDateTime().toSeconds()\n" +
+          'showButton "Check"\nlet took = getAbsoluteDateTime().toSeconds() - start\ntook = took * 2\nlet bound = limit()\n' +
           'if took <= bound and took >= 0 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
       [
         "time kept through a function",
-        'function stamp {\n  return getTimestamp()\n}\nlet start = stamp()\nshowButton "Go"\n' +
-          'if (getTimestamp() - start) / 1 s >= 300 {\n  say "Hit."\n}\nexit\n',
+        'function stamp {\n  return getAbsoluteDateTime()\n}\nlet start = stamp()\nshowButton "Go"\n' +
+          'if (getAbsoluteDateTime() - start) / 1 s >= 300 {\n  say "Hit."\n}\nexit\n',
         true,
       ],
       [
@@ -1394,10 +1394,10 @@ test(
       ["", 'showButton "Bye"\n'],
     ]) {
       const source =
-        'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
+        'let last = load "last", default: 0\nlet away = getAbsoluteDateTime().toSeconds() - last\nshowButton "Go"\n' +
         `if last > 0 {\n  if away < 7200 {\n    say "Too soon."\n${outside}` +
         `  } else if away > 18000 {\n    say "Too late."\n${outside}  } else {\n    say "Welcome back."\n  }\n}\n` +
-        `save getTimestamp().toSeconds() as "last"\n${bye}exit\n`;
+        `save getAbsoluteDateTime().toSeconds() as "last"\n${bye}exit\n`;
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       const result = explore(engine, plan, {
@@ -1422,9 +1422,9 @@ test(
     // the player: it keeps forward time.
     {
       const source =
-        "function limit {\n  return getTimestamp().toSeconds() - 1790946000\n}\nlet start = getTimestamp().toSeconds()\n" +
-        'showButton "Check"\nlet bound = limit()\nif (getTimestamp().toSeconds() - start) <= bound and ' +
-        '(getTimestamp().toSeconds() - start) >= 0 {\n  say "Hit."\n}\nexit\n';
+        "function limit {\n  return getAbsoluteDateTime().toSeconds() - 1790946000\n}\nlet start = getAbsoluteDateTime().toSeconds()\n" +
+        'showButton "Check"\nlet bound = limit()\nif (getAbsoluteDateTime().toSeconds() - start) <= bound and ' +
+        '(getAbsoluteDateTime().toSeconds() - start) >= 0 {\n  say "Hit."\n}\nexit\n';
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       const instructions = Array.isArray(plan.instructions)
@@ -1456,7 +1456,7 @@ test(
       ] as const) {
         const source =
           `${helpers}showButton "Start"\nlet scriptText = "dc"\nlet last = ${load}\nshowButton "Go"\n` +
-          'if getTimestamp().toSeconds() - last > 3600 {\n  say "Hit."\n}\nexit\n';
+          'if getAbsoluteDateTime().toSeconds() - last > 3600 {\n  say "Hit."\n}\nexit\n';
         const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
         assert.ok(isRecord(plan));
         const instructions = Array.isArray(plan.instructions)
@@ -2071,10 +2071,10 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const source =
-      'let last = load "visit", default: 0\nfunction hoursSince(stamp) {\n  return (getTimestamp().toSeconds() - stamp) / 3600\n}\n' +
+      'let last = load "visit", default: 0\nfunction hoursSince(stamp) {\n  return (getAbsoluteDateTime().toSeconds() - stamp) / 3600\n}\n' +
       'showButton "Hello"\nif last == 0 {\n  say "First visit."\n} else if hoursSince(last) < 2 {\n  say "Back so soon?"\n' +
       '} else if hoursSince(last) > 48 {\n  say "Where have you been?"\n} else {\n  say "Welcome back."\n}\n' +
-      'save getTimestamp().toSeconds() as "visit"\nexit\n';
+      'save getAbsoluteDateTime().toSeconds() as "visit"\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
     assert.ok(isRecord(plan));
     const result = explore(engine, plan, {
@@ -2116,7 +2116,7 @@ test(
           path: "main.tease",
           source:
             "function orderOf(a, b) {\n  if a < b {\n    return -1\n  }\n  if a > b {\n    return 1\n  }\n  return 0\n}\n" +
-            `showButton "Wait"\nif orderOf(getTimestamp().toSeconds(), ${deadline}) == 0 {\n  say "Now."\n}\nexit\n`,
+            `showButton "Wait"\nif orderOf(getAbsoluteDateTime().toSeconds(), ${deadline}) == 0 {\n  say "Now."\n}\nexit\n`,
         },
       ],
       { builtins: [] },

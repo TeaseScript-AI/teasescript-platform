@@ -205,7 +205,14 @@ export type Source =
   | { readonly kind: "variable"; readonly name: string; readonly counter: boolean };
 
 /** Getters of the current date and time. */
-const CLOCK_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
+// getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
+const CLOCK_GETTERS = new Set([
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getTimestamp",
+  "getAbsoluteDateTime",
+]);
 
 interface Flow {
   asks: Set<number>;
