@@ -13,6 +13,13 @@
       "category": "e",
       "reason": "Three read storage keys are saved by nothing, so the branches that need them never ran: cumPermission tests toys.ringgag, which the toy chest saves as toys.ring_gag (trainTorture reads that), and buttplug_On, which cumPermission itself saves as cumpermission.buttplug_On; ritualNight tests clothes.spreader_bar, which the toy chest saves as toys.spreader_bar. Read the keys the scripts save.",
       "diff": "storage-key-typos.diff"
+    },
+    {
+      "id": "deny-orgasm-check",
+      "layer": "source",
+      "category": "e",
+      "reason": "The pick-or-dick choice skips to the failure while an orgasm denial runs, but tests true==loadInteger(\"Jewell.deny_Orgasm\"): nothing saves that capitalised key (the scripts save jewell.deny_Orgasm, an expiry time in seconds), and a number never equals true, so a denial never applied. Test the expiry as trainStrapon does: loadInteger(\"jewell.deny_Orgasm\")!=null && loadInteger(\"jewell.deny_Orgasm\")>getTime().",
+      "diff": "deny-orgasm-check.diff"
     }
   ]
 }
