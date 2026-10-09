@@ -773,6 +773,57 @@ test(
       across.every((need) => !/[!=]= true/u.test(need)),
       JSON.stringify(across),
     );
+    // Copies nested deeper than are followed ask nothing either; a call's result is what the function returns, not
+    // every value its temporary held; and a key the condition names stays that key, not its pattern.
+    const deep = nested(`${"true and (".repeat(9)}pick(0) > 2${")".repeat(9)}`);
+    assert.ok(
+      deep.every((need) => !/[!=]= true/u.test(need)),
+      JSON.stringify(deep),
+    );
+    const gated = (condition: string) => {
+      const written =
+        'function ready(ignore) {\n  return load("gate", default: false)\n}\nsave false as "gate"\n' +
+        'save true as "flag"\nlet item = "knife"\nsave true as "gear.knife"\nshowButton "Check"\n' +
+        `if ${condition} {\n  say "Through."\n}\nexit\n`;
+      const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(compiled));
+      return explore(engine, compiled, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 2000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", written]]),
+        diagnostics: [],
+      }).coverage.unvisitedBranches;
+    };
+    const called = gated('ready(0) and load("flag", default: false)').map((entry) =>
+      entry.parts.map((part) => part.needs),
+    );
+    assert.ok(
+      called.some((needs) => needs.includes("stored gate == true")),
+      JSON.stringify(called),
+    );
+    assert.ok(
+      called.every(
+        (needs) =>
+          !(
+            needs.includes("stored flag == true") &&
+            needs.some((need) => need.startsWith("stored gate"))
+          ),
+      ),
+      JSON.stringify(called),
+    );
+    const keyed = gated('ready(0) and load("gear.${item}", default: false)');
+    assert.ok(
+      keyed.every(
+        (entry) =>
+          !(entry.reason ?? "").includes("gear.*") &&
+          entry.parts.every((part) => !part.needs.includes("gear.*")),
+      ),
+      JSON.stringify(keyed.map((entry) => entry.parts)),
+    );
   },
 );
 

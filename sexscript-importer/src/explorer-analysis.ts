@@ -474,19 +474,20 @@ export class DataFlow {
   /**
    * What a temporary holds at an instruction, as far as the nearest store before it in the same function tells: the
    * expression stored (a condition `a and b` lowers to a temporary that holds `a`, then `b`, or another temporary for a
-   * part of it); null when the nearest is the result of a call, or none is found within a short way back. A jump may skip
-   * that store, so it says what kind of value the temporary holds, not which.
+   * part of it), or for a call's result `{ kind: "callResult", functionId, call }` with the call's index, which
+   * {@link flowOf} reads as the function's result; null when none is found within a short way back. A jump may skip that store, so it says what
+   * kind of value the temporary holds, not which.
    */
-  heldAt(temporaryId: number, at: number): unknown {
+  heldAt(temporaryId: number, at: number): Data | null {
     const owner = this.functionAt(at);
     for (let index = at - 1; index >= 0 && index >= at - HELD_WINDOW; index -= 1) {
       const instruction = record(this.#instructions[index]);
       // Another function's code, or another file's: the `end` that closes a file's own code.
       if (this.functionAt(index) !== owner || instruction.kind === "end") return null;
       if (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId)
-        return instruction.value;
+        return isRecord(instruction.value) ? instruction.value : null;
       if (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId)
-        return null;
+        return { kind: "callResult", functionId: instruction.functionId, call: index };
     }
     return null;
   }
@@ -515,6 +516,16 @@ export class DataFlow {
         if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
         const call = this.#callBefore(value.temporaryId, at);
         const named = call === null ? [] : this.#keysCalled(call, pattern, new Map(), HELPER_DEPTH);
+        if (named.length === 0) keys.add(null);
+        for (const key of named) keys.add(key);
+      } else if (value.kind === "callResult" && typeof value.call === "number") {
+        if (this.#functions.get(Number(value.functionId))?.keys.has(pattern) !== true) return;
+        const named = this.#keysCalled(
+          this.#instructions[value.call]!,
+          pattern,
+          new Map(),
+          HELPER_DEPTH,
+        );
         if (named.length === 0) keys.add(null);
         for (const key of named) keys.add(key);
       }
@@ -671,6 +682,9 @@ export class DataFlow {
         }
       } else if (value.kind === "call" && CLOCK_GETTERS.has(calleeName(value) ?? "")) {
         flow.clock = true;
+      } else if (value.kind === "callResult" && typeof value.functionId === "number") {
+        const known = this.#functions.get(value.functionId);
+        if (known !== undefined) merge(flow, known);
       }
       for (const [key, item] of Object.entries(value))
         if (key !== "span" && key !== "typeCheck") walk(item);
@@ -1144,22 +1158,37 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
       : source;
   // A temporary's truth compared with `true` or `false` is read through what the nearest stores before the condition
-  // put there, also through a temporary copied into it. A truth the code computes, as a short-circuit `a and b` or
-  // `a or b` lowers to, holds what the way taken left there: no stored value to make true, so the atom is left out and
-  // the keys and clock it reads stay dependencies (below). A value the code tests (`load(...) and f()`) is the atom's
-  // subject instead of the temporary, which merges every value it held. A call's result stays as it was.
+  // put there, also through a temporary copied into it, as the temporary itself merges every value it ever held. A truth
+  // the code computes, as a short-circuit `a and b` or `a or b` lowers to, holds what the way taken left there: no stored
+  // value to make true, so the atom is left out and what it reads stays a dependency (below). A value the code tests
+  // (`load(...) and f()`), or a call's result, is the atom's subject instead. A chain of copies too long to follow is
+  // left out too.
+  const roots: unknown[] = [];
+  let resolved = false;
   const atoms = atomsFor(condition, wanted, true).flatMap((atom): Atom[] => {
     let subject = record(atom.subject);
-    if (at === undefined || atom.against !== undefined || typeof atom.constant !== "boolean")
+    if (
+      at === undefined ||
+      atom.against !== undefined ||
+      typeof atom.constant !== "boolean" ||
+      subject.kind !== "temporary"
+    ) {
+      roots.push(atom.subject);
       return [atom];
-    let held: unknown = null;
+    }
+    let held: Data | null = null;
     for (let depth = 0; depth < 8 && subject.kind === "temporary"; depth += 1) {
       if (typeof subject.temporaryId !== "number") break;
       held = flow.heldAt(subject.temporaryId, at);
-      if (held === null) return [atom];
+      if (held === null) {
+        roots.push(atom.subject);
+        return [atom];
+      }
       subject = record(held);
     }
-    if (held === null) return [atom];
+    resolved = true;
+    if (subject.kind === "temporary") return [];
+    roots.push(held);
     return comparesTruth(held) ? [] : [{ ...atom, subject: held }];
   });
   for (const atom of atoms) {
@@ -1212,9 +1241,12 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       goals.push({ source, candidates, comparison });
     }
   }
-  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`.
-  for (const found of flow.sourcesOf(condition)) {
-    const source = keyed(found, condition);
+  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`; with a temporary's
+  // truth read through, of what it was read through to.
+  for (const [found, expression] of (resolved ? roots : [condition]).flatMap((root) =>
+    flow.sourcesOf(root).map((found) => [found, root] as const),
+  )) {
+    const source = keyed(found, expression);
     if (source.kind !== "storage" && source.kind !== "clock") continue;
     const known = goals.some(
       (goal) =>
