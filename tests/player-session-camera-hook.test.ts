@@ -22,8 +22,16 @@ interface CameraHost {
   readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
   readonly hostError: Readonly<Ref<string | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
+  readonly permanentButtons: Readonly<Ref<readonly { readonly buttonId: number }[]>>;
   reportHostError(error: unknown): void;
   prepareInput(): true | Promise<boolean>;
+  pressPermanentButton(buttonId: number): Promise<void>;
+  editSavedData(edit: {
+    readonly key: string;
+    readonly value: SerializableRuntimeValue;
+    readonly expected: SerializableRuntimeValue | undefined;
+  }): Promise<{ readonly kind: string; readonly live?: boolean }>;
+  setDebugTracing(on: boolean): void;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -249,4 +257,72 @@ test("a Start that throws after the camera opened releases the camera", async (c
   assert.equal(host.hostError.value, "TypeError");
   assert.equal(tracks.length, 1);
   assert.equal(tracks[0]?.readyState, "ended");
+});
+
+test("input admitted just before a Player exception does not run after it", async (context) => {
+  stubBrowser(context);
+  context.mock.method(console, "error", () => {});
+  const host = mount(context, { capabilities: { camera: false } });
+  host.prepare(() =>
+    createPlayerRuntimeSession(
+      'showPermanentButton "Help" {\n  say "pressed", instant\n}\nshowButton "Done"\nexit',
+    ),
+  );
+  await host.activate();
+  const [button] = host.permanentButtons.value;
+  assert.ok(button);
+  // The press waits for its input to go ahead, and the error comes meanwhile.
+  const pressing = host.pressPermanentButton(button.buttonId);
+  host.reportHostError(new TypeError("A component failed."));
+  await pressing;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(
+    host.session.value?.transcriptEntries.map((entry) => entry.text),
+    [],
+  );
+});
+
+test("after a Player exception, a Debug edit does not wait for the dropped save, which is not issued again", async (context) => {
+  stubBrowser(context);
+  context.mock.method(console, "error", () => {});
+  const stored = new Map<string, SerializableRuntimeValue>();
+  const writes: [string, SerializableRuntimeValue][] = [];
+  let finishScriptSave!: () => void;
+  const provider: ScriptStorageProvider = {
+    scope: "test",
+    load: async () => [...stored].map(([key, value]) => ({ key, value })),
+    write: (key, value) => {
+      writes.push([key, value]);
+      const store = () => void stored.set(key, value);
+      // The script's own save settles only when the test says so; the edit's at once.
+      if (writes.length > 1) return Promise.resolve(store());
+      return new Promise<void>((resolve) => (finishScriptSave = () => resolve(store())));
+    },
+    replace: async () => {},
+    clear: async () => {},
+  };
+  const host = mount(context, { scriptStorage: provider, capabilities: { camera: false } });
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    createPlayerRuntimeSession('save 1 as "count"\nsay "after save", instant\nexit', {
+      persistentScriptStorage: true,
+    }),
+  );
+  await host.activate();
+  assert.deepEqual(writes, [["count", 1]]);
+  host.reportHostError(new TypeError("A component failed."));
+  finishScriptSave();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(await host.editSavedData({ key: "count", value: 42, expected: 1 }), {
+    kind: "saved",
+    live: false,
+  });
+  // Publishing the stopped session again, as Debug's value trace does, issues no write.
+  host.setDebugTracing(true);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(writes, [
+    ["count", 1],
+    ["count", 42],
+  ]);
+  assert.equal(stored.get("count"), 42);
 });

@@ -650,7 +650,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session,
     (current) => {
       const write = current && pendingPlayerRuntimeStorageWrite(current.state);
-      if (!scriptStorage || !write) return;
+      // A stopped session issues no more writes, also when it is published again, such as by Debug's value trace.
+      if (!scriptStorage || !write || stopped.value) return;
       const sessionGeneration = generation.value;
       const flight = `${sessionGeneration}:${write.actionId}`;
       if (writesInFlight.has(flight)) return;
@@ -718,7 +719,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.state) !== null;
   // Edits that wait for the session's write to settle; each published session or new run wakes them to look again.
   const writeSettledWaiters = new Set<() => void>();
-  watch([session, generation], () => {
+  // A stop wakes them too: the write they wait for is never acknowledged then.
+  watch([session, generation, stopped], () => {
     for (const resolve of writeSettledWaiters) resolve();
     writeSettledWaiters.clear();
   });
@@ -800,6 +802,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       savedDataRevision.value++;
       while (
         !retired() &&
+        !stopped.value &&
         session.value !== null &&
         pendingPlayerRuntimeStorageWrite(session.value.state) !== null
       )
@@ -807,7 +810,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } finally {
       scriptWritesStored.delete(stored);
     }
-    if (retired()) return { kind: "saved", live: false };
+    if (retired() || stopped.value) return { kind: "saved", live: false };
     if (stored.has(key)) return { kind: "overtaken" };
     if (!liveSession()) return { kind: "saved", live: false };
     const latest = session.value!;
@@ -1533,7 +1536,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       rewindWork.value = null;
     }
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
-    if (disposed || generation.value !== owner || !inspecting.value) return false;
+    if (disposed || generation.value !== owner || !inspecting.value || stopped.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
     savedDataRevision.value++;
     rewindAdopted?.();
@@ -1559,7 +1562,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   );
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
   async function pressPermanentButton(buttonId: number) {
-    if (!(await prepareInput())) return;
+    // The session may stop while input waits to go ahead.
+    if (!(await prepareInput()) || stopped.value) return;
     const current = clock.observe();
     if (current === null) return;
     const result = pressPlayerRuntimePermanentButton(current, buttonId);

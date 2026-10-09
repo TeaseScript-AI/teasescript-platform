@@ -72,7 +72,7 @@ export function useDevelopmentTime(
     try {
       // Skipping is input to a state Debug's rewind restored: it adopts the state first.
       if (!(await player.prepareInput())) return;
-      if (disposed || player.generation.value !== generation) return;
+      if (disposed || player.generation.value !== generation || player.stopped.value) return;
       // Time that really elapsed is observed first, with the media progress actually played.
       const start = player.observe();
       const targetMs = start === null ? null : target(start);
