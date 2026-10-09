@@ -2172,7 +2172,13 @@ class TypeChecker {
         }[] = [{ literal, holders: candidates.map((candidate) => candidate.element) }];
         for (let next = 0; next < pending.length; next += 1) {
           const { literal: current, holders } = pending[next]!;
-          const elements = union(holders);
+          const held = holders.flatMap((holder) =>
+            members(resolved(nonNullType(holder))).map(resolved),
+          );
+          // A holder of values the compiler cannot know, such as `list`, may hold anything below it.
+          if (!held.every(isKnown)) continue;
+          // Built only for an element that needs it, so levels of nested literals do not compare whole types again.
+          let elements: StaticType | undefined;
           for (const element of literalElements(current)) {
             const nested = unwrap(element);
             if (
@@ -2181,13 +2187,13 @@ class TypeChecker {
               nested.kind === "dictLiteral"
             ) {
               const kind = literalCollectionKind(nested);
-              const inner = holders
-                .flatMap((holder) => members(resolved(nonNullType(holder))).map(resolved))
+              const inner = held
                 .filter((member): member is CollectionType => member.kind === kind)
                 .map((member) => member.element);
               if (inner.length > 0) pending.push({ literal: nested, holders: inner });
               continue;
             }
+            elements ??= union(holders);
             const unfit = this.#unfitResults(element, this.#typeOf(element), elements);
             if (unfit === undefined) continue;
             const text = operationText(element);
@@ -4551,11 +4557,10 @@ class TypeChecker {
       )
         return outcome.type;
       const possible = this.#possibleResults(operands, expression, result);
-      // What an inner operation can give works with nothing the other operand may be, so this always fails.
-      if (possible.results.length > 0 || possible.narrowed === null) {
-        this.#unknownOperations.set(expression, possible.results);
-        return outcome.type;
-      }
+      if (possible.results.length > 0) this.#unknownOperations.set(expression, possible.results);
+      // What an inner operation can give works with nothing the other operand may be, so this always fails. Left
+      // unrecorded, an operation whose operand already failed passes that on without a message of its own.
+      if (possible.results.length > 0 || possible.narrowed === null) return outcome.type;
       failed = possible.narrowed;
     } else failed = outcome.failed;
     const command = this.#timeOperands.get(expression);
@@ -4606,11 +4611,17 @@ class TypeChecker {
         ? [expression.left, expression.right]
         : [expression.operand];
     let narrowed = false;
+    // An operand that is an operation the check did not record already reported why it fails.
+    let failed = false;
     const [lefts, rights] = operands.map((operand, index) =>
       members(resolved(nonNullTypeForUse(operand))).flatMap((member) => {
         if (isKnown(member)) return [member];
-        const given = this.#unknownOperations.get(unwrap(expressions[index]!));
-        if (given === undefined) return OPERAND_KINDS;
+        const operation = unwrap(expressions[index]!);
+        const given = this.#unknownOperations.get(operation);
+        if (given === undefined) {
+          failed ||= operation.kind === "binaryExpression" || operation.kind === "unaryExpression";
+          return OPERAND_KINDS;
+        }
         narrowed = true;
         return given;
       }),
@@ -4624,9 +4635,10 @@ class TypeChecker {
       }
     return {
       results,
-      narrowed: narrowed
-        ? [lefts!, rights].flatMap((side) => (side === undefined ? [] : [union(side)]))
-        : null,
+      narrowed:
+        narrowed && !failed
+          ? [lefts!, rights].flatMap((side) => (side === undefined ? [] : [union(side)]))
+          : null,
     };
   }
 

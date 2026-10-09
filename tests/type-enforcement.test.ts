@@ -778,6 +778,17 @@ test("an operation of unknown result keeps the types it can give, also inside an
   assert.deepEqual(mismatches(inFunction('say -(x + "a")')), [
     ["TSV043", "'-' needs a number or a duration, but this is text (string).", '-(x + "a")'],
   ]);
+  // An operand that already failed has its own message, and the operations around it add none.
+  for (const failing of [
+    '("a" * x) * (z + "a")',
+    '(z + "a") * ("a" * x)',
+    '(("a" * x) * (z + "a")) + 1',
+  ])
+    assert.deepEqual(
+      mismatches(inFunction(`say ${failing}`)).map(([code, , text]) => [code, text]),
+      [["TSV043", '"a" * x']],
+      failing,
+    );
   // Nested literals are checked against what the members' elements hold at their depth.
   assert.deepEqual(
     mismatches(inFunction("let ys: string[][] | boolean[][] = [[x / 4]]", "say ys")),
@@ -799,6 +810,19 @@ test("an operation of unknown result keeps the types it can give, also inside an
       ["TSV041"],
       store,
     );
+  // Below a member that may hold anything, such as `list`, nothing is proven to fail: the report names the leaf that
+  // no member holds.
+  assert.deepEqual(
+    mismatches(
+      inFunction(
+        "let ys: (list | (string[] set))[] | (string[][] | (date[] set))[] = [[[x / 4]], set[[z / 2]]]",
+        "say ys",
+      ),
+    )
+      .filter(([code]) => code === "TSV041")
+      .map(([, , text]) => text),
+    ["z / 2"],
+  );
   // A result that may fit is checked when the script runs.
   assert.deepEqual(
     mismatches(
