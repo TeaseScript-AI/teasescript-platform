@@ -891,7 +891,7 @@ test(
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    const run = (source: string) => {
+    const run = (source: string, followChains = false) => {
       const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
       assert.ok(isRecord(plan));
       return explore(engine, plan, {
@@ -901,6 +901,7 @@ test(
         maxStates: 100_000,
         sources: new Map(),
         diagnostics: [],
+        followChains,
       });
     };
     // Every hundred strokes the explorer records a state with nothing to do but wait; a stroke's place in the loop is
@@ -909,6 +910,12 @@ test(
       run(
         'let pick = choose punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
           `for stroke in 1..=${count} {\n  wait 1 s\n}\nsay "Done."\nexit\n`,
+      );
+    const strokesFollowed = (count: number) =>
+      run(
+        'let pick = choose punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
+          `for stroke in 1..=${count} {\n  wait 1 s\n}\nsay "Done."\nexit\n`,
+        true,
       );
     const short = strokes(500);
     const long = strokes(1000);
@@ -923,6 +930,18 @@ test(
       endless.traps.map((trap) => trap.kind),
       ["loop"],
     );
+    // Following such runs at once still ends in a run that never ends, within its share, and finds the same trap.
+    const followed = run(
+      'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  exit\n}\nwhile true {\n  wait 1 s\n}\n',
+      true,
+    );
+    assert.equal(followed.search.stoppedBy, "operations");
+    assert.deepEqual(
+      followed.traps.map((trap) => trap.kind),
+      ["loop"],
+    );
+    // And the run of strokes is followed to what comes after it, as without following.
+    assert.equal(strokesFollowed(1000).coverage.percent, long.coverage.percent);
   },
 );
 

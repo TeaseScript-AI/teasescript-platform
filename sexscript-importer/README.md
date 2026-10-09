@@ -660,7 +660,8 @@ Known limits:
   - following a chain at once, pass after pass, within a sixteenth of all operations: only for chains a step entered
     with new code, it never followed Domme3's, as `spank()` is code every punishment shares; for every chain, it reached
     Domme3 858–873 in two of three seeds, with Domme3's coverage unchanged, but cost DisciplineClinic 57 lines
-    consistently (`Punish.tease` 5471–5501, behind its own punishment chains) and jewell 0.7 points.
+    consistently (`Punish.tease` 5471–5501, behind its own punishment chains) and jewell 0.7 points. This one is kept
+    as `--follow-chains` (opt-in), for confirming content behind long automatic chains: the only measured way there.
 - A step settles at most 1,000 automatic operations (`MAX_AUTO_OPERATIONS`). An automatic run longer than that, such as
   more than a thousand camera requests in a row, ends the step with the request still pending, and the state is
   reported as stuck although settling could go on.

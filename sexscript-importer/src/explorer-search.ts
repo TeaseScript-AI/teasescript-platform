@@ -123,6 +123,11 @@ const CHOSEN_SHARE = 1 / 16;
  */
 const DEPTH_EXPLORE_SHARE = 1 / 8;
 /**
+ * With chain following: the share of all runtime operations that following long runs of waits may take. A sixteenth, as
+ * for chosen random outcomes; past it, such states are ranked as any other.
+ */
+const FORCED_SHARE = 1 / 16;
+/**
  * Until stalled: the operations without progress after which a run stops, at least, and more per coverable line; and
  * how many times the longest stretch without progress that progress still ended the window grows to.
  */
@@ -336,6 +341,13 @@ export interface ExploreOptions {
    * one or one that keeps finding something comes back sooner, and a new cell comes first. Off by default.
    */
   readonly effectRanking?: boolean;
+  /**
+   * Chain following: a state a step left after a hundred waits with nothing else to do (`Step.forced`) goes on waiting
+   * in the same expansion, pass after pass, until something else can happen or a state seen before comes, as waiting
+   * is no choice; within {@link FORCED_SHARE} of all runtime operations, past which such states are ranked as any other.
+   * It reaches content behind long automatic chains at the cost of other content. Off by default.
+   */
+  readonly followChains?: boolean;
   /**
    * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
    * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
@@ -2210,6 +2222,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const withinShare = () => directedWork <= (session.operations - replayWork) * DIRECTED_SHARE;
   const withinNextShare = () => nextWork <= (session.operations - replayWork) * NEXT_SHARE;
   const withinChosenShare = () => chosenWork <= (session.operations - replayWork) * CHOSEN_SHARE;
+  /** With chain following: runtime operations of long runs of waits followed, within {@link FORCED_SHARE}. */
+  let forcedWork = 0;
+  const withinForcedShare = () => forcedWork <= (session.operations - replayWork) * FORCED_SHARE;
   /**
    * Whether directed search is done with a target: a way only play with a chosen random outcome reached is still aimed
    * at by play without one, whose states are not limited by {@link CHOSEN_SHARE}.
@@ -2553,6 +2568,33 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           },
         });
       }
+    }
+  };
+
+  /**
+   * With chain following: follows a long run of waits from the state `first` its step left (see
+   * {@link ExploreOptions.followChains}): each state with nothing to do but wait goes on waiting at once, until something
+   * else can happen, a state seen before comes, or the share is spent. The states passed are expanded on the way.
+   */
+  const followWaits = (first: Node, firstStep: Step): void => {
+    let current = first;
+    let last = firstStep;
+    while (last.forced && current.status === "open" && withinForcedShare() && !outOfBudget()) {
+      const runtime = last.runtime;
+      const offered = session.options(runtime, runtime.view(), () =>
+        runtime.exportTrustedSnapshot(),
+      );
+      if (offered.length !== 1 || offered[0]!.kind !== "wait") return;
+      const work = session.operations;
+      const next = step(current, runtime, offered[0]!);
+      forcedWork += session.operations - work;
+      if (next === null) return;
+      current.status = "expanded";
+      const known = nodes.length;
+      const reached = transition(current, offered[0]!, next, current.start, null);
+      if (reached.id < known) return;
+      current = reached;
+      last = next;
     }
   };
 
@@ -4041,12 +4083,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         lead.remaining += 1;
         refunded = true;
       }
-      transition(node, input, next, node.start, lead);
+      const child = transition(node, input, next, node.start, lead);
       if (lastStepNew || closer >= 0 || guided) {
         if (!productive) at.productive += 1;
         productive = true;
         at.inputs.add(inputKey(input));
       }
+      if (options.followChains === true && next.forced && !node.chosen && child.status === "open")
+        followWaits(child, next);
     }
     if (turn !== null && !leading)
       charge(turn.depth, session.operations - workBefore, gainCount - gainBefore, turn.exploring);
