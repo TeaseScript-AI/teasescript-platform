@@ -154,7 +154,11 @@ test("statistics report empty lists, values they cannot read, and percentages ou
       "median(...) needs a list of objects for by:, not a list that holds a number.",
     ],
     ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a number."],
-    ["sum(dynamic([1e308, 1e308]))", "TSR036", "sum(...) gives a number too large to represent."],
+    [
+      "sum(dynamic([1e308, 1e308]))",
+      "TSR036",
+      "sum(...) gives a number too large to represent. Use smaller values.",
+    ],
   ];
   for (const [call, code, message] of cases)
     assert.deepEqual(failure(`${DYNAMIC}say ${call}\nexit`), [code, message], call);
@@ -409,7 +413,7 @@ test("linearRegression and predict report too few points, one x, and values of t
     [
       'linearRegression(dynamic([{ x: 1, y: 2 }, { x: 1, y: 3 }]), x: "x", y: "y")',
       "TSR036",
-      "linearRegression(...) has no result: every point has the same x, so no line fits.",
+      "linearRegression(...) has no result: every point has the same x, so the line's slope cannot be determined. Use points with at least two different x values.",
     ],
     [
       'linearRegression(dynamic([{ x: toTime("08:00"), y: 2 }, { x: toTime("09:00"), y: 3 }]), x: "x", y: "y")',

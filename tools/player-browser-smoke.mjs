@@ -4184,7 +4184,7 @@ async function debugExportScenario(cdp, origin, profile) {
       `JSON.stringify([document.querySelector('[data-session-error-code]').textContent.trim(), document.querySelector('[data-session-error-source]').textContent, document.querySelector('[data-session-error-failing]').textContent, !!document.querySelector('[data-session-error-calls]')])`,
     ),
     JSON.stringify([
-      "TSR036: Numeric operation produced a non-finite result.",
+      "TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0 first.",
       "let result = 1 / zero",
       "1 / zero",
       false,

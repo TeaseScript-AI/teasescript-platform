@@ -19,6 +19,7 @@ import type {
   InstructionPlan,
   PlanSourceLocation,
   PlanTag,
+  RangeExpressionPlan,
   TagQueryExpressionPlan,
   TagQueryStepPlan,
   TypeCheckPlan,
@@ -104,6 +105,7 @@ import {
   negateDurationParts,
   scaleDurationParts,
   storedDuration,
+  ZERO_DIVISOR,
   type DurationParts,
 } from "../duration.js";
 import {
@@ -933,8 +935,18 @@ export class Evaluator {
               expression.operator === "+" ? parts : negateDurationParts(parts),
             );
           } else {
-            const number = this.#number(result.value, expression.operand.span);
-            value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
+            if (typeof result.value !== "number") {
+              const operand = operandLabel(expression.operand);
+              throw notNumber(
+                `'${expression.operator}${operand ?? ""}'`,
+                operand,
+                "",
+                result.value,
+                expression.operand.span,
+              );
+            }
+            // Negating a finite number gives a finite number.
+            value = expression.operator === "+" ? result.value : -result.value;
           }
           break;
         case "binary":
@@ -978,7 +990,7 @@ export class Evaluator {
             continue;
           }
           if (frame.stage === 1) {
-            frame.value = this.#number(result.value, expression.start.span);
+            frame.value = rangeBound(expression, "start", result.value);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.end));
             continue;
@@ -988,7 +1000,7 @@ export class Evaluator {
             kind: "range",
             // EVIDENCE: invariant: range stage 1 validates and retains the numeric start.
             start: frame.value as number,
-            end: this.#number(result.value, expression.end.span),
+            end: rangeBound(expression, "end", result.value),
             inclusive: expression.inclusive,
           };
           break;
@@ -1664,22 +1676,30 @@ export class Evaluator {
       if (expression.operator === ">") return left > right;
       return left >= right;
     }
-    const leftNumber = this.#number(left, expression.left.span);
-    const rightNumber = this.#number(right, expression.right.span);
+    const leftNumber = operandNumber(expression, "left", left);
+    const rightNumber = operandNumber(expression, "right", right);
+    let result: number;
     switch (expression.operator) {
       case "+":
-        return this.#finite(leftNumber + rightNumber, expression.span);
+        result = leftNumber + rightNumber;
+        break;
       case "-":
-        return this.#finite(leftNumber - rightNumber, expression.span);
+        result = leftNumber - rightNumber;
+        break;
       case "*":
-        return this.#finite(leftNumber * rightNumber, expression.span);
+        result = leftNumber * rightNumber;
+        break;
       case "/":
-        return this.#finite(leftNumber / rightNumber, expression.span);
+        result = leftNumber / rightNumber;
+        break;
       case "%":
-        return this.#finite(leftNumber % rightNumber, expression.span);
+        result = leftNumber % rightNumber;
+        break;
       default:
         throw fault("TSR035", "Unsupported binary operation.", expression.span);
     }
+    if (!Number.isFinite(result)) throw noArithmeticResult(expression, left, right);
+    return result;
   }
 
   /**
@@ -1716,16 +1736,17 @@ export class Evaluator {
     const span = expression.span;
     const operator = expression.operator;
     const result = (parts: DurationParts | string): SerializableRuntimeDuration => {
+      if (parts === ZERO_DIVISOR) throw noArithmeticResult(expression, left, right, "TSR009");
       if (typeof parts === "string")
         throw fault("TSR009", `Operator '${operator}': ${parts}.`, span);
       // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
-      if (!Number.isSafeInteger(parts.months) || !Number.isSafeInteger(parts.days))
-        throw fault(
-          "TSR036",
-          `Operator '${operator}': the result has too many calendar days or months to represent.`,
-          span,
-        );
-      return storedDuration({ ...parts, milliseconds: this.#finite(parts.milliseconds, span) });
+      if (
+        !Number.isSafeInteger(parts.months) ||
+        !Number.isSafeInteger(parts.days) ||
+        !Number.isFinite(parts.milliseconds)
+      )
+        throw noArithmeticResult(expression, left, right);
+      return storedDuration(parts);
     };
     if (isDuration(left) && isDuration(right)) {
       const [a, b] = [durationParts(left), durationParts(right)];
@@ -1736,15 +1757,16 @@ export class Evaluator {
         case "-":
           return result(addDurationParts(a, b, -1));
         case "/": {
-          if (exact) return this.#finite(a.milliseconds / b.milliseconds, span);
-          const ratio = durationRatio(a, b);
+          const ratio = exact ? a.milliseconds / b.milliseconds : durationRatio(a, b);
+          if (ratio === ZERO_DIVISOR) throw noArithmeticResult(expression, left, right, "TSR009");
           if (typeof ratio === "string")
             throw fault(
               "TSR009",
               `${formatDuration(a)} cannot be divided by ${formatDuration(b)}: ${ratio}.`,
               span,
             );
-          return this.#finite(ratio, span);
+          if (!Number.isFinite(ratio)) throw noArithmeticResult(expression, left, right);
+          return ratio;
         }
         case "<":
         case "<=":
@@ -1775,7 +1797,9 @@ export class Evaluator {
     }
     throw fault(
       "TSR009",
-      `Operator '${operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
+      ["<", "<=", ">", ">="].includes(operator)
+        ? `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use a duration on both sides.`
+        : `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
       span,
     );
   }
@@ -3248,17 +3272,6 @@ export class Evaluator {
       throw fault("TSR025", `List index ${index} is outside the valid range.`, span);
   }
 
-  #number(value: SerializableRuntimeValue, span: SourceSpan): number {
-    if (typeof value !== "number") throw fault("TSR027", "Expected a numeric value.", span);
-    return value;
-  }
-
-  #finite(value: number, span: SourceSpan): number {
-    if (!Number.isFinite(value))
-      throw fault("TSR036", "Numeric operation produced a non-finite result.", span);
-    return value;
-  }
-
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
       return fault("TSR031", error.message, span);
@@ -3342,6 +3355,143 @@ function missingKey(
     `Dictionary has no key ${shown}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
     span,
   );
+}
+
+/** How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. */
+function operandLabel(plan: ExpressionPlan): string | null {
+  let current = plan;
+  while (current.kind === "group") current = current.expression;
+  if (current.kind === "literal")
+    return typeof current.value === "number" ? String(current.value) : null;
+  return planLabel(current);
+}
+
+/** How the source spells `left operator right`, when it spells both operands, or `null`. */
+function binaryLabel(expression: BinaryExpressionPlan): string | null {
+  const left = operandLabel(expression.left);
+  const right = operandLabel(expression.right);
+  return left === null || right === null ? null : `${left} ${expression.operator} ${right}`;
+}
+
+/** An operand of `expression` as a number, or `TSR027`, which names the operand where the source spells it. */
+function operandNumber(
+  expression: BinaryExpressionPlan,
+  side: "left" | "right",
+  value: SerializableRuntimeValue,
+): number {
+  if (typeof value === "number") return value;
+  const label = binaryLabel(expression);
+  throw notNumber(
+    label === null ? `'${expression.operator}'` : `'${label}'`,
+    operandLabel(expression[side]),
+    ` on its ${side} side`,
+    value,
+    expression[side].span,
+  );
+}
+
+/** A bound of `range` as a number, or `TSR027`, which names the range and the bound. */
+function rangeBound(
+  range: RangeExpressionPlan,
+  bound: "start" | "end",
+  value: SerializableRuntimeValue,
+): number {
+  if (typeof value === "number") return value;
+  const start = operandLabel(range.start);
+  const end = operandLabel(range.end);
+  throw notNumber(
+    start === null || end === null
+      ? "A range"
+      : `'${start}${range.inclusive ? "..=" : ".."}${end}'`,
+    operandLabel(range[bound]),
+    ` as its ${bound}`,
+    value,
+    range[bound].span,
+  );
+}
+
+/**
+ * `TSR027`: `subject` needs a number for the operand the source spells `operand`, or else `place`, but got `value`. The
+ * fix depends on the value: a null check, a conversion of numeric text, or another value.
+ */
+function notNumber(
+  subject: string,
+  operand: string | null,
+  place: string,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): RuntimeFault {
+  const received =
+    typeof value === "string"
+      ? `text (string) ${quotedText(messageText(value))}`
+      : typeof value === "boolean"
+        ? `${value} (boolean)`
+        : describeRuntimeValue(value);
+  const fix =
+    value === null
+      ? `Check that ${operand === null ? "the value" : `'${operand}'`} is not null before using it.`
+      : typeof value === "string" && numberFromText(value) !== undefined
+        ? "Convert the text with toNumber(...) first."
+        : "Use a number instead.";
+  return fault(
+    "TSR027",
+    `${subject} needs a number${operand === null ? place : ` for '${operand}'`}, but received ${received}. ${fix}`,
+    span,
+  );
+}
+
+/**
+ * Why an arithmetic step has no finite result: a division or remainder by zero, or a number or duration too large. It
+ * names the operands as the source spells them, where the plan still does, and shows their values.
+ */
+function noArithmeticResult(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  code = "TSR036",
+): RuntimeFault {
+  const { operator } = expression;
+  const label = binaryLabel(expression);
+  const values = `${operandText(left)} ${operator} ${operandText(right)}`;
+  const subject = label === null ? values : `'${label}'`;
+  if ((operator === "/" || operator === "%") && isZero(right)) {
+    const divisor = operandLabel(expression.right);
+    const zero = operandText(right);
+    const cause = divisor === null ? "" : ` because '${divisor}' is ${zero}`;
+    return fault(
+      code,
+      `${operator === "/" ? "Division" : "Remainder"} by zero: ${subject} has no result${cause}. Check that ${divisor === null ? "the divisor" : `'${divisor}'`} is not ${zero} first.`,
+      expression.span,
+    );
+  }
+  // A duration divided by a duration is a number, and any other step with a duration gives a duration.
+  const what =
+    (isDuration(left) || isDuration(right)) &&
+    !(operator === "/" && isDuration(left) && isDuration(right))
+      ? "a duration too long"
+      : "a number too large";
+  return fault(
+    code,
+    `${label === null ? values : `${subject} is ${values}, which`} gives ${what} to represent. Use smaller values.`,
+    expression.span,
+  );
+}
+
+/** An operand's kind, with the value of a number or duration, such as `a duration (1 s)`. */
+function kindAndValue(value: SerializableRuntimeValue): string {
+  return typeof value === "number" || isDuration(value)
+    ? `${describeRuntimeValue(value)} (${operandText(value)})`
+    : describeRuntimeValue(value);
+}
+
+/** A number or duration operand as a message shows it. */
+function operandText(value: SerializableRuntimeValue): string {
+  if (typeof value === "number") return String(withoutNegativeZero(value));
+  return isDuration(value) ? formatDuration(durationParts(value)) : describeRuntimeValue(value);
+}
+
+function isZero(value: SerializableRuntimeValue): boolean {
+  return value === 0 || (isDuration(value) && durationFamily(durationParts(value)) === "zero");
 }
 
 /** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */

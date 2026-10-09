@@ -285,7 +285,9 @@ the anchor in a worker and compares each result and the final state. It reports 
 the first divergence with its source location and calls (1), an incomplete export (2), an unsupported version, for
 which a checkout of the recorded build is needed (3), an invalid export (4), or a timeout (`--timeout`, default 60 s;
 5). Exact replay covers the engine path; browser and device failures are diagnosed from their recorded reports, which
-replay substitutes for the devices.
+replay substitutes for the devices. The final state is compared exactly, failure messages included, so an export from a
+build whose engine differs, such as one with other error wording, can diverge. Replay it with a checkout of its recorded
+build.
 
 Debugger history may snapshot selected boundaries; this does not imply that production execution persists every internal
 instruction. Simulation is debugger tooling when execution uses disposable or test state, not an editor semantic.
