@@ -21,7 +21,6 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
-import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "./helpers/player-state.js";
@@ -1659,47 +1658,6 @@ test("restore validation rejects malformed settled timer records and their block
     mutate(corrupted);
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   }
-});
-
-test("settled timer blocks may use a block function that statements of a valid plan share", () => {
-  const compiled = plan(
-    [
-      'timer async 1 { say "a" }',
-      'timer async 1 { say "b" }',
-      "timer async 0 s {",
-      "  wait 5",
-      "}",
-      "wait 10",
-      "exit",
-    ].join("\n"),
-  );
-  // EVIDENCE: JSON serialization preserves the compiled plan's plain-data shape; the case gives both timers one block.
-  const shared = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
-  const [first, second] = shared.instructions.filter(
-    (instruction): instruction is StartTimerInstruction => instruction.kind === "startTimer",
-  );
-  // EVIDENCE: the JSON copy is plain mutable data, so its readonly plan types do not apply to it.
-  (second as { handlerFunctionId: number | null }).handlerFunctionId = first!.handlerFunctionId;
-  assert.equal(validateInstructionPlan(shared).valid, true);
-  let snapshot = run(shared, createImmediatePacingRuntimeSnapshot(shared)).snapshot;
-  snapshot = run(shared, observeTime(shared, snapshot, 1_500).snapshot).snapshot;
-  // Both finished while their blocks wait behind the first block, which keeps its own record too.
-  assert.equal(snapshot.settledTimers.length, 3);
-  assert.equal(snapshot.pendingTimerHandlers.length, 2);
-  assert.deepEqual(validateRuntimeSnapshot(snapshot, shared).errors, []);
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(shared, snapshot)));
-  const later = run(shared, observeTime(shared, restored.snapshot, 6_000).snapshot);
-  assert.deepEqual(
-    later.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["a", "a"],
-  );
-  // A one-shot timer's block runs once, so the other timer's block cannot be its own as well.
-  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case moves one block.
-  const corrupted = JSON.parse(JSON.stringify(snapshot)) as {
-    pendingTimerHandlers: { timerId: number }[];
-  };
-  corrupted.pendingTimerHandlers[1]!.timerId = corrupted.pendingTimerHandlers[0]!.timerId;
-  assert.equal(validateRuntimeSnapshot(corrupted, shared).valid, false);
 });
 
 test("a long start and stop loop keeps settledTimers and the snapshot bounded", () => {

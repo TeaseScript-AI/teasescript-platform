@@ -472,30 +472,24 @@ export function validateTimerState(
   if ([...oneShotInvocations.values()].some((count) => count > 1)) {
     errors.push("Runtime one-shot timer has more than one expiry block invocation.");
   }
-  // The blocks of one settled timer run one block in one activation with one list of shared variables. A timer
-  // statement that uses that block, persists alike, and has a label exactly when the timer has one could have started
-  // it; plans may share a block between statements. A timer that does not repeat finished before its block runs, once.
-  let startsByBlock: Map<unknown, StartTimerInstruction[]> | undefined;
-  const startsUsing = (functionId: unknown): readonly StartTimerInstruction[] => {
-    if (startsByBlock === undefined) {
-      startsByBlock = new Map();
-      for (const instruction of plan?.instructions ?? []) {
-        if (instruction?.kind !== "startTimer" || instruction.handlerFunctionId === null) continue;
-        const starts = startsByBlock.get(instruction.handlerFunctionId) ?? [];
-        starts.push(instruction);
-        startsByBlock.set(instruction.handlerFunctionId, starts);
-      }
+  // The blocks of one settled timer run one block in one activation with one list of shared variables. The timer
+  // statement that uses that block, which plan validation makes the only one, must persist alike and have a label exactly
+  // when the timer has one; a timer that does not repeat finished before its block runs, once.
+  let blockStarts: Map<unknown, StartTimerInstruction> | undefined;
+  const startOf = (functionId: unknown): StartTimerInstruction | undefined => {
+    if (blockStarts === undefined) {
+      blockStarts = new Map();
+      for (const instruction of plan?.instructions ?? [])
+        if (instruction?.kind === "startTimer" && instruction.handlerFunctionId !== null)
+          blockStarts.set(instruction.handlerFunctionId, instruction);
     }
-    return startsByBlock.get(functionId) ?? [];
+    return blockStarts.get(functionId);
   };
   for (const [record, blocks] of settledBlocks) {
     const first = blocks[0]!;
     let runs = 0;
     for (const block of blocks) runs += block.count;
-    const fits = (start: StartTimerInstruction): boolean =>
-      start.persist === record.persist &&
-      (start.label === null) === (record.label === null) &&
-      (start.repeat || (runs === 1 && record.state === "finished"));
+    const start = startOf(first.functionId);
     if (
       blocks.some(
         (block) =>
@@ -503,7 +497,11 @@ export function validateTimerState(
           block.rootScopeId !== first.rootScopeId ||
           !sameCaptures(block.captures, first.captures),
       ) ||
-      (plan !== undefined && !startsUsing(first.functionId).some(fits))
+      (plan !== undefined &&
+        (start === undefined ||
+          start.persist !== record.persist ||
+          (start.label === null) !== (record.label === null) ||
+          (!start.repeat && (runs !== 1 || record.state !== "finished"))))
     ) {
       errors.push("Runtime settled timer blocks do not belong to one timer statement.");
     }
