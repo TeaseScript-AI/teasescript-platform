@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "progress-bar-spans",
+      "layer": "source",
+      "category": "b",
+      "reason": "ProgressBar builds its gauge's HTML across statements: m starts as an opening <font color='blue'>, the step i+1 closes it and opens <font color='white'>, and the end closes that. Message markup spans cannot cross statements, so each piece settles on its own and the gauge would show 30 blocks without its colours (before, it showed the colour tags as text). The loop now collects the blue and the white blocks first and one expression writes each colour around its blocks; the text shown without the gauge is one blue text too.",
+      "diff": "progress-bar-spans.diff"
+    }
+  ]
+}
