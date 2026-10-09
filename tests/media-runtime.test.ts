@@ -407,7 +407,7 @@ test("seeks clamp, skip jumped cues, fire a landing cue once playback proceeds, 
       "  }",
       "}",
       "m.position = 2 s",
-      'say "seek ${m.position}"',
+      'say "seek ${m.position}", instant',
       "wait 1",
       "m.remaining = 0 s",
       'say "after end ${m.position} ${m.elapsed}"',
@@ -1049,6 +1049,159 @@ test("stop() cancels a cue block that is queued and not yet started", () => {
   session.load(1, 1_000).at(1_000, [1, 1_000]);
   assert.deepEqual(session.said(), ["stopped"]);
   assert.equal(session.snapshot.pendingTimerHandlers.length, 0);
+});
+
+/** How each media and each wait on media settled, in event order. */
+function mediaSettlements(session: Session): string[] {
+  return session.events.flatMap((event) =>
+    event.kind === "actionCompleted" && event.settlement.actionKind === "media"
+      ? [`${event.settlement.mediaId} ${event.settlement.settlementKind}`]
+      : event.kind === "actionCompleted" && event.settlement.actionKind === "mediaPlayback"
+        ? [`wait ${event.settlement.mediaId} ${event.settlement.outcome}`]
+        : [],
+  );
+}
+
+test("stopAudio stops running and paused audio in start order and leaves finished audio and video", () => {
+  const session = new Session(
+    [
+      'let a = playAudio async repeat "a.mp3"',
+      'let b = playAudio async "b.mp3"',
+      'let c = playAudio async "c.mp3" {',
+      "  finish {",
+      '    say "c finished"',
+      "  }",
+      "}",
+      'let v = playVideo async repeat "v.mp4"',
+      "b.pause()",
+      "wait 2",
+      "stopAudio",
+      'say "${a.state} ${a.position} ${b.state} ${b.position} ${c.state} ${v.state}"',
+      "stopAudio",
+      'say "${v.state}"',
+      "exit",
+    ].join("\n"),
+  );
+  session.load(1, 10_000).load(2, 10_000).load(3, 1_000).load(4, 10_000);
+  session.at(2_000, [1, 2_000], [3, 1_000], [4, 2_000]);
+  assert.deepEqual(session.said(), [
+    "c finished",
+    "stopped 2 s stopped 0 s finished running",
+    "running",
+  ]);
+  // Each sound settles like stop() on its handle, in the order the sounds started; a second stopAudio finds none.
+  assert.deepEqual(
+    mediaSettlements(session).filter((settlement) => !settlement.startsWith("wait")),
+    ["3 finished", "1 stopped", "2 stopped"],
+  );
+  assert.deepEqual(session.warnings(), []);
+  assert.equal(session.snapshot.status, "halted");
+});
+
+test("stopAudio cancels queued cue blocks, and finish never runs", () => {
+  const session = new Session(
+    [
+      'let m = playAudio async "m.mp3" {',
+      "  at 500 ms {",
+      '    say "never: cue"',
+      "  }",
+      "  finish {",
+      '    say "never: finish"',
+      "  }",
+      "}",
+      "timer async 400 ms {",
+      "  wait 200 ms",
+      "  stopAudio",
+      '  say "${m.state}"',
+      "}",
+      "wait 2",
+      "exit",
+    ].join("\n"),
+  );
+  // The timer block waits from 400 ms to 600 ms; the cue at 500 ms queues behind it and is dropped by stopAudio.
+  session.load(1, 1_000).at(1_000, [1, 1_000]).at(2_000);
+  assert.deepEqual(session.said(), ["stopped"]);
+  assert.equal(session.snapshot.status, "halted");
+});
+
+test("stopAudio in a timer block ends a blocking play, which continues when the block returns", () => {
+  // Like a failed load, or a blocking video that a block replaces, the stopped sound releases the script's wait.
+  const session = new Session(
+    [
+      "timer async 1 {",
+      "  stopAudio",
+      '  say "stopped"',
+      "}",
+      'playAudio "long.mp3" {',
+      "  finish {",
+      '    say "never"',
+      "  }",
+      "}",
+      'say "after"',
+      "exit",
+    ].join("\n"),
+  );
+  session.load(1, 60_000).at(1_000, [1, 1_000]);
+  assert.deepEqual(session.said(), ["stopped", "after"]);
+  assert.deepEqual(mediaSettlements(session), ["1 stopped", "wait 1 stopped"]);
+  assert.equal(session.snapshot.status, "halted");
+});
+
+test("stopAudio waits for message pacing on the story path, but not inside a timer block", () => {
+  const story = new Session(
+    [
+      'let m = playAudio async "m.mp3"',
+      'say "Listen."',
+      "stopAudio",
+      'say "${m.state}"',
+      "exit",
+    ].join("\n"),
+    { pacing: true },
+  );
+  story.load(1, 60_000);
+  assert.equal(story.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.equal(story.media(1)?.state, "running");
+  story.skip();
+  assert.deepEqual(story.said(), ["Listen.", "stopped"]);
+
+  const interrupt = new Session(
+    [
+      'let m = playAudio async "m.mp3"',
+      "timer async 1 {",
+      '  say "Now."',
+      "  stopAudio",
+      "}",
+      "wait 10",
+      "exit",
+    ].join("\n"),
+    { pacing: true },
+  );
+  interrupt.load(1, 60_000).at(1_000, [1, 1_000]);
+  assert.equal(interrupt.media(1)?.state, "stopped");
+});
+
+test("stopAudio resumes equivalently from every checkpoint boundary", () => {
+  assertRuntimeResumeEquivalent(
+    [
+      'let a = playAudio async repeat "a.mp3" {',
+      "  at 250 ms {",
+      '    say "a ${a.position}"',
+      "  }",
+      "}",
+      'let b = playAudio async "b.mp3"',
+      "b.pause()",
+      'let v = playVideo async repeat "v.mp4"',
+      "timer async 1500 ms {",
+      "  stopAudio",
+      '  say "${a.state} ${b.state} ${v.state}"',
+      "}",
+      'playAudio(file: "c.mp3", repeat: 3 times)',
+      'say "after ${v.state}"',
+      "stopAudio",
+      "exit",
+    ].join("\n"),
+    { mediaDurationMs: 1_000 },
+  );
 });
 
 test("restore validation keeps elapsed and sample history coherent with scene time", () => {

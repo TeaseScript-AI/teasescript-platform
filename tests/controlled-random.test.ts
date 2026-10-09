@@ -487,6 +487,38 @@ test("a builtin the unit called before a pause is not called again when it resum
   assert.deepEqual(said(drive(scenario, "pauseCheckpoint", natural)), said(plain));
 });
 
+test("a restore without the builtins resumes a draw after a builtin's recorded call, and refuses a new call", () => {
+  const resumedWithout = (source: string) => {
+    const plan = compileValidPlan(source, { builtins: ["counter"] });
+    const session = createFreshRuntimeSession(
+      plan,
+      {},
+      { capabilities: { builtins: { counter: () => 10 } }, randomControl: {} },
+    );
+    session.run();
+    const paused = session.view().randomDraw!;
+    const restored = restoreRuntimeSession(JSON.parse(JSON.stringify(session.exportCheckpoint())));
+    const resumed = restored.resumeRandomDraw({
+      drawId: paused.drawId,
+      outcome: { kind: "number", value: 6 },
+    });
+    assert.deepEqual(resumed.outcome, { kind: "resolved", forced: true }, source);
+    return { restored, resumed };
+  };
+  // The counter() before the draw returns its recorded result, so the restored session needs no counter.
+  const recorded = resumedWithout('say "${counter() + randomInteger(1..=6)}", instant\nexit');
+  assert.deepEqual(
+    recorded.resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["16"],
+  );
+  assert.equal(recorded.restored.view().status, "halted");
+  // The counter() after it is a new call, which a session without the builtin refuses.
+  const unrecorded = resumedWithout(
+    'say "${counter() + randomInteger(1..=6) + counter()}", instant\nexit',
+  );
+  assert.equal(unrecorded.restored.view().failure?.code, "TSR011");
+});
+
 test("a change before a draw in the same instruction happens once, with its warning", () => {
   const scenario = SCENARIOS.changeBeforeDraw!();
   const paused = drive(scenario, "pause", forced);

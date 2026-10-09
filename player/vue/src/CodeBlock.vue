@@ -347,7 +347,7 @@ async function copy() {
   color: var(--theme-syntax-operator);
 }
 .code-block-mark {
-  text-decoration: underline 2px var(--theme-accent-focus);
+  text-decoration: underline 2px var(--theme-accent-mark);
   text-underline-offset: 3px;
 }
 /* The tools float top right over the code as the title bar's control group: one pill of its translucent material with

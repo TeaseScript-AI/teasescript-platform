@@ -98,7 +98,7 @@ function checkpointWithSnapshot(
 }
 
 test("older pacing gate promotes after a newer delay settlement and resumes prepared output once", () => {
-  const compiled = plan('say "first"\nwait 1 s\nsay "second"\nexit');
+  const compiled = plan('say "first"\nwait 1 s\nsay "second"\nexit', {}, ["TSV060"]);
   const initial = run(compiled, createFreshRuntimeSnapshot(compiled));
   const pacing = initial.snapshot.backgroundActions[0];
   const delay = initial.snapshot.foregroundAction;
@@ -915,7 +915,7 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   });
   const backgroundTimed = observeTime(waitPlan, withWait.snapshot, 1_800);
 
-  const shortWaitPlan = plan('say "first"\nwait 1 s\nexit');
+  const shortWaitPlan = plan('say "first"\nwait 1 s\nexit', {}, ["TSV060"]);
   const shortWait = run(shortWaitPlan, createFreshRuntimeSnapshot(shortWaitPlan));
   const delaySettled = observeTime(shortWaitPlan, shortWait.snapshot, 1_000);
 

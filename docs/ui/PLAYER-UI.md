@@ -818,6 +818,13 @@ Standard keyboard behavior is:
 
 - `Enter` submits;
 - `Shift+Enter` inserts a newline;
+- Space in the empty composer activates the preselected button: a `showButton`, or the button that `prefill:` of
+  `choose` or `askBoolean` preselects; without one it does nothing, and while a text, number, or date field waits
+  it types. A focused button keeps its own Space: it activates that button, and a focused form toggle flips without
+  submitting the form;
+- Enter, in the input or on Send, and that Space act only on a fresh press, one that began after the interaction appeared and is not a held key's
+  repeat, so the Space that skips a message never also answers the button that appears after it, and a held Enter
+  never submits the next field;
 - a future user preference may invert or otherwise refine that choice;
 - whitespace-only ordinary submissions are rejected;
 - the maintained default hint is `Type your response…` when an interaction does not provide its own hint. An explicit
@@ -829,11 +836,11 @@ Standard keyboard behavior is:
 `askText`, `askNumber`, and `askInteger` use the composer as their active answer field; `askInteger` asks for a numeric
 keyboard. `askDate`, `askTime`, and `askDateTime` replace the composer's text field with the browser's date, time, or
 date-and-time control, which submits ISO text, and show the hint beside it. These native controls cover the years 0001
-through 9999; a default in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
+through 9999; a prefill in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
 Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
-new field. A default answer starts as the composer text,
+new field. A prefill starts as the composer text,
 which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
-composer shows the default again, and unsent edits are not kept.
+composer shows the prefill again, and unsent edits are not kept.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
 request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
@@ -867,7 +874,8 @@ used, such as on a page that is not a secure context, a request that allows only
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
-  the same action; other text and Space while the empty composer owns focus do not activate it;
+  the same action, and so does Space in the empty composer, since its button is always preselected; other text does
+  not;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
 - a `showButton` timeout removes the button without a transcript message; the Player observes time at the timeout
   so the button disappears on schedule;
@@ -917,7 +925,9 @@ line-height. Short buttons take their content width; long labels wrap and grow t
 apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
 without moving the label; pressing reduces the depth. Neither changes the rim colour or the button's size; only keyboard
-focus (`:focus-visible`) draws an outline. Controls scroll away with the transcript; there is no separate
+focus (`:focus-visible`) draws an outline. A preselected button, a `showButton` or the one `prefill:` names, wears a
+1px ring in the theme's solid accent tone drawn around its rim, so its size does not change; its focus outline keeps
+its gap outside the ring. Controls scroll away with the transcript; there is no separate
 button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
 following the latest content. After completion, the active controls disappear and the existing runtime transcript
 records the response. Completed choices and buttons carry a visible `›` marker in the transcript, distinct from typed
@@ -1047,8 +1057,10 @@ Ordinary neutral controls use the shared progression without geometric movement:
 1. default: quiet control surface with `border-subtle`;
 2. hover: `border-default` plus `surface-hover` fill;
 3. pressed/active: `border-strong` plus `surface-pressed` fill;
-4. keyboard focus: a `2px` accent outline with `2px` visible separation and no layout shift. The outline is the only
-   focus mark; components add no separate focus ring. The Player's `2px` separation replaces the shared `1px` baseline;
+4. keyboard focus: a `2px` outline in the neutral `focus-ring` role, the primary text tone, with `2px` visible
+   separation and no layout shift. The outline is the only focus mark; components add no ring of their own. The
+   Player's neutral colour and `2px` separation replace the shared accent and `1px` baseline, so focus looks alike in
+   both modes, does not follow an author's accent, and stays apart from the accent of primary actions;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
 A non-interactive status item is a separate semantic/visual class, not a disabled control.

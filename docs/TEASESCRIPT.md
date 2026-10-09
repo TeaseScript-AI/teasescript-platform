@@ -97,19 +97,19 @@ let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
 let text = askText as mistress "What do you say?"
-let name = askText "Your name?", default: "Ada", hint: "Type your name"
+let name = askText "Your name?", prefill: "Ada", hint: "Type your name"
 
 let amount = askNumber
 let amount = askNumber as mistress "How many?"
-let minutes = askNumber default: 10
-let count = askInteger "How many?", default: 3
+let minutes = askNumber prefill: 10
+let count = askInteger "How many?", prefill: 3
 
 let day = askDate "Which day?"
-let start = askTime as mistress "What time?", default: toTime("20:00")
+let start = askTime as mistress "What time?", prefill: toTime("20:00")
 let moment = askDateTime "When are you free?"
 
-let name = askText("Your name?", default: "Ada")
-let more = askInteger as mistress ("How many?", default: 3) + 1
+let name = askText("Your name?", prefill: "Ada")
+let more = askInteger as mistress ("How many?", prefill: 3) + 1
 
 let ok = askBoolean as mistress "Ready?", yesText: "Sure!", noText: "No, thanks"
 ```
@@ -120,12 +120,13 @@ expression, and `as speaker` comes before the parentheses
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
 speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
-only; in a text or number field it shows only while the field is empty, so a default usually hides it
+only; in a text or number field it shows only while the field is empty, so a prefill usually hides it
 ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
-optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
-it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers). `askBoolean` says its question the
+optional `prefill:` answer starts in the field; the player still submits it, and a cleared field does not fall back to
+it. See [prefilled answers](specifications/accepted-syntaxes-v30.md#prefilled-answers). `askBoolean` says its question the
 same way, then shows two buttons: `yesText:` (default "Yes") returns `true` and `noText:` (default "No") returns
-`false` ([boolean input](specifications/accepted-syntaxes-v30.md#boolean-input)).
+`false`, and `prefill: true` or `prefill: false` preselects one of them
+([boolean input](specifications/accepted-syntaxes-v30.md#boolean-input)).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askBoolean` returns
@@ -152,8 +153,11 @@ let result = choose 1: "Open the door", 2: "Walk away"
 let rounds = choose 5, 10, 15
 let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
 let answer = choose back: "Back", offenses
+let rounds = choose 5, 10, 15, prefill: 10
 ```
 
+A trailing `prefill:` preselects the first button with that value: it is marked, and Space in the empty composer
+activates it, but it is never chosen by itself ([preselected button](specifications/accepted-syntaxes-v30.md#preselected-button)).
 The compact form keeps every option in one statement and separates options with commas. Options with and without a written value may be mixed; until union types arrive (#504), one `choose` may not mix identifier and numeric values before `:`. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices) defines the complete option rules.
 
 `choose` is the author-facing construct. `choice` is the internal interaction/action noun.
@@ -279,8 +283,8 @@ limits are defined in specification [§27](specifications/accepted-syntaxes-v30.
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
 `playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,
-and checkpoint restore. Player load and progress reports drive playback state; browser integration is tracked in #446
-and browser video playback is not implemented. Accepted forms are defined in specification
+`stopAudio` for every sound at once, and checkpoint restore. Player load and progress reports drive playback state;
+browser integration is tracked in #446 and browser video playback is not implemented. Accepted forms are defined in specification
 [§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video).
 
 The current function subset includes:

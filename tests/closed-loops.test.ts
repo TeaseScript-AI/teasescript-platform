@@ -43,7 +43,7 @@ test("a while true or label loop with no way out is a warning, which does not pr
     "1 warning TSV058",
     "2 error TSV053",
   ]);
-  assert.deepEqual(report('label again\nsay "Again"\nwait 1\ngoto again').diagnostics, [
+  assert.deepEqual(report('label again\nsay "Again", instant\nwait 1\ngoto again').diagnostics, [
     "4 warning TSV058",
     "4 error TSV053",
   ]);
@@ -51,10 +51,10 @@ test("a while true or label loop with no way out is a warning, which does not pr
   for (const [loop, line] of [
     ["while true { wait 1 }", 3],
     ["while (true) {\n    wait 1\n}", 3],
-    ['label again\nsay "Again"\nwait 1\ngoto again', 6],
+    ['label again\nsay "Again", instant\nwait 1\ngoto again', 6],
     // Asking, showing, and engine functions that only compute a value are no way out.
     ['while true {\n    let mood = choose "Good", "Bad"\n    say mood\n}', 3],
-    ['while true {\n    say "You rolled ${randomInteger(1..6)}"\n    wait 1\n}', 3],
+    ['while true {\n    say "You rolled ${randomInteger(1..6)}", instant\n    wait 1\n}', 3],
     // A timer block without a way out does not end the loop.
     ['timer async 5 s { say "Hurry" }\nwhile true { wait 1 }', 4],
     ["function idle {\n    while true { wait 1 }\n}\nidle()\nexit", 4],

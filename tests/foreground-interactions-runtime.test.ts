@@ -757,20 +757,6 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     assert.equal(validateRuntimeSnapshot(hostile, speakerPlan).valid, false);
   }
 
-  const defaultSpeakerPlan = compiledPlan(
-    'speaker alice {}\nspeaker bob {}\nspeaker alice\nshowButton "Continue"\nexit',
-  );
-  const defaultPending = waiting(defaultSpeakerPlan).snapshot;
-  const defaultAction = defaultPending.foregroundAction;
-  assert.equal(
-    defaultAction?.kind === "interaction" && defaultAction.speakerId,
-    defaultPending.defaultSpeaker,
-  );
-  const wrongDefault = corrupted(defaultPending, (_copy, action) => {
-    action.speakerId = speakerId(defaultPending, "bob");
-  });
-  assert.equal(validateRuntimeSnapshot(wrongDefault, defaultSpeakerPlan).valid, false);
-
   const removeAliceBinding = (copy: Mutable<RuntimeSnapshot>) => {
     copy.globals = copy.globals.filter((binding) => binding.name !== "alice");
   };

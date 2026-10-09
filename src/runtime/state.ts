@@ -28,6 +28,7 @@ import type {
   InteractionResultValue,
 } from "./actions/model.js";
 import { cloneFormState, cloneFormUi } from "./actions/form.js";
+import { DEFAULT_CHAT_PACING_SETTINGS, type ChatPacingSettings } from "../chat-pacing.js";
 import {
   type CompiledFunctionDefinition,
   type Instruction,
@@ -117,15 +118,10 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 60;
+export const RUNTIME_SNAPSHOT_VERSION = 61;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
-const DEFAULT_CHAT_PACING_SETTINGS = Object.freeze({
-  baseDelayMs: 1500,
-  delayPerWordMs: 300,
-  delayPerCharacterMs: 30,
-});
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
   "version",
@@ -373,11 +369,7 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly result: InteractionResultValue;
 }
 
-export interface ChatPacingSettings {
-  readonly baseDelayMs: number;
-  readonly delayPerWordMs: number;
-  readonly delayPerCharacterMs: number;
-}
+export type { ChatPacingSettings };
 
 export interface RuntimeSnapshot {
   readonly format: typeof RUNTIME_SNAPSHOT_FORMAT;
@@ -957,6 +949,7 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
         value: cloneInteractionChoiceValue(option.value),
         ...(option.background === undefined ? {} : { background: option.background }),
       })),
+      ...(ui.preselected === undefined ? {} : { preselected: ui.preselected }),
       accessibleName,
     };
   if (ui.kind === "button")

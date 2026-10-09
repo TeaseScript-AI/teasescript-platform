@@ -793,7 +793,7 @@ test("typed skip resolves an active background pacing gate without disturbing a 
     ["actionCompleted"],
   );
 
-  const withWait = plan('say "first"\nwait 1 s\nexit');
+  const withWait = plan('say "first"\nwait 1 s\nexit', {}, ["TSV060"]);
   const waiting = run(withWait, createFreshRuntimeSnapshot(withWait));
   const backgroundGate = waiting.snapshot.backgroundActions[0];
   assert.equal(waiting.snapshot.foregroundAction?.kind, "delay");
@@ -839,7 +839,7 @@ test("unskippable pacing rejects typed skips without mutating foreground or back
 });
 
 test("a late observation replays the script at the delay deadline before later pacing", () => {
-  const compiled = plan('say "first"\nwait 1 s\nexit');
+  const compiled = plan('say "first"\nwait 1 s\nexit', {}, ["TSV060"]);
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
   const pacing = waiting.snapshot.backgroundActions[0];
@@ -1607,7 +1607,7 @@ test("say instruction plans and public pacing failures stay at their validation 
 });
 
 test("bounded replay advances across delay, pacing, and interaction settlements", () => {
-  const compiled = plan('say "first"\nwait 1 s\nshowButton "Continue"\nexit');
+  const compiled = plan('say "first"\nwait 1 s\nshowButton "Continue"\nexit', {}, ["TSV060"]);
   const initial = run(compiled, createFreshRuntimeSnapshot(compiled));
   const pacing = initial.snapshot.backgroundActions[0];
   const delay = initial.snapshot.foregroundAction;

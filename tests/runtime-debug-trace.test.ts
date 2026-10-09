@@ -589,6 +589,27 @@ test("a media block's own handle is its first variable", () => {
   );
 });
 
+test("stopAudio explains the state of each sound it stops, like stop() on its handle", () => {
+  const trace = new RuntimeDebugContext();
+  let session = createPlayerRuntimeSession(
+    ['let music = playAudio async "loop.mp3"', "stopAudio", 'say "${music.state}"', "exit"].join(
+      "\n",
+    ),
+    { debugTrace: trace },
+  );
+  session = reportPlayerRuntimeMediaLoad(session, 1, {
+    kind: "loaded",
+    durationMs: 10_000,
+  }).session;
+  assert.equal(session.state.status, "halted");
+  const said = session.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind === "say" && said.text, "stopped");
+  const stopped = lineage(trace, trace.outputRecord(said.sequence)).find(
+    (step) => step.kind === "mutation",
+  );
+  assert.deepEqual([stopped?.target, stopped?.location?.line], ["media.stop()", 2]);
+});
+
 test("speaker and handle properties are state that every name for them reads", () => {
   const played = traced(
     [

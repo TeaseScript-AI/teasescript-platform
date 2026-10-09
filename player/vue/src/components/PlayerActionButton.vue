@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, onUpdated, ref } from "vue";
 import { Button } from "@/components/ui/button";
 import { authoredColorToOklch } from "../../../theme/color.js";
 import { storyChoiceVariables } from "../../../theme/story-choice.js";
+import { playerKeys } from "../playerKeys";
 
 const props = defineProps<{
   authoredFill?: string | undefined;
@@ -10,6 +11,8 @@ const props = defineProps<{
   /** Looks and is announced disabled but keeps keyboard focus, for a control that becomes active again in place. */
   inactive?: boolean;
   label?: string | undefined;
+  /** The button Space in the empty composer activates; it is marked, but never chosen by itself. */
+  preselected?: boolean | undefined;
 }>();
 const emit = defineEmits<{ widthChange: [] }>();
 const labelElement = ref<HTMLElement | null>(null);
@@ -74,6 +77,8 @@ const material = computed(() =>
     :style="material"
     :disabled="disabled"
     :aria-disabled="inactive ? 'true' : undefined"
+    :data-preselected="preselected ? '' : undefined"
+    :aria-keyshortcuts="preselected ? playerKeys.preselectedButton.name : undefined"
   >
     <span v-if="props.label !== undefined" ref="labelElement" class="player-action-label">{{ props.label }}</span>
     <slot v-else />
@@ -82,6 +87,8 @@ const material = computed(() =>
 
 <style scoped>
 .player-action-button {
+  /* A preselected button wears a ring in the accent tone around its rim; it draws outside, so nothing moves. */
+  --player-action-ring: 0 0 transparent;
   --button-text: var(--story-choice-ink);
   height: auto;
   min-height: 44px;
@@ -99,8 +106,12 @@ const material = computed(() =>
   border-radius: 9px;
   color: var(--story-choice-ink);
   background: linear-gradient(var(--story-choice-top), var(--story-choice-bottom));
-  box-shadow: inset 0 1px 0 #ffffff24, 0 1px 0 var(--story-choice-depth), 0 2px 3px #00000020;
+  box-shadow: var(--player-action-ring), inset 0 1px 0 #ffffff24, 0 1px 0 var(--story-choice-depth),
+    0 2px 3px #00000020;
   transition: box-shadow 100ms;
+}
+.player-action-button[data-preselected] {
+  --player-action-ring: 0 0 0 1px var(--theme-accent-solid);
 }
 .player-action-label {
   min-width: 0;
@@ -111,12 +122,13 @@ const material = computed(() =>
 .player-action-button:hover:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--story-choice-rim);
   background: linear-gradient(var(--story-choice-hover-top), var(--story-choice-hover-bottom));
-  box-shadow: inset 0 1px 0 #ffffff35, 0 1px 0 var(--story-choice-depth), 0 3px 5px #00000024;
+  box-shadow: var(--player-action-ring), inset 0 1px 0 #ffffff35, 0 1px 0 var(--story-choice-depth),
+    0 3px 5px #00000024;
 }
 .player-action-button:active:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--story-choice-rim);
   background: var(--story-choice-pressed);
-  box-shadow: inset 0 1px 2px #00000022, 0 1px 0 var(--story-choice-depth);
+  box-shadow: var(--player-action-ring), inset 0 1px 2px #00000022, 0 1px 0 var(--story-choice-depth);
 }
 /* Disabled actions use the shared theme roles, not opacity over an arbitrary background. */
 .player-action-button:disabled,
@@ -129,8 +141,12 @@ const material = computed(() =>
   cursor: not-allowed;
 }
 .player-action-button:focus-visible {
-  outline: 2px solid var(--theme-accent-focus);
+  outline: 2px solid var(--theme-focus-ring);
   outline-offset: var(--player-focus-offset);
+}
+/* The focus outline keeps its gap outside the preselected ring; this overrides the theme's shared focus rule. */
+:root[data-player-theme] .player-action-button[data-preselected]:focus-visible {
+  outline-offset: calc(1px + var(--player-focus-offset));
 }
 @media (prefers-reduced-motion: reduce) {
   .player-action-button { transition: none; }
