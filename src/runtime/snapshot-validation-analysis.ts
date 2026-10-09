@@ -1,6 +1,7 @@
+import { expressionPlanChildren } from "../plan/expression-children.js";
 import type {
   CompiledFunctionDefinition,
-  Instruction,
+  ExpressionPlan,
   InstructionPlan,
   PlanTransferDestination,
 } from "../plan/model.js";
@@ -38,7 +39,11 @@ export interface SnapshotValidationAnalysis {
   readonly continuationRequirements: Map<string, ReadonlySet<number>>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
-  readonly preparedReferenceTemporaryIds: ReadonlySet<number>;
+  /**
+   * The temporaries that `prepareReference` instructions produce, each with whether an attached reference stored there
+   * keeps a copy of its root ({@link collectPreparedReferenceTemporaries}).
+   */
+  readonly preparedReferenceTemporaries: ReadonlyMap<number, boolean>;
   readonly preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership;
   readonly loops: ReadonlyMap<number, PlannedLoop>;
   /** The destinations that `fallback` statements of the plan name directly. */
@@ -159,7 +164,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     continuationRequirements: new Map(),
     defaultBindingPositions,
     parameterNames,
-    preparedReferenceTemporaryIds: collectPreparedReferenceTemporaryIds(plan),
+    preparedReferenceTemporaries: collectPreparedReferenceTemporaries(plan),
     preparedSayTemporaryOwnership: collectPreparedSayTemporaryOwnership(plan),
     loops,
     fallbackDestinations,
@@ -171,15 +176,49 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   };
 }
 
-function collectPreparedReferenceTemporaryIds(plan: InstructionPlan): ReadonlySet<number> {
-  return new Set(
-    plan.instructions
-      .filter(
-        (instruction): instruction is Extract<Instruction, { kind: "prepareReference" }> =>
-          instruction?.kind === "prepareReference",
-      )
-      .map((instruction) => instruction.destinationTemporary),
-  );
+/**
+ * An attached prepared reference resolves through its variable, and every change that could break its path first fixes
+ * it to the value it reaches. Its copy of the root is read only while a preparation runs: by its own, when a call after
+ * the root was read can change the value it selects, and by a later preparation that extends it and keeps a copy too.
+ * Only such references keep one.
+ */
+function collectPreparedReferenceTemporaries(plan: InstructionPlan): ReadonlyMap<number, boolean> {
+  const temporaries = new Map<number, boolean>();
+  // A producer precedes every use, so the preparations that extend a reference come before it here.
+  for (let index = plan.instructions.length - 1; index >= 0; index -= 1) {
+    const instruction = plan.instructions[index];
+    if (instruction?.kind !== "prepareReference") continue;
+    const keepsRoot =
+      temporaries.get(instruction.destinationTemporary) === true ||
+      expressionCalls(instruction.expression);
+    temporaries.set(instruction.destinationTemporary, keepsRoot);
+    if (!keepsRoot) continue;
+    for (const extended of preparedReferenceLeaves(instruction.expression)) {
+      temporaries.set(extended, true);
+    }
+  }
+  return temporaries;
+}
+
+function expressionCalls(root: ExpressionPlan): boolean {
+  const pending = [root];
+  while (pending.length > 0) {
+    const expression = pending.pop()!;
+    if (expression.kind === "call") return true;
+    pending.push(...expressionPlanChildren(expression));
+  }
+  return false;
+}
+
+function preparedReferenceLeaves(root: ExpressionPlan): number[] {
+  const leaves: number[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const expression = pending.pop()!;
+    if (expression.kind === "preparedReference") leaves.push(expression.temporaryId);
+    else pending.push(...expressionPlanChildren(expression));
+  }
+  return leaves;
 }
 
 function collectPreparedSayTemporaryOwnership(

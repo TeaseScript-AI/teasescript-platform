@@ -149,6 +149,7 @@ import {
   currentTemporalContext,
   MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
+import { snapshotValidationAnalysis } from "./snapshot-validation-analysis.js";
 import type {
   RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
@@ -889,7 +890,12 @@ function executePlannedInstruction(
       return;
     }
     case "prepareReference": {
-      const reference = evaluator.prepareReference(instruction.expression);
+      const reference = evaluator.prepareReference(
+        instruction.expression,
+        snapshotValidationAnalysis(plan).preparedReferenceTemporaries.get(
+          instruction.destinationTemporary,
+        ) === true,
+      );
       setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
       evaluator.trace?.writeTemporary(
         evaluator.callFrameId(),

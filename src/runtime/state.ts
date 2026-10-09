@@ -129,7 +129,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 70;
+export const RUNTIME_SNAPSHOT_VERSION = 71;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1174,14 +1174,14 @@ function validateCapturedRuntimeSnapshotDetails(
   validateGlobals(value, plan, errors);
   validateStartupPhase(value, plan, errors);
   const scopes = referenceScopes(value);
-  const preparedReferenceTemporaryIds = analysis?.preparedReferenceTemporaryIds;
+  const preparedReferenceTemporaries = analysis?.preparedReferenceTemporaries;
   const preparedSayTemporaryOwnership = analysis?.preparedSayTemporaryOwnership;
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
     scopes,
     value.speakers,
-    preparedReferenceTemporaryIds,
+    preparedReferenceTemporaries,
     "Runtime temporaries",
     errors,
   );
@@ -1202,7 +1202,7 @@ function validateCapturedRuntimeSnapshotDetails(
     plan,
     analysis,
     continuationRequests,
-    preparedReferenceTemporaryIds,
+    preparedReferenceTemporaries,
     preparedSayTemporaryOwnership,
     value,
     errors,
@@ -1604,26 +1604,23 @@ function validatePreparedReferenceTemporaries(
   value: unknown,
   frames: unknown,
   speakers: unknown,
-  preparedTemporaryIds: ReadonlySet<number> | undefined,
+  preparedTemporaries: ReadonlyMap<number, boolean> | undefined,
   label: string,
   errors: string[],
 ): void {
-  if (
-    preparedTemporaryIds === undefined ||
-    preparedTemporaryIds.size === 0 ||
-    !Array.isArray(value)
-  )
+  if (preparedTemporaries === undefined || preparedTemporaries.size === 0 || !Array.isArray(value))
     return;
 
   for (const temporary of value) {
-    if (
-      !isPlainRecord(temporary) ||
-      !nonNegativeSafeInteger(temporary.id) ||
-      !preparedTemporaryIds.has(temporary.id)
-    ) {
-      continue;
-    }
-    const failure = validatePreparedReferenceDescriptor(temporary.value, frames, speakers);
+    if (!isPlainRecord(temporary) || !nonNegativeSafeInteger(temporary.id)) continue;
+    const keepsRoot = preparedTemporaries.get(temporary.id);
+    if (keepsRoot === undefined) continue;
+    const failure = validatePreparedReferenceDescriptor(
+      temporary.value,
+      frames,
+      speakers,
+      keepsRoot,
+    );
     if (failure !== null) {
       errors.push(`${label} contain malformed prepared-reference state: ${failure}`);
     }
@@ -1754,16 +1751,19 @@ function validPreparedSayContextualSpeaker(
   );
 }
 
+/** `keepsRoot`: whether the plan keeps a copy of the root of an attached reference in this temporary. */
 function validatePreparedReferenceDescriptor(
   value: unknown,
   frames: unknown,
   speakers: unknown,
+  keepsRoot: boolean,
 ): string | null {
   const properties = serializedObjectPropertyMap(value);
   if (
     properties === null ||
-    properties.size !== preparedReferencePropertyNames.length ||
-    preparedReferencePropertyNames.some((name) => !properties.has(name))
+    properties.size !==
+      preparedReferencePropertyNames.length - (properties.has("capturedRoot") ? 0 : 1) ||
+    preparedReferencePropertyNames.some((name) => name !== "capturedRoot" && !properties.has(name))
   ) {
     return "the descriptor must contain exactly the supported fields.";
   }
@@ -1796,13 +1796,16 @@ function validatePreparedReferenceDescriptor(
   if (rootFrameId === null && detached !== true) {
     return "a descriptor without a binding root must be detached.";
   }
-  if (capturedRoot === undefined) {
-    return "the captured root is missing.";
+  // A detached reference is its captured root; an attached one keeps a copy exactly where the plan does.
+  if ((capturedRoot !== undefined) !== (detached || keepsRoot)) {
+    return detached || keepsRoot
+      ? "the captured root is missing."
+      : "an attached descriptor keeps a captured root where the plan keeps none.";
   }
 
   const path = parsePreparedReferencePath(pathValue);
   if (path === null) return "the descriptor path is malformed.";
-  if (!preparedReferencePathResolves(capturedRoot, path, speakers)) {
+  if (capturedRoot !== undefined && !preparedReferencePathResolves(capturedRoot, path, speakers)) {
     return "the captured root does not satisfy the prepared path.";
   }
 
@@ -2027,7 +2030,7 @@ function validateCallFrames(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   continuationRequests: ContinuationRequests,
-  preparedReferenceTemporaryIds: ReadonlySet<number> | undefined,
+  preparedReferenceTemporaries: ReadonlyMap<number, boolean> | undefined,
   preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership | undefined,
   snapshotValue: Record<string, unknown>,
   errors: string[],
@@ -2167,7 +2170,7 @@ function validateCallFrames(
       frame.callerTemporaries,
       referenceScopes(snapshotValue),
       speakers,
-      preparedReferenceTemporaryIds,
+      preparedReferenceTemporaries,
       "Runtime caller temporaries",
       errors,
     );

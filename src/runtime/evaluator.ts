@@ -307,6 +307,9 @@ export class Evaluator {
 
   #referenceEpoch = 0;
 
+  /** Whether the reference being prepared keeps a copy of its root (`preparedReferenceTemporaries`). */
+  #keepPreparedRoot = false;
+
   /** Whether a start value is being evaluated, which may not select anything at random (ADR 0022 §6). */
   #startValue = false;
 
@@ -705,9 +708,9 @@ export class Evaluator {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
           trace?.readBinding(location.frame.id, expression.name, location.binding.value);
-          // Only the root of a prepared reference, reached through reference frames alone, keeps a copy: an index
-          // read after it can remove an ancestor of the value it selects. The receiver of an immediate call resolves
-          // through its binding, so it shares the root instead of copying it.
+          // Only the root of a prepared reference, reached through reference frames alone, keeps a copy, and only where
+          // the plan keeps one: a call in an index read after it can remove an ancestor of the value it selects. The
+          // receiver of an immediate call resolves through its binding, so it shares the root instead of copying it.
           const prepared = pending.every((pendingFrame) => pendingFrame.reference);
           result = {
             value: location.binding.value,
@@ -716,9 +719,11 @@ export class Evaluator {
               rootFrameId: location.frame.id,
               rootName: expression.name,
               path: [],
-              capturedRoot: prepared
-                ? cloneCapturedSerializableValue(location.binding.value)
-                : location.binding.value,
+              capturedRoot: !prepared
+                ? location.binding.value
+                : this.#keepPreparedRoot
+                  ? cloneCapturedSerializableValue(location.binding.value)
+                  : undefined,
               detached: false,
             },
             epoch: this.#referenceEpoch,
@@ -737,7 +742,8 @@ export class Evaluator {
             this.#tracePreparedReference(
               serialized,
               expression.temporaryId,
-              descriptor.capturedRoot,
+              descriptor.capturedRoot ??
+                this.#resolveDescriptor({ ...descriptor, path: [] }, expression.span),
               expression.span,
             );
           result = {
@@ -1363,8 +1369,15 @@ export class Evaluator {
       this.#traceVariableChange("assignment", receiverDescriptor, target.span);
   }
 
-  public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
-    const descriptor = this.#buildPreparedReference(expression);
+  /** `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary. */
+  public prepareReference(
+    expression: ExpressionPlan,
+    keepsRoot: boolean,
+  ): SerializableRuntimeObject {
+    this.#keepPreparedRoot = keepsRoot;
+    let descriptor = this.#buildPreparedReference(expression);
+    // A reference extended from one that keeps a copy for its own preparation shares that copy.
+    if (!keepsRoot && !descriptor.detached) descriptor = { ...descriptor, capturedRoot: undefined };
     return serializePreparedReference(this.#restorableDescriptor(descriptor, expression.span));
   }
 
@@ -1381,6 +1394,11 @@ export class Evaluator {
     span: SourceSpan,
   ): PreparedReferenceDescriptor {
     if (descriptor.detached) return descriptor;
+    if (descriptor.capturedRoot === undefined) {
+      // Without a call after its root was read, nothing changed the variable while the reference was prepared.
+      this.#resolveDescriptor(descriptor, span);
+      return descriptor;
+    }
     if (!this.#resolves(descriptor, span)) {
       const detached = { ...descriptor, detached: true };
       this.#resolveDescriptor(detached, span);
@@ -1503,7 +1521,12 @@ export class Evaluator {
     try {
       return this.#resolveDescriptor(descriptor, span);
     } catch (error) {
-      if (!(error instanceof RuntimeFault) || !isObject(serialized)) throw error;
+      if (
+        !(error instanceof RuntimeFault) ||
+        !isObject(serialized) ||
+        descriptor.capturedRoot === undefined
+      )
+        throw error;
       setCapturedSerializableProperty(serialized, "detached", true);
       return this.#resolveDescriptor({ ...descriptor, detached: true }, span);
     }
@@ -1527,7 +1550,9 @@ export class Evaluator {
       }
       value = binding.value;
     } else {
-      value = descriptor.capturedRoot;
+      // EVIDENCE: readPreparedReference and the reference machine give every detached or rootless reference a captured
+      // root, and #restorableDescriptor detaches only a reference that keeps one.
+      value = descriptor.capturedRoot!;
     }
     for (const step of descriptor.path) {
       if (step.kind === "property") {
