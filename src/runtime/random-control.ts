@@ -360,7 +360,8 @@ function drawsTimerDuration(
     (instruction.kind === "startTimer" ||
       (instruction.kind === "wait" && instruction.command === "timer")) &&
     instruction.duration.kind !== "literal" &&
-    instruction.duration.kind !== "duration"
+    instruction.duration.kind !== "duration" &&
+    instruction.duration.kind !== "calendarDuration"
   );
 }
 

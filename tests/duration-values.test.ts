@@ -116,13 +116,14 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
 });
 
 test("wait never measures a calendar duration; doubled units and overflow are rejected at compile time", () => {
-  // A calendar day or month has no fixed number of hours (V30 section 35): a calendar duration that the compiler can see
-  // is a compile error located in it, and one it cannot see fails when the wait starts.
+  // A calendar day or month has no fixed number of hours (ADR 0026): a calendar duration that the compiler can see is a
+  // compile error located in it, and one it cannot see fails when the wait starts.
   for (const [source, duration] of [
-    ["wait 3 days\nexit", "3 days"],
-    ["let n = 3\nwait n days", "days"],
-    ["wait 2 weeks\nexit", "2 weeks"],
-    ["wait 1 h + 1 mo\nexit", "1 h + 1 mo"],
+    ["wait 3 calendar days\nexit", "3 calendar days"],
+    ["let n = 3\nwait n calendar days", "calendar"],
+    ["let n = 3\nwait n months", "months"],
+    ["wait 2 calendar weeks\nexit", "2 calendar weeks"],
+    ["wait 1 h + 1 calendar mo\nexit", "1 h + 1 calendar mo"],
   ] as const) {
     const start = source.indexOf(duration);
     const compiled = compileSource(source);
@@ -137,7 +138,7 @@ test("wait never measures a calendar duration; doubled units and overflow are re
       `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(duration)}`,
     );
   }
-  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 mo)\nwait a\nexit`), "TSR065");
+  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 calendar mo)\nwait a\nexit`), "TSR065");
   assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });
@@ -156,6 +157,8 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
     ["let d = 1.5 s\nwait d\nexit", 1_500],
     ["let n = 3\nwait n ms\nexit", 3],
     ["wait 2\nexit", 2_000],
+    // A day is exactly 24 hours (ADR 0026).
+    ["wait 1 day\nexit", 86_400_000],
   ] as const) {
     const result = runValidSource(source);
     assert.equal(result.snapshot.status, "waiting", source);

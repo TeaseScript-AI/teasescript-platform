@@ -1,11 +1,13 @@
 import type { CalendarDurationUnit, DurationLiteral, DurationUnit } from "./ast.js";
 
-/** Exact elapsed milliseconds per V30 §35 elapsed-time unit. */
+/** Exact milliseconds per exact unit (ADR 0026): a day is 24 hours and a week 168 hours. */
 export const DURATION_UNIT_MILLISECONDS: Readonly<Record<DurationUnit, number>> = Object.freeze({
   ms: 1,
   s: 1_000,
   min: 60_000,
   h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
 });
 
 const ELAPSED_UNIT_NAMES: ReadonlyMap<string, DurationUnit> = new Map([
@@ -21,6 +23,12 @@ const ELAPSED_UNIT_NAMES: ReadonlyMap<string, DurationUnit> = new Map([
   ["h", "h"],
   ["hour", "h"],
   ["hours", "h"],
+  ["d", "d"],
+  ["day", "d"],
+  ["days", "d"],
+  ["w", "w"],
+  ["week", "w"],
+  ["weeks", "w"],
 ]);
 
 const CALENDAR_UNIT_NAMES: ReadonlyMap<string, CalendarDurationUnit> = new Map([
@@ -38,19 +46,29 @@ const CALENDAR_UNIT_NAMES: ReadonlyMap<string, CalendarDurationUnit> = new Map([
   ["years", "y"],
 ]);
 
-/** Resolves a short or long elapsed-time unit name. */
+/** Resolves a short or long exact unit name, from milliseconds to weeks. */
 export function elapsedDurationUnit(name: string): DurationUnit | undefined {
   return ELAPSED_UNIT_NAMES.get(name);
 }
 
-/** Resolves a short or long calendar unit name: days, weeks, months, or years. */
+/** Resolves a short or long unit name after `calendar`: days, weeks, months, or years. */
 export function calendarDurationUnit(name: string): CalendarDurationUnit | undefined {
   return CALENDAR_UNIT_NAMES.get(name);
 }
 
 /**
- * A duration's normalized parts (V30 §35): whole calendar months and days, and exact milliseconds. A week is 7 days and
- * a year 12 months. Calendar parts apply first, months then days, before the exact time.
+ * Why an exact duration has no property `name` (ADR 0026): a unit name such as `days` gets the division that gives
+ * its number, as in `span / 1 day`.
+ */
+export function durationPropertyMessage(name: string, label = "value"): string {
+  if (elapsedDurationUnit(name) === undefined) return `A duration has no property '${name}'.`;
+  const unit = name.length > 2 && name.endsWith("s") ? name.slice(0, -1) : name;
+  return `A duration has no property '${name}'. Divide it by a unit, as in '${label} / 1 ${unit}'.`;
+}
+
+/**
+ * The components of a calendar duration (ADR 0026): whole calendar months and days, and an exact offset in
+ * milliseconds. A calendar week is 7 days and a calendar year 12 months. Applied, months come first, then days.
  */
 export interface DurationParts {
   readonly months: number;
@@ -58,92 +76,107 @@ export interface DurationParts {
   readonly milliseconds: number;
 }
 
-/** A duration as a runtime value or plan stores it: calendar parts only when they are not zero. */
+/** An exact duration as a runtime value or plan stores it. */
 export interface StoredDuration {
   readonly kind: "duration";
   readonly milliseconds: number;
-  readonly months?: number;
-  readonly days?: number;
 }
 
-/**
- * Whether a record is a stored duration with exactly these keys besides its parts: a finite `milliseconds`, and
- * `months` and `days` only when they are whole and not zero.
- */
+/** A calendar duration as a runtime value or plan stores it; it keeps its kind also when every part is zero. */
+export interface StoredCalendarDuration extends DurationParts {
+  readonly kind: "calendarDuration";
+}
+
+export type AnyDuration = StoredDuration | StoredCalendarDuration;
+
+/** Whether a record is an exact duration with a finite `milliseconds` and exactly these keys besides. */
 export function isStoredDurationRecord(
   value: Record<string, unknown>,
   otherKeys: readonly string[] = [],
 ): boolean {
-  const optional = ["months", "days"].filter((key) => Object.hasOwn(value, key));
-  const keys = ["kind", "milliseconds", ...optional, ...otherKeys];
   return (
-    Object.keys(value).length === keys.length &&
-    keys.every((key) => Object.hasOwn(value, key)) &&
+    hasExactly(value, ["kind", "milliseconds", ...otherKeys]) &&
     value.kind === "duration" &&
     typeof value.milliseconds === "number" &&
-    Number.isFinite(value.milliseconds) &&
-    optional.every((key) => {
-      const part = value[key];
-      return typeof part === "number" && Number.isSafeInteger(part) && part !== 0;
-    })
+    Number.isFinite(value.milliseconds)
   );
 }
 
-export function durationParts(duration: StoredDuration): DurationParts {
-  return {
-    months: duration.months ?? 0,
-    days: duration.days ?? 0,
-    milliseconds: duration.milliseconds,
-  };
+/**
+ * Whether a record is a calendar duration with whole `months` and `days`, a finite `milliseconds`, and exactly these
+ * keys besides.
+ */
+export function isStoredCalendarDurationRecord(
+  value: Record<string, unknown>,
+  otherKeys: readonly string[] = [],
+): boolean {
+  return (
+    hasExactly(value, ["kind", "months", "days", "milliseconds", ...otherKeys]) &&
+    value.kind === "calendarDuration" &&
+    Number.isSafeInteger(value.months) &&
+    Number.isSafeInteger(value.days) &&
+    typeof value.milliseconds === "number" &&
+    Number.isFinite(value.milliseconds)
+  );
 }
 
-export function storedDuration(parts: DurationParts): StoredDuration {
+function hasExactly(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return (
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+export function isCalendar(duration: AnyDuration): duration is StoredCalendarDuration {
+  return duration.kind === "calendarDuration";
+}
+
+/** The components of a duration; an exact one has no calendar months or days. */
+export function durationParts(duration: AnyDuration): DurationParts {
+  return isCalendar(duration)
+    ? { months: duration.months, days: duration.days, milliseconds: duration.milliseconds }
+    : { months: 0, days: 0, milliseconds: duration.milliseconds };
+}
+
+export function exactDuration(milliseconds: number): StoredDuration {
+  return { kind: "duration", milliseconds: milliseconds === 0 ? 0 : milliseconds };
+}
+
+export function calendarDuration(parts: DurationParts): StoredCalendarDuration {
   return {
-    kind: "duration",
+    kind: "calendarDuration",
+    months: parts.months === 0 ? 0 : parts.months,
+    days: parts.days === 0 ? 0 : parts.days,
     milliseconds: parts.milliseconds === 0 ? 0 : parts.milliseconds,
-    ...(parts.months === 0 ? {} : { months: parts.months }),
-    ...(parts.days === 0 ? {} : { days: parts.days }),
   };
 }
 
 /**
- * The parts of a duration literal, or why it has none: a calendar amount must give whole days or months, so `0.5 years`
- * is 6 months while `1.5 days` and `1.5 weeks` are errors.
+ * The value of a duration literal, or why it has none. `2 days` is exact; a calendar amount must give whole days or
+ * months, so `0.5 calendar years` is 6 months while `1.5 calendar days` and `1.5 calendar weeks` are errors.
  */
-export function durationLiteralParts(literal: DurationLiteral): DurationParts | string {
+export function durationLiteralValue(literal: DurationLiteral): AnyDuration | string {
   const amount = literal.amount.value;
+  if (!literal.calendar) return exactDuration(amount * DURATION_UNIT_MILLISECONDS[literal.unit]);
   switch (literal.unit) {
     case "d":
     case "w": {
       const days = amount * (literal.unit === "w" ? 7 : 1);
       return Number.isInteger(days)
-        ? { months: 0, days, milliseconds: 0 }
-        : `${amount} ${literal.unit === "w" ? "weeks" : "days"} is not a whole number of days`;
+        ? calendarDuration({ months: 0, days, milliseconds: 0 })
+        : `${amount} calendar ${literal.unit === "w" ? "weeks" : "days"} is not a whole number of days`;
     }
-    case "mo":
-    case "y": {
+    default: {
       const months = amount * (literal.unit === "y" ? 12 : 1);
       return Number.isInteger(months)
-        ? { months, days: 0, milliseconds: 0 }
-        : `${amount} ${literal.unit === "y" ? "years" : "months"} is not a whole number of months`;
+        ? calendarDuration({ months, days: 0, milliseconds: 0 })
+        : `${amount} calendar ${literal.unit === "y" ? "years" : "months"} is not a whole number of months`;
     }
-    default:
-      return {
-        months: 0,
-        days: 0,
-        milliseconds: amount * DURATION_UNIT_MILLISECONDS[literal.unit],
-      };
   }
 }
 
-/** Whether a duration is exact elapsed time, without calendar days or months. */
-export function isExactDuration(parts: DurationParts): boolean {
-  return parts.months === 0 && parts.days === 0;
-}
-
 /**
- * The family of a duration (V30 §35): exact time, days and weeks, or months and years. Zero belongs to every family; a
- * duration with parts of two families belongs to none.
+ * The family of a calendar duration (ADR 0026): months only, days only, or exact offset only. Zero belongs to every
+ * family; a duration with parts of two families belongs to none.
  */
 export type DurationFamily = "zero" | "exact" | "days" | "months" | "mixed";
 
@@ -155,69 +188,80 @@ export function durationFamily(parts: DurationParts): DurationFamily {
   return families.length === 0 ? "zero" : families.length === 1 ? families[0]! : "mixed";
 }
 
-export function addDurationParts(
-  left: DurationParts,
-  right: DurationParts,
-  sign: 1 | -1 = 1,
-): DurationParts {
-  return {
-    months: left.months + sign * right.months,
-    days: left.days + sign * right.days,
-    milliseconds: left.milliseconds + sign * right.milliseconds,
-  };
+/** Two durations added or subtracted: a calendar duration when either is one, also when the result is zero. */
+export function addDurations(left: AnyDuration, right: AnyDuration, sign: 1 | -1 = 1): AnyDuration {
+  if (!isCalendar(left) && !isCalendar(right))
+    return exactDuration(left.milliseconds + sign * right.milliseconds);
+  const [a, b] = [durationParts(left), durationParts(right)];
+  return calendarDuration({
+    months: a.months + sign * b.months,
+    days: a.days + sign * b.days,
+    milliseconds: a.milliseconds + sign * b.milliseconds,
+  });
 }
 
-export function negateDurationParts(parts: DurationParts): DurationParts {
-  return { months: -parts.months, days: -parts.days, milliseconds: -parts.milliseconds };
+export function negateDuration(duration: AnyDuration): AnyDuration {
+  return isCalendar(duration)
+    ? calendarDuration({
+        months: -duration.months,
+        days: -duration.days,
+        milliseconds: -duration.milliseconds,
+      })
+    : exactDuration(-duration.milliseconds);
 }
 
-/** A duration times a number, or why not: calendar parts must stay whole, so `1 month * 1.5` is an error. */
-export function scaleDurationParts(parts: DurationParts, factor: number): DurationParts | string {
-  const months = parts.months * factor;
-  const days = parts.days * factor;
+/** Why a calendar duration and an exact one have no order or ratio. */
+const MIXED_DURATIONS = "a calendar day or month has no fixed length";
+
+/** A duration times a number, or why not: calendar parts must stay whole, so `1 calendar month * 1.5` is an error. */
+export function scaleDuration(duration: AnyDuration, factor: number): AnyDuration | string {
+  if (!isCalendar(duration)) return exactDuration(duration.milliseconds * factor);
+  const months = duration.months * factor;
+  const days = duration.days * factor;
   if (!Number.isInteger(months) || !Number.isInteger(days))
     return "a calendar duration must stay a whole number of days and months";
-  return {
-    months: months === 0 ? 0 : months,
-    days: days === 0 ? 0 : days,
-    milliseconds: parts.milliseconds * factor,
-  };
+  return calendarDuration({ months, days, milliseconds: duration.milliseconds * factor });
 }
 
 /** Why a division of a duration has no result when its divisor is zero. */
 export const ZERO_DIVISOR = "the divisor is zero";
 
 /** A duration divided by a number, or why not: calendar parts must stay whole and the divisor must not be zero. */
-export function divideDurationParts(parts: DurationParts, divisor: number): DurationParts | string {
+export function divideDuration(duration: AnyDuration, divisor: number): AnyDuration | string {
   if (divisor === 0) return ZERO_DIVISOR;
-  const months = parts.months / divisor;
-  const days = parts.days / divisor;
+  if (!isCalendar(duration)) return exactDuration(duration.milliseconds / divisor);
+  const months = duration.months / divisor;
+  const days = duration.days / divisor;
   if (!Number.isInteger(months) || !Number.isInteger(days))
     return "a calendar duration must stay a whole number of days and months";
-  return {
-    months: months === 0 ? 0 : months,
-    days: days === 0 ? 0 : days,
-    milliseconds: parts.milliseconds / divisor,
-  };
+  return calendarDuration({ months, days, milliseconds: duration.milliseconds / divisor });
 }
 
 /**
- * The ratio of two durations of one family, or why there is none: across families there is no fixed ratio, and a zero
- * divisor is an error. `18 months / 1 year` is `1.5`.
+ * The ratio of two durations, or why there is none: exact durations always have one, calendar durations only within
+ * one family, and a calendar duration and an exact one never. A zero divisor is an error. `18 calendar months /
+ * 1 calendar year` is `1.5`.
  */
-export function durationRatio(dividend: DurationParts, divisor: DurationParts): number | string {
-  const family = sharedFamily(dividend, divisor);
+export function durationQuotient(dividend: AnyDuration, divisor: AnyDuration): number | string {
+  if (isCalendar(dividend) !== isCalendar(divisor)) return MIXED_DURATIONS;
+  if (!isCalendar(dividend))
+    return divisor.milliseconds === 0 ? ZERO_DIVISOR : dividend.milliseconds / divisor.milliseconds;
+  const [a, b] = [durationParts(dividend), durationParts(divisor)];
+  const family = sharedFamily(a, b);
   if (typeof family !== "string") return family.problem;
-  if (family === "zero" || familyAmount(divisor, family) === 0) return ZERO_DIVISOR;
-  return familyAmount(dividend, family) / familyAmount(divisor, family);
+  if (family === "zero" || familyAmount(b, family) === 0) return ZERO_DIVISOR;
+  return familyAmount(a, family) / familyAmount(b, family);
 }
 
-/** The order of two durations of one family (-1, 0, or 1), or why they cannot be ordered. */
-export function compareDurationParts(left: DurationParts, right: DurationParts): number | string {
-  const family = sharedFamily(left, right);
+/** The order of two durations (-1, 0, or 1) under the same rules as their ratio, or why they cannot be ordered. */
+export function compareDurations(left: AnyDuration, right: AnyDuration): number | string {
+  if (isCalendar(left) !== isCalendar(right)) return MIXED_DURATIONS;
+  if (!isCalendar(left)) return Math.sign(left.milliseconds - right.milliseconds);
+  const [a, b] = [durationParts(left), durationParts(right)];
+  const family = sharedFamily(a, b);
   if (typeof family !== "string") return family.problem;
   if (family === "zero") return 0;
-  return Math.sign(familyAmount(left, family) - familyAmount(right, family));
+  return Math.sign(familyAmount(a, family) - familyAmount(b, family));
 }
 
 function sharedFamily(
@@ -228,7 +272,7 @@ function sharedFamily(
   const b = durationFamily(right);
   const problem = {
     problem:
-      "only durations of one kind compare or divide: exact time with exact time, days and weeks with days and weeks, months and years with months and years",
+      "calendar durations compare and divide only within one kind: months with months, days with days, and exact time with exact time",
   };
   if (a === "mixed" || b === "mixed") return problem;
   if (a === "zero") return b;
@@ -240,20 +284,26 @@ function familyAmount(parts: DurationParts, family: "exact" | "days" | "months")
 }
 
 /**
- * Deterministic visible text for a duration, such as `1 h 2 min 3.5 s`, `250 ms`, or `1 y 2 mo 3 d`. Each part keeps its
- * own sign. Locale-aware duration presentation is later Player work.
+ * Deterministic visible text for a duration (ADR 0026): an exact one in days, hours, minutes, and seconds, such as
+ * `2 d 6 h` or `1 min 3.5 s`, and `250 ms` below a second; a calendar one names each calendar part, with 12 months as
+ * a year, before any exact offset, such as `1 calendar month 16 calendar days`. Each part keeps its own sign.
+ * Locale-aware duration presentation is later Player work.
  */
-export function formatDuration(duration: number | DurationParts): string {
-  const parts =
-    typeof duration === "number" ? { months: 0, days: 0, milliseconds: duration } : duration;
-  const pieces: string[] = [];
-  const years = Math.trunc(parts.months / 12);
-  const months = parts.months - years * 12;
-  if (years !== 0) pieces.push(`${years} y`);
-  if (months !== 0) pieces.push(`${months} mo`);
-  if (parts.days !== 0) pieces.push(`${parts.days} d`);
-  if (parts.milliseconds !== 0 || pieces.length === 0) pieces.push(formatExact(parts.milliseconds));
-  return pieces.join(" ");
+export function formatDuration(duration: number | AnyDuration): string {
+  if (typeof duration === "number" || !isCalendar(duration))
+    return formatExact(typeof duration === "number" ? duration : duration.milliseconds);
+  const years = Math.trunc(duration.months / 12);
+  const pieces = [
+    calendarPart(years, "year"),
+    calendarPart(duration.months - years * 12, "month"),
+    calendarPart(duration.days, "day"),
+  ].filter((piece) => piece !== "");
+  if (duration.milliseconds !== 0) pieces.push(formatExact(duration.milliseconds));
+  return pieces.length === 0 ? "0 calendar days" : pieces.join(" ");
+}
+
+function calendarPart(amount: number, unit: "year" | "month" | "day"): string {
+  return amount === 0 ? "" : `${amount} calendar ${unit}${Math.abs(amount) === 1 ? "" : "s"}`;
 }
 
 function formatExact(milliseconds: number): string {
@@ -262,10 +312,13 @@ function formatExact(milliseconds: number): string {
   if (rest === 0) return "0 s";
   if (rest < 1_000) return `${sign}${formatNumber(rest)} ms`;
   const parts: string[] = [];
+  const days = Math.floor(rest / 86_400_000);
+  rest -= days * 86_400_000;
   const hours = Math.floor(rest / 3_600_000);
   rest -= hours * 3_600_000;
   const minutes = Math.floor(rest / 60_000);
   rest -= minutes * 60_000;
+  if (days > 0) parts.push(`${days} d`);
   if (hours > 0) parts.push(`${hours} h`);
   if (minutes > 0) parts.push(`${minutes} min`);
   if (rest > 0) parts.push(`${formatNumber(rest / 1_000)} s`);

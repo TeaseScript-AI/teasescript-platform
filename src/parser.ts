@@ -55,7 +55,9 @@ import type {
   LoadExpression,
   SaveStatement,
   ShowImageStatement,
+  CalendarDurationUnit,
   DurationUnit,
+  TrailingDurationUnit,
   ListLiteral,
   NumberLiteral,
   RepeatStatement,
@@ -1177,15 +1179,14 @@ class Parser {
       return null;
     }
     let end = duration.span;
-    let unit: DurationUnit | null;
+    let unit: TrailingDurationUnit | null;
     // In `timer 5..10 s` the unit belongs to the whole range, not only to its end bound.
     if (duration.kind === "rangeExpression" && duration.end.kind === "durationLiteral") {
-      const rangeUnit = duration.end.unit;
-      unit = elapsedDurationUnit(rangeUnit) ?? null;
+      unit = duration.end.calendar ? null : (trailingDurationUnit(duration.end.unit) ?? null);
       if (unit === null)
         this.#reportSpan(
           parserDiagnosticCode.unsupportedDurationUnit,
-          "A timer needs an exact unit: 'ms', 's', 'min', or 'h'. A calendar day is not a fixed number of hours.",
+          "A timer range needs the unit 'ms', 's', 'min', or 'h'.",
           duration.end.unitSpan,
         );
       end = duration.end.span;
@@ -2293,18 +2294,18 @@ class Parser {
   }
 
   /** A trailing `ms`, `s`, `min`, or `h` after a `wait` or short `timer` duration expression. */
-  #parseTrailingDurationUnit(command: "wait" | "timer"): DurationUnit | null {
+  #parseTrailingDurationUnit(command: "wait" | "timer"): TrailingDurationUnit | null {
     if (!this.#check(TokenKind.Identifier)) return null;
     const token = this.#advance();
-    const unit = elapsedDurationUnit(token.lexeme);
+    const unit = trailingDurationUnit(token.lexeme);
     if (unit !== undefined) return unit;
-    const calendar = calendarDurationUnit(token.lexeme) !== undefined;
+    const other = elapsedDurationUnit(token.lexeme) ?? calendarDurationUnit(token.lexeme);
     this.#reportToken(
-      calendar
+      other !== undefined
         ? parserDiagnosticCode.unsupportedDurationUnit
         : parserDiagnosticCode.expectedStatementEnd,
-      calendar
-        ? `A ${command} needs an exact unit: 'ms', 's', 'min', or 'h'. A calendar day is not a fixed number of hours.`
+      other !== undefined
+        ? `A ${command} needs the unit 'ms', 's', 'min', or 'h' here.`
         : `Expected ${command} unit 'ms', 's', 'min', or 'h' (or their long forms).`,
       token,
     );
@@ -3572,20 +3573,52 @@ class Parser {
     });
   }
 
-  /** A unit identifier directly after a number literal on the same line forms a duration literal. */
+  /**
+   * A unit identifier directly after a number literal on the same line forms a duration literal: an exact unit, or
+   * `calendar` and a calendar unit (ADR 0026). A month or year without `calendar` is an error that suggests it.
+   */
   #parseDurationUnit(amount: NumberLiteral): Expression {
     if (!this.#check(TokenKind.Identifier)) return amount;
     const token = this.#peek();
-    const unit = elapsedDurationUnit(token.lexeme) ?? calendarDurationUnit(token.lexeme);
-    if (unit === undefined) return amount;
-    this.#advance();
-    return Object.freeze({
-      kind: "durationLiteral",
-      amount,
-      unit,
-      unitSpan: copySpan(token.span),
-      span: spanFrom(amount.span, token.span),
-    });
+    const literal = (
+      unit:
+        | { readonly calendar: false; readonly unit: DurationUnit }
+        | { readonly calendar: true; readonly unit: CalendarDurationUnit },
+      last: Token,
+    ): Expression =>
+      Object.freeze({
+        kind: "durationLiteral",
+        amount,
+        ...unit,
+        unitSpan: copySpan(last.span),
+        span: spanFrom(amount.span, last.span),
+      });
+    if (token.lexeme === "calendar") {
+      this.#advance();
+      const next = this.#peek();
+      const unit =
+        next.kind === TokenKind.Identifier ? calendarDurationUnit(next.lexeme) : undefined;
+      if (unit === undefined) {
+        this.#reportToken(
+          parserDiagnosticCode.unsupportedDurationUnit,
+          "Expected a calendar unit after 'calendar': day, week, month, or year.",
+          token,
+        );
+        return amount;
+      }
+      return literal({ calendar: true, unit }, this.#advance());
+    }
+    const exact = elapsedDurationUnit(token.lexeme);
+    if (exact !== undefined) return literal({ calendar: false, unit: exact }, this.#advance());
+    const calendar = calendarDurationUnit(token.lexeme);
+    if (calendar === undefined) return amount;
+    // Only months and years remain: days and weeks are exact units.
+    this.#reportToken(
+      parserDiagnosticCode.unsupportedDurationUnit,
+      `A ${calendar === "mo" ? "month" : "year"} has no fixed length. Write '${amount.raw} calendar ${token.lexeme}'.`,
+      token,
+    );
+    return literal({ calendar: true, unit: calendar }, this.#advance());
   }
 
   *#parsePrimary(): ParseTask<Expression | null> {
@@ -4797,6 +4830,12 @@ const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
   TokenKind.RightBrace,
 ]);
 
+/** The unit of a whole `wait` or short `timer` expression, or `undefined`. */
+function trailingDurationUnit(name: string): TrailingDurationUnit | undefined {
+  const unit = elapsedDurationUnit(name);
+  return unit === "d" || unit === "w" ? undefined : unit;
+}
+
 const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
   (
     [
@@ -4809,6 +4848,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "datetime",
       "absoluteDateTime",
       "duration",
+      "calendarDuration",
       "list",
       "dict",
       "object",

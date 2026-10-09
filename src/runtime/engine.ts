@@ -209,6 +209,7 @@ import {
   isDate,
   isDateTime,
   isDict,
+  isAnyDuration,
   isDuration,
   isList,
   isObject,
@@ -2622,8 +2623,8 @@ function buttonTimeoutMs(
   snapshot: RuntimeSnapshot,
   span: SourceSpan,
 ): number {
-  // A calendar duration has no fixed length (V30 §35).
-  if (isDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
+  // A calendar duration has no fixed length (ADR 0026).
+  if (isAnyDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
   const timeoutMs = buttonTimeoutMilliseconds(value);
   if (timeoutMs === null) {
     throw fault(
@@ -3273,7 +3274,7 @@ export function timerDurationMs(
       ? value
       : evaluator.randomIntegerInRange(range, span, "A timer", "duration");
   const amount =
-    isDuration(drawn) && unit === null
+    isAnyDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
       : drawn;
   if (command === "timer" && isRange(drawn))
@@ -3609,7 +3610,7 @@ function mediaMilliseconds(
   subject: string,
   span: SourceSpan,
 ): number {
-  const milliseconds = isDuration(value)
+  const milliseconds = isAnyDuration(value)
     ? exactDurationMilliseconds(value, subject, span)
     : typeof value === "number"
       ? value * 1_000
@@ -3642,8 +3643,8 @@ function mediaRepeat(
   }
   if (value === true) return { kind: "indefinite" };
   if (value === false) return { kind: "once" };
-  if (isDuration(value)) {
-    // A calendar duration has no fixed length (V30 §35), whatever its exact part.
+  if (isAnyDuration(value)) {
+    // A calendar duration has no fixed length (ADR 0026), whatever its parts.
     const milliseconds = exactDurationMilliseconds(value, "A repeat budget", repeat.value.span);
     if (Number.isFinite(milliseconds) && milliseconds > 0) return { kind: "budget", milliseconds };
   }

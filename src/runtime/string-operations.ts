@@ -16,7 +16,7 @@ import {
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
-import { describeRuntimeValue, isDuration } from "./value-predicates.js";
+import { describeRuntimeValue, isAnyDuration, isDuration } from "./value-predicates.js";
 import {
   createCapturedSerializableList,
   type SerializableRuntimeValue,
@@ -51,7 +51,7 @@ export function missingMemberMessage(
     ? ""
     : value === null
       ? " Check that it is not null first."
-      : typeof value === "number" || typeof value === "boolean" || isDuration(value)
+      : typeof value === "number" || typeof value === "boolean" || isAnyDuration(value)
         ? " Convert it to text first with toString(...)."
         : "";
   return `${description} has no ${use} '${name}'.${fix}`;
