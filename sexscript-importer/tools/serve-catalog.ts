@@ -12,12 +12,12 @@
  *   --port <https-port> [--http-port <port>] [--host <address>] [--verified-root <dir> --verified-upstream <url>]
  *   [--pins <file>]
  */
-import { createReadStream } from "node:fs";
-import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import { open, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
+import { pipeline } from "node:stream";
 import { parseArgs } from "node:util";
 import { LATEST_PREFIX } from "./catalog.ts";
 
@@ -163,19 +163,23 @@ async function serveFile(
     segments.some((segment) => segment === "" || segment.startsWith("."))
   )
     return send(response, 404);
-  const file = path.join(catalogRoot, ...segments);
-  const information = await stat(file).catch(() => null);
-  if (information?.isFile() !== true) return send(response, 404);
+  // One open file for its size and contents: the catalog folder may be a symlink that a regeneration repoints.
+  const file = await open(path.join(catalogRoot, ...segments)).catch(() => null);
+  if (file === null) return send(response, 404);
+  const information = await file.stat().catch(() => null);
+  if (information?.isFile() !== true) {
+    await file.close();
+    return send(response, 404);
+  }
   response.writeHead(200, {
     "Content-Type": type,
     "Content-Length": information.size,
     "Cache-Control": "no-cache",
   });
-  if (request.method === "HEAD") response.end();
-  else
-    createReadStream(file)
-      .on("error", () => response.destroy())
-      .pipe(response);
+  if (request.method === "HEAD") {
+    await file.close();
+    response.end();
+  } else pipeline(file.createReadStream(), response, () => {});
 }
 
 /**
