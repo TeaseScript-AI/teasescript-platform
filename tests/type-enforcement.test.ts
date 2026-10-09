@@ -1276,6 +1276,11 @@ test("a list or set literal of known types holds one type, also in nested lists 
 });
 
 test("a first null is remembered wherever a first value decides a type", () => {
+  // A loop variable is a new place, so after a null element its first other value decides its type.
+  assert.deepEqual(sayTexts("for k, v in dict{ a: null } {\n    v = 1\n    say v\n}\nexit"), ["1"]);
+  assert.deepEqual(codes('for v in [null] {\n    v = 1\n    v = "x"\n}\nexit'), [
+    ["TSV041", '"x"'],
+  ]);
   assert.deepEqual(
     codes("let door = {}\ndoor.owner = null\ndoor.owner = 1\ndoor.owner = null\nexit"),
     [],

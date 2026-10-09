@@ -1676,8 +1676,8 @@ class TypeChecker {
           statement.iterable,
           "A for-loop goes through a list, a set, a dict, or a range",
         );
-        // The loop variable is a place: it keeps the plain element type.
-        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+        // The loop variable is a new place, as if declared with `let` from the element (rules 1.2 and 1.3).
+        const loopType = element === undefined ? UNKNOWN_TYPE : placeType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1795,7 +1795,7 @@ class TypeChecker {
       declaration: statement,
     };
     const element = dictValueType(iterable);
-    const valueType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+    const valueType = element === undefined ? UNKNOWN_TYPE : placeType(element);
     this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
     const value: Variable = {
       name: valueName.name,
