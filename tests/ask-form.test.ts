@@ -438,6 +438,41 @@ test("a loop goes through the answers of a dict of fields where the form is aske
   );
 });
 
+test("fields the compiler cannot know open the form with the shape of their value", () => {
+  const ask = (argument: string, use: string) =>
+    compileValidPlan(
+      `function ask(fields) {\n    let answers = askForm fields: fields\n    ${use}\n}\nask(${argument})\nexit`,
+    );
+  const restored = (plan: InstructionPlan, snapshot: RuntimeSnapshot) =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot;
+
+  // A dict opens a dict form, whose answers a loop goes through, also after a restore.
+  const dict = ask(
+    'dict { "rope": false, "gag": true }',
+    "for key in answers { say key, instant }",
+  );
+  const { snapshot, ui } = opened(dict);
+  assert.equal(ui.shape, "dict");
+  const { finished } = submitted(dict, restored(dict, snapshot));
+  assert.deepEqual(
+    finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["rope", "gag"],
+  );
+  restored(dict, finished.snapshot);
+
+  // An object still opens an object form.
+  const object = ask("{ rope: true }", "say answers.rope, instant");
+  assert.equal(opened(object).ui.shape, "object");
+
+  // Any other value fails when the form would open.
+  const number = ask("5", "say answers, instant");
+  const failure = run(number, createImmediatePacingRuntimeSnapshot(number)).snapshot.failure;
+  assert.deepEqual(
+    [failure?.code, failure?.message],
+    ["TSR052", "askForm fields: must be an object or a dict of fields, not a number."],
+  );
+});
+
 test("a dict of fields of different kinds says each type, and answers in the union to narrow", () => {
   const menu = [
     'let settingId = "impact"',

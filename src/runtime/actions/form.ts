@@ -133,6 +133,7 @@ export function materializeForm(
     fields.push(field);
     values.push(value);
   };
+  let shape: FormUi["shape"] = "booleanList";
   if (prepared.kind === "booleanList") {
     if (texts === undefined || defaults === undefined || fieldsValue !== undefined)
       throw fault(internalFault("The prepared askForm request is malformed."), span);
@@ -159,17 +160,19 @@ export function materializeForm(
   } else {
     if (fieldsValue === undefined || texts !== undefined || defaults !== undefined)
       throw fault(internalFault("The prepared askForm request is malformed."), span);
+    // An unknown form takes the shape of its fields.
     const written =
-      prepared.kind === "object" && isObject(fieldsValue)
+      prepared.kind !== "dict" && isObject(fieldsValue)
         ? fieldsValue.properties.map(({ name, value }) => ({ id: name, value }))
-        : prepared.kind === "dict" && isDict(fieldsValue)
+        : prepared.kind !== "object" && isDict(fieldsValue)
           ? fieldsValue.entries.map(({ key, value }) => ({ id: key, value }))
           : undefined;
     if (written === undefined)
       throw fault(
-        `askForm fields: must be ${prepared.kind === "object" ? "an object" : "a dict"} of fields, not ${describeRuntimeValue(fieldsValue)}.`,
+        `askForm fields: must be ${prepared.kind === "object" ? "an object" : prepared.kind === "dict" ? "a dict" : "an object or a dict"} of fields, not ${describeRuntimeValue(fieldsValue)}.`,
         span,
       );
+    shape = isObject(fieldsValue) ? "object" : "dict";
     const numericKinds = new Map(
       prepared.kind === "object"
         ? prepared.numericKinds.map((entry) => [entry.name, entry.numericKind] as const)
@@ -221,16 +224,7 @@ export function materializeForm(
     .filter((part) => part !== "")
     .join("\n\n");
   return {
-    ui: {
-      kind: "form",
-      shape: prepared.kind,
-      fields,
-      hint,
-      submit,
-      cancel,
-      timeout,
-      accessibleName,
-    },
+    ui: { kind: "form", shape, fields, hint, submit, cancel, timeout, accessibleName },
     state: { values, editor: null },
     prose: prose === "" ? null : prose,
   };
@@ -266,6 +260,13 @@ export function formAnswerMismatch(
     if (answer !== undefined) return { field, type, answer };
   }
   return null;
+}
+
+/** Whether an open form's shape fits its prepared one: the same, or an object or a dict for an unknown one. */
+export function formShapeFits(prepared: PreparedFormShape, shape: unknown): boolean {
+  return prepared.kind === "unknown"
+    ? shape === "object" || shape === "dict"
+    : shape === prepared.kind;
 }
 
 /** One answer of each type a field can give. */
