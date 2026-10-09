@@ -103,38 +103,38 @@ const HELP = Object.freeze({
   askText: Object.freeze({
     command: "askText" as const,
     summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
-    syntax: "askText [as speaker] [hint | hint, prefill: answer | prefill: answer]",
+      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The asking speaker says the optional question in the chat before the field opens. An optional hint is shown in the field, not in the chat. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
+    syntax: "askText [as speaker] [question] [, prefill: answer] [, hint: text]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
       "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional prefill number fills the field at first.",
-    syntax: "askNumber [as speaker] [hint | hint, prefill: number | prefill: number]",
+    syntax: "askNumber [as speaker] [question] [, prefill: number] [, hint: text]",
   }),
   askInteger: Object.freeze({
     command: "askInteger" as const,
     summary:
       "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional prefill whole number fills the field at first.",
-    syntax: "askInteger [as speaker] [hint | hint, prefill: integer | prefill: integer]",
+    syntax: "askInteger [as speaker] [question] [, prefill: integer] [, hint: text]",
   }),
   askDate: Object.freeze({
     command: "askDate" as const,
     summary:
       "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
-    syntax: "askDate [as speaker] [hint | hint, prefill: date | prefill: date]",
+    syntax: "askDate [as speaker] [question] [, prefill: date] [, hint: text]",
   }),
   askTime: Object.freeze({
     command: "askTime" as const,
     summary:
       "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
-    syntax: "askTime [as speaker] [hint | hint, prefill: time | prefill: time]",
+    syntax: "askTime [as speaker] [question] [, prefill: time] [, hint: text]",
   }),
   askDateTime: Object.freeze({
     command: "askDateTime" as const,
     summary:
       "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
-    syntax: "askDateTime [as speaker] [hint | hint, prefill: datetime | prefill: datetime]",
+    syntax: "askDateTime [as speaker] [question] [, prefill: datetime] [, hint: text]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -578,7 +578,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
     case "askDate":
     case "askTime":
     case "askDateTime":
-      return Object.freeze(["speaker", "hint", "prefill"]);
+      return Object.freeze(["speaker", "question", "prefill", "hint"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
     case "say":
@@ -663,7 +663,7 @@ function activeParameterFor(
 /** The signature parameter of a named compact option, such as `timeout:` of `showButton`. */
 function namedOptionParameter(command: CompactCommand, name: string): number | null {
   if (command === "showButton") return name === "background" ? 2 : name === "timeout" ? 3 : null;
-  return name === "prefill" ? 2 : null;
+  return name === "prefill" ? 2 : name === "hint" ? 3 : null;
 }
 
 function lineStarts(source: string): readonly number[] {
