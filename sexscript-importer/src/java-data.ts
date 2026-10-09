@@ -171,6 +171,10 @@ interface ResourceAnalysis {
   readonly presenceValues: ReadonlySet<AstNode>;
   /** Variables assigned once with a path text known whole (constantPaths). */
   readonly constants: ReadonlyMap<string, string>;
+  /** JsonSlurper variables: assigned one `new JsonSlurper()` and read only by `parse(file)` of a package file. */
+  readonly jsonParsers: ReadonlySet<string>;
+  /** The `new JsonSlurper()` constructors that JsonSlurper variables are assigned. */
+  readonly jsonValues: ReadonlySet<AstNode>;
 }
 
 const FILE_TYPES = new Set(["File", "java.io.File"]);
@@ -187,6 +191,7 @@ const STREAM_TYPES = new Map<string, Charset | "reader" | "wrap">([
 ]);
 const INI_TYPES = new Set(["Wini", "org.ini4j.Wini"]);
 const PROPERTIES_TYPES = new Set(["Properties", "java.util.Properties"]);
+const JSON_TYPES = new Set(["JsonSlurper", "groovy.json.JsonSlurper"]);
 /** Constructors that write the file their first argument names. */
 const WRITER_TYPES = new Set([
   "FileWriter",
@@ -349,6 +354,8 @@ function emptyAnalysis(): ResourceAnalysis {
     presence: new Set(),
     presenceValues: new Set(),
     constants: new Map(),
+    jsonParsers: new Set(),
+    jsonValues: new Set(),
   };
 }
 
@@ -372,6 +379,32 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
     });
     if (kinds.length > 0 && kinds.every((kind) => kind === kinds[0]))
       variables.set(name, kinds[0]!);
+  }
+  // JsonSlurper variables whose only use parses one file, as trick_or_treat_poker reads its mistress's data.
+  const jsonParsers = new Set<string>();
+  const jsonValues = new Set<AstNode>();
+  for (const [name, values] of tree.assignments) {
+    const value = values.length === 1 ? values[0] : undefined;
+    if (
+      tree.parameters.has(name) ||
+      value?.kind !== "constructorCall" ||
+      !JSON_TYPES.has(String(value.type)) ||
+      argumentsOf(value).length !== 0
+    )
+      continue;
+    const reads = tree.reads.get(name) ?? [];
+    if (
+      reads.length > 0 &&
+      reads.every((reference) => {
+        const member = memberOf(reference, tree);
+        return (
+          member?.property === false && member.name === "parse" && member.arguments.length === 1
+        );
+      })
+    ) {
+      jsonParsers.add(name);
+      jsonValues.add(value);
+    }
   }
   const properties = new Set<string>();
   for (const [name, values] of tree.assignments) {
@@ -397,7 +430,7 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
           variables.get(variableName(value) ?? "") === kind,
       );
       const readsOk = (tree.reads.get(name) ?? []).every((reference) =>
-        supportedResourceUse(reference, kind, tree, variables, properties),
+        supportedResourceUse(reference, kind, tree, variables, properties, jsonParsers),
       );
       if (!assignedOk || !readsOk) {
         variables.delete(name);
@@ -426,6 +459,7 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
         tree,
         variables,
         properties,
+        jsonParsers,
       )
     )
       values.add(node);
@@ -464,6 +498,8 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
     presence,
     presenceValues,
     constants,
+    jsonParsers,
+    jsonValues,
   };
 }
 
@@ -564,6 +600,7 @@ function supportedResourceUse(
   tree: Tree,
   variables: ReadonlyMap<string, ResourceKind>,
   properties: ReadonlySet<string>,
+  jsonParsers: ReadonlySet<string>,
 ): boolean {
   const parent = tree.parents.get(node) ?? null;
   const member = memberOf(node, tree);
@@ -620,6 +657,8 @@ function supportedResourceUse(
       return resourceConstructorKind(argument.call, variables) !== null;
     if (argument.call.kind === "methodCall" && constantString(argument.call.method) === "load")
       return properties.has(variableName(argument.call.object) ?? "");
+    if (argument.call.kind === "methodCall" && constantString(argument.call.method) === "parse")
+      return kind === "file" && jsonParsers.has(variableName(argument.call.object) ?? "");
     return false;
   }
   // The value of a resource variable's assignment.
@@ -986,6 +1025,8 @@ export function javaDeclaration(
   span: SourceSpan | null,
   host: JavaRuleHost,
 ): IrStatement[] | null {
+  // The parser goes; each file it parses is a value (packageJsonRead).
+  if (host.state.analysis.jsonValues.has(value)) return [];
   if (!host.state.analysis.propertiesValues.has(value))
     return textDeclaration(name, value, span, host);
   return [
@@ -1038,6 +1079,12 @@ export function javaMethodCall(
       return iniRead(node, receiver, args, host);
     return undefined;
   }
+  if (
+    name === "parse" &&
+    args.length === 1 &&
+    analysis.jsonParsers.has(variableName(receiver) ?? "")
+  )
+    return packageJsonRead(node, args[0]!, host);
   const table = variableName(receiver);
   if (table === null || !analysis.properties.has(table))
     return temporalCall(node, name, args, host) ?? textCall(node, name, args, host);
@@ -1590,6 +1637,78 @@ function resolveFiles(
     }
   }
   return result;
+}
+
+/**
+ * JsonSlurper's `parse(file)` of a package file no script writes, as the value it gave, written out at conversion time:
+ * a JSON object becomes an object, or a dict where a key is no name, and a number with a fraction or an exponent a
+ * decimal, as JsonSlurper read it as a BigDecimal. Null after a diagnostic.
+ */
+function packageJsonRead(node: AstNode, file: AstNode, host: JavaRuleHost): IrExpression | null {
+  const files = resolveFiles(node, file, "lines", host);
+  if (files === null) return null;
+  const [path, lines] = [...files][0] ?? [];
+  if (files.size !== 1 || !Array.isArray(lines)) {
+    host.diagnostic(
+      "SX_PACKAGE_JSON",
+      "error",
+      "The path of this JSON file matches several package files; the conversion writes out one file's value.",
+      node.span,
+    );
+    return null;
+  }
+  // A number's own text tells a whole number from a decimal, which JSON.parse alone does not.
+  class Decimal {
+    readonly value: number;
+    constructor(value: number) {
+      this.value = value;
+    }
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lines.join("\n"), (_key, item: unknown, context?: { source?: string }) =>
+      typeof item === "number" && /[.eE]/u.test(context?.source ?? "") ? new Decimal(item) : item,
+    );
+  } catch {
+    host.diagnostic(
+      "SX_PACKAGE_JSON",
+      "error",
+      `The package file ${path} is no JSON that JsonSlurper reads the same way.`,
+      node.span,
+    );
+    return null;
+  }
+  noteOnce(host, "SX_PACKAGE_TEXT_SNAPSHOT", SNAPSHOT_NOTE, node.span);
+  const value = (item: unknown): IrExpression => {
+    if (item instanceof Decimal) return { kind: "literal", value: item.value, decimal: true };
+    if (Array.isArray(item)) return { kind: "list", items: item.map(value) };
+    if (item !== null && typeof item === "object") {
+      const entries = Object.entries(item);
+      const named = entries.every(([key]) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key));
+      return named
+        ? {
+            kind: "object",
+            properties: entries.map(([name, field]) => ({ name, value: value(field) })),
+          }
+        : {
+            kind: "object",
+            dict: true,
+            properties: entries.map(([key, field]) => ({
+              name: key,
+              key: { kind: "literal", value: key },
+              value: value(field),
+            })),
+          };
+    }
+    return {
+      kind: "literal",
+      value:
+        typeof item === "string" || typeof item === "number" || typeof item === "boolean"
+          ? item
+          : null,
+    };
+  };
+  return value(parsed);
 }
 
 /** `new File(path).exists()` for a resource that the conversion represents by its path text. */

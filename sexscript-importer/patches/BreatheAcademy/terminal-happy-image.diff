@@ -1,0 +1,20 @@
+--- a/scripts/BreatheAcademy.groovy
++++ b/scripts/BreatheAcademy.groovy
+@@ -734,7 +734,7 @@
+ 	}
+ 
+ 	save("advanced.status", "punishment")
+-	getLeahImage("BreatheAcademy/Leah/Dark/happy0.jpg")
++	setImage("BreatheAcademy/Leah/Dark/happy0.jpg")
+ 	}
+ }
+ else if (status == "punishment") {
+@@ -746,7 +746,7 @@
+ startLeahPunishment()
+ 
+ 	save("advanced.status", "start")
+-	getLeahImage("BreatheAcademy/Leah/Dark/happy0.jpg")
++	setImage("BreatheAcademy/Leah/Dark/happy0.jpg")
+ }
+ 
+ 

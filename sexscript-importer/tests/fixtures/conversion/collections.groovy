@@ -72,3 +72,14 @@ show("Stages " + stages + " " + paces + " " + firstPaces(paces).size())
 // A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
 def replies = new java.util.concurrent.LinkedBlockingQueue<String>()
 if (replies.size() == 0) show("No replies yet")
+// An any() whose result goes unused is a loop: a true result, returned or last, stops it, as in campdrain's drains.
+int drainSpeed = 0
+(1..2).any { stroke ->
+	show("Stroke " + stroke)
+	if (loadBoolean("training.edge") == true) {
+		if (getBoolean("Over the edge?")) return "training.groovy"
+		save("training.edge", false)
+		drainSpeed = 5
+	}
+}
+show("Speed " + drainSpeed)

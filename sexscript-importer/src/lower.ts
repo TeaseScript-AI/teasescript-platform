@@ -6688,6 +6688,10 @@ function lowerCallStatement(
   if (call !== null && !call.inherited && (call.name === "each" || call.name === "forEach")) {
     return lowerEachStatement(node, call.arguments, span, context);
   }
+  // An any() whose result goes unused runs its closure as a loop that a true result stops, as campdrain's drain loop.
+  if (call !== null && !call.inherited && call.name === "any") {
+    return lowerEachStatement(node, call.arguments, span, context, true);
+  }
   const collectionStatement =
     call === null || call.inherited ? null : lowerCollectionStatement(node, call, span, context);
   if (collectionStatement !== null) return collectionStatement;
@@ -8279,6 +8283,7 @@ function lowerEachStatement(
   args: AstNode[],
   span: SourceSpan | null,
   context: LowerContext,
+  stops = false,
 ): IrStatement[] {
   const receiverNode = asNode(node.object);
   if (receiverNode === null || args.length !== 1 || args[0]?.kind !== "closure") {
@@ -8333,6 +8338,18 @@ function lowerEachStatement(
       ),
     ];
   }
+  // In any(), the closure's result, returned or its last statement's value, stops the loop where it is true.
+  const anyBody = stops ? anyLoopBody(body) : null;
+  if (stops && anyBody === null) {
+    return [
+      unsupportedStatement(
+        context,
+        node,
+        "SX_ANY_RETURN",
+        "Groovy any() stops at the first true result of its closure; here a result's truth is known only at runtime, so it needs a manual rewrite.",
+      ),
+    ];
+  }
 
   const parameterSpecified = closure.parameterSpecified === true;
   const closureParameters = groovyParameters(closure.parameters);
@@ -8368,17 +8385,106 @@ function lowerEachStatement(
       ),
     ];
   }
-  if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
-  const loopBody = lowerBlock(body, context);
+  if (anyBody !== null)
+    addDiagnostic(
+      context,
+      "SX_ANY_LOOP",
+      "info",
+      "Groovy any() ran its closure for each element until one returned a true value, and its result went unused; it becomes a for loop that a true result breaks and a false one continues.",
+      span,
+    );
+  else if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
+  const loopBody = lowerBlock(anyBody ?? body, context);
   return [
     {
       kind: "for",
       variable,
       collection,
-      body: returns.length > 0 ? withoutFinalContinue(returnsAsContinue(loopBody)) : loopBody,
+      body:
+        anyBody === null && returns.length > 0
+          ? withoutFinalContinue(returnsAsContinue(loopBody))
+          : loopBody,
       span,
     },
   ];
+}
+
+/**
+ * The body of an any() closure as a loop body: a return of a true value becomes break and one of a false value or
+ * none continue, and a last statement whose value is true, such as campdrain's `drainSpeed = 5`, is followed by a
+ * break (Groovy returns the value of the closure's last statement, also at the end of an if branch). Null where a
+ * result's truth is known only at runtime, or where a break would leave a switch instead.
+ */
+function anyLoopBody(body: AstNode): AstNode | null {
+  let known = true;
+  const truth = (value: AstNode | null): boolean | null => {
+    if (value === null) return false;
+    const constant = constantValue(value);
+    return constant === undefined
+      ? null
+      : constant !== null && constant !== false && constant !== 0 && constant !== "";
+  };
+  const jump = (stops: boolean, span: SourceSpan | null): AstNode => ({
+    kind: stops ? "break" : "continue",
+    span,
+    label: null,
+  });
+  const returns = (node: AstNode, inSwitch: boolean): AstNode => {
+    if (node.kind === "closure") return node;
+    if (node.kind === "return") {
+      const stops = truth(asNode(node.value));
+      if (stops === null || (stops && inSwitch)) known = false;
+      return jump(stops === true, node.span);
+    }
+    const result: AstNode = { ...node };
+    const nested = inSwitch || node.kind === "switch";
+    for (const [key, value] of Object.entries(node)) {
+      if (isAstNode(value)) result[key] = returns(value, nested);
+      else if (Array.isArray(value))
+        result[key] = value.map((item) => (isAstNode(item) ? returns(item, nested) : item));
+    }
+    return result;
+  };
+  // The statements ending with the closure's last one, with a break after a last value that is true.
+  const last = (statements: AstNode[]): AstNode[] => {
+    const tail = statements.at(-1);
+    if (tail === undefined) return statements;
+    const before = statements.slice(0, -1);
+    const branch = (value: unknown): AstNode | null => {
+      const node = asNode(value);
+      return node === null || node.kind === "empty"
+        ? node
+        : { kind: "block", span: node.span, statements: last(branchStatements(node)) };
+    };
+    switch (tail.kind) {
+      case "block":
+        return [...before, { ...tail, statements: last(nodeArray(tail.statements)) }];
+      case "if":
+        return [...before, { ...tail, then: branch(tail.then), else: branch(tail.else) }];
+      case "expressionStatement": {
+        const expression = asNode(tail.expression);
+        const value =
+          expression?.kind === "binary" && expression.operator === "="
+            ? asNode(expression.right)
+            : expression;
+        const stops = value === null ? null : truth(value);
+        if (stops === null) known = false;
+        return stops === true ? [...statements, jump(true, tail.span)] : statements;
+      }
+      case "break":
+      case "continue":
+      case "for":
+      case "while":
+      case "empty":
+        return statements;
+      default:
+        known = false;
+        return statements;
+    }
+  };
+  const rewritten = returns(body, false);
+  const result: AstNode = { ...rewritten, statements: last(nodeArray(rewritten.statements)) };
+  return known ? result : null;
 }
 
 function noteReturnAsContinue(node: AstNode, context: LowerContext): void {
@@ -8423,25 +8529,31 @@ function withoutFinalContinue(statements: IrStatement[]): IrStatement[] {
 }
 
 /** At script level a lowered return is a script transfer or end; inside each() it only ended the iteration. */
-function returnsAsContinue(statements: IrStatement[]): IrStatement[] {
+function returnsAsContinue(
+  statements: IrStatement[],
+  kind: "continue" | "break" = "continue",
+): IrStatement[] {
   return statements.map((statement): IrStatement => {
     switch (statement.kind) {
       case "return":
       case "goto":
-        return { kind: "continue", span: statement.span };
+        return { kind, span: statement.span };
       case "exit":
-        return statement.returned === true ? { kind: "continue", span: statement.span } : statement;
+        return statement.returned === true ? { kind, span: statement.span } : statement;
       case "if":
         return {
           ...statement,
-          then: returnsAsContinue(statement.then),
-          else: returnsAsContinue(statement.else),
+          then: returnsAsContinue(statement.then, kind),
+          else: returnsAsContinue(statement.else, kind),
         };
       case "switch":
         return {
           ...statement,
-          cases: statement.cases.map((item) => ({ ...item, body: returnsAsContinue(item.body) })),
-          default: returnsAsContinue(statement.default),
+          cases: statement.cases.map((item) => ({
+            ...item,
+            body: returnsAsContinue(item.body, kind),
+          })),
+          default: returnsAsContinue(statement.default, kind),
         };
       default:
         return statement;
@@ -10043,20 +10155,46 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
 
 /**
  * `save("k", count++)` uses the old value and then increments. When nothing else in the statement can observe the
- * variable, the value is the variable itself and the increment follows the statement.
+ * variable, the value is the variable itself and the increment follows the statement. Where a function the statement
+ * calls afterwards may read it, as Domme2's `showDynamically(rules[i++])`, the old value is kept first and the
+ * increment comes before the statement, as Groovy made it before the call.
  */
 function lowerPostfixValue(node: AstNode, context: LowerContext): IrExpression | null {
   const name = variableName(asNode(node.value));
   const operator = node.operator === "++" ? "+=" : node.operator === "--" ? "-=" : null;
   const root = context.statementRoot;
+  const after =
+    name !== null &&
+    operator !== null &&
+    root !== null &&
+    root === context.postludeRoot &&
+    root.kind === "expressionStatement" &&
+    incrementsAfterStatement(root, node, name, context);
   if (
-    name === null ||
-    operator === null ||
-    root === null ||
-    root !== context.postludeRoot ||
-    root.kind !== "expressionStatement" ||
-    !incrementsAfterStatement(root, node, name, context)
+    !after &&
+    name !== null &&
+    operator !== null &&
+    root !== null &&
+    onlyRead(root, node, name) &&
+    isHoistable(root, node, context)
   ) {
+    const old = freshName(`${name}Before`, context);
+    const variables = new Map(context.types.variables);
+    variables.set(old, inferType(asNode(node.value)!, context.types));
+    context.types = { ...context.types, variables };
+    context.prelude.push(
+      { kind: "let", name: old, value: { kind: "variable", name }, span: node.span },
+      {
+        kind: "assign",
+        target: { kind: "variable", name },
+        operator,
+        value: { kind: "literal", value: 1 },
+        span: node.span,
+      },
+    );
+    return { kind: "variable", name: old };
+  }
+  if (!after || name === null || operator === null) {
     return unsupportedExpression(
       context,
       node,
@@ -10079,12 +10217,11 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
   const name = variableName(asNode(node.value));
   const operator = node.operator === "++" ? "+=" : node.operator === "--" ? "-=" : null;
   const root = context.statementRoot;
-  // The change may move before the statement when nothing else in it reads the variable or calls a local function.
-  let uses = 0;
+  // The change may move before the statement when nothing else in it reads the variable or calls a local function;
+  // the variable a plain assignment sets, as ShockReflex's `powerLevel = Math.min(++powerLevel, max)`, is written last.
   let localCalls = false;
   if (root !== null)
     walkAst(root, (child) => {
-      if (variableName(child) === name && child.kind === "variable") uses += 1;
       if (child.kind === "methodCall" && child.implicitThis === true)
         localCalls ||= context.functions.has(constantString(child.method) ?? "");
     });
@@ -10092,7 +10229,7 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
     name === null ||
     operator === null ||
     root === null ||
-    uses !== 1 ||
+    !onlyRead(root, node, name) ||
     localCalls ||
     !isHoistable(root, node, context)
   ) {
@@ -10147,6 +10284,32 @@ function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression 
   if (statements.some((statement) => statement.kind === "unsupported")) return null;
   context.prelude.push(...statements);
   return { kind: "variable", name };
+}
+
+/**
+ * Whether the variable `name` occurs in statement `root` only as the operand of `target`, apart from the variable that
+ * a plain assignment or declaration as the statement sets, which Groovy writes after computing the value.
+ */
+function onlyRead(root: AstNode, target: AstNode, name: string): boolean {
+  const expression = root.kind === "expressionStatement" ? asNode(root.expression) : root;
+  const assigned =
+    expression !== null &&
+    (expression.kind === "declaration" ||
+      (expression.kind === "binary" && expression.operator === "="))
+      ? asNode(expression.left)
+      : null;
+  const operand = asNode(target.value);
+  let others = 0;
+  walkAst(root, (child) => {
+    if (
+      child.kind === "variable" &&
+      variableName(child) === name &&
+      child !== operand &&
+      child !== assigned
+    )
+      others += 1;
+  });
+  return others === 0;
 }
 
 function incrementsAfterStatement(
