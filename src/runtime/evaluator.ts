@@ -3203,8 +3203,13 @@ export class Evaluator {
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
-    const text = call.positional[0];
-    if (typeof text !== "string") throw new TypeError("escapeMarkup(text) requires a string.");
+    const text = call.positional[0]!;
+    if (typeof text !== "string")
+      throw fault(
+        "TSR059",
+        `escapeMarkup(...) needs text, not ${describeRuntimeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
+        call.span,
+      );
     // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
     if (text.length * 2 > MAX_TEXT_LENGTH)
       checkTextLength(escapedMarkupLength(text), "escapeMarkup", call.span);
