@@ -179,7 +179,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   that never changes joins the span's own text first (DisciplineClinic's `dots = "\n\n....... "`), and a variable that
   every show wraps in the same span again keeps no span of its own (DisciplineClinic's `message`, which legacy wrapped
   in `<b>` twice). A value built at runtime with line breaks inside a span still crosses them (DisciplineClinic's
-  "Keep counting!" variant of a long spanking), which only a span per line at runtime would mend.
+  "Keep counting!" variant of a long spanking), which only a span per line at runtime would mend. Corpus: 214 lines of
+  stray delimiters gone from texts in 21 units, 12 nested spans settled in 3 units, 3 constant texts folded in 2 units,
+  and 1 nested variable span (DisciplineClinic).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
   or empty. TeaseScript prefills with `default:`, and a null or blank default at runtime opens the input without a
   prefill (#618), so such a default converts as written; a literal empty or null default, which TeaseScript rejects
