@@ -4,7 +4,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { createPlayerRuntimeSession, playerRuntimeSnapshot } from "../player/runtime-adapter.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { CheckpointError, serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import {
   checkStorageTransferImages,
   bundleSavedScripts,
@@ -16,6 +16,7 @@ import {
   storageTransferFile,
   storageTransferFileName,
   storageTransferText,
+  storageTransferTextWithin,
   StorageTransferError,
   type StorageBundle,
 } from "../player/storage-transfer.js";
@@ -128,6 +129,17 @@ test("text round trips compressed and as plain JSON, also when wrapped across li
   // The text decodes with an independent base64url decoder to the same gzip document.
   const independent = Buffer.from(compressed.slice("TSST1.gzip.".length), "base64url");
   assert.equal(gunzipSync(independent).toString("utf8"), plain);
+});
+
+test("text longer than a text can be fails with TSK004 before it is built, compressed and as plain JSON", async () => {
+  const tooLarge = (error: unknown) =>
+    error instanceof CheckpointError && error.info.code === "TSK004";
+  for (const gzip of [true, false]) {
+    const text = await storageTransferText(transfer, gzip);
+    // The guard counts exactly: the text fits a limit of its own length, and not one shorter.
+    assert.equal(await storageTransferTextWithin(transfer, gzip, text.length), text);
+    await assert.rejects(storageTransferTextWithin(transfer, gzip, text.length - 1), tooLarge);
+  }
 });
 
 test("the plain document keeps stored values readable, one saved value per line", async () => {

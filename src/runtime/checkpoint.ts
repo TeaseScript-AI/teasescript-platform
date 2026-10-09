@@ -87,7 +87,8 @@ function isStringLengthExhaustion(error: unknown): boolean {
   return error instanceof RangeError && error.message === "Invalid string length";
 }
 
-function stateTooLarge(): CheckpointError {
+/** `TSK004`: a state, or a text built from one such as an export, would be longer than a text can be. */
+export function stateTooLarge(): CheckpointError {
   return checkpointError(
     "TSK004",
     `The state is too large to save: as text it would be longer than the limit of ${MAX_TEXT_LENGTH.toLocaleString("en-US")} characters.`,

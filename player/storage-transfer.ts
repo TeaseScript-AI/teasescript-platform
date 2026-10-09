@@ -4,7 +4,8 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { isWellFormedCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { serializeValidatedRuntimeJson, stateTooLarge } from "../src/runtime/checkpoint.js";
+import { MAX_TEXT_LENGTH } from "../src/runtime/text-length.js";
 import { capturedMediaReferences } from "./captured-media-persistence.js";
 import { checkImageFile, type ImageDecoder } from "./image-file.js";
 import {
@@ -147,14 +148,34 @@ export async function storageTransferFile(
   return jsonFile(pieces(bundle), gzip);
 }
 
-/** The exported text: `TSST1.gzip.` plus base64url, or plain JSON without `gzip`. */
+/**
+ * The exported text: `TSST1.gzip.` plus base64url, or plain JSON without `gzip`. Text longer than a text can be
+ * (`MAX_TEXT_LENGTH`) fails with `TSK004` before it is built; the file has no such limit.
+ */
 export async function storageTransferText(
   bundle: StorageBundle,
   gzip = gzipSupported(),
 ): Promise<string> {
-  if (!gzip) return [...pieces(bundle)].join("");
-  const file = await storageTransferFile(bundle, true);
-  return TEXT_PREFIX + encodeBase64url(new Uint8Array(await file.arrayBuffer()));
+  return storageTransferTextWithin(bundle, gzip, MAX_TEXT_LENGTH);
+}
+
+/** `storageTransferText` with `limit` as the longest text it writes; tests give a small one. */
+export async function storageTransferTextWithin(
+  bundle: StorageBundle,
+  gzip: boolean,
+  limit: number,
+): Promise<string> {
+  if (!gzip) {
+    const parts = [...pieces(bundle)];
+    let length = 0;
+    for (const part of parts) length += part.length;
+    if (length > limit) throw stateTooLarge();
+    return parts.join("");
+  }
+  const bytes = new Uint8Array(await (await storageTransferFile(bundle, true)).arrayBuffer());
+  // Unpadded base64url has four characters for every three bytes, and two or three for one or two left over.
+  if (TEXT_PREFIX.length + Math.ceil((bytes.length * 4) / 3) > limit) throw stateTooLarge();
+  return TEXT_PREFIX + encodeBase64url(bytes);
 }
 
 /** The file name for an export: the name, such as the one script's, kept to safe characters. */
@@ -400,8 +421,11 @@ function* pieces(bundle: StorageBundle): Generator<string> {
   yield `{"format":${JSON.stringify(FORMAT)},"version":${VERSION},\n"scripts":[`;
   for (const [index, script] of bundle.scripts.entries()) {
     yield `${index === 0 ? "\n" : ",\n"}{"scope":${JSON.stringify(script.scope)},"name":${JSON.stringify(script.name)},"photos":${JSON.stringify(script.photos)},"entries":[`;
-    for (const [entryIndex, entry] of script.entries.entries())
-      yield `${entryIndex === 0 ? "\n" : ",\n"}${serializeValidatedRuntimeJson({ key: entry.key, value: entry.value })}`;
+    // An entry's JSON is a piece of its own, which may be as long as a text can be.
+    for (const [entryIndex, entry] of script.entries.entries()) {
+      yield entryIndex === 0 ? "\n" : ",\n";
+      yield serializeValidatedRuntimeJson({ key: entry.key, value: entry.value });
+    }
     yield "\n]}";
   }
   yield `\n],\n"images":[`;

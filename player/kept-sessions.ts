@@ -135,15 +135,48 @@ const REFERENCES_IN_TEXT =
  * session that cannot be read rejects, so a sweep defers.
  */
 export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaInUse | undefined {
-  return (
-    store &&
-    (async (scope) => capturedMediaReferencesInJson(JSON.stringify(await store.session(scope))))
-  );
+  return store && (async (scope) => capturedMediaReferencesIn(await store.session(scope)));
 }
 
-/** The captured-media references in serialized state, such as photos a session shows or holds in variables. */
-export function capturedMediaReferencesInJson(json: string): Set<string> {
-  return new Set(json.match(REFERENCES_IN_TEXT));
+/**
+ * The captured-media references in session data, such as photos a session shows or holds in variables: the references in
+ * its JSON, written one field of a record and one element of a list at a time rather than as one text. JSON decides
+ * everything else, as for the whole: a value it leaves out has none, and one it cannot write, such as a cycle, throws.
+ * A text is searched as it is, since a reference has no character JSON escapes.
+ */
+export function capturedMediaReferencesIn(...data: readonly unknown[]): Set<string> {
+  const found = new Set<string>();
+  const search = (value: unknown): void => {
+    const json = typeof value === "string" ? value : JSON.stringify(value);
+    if (json !== undefined)
+      for (const [reference] of json.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
+  };
+  const searchElements = (value: unknown): void => {
+    if (!Array.isArray(value)) search(value);
+    // JSON writes a hole or a value it leaves out of a list as null, which has none.
+    else for (let index = 0; index < value.length; index += 1) search(value[index]);
+  };
+  for (const value of data) {
+    if (!isPlainRecord(value)) searchElements(value);
+    else
+      for (const [key, field] of Object.entries(value)) {
+        // JSON leaves out a field whose value it cannot write, and with it its key.
+        if (field === undefined || typeof field === "function" || typeof field === "symbol")
+          continue;
+        search(key);
+        searchElements(field);
+      }
+  }
+  return found;
+}
+
+/** A record JSON writes field by field: a plain object, not a list or a boxed value such as `new String()`. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    typeof value["toJSON"] !== "function"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

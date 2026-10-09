@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import {
-  capturedMediaReferencesInJson,
+  sweepCapturedMedia,
+  type CapturedMediaLocks,
+} from "../player/captured-media-persistence.js";
+import {
+  capturedMediaReferencesIn,
+  keptPhotoReferences,
   keptSession,
   memoryKeptRoomStore,
   memoryKeptSessionStore,
@@ -12,7 +17,9 @@ import {
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeSession,
+  playerRuntimeSnapshotJson,
 } from "../player/runtime-adapter.js";
+import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InterpreterEvent } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
@@ -160,13 +167,90 @@ test("a debug room keeps saved values of its own beside its session and photos, 
   await assert.rejects(values.load(), /no debug room/);
 });
 
+test("a kept session's photos are found in its state and events one text at a time, as in its JSON", async () => {
+  const reference = (n: number) => `captured-media:01234567-89ab-cdef-0123-456789abcdef:${n}`;
+  const snapshotJson = JSON.stringify({ stage: reference(1), values: [`x${reference(2)}y`] });
+  const kept = events("say", "actionRequested", "say");
+  Object.assign(kept[0]!, { text: `${reference(3)} and ${reference(4)}` });
+  Object.assign(kept[1]!, { action: { [reference(5)]: [[reference(6)]] } });
+  const session = stored({ snapshotJson, events: kept });
+  // The oracle: one search of the session's whole JSON, the text that is no longer built.
+  const inJson = new Set(JSON.stringify(session).match(/captured-media:[0-9a-f-]+:[0-9]+/gu));
+  assert.equal(inJson.size, 6);
+  assert.deepEqual(capturedMediaReferencesIn(snapshotJson, kept), inJson);
+  const store = memoryKeptSessionStore();
+  await store.publish("script", {
+    planJson: "{}",
+    snapshotJson,
+    eventsFrom: 0,
+    events: kept,
+    marks,
+  });
+  assert.deepEqual(await keptPhotoReferences(store)!("script"), inJson);
+});
+
+test("the sweep keeps every photo a stored kept session shows, and defers when the session cannot be written as JSON", async () => {
+  const reference = "captured-media:00000000-0000-4000-8000-000000000000:1";
+  const live = createPlayerRuntimeSession(`showImage "${reference}"\nshowButton "Next"\nexit`);
+  // Stored data is structured-cloned: it may hold what JSON leaves out, a boxed text, or a cycle.
+  const keptWith = async (extra: unknown) => {
+    const kept = memoryKeptSessionStore();
+    const storedEvents = structuredClone(live.events);
+    Object.assign(storedEvents.at(-1)!, { extra: structuredClone(extra) });
+    await kept.publish("script", {
+      planJson: JSON.stringify(live.plan),
+      snapshotJson: playerRuntimeSnapshotJson(live),
+      eventsFrom: 0,
+      events: storedEvents,
+      marks,
+    });
+    return kept;
+  };
+  const sweep = async (kept: ReturnType<typeof memoryKeptSessionStore>) => {
+    const repository = new FakeMediaRepository();
+    await repository.add({
+      namespace: "script",
+      reference,
+      kind: "image",
+      mimeType: "image/png",
+      size: 5,
+      data: new Blob(["photo"], { type: "image/png" }),
+    });
+    const store = new CapturedMediaStore(repository, urls, "script");
+    const provider: ScriptStorageProvider = {
+      scope: "script",
+      load: async () => [],
+      write: async () => {},
+      replace: async () => {},
+      clear: async () => {},
+    };
+    const idle: CapturedMediaLocks = {
+      holdLive: () => ({ granted: Promise.resolve("held" as const), release: () => {} }),
+      whenIdle: async (_scope, work) => (await work(), true),
+    };
+    const swept = sweepCapturedMedia(provider, store, idle, keptPhotoReferences(kept));
+    return { swept, kept: async () => (await repository.get("script", reference)) !== null };
+  };
+  const cycle: Record<string, unknown> = {};
+  cycle["self"] = cycle;
+  for (const extra of [undefined, { optional: undefined }, new Array(1), new String("text")]) {
+    const { swept, kept } = await sweep(await keptWith(extra));
+    await swept;
+    assert.equal(await kept(), true, String(extra));
+  }
+  // JSON cannot write a cycle, so the sweep defers, as it does for a session it cannot read.
+  const { swept, kept } = await sweep(await keptWith(cycle));
+  await assert.rejects(swept, TypeError);
+  assert.equal(await kept(), true);
+});
+
 test("a photo a kept session holds comes back as session media, which a save stores again", async () => {
   const repository = new FakeMediaRepository();
   const media = new CapturedMediaStore(repository, urls, "script");
   const shown = media.add("image", new Blob(["shown"], { type: "image/png" }));
   const record = await media.read(shown.reference);
   assert.deepEqual(
-    [...capturedMediaReferencesInJson(JSON.stringify({ stage: shown.reference }))],
+    [...capturedMediaReferencesIn(JSON.stringify({ stage: shown.reference }))],
     [shown.reference],
   );
 
