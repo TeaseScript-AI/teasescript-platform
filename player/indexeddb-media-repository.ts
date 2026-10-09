@@ -77,7 +77,12 @@ function committed(database: IDBDatabase, write: (store: IDBObjectStore) => void
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE, "readwrite");
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
+    // A request's error reaches the transaction before the transaction has an error of its own, so it is the cause.
+    transaction.onerror = (event) =>
+      reject(
+        (event.target instanceof IDBRequest ? event.target.error : null) ??
+          new DOMException("The write failed.", "UnknownError"),
+      );
     transaction.onabort = () =>
       reject(transaction.error ?? new DOMException("The write was aborted.", "AbortError"));
     write(transaction.objectStore(STORE));

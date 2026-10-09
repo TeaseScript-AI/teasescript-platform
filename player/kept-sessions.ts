@@ -468,7 +468,10 @@ function transact<T>(
     let result: T;
     let failure: Error | null = null;
     transaction.oncomplete = () => resolve(result);
-    transaction.onabort = transaction.onerror = () =>
+    // A request's error reaches the transaction before the transaction has an error of its own, so it is the cause.
+    transaction.onerror = (event) =>
+      reject(failure ?? requestError(event) ?? new DOMException("Aborted.", "AbortError"));
+    transaction.onabort = () =>
       reject(failure ?? transaction.error ?? new DOMException("Aborted.", "AbortError"));
     work(
       transaction,
@@ -480,6 +483,10 @@ function transact<T>(
     );
   });
 }
+
+/** The error of the request an `error` event comes from, or `null`. */
+const requestError = (event: Event) =>
+  event.target instanceof IDBRequest ? event.target.error : null;
 
 const got = <T>(request: IDBRequest<T>, then: (value: T) => void) => {
   request.onsuccess = () => then(request.result);
