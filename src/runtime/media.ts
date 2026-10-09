@@ -5,8 +5,8 @@ import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 /**
  * Audio or video playback state. The enclosing background action owns an ADR 0016 action ID; the media ID is the
  * identity behind opaque handles. The engine owns lifecycle, passes, repeat limits, cue order, and settlement; the
- * Player reports only load results and scene-timestamped playback progress. Settled records remain so handles stay
- * readable.
+ * Player reports only load results and scene-timestamped playback progress. A settled record keeps only what a handle
+ * still reads.
  */
 export type RuntimeMediaState = "running" | "paused" | "finished" | "stopped";
 
@@ -78,6 +78,21 @@ export interface RuntimeMediaSnapshot {
   points: RuntimeMediaPointSnapshot[];
 }
 
+/**
+ * What a handle still reads once media finished or stopped: its source, state, duration, volume, and where playback
+ * ended. Nothing plays it again, so the timeline, blocks, and samples go when it settles.
+ */
+export interface RuntimeSettledMediaSnapshot {
+  readonly mediaId: number;
+  readonly source: string;
+  readonly state: "finished" | "stopped";
+  /** Source duration; `null` when the source never loaded. */
+  readonly durationMs: number | null;
+  readonly volume: number;
+  readonly positionMs: number;
+  readonly elapsedMs: number;
+}
+
 /** The parts of a media record that determine its timeline: range, repeat, cues, and the current segment's anchor. */
 export type MediaTimeline = Pick<
   RuntimeMediaSnapshot,
@@ -138,8 +153,27 @@ export interface MediaEventOutcome {
   readonly finished: boolean;
 }
 
+/** The record a media handle refers to: the active one, or what remains once the media settled. */
+export type MediaHandleRecord = RuntimeMediaSnapshot | RuntimeSettledMediaSnapshot;
+
 export function isActiveMedia(media: RuntimeMediaSnapshot): boolean {
   return media.state === "running" || media.state === "paused";
+}
+
+/** The settled record of finished or stopped media. */
+export function settledMediaRecord(media: RuntimeMediaSnapshot): RuntimeSettledMediaSnapshot {
+  if (media.state !== "finished" && media.state !== "stopped") {
+    throw new Error("Only finished or stopped media can settle.");
+  }
+  return {
+    mediaId: media.mediaId,
+    source: media.source,
+    state: media.state,
+    durationMs: media.durationMs,
+    volume: media.volume,
+    positionMs: media.positionMs,
+    elapsedMs: media.elapsedMs,
+  };
 }
 
 /** The effective end of the active range; only meaningful once loaded. */
@@ -325,19 +359,17 @@ function predecessorsOf(media: MediaTimeline, passes: number, positionMs: number
 }
 
 /**
- * Whether the runtime itself reaches this committed cursor in its segment: an unfinished cursor stands at its pass's
- * origin or on a cue arrival; a finished one at the arrival that ended the last pass or a repeat duration. Every
- * arrival is recomputed with the runtime's own next-arrival step from its predecessor, so restore validation accepts
- * exactly what the timeline produces.
+ * Whether the runtime itself reaches this committed cursor of active media in its segment: it stands at its pass's
+ * origin or on a cue arrival. Every arrival is recomputed with the runtime's own next-arrival step from its
+ * predecessor, so restore validation accepts exactly what the timeline produces.
  */
-export function reachableMediaCursor(media: PersistedMediaCursor, finished: boolean): boolean {
+export function reachableMediaCursor(media: PersistedMediaCursor): boolean {
   const passes = media.passesCompleted;
   if (passes < media.segmentPasses) return false;
   // Start cues wait at the origin of a pass, where playback has committed nothing beyond it.
   if (media.startCuesPending) {
     const origin = passOrigin(media, passes);
     if (
-      finished ||
       media.positionMs !== origin.positionMs ||
       media.committedProgressMs !== origin.progressMs ||
       media.positionMs >= mediaEndMs(media) ||
@@ -370,24 +402,9 @@ export function reachableMediaCursor(media: PersistedMediaCursor, finished: bool
   };
   const position = media.positionMs;
   const committed = media.committedProgressMs;
-  if (!finished) {
-    const origin = passOrigin(media, passes);
-    if (position === origin.positionMs) return committed === origin.progressMs && started(passes);
-    return position < end && started(passes) && arrivesAt(passes, position, committed);
-  }
-  if (
-    position === end &&
-    passes > media.segmentPasses &&
-    started(passes - 1) &&
-    arrivesAt(passes - 1, end, committed)
-  )
-    return true;
-  return (
-    media.repeat.kind === "budget" &&
-    committed >= budgetEndProgressMs(media) &&
-    started(passes) &&
-    arrivesAt(passes, position, committed)
-  );
+  const origin = passOrigin(media, passes);
+  if (position === origin.positionMs) return committed === origin.progressMs && started(passes);
+  return position < end && started(passes) && arrivesAt(passes, position, committed);
 }
 
 /** Where a repeat duration ending at segment progress `endProgressMs` inside the pass after `passes` stands. */
@@ -528,11 +545,11 @@ export function commitMediaEvent(
       media.startCuesPending = cuesAt(media, media.startAtMs).length > 0;
       return { cueFunctionIds, finished: false };
     }
-    finishMedia(media, event);
+    media.state = "finished";
     return { cueFunctionIds, finished: true };
   }
   if (media.committedProgressMs >= budgetEndProgressMs(media)) {
-    finishMedia(media, event);
+    media.state = "finished";
     return { cueFunctionIds, finished: true };
   }
   return { cueFunctionIds, finished: false };
@@ -591,13 +608,6 @@ export function skipSilentPasses(
     positionMs: end,
     dueAtMs: null,
   });
-}
-
-/** Settled media never interpolates again; one sample at the finish replaces the segment's history. */
-function finishMedia(media: RuntimeMediaSnapshot, event: MediaTimelineEvent): void {
-  media.state = "finished";
-  if (event.dueAtMs !== null)
-    media.points = [{ atMs: event.dueAtMs, progressMs: event.progressMs }];
 }
 
 /**
@@ -725,7 +735,7 @@ export function pruneMediaPoints(media: RuntimeMediaSnapshot, atMs: number): voi
  * a null source, a load failure, Stage replacement, or the end of the session. Restore validation does not check this
  * for state the runtime does not produce, such as a hand-edited checkpoint that binds the handle of loading media.
  */
-export function pauseMedia(media: RuntimeMediaSnapshot, atMs: number): MediaWarning | null {
+export function pauseMedia(media: MediaHandleRecord, atMs: number): MediaWarning | null {
   if (media.state === "paused") return null;
   if (media.state !== "running") return settledWarning(media, "pause()");
   startSegment(media, atMs);
@@ -733,7 +743,7 @@ export function pauseMedia(media: RuntimeMediaSnapshot, atMs: number): MediaWarn
   return null;
 }
 
-export function resumeMedia(media: RuntimeMediaSnapshot, atMs: number): MediaWarning | null {
+export function resumeMedia(media: MediaHandleRecord, atMs: number): MediaWarning | null {
   if (media.state === "running") return null;
   if (media.state !== "paused") return settledWarning(media, "resume()");
   startSegment(media, atMs);
@@ -749,33 +759,39 @@ export function stopMedia(media: RuntimeMediaSnapshot, atMs: number): void {
 }
 
 /**
- * Seeks to `requestedMs`, clamped to the active range. Cues strictly between the old and new position do not fire; cues
- * at the new position fire once playback proceeds from it, and a seek to the end completes the pass at once.
+ * Seeks to the source position `milliseconds`, or to `milliseconds` before the effective end, clamped to the active
+ * range. Cues strictly between the old and new position do not fire; cues at the new position fire once playback
+ * proceeds from it, and a seek to the end completes the pass at once.
  */
 export function seekMedia(
-  media: RuntimeMediaSnapshot,
-  requestedMs: number,
+  media: MediaHandleRecord,
+  milliseconds: number,
   atMs: number,
   operation: "position" | "remaining",
 ): MediaWarning | null {
-  if (!isActiveMedia(media)) return settledWarning(media, operation);
+  if (media.state !== "running" && media.state !== "paused")
+    return settledWarning(media, operation);
   startSegment(media, atMs);
   const end = mediaEndMs(media);
+  const requestedMs = operation === "position" ? milliseconds : end - milliseconds;
   media.positionMs = Math.min(Math.max(requestedMs, media.startAtMs), end);
   media.segmentPositionMs = media.positionMs;
   media.startCuesPending = media.positionMs < end && cuesAt(media, media.positionMs).length > 0;
   return null;
 }
 
-export function setMediaVolume(media: RuntimeMediaSnapshot, volume: number): MediaWarning | null {
-  if (!isActiveMedia(media)) return settledWarning(media, "volume");
+export function setMediaVolume(media: MediaHandleRecord, volume: number): MediaWarning | null {
+  if (media.state !== "running" && media.state !== "paused") return settledWarning(media, "volume");
   media.volume = volume;
   return null;
 }
 
-/** Handle property reads at scene time `atMs`; `undefined` means the property does not exist. */
+/**
+ * Handle property reads at scene time `atMs`; `undefined` means the property does not exist. Finished and stopped
+ * media read where playback ended, and no `remaining` time once the source loaded.
+ */
 export function mediaProperty(
-  media: RuntimeMediaSnapshot,
+  media: MediaHandleRecord,
   name: string,
   atMs: number,
 ): SerializableRuntimeValue | undefined {
@@ -783,17 +799,21 @@ export function mediaProperty(
     kind: "duration",
     milliseconds,
   });
-  const progress = (): number => progressBefore(media, atMs);
-  const advanced = (): number => progress() - media.committedProgressMs;
-  const position = (): number => positionAtProgressMs(media, progress()).positionMs;
+  const active = media.state === "running" || media.state === "paused" ? media : null;
+  const advanced = (): number =>
+    active === null ? 0 : progressBefore(active, atMs) - active.committedProgressMs;
+  const position = (): number =>
+    active === null
+      ? media.positionMs
+      : positionAtProgressMs(active, progressBefore(active, atMs)).positionMs;
   switch (name) {
     case "position":
       return duration(position());
     case "elapsed":
       return duration(media.elapsedMs + advanced());
     case "remaining":
-      if (!media.loaded) return null;
-      return duration(isActiveMedia(media) ? Math.max(0, mediaEndMs(media) - position()) : 0);
+      if (media.durationMs === null) return null;
+      return duration(active === null ? 0 : Math.max(0, mediaEndMs(active) - position()));
     case "duration":
       return media.durationMs === null ? null : duration(media.durationMs);
     case "volume":
@@ -880,7 +900,7 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   return withinPass(passes + laps);
 }
 
-function settledWarning(media: RuntimeMediaSnapshot, operation: string): MediaWarning {
+function settledWarning(media: MediaHandleRecord, operation: string): MediaWarning {
   return {
     code: "TSW010",
     message: `Media ${operation} has no effect because the media is already ${media.state}.`,

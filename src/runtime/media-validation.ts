@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../plan/model.js";
+import type { InstructionPlan, PlayMediaInstruction } from "../plan/model.js";
 import { sameCaptures } from "./capture-validation.js";
 import { rootFitsFunction, serializedRootFiles } from "./activation-validation.js";
 import { isValidSessionTime } from "./actions/delay.js";
@@ -9,6 +9,16 @@ import {
 } from "./media.js";
 
 /** Restore validation for media playback records, their handles, queued cue blocks, and cue-block frames. */
+
+const SETTLED_MEDIA_KEYS = [
+  "mediaId",
+  "source",
+  "state",
+  "durationMs",
+  "volume",
+  "positionMs",
+  "elapsedMs",
+] as const;
 
 const MEDIA_KEYS = [
   "mediaId",
@@ -66,7 +76,7 @@ export function validMediaAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.media) ||
-    !validMediaRecord(action.media, true, snapshot, plan)
+    !validMediaRecord(action.media, snapshot, plan)
   ) {
     return false;
   }
@@ -90,9 +100,27 @@ export function validMediaAction(
   );
 }
 
+/** A settled record keeps what a handle reads; a source that never loaded stopped without playing. */
+function validSettledMediaRecord(media: Record<string, unknown>): boolean {
+  return (
+    hasExactKeys(media, SETTLED_MEDIA_KEYS) &&
+    positiveSafeInteger(media.mediaId) &&
+    typeof media.source === "string" &&
+    (media.state === "finished" || media.state === "stopped") &&
+    typeof media.volume === "number" &&
+    media.volume >= 0 &&
+    media.volume <= 1 &&
+    validMilliseconds(media.positionMs) &&
+    validMilliseconds(media.elapsedMs) &&
+    (media.durationMs === null
+      ? media.state === "stopped" && media.elapsedMs === 0
+      : validMilliseconds(media.durationMs))
+  );
+}
+
+/** An active media record: running or paused, with its timeline, blocks, and the samples of its current segment. */
 function validMediaRecord(
   media: Record<string, unknown>,
-  active: boolean,
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
 ): boolean {
@@ -145,24 +173,13 @@ function validMediaRecord(
       !media.startCuesPending &&
       media.positionMs === media.startAtMs &&
       unanchored &&
-      (active ? media.state === "running" : media.state === "stopped")
+      media.state === "running"
     );
   }
   if (!validMilliseconds(media.durationMs)) return false;
   const end = media.endAtMs === null ? media.durationMs : Math.min(media.endAtMs, media.durationMs);
-  if (media.startAtMs >= end) {
-    // A load with an empty range stops before any playback; playback itself needs a positive range length.
-    return (
-      !active &&
-      media.state === "stopped" &&
-      media.segment === 0 &&
-      points.length === 0 &&
-      media.positionMs === media.startAtMs &&
-      media.committedProgressMs === 0 &&
-      media.elapsedMs === 0 &&
-      unanchored
-    );
-  }
+  // A load with an empty range stops before any playback; playback itself needs a positive range length.
+  if (media.startAtMs >= end) return false;
   if (
     media.positionMs < media.startAtMs ||
     media.positionMs > end ||
@@ -171,30 +188,22 @@ function validMediaRecord(
     media.segmentPasses > media.passesCompleted ||
     media.elapsedMs !==
       elapsedAtCommitted(media, media.segmentElapsedMs, media.committedProgressMs) ||
-    !reachableMediaCursor(
-      {
-        durationMs: media.durationMs,
-        startAtMs: media.startAtMs,
-        endAtMs: media.endAtMs,
-        repeat: media.repeat,
-        cues: media.cues,
-        segmentPositionMs: media.segmentPositionMs,
-        segmentPasses: media.segmentPasses,
-        segmentElapsedMs: media.segmentElapsedMs,
-        positionMs: media.positionMs,
-        committedProgressMs: media.committedProgressMs,
-        passesCompleted: media.passesCompleted,
-        startCuesPending: media.startCuesPending,
-      },
-      media.state === "finished",
-    )
+    !reachableMediaCursor({
+      durationMs: media.durationMs,
+      startAtMs: media.startAtMs,
+      endAtMs: media.endAtMs,
+      repeat: media.repeat,
+      cues: media.cues,
+      segmentPositionMs: media.segmentPositionMs,
+      segmentPasses: media.segmentPasses,
+      segmentElapsedMs: media.segmentElapsedMs,
+      positionMs: media.positionMs,
+      committedProgressMs: media.committedProgressMs,
+      passesCompleted: media.passesCompleted,
+      startCuesPending: media.startCuesPending,
+    })
   )
     return false;
-  // A stop starts a final segment at the stop position.
-  const atAnchor =
-    media.segmentPositionMs === media.positionMs &&
-    media.segmentPasses === media.passesCompleted &&
-    media.segmentElapsedMs === media.elapsedMs;
   // Segments start at current scene time, so no retained sample lies after it.
   const head = points[0];
   if (
@@ -208,7 +217,6 @@ function validMediaRecord(
   switch (media.state) {
     case "running":
       return (
-        active &&
         media.segment >= 1 &&
         points.length > 0 &&
         media.committedProgressMs <= reportedProgress &&
@@ -216,22 +224,10 @@ function validMediaRecord(
       );
     case "paused":
       return (
-        active &&
         media.segment >= 1 &&
         segmentStart &&
         media.committedProgressMs === 0 &&
         withinRepeatLimit(media)
-      );
-    case "finished":
-      return (
-        !active &&
-        media.segment >= 1 &&
-        media.committedProgressMs <= reportedProgress &&
-        reachedRepeatLimit(media)
-      );
-    case "stopped":
-      return (
-        !active && media.segment >= 1 && segmentStart && atAnchor && media.committedProgressMs === 0
       );
     default:
       return false;
@@ -253,26 +249,6 @@ function elapsedAtCommitted(
   return committedProgressMs >= repeat.milliseconds - segmentElapsedMs
     ? repeat.milliseconds
     : Math.min(repeat.milliseconds, segmentElapsedMs + committedProgressMs);
-}
-
-/** Finished media ended naturally: after its only or last counted pass, or when its duration budget ran out. */
-function reachedRepeatLimit(media: Record<string, unknown>): boolean {
-  const repeat = media.repeat;
-  if (!isPlainRecord(repeat) || typeof media.passesCompleted !== "number") return false;
-  switch (repeat.kind) {
-    case "once":
-      return media.passesCompleted === 1;
-    case "count":
-      return media.passesCompleted === repeat.passes;
-    case "budget":
-      return (
-        typeof media.elapsedMs === "number" &&
-        typeof repeat.milliseconds === "number" &&
-        media.elapsedMs >= repeat.milliseconds
-      );
-    default:
-      return false;
-  }
 }
 
 /**
@@ -380,8 +356,9 @@ function validPoints(value: unknown, observedSessionTimeMs: unknown): boolean {
 
 /**
  * Each issued media ID has at most one active or settled record, every handle and every queued or running cue block has
- * the record of its media, and cue blocks and cue-block frames belong to their media's own blocks. Only one video is
- * active.
+ * the record of its media, and cue blocks and cue-block frames belong to their media's own blocks: those an active
+ * record lists, or for settled media, whose record no longer lists them, blocks of one play that share one activation
+ * root and its variables. Only one video is active.
  */
 export function validateMediaState(
   value: Record<string, unknown>,
@@ -395,6 +372,7 @@ export function validateMediaState(
     return;
   }
   const records = new Map<number, Record<string, unknown>>();
+  const settledRecords = new Set<Record<string, unknown>>();
   const add = (media: Record<string, unknown>): void => {
     if (!positiveSafeInteger(media.mediaId)) return;
     if (records.has(media.mediaId)) errors.push("Runtime media IDs must be unique.");
@@ -405,10 +383,11 @@ export function validateMediaState(
     errors.push("Runtime settledMedia must be an array.");
   } else {
     for (const media of settled) {
-      if (!isPlainRecord(media) || !validMediaRecord(media, false, value, plan)) {
+      if (!isPlainRecord(media) || !validSettledMediaRecord(media)) {
         errors.push("Runtime settled media is malformed.");
         continue;
       }
+      settledRecords.add(media);
       add(media);
     }
   }
@@ -441,22 +420,63 @@ export function validateMediaState(
   for (const id of handleIds) {
     if (!records.has(id)) errors.push("Runtime media handle refers to media without a record.");
   }
-  const ownsHandler = (media: Record<string, unknown> | undefined, functionId: unknown): boolean =>
-    media !== undefined &&
-    (media.finishFunctionId === functionId ||
-      (Array.isArray(media.cues) &&
-        media.cues.some((cue) => isPlainRecord(cue) && cue.functionId === functionId)));
+  const ownsHandler = (media: Record<string, unknown>, functionId: unknown): boolean =>
+    media.finishFunctionId === functionId ||
+    (Array.isArray(media.cues) &&
+      media.cues.some((cue) => isPlainRecord(cue) && cue.functionId === functionId));
+  let blockPlays: Map<unknown, PlayMediaInstruction> | undefined;
+  const playOfBlock = (functionId: unknown): PlayMediaInstruction | undefined => {
+    if (plan === undefined) return undefined;
+    if (blockPlays === undefined) {
+      blockPlays = new Map();
+      for (const instruction of plan.instructions) {
+        if (instruction?.kind !== "playMedia") continue;
+        for (const cue of instruction.cues) blockPlays.set(cue.functionId, instruction);
+        if (instruction.finishFunctionId !== null)
+          blockPlays.set(instruction.finishFunctionId, instruction);
+      }
+    }
+    return blockPlays.get(functionId);
+  };
+  // The play, activation root, and variables of the first block seen of each settled media.
+  const settledOwners = new Map<
+    number,
+    { play: PlayMediaInstruction | undefined; rootScopeId: unknown; captures: unknown }
+  >();
   // Cue blocks exist only for loaded media; `finish` runs once, after the media finished.
   const finishRuns = new Map<number, number>();
   const validOwner = (
     media: Record<string, unknown> | undefined,
     functionId: unknown,
     count: number,
+    rootScopeId: unknown,
+    captures: unknown,
   ) => {
-    if (media === undefined || !ownsHandler(media, functionId) || media.loaded !== true)
-      return false;
-    if (functionId !== media.finishFunctionId) return true;
-    if (!positiveSafeInteger(media.mediaId)) return false;
+    if (media === undefined || !positiveSafeInteger(media.mediaId)) return false;
+    let finishFunctionId: unknown;
+    if (settledRecords.has(media)) {
+      const play = playOfBlock(functionId);
+      if (media.durationMs === null || (plan !== undefined && play === undefined)) return false;
+      const owner = settledOwners.get(media.mediaId);
+      if (owner === undefined) settledOwners.set(media.mediaId, { play, rootScopeId, captures });
+      else if (
+        owner.play !== play ||
+        owner.rootScopeId !== rootScopeId ||
+        !sameCaptures(captures, owner.captures)
+      )
+        return false;
+      finishFunctionId = play?.finishFunctionId;
+    } else {
+      if (
+        !ownsHandler(media, functionId) ||
+        media.loaded !== true ||
+        rootScopeId !== media.handlerRootScopeId ||
+        !sameCaptures(captures, media.captures)
+      )
+        return false;
+      finishFunctionId = media.finishFunctionId;
+    }
+    if (functionId !== finishFunctionId) return true;
     finishRuns.set(media.mediaId, (finishRuns.get(media.mediaId) ?? 0) + count);
     return media.state === "finished";
   };
@@ -484,11 +504,15 @@ export function validateMediaState(
           "count",
         ]) ||
         !positiveSafeInteger(invocation.count) ||
-        invocation.rootScopeId !== media?.handlerRootScopeId ||
-        !sameCaptures(invocation.captures, media?.captures) ||
         !rootFitsFunction(plan, roots, invocation.rootScopeId, invocation.handlerFunctionId) ||
         media?.state === "stopped" ||
-        !validOwner(media, invocation.handlerFunctionId, invocation.count)
+        !validOwner(
+          media,
+          invocation.handlerFunctionId,
+          invocation.count,
+          invocation.rootScopeId,
+          invocation.captures,
+        )
       ) {
         errors.push("Runtime pending media cue block is malformed.");
       }
@@ -506,11 +530,7 @@ export function validateMediaState(
       const media = positiveSafeInteger(frame.timerInterruption.mediaId)
         ? records.get(frame.timerInterruption.mediaId)
         : undefined;
-      if (
-        !validOwner(media, frame.functionId, 1) ||
-        frame.rootScopeId !== media?.handlerRootScopeId ||
-        !sameCaptures(frame.captures, media?.captures)
-      ) {
+      if (!validOwner(media, frame.functionId, 1, frame.rootScopeId, frame.captures)) {
         errors.push("Runtime media cue-block frame does not belong to its media.");
       }
     }
@@ -519,7 +539,10 @@ export function validateMediaState(
     errors.push("Runtime media finish block runs more than once.");
   }
   for (const [mediaId, media] of records) {
-    if (!cueBookkeepingFits(media, invocations.get(mediaId) ?? new Map<unknown, number>())) {
+    if (
+      !settledRecords.has(media) &&
+      !cueBookkeepingFits(media, invocations.get(mediaId) ?? new Map<unknown, number>())
+    ) {
       errors.push("Runtime media cue bookkeeping does not match its playback.");
     }
   }
@@ -533,7 +556,7 @@ export function validateMediaState(
 }
 
 /**
- * Media that have played only since loading (segment 1, no control since) fix their cue bookkeeping: a start cue at
+ * Active media that have played only since loading (segment 1, no control since) fix their cue bookkeeping: a start cue at
  * a pass origin is pending until reported playback moves past it, when its departure queues it; in the first pass a
  * pending start cue has not been queued yet; and a cue's queued and running invocations cannot outnumber the passes
  * that reached its point. Later segments may follow seeks and pauses whose history is not retained.
@@ -543,7 +566,7 @@ function cueBookkeepingFits(
   invocations: ReadonlyMap<unknown, number>,
 ): boolean {
   const { segment, loaded, points, cues, durationMs, endAtMs, startAtMs, positionMs } = media;
-  const { passesCompleted, committedProgressMs, startCuesPending, state } = media;
+  const { passesCompleted, committedProgressMs, startCuesPending } = media;
   if (
     segment !== 1 ||
     loaded !== true ||
@@ -557,7 +580,6 @@ function cueBookkeepingFits(
   )
     return true;
   const end = typeof endAtMs === "number" ? Math.min(endAtMs, durationMs) : durationMs;
-  const finished = state === "finished";
   const cuePoints = cues.flatMap((cue: unknown) => {
     if (!isPlainRecord(cue) || typeof cue.offsetMs !== "number") return [];
     const point = cue.kind === "at" ? cue.offsetMs : end - cue.offsetMs;
@@ -565,7 +587,7 @@ function cueBookkeepingFits(
   });
   // The load anchors segment 1 at the range start; a later pass starts there too.
   const origin = startAtMs;
-  const atOrigin = !finished && positionMs === origin && positionMs < end;
+  const atOrigin = positionMs === origin && positionMs < end;
   const originCues = cuePoints.filter((cue) => cue.point === origin);
   if (atOrigin && originCues.length > 0) {
     const reported = points.at(-1)?.progressMs ?? 0;
@@ -579,9 +601,8 @@ function cueBookkeepingFits(
   }
   return cuePoints.every(({ point, functionId }) => {
     const reachedInPass =
-      !(finished && positionMs >= end) &&
-      (positionMs > point ||
-        (positionMs === point && !(point === origin && startCuesPending === true)));
+      positionMs > point ||
+      (positionMs === point && !(point === origin && startCuesPending === true));
     return (invocations.get(functionId) ?? 0) <= passesCompleted + (reachedInPass ? 1 : 0);
   });
 }

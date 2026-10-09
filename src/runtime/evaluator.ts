@@ -183,14 +183,13 @@ import {
   storedValueMismatch,
 } from "./value-types.js";
 import {
-  mediaEndMs,
   mediaProperty,
   pauseMedia,
   resumeMedia,
   seekMedia,
   setMediaVolume,
+  type MediaHandleRecord,
   type MediaWarning,
-  type RuntimeMediaSnapshot,
 } from "./media.js";
 import {
   activeMediaAction,
@@ -2406,7 +2405,7 @@ export class Evaluator {
     }
   }
 
-  #media(handle: SerializableMediaHandle, span: SourceSpan): RuntimeMediaSnapshot {
+  #media(handle: SerializableMediaHandle, span: SourceSpan): MediaHandleRecord {
     const media = mediaRecord(this.snapshot, handle.mediaId);
     if (media === undefined) throw fault("TSR053", "Media handle refers to no media.", span);
     return media;
@@ -2480,9 +2479,10 @@ export class Evaluator {
     const action = activeMediaAction(this.snapshot, handle.mediaId);
     // Playback already reached by now is committed before the seek starts a new segment.
     if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
-    const target =
-      name === "position" ? value.milliseconds : mediaEndMs(media) - value.milliseconds;
-    this.#mediaWarning(seekMedia(media, target, this.snapshot.currentSessionTimeMs, name), span);
+    this.#mediaWarning(
+      seekMedia(media, value.milliseconds, this.snapshot.currentSessionTimeMs, name),
+      span,
+    );
     // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
     if (action !== undefined) {
       drainMediaEvents(null, this.snapshot, action, this.events, span, true);

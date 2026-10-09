@@ -4,8 +4,8 @@ import type { SnapshotValidationAnalysis } from "./snapshot-validation-analysis.
 /**
  * Restore validation for the variables blocks share with the code that created them (V30 §14). Each resource, queued
  * block, and running block names the variables its plan instruction lists, each in a block, loop, or function scope
- * that holds it. A retained scope of that kind exists only while one of them shares it. Settled handle records keep
- * their list without owning its scopes.
+ * that holds it. A retained scope of that kind exists only while one of them shares it. Settled timer records keep
+ * their list without owning its scopes; settled media records drop it.
  */
 export function validateCaptureState(
   snapshot: Record<string, unknown>,
@@ -80,8 +80,6 @@ export function validateCaptureState(
   }
   for (const timer of Array.isArray(snapshot.settledTimers) ? snapshot.settledTimers : [])
     if (isPlainRecord(timer)) check(timer.captures, timer.handlerFunctionId, false);
-  for (const media of Array.isArray(snapshot.settledMedia) ? snapshot.settledMedia : [])
-    if (isPlainRecord(media)) check(media.captures, mediaFunctionId(media), false);
   for (const invocation of Array.isArray(snapshot.pendingTimerHandlers)
     ? snapshot.pendingTimerHandlers
     : [])
