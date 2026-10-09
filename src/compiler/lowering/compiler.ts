@@ -1831,8 +1831,12 @@ export class InstructionCompiler {
                 accessibleName: { kind: "localizedDefault", key: "answer" },
               };
     } else {
+      // The `prefill:` after the options is evaluated after them.
       const loweredValues = yield* compileChild(
-        this.#lowerInteractionPayloadsTask(values, speakerTemporary),
+        this.#lowerInteractionPayloadsTask(
+          expression.prefill === null ? values : [...values, expression.prefill],
+          speakerTemporary,
+        ),
       );
       const optionsTemporary = this.#allocateTemporary();
       this.instructions.push({
@@ -1840,23 +1844,36 @@ export class InstructionCompiler {
         temporaryId: optionsTemporary,
         value: {
           kind: "list",
-          elements: loweredValues.map((item) => item.plan),
+          elements: loweredValues.slice(0, values.length).map((item) => item.plan),
           span: copySpan(expression.span),
         },
         expectBoolean: false,
         span: copySpan(expression.span),
       });
+      preparedTemporaryIds.push(optionsTemporary);
+      let prefillTemporary: number | undefined;
+      if (expression.prefill !== null) {
+        prefillTemporary = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "storeTemporary",
+          temporaryId: prefillTemporary,
+          value: loweredValues[values.length]!.plan,
+          expectBoolean: false,
+          span: copySpan(expression.prefill.span),
+        });
+        preparedTemporaryIds.push(prefillTemporary);
+      }
       this.#emitTemporaryCleanup(
         loweredValues.flatMap((item) => item.temporaryIds),
         expression.span,
       );
-      preparedTemporaryIds.push(optionsTemporary);
       preparedUi = {
         kind: "choice",
         optionsTemporary,
         values: expression.options.map((option) =>
           option.value === null ? null : authoredChoiceValue(option.value),
         ),
+        ...(prefillTemporary === undefined ? {} : { prefillTemporary }),
         accessibleName: { kind: "localizedDefault", key: "chooseOption" },
       };
     }
@@ -1940,6 +1957,18 @@ export class InstructionCompiler {
       expectBoolean: false,
       span,
     });
+    // `prefill:` preselects the button whose value it is.
+    let prefillTemporary: number | undefined;
+    if (written.has("prefill")) {
+      prefillTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "storeTemporary",
+        temporaryId: prefillTemporary,
+        value: { kind: "property", object: request, name: "prefill", span },
+        expectBoolean: false,
+        span,
+      });
+    }
     this.#emitTemporaryCleanup([requestTemporary], expression.span);
     const lowered = this.#emitPreparedResultInteraction(
       "choice",
@@ -1949,11 +1978,19 @@ export class InstructionCompiler {
         kind: "choice",
         optionsTemporary,
         values: [null, null],
+        ...(prefillTemporary === undefined ? {} : { prefillTemporary }),
         accessibleName: { kind: "localizedDefault", key: "chooseOption" },
       },
       expression.span,
     );
-    this.#emitTemporaryCleanup([speakerTemporary, optionsTemporary], expression.span);
+    this.#emitTemporaryCleanup(
+      [
+        speakerTemporary,
+        optionsTemporary,
+        ...(prefillTemporary === undefined ? [] : [prefillTemporary]),
+      ],
+      expression.span,
+    );
     return lowered;
   }
 
@@ -2852,12 +2889,19 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
       if (text === undefined) return undefined;
       options.push({ text, value });
     }
+    // A literal `prefill:` preselects its button: Yes for `true`, No for `false`.
+    const prefill = expression.formArguments.find((argument) => argument.name.name === "prefill");
+    const preselected = prefill === undefined ? undefined : unwrapParentheses(prefill.value);
+    if (preselected !== undefined && preselected.kind !== "booleanLiteral") return undefined;
     return {
       kind: "choice",
       options,
+      ...(preselected === undefined ? {} : { preselected: preselected.value ? 0 : 1 }),
       accessibleName: { kind: "localizedDefault", key: "chooseOption" },
     };
   }
+  // A choice with `prefill:` finds its preselected button when it opens.
+  if (expression.interactionKind === "choice" && expression.prefill !== null) return undefined;
   if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.prefill === null ? null : staticInteractionPrefill(expression);

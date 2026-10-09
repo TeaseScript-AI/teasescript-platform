@@ -613,7 +613,8 @@ export function playerRuntimeForeground(
         types: action.ui.types,
         mime: action.ui.mime,
       });
-    case "choice":
+    case "choice": {
+      const preselected = action.ui.preselected;
       return Object.freeze({
         kind: "choose",
         accessibleName,
@@ -623,10 +624,12 @@ export function playerRuntimeForeground(
               id: choiceOptionId(action.actionId, index),
               label: option.text,
               ...(option.background === undefined ? {} : { authoredFill: option.background }),
+              ...(index === preselected ? { preselected: true as const } : {}),
             }),
           ),
         ),
       });
+    }
   }
 }
 

@@ -139,7 +139,11 @@ export function requiredInstructionTemporaries(
             output.add(instruction.preparedUi.hintTemporary);
           if (instruction.preparedUi.prefillTemporary !== undefined)
             output.add(instruction.preparedUi.prefillTemporary);
-        } else output.add(instruction.preparedUi.optionsTemporary);
+        } else {
+          output.add(instruction.preparedUi.optionsTemporary);
+          if (instruction.preparedUi.prefillTemporary !== undefined)
+            output.add(instruction.preparedUi.prefillTemporary);
+        }
       }
       break;
   }

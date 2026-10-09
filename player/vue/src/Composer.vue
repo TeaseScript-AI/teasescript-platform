@@ -5,6 +5,7 @@ import { Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
+import { playerKeys } from "./playerKeys";
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +20,13 @@ const props = withDefaults(
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
+    /** A preselected button waits; Space in the empty input activates it. */
+    preselected?: boolean;
+    /**
+     * When the waiting interaction appeared, as a `performance.now()` time: a key pressed earlier, or held down, does
+     * not submit it or activate its button.
+     */
+    freshAfter?: number;
     /**
      * While an image request accepts a file: a paperclip opens the browser's file picker with this `accept` hint, and a
      * file dropped onto the composer answers too. Without it there is neither. `request` identifies the request the
@@ -35,6 +43,8 @@ const props = withDefaults(
     inputType: "text",
     feedback: "",
     pacing: false,
+    preselected: false,
+    freshAfter: 0,
     attach: null,
   },
 );
@@ -43,6 +53,8 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
+  /** Space in the empty input while a preselected button waits. */
+  activate: [];
   /** Escape in the input, which closes an edited form field. */
   escape: [];
   /** Files the player chose or dropped, with the `attach.request` offered when the picker opened or at the drop. */
@@ -73,9 +85,12 @@ function focusInput(): void {
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
+  // A press that began before the interaction appeared, or a held key repeating, belongs to what came before, such as
+  // the message the same Space skipped.
+  const fresh = !event.repeat && event.timeStamp >= props.freshAfter;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    emit("submit", "input");
+    if (fresh) emit("submit", "input");
     return;
   }
   if (event.key === "Escape") {
@@ -83,14 +98,13 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
   const element = input.value;
-  if (
-    event.key === " " &&
-    props.pacing &&
-    props.modelValue === "" &&
-    element?.selectionStart === element?.selectionEnd
-  ) {
+  const empty = props.modelValue === "" && element?.selectionStart === element?.selectionEnd;
+  if (event.key === playerKeys.skipPacing.key && props.pacing && empty) {
     event.preventDefault();
     emit("skip");
+  } else if (event.key === playerKeys.preselectedButton.key && props.preselected && empty) {
+    event.preventDefault();
+    if (fresh) emit("activate");
   }
 }
 

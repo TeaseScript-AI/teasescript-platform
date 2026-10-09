@@ -818,6 +818,13 @@ Standard keyboard behavior is:
 
 - `Enter` submits;
 - `Shift+Enter` inserts a newline;
+- Space in the empty composer activates the preselected button: a `showButton`, or the button that `prefill:` of
+  `choose` or `askBoolean` preselects; without one it activates nothing, and while a text, number, or date field waits
+  it types. A focused button keeps its own Space: it activates that button, and a focused form toggle flips without
+  submitting the form;
+- Enter and that Space act only on a fresh press, one that began after the interaction appeared and is not a held key's
+  repeat, so the Space that skips a message never also answers the button that appears after it, and a held Enter
+  never submits the next field;
 - a future user preference may invert or otherwise refine that choice;
 - whitespace-only ordinary submissions are rejected;
 - the maintained default hint is `Type your response…` when an interaction does not provide its own hint. An explicit
@@ -867,7 +874,8 @@ used, such as on a page that is not a secure context, a request that allows only
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
-  the same action; other text and Space while the empty composer owns focus do not activate it;
+  the same action, and so does Space in the empty composer, since its button is always preselected; other text does
+  not;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
 - a `showButton` timeout removes the button without a transcript message; the Player observes time at the timeout
   so the button disappears on schedule;
@@ -917,7 +925,9 @@ line-height. Short buttons take their content width; long labels wrap and grow t
 apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
 without moving the label; pressing reduces the depth. Neither changes the rim colour or the button's size; only keyboard
-focus (`:focus-visible`) draws an outline. Controls scroll away with the transcript; there is no separate
+focus (`:focus-visible`) draws an outline. A preselected button, a `showButton` or the one `prefill:` names, wears a
+1px ring in the theme's solid accent tone drawn around its rim, so its size does not change; its focus outline keeps
+its gap outside the ring. Controls scroll away with the transcript; there is no separate
 button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
 following the latest content. After completion, the active controls disappear and the existing runtime transcript
 records the response. Completed choices and buttons carry a visible `›` marker in the transcript, distinct from typed

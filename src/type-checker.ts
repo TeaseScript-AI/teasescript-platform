@@ -5258,10 +5258,16 @@ class TypeChecker {
     if (expression.interactionKind === "booleans")
       return yield* compileChild(this.#askBooleansTask(expression, scope));
     if (expression.interactionKind === "boolean") {
-      // Two buttons that return true and false (V30 §20).
+      // Two buttons that return true and false, and the one `prefill:` names is preselected (V30 §20).
       for (const { name, value } of namedAskArguments(expression)) {
         const type = yield* compileChild(this.#expressionTask(value, scope));
-        this.#checkShownText(value, type, name === "message" ? "an ask question" : "a button text");
+        if (name === "prefill") this.#checkInteractionPrefill("boolean", value, type);
+        else
+          this.#checkShownText(
+            value,
+            type,
+            name === "message" ? "an ask question" : "a button text",
+          );
       }
       return BOOLEAN_TYPE;
     }
@@ -5381,6 +5387,9 @@ class TypeChecker {
         `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
         expression.span,
       );
+    // The button whose value `prefill:` gives is preselected; a value no button has preselects none (V30 §19).
+    if (expression.prefill !== null)
+      yield* compileChild(this.#expressionTask(expression.prefill, scope));
     if (values.length === 0) return UNKNOWN_TYPE;
     const known: readonly (ScalarValue | null)[] | null = literals;
     const joined = joinTypes(values);
@@ -5694,6 +5703,21 @@ class TypeChecker {
       : name === null
         ? `, not ${describeValue(type)}`
         : `, but '${name}' holds ${describeValue(type)}`;
+    if (kind === "boolean") {
+      if (resolved(type).kind === "null")
+        this.#report(
+          typeCode.invalidInteractionPrefill,
+          "The prefill of askBoolean must be true or false, not null. Remove 'prefill:' to preselect no button.",
+          expression.span,
+        );
+      else if (!isAssignable(BOOLEAN_TYPE, value))
+        this.#report(
+          typeCode.invalidInteractionPrefill,
+          `The prefill of askBoolean must be true or false${holds}.`,
+          expression.span,
+        );
+      return;
+    }
     if (kind === "date" || kind === "time" || kind === "datetime") {
       // A date or time field shows its prefill as ISO text; text is converted first (V30 §20, §35).
       const expected = interactionResultType(kind);

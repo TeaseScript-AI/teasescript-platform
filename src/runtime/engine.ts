@@ -108,6 +108,7 @@ export type {
 export { RuntimeDataError } from "./operations/support.js";
 import type {
   ActionRequestedEvent,
+  DeveloperWarningEvent,
   ExitEvent,
   InterpreterEvent,
   OutputSpeaker,
@@ -214,7 +215,7 @@ import {
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
-import { expandChoiceOptions } from "./choice-options.js";
+import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 
@@ -1212,6 +1213,19 @@ function executePlannedInstruction(
           events,
         );
       }
+      if (materialized.warning !== undefined) {
+        assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
+        events.push(
+          Object.freeze({
+            kind: "developerWarning",
+            sequence: takeSequence(snapshot),
+            severity: "warning",
+            code: materialized.warning.code,
+            message: materialized.warning.message,
+            span: copySpan(instruction.span),
+          } satisfies DeveloperWarningEvent),
+        );
+      }
       // A form's descriptions and outro are said as one prose message as it opens, after its question.
       if (materialized.prose !== undefined) {
         assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
@@ -1444,6 +1458,8 @@ interface MaterializedInteractionUi {
   readonly form?: RuntimeFormStateSnapshot;
   /** The prose a form's speaker says as it opens. */
   readonly prose?: string;
+  /** A developer warning about how it opens, such as a `prefill:` that no button's value matches. */
+  readonly warning?: { readonly code: string; readonly message: string };
   readonly stagedWrites: readonly {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -1483,6 +1499,7 @@ function materializeInteractionUi(
   let ui: InteractionUiPayload;
   let form: RuntimeFormStateSnapshot | undefined;
   let prose: string | undefined;
+  let warning: MaterializedInteractionUi["warning"];
   if (prepared.kind === "button") {
     ui = {
       kind: "button",
@@ -1554,9 +1571,27 @@ function materializeInteractionUi(
         span,
       );
     }
+    const options = expandChoiceOptions(source.value.items, prepared.values, temporalContext, span);
+    let preselected: number | null | undefined = null;
+    if (prepared.prefillTemporary !== undefined) {
+      const prefill = read(prepared.prefillTemporary).value;
+      preselected = preselectedChoice(options, prefill);
+      // A value no button has preselects none; the script goes on, and Debug shows why (owner decision, 2026-10-08).
+      if (preselected === undefined)
+        warning = {
+          code: "TSW017",
+          message: `No button has the prefill value (${prefillNotation(prefill)}), so none is preselected.${
+            // The likely mistake: the text of a button whose value differs.
+            typeof prefill === "string" && options.some((option) => option.text === prefill)
+              ? " 'prefill:' gives a button's value, not its text."
+              : ""
+          }`,
+        };
+    }
     ui = {
       kind: "choice",
-      options: expandChoiceOptions(source.value.items, prepared.values, temporalContext, span),
+      options,
+      ...(typeof preselected === "number" ? { preselected } : {}),
       accessibleName: prepared.accessibleName,
     };
   }
@@ -1566,6 +1601,7 @@ function materializeInteractionUi(
     ui,
     ...(form === undefined ? {} : { form }),
     ...(prose === undefined ? {} : { prose }),
+    ...(warning === undefined ? {} : { warning }),
     stagedWrites: Object.freeze(
       stagedWrites.map((staged) =>
         Object.freeze({
@@ -1575,6 +1611,13 @@ function materializeInteractionUi(
       ),
     ),
   });
+}
+
+/** A `prefill:` value as a warning shows it: a text in quotes, a number or boolean as written, or else its kind. */
+function prefillNotation(value: SerializableRuntimeValue): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return describeRuntimeValue(value);
 }
 
 /**
@@ -2326,7 +2369,12 @@ function cloneInteractionUi(
       value: cloneInteractionChoiceValue(option.value),
       ...(option.background === undefined ? {} : { background: option.background }),
     }));
-    return { kind: "choice", options, accessibleName };
+    return {
+      kind: "choice",
+      options,
+      ...(ui.preselected === undefined ? {} : { preselected: ui.preselected }),
+      accessibleName,
+    };
   }
   if (ui.kind === "button")
     return {

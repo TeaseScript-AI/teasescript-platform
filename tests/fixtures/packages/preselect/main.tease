@@ -1,0 +1,14 @@
+---
+title: "Preselect fixture"
+author: "Author fixture"
+---
+say "First"
+let ready = askBoolean "Continue?", prefill: true
+showButton "Next"
+let count = choose 5, 10, prefill: 10
+let level = choose 1, 2
+let name = askText "Name?", prefill: "Ada"
+let toys = askBooleans "Which?", texts: ["A", "B"], prefill: [false, false]
+say "${ready} ${count} ${level} ${name}", instant
+say toys, instant
+exit

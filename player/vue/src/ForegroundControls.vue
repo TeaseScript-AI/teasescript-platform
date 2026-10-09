@@ -71,6 +71,7 @@ watch(() => props.foreground, async () => {
           :authored-fill="option.authoredFill"
           :disabled="disabled"
           :label="option.label"
+          :preselected="option.preselected"
           @width-change="syncChoiceRows"
           @click="emit('activate', option.id)"
         />
@@ -83,6 +84,7 @@ watch(() => props.foreground, async () => {
       :aria-label="foreground.label.trim() === '' ? foreground.accessibleName : undefined"
       :disabled="disabled"
       :label="foreground.label"
+      preselected
       @click="emit('activate', null)"
     />
   </div>

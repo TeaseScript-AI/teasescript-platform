@@ -35,7 +35,7 @@ export function namedAskArguments(
 
 /**
  * The operands of an ask in evaluation order: the question, then `hint:` and `prefill:` in the order they are written,
- * or every named argument of an ask that keeps them.
+ * or every named argument of an ask that keeps them. For `choose`, the `prefill:` that follows its options.
  */
 export function askOperands(expression: InteractionExpression): readonly Expression[] {
   if (hasNamedAskArguments(expression))

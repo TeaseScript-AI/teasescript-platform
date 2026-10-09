@@ -1980,6 +1980,29 @@ Rules:
   three buttons. A selected button is identified by its position, so each returns its own value.
 - `choose` does not return a result object.
 
+### Preselected button
+
+**Status:** Accepted (Owner decision on #512, 2026-10-08).
+
+A trailing `prefill:`, at most once and after the options, preselects the button whose value it gives:
+
+```text
+let action = choose stay: "Stay", leave: "Leave", prefill: "leave"
+let rounds = choose 5, 10, 15, prefill: 10
+let level = load("level", default: null)
+let next = choose 6, 7, 8, 9, prefill: level
+```
+
+- The button is identified by the value it returns, compared as `==` compares values, not by its text: write
+  `prefill: "leave"` for `leave: "Walk away"`. With several buttons of that value, the first is preselected.
+- The prefill is evaluated once, after the options. `null` preselects no button. A value that no button has preselects
+  none either, and reports developer warning `TSW017` in Debug; the script goes on, and the player notices nothing.
+- A preselected button is marked, and Space in the empty message field activates it
+  ([PLAYER-UI.md](../ui/PLAYER-UI.md#foreground-interaction-presentation)); it is never chosen by itself. Without
+  `prefill:` no button is preselected.
+- `prefill` is reserved after the options of a compact `choose`, so no option can be labelled `prefill:`; write such a
+  button as `{ value: "prefill", text: "..." }`.
+
 ## 20. Input functions
 **Status:** Accepted (parenthesized basic asks implemented, and their text is the question: Owner decisions on #627,
 2026-10-05; an ask's starting answer is `prefill:`: Owner decision on #512, 2026-10-08)
@@ -2151,8 +2174,9 @@ let answer = askBoolean(
 `noText:`, by default `"No"`, returns `false`; the player's answer is the chosen button's text. As for a basic ask, the
 compact and parenthesized forms mean the same, `as speaker` comes before the arguments, and the question, which may
 instead be named `message:`, is said once by the asking speaker before the buttons open. The question and the button
-texts are evaluated once, in written order, and accept what a field text accepts. Its `prefill:`
-([Prefilled answers](#prefilled-answers)) is not implemented yet.
+texts are evaluated once, in written order, and accept what a field text accepts. `prefill: true` or `prefill: false`
+preselects the Yes or No button as `choose` preselects one ([§19](#preselected-button)): it is marked and Space
+activates it, but it is never chosen by itself. Without `prefill:` neither button is preselected.
 
 ### Multiple boolean choices
 
@@ -2389,9 +2413,9 @@ Rules:
   when the input opens; an invalid one is a runtime error, and the input does not open.
 - `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
 - Restoring a checkpoint shows the original prefill again; edits the player had not submitted are dropped.
-- `choose` has no preselected option: a choice is an explicit decision, and a choice button completes when activated.
-  An author can style the preferred option instead, for example with `background:`. File, folder, image, video, and
-  audio pickers have no prefill because a browser cannot preset a file input. Multi-field inputs take a `prefill:` list.
+- `askBoolean` preselects the button of its prefill, as `choose` does with `prefill:`
+  ([§19](#preselected-button)); a preselected button is never chosen by itself. File, folder, image, video, and audio
+  pickers have no prefill because a browser cannot preset a file input. Multi-field inputs take a `prefill:` list.
 - An ask's earlier `default:`, or `defaults:` of a multi-field input, is a compile error that names the fix, such as
   `askText has no 'default:'; use 'prefill:'.` (Owner decision on #512, 2026-10-08.) `default:` stays where its value
   becomes the result without the player: `load`, `dict.get`, the conversions such as `toNumber`, parameter defaults,

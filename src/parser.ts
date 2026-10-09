@@ -217,7 +217,7 @@ const FORM_OPTIONS: readonly string[] = [
 const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], readonly string[]> =
   new Map([
     ["form", FORM_OPTIONS],
-    ["boolean", ["yesText", "noText", "message"]],
+    ["boolean", ["yesText", "noText", "prefill", "message"]],
     ["booleans", ["texts", "prefill", "cancel", "message"]],
   ]);
 /**
@@ -226,7 +226,7 @@ const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], r
  */
 function removedPrefillName(kind: InteractionExpression["interactionKind"]): string | null {
   if (kind === "booleans") return "defaults";
-  return kind === "choice" || kind === "form" || kind === "boolean" ? null : "default";
+  return kind === "choice" || kind === "form" ? null : "default";
 }
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 /** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
@@ -3807,8 +3807,44 @@ class Parser {
     }
 
     const options: InteractionChoiceOption[] = [];
+    let prefill: Expression | null = null;
     let missingChoiceOptionWasReported = false;
     while (!this.#isInteractionChoiceTerminator()) {
+      // `prefill:` names the preselected button's value once, after the options, so no option is labelled `prefill`.
+      if (this.#checkIdentifier("prefill") && this.#peek(1).kind === TokenKind.Colon) {
+        const name = this.#advance();
+        this.#advance();
+        prefill = yield* parseChild(this.#parseColonValueTask(false));
+        if (prefill === null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedInteractionText,
+            "Expected a prefill value after 'prefill:'.",
+          );
+          if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
+            this.#recoveredAtStatementBoundary = true;
+          break;
+        }
+        if (options.length === 0) {
+          missingChoiceOptionWasReported = true;
+          this.#reportSpan(
+            parserDiagnosticCode.expectedChoiceOption,
+            "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+            name.span,
+          );
+          this.#synchronizeStatement();
+        } else if (
+          !this.#isInteractionChoiceTerminator() &&
+          !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace))
+        ) {
+          this.#reportSpan(
+            parserDiagnosticCode.unsupportedInteractionForm,
+            "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+            this.#peek().span,
+          );
+          this.#synchronizeStatement();
+        }
+        break;
+      }
       const optionValue =
         (this.#check(TokenKind.Identifier) || this.#check(TokenKind.NumberLiteral)) &&
         this.#peek(1).kind === TokenKind.Colon
@@ -3892,7 +3928,7 @@ class Parser {
         "Expected at least one choice option.",
       );
     }
-    const end = options.at(-1)?.expression.span ?? speaker?.span ?? command.span;
+    const end = prefill?.span ?? options.at(-1)?.expression.span ?? speaker?.span ?? command.span;
     return Object.freeze({
       kind: "interactionExpression",
       interactionKind,
@@ -3901,7 +3937,7 @@ class Parser {
       speaker,
       question: null,
       hint: null,
-      prefill: null,
+      prefill,
       options: Object.freeze(options),
       formArguments: Object.freeze([]),
       span: spanFrom(command.span, end),

@@ -2294,6 +2294,10 @@ class SemanticValidator {
       for (const element of content.elements)
         this.#validateChoiceObject(unwrapParentheses(element), option.value);
     }
+    if (expression.prefill !== null)
+      yield* compileChild(
+        this.#validateExpressionTask(expression.prefill, scope, contextualSpeaker),
+      );
     if (empty)
       this.#report(
         semanticCode.invalidInteractionChoice,
