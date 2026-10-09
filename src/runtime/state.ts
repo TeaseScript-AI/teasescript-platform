@@ -1475,11 +1475,16 @@ function validateLoopContexts(
         nonNegativeSafeInteger(position) &&
         position > planned.start &&
         position < planned.target;
+      // Without a plan, the position cannot tell whether the loop's body, with its own scope, holds it.
       if (
         frame.callFrameId !== owner ||
         active.has(frame.loopId) ||
         scopeDepth <= scopeStart ||
-        (inBody ? scopeDepth >= scopeEnd : scopeDepth !== scopeEnd) ||
+        (plan === undefined
+          ? scopeDepth > scopeEnd
+          : inBody
+            ? scopeDepth >= scopeEnd
+            : scopeDepth !== scopeEnd) ||
         (scopeDepth < frameList.length &&
           (!isPlainRecord(frameList[scopeDepth]) || frameList[scopeDepth].file !== null))
       ) {
