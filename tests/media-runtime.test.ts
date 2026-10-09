@@ -252,7 +252,7 @@ test("blocking audio waits for load and natural completion; async audio continue
   );
   assert.deepEqual(background.said(), []);
   background.load(1, 90_000);
-  assert.deepEqual(background.said(), ["started 1 min 30 s running"]);
+  assert.deepEqual(background.said(), ["started 1 minute 30 seconds running"]);
 });
 
 test("a source the Player cannot load warns, stops without cues or finish, and never blocks", () => {
@@ -303,12 +303,12 @@ test("cues fire on every natural pass; the compact block is a per-pass end; fini
   );
   session.load(1, 2_000).at(0, [1, 0]).at(4_000, [1, 4_000]);
   assert.deepEqual(session.said(), [
-    "start 0 s",
+    "start 0 seconds",
     "one",
-    "end 2 s",
-    "start 0 s",
+    "end 2 seconds",
+    "start 0 seconds",
     "one",
-    "end 4 s",
+    "end 4 seconds",
     "finish finished",
   ]);
   assert.equal(session.media(1)?.elapsedMs, 4_000);
@@ -366,7 +366,7 @@ test("one late observation and many small ones give the same result under linear
   const small = new Session(source).load(1, 4_000).at(0, [1, 0]);
   for (let now = 250; now <= 12_000; now += 250) small.at(now, [1, now]);
   assert.deepEqual(late.said(), small.said());
-  assert.deepEqual(late.said(), ["cue 3 s", "timer 5 s", "done stopped 5 s"]);
+  assert.deepEqual(late.said(), ["cue 3 seconds", "timer 5 seconds", "done stopped 5 seconds"]);
 });
 
 test("a stall reported by equal progress delays cues; elapsed excludes stalls and pauses", () => {
@@ -394,7 +394,7 @@ test("a stall reported by equal progress delays cues; elapsed excludes stalls an
     .at(4_000, [1, 1_000])
     .at(6_000, [1, 3_000]);
   session.at(10_000, [1, 3_000]);
-  assert.deepEqual(session.said(), ["timer 1 s", "done 1 s paused"]);
+  assert.deepEqual(session.said(), ["timer 1 second", "done 1 second paused"]);
 });
 
 test("seeks clamp, skip jumped cues, fire a landing cue once playback proceeds, and end a pass at once", () => {
@@ -425,12 +425,12 @@ test("seeks clamp, skip jumped cues, fire a landing cue once playback proceeds, 
   session.load(1, 3_000).at(0, [1, 0]).at(500, [1, 500]).at(1_000, [1, 1_000]);
   // The wait ends as the pass ends naturally; the seek then completes the next pass at once.
   assert.deepEqual(session.said(), [
-    "seek 2 s",
+    "seek 2 seconds",
     "two",
     "end",
     "end",
-    "after end 0 s 1 s",
-    "clamped 0 s",
+    "after end 0 seconds 1 second",
+    "clamped 0 seconds",
   ]);
 });
 
@@ -454,9 +454,9 @@ test("pausing keeps the position and cues pending; resume continues; no-op calls
     ].join("\n"),
   );
   session.load(1, 60_000).at(2_000);
-  assert.deepEqual(session.said(), ["paused 0 s"]);
+  assert.deepEqual(session.said(), ["paused 0 seconds"]);
   session.at(3_000, [1, 1_000]).at(7_000, [1, 5_000]);
-  assert.deepEqual(session.said(), ["paused 0 s", "start", "at 5 s"]);
+  assert.deepEqual(session.said(), ["paused 0 seconds", "start", "at 5 seconds"]);
   assert.deepEqual(session.warnings(), []);
 });
 
@@ -700,7 +700,7 @@ test("controlling other media inside a cue block keeps the catch-up order of wor
   // The cue of b at 500 ms follows the timer; b was paused exactly there, so it fires once b plays on.
   assert.deepEqual(paused.said(), ["a", "timer"]);
   paused.at(10_000).at(10_500, [2, 500]);
-  assert.deepEqual(paused.said(), ["a", "timer", "paused 500 ms", "b"]);
+  assert.deepEqual(paused.said(), ["a", "timer", "paused 500 milliseconds", "b"]);
 
   const stopped = new Session(source('say "timer"\n  b.stop()'))
     .load(1, 1_000)
@@ -888,7 +888,7 @@ test("an async play whose loaded source leaves no range continues as a failed lo
     'let m = playAudio(file: "a", async: true, startAt: 2 s)\nsay "${m.state} ${m.duration}"\nexit',
   );
   session.load(1, 1_000);
-  assert.deepEqual(session.said(), ["stopped 1 s"]);
+  assert.deepEqual(session.said(), ["stopped 1 second"]);
   assert.equal(session.warnings().filter((warning) => warning.startsWith("TSW013")).length, 1);
 });
 
@@ -920,7 +920,7 @@ test("pausing media exactly where its repeat duration runs out still finishes it
   );
   session.load(1, 1_000).load(2, 1_000).at(1_000, [1, 1_000], [2, 1_000]);
   assert.equal(session.media(2)?.state, "finished");
-  assert.deepEqual(session.said(), ["b finished 500 ms"]);
+  assert.deepEqual(session.said(), ["b finished 500 milliseconds"]);
 });
 
 test("cues at one point run in source order, also when written differently, before finish", () => {
@@ -1105,7 +1105,7 @@ test("stopAudio stops running and paused audio in start order and leaves finishe
   session.at(2_000, [1, 2_000], [3, 1_000], [4, 2_000]);
   assert.deepEqual(session.said(), [
     "c finished",
-    "stopped 2 s stopped 0 s finished running",
+    "stopped 2 seconds stopped 0 seconds finished running",
     "running",
   ]);
   // Each sound settles like stop() on its handle, in the order the sounds started; a second stopAudio finds none.
@@ -1376,7 +1376,7 @@ test("the main path reads and stops media at scene time however late playback is
   fine.at(1_000, [1, 1_000]).at(5_000, [1, 5_000]);
   const late = new Session(source).load(1, 10_000);
   late.at(5_000, [1, 5_000]);
-  assert.deepEqual(late.said(), ["1 s", "1 s"]);
+  assert.deepEqual(late.said(), ["1 second", "1 second"]);
   assert.deepEqual(late.said(), fine.said());
   assert.deepEqual(late.media(1)?.positionMs, fine.media(1)?.positionMs);
 });
@@ -1435,7 +1435,7 @@ test("fractional controls, budget ends, and terminal playheads agree with the ar
   ].join("\n");
   const fine = new Session(source).load(1, 20).at(10, [1, 10.1]).at(20);
   const late = new Session(source).load(1, 20).at(20, [1, 20.2]);
-  assert.deepEqual(fine.said(), ["end", "finish 10.1 ms"]);
+  assert.deepEqual(fine.said(), ["end", "finish 10.1 milliseconds"]);
   assert.deepEqual(late.said(), fine.said());
   // A repeat duration ending inside the last pass never carries the position past the range.
   const budget = new Session(
@@ -1543,7 +1543,7 @@ test("reads at a fractional sample are whole milliseconds like interpolated read
   ].join("\n");
   const fine = new Session(source).load(1, 1_000).at(10, [1, 10.1]).at(20);
   const late = new Session(source).load(1, 1_000).at(20, [1, 20.2]);
-  assert.deepEqual(fine.said(), ["10 ms 10 ms 990 ms"]);
+  assert.deepEqual(fine.said(), ["10 milliseconds 10 milliseconds 990 milliseconds"]);
   assert.deepEqual(late.said(), fine.said());
   assert.deepEqual(late.media(1), fine.media(1));
 });
@@ -1599,12 +1599,12 @@ test("crossings and reads use the exact reported values", () => {
     'let clock = timer async 100 ms\nlet m = playAudio async "a" {\n  at 1.7 ms {\n    say "${clock.elapsed}", instant\n  }\n}\nwait 100 ms\nexit',
   );
   crossing.load(1, 100).at(3, [1, 5.1]);
-  assert.deepEqual(crossing.said(), ["2 ms"]);
+  assert.deepEqual(crossing.said(), ["2 milliseconds"]);
   const read = new Session(
     'let m = playAudio async "a"\nwait 5 ms\nsay "${m.position} ${m.elapsed} ${m.remaining}", instant\nm.pause()\nwait 100 ms\nexit',
   );
   read.load(1, 100).at(6, [1, 0.6]);
-  assert.deepEqual(read.said(), ["0 s 0 s 100 ms"]);
+  assert.deepEqual(read.said(), ["0 seconds 0 seconds 100 milliseconds"]);
 });
 
 test("a terminal playhead stays at the range end beyond exactly countable passes", () => {
@@ -1759,7 +1759,11 @@ test("position reads and the terminal playhead use the arrival the timeline comm
     ].join("\n"),
   );
   read.load(1, 4_503_599_627_370_496).at(2, [1, 1]).at(4, [1, 1.25]);
-  assert.deepEqual(read.said(), ["C 0.1 ms", "before 0.1 ms", "after 0.1 ms"]);
+  assert.deepEqual(read.said(), [
+    "C 0.1 milliseconds",
+    "before 0.1 milliseconds",
+    "after 0.1 milliseconds",
+  ]);
   const terminal = new Session(
     'let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 1000.3 ms, repeat: 2498 ms) {\n  at 1.1 ms { }\n}\nwait 10000 ms\nexit',
   );
@@ -1993,7 +1997,12 @@ test("settled media stay readable through every handle and cue block that still 
   ].join("\n");
   const { boundaries, events } = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
   const said = events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
-  assert.deepEqual(said, ["own finished", "late finish", "timer stopped", "stopped 1 s 0 s"]);
+  assert.deepEqual(said, [
+    "own finished",
+    "late finish",
+    "timer stopped",
+    "stopped 1 second 0 seconds",
+  ]);
   // The list and the dict keep theirs; the rest went once their timer or cue block no longer needed them.
   assert.deepEqual(
     boundaries.at(-1)?.settledMedia.map((media) => media.mediaId),
@@ -2038,14 +2047,14 @@ test("a settled record keeps only what its handle reads, the same at every check
       "cue 1",
       "finish 1 finished",
       '<media "done.mp3", finished>',
-      "700 ms 1 s 0 s 1 s 0.5",
-      "finished 700 ms 1 s 0 s",
+      "700 milliseconds 1 second 0 seconds 1 second 0.5",
+      "finished 700 milliseconds 1 second 0 seconds",
       '<media "cut.mp3", stopped>',
-      "250 ms 250 ms 0 s 1 s 1",
-      "stopped 250 ms 250 ms 0 s",
+      "250 milliseconds 250 milliseconds 0 seconds 1 second 1",
+      "stopped 250 milliseconds 250 milliseconds 0 seconds",
       '<media "empty.mp3", stopped>',
-      "2 s 0 s 0 s 1 s 1",
-      "stopped 2 s 0 s 0 s",
+      "2 seconds 0 seconds 0 seconds 1 second 1",
+      "stopped 2 seconds 0 seconds 0 seconds",
     ],
   );
   // Controls of settled media change nothing: each warns except the silent stop.

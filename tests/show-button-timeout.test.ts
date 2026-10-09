@@ -172,7 +172,7 @@ test("a button works as a value inside interpolation", () => {
     1_000,
   );
   assert.equal(session.state.status, "halted");
-  assert.equal(session.transcriptEntries.at(-1)?.text, "You waited 1 s.");
+  assert.equal(session.transcriptEntries.at(-1)?.text, "You waited 1 second.");
 });
 
 test("the compiler rejects a timeout it can see is invalid and names the fix", () => {

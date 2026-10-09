@@ -386,9 +386,9 @@ test("an async timer returns a typed handle whose reads follow scene time", () =
   );
   session.at(4_000).at(11_000);
   assert.deepEqual(session.said(), [
-    "running mystery Deadline 10 s 0 s true",
-    "6 s 4 s",
-    "finished 0 s 10 s",
+    "running mystery Deadline 10 seconds 0 seconds true",
+    "6 seconds 4 seconds",
+    "finished 0 seconds 10 seconds",
   ]);
   assert.equal(session.snapshot.status, "halted");
   const completed = session.events.filter((event) => event.kind === "actionCompleted");
@@ -427,10 +427,10 @@ test("pause, resume, and stop follow the four lifecycle states with idempotent n
   );
   session.at(2_000).at(7_000).at(8_000);
   assert.deepEqual(session.said(), [
-    "paused 8 s 2 s",
-    "running 7 s 3 s",
-    "stopped 0 s 3 s",
-    "stopped 0 s",
+    "paused 8 seconds 2 seconds",
+    "running 7 seconds 3 seconds",
+    "stopped 0 seconds 3 seconds",
+    "stopped 0 seconds",
   ]);
   assert.deepEqual(warnings(session), ["TSW010", "TSW010", "TSW010", "TSW010", "TSW010"]);
   assert.equal(session.snapshot.status, "halted");
@@ -456,7 +456,12 @@ test("adjusting remaining changes only the current round and zero expires it imm
     ].join("\n"),
   );
   session.at(1_000);
-  assert.deepEqual(session.said(), ["6 s", "paused 20 s", "finished 0 s fired 1", "fired 1"]);
+  assert.deepEqual(session.said(), [
+    "6 seconds",
+    "paused 20 seconds",
+    "finished 0 seconds fired 1",
+    "fired 1",
+  ]);
 });
 
 test("a paused repeating timer expiring at zero stays paused with a full next round", () => {
@@ -474,7 +479,7 @@ test("a paused repeating timer expiring at zero stays paused with a full next ro
     ].join("\n"),
   );
   session.at(3_000).at(4_000);
-  assert.deepEqual(session.said(), ["paused 3 s", "4 s 4 s"]);
+  assert.deepEqual(session.said(), ["paused 3 seconds", "4 seconds 4 seconds"]);
 });
 
 test("repeating ranges redraw each round from the session RNG, including during catch-up", () => {
@@ -499,7 +504,9 @@ test("repeating ranges redraw each round from the session RNG, including during 
   assert.deepEqual(late.snapshot, stepwise.snapshot);
 
   const said = late.said();
-  const expiriesMs = said.slice(0, -1).map((text) => Number(text.replace(/ s$/u, "")) * 1_000);
+  const expiriesMs = said
+    .slice(0, -1)
+    .map((text) => Number(text.replace(/ seconds?$/u, "")) * 1_000);
   assert.equal(said.at(-1), String(expiriesMs.length));
   const roundsMs = expiriesMs.map((ms, index) => ms - (expiriesMs[index - 1] ?? 0));
   // Every round lasts whole seconds in 1..=4, and rounds keep expiring until the wait ends.
@@ -1037,7 +1044,7 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     [
       'let t = timer(duration: 1, async: true, repeat: true)\ntimer async 2 { t.repeatDuration = 10 s }\nwait 5\nsay "${t.remaining} ${t.elapsed}"\nexit',
       [1_000, 2_000, 3_000, 5_000],
-      ["8 s 5 s"],
+      ["8 seconds 5 seconds"],
     ],
     [
       'let t = timer async 3 { say "too late" }\ntimer async 1 {\n  wait 1\n  t.stop()\n}\nwait 10\nexit',
@@ -1543,7 +1550,7 @@ test("settled timers stay readable through every handle and expiry block that st
   ].join("\n");
   const { boundaries, events } = assertRuntimeResumeEquivalent(source);
   const said = events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
-  assert.deepEqual(said, ["late block", "timer stopped", "stopped stopped 0 s"]);
+  assert.deepEqual(said, ["late block", "timer stopped", "stopped stopped 0 seconds"]);
   // The list and the dict keep theirs; the rest went once their scope or block no longer needed them.
   assert.deepEqual(
     boundaries.at(-1)?.settledTimers.map((timer) => timer.timerId),
@@ -1588,17 +1595,17 @@ test("a settled timer record keeps only what its handle reads, the same at every
       "once finished",
       "beat 1",
       '<timer "Beat", stopped>',
-      "0 s 3 s mystery Beat stopped 3 s",
-      "0 s 3 s mystery stopped",
+      "0 seconds 3 seconds mystery Beat stopped 3 seconds",
+      "0 seconds 3 seconds mystery stopped",
       '<timer "Once", finished>',
-      "0 s 1 s visible Once finished null",
-      "0 s 1 s visible finished",
+      "0 seconds 1 second visible Once finished null",
+      "0 seconds 1 second visible finished",
       '<timer "Cut", stopped>',
-      "0 s 3 s visible Cut stopped null",
-      "0 s 3 s visible stopped",
+      "0 seconds 3 seconds visible Cut stopped null",
+      "0 seconds 3 seconds visible stopped",
       "<timer, stopped>",
-      "0 s 3 s visible null stopped null",
-      "0 s 3 s visible stopped",
+      "0 seconds 3 seconds visible null stopped null",
+      "0 seconds 3 seconds visible stopped",
     ],
   );
   assert.equal(

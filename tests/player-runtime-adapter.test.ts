@@ -629,7 +629,7 @@ test("authored timers scenario presents concurrent timers and interrupts the una
   );
   assert.equal(answered?.outcome.kind, "completed");
   session = answered!.session;
-  assert.ok(texts(session).includes("Thank you, Ada. 12 s were left on the deadline."));
+  assert.ok(texts(session).includes("Thank you, Ada. 12 seconds were left on the deadline."));
   assert.deepEqual(
     presented(session, 8_000).map(([kind, name]) => [kind, name]),
     [
@@ -702,7 +702,7 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
   ]).session;
   assert.equal(finished.state.status, "halted");
   const last = finished.transcriptEntries.at(-1);
-  assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 s 8 s");
+  assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 seconds 8 seconds");
 });
 
 test("the Player answers takePhoto() with a vouched reference or an unavailable camera", () => {

@@ -81,7 +81,7 @@ test("+10 s at a button runs timers and its timeout in scene-time order and show
     ),
     10_000,
   );
-  assert.deepEqual(said(session), ["three", "after 5 s", "late"]);
+  assert.deepEqual(said(session), ["three", "after 5 seconds", "late"]);
   assert.deepEqual(
     session.events.flatMap((event) =>
       event.kind === "actionCompleted" && event.settlement.actionKind === "timer"
@@ -104,7 +104,7 @@ test("+10 s at a button runs timers and its timeout in scene-time order and show
   session = advancePlayerRuntimeTime(session, 70_000);
   assert.deepEqual(said(activatePlayerRuntimeButton(session)!.session), [
     "Done",
-    "1 min 10 s 1 min 10 s",
+    "1 minute 10 seconds 1 minute 10 seconds",
   ]);
 });
 
@@ -141,7 +141,7 @@ test("a jump waits for a write a block makes, and checkpoints before and after i
   assert.equal(continued!.state.status, "halted");
   assert.deepEqual(
     continued!.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["saved", "Waited 15 s"],
+    ["saved", "Waited 15 seconds"],
   );
   assert.deepEqual(
     continued!.events.flatMap((event) =>
@@ -191,13 +191,13 @@ test("a jump plays running audio on at 1× through cues, seeks, pauses, and resu
   }
   const jumped = advancePlayerRuntimeTime(loaded(), 3_600);
   assert.deepEqual(said(jumped), [
-    "start 0 s",
-    "cue 1 s",
-    "start 1 s",
-    "paused 500 ms",
-    "resumed 500 ms",
-    "cue 2 s",
-    "start 2 s",
+    "start 0 seconds",
+    "cue 1 second",
+    "start 1 second",
+    "paused 500 milliseconds",
+    "resumed 500 milliseconds",
+    "cue 2 seconds",
+    "start 2 seconds",
   ]);
   assert.deepEqual(canonical(jumped), canonical(sampled));
 });
@@ -261,7 +261,7 @@ test("after a jump the device plays from the jumped playhead and measures on fro
   player.tick(1_000);
   const segment = player.session.state.backgroundActions.find((action) => action.kind === "media");
   player.jump(3_500);
-  assert.deepEqual(player.texts(), ["cue 3 s"]);
+  assert.deepEqual(player.texts(), ["cue 3 seconds"]);
   // The jump stays in the segment, so only the jump moves the element.
   assert.equal(element!.position, 3.5);
   assert.equal(element!.paused, false);

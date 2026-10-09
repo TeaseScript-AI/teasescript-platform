@@ -1579,7 +1579,7 @@ numbers together are numbers. The selected element is shown as that value would 
 ```text
 let waits = [30 seconds, 90 seconds]
 
-say "Wait ${waits}"  // for example "Wait 1 min 30 s"
+say "Wait ${waits}"  // for example "Wait 1 minute 30 seconds"
 ```
 
 A list that holds values of different types needs a declared union element type ([§13](#13-explicit-types)):
@@ -1587,7 +1587,7 @@ A list that holds values of different types needs a declared union element type 
 ```text
 let values: (string | number | duration)[] = ["Level", 2, 3.5, 90 seconds]
 
-say "Current: ${values}"  // for example "Current: 1 min 30 s"
+say "Current: ${values}"  // for example "Current: 1 minute 30 seconds"
 ```
 
 The whole list is checked before the selection, so a list that also contains a list, a set, an object, or a media or
@@ -1612,16 +1612,16 @@ say { name: "Bo" }             // { name: "Bo" }
 say dict{ collar: "leather" }  // dict{ "collar": "leather" }
 say ["He said \"hi\""]         // ["He said \"hi\""]
 say []                         // []
-say [90 seconds]               // [1 min 30 s]
+say [90 seconds]               // [1 minute 30 seconds]
 say 1..=5                      // 1..=5
 say mistress                   // <speaker mistress>
-say music                      // <media "music.mp3", playing at 12 s>
-say beat                       // <timer "Beat", 7 s left>
+say music                      // <media "music.mp3", playing at 12 seconds>
+say beat                       // <timer "Beat", 7 seconds left>
 ```
 
-In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), durations use their
-short form, a set shows like a list, an object shows its properties in order, a dict shows its quoted keys and values in
-order, and a range shows as written. A speaker shows its identifier. A media handle shows its file and state:
+In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), a duration shows as it
+does on its own, a set shows like a list, an object shows its properties in order, a dict shows its quoted keys and
+values in order, and a range shows as written. A speaker shows its identifier. A media handle shows its file and state:
 `playing at` or `paused at` its position, `stopped`, or `finished`. A timer handle shows its label when it has one and
 its state: the time left (after `paused,` when paused), `stopped`, or `finished`. A permanent button identifier shows
 the button's text, `<permanent button "Stop">`, or `<permanent button, removed>`. Handles show the state at the moment
@@ -4063,9 +4063,11 @@ local form: date field order, separators, and 12- or 24-hour clock follow the pl
 in Dutch and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only when
 they are not zero, milliseconds never (`toISO()` keeps them), and no month or weekday names appear. `formatDate()`,
 `formatTime()`, and `formatDateTime()` return the same text for part or all of a value. A duration displays in days,
-hours, minutes, and seconds, such as `2 d 6 h` or `1 min 3.5 s`, and in milliseconds below a second. A calendar
-duration names each calendar part, with 12 months as a year and weeks as days, before any exact offset, such as
-`1 calendar month 16 calendar days` or `1 calendar day -2 h`; a zero one is `0 calendar days`.
+hours, minutes, and seconds, such as `2 days 6 hours` or `1 minute 3.5 seconds`, and in milliseconds below a second,
+such as `500 milliseconds`. Unit words are written in full, singular only for an amount of exactly 1 or -1, so `1 day`
+and `1.5 seconds`. A calendar duration names each calendar part, with 12 months as a year and weeks as days, before any
+exact offset, such as `1 calendar month 16 calendar days` or `1 calendar day -2 hours`; a zero one is
+`0 calendar days`.
 
 Inside a list, set, or object, temporal values use a fixed notation: `<date 2026-10-04>`, `<time 14:30>`,
 `<datetime 2026-10-04 14:30>`, and `<absoluteDateTime 2026-10-04T12:30:00Z>`.

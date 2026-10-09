@@ -3393,7 +3393,7 @@ function startTimer(
   const zeroRoundFault = () =>
     fault(
       "TSR050",
-      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : `${range.start} s`}. Use a duration of at least 1 s.`,
+      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : formatDuration(range.start * 1_000)}. Use a duration of at least 1 second.`,
       instruction.duration.span,
     );
   // A range that allows a zero-length round is rejected before its first round is drawn.

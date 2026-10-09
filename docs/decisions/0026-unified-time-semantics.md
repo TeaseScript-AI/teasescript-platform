@@ -129,9 +129,12 @@ other consumers of an exact duration take a `duration` and reject a `calendarDur
 
 ### 6. Display
 
-A `duration` displays in days, hours, minutes, and seconds, without weeks: `2 days + 6 h` shows `2 d 6 h` and `2 weeks`
-shows `14 d`. A `calendarDuration` is normalized, weeks into days and 12 months into a year, and every calendar part is
-marked: `1 calendar month + 16 calendar days` shows `1 calendar month 16 calendar days`.
+Displayed unit words are written in full, singular only for an amount of exactly 1 or -1. A `duration` displays in
+days, hours, minutes, and seconds, without weeks: `2 days + 6 h` shows `2 days 6 hours`, `2 weeks` shows `14 days`,
+`90 min` shows `1 hour 30 minutes`, and `1.5 s` shows `1.5 seconds`. Below a second it displays in milliseconds:
+`500 ms` shows `500 milliseconds`. A `calendarDuration` is normalized, weeks into days and 12 months into a year, and
+every calendar part is marked: `1 calendar month + 16 calendar days` shows `1 calendar month 16 calendar days`,
+`1 calendar day - 2 h` shows `1 calendar day -2 hours`, and a zero one shows `0 calendar days`.
 
 ### 7. Stored values
 
