@@ -1963,6 +1963,34 @@ async function composerMouseFocusChecks(page) {
   return "PASS default composer focus and mouse Send keeps editing focus";
 }
 
+// In the buttons scenario the first interaction appears as Start leaves the page. Focus then belongs to nothing, so
+// with a mouse the composer takes it, as for any other interaction.
+async function startComposerFocusChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.goto(`${page.url().split("?")[0]}?dev&scenario=buttons`);
+  await page
+    .locator("[data-foreground-controls]")
+    .getByRole("button", { name: "Done counting", exact: true })
+    .waitFor();
+  const inputFocused = () =>
+    page.evaluate(() => document.activeElement?.matches("[data-composer-input]") === true);
+  await page
+    .waitForFunction(
+      () => document.activeElement?.matches("[data-composer-input]") === true,
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+  check(await inputFocused(), "The composer did not take focus after Start");
+  check(
+    (await page.locator("html").getAttribute("data-player-keyboard-focus")) === "false",
+    "Focus after Start revealed a keyboard-navigation outline",
+  );
+  return "PASS the composer takes focus when Start leaves the page for an interaction";
+}
+
 async function composerSendFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2814,6 +2842,7 @@ const groups = [
   toolContentChecks,
   composerNoticeChecks,
   composerMouseFocusChecks,
+  startComposerFocusChecks,
   composerSendFocusChecks,
   sidebarShortcutChecks,
   playerSettingsChecks,
