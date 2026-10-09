@@ -453,8 +453,19 @@ jewell 6), measured against the explorer without phases (DisciplineClinic 20.8%,
 - Rates from all of a depth's work and gain, directed search included, as described above: DisciplineClinic 25.2%,
   Domme3 50.1%, ToyExpanded 39.4%, jewell 46.5% with a trap loop in 2 of 6 seeds.
 
-The second round keeps DisciplineClinic's gain and Domme3's coverage, but jewell still finds its trap loops less often,
-so phases stay opt-in.
+The second round keeps DisciplineClinic's gain and Domme3's coverage, but jewell still finds its trap loops less often.
+A third round found the rule that costs them: opening the next depth on levelling off. With the per-depth order but no
+such opening, jewell gained (48.2%, a trap loop in 4 of 6 seeds, as without phases); the levelling-off test compares the
+recent rate with an average the cheap first steps raise, so on a first session that still gains steadily it fires early
+(at 4,500 to 7,300 of 22,000 operations in jewell) and not later. Of three variants, comparing with the second quarter's
+rate opened even earlier; requiring the low rate to last while the depth's work doubles kept jewell's traps but lost
+most of DisciplineClinic's gain at 512,000 operations (34.5%); and a quarter of the average instead of half kept both
+(jewell 48.7% with a trap loop in 4 of 6 seeds, DisciplineClinic 43.2%). On the 13-unit gate (3 seeds; jewell and
+ToyExpanded 6), that variant gained DisciplineClinic 1.8 points, BreatheAcademy 0.9 and earthdefender 0.7, but lost
+ToyExpanded 2.0 (its second visit gains early, and the stricter test kept it closed) and found jewell's trap loops in 3
+of 6 seeds instead of 5. No one level for the test serves a first session that still gains and a second one that gains
+more, so phases stay opt-in. At four times the gate budgets, phases also cost Domme3 2.6 points (192,000 operations),
+whose next visits at other times of day they start far less often (14 instead of 171).
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
