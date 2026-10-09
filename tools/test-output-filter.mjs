@@ -20,9 +20,10 @@ const testFiles =
         .map((file) => join("dist/tests", file));
 
 // Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
-// path beside a valid one would let a focused run pass without running its test. Its runner leaves out a `node_modules`
-// folder in the working directory, so the check does too. An argument right after an option without `=` may be that
-// option's value, as in `--test-concurrency 1`, so it is not checked.
+// path beside a valid one would let a focused run pass without running its test. Its runner globs with the same
+// `exclude`, which leaves out the `node_modules` folder in the working directory and any `node_modules` that a `**`
+// reaches, so the check uses it too. An argument right after an option without `=` may be that option's value, as in
+// `--test-concurrency 1`, so it is not checked.
 const unmatched = arguments_.filter((path, index) => {
   const previous = arguments_[index - 1];
   const optionValue = previous !== undefined && previous.startsWith("-") && !previous.includes("=");
