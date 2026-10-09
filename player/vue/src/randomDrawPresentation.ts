@@ -163,19 +163,23 @@ export function randomDrawCode(
     readonly to: number;
   } | null;
 } | null {
-  const starts = lineStarts(source);
+  const file = fileCode(source);
+  const { starts } = file;
   if (site.line < 1 || site.line > starts.length) return null;
-  const lexed = lex(source);
-  const tokens = lexed.diagnostics.length === 0 ? lexed.tokens : [];
   const mark = {
     from: starts[site.line - 1]! + site.column - 1,
     to: (starts[site.endLine - 1] ?? source.length) + site.endColumn - 1,
   };
+  // Only the lines from one end of the draw to the other change: their segments split at its ends.
+  const lines = [...file.lines];
+  const ends = [lineAt(starts, mark.from), lineAt(starts, mark.to)];
+  for (let number = Math.min(...ends); number <= Math.max(...ends); number += 1)
+    lines[number - 1] = markLine(lines[number - 1]!, starts[number - 1]!, mark);
   const half = (CONTEXT_ROWS - 1) / 2;
   const context = [Math.max(1, site.line - half), Math.min(starts.length, site.line + half)];
-  const range = enclosingRange(source, site, starts.length);
+  const range = enclosingRange(file.spans, site, starts.length);
   return {
-    lines: renderLines(source, starts, tokens, mark, 1, starts.length),
+    lines,
     enclosing:
       range === null || (range.from >= context[0]! && range.to <= context[1]!)
         ? null
@@ -196,7 +200,7 @@ export function outcomeLines(outcomes: readonly string[], first = 1): readonly C
     const text = outcome.replace(/\r?\n/g, " ");
     const lexed = lex(text);
     const tokens = lexed.diagnostics.length === 0 ? lexed.tokens : [];
-    return { ...renderLines(text, [0], tokens, null, 1, 1)[0]!, number: first + index };
+    return { ...renderLines(text, [0], tokens, 1, 1)[0]!, number: first + index };
   });
 }
 
@@ -206,6 +210,44 @@ function lineStarts(source: string): number[] {
   for (let index = source.indexOf("\n"); index >= 0; index = source.indexOf("\n", index + 1))
     starts.push(index + 1);
   return starts;
+}
+
+/** The one-based line `offset` is on: the last line starting at or before it. */
+function lineAt(starts: readonly number[], offset: number): number {
+  let [low, high] = [1, starts.length];
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (starts[middle - 1]! <= offset) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
+/** What every draw in a file shows alike: its lines, unmarked, and the spans "Show whole" fits. */
+interface FileCode {
+  readonly source: string;
+  readonly starts: readonly number[];
+  readonly lines: readonly CodeLine[];
+  readonly spans: EnclosingSpans | null;
+}
+
+// The file of the latest draw: lexing and parsing a long file is slow, and a file's draws often follow each other, as
+// in a loop.
+let latestFile: FileCode | null = null;
+
+function fileCode(source: string): FileCode {
+  if (latestFile?.source !== source) {
+    const starts = lineStarts(source);
+    const lexed = lex(source);
+    const tokens = lexed.diagnostics.length === 0 ? lexed.tokens : [];
+    latestFile = {
+      source,
+      starts,
+      lines: renderLines(source, starts, tokens, 1, starts.length),
+      spans: enclosingSpans(source),
+    };
+  }
+  return latestFile;
 }
 
 const tokenClasses: Partial<Record<Token["kind"], CodeTokenClass>> = {
@@ -220,17 +262,14 @@ function tokenClass(kind: Token["kind"]): CodeTokenClass {
   return tokenClasses[kind] ?? (kind.startsWith("keyword") ? "keyword" : "operator");
 }
 
-/** Lines `from` through `to`, one-based, split into segments by token, comment, and the mark. */
+/** Lines `from` through `to`, one-based, split into segments by token and comment. */
 function renderLines(
   source: string,
   starts: readonly number[],
   tokens: readonly Token[],
-  mark: { readonly from: number; readonly to: number } | null,
   from: number,
   to: number,
 ): CodeLine[] {
-  const drawStart = mark?.from ?? -1;
-  const drawEnd = mark?.to ?? -1;
   // The first token that can reach line `from`; tokens are in source order.
   let next = tokens.findIndex((token) => token.span.end.offset > starts[from - 1]!);
   if (next < 0) next = tokens.length;
@@ -239,18 +278,16 @@ function renderLines(
     const lineStart = starts[number - 1]!;
     let lineEnd = number < starts.length ? starts[number]! - 1 : source.length;
     if (source[lineEnd - 1] === "\r") lineEnd -= 1;
-    const pieces: { from: number; to: number; kind: CodeTokenClass | null }[] = [];
+    const segments: CodeSegment[] = [];
     let cursor = lineStart;
+    const piece = (end: number, kind: CodeTokenClass | null) => {
+      segments.push({ text: source.slice(cursor, end), kind, mark: false });
+      cursor = end;
+    };
     const gap = (end: number) => {
       if (end <= cursor) return;
       // The lexer skips only whitespace and comments.
-      const text = source.slice(cursor, end);
-      pieces.push({
-        from: cursor,
-        to: end,
-        kind: text.trim() === "" || tokens.length === 0 ? null : "comment",
-      });
-      cursor = end;
+      piece(end, source.slice(cursor, end).trim() === "" || tokens.length === 0 ? null : "comment");
     };
     for (let index = next; index < tokens.length; index += 1) {
       const token = tokens[index]!;
@@ -260,55 +297,58 @@ function renderLines(
       const end = Math.min(token.span.end.offset, lineEnd);
       if (end <= start) continue;
       gap(start);
-      pieces.push({ from: start, to: end, kind: tokenClass(token.kind) });
-      cursor = end;
+      piece(end, tokenClass(token.kind));
       if (token.span.end.offset <= lineEnd) next = index + 1;
     }
     gap(lineEnd);
-    // Split at the draw's ends, so the draw is marked over its tokens' own colours.
-    const segments: CodeSegment[] = [];
-    for (const piece of pieces) {
-      const cuts = [piece.from, drawStart, drawEnd, piece.to]
-        .filter((cut) => cut >= piece.from && cut <= piece.to)
-        .sort((left, right) => left - right);
-      for (let index = 0; index + 1 < cuts.length; index += 1) {
-        const [start, end] = [cuts[index]!, cuts[index + 1]!];
-        if (end > start)
-          segments.push({
-            text: source.slice(start, end),
-            kind: piece.kind,
-            mark: start >= drawStart && end <= drawEnd,
-          });
-      }
-    }
     lines.push({ number, segments });
   }
   return lines;
 }
 
 /**
- * The lines of the function the draw is in, the innermost; outside functions, of the top-level statement it is in
- * when that spans several lines, otherwise of the whole file. `null` when the file does not parse.
+ * `line`, which starts at offset `lineStart`, with its segments split at the draw's ends, so the draw is marked over its
+ * tokens' own colours.
  */
-function enclosingRange(
-  source: string,
-  site: RandomSite,
-  lineCount: number,
-): {
-  readonly kind: "function" | "block" | "file";
-  readonly from: number;
-  readonly to: number;
-} | null {
+function markLine(
+  line: CodeLine,
+  lineStart: number,
+  mark: { readonly from: number; readonly to: number },
+): CodeLine {
+  const segments: CodeSegment[] = [];
+  let from = lineStart;
+  for (const segment of line.segments) {
+    const to = from + segment.text.length;
+    const cuts = [from, mark.from, mark.to, to]
+      .filter((cut) => cut >= from && cut <= to)
+      .sort((left, right) => left - right);
+    for (let index = 0; index + 1 < cuts.length; index += 1) {
+      const [start, end] = [cuts[index]!, cuts[index + 1]!];
+      if (end > start)
+        segments.push({
+          text: segment.text.slice(start - from, end - from),
+          kind: segment.kind,
+          mark: start >= mark.from && end <= mark.to,
+        });
+    }
+    from = to;
+  }
+  return { number: line.number, segments };
+}
+
+/** Every function's span and every top-level statement's, in the parser's zero-based lines and columns. */
+interface EnclosingSpans {
+  readonly functions: readonly SourceSpan[];
+  readonly statements: readonly SourceSpan[];
+}
+
+/** The spans `enclosingRange` chooses from, or `null` when the file does not parse. */
+function enclosingSpans(source: string): EnclosingSpans | null {
   const parsed = parse(source);
   if (parsed.diagnostics.some((diagnostic) => diagnostic.severity === "error")) return null;
-  const line = site.line - 1;
-  const column = site.column - 1;
-  const contains = (span: SourceSpan) =>
-    (span.start.line < line || (span.start.line === line && span.start.column <= column)) &&
-    (span.end.line > line || (span.end.line === line && span.end.column > column));
-  // The innermost function around the draw: the one that starts last. The tree is walked with a list rather than by
-  // recursion, as valid source may nest deeper than the call stack reaches.
-  let found: SourceSpan | undefined;
+  // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
+  // reaches.
+  const functions: SourceSpan[] = [];
   const pending: unknown[] = [parsed.program.statements];
   while (pending.length > 0) {
     const node = pending.pop();
@@ -318,23 +358,51 @@ function enclosingRange(
       continue;
     }
     // EVIDENCE: the parser's syntax tree holds plain nodes, arrays, and values, and a node's `span` is its SourceSpan.
-    const record = node as { readonly kind?: unknown; readonly span?: SourceSpan };
-    if (record.span !== undefined && !contains(record.span)) continue;
-    if (
-      record.kind === "functionDeclaration" &&
-      record.span !== undefined &&
-      (found === undefined ||
-        record.span.start.line > found.start.line ||
-        (record.span.start.line === found.start.line &&
-          record.span.start.column > found.start.column))
-    )
-      found = record.span;
-    for (const [key, value] of Object.entries(record)) if (key !== "span") pending.push(value);
+    const record = node as {
+      readonly [key: string]: unknown;
+      readonly kind?: unknown;
+      readonly span?: SourceSpan;
+    };
+    if (record.kind === "functionDeclaration" && record.span !== undefined)
+      functions.push(record.span);
+    for (const key in record) if (key !== "span") pending.push(record[key]);
   }
+  return { functions, statements: parsed.program.statements.map((statement) => statement.span) };
+}
+
+/**
+ * The lines of the function the draw is in, the innermost; outside functions, of the top-level statement it is in
+ * when that spans several lines, otherwise of the whole file. `null` when the file does not parse.
+ */
+function enclosingRange(
+  spans: EnclosingSpans | null,
+  site: RandomSite,
+  lineCount: number,
+): {
+  readonly kind: "function" | "block" | "file";
+  readonly from: number;
+  readonly to: number;
+} | null {
+  if (spans === null) return null;
+  const line = site.line - 1;
+  const column = site.column - 1;
+  const contains = (span: SourceSpan) =>
+    (span.start.line < line || (span.start.line === line && span.start.column <= column)) &&
+    (span.end.line > line || (span.end.line === line && span.end.column > column));
+  // The innermost function around the draw: the one that starts last.
+  let found: SourceSpan | undefined;
+  for (const span of spans.functions)
+    if (
+      contains(span) &&
+      (found === undefined ||
+        span.start.line > found.start.line ||
+        (span.start.line === found.start.line && span.start.column > found.start.column))
+    )
+      found = span;
   if (found !== undefined)
     return { kind: "function", from: found.start.line + 1, to: found.end.line + 1 };
-  const statement = parsed.program.statements.find((candidate) => contains(candidate.span));
-  if (statement !== undefined && statement.span.end.line > statement.span.start.line)
-    return { kind: "block", from: statement.span.start.line + 1, to: statement.span.end.line + 1 };
+  const statement = spans.statements.find(contains);
+  if (statement !== undefined && statement.end.line > statement.start.line)
+    return { kind: "block", from: statement.start.line + 1, to: statement.end.line + 1 };
   return { kind: "file", from: 1, to: lineCount };
 }
