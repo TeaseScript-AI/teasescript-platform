@@ -6,6 +6,14 @@ export interface RuntimeErrorInfo {
   readonly span: SourceSpan;
 }
 
+/**
+ * The message of a failure that the plan, the engine's state, or the host causes rather than the script: what failed,
+ * worded for a bug report, then that the script is not at fault.
+ */
+export function internalFault(what: string): string {
+  return `${what} This is a fault in the Playroom, not in the script. Report it with a debug export.`;
+}
+
 export class RuntimeFault extends Error {
   public readonly code: string;
   public readonly span: SourceSpan;

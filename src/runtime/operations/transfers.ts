@@ -87,7 +87,7 @@ export function executeTransfer(
     if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
       throw new RuntimeFault(
         "TSR047",
-        `Maximum TeaseScript call depth of ${snapshot.maxCallDepth} exceeded.`,
+        `Calls are nested ${snapshot.maxCallDepth} deep, the most this session allows. End the recursion sooner, or use a loop instead.`,
         copySpan(instruction.span),
       );
     }

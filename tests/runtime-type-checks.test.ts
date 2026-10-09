@@ -228,6 +228,32 @@ test("an index or member that a value does not have names the value, its bounds,
       "door.lock",
     ],
     [
+      // The index removes the element that the statement then changes.
+      "let a = [[[1]], [[2], [3]]]\na[1][a.removeLast().length - 1].add(4)",
+      "TSR025",
+      "The list element this statement changes no longer exists: something in the same statement removed position 1. Make the change in a separate statement.",
+      "a[1][a.removeLast().length - 1]",
+    ],
+    [
+      "let level = 1\nsay (level)()",
+      "TSR011",
+      "'level' is 1, not a function, so it cannot be called. Call a function by its name instead.",
+      "level",
+    ],
+    [
+      // 'speaker' names the current speaker of a say, which is not a variable.
+      'speaker vera {}\nsay as vera "${(speaker)()}"',
+      "TSR011",
+      "'speaker' is not a function the Playroom provides, so it cannot be called. Call a function by its name instead.",
+      "speaker",
+    ],
+    [
+      "let a = [[1]]\na[0]()",
+      "TSR014",
+      "Only a function or a method can be called, but this is neither. Call a function by its name instead.",
+      "a[0]",
+    ],
+    [
       "let empty = pick({})\nsay empty.lock",
       "TSR017",
       "'empty' has no properties, so it has no 'lock'.",

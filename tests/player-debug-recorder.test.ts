@@ -115,7 +115,7 @@ function startedWithScopesUsedUp(
   );
 }
 
-const SCOPES_USED_UP = /nextScopeId cannot be advanced safely/u;
+const SCOPES_USED_UP = /nextScopeId is at its largest value, so it cannot advance/u;
 
 /** Plays a script through every engine seam of the Player: time, media, input, image, photo, button, and storage. */
 function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSession {

@@ -170,7 +170,7 @@ export function validateScriptStorageEntries(
     if (failure !== null) return failure;
     // EVIDENCE: validation: validateCapturedSerializableValue accepted this stored value above.
     const valid = stored as SerializableRuntimeValue;
-    if (valid === null) return `${entryPath}.value must not be null; an absent key has no entry.`;
+    if (valid === null) return `${entryPath}.value must not be null. An absent key has no entry.`;
     if (containsRuntimeIdentity(valid)) {
       return `${entryPath}.value contains a timer, media, or message handle or a speaker reference.`;
     }
