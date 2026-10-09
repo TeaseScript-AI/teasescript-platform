@@ -732,7 +732,8 @@ ties follow a fixed, perceptually spaced palette order. Later messages increase 
 keeps the assignment. Authored text and bubble colours do not choose avatar colours. An authored V30 speaker `avatar`
 image replaces the glyph and is decorative beside the visible speaker name; while it is unavailable or fails to load,
 the glyph remains. Like Stage media, the reference is package-relative and resolved by the trusted host; an
-unresolvable avatar keeps the glyph.
+unresolvable avatar keeps the glyph too. An avatar that does not resolve or does not load is a warning notice, once per
+session and path, as a Stage image is.
 
 ## Composer and foreground interactions
 

@@ -1371,8 +1371,8 @@ async function packageScenario(cdp, origin) {
 }
 
 /**
- * The `missing-media` package refers to an image and a sound the package lacks, and to an image and a sound that are no
- * valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
+ * The `missing-media` package refers to an image, a sound, and a speaker avatar the package lacks, and to an image, a
+ * sound, and an avatar that are no valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
  * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
  */
 /**
@@ -2170,9 +2170,11 @@ async function missingMediaScenario(cdp, origin) {
   assertEqual(
     JSON.stringify(await value(cdp, `${notices}.sort()`)),
     JSON.stringify([
-      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 5)",
-      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 4)",
+      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 15)",
+      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 14)",
+      "warning Warning: Image could not be loaded: avatars/corrupt.png",
       "warning Warning: Image could not be loaded: images/corrupt.png",
+      "warning Warning: Image not found: avatars/missing.png",
       "warning Warning: Image not found: images/missing.png",
     ]),
     "The notifications did not list one warning per unusable path",

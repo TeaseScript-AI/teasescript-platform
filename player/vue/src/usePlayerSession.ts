@@ -443,6 +443,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const failedStageSource = shallowRef<string | null>(null);
   // The Stage source the browser has loaded and decoded, as the Stage reports it, or `null`; for Debug's Now view.
   const loadedStageSource = shallowRef<string | null>(null);
+  // A speaker's avatar image that is no package file is reported as a Stage image is; the glyph shows instead.
+  watch(
+    () => session.value?.speakers,
+    (speakers) => {
+      for (const { avatarImage } of Object.values(speakers ?? {}))
+        if (avatarImage !== undefined && resolvePackageAsset(avatarImage) === null)
+          reportUnusableMedia(
+            avatarImage,
+            playerNotices.unusableMedia("image", avatarImage, "missing"),
+          );
+    },
+  );
   // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
   watch([generation, stageImage], ([, image]) => {
     if (image === null) return;
@@ -1839,6 +1851,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
+    /** Reports a speaker's avatar image that the browser could not load or decode, as a Stage image is reported. */
+    avatarFailed(path: string) {
+      if (resolvePackageAsset(path) !== null)
+        reportUnusableMedia(path, playerNotices.unusableMedia("image", path, "failed"));
+    },
     /** The authored Stage image of the session, or `null` for an empty Stage. */
     stageImage,
     /** What the Stage reports about the source it shows: loaded and decoded, or failed; for Debug's Now view. */
