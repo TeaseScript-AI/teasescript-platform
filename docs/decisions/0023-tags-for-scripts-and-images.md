@@ -65,8 +65,8 @@ let photos = findImages(where: "bedroom" and "punishment")
 ```
 
 1. `findScripts` returns script references (ADR 0022). `findImages` returns image references, which are text.
-2. A directly selected query that provably matches nothing in the package is a compile error. A query used as a list may
-   be empty.
+2. A directly selected query that provably matches nothing in the package is a compile error, under the conditions in
+   [V30 §41](../specifications/accepted-syntaxes-v30.md#tagged-selection). A query used as a list may be empty.
 
 ### 5. Image tags
 

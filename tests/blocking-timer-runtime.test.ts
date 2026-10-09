@@ -292,9 +292,10 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
 });
 
 test("accepted duration forms without an implementation are never read as another duration", () => {
-  // Calendar units (§35) and timer ranges with other units (§27) are not implemented yet. They may fail with a compile
-  // or runtime error located in the duration, but a started timer must have the accepted meaning, never for example
-  // plain seconds.
+  // Timer ranges with other units (§27) are accepted but not implemented yet. They may fail with a compile or runtime
+  // error located in the duration, but a started timer must have the accepted meaning, never for example plain
+  // seconds. A calendar duration such as `1 day` is an error for a timer (§35); its case only guards that it is never
+  // read as another duration.
   const minutesFiveToTen = (deadlineMs: number): boolean =>
     deadlineMs >= 5 * 60_000 && deadlineMs < 10 * 60_000;
   const cases: ReadonlyArray<
