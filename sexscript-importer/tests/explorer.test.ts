@@ -860,6 +860,69 @@ test(
   },
 );
 
+test(
+  "a stored value is measured against a condition's constant only where the condition compares the value itself, not a difference or count computed from it",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'let planned: integer = load "trip.planned", default: 400\nlet walked: integer = load "trip.walked", default: 0\n' +
+      'let left = 0\nlet stage = 0\nif load("trip.resume", default: false) {\n  stage = toInteger(load("trip.stage", default: 0))\n' +
+      '} else {\n  stage = randomInteger(0..3)\n}\nshowButton "Walk"\nwalked += 1\nsave walked as "trip.walked"\n' +
+      'left = planned - walked\nif left > 0 {\n  say "More to go."\n}\nif walked > 500 {\n  say "Tired."\n}\n' +
+      'if toInteger(load("trip.walked", default: 0)) >= 300 {\n  say "Far."\n}\nswitch stage {\n  case 7 {\n    say "Seven."\n  }\n}\n' +
+      "exit\n";
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const missed = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    }).coverage.unvisitedBranches;
+    console.log(
+      JSON.stringify(
+        missed.map((entry) => [
+          entry.condition?.text,
+          entry.missed,
+          entry.reach,
+          entry.parts.map((part) => part.needs),
+        ]),
+      ),
+    );
+    const needsAt = (text: string) =>
+      missed
+        .filter((entry) => entry.condition?.text === text)
+        .flatMap((entry) => entry.parts.map((part) => part.needs));
+    // `left` is planned less walked: neither stored value compared with 0 says how to take the way.
+    const left = needsAt("left > 0");
+    assert.ok(
+      left.includes("stored trip.walked") && left.includes("stored trip.planned"),
+      JSON.stringify(left),
+    );
+    assert.ok(
+      left.every((need) => !/trip\.\w+ [<>=!]/u.test(need)),
+      JSON.stringify(left),
+    );
+    // `walked` counts up from the stored value: a count, not the stored value.
+    const counted = needsAt("walked > 500");
+    assert.ok(
+      counted.every((need) => !/trip\.walked [<>=!]/u.test(need)),
+      JSON.stringify(counted),
+    );
+    // The stored value itself, also through `toInteger` and through a variable assigned it or a random draw.
+    assert.ok(
+      needsAt('toInteger(load("trip.walked", default: 0)) >= 300').includes(
+        "stored trip.walked >= 300",
+      ),
+    );
+    assert.ok(needsAt("7").includes("stored trip.stage == 7"), JSON.stringify(needsAt("7")));
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

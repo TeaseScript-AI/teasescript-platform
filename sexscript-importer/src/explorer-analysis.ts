@@ -220,6 +220,8 @@ export type Source =
   /** A variable the code assigns; `counter` when an assignment adds to or subtracts from its own value. */
   | { readonly kind: "variable"; readonly name: string; readonly counter: boolean };
 
+/** Conversions whose result is the number their argument holds. */
+const KEEPS_NUMBER = new Set(["toInteger", "toNumber"]);
 /** Getters of the current date and time. */
 // getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
 const CLOCK_GETTERS = new Set([
@@ -368,6 +370,13 @@ export class DataFlow {
   readonly #jumpTargets = new Set<number>();
   /** Each function's own code, by its ID ({@link Code}); made when first needed. */
   #code: Map<number, Code> | null = null;
+  /**
+   * The expressions assigned to each variable, by name, its declaration's included; null for a parameter, a loop
+   * variable, or a variable a part of which is assigned.
+   */
+  readonly #assigned = new Map<string, Data[] | null>();
+  /** {@link holdsStored} for variables, by name and key; false while one is being worked out. */
+  readonly #holds = new Map<string, boolean>();
   /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
   readonly #stores = new Map<number, number[]>();
 
@@ -476,6 +485,74 @@ export class DataFlow {
    */
   loadAlias(name: string): LoadAlias | null {
     return this.#loads.get(name) ?? null;
+  }
+
+  /**
+   * Whether an expression's value is a stored key's value (`key` as {@link sourcesOf} names it, a pattern for a
+   * template): its load, a conversion of such that keeps its number (`toInteger`), a variable whose every assignment
+   * that reads the key is such (a value from elsewhere, such as a random draw, may also be assigned), or a temporary
+   * that holds such at instruction `at` (a `switch` on a load). A comparison of such a value with a constant compares
+   * the stored value; of anything else computed from it, such as `todo - done` or a count added to, it does not.
+   */
+  holdsStored(expression: unknown, key: string, at: number | undefined): boolean {
+    const value = record(expression);
+    // Of several values the expression may take, those that read the key, at least one, are all the stored value.
+    const all = (values: { value: unknown; at: number | undefined }[]) => {
+      const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
+      return (
+        reading.length > 0 && reading.every((each) => this.holdsStored(each.value, key, each.at))
+      );
+    };
+    // Once per variable or function and key; false while it is worked out, as for a function that calls itself.
+    const memo = (name: string, work: () => boolean) => {
+      const known = this.#holds.get(`${name}\u0000${key}`);
+      if (known !== undefined) return known;
+      this.#holds.set(`${name}\u0000${key}`, false);
+      const holds = work();
+      this.#holds.set(`${name}\u0000${key}`, holds);
+      return holds;
+    };
+    if (value.kind === "group") return this.holdsStored(value.expression, key, at);
+    if (value.kind === "storageLoad") return keyText(value.key) === key;
+    if (value.kind === "identifier" && typeof value.name === "string") {
+      const assigned = this.#assigned.get(value.name);
+      return (
+        assigned !== null &&
+        memo(value.name, () =>
+          all((assigned ?? []).map((each) => ({ value: each, at: undefined }))),
+        )
+      );
+    }
+    if (value.kind === "call" && KEEPS_NUMBER.has(calleeName(value) ?? "")) {
+      const [only, ...rest] = list(value.arguments);
+      return only !== undefined && rest.length === 0 && this.holdsStored(only.value, key, at);
+    }
+    // A truth compared with `true` is that truth (`load(k) == true`).
+    if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
+      const truth = value.operator === "==";
+      const [side, other] = [record(value.left), record(value.right)];
+      if (other.kind === "literal" && other.value === truth) return this.holdsStored(side, key, at);
+      if (side.kind === "literal" && side.value === truth) return this.holdsStored(other, key, at);
+      return false;
+    }
+    if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
+      const held = this.heldAt(value.temporaryId, at);
+      return held !== null && all(held.map((store) => ({ value: store.value, at: store.index })));
+    }
+    // A call's result: what the function returns.
+    if (value.kind === "callResult" && typeof value.functionId === "number") {
+      const id = value.functionId;
+      return memo(`function ${id}`, () =>
+        all(
+          this.#instructions.flatMap((instruction, index) =>
+            instruction.kind === "returnValue" && this.functionAt(index) === id
+              ? [{ value: instruction.value, at: index }]
+              : [],
+          ),
+        ),
+      );
+    }
+    return false;
   }
 
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
@@ -932,6 +1009,9 @@ export class DataFlow {
           ? null
           : { key, fallback: literal };
       const only = expression.kind === "literal" ? (scalar(expression.value) ?? null) : null;
+      const assigned = this.#assigned.get(name);
+      if (assigned === undefined) this.#assigned.set(name, [expression]);
+      else assigned?.push(expression);
       const fixed = this.#literals.get(name);
       this.#literals.set(name, fixed === undefined || fixed === only ? only : null);
       const known = this.#loads.get(name);
@@ -948,11 +1028,13 @@ export class DataFlow {
         if (typeof parameter.name === "string") {
           this.#loads.set(parameter.name, null);
           this.#literals.set(parameter.name, null);
+          this.#assigned.set(parameter.name, null);
         }
     for (const instruction of instructions) {
       if (instruction.kind === "loopStart" && typeof instruction.variable === "string") {
         this.#loads.set(instruction.variable, null);
         this.#literals.set(instruction.variable, null);
+        this.#assigned.set(instruction.variable, null);
       }
       if (
         (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
@@ -967,6 +1049,7 @@ export class DataFlow {
         else {
           this.#loads.set(name, null);
           this.#literals.set(name, null);
+          this.#assigned.set(name, null);
         }
       }
     }
@@ -1245,17 +1328,27 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       const source = keyed(found, atom.subject);
       if (source.kind === "storage" && keys.has(source.key)) continue;
       if (source.kind === "storage") keys.add(source.key);
+      // A stored value is measured, and its values tried, only where the condition compares the value itself, not one
+      // computed from it; closeness of a variable, where it reads the variable itself.
+      const itself =
+        (source.kind === "variable" &&
+          subject.kind === "identifier" &&
+          subject.name === source.name) ||
+        (source.kind === "storage" &&
+          found.kind === "storage" &&
+          flow.holdsStored(atom.subject, found.key, at));
       const candidates =
-        source.kind === "ask"
-          ? values
-              .filter((value) => typeof value !== "object")
-              .map((value) =>
-                lengthOf && typeof value === "number"
-                  ? "x".repeat(Math.max(1, Math.min(value, 200)))
-                  : String(value),
-              )
-          : values;
-      // Closeness is measured where the comparison reads the variable itself, or a stored value.
+        source.kind === "storage" && !itself
+          ? []
+          : source.kind === "ask"
+            ? values
+                .filter((value) => typeof value !== "object")
+                .map((value) =>
+                  lengthOf && typeof value === "number"
+                    ? "x".repeat(Math.max(1, Math.min(value, 200)))
+                    : String(value),
+                )
+            : values;
       const constant =
         typeof atom.constant === "number"
           ? atom.constant
@@ -1263,11 +1356,7 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
             ? Number(atom.constant)
             : null;
       const comparison =
-        constant !== null &&
-        ((source.kind === "variable" &&
-          subject.kind === "identifier" &&
-          subject.name === source.name) ||
-          source.kind === "storage")
+        constant !== null && itself
           ? {
               operator: holds,
               constant,
