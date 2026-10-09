@@ -25,7 +25,8 @@ npx prettier --write 'src/components/ui/<component>/*.ts'
 
 `npx shadcn-vue view <component>` lists the npm packages the component needs. Most, such as `reka-ui` and
 `@vueuse/core`, are root dependencies already. Any other one is added to the root `package.json` under the dependency
-rule in `AGENTS.md`. Knip reports a component that nothing imports yet.
+rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScript settings, such as
+`exactOptionalPropertyTypes`, so run `npm run typecheck:player`. Knip reports a component that nothing imports yet.
 
 ## Responsibility boundaries
 
