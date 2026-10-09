@@ -321,7 +321,8 @@ export interface ExploreOptions {
    * new lines and condition ways, instead of fixed shares. A new player's first session goes first; the next depth opens
    * when the deepest open one levels off (in the last quarter of its play work, under half its average gain per
    * operation) and left storage of completed sessions to start from, and then gets a quarter of that depth's work first.
-   * After that the open depth with the most gain per operation in the last quarter of its own work gets play, and an
+   * States whose step reached new code go first in any open depth, as without phases. Otherwise the open depth with the
+   * most gain per operation in the last quarter of its own work gets play, and an
    * eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets
    * work back when it gains again. A depth starts a next session (from the storage with the most compared values no
    * session of that depth started from had) when none of its open states reached new code. Directed work and random
@@ -3214,7 +3215,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /**
    * The depth whose play goes next, among the open ones with open states or storage to start from, and whether it is
-   * an exploration turn; when the open depths have nothing left, the next depth with something opens; null when none.
+   * an exploration turn: a depth with states whose step reached new code first; when the open depths have nothing
+   * left, the next depth with something opens; null when none.
    */
   const chooseDepth = (): { depth: number; exploring: boolean } | null => {
     const frontierOf = depthFrontier!;
@@ -3235,6 +3237,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (opens === undefined) return null;
       openDepth(opens, 0);
       open.push(opens);
+    }
+    // States whose step reached new code go first in any open depth, as without phases: the one gaining most first.
+    const fresh = open.filter((depth) => frontierOf.freshOf(depth) > 0);
+    if (fresh.length > 0) {
+      const [first] = fresh.sort(
+        (left, right) => recentRate(right) - recentRate(left) || left - right,
+      );
+      return { depth: first!, exploring: false };
     }
     const owed = open.findLast((depth) => depthOf(depth).owed > 0);
     if (owed !== undefined) return { depth: owed, exploring: false };

@@ -408,8 +408,9 @@ a new player's first. Each depth's play work (its expansions and the next sessio
 condition ways those reach first) are measured as the run goes. The first session goes first. The next depth opens when
 the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its average,
 or has nothing left; only a depth that reached something new opens another, and only when a completed session of it
-left storage to start from. A newly opened depth first gets a quarter of the work of the depth before it. Then the
-open depth with the most gain per operation in the last quarter of its work gets play, and an eighth of play goes to
+left storage to start from. States whose step reached new code go first in any open depth, as without phases. Apart
+from those, a newly opened depth first gets a quarter of the work of the depth before it; then the open depth with the
+most gain per operation in the last quarter of its work gets play, and an eighth of play goes to
 the other open depths in turn, the one explored least first, so that an earlier depth gets work back when it gains
 again. A depth starts a next session when none of its open states reached new code: from the storage a completed
 session of the depth before left, the one with the most compared values (each compared key's value bucket, as cells
