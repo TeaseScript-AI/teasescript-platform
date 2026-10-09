@@ -360,7 +360,9 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   fallback and the message are dropped with a `NOTE`, and the Player decides how the photo is taken (3 corpus sites).
 - Rewrites that move evaluation (ternary branches, input prompts) are applied only when the expression is not behind
   `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
-  reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`).
+  reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`). A condition or assignment whose `&&`/`||` chain asks,
+  such as `getBoolean(a) && getBoolean(b) && getBoolean(c)`, is computed step by step and asks each question only
+  where the short circuit reaches it.
 
 ## Type enforcement findings (#519, #526, #530)
 

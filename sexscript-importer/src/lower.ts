@@ -3968,7 +3968,26 @@ function lowerConditionalAssignment(
     const rightNode = asNode(conditional.right);
     const name = variableName(target);
     if (leftNode === null || rightNode === null || name === null) return [];
-    const first = lowerCondition(leftNode, context);
+    // A left side that asks inside its own short circuit, as in `a && b && c`, stores its truth the same way first.
+    const nested = hasGuardedInput(leftNode)
+      ? lowerConditionalAssignment(declaration, target, leftNode, span, context)
+      : null;
+    const first = nested === null ? lowerCondition(leftNode, context) : null;
+    const opening: IrStatement[] | null =
+      nested ??
+      (first === null
+        ? null
+        : [
+            declaration
+              ? { kind: "let", name, value: first, span }
+              : {
+                  kind: "assign",
+                  target: { kind: "variable", name },
+                  operator: "=",
+                  value: first,
+                  span,
+                },
+          ]);
     const facts = conditionFacts(leftNode, context, conditional.operator === "||");
     const variable: IrExpression = { kind: "variable", name };
     // An input on the right side asks inside the branch; a conditional expression there gets its own statements.
@@ -3992,14 +4011,12 @@ function lowerConditionalAssignment(
       const [prelude, lowered, postlude] = withSurroundings(context, truth);
       return [...prelude, ...lowered, ...postlude];
     });
-    if (first === null || then === null) {
+    if (opening === null || then === null) {
       const legacySource = span === null ? [] : legacySourceLines(context, span);
       return [{ kind: "unsupported", legacySource, span }];
     }
     return [
-      declaration
-        ? { kind: "let", name, value: first, span }
-        : { kind: "assign", target: variable, operator: "=", value: first, span },
+      ...opening,
       {
         kind: "if",
         condition: conditional.operator === "&&" ? variable : negate(variable),
@@ -14410,8 +14427,9 @@ function isCurrentDateConstructor(node: AstNode): boolean {
 /**
  * Java date pattern formatting of the current moment (#532): the fixed machine format `yyyy-MM-dd` is a date's
  * `toISO()`; a display pattern of a whole date, time, or both becomes `formatDate()`, `formatTime()`, or
- * `formatDateTime()`, which show the player's local form instead of the legacy pattern, with a note. Other patterns
- * (weekday names, partial fields, time zones) and dates built from Unix time are reported.
+ * `formatDateTime()`, which show the player's local form instead of the legacy pattern, with a note; a pattern of number
+ * fields that is no whole date or time is written from the fields (datePatternFields). Other patterns (weekday and
+ * month names, time zones) and dates built from Unix time are reported.
  */
 function dateFormat(
   node: AstNode,
