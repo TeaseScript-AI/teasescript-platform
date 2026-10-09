@@ -34,6 +34,39 @@ const MODEL_PATHS_CATALOG = {
   problems: [],
 };
 
+// A file of a few thousand lines with a draw deep inside a long function, which a loop calls 300 times, for the random
+// draw picker's code and earlier outcomes; generated, as only the lengths and one long line far from the draw matter.
+const LARGE_FILE_LINES = Array.from({ length: 2_000 }, (_, index) => `// Line ${index + 1}.`);
+LARGE_FILE_LINES[0] = "let hit = false";
+LARGE_FILE_LINES[1] = `// ${"A long line. ".repeat(20)}`;
+LARGE_FILE_LINES[1_199] = "function flip {";
+LARGE_FILE_LINES.splice(
+  1_499,
+  10,
+  "    hit = chance(25)",
+  "}",
+  "repeat 300 {",
+  "    flip()",
+  "}",
+  'showButton "Again"',
+  "flip()",
+  'say "Hit: ${hit}", instant',
+  'showButton "Done"',
+  "exit",
+);
+const CATALOGS = new Map([
+  ["/dev-package/model-paths/catalog.json", MODEL_PATHS_CATALOG],
+  [
+    "/dev-package/large-file/catalog.json",
+    {
+      images: [],
+      media: [],
+      sources: [{ path: "main.tease", source: LARGE_FILE_LINES.join("\n") }],
+      problems: [],
+    },
+  ],
+]);
+
 const LAN_HOST = "player-lan.test";
 // The late-image scenario holds the first response for this image until the scenario releases it.
 const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
@@ -54,7 +87,8 @@ async function main() {
   const server = createPlaygroundServer({
     packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
   });
-  // The model-paths package exists only as this catalog, so the smoke needs no file named with `\` or `C:` on disk.
+  // The model-paths and large-file packages exist only as catalogs, so the smoke needs no file named with `\` or `C:`,
+  // nor one of thousands of lines, on disk.
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
@@ -78,10 +112,10 @@ async function main() {
       );
       return;
     }
-    if (request.url !== "/dev-package/model-paths/catalog.json")
-      return handleRequest(request, response);
+    const catalog = CATALOGS.get(request.url);
+    if (catalog === undefined) return handleRequest(request, response);
     response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(MODEL_PATHS_CATALOG));
+    response.end(JSON.stringify(catalog));
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -141,6 +175,7 @@ async function main() {
       await keptSessionScenario(cdp, origin, profile);
       await debugRoomScenario(cdp, origin);
       await randomPickerScenario(cdp, origin);
+      await largeRandomPickerScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
@@ -168,7 +203,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines and hundreds of earlier outcomes, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -1777,6 +1812,111 @@ async function randomPickerScenario(cdp, origin) {
     `!document.querySelector('[data-random-draw-picker]') && ${said}.includes('Again: ')`,
     8_000,
     "Least tried did not go on",
+  );
+}
+
+// In a file of a few thousand lines the picker's code renders only the lines in and near view, and shows like a short
+// file's: the draw's line in the middle, Copy copies the lines in view, it scrolls sideways as far as its widest line,
+// its large view opens on the draw, Show whole function starts at the function's first line, the file's end scrolls
+// into view, and Show less returns to the draw. Hundreds of earlier outcomes likewise render only near view and open at
+// the newest, at the bottom.
+async function largeRandomPickerScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const block = `document.querySelector('[data-random-draw-source] [data-code-block]')`;
+  const history = `document.querySelector('[data-random-draw-history] [data-code-block]')`;
+  const rendered = (scope) => `document.querySelectorAll('${scope} [data-code-line]').length`;
+  const inView = (number) =>
+    `(() => { const line = ${block}.querySelector('[data-code-line="${number}"]'); return !!line && line.offsetTop >= ${block}.scrollTop && line.offsetTop + line.offsetHeight <= ${block}.scrollTop + ${block}.clientHeight; })()`;
+  const centred = `(() => { const line = ${block}?.querySelector('[data-code-highlight]'); return line?.dataset.codeLine === '1500' && line.offsetTop - ${block}.scrollTop === 3 * line.offsetHeight; })()`;
+  const again = `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === 'Again')`;
+  await navigate(cdp, `${origin}/player/?package=large-file&room=debug`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
+  if (!(await value(cdp, `!!document.querySelector('[data-debug-random-active]')`)))
+    await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('[data-debug-random-active]')`);
+  await physicalClick(cdp, "[data-debug-random-active]");
+  await physicalClick(cdp, "[data-session-start]");
+  // The draw's line has three lines above it, like a short file's.
+  await waitFor(cdp, centred, 20_000, "The draw's line was not in the middle of the code");
+  assertEqual(
+    await value(
+      cdp,
+      `[...${block}.querySelectorAll('[data-code-mark]')].map((node) => node.textContent).join('')`,
+    ),
+    "chance(25)",
+    "The draw was not marked",
+  );
+  // Regression oracle for rendering every line of the file, which took seconds in a file of thousands of lines.
+  if ((await value(cdp, rendered("[data-random-draw-source]"))) > 100)
+    throw new Error("The picker rendered most of a file of thousands of lines");
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
+  );
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
+  await waitFor(cdp, `window.__copied !== null`, 5_000, "Copy did not copy");
+  assertEqual(
+    await value(cdp, `window.__copied`),
+    LARGE_FILE_LINES.slice(1_496, 1_503).join("\n"),
+    "Copy did not copy the lines in view",
+  );
+  assertEqual(
+    await value(cdp, `${block}.scrollWidth > ${block}.clientWidth + 200`),
+    true,
+    "The code scrolled sideways only as far as the lines near view",
+  );
+  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('[data-code-block-lightbox] [data-code-mark]')].map((node) => node.textContent).join('') === 'chance(25)'`,
+    5_000,
+    "The large view did not open on the draw",
+  );
+  if ((await value(cdp, rendered("[data-code-block-lightbox]"))) > 200)
+    throw new Error("The large view rendered most of a file of thousands of lines");
+  await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
+  await waitFor(cdp, `!document.querySelector('[data-code-block-lightbox]')`);
+  await physicalClick(cdp, "[data-random-draw-expand]");
+  await waitFor(
+    cdp,
+    `(() => { const line = ${block}.querySelector('[data-code-line="1200"]'); return !!line && Math.abs(line.offsetTop - ${block}.scrollTop) < 1; })()`,
+    5_000,
+    "Show whole function did not start at the function's first line",
+  );
+  await evaluate(cdp, `${block}.scrollTop = ${block}.scrollHeight`);
+  await waitFor(cdp, inView(2000), 5_000, "The file's last line did not scroll into view");
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-random-draw-expand]').scrollIntoView({ block: 'nearest' })`,
+  );
+  await physicalClick(cdp, "[data-random-draw-expand]");
+  await waitFor(cdp, centred, 5_000, "Show less did not return to the draw's line");
+
+  // The other 299 draws at the site go on by themselves; asked again, it lists all 300.
+  await physicalClick(cdp, '[data-random-draw-next-option="random"]');
+  await physicalClick(cdp, "[data-random-draw-natural]");
+  await waitFor(cdp, `!!${again}`, 20_000, "The draws that go on by themselves did not");
+  await physicalClick(cdp, "[data-debug-random-reset]");
+  const point = await evaluate(
+    cdp,
+    `const rect = ${again}.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };`,
+  );
+  for (const type of ["mousePressed", "mouseReleased"])
+    await cdp.call("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+  await waitFor(
+    cdp,
+    `(() => { const line = ${history}?.querySelector('[data-code-line="300"]'); return !!line && Math.abs(line.offsetTop + line.offsetHeight - ${history}.scrollTop - ${history}.clientHeight) < 1; })()`,
+    8_000,
+    "The earlier outcomes did not open at the newest, at the bottom",
+  );
+  if ((await value(cdp, rendered("[data-random-draw-history]"))) > 100)
+    throw new Error("The picker rendered most of 300 earlier outcomes");
+  await physicalClick(cdp, "[data-random-draw-outcome]");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Hit: true'))`,
+    8_000,
+    "The chosen outcome did not reach the script",
   );
 }
 

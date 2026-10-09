@@ -13,9 +13,9 @@ TypeScript in `.ts`. Finite sessions and long-running personalities share one en
 save/checkpoint format.
 
 Production browser UI uses Vue 3 with Tailwind CSS 4 and repository-owned shadcn-vue/Reka primitives. TanStack Vue
-Virtual owns transcript windowing and scroll anchoring, while browser-native CSS owns layout geometry and responsive
-composition. The engine and shared domain contracts remain framework-independent TypeScript. The Player implementation
-is under `player/vue/src/`; its presentation contract lives in
+Virtual owns windowing and scroll anchoring of the transcript and of long code blocks, while browser-native CSS owns
+layout geometry and responsive composition. The engine and shared domain contracts remain framework-independent
+TypeScript. The Player implementation is under `player/vue/src/`; its presentation contract lives in
 [`docs/ui/PLAYER-UI.md`](docs/ui/PLAYER-UI.md). The Vue boundary and deliberately minimal frontend toolchain are
 accepted in [`ADR 0020`](docs/decisions/0020-vue-3-production-browser-ui.md).
 
