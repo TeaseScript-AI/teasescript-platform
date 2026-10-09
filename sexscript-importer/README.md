@@ -547,8 +547,9 @@ The report `<out>/<unit>.json` has these parts:
   `else if` chain, which must not hold): `met` when some explored state or stored value satisfied it (not necessarily
   together with the other parts), `unmet` with the closest one, or `unmeasured`; `best`, what keeps the way closed as
   far as measured: of the condition's own unmet parts, the furthest from holding when the way needs all of them, the
-  nearest when any one would do, and none when they combine both ways; and `case` for a `switch` case, whose condition
-  text is its pattern. A variable is read in the innermost running call of the condition's function, over the
+  nearest when any one would do, and none when they combine both ways; and for a `switch` case, whose condition text is
+  its pattern, `case` (`value`, `values` as in `case 3, 4`, or `range`), `subject`, the text of what the switch
+  compares, and `clockPart` when that is exactly one part of the date or time (`hour`, ...). A variable is read in the innermost running call of the condition's function, over the
   top-level variables of its file, as a value of the compared constant's type; for two values, `needs` shows their
   difference (`reps - target >= 0`), read there when both sides are numbers, or both booleans; its closest state
   counts from when the condition became a target, with its value (for two values, the difference), its session, the
