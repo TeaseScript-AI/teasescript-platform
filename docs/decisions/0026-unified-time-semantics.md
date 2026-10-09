@@ -58,8 +58,9 @@ A `duration` is exact. `d`/`day`/`days` is 24 hours and `w`/`week`/`weeks` is 16
 A calendar step puts `calendar` before its unit: `1 calendar day`, `2 calendar weeks`, `1 calendar month`,
 `1 calendar year`. `calendar` takes the short forms `d`, `w`, `mo`, and `y` and every long form. Its value is a
 `calendarDuration`. `month` and `year`, also `mo` and `y`, without `calendar` are compile errors that suggest it. `m`
-remains invalid. `calendar` is a unit word only where a unit can stand; elsewhere it is an ordinary name, as in
-`p.calendar.month`.
+remains invalid. Units still follow numeric literals, and after `wait` and the short `timer` a unit still applies to
+the whole duration expression. `calendar` is a unit word only where a unit can stand; elsewhere it is an ordinary name,
+as in `p.calendar.month`.
 
 A calendar amount counts a week as 7 days and a year as 12 months, and must give whole days and months:
 `0.5 calendar years` is 6 months, `2 calendar weeks / 2` is 7 calendar days, and `1.5 calendar days` and
@@ -98,9 +99,9 @@ Operators never read a time zone.
 
 | Operation | Result |
 | --- | --- |
-| `date ± C` without an exact offset | `date`: months, then days |
+| `date ± C` with a zero exact offset | `date`: months, then days |
 | `date ± D` | `date`, when D is a whole number of days such as `1 day`, `2 weeks`, or `0 s` |
-| `datetime ± C` without an exact offset | `datetime`: months, then days, with the same clock time |
+| `datetime ± C` with a zero exact offset | `datetime`: months, then days, with the same clock time |
 | `absoluteDateTime ± D` | `absoluteDateTime` |
 | `absoluteDateTime - absoluteDateTime` | D |
 | `date - date` | D, a whole number of days |
@@ -108,8 +109,8 @@ Operators never read a time zone.
 Adding months to a day that the target month lacks gives that month's last day, as before. Every other combination is
 an error with a diagnostic that names a route that works:
 
-- `date ± D` that is not a whole number of days, and `date ± C` with an exact offset;
-- `datetime ± D`, `datetime ± C` with an exact offset, and `datetime - datetime`: convert to `absoluteDateTime` for
+- `date ± D` that is not a whole number of days, and `date ± C` with a nonzero exact offset;
+- `datetime ± D`, `datetime ± C` with a nonzero exact offset, and `datetime - datetime`: convert to `absoluteDateTime` for
   elapsed time, or use calendar units or `toDate(...)` for local dates;
 - `absoluteDateTime ± C`: convert to a `datetime` first;
 - any arithmetic on `time`.
