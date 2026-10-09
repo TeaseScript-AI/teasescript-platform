@@ -6102,16 +6102,16 @@ function lowerAssignment(
               },
             };
     } else {
-      context.writeTargets.add(targetNode);
+      const written = writeChain(targetNode, context);
       target = lowerExpression(targetNode, context);
-      context.writeTargets.delete(targetNode);
+      for (const part of written) context.writeTargets.delete(part);
     }
     if (target !== null) noteSharedListWrite(asNode(targetNode.left), node, context);
     if (target?.kind === "index" && target.dict === true) noteSharedMapWrite(node.span, context);
   } else if (operator === "=" && targetNode.kind === "property") {
-    context.writeTargets.add(targetNode);
+    const written = writeChain(targetNode, context);
     target = lowerExpression(targetNode, context);
-    context.writeTargets.delete(targetNode);
+    for (const part of written) context.writeTargets.delete(part);
     if (target !== null) noteSharedMapWrite(node.span, context);
   }
   if (target === null) {
@@ -6366,9 +6366,9 @@ function lowerPostfix(
     (index !== null && negativeConstantIndex(index) !== null)
   )
     return [unsupportedPostfix(node, context)];
-  context.writeTargets.add(targetNode);
+  const written = writeChain(targetNode, context);
   let target = lowerExpression(targetNode, context);
-  context.writeTargets.delete(targetNode);
+  for (const part of written) context.writeTargets.delete(part);
   if (target === null) return [];
   const before: IrStatement[] = [];
   if (computed && !isPure(index, context)) {
@@ -10310,6 +10310,26 @@ function onlyRead(root: AstNode, target: AstNode, name: string): boolean {
       others += 1;
   });
   return others === 0;
+}
+
+/**
+ * Marks a written place and the lists and objects it lies in as write targets, so that `shots[x][y] = 1` writes into
+ * `shots` itself rather than into a copy that a reading helper returned (TeaseScript lists are values). Returns them,
+ * for the caller to unmark after lowering.
+ */
+function writeChain(target: AstNode, context: LowerContext): AstNode[] {
+  const written: AstNode[] = [];
+  for (let part: AstNode | null = target; part !== null;) {
+    const index = part.kind === "binary" && part.operator === "[";
+    // A range or a list of positions read a new list, as Groovy did, so a write into it stays there.
+    const position = index ? asNode(part.right) : null;
+    if (part !== target && (position?.kind === "range" || position?.kind === "list")) break;
+    if (part !== target && !index && part.kind !== "property") break;
+    context.writeTargets.add(part);
+    written.push(part);
+    part = asNode(index ? part.left : part.object);
+  }
+  return written;
 }
 
 function incrementsAfterStatement(

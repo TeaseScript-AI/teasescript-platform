@@ -228,4 +228,21 @@ for stroke in 1..=2 {
   }
 }
 say "Speed ${drainSpeed}"
+// A write into a list inside a list changes the outer list itself, also where its position may be -1, as Battleship's
+// board of shots.
+let shots = [
+  [0, 0],
+  [0, 0]
+]
+let letters = "AB"
+let column = -1
+let cell = askText("Shoot (A1 to B2):", prefill: "A1").replace("\n", " ")
+if cell.length == 2 {
+  column = letters.indexOf(cell.substring(0, 1))
+}
+if column < 0 {
+  column = 0
+}
+shots[column][0] = 1
+say "Shot ${shots[0][0]}"
 exit

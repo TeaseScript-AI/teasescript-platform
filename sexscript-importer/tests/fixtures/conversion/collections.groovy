@@ -83,3 +83,13 @@ int drainSpeed = 0
 	}
 }
 show("Speed " + drainSpeed)
+// A write into a list inside a list changes the outer list itself, also where its position may be -1, as Battleship's
+// board of shots.
+def shots = [[0, 0], [0, 0]]
+def letters = "AB"
+def column = -1
+def cell = getString("Shoot (A1 to B2):", "A1")
+if (cell.length() == 2) column = letters.indexOf(cell[0])
+if (column < 0) column = 0
+shots[column][0] = 1
+show("Shot " + shots[0][0])
