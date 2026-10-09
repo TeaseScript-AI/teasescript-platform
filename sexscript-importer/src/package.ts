@@ -29,11 +29,12 @@ import {
   packageMapUses,
   packageResultUses,
   packageStableNames,
+  callsFunction,
   photoCopy,
   storageKeyShape,
   withGuardedInputs,
 } from "./lower.ts";
-import { withoutRepeatedChainText } from "./repeated-text.ts";
+import { withNestedBlocks, withoutRepeatedChainText } from "./repeated-text.ts";
 import {
   helperDefinitionOrder,
   SYSTEM_SPEAKER,
@@ -46,6 +47,8 @@ import { withStorageDefaults } from "./storage-keys.ts";
 import {
   expressionType,
   functionResultTypes,
+  mapChildren,
+  mapOwnExpressions,
   withReturnTypes,
   type TeaseType,
 } from "./variable-types.ts";
@@ -922,8 +925,8 @@ export function lowerPackage(
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
   const moduleFiles = withModuleFiles(noted, files);
-  const withClasses = noted.map(
-    (program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program,
+  const withClasses = withBooleanResultTruths(
+    noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
   );
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
@@ -1088,6 +1091,49 @@ function withMainHelpers(
     programs: programs.map(without),
     main: { ...main, statements: [...own.slice(0, at), ...shared, ...own.slice(at)] },
   };
+}
+
+const TRUTH_HELPER = "sexscriptLegacyTruth";
+
+/**
+ * Groovy truth of a call of a package function that returns a boolean on every path is that boolean, so the truth
+ * helper goes, `if percentChance(40)` (Domme3's class function), which each file's typing could not see, as the function
+ * is in another file. A name that several files define tells nothing. The helper goes where no file calls it any more.
+ */
+function withBooleanResultTruths(programs: MigrationProgram[]): MigrationProgram[] {
+  const functions = programs.flatMap((program) =>
+    program.statements.filter((statement) => statement.kind === "function"),
+  );
+  const once = functions.filter(
+    (statement) => functions.filter((other) => other.name === statement.name).length === 1,
+  );
+  const booleans = new Set(
+    [...functionResultTypes(once)].flatMap(([name, type]) =>
+      type.kind === "scalar" && type.name === "boolean" ? [name] : [],
+    ),
+  );
+  if (booleans.size === 0) return programs;
+  const expression = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, expression);
+    const tested = next.kind === "call" && next.name === TRUTH_HELPER ? next.positional : [];
+    return tested.length === 1 && tested[0]!.kind === "call" && booleans.has(tested[0]!.name)
+      ? tested[0]!
+      : next;
+  };
+  const statements = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => mapOwnExpressions(withNestedBlocks(item, statements), expression));
+  const rewritten = programs.map((program) => ({
+    ...program,
+    statements: statements(program.statements),
+  }));
+  if (rewritten.some((program) => callsFunction(program.statements, TRUTH_HELPER)))
+    return rewritten;
+  return rewritten.map((program) => ({
+    ...program,
+    statements: program.statements.filter(
+      (statement) => statement.kind !== "function" || statement.name !== TRUTH_HELPER,
+    ),
+  }));
 }
 
 /**
