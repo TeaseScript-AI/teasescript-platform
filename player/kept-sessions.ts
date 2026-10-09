@@ -6,7 +6,11 @@ import {
 } from "../src/index.js";
 import { isMessagePresentation } from "../src/message-presentation.js";
 import { isFormUi, validFormResult } from "../src/runtime/actions/form.js";
-import type { CapturedMediaRecord, CapturedMediaRepository } from "./captured-media.js";
+import {
+  storableCapturedMedia,
+  type CapturedMediaRecord,
+  type CapturedMediaRepository,
+} from "./captured-media.js";
 import type { MediaInUse } from "./captured-media-persistence.js";
 import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-export.js";
 import type { DebugHistoryMarks } from "./debug-history.js";
@@ -519,10 +523,12 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
           ),
         ),
       // `add`, unlike `put`, fails instead of overwriting an existing record.
-      add: (record) =>
-        transact<void>(database, [MEDIA], "readwrite", (transaction) => {
-          transaction.objectStore(MEDIA).add(record);
-        }),
+      add: async (record) => {
+        const stored = await storableCapturedMedia(record);
+        return transact<void>(database, [MEDIA], "readwrite", (transaction) => {
+          transaction.objectStore(MEDIA).add(stored);
+        });
+      },
       delete: (namespace, reference) =>
         transact<void>(database, [MEDIA], "readwrite", (transaction) => {
           transaction.objectStore(MEDIA).delete([namespace, reference]);
@@ -580,19 +586,17 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       ),
     create(scope, entries, photos) {
       checkedEntries(entries);
-      return transact<void>(
-        database,
-        [ROOMS, SESSIONS, EVENTS, MEDIA],
-        "readwrite",
-        (transaction) => {
+      // The photos' bytes are read before the transaction starts, which commits once no request of it is pending.
+      return Promise.all(photos.map(storableCapturedMedia)).then((stored) =>
+        transact<void>(database, [ROOMS, SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
           // Nothing of an earlier room may stay; `add` fails when the scope has a room.
           transaction.objectStore(SESSIONS).delete(scope);
           transaction.objectStore(EVENTS).delete(scopeRange(scope));
           transaction.objectStore(MEDIA).delete(scopeRange(scope));
           transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
-          for (const photo of photos)
+          for (const photo of stored)
             transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
-        },
+        }),
       );
     },
     values: (scope) => ({
