@@ -184,8 +184,6 @@ export function withElapsedDurations(
       walk(items, new Scope(scope));
       return items;
     });
-    if (item.kind === "playAudio" && item.handle !== undefined)
-      scope.names.set(item.handle, numberOnly());
   };
   const walk = (items: readonly IrStatement[], scope: Scope): void => {
     for (const item of items) statement(item, scope);

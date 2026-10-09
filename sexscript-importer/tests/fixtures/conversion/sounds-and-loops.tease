@@ -1,50 +1,32 @@
-let sexscriptBackgroundSounds = []
-function sexscriptLegacyPlayBackgroundSound(file, passes) {
-  if file == null {
-    sexscriptLegacyStopBackgroundSounds()
-    return
-  }
-  if passes < 1 {
-    return
-  }
-  let sound = playAudio(file: file, async: true, repeat: passes times)
-  let playing = []
-  for kept in sexscriptBackgroundSounds {
-    if kept.state == "running" or kept.state == "paused" {
-      playing.add(kept)
-    }
-  }
-  playing.add(sound)
-  sexscriptBackgroundSounds = playing
-}
-function sexscriptLegacyStopBackgroundSounds {
-  for sound in sexscriptBackgroundSounds {
-    sound.stop()
-  }
-  sexscriptBackgroundSounds = []
-}
 // Background sounds overlap; playBackgroundSound(null) stops all of them.
-sexscriptLegacyPlayBackgroundSound("rain.wav", 1)
-sexscriptLegacyPlayBackgroundSound("bell.wav", 2)
+playAudio async "rain.wav"
+playAudio(file: "bell.wav", async: true, repeat: 2 times)
 let answer = 0
 while answer < 5 {
   answer += 2
 }
 // The sound starts again before every round of the endless loop.
 while true {
-  sexscriptLegacyPlayBackgroundSound("tick.wav", 1)
+  playAudio async "tick.wav"
   say "Tick"
   if answer > 3 {
     break
   }
 }
-sexscriptLegacyStopBackgroundSounds()
+// A shock plays its sound once for each started ten seconds (PainStacks playShockSingle).
+let stime = 25
+let repetitions = toInteger(ceil(stime / 10))
+if repetitions >= 1 {
+  playAudio(file: "shock.mp3", async: true, repeat: repetitions times)
+}
+wait stime
+stopAudio
 // show() returns nothing, so Groovy discarded the appended text.
-// NOTE SX_DISCARDED_CONCATENATION line 13: Groovy appended text to the result of show(), which returns nothing, and discarded it; the appended text was never shown and is dropped here.
+// NOTE SX_DISCARDED_CONCATENATION line 18: Groovy appended text to the result of show(), which returns nothing, and discarded it; the appended text was never shown and is dropped here.
 say "Quiet now."
 function finish {
   say "Bye"
-  // NOTE SX_SYSTEM_EXIT line 16: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
+  // NOTE SX_SYSTEM_EXIT line 21: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
   exit
 }
 finish()

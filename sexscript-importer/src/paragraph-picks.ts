@@ -852,8 +852,6 @@ function identifiers(statements: readonly IrStatement[]): Set<string> {
       names.add(statement.variable);
       if (statement.valueVariable !== undefined) names.add(statement.valueVariable);
     }
-    if (statement.kind === "playAudio" && statement.handle !== undefined)
-      names.add(statement.handle);
     mapOwnExpressions(statement, expression);
     if (statement.kind === "function") statement.body.forEach(visit);
     else

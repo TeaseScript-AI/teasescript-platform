@@ -183,7 +183,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `loadString(k)` etc. | `load k` | Owner semantics: `null` when missing, no write. A typed read followed by `if (x == null) x = d` becomes `load k, default: d` (#541); other defaults stay explicit null checks. A condition `loadBoolean(k)` becomes `load(k) == true`; a read inside a larger expression takes the bounded `load(k)` form, as an ask there takes its parenthesized form (`askInteger(default: 0)`). |
 | `setImage(f)` / `setImage(null)` | `showImage f` / `hideImage` | Byte-array images and video files need manual work. |
 | `playSound(f)` | `playAudio f` | Blocking. `playSound(null)` stopped every sound. |
-| `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds (no TeaseScript equivalent). |
+| `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds: `stopAudio`. |
 | `useUrl(u)` | `openUrl(u)` | Accepted, not implemented yet. |
 | `setInfos(...)` | `---` file header | V30 §41, ADR 0023: title, author, and summary become `title`, `author`, and `description`, the legacy catalog tags `keywords`; version, status, color, language, and computed values stay a comment after the header. |
 | returned script name / `return null` | `goto "x.tease"` / `exit` | ADR 0022: paths from the package root, the entry is `main.tease`, a computed name becomes `goto script(name)`, a missing script `exit`; every file ends with a transfer or `exit`. Chaining is not a function call, so no `call`. |
