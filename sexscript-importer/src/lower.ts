@@ -4936,7 +4936,7 @@ function pixelCheck(body: AstNode, node: AstNode, context: LowerContext): IrStat
  * A function that makes a request to an online service, `new URL(address)` with `openStream()` or `openConnection()`,
  * such as a download into a file or a chat with a language model: a package cannot reach the service (owner decision),
  * so the function shows the request as a system notice, with its method and secret values hidden, and returns false,
- * or null, as when the request failed. Null for any other body.
+ * or null, as when the request failed, or the empty text where it answered with text. Null for any other body.
  */
 function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): IrStatement[] | null {
   let address: AstNode | null = null;
@@ -4944,6 +4944,9 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
   let writes = false;
   let answers = true;
   let method = "GET";
+  const returned: Array<AstNode | null> = [];
+  // The values the body sets each of its variables to, to tell what a returned variable holds.
+  const bodyValues = new Map<string, AstNode[]>();
   walkAst(body, (child) => {
     if (
       child.kind === "constructorCall" &&
@@ -4966,9 +4969,38 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     if (child.kind === "return") {
       const value = constantValue(asNode(child.value) ?? undefined);
       if (typeof value !== "boolean") answers = false;
+      returned.push(asNode(child.value));
     }
+    const assignedName =
+      child.kind === "declaration" || (child.kind === "binary" && child.operator === "=")
+        ? variableName(child.left)
+        : null;
+    const assignedValue = assignedName === null ? null : asNode(child.right);
+    if (assignedName !== null && assignedValue !== null)
+      bodyValues.set(assignedName, [...(bodyValues.get(assignedName) ?? []), assignedValue]);
   });
   if (address === null || !opens) return null;
+  // A function that answers with the response's text, as MandysBlackmail's `doSend` with `new String(buffer)`, reads
+  // empty: its callers go on with the text, such as `doSend(...).trim()`.
+  const isText = (value: AstNode | null, depth = 0): boolean => {
+    if (value === null) return false;
+    if (
+      value.kind === "constructorCall" &&
+      (value.type === "String" || value.type === "java.lang.String")
+    )
+      return true;
+    const type = inferType(value, context.types);
+    if (type !== 0 && onlyOf(type, STRING)) return true;
+    const values =
+      value.kind === "variable" ? bodyValues.get(variableName(value) ?? "") : undefined;
+    return (
+      depth < 2 &&
+      values !== undefined &&
+      values.length > 0 &&
+      values.every((other) => isText(other, depth + 1))
+    );
+  };
+  const readsText = !answers && returned.length > 0 && returned.every((value) => isText(value));
   // The body that declared a local address goes, so the notice shows its literal value, or no address.
   const addressName = variableName(address);
   let declared: AstNode | null | undefined;
@@ -4996,7 +5028,7 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     context,
     "SX_ONLINE_REQUEST",
     "warning",
-    `This function ${writes ? "downloaded a web address into a file" : "made a request to an online service"}, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.`,
+    `This function ${writes ? "downloaded a web address into a file" : "made a request to an online service"}, which a package cannot do; a system notice shows the request, with secret values hidden, and the function ${readsText ? "returns the empty text, as a request that read nothing" : "returns as when the request failed"}.`,
     node.span,
   );
   const shown =
@@ -5024,7 +5056,11 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
       node.span,
       context,
     ),
-    { kind: "return", value: { kind: "literal", value: answers ? false : null }, span: node.span },
+    {
+      kind: "return",
+      value: { kind: "literal", value: answers ? false : readsText ? "" : null },
+      span: node.span,
+    },
   ];
 }
 

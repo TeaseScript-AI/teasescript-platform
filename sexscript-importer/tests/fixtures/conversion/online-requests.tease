@@ -46,4 +46,13 @@ function ping {
   return null
 }
 say "Ping ${ping()}"
+// A function that answers with the response's text reads empty, so that its caller goes on with the text.
+// NOTE SX_ONLINE_REQUEST line 22: This function made a request to an online service, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns the empty text, as a request that read nothing.
+function send(data) {
+  say as system "Online feature not available here. The original would have requested: POST http://example.org/proxy.php"
+  return ""
+}
+if send({ action: "test" }).trim() != "ok" {
+  say "Your connection to the internet is down."
+}
 exit
