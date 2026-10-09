@@ -1546,7 +1546,7 @@ restart, and report the failure with its debug export.
 | `TSR009` | An operator that cannot combine its operands, such as values of different kinds, durations of different families, a date moved by clock time, or a calendar duration divided by zero. | Check or convert the operand the message names. |
 | `TSR010` | A named argument given twice. _Defect._ | Report it. |
 | `TSR011` | A call of a built-in function the host does not provide, or, in a plan compiled before `TSV019` rejected it, of a name that is not a function, such as `(x)()`. | Call a function by its name. |
-| `TSR012` | A host built-in failed, or `escapeMarkup(...)` received a value that is not text. | Check the values the script passes, or report a host failure with a debug export. |
+| `TSR012` | A host built-in failed. | Check the values the script passes, or report a host failure with a debug export. |
 | `TSR013` | A host built-in returned a value a script cannot hold. | Report it to the host. |
 | `TSR014` | A call of something that is not a function or a method, such as `items[0]()`, in a plan compiled before `TSV019` rejected it. | Call a function by its name. |
 | `TSR015` | Named arguments where a call takes only positional ones. | Remove the names. |
