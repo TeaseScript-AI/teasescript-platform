@@ -778,14 +778,18 @@ test("an operation of unknown result keeps the types it can give, also inside an
   assert.deepEqual(mismatches(inFunction('say -(x + "a")')), [
     ["TSV043", "'-' needs a number or a duration, but this is text (string).", '-(x + "a")'],
   ]);
-  // An operand that already failed has its own message, and the operations around it add none.
+  // An operand that already failed has its own message, and the operations, stores, and compound assignments around
+  // it add none.
   for (const failing of [
-    '("a" * x) * (z + "a")',
-    '(z + "a") * ("a" * x)',
-    '(("a" * x) * (z + "a")) + 1',
+    'say ("a" * x) * (z + "a")',
+    'say (z + "a") * ("a" * x)',
+    'say (("a" * x) * (z + "a")) + 1',
+    'let s: string = (("a" * x) * (z + "a")) + 1',
+    'let t: string = "a"\nt += (("a" * x) * (z + "a")) + 1',
+    'let ys: string[][] | boolean[][] = [[(("a" * x) * (z + "a")) + 1]]',
   ])
     assert.deepEqual(
-      mismatches(inFunction(`say ${failing}`)).map(([code, , text]) => [code, text]),
+      mismatches(inFunction(...failing.split("\n"))).map(([code, , text]) => [code, text]),
       [["TSV043", '"a" * x']],
       failing,
     );
@@ -809,6 +813,16 @@ test("an operation of unknown result keeps the types it can give, also inside an
       mismatches(inFunction(store, "say ys")).map(([code]) => code),
       ["TSV041"],
       store,
+    );
+  // A member that holds only null holds no result of an operation either.
+  for (const members of ["null[] | string[]", "string[] | null[]"])
+    assert.deepEqual(
+      mismatches(inFunction(`let ys: ${members} = [x / 4]`, "say ys")).map(([code, , text]) => [
+        code,
+        text,
+      ]),
+      [["TSV041", "x / 4"]],
+      members,
     );
   // Below a member that may hold anything, such as `list`, nothing is proven to fail: the report names the leaf that
   // no member holds.
@@ -838,6 +852,7 @@ test("an operation of unknown result keeps the types it can give, also inside an
         "more += x",
         "say (x / 4) * (z / 2)",
         "let rows: number[][] | string[][] = [[x / 4]]",
+        "let maybe: null[] | number[] = [x / 4]",
         "say text",
       ),
     ),

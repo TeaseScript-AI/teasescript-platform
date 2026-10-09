@@ -2175,10 +2175,8 @@ class TypeChecker {
           const held = holders.flatMap((holder) =>
             members(resolved(nonNullType(holder))).map(resolved),
           );
-          // A holder of values the compiler cannot know, such as `list`, may hold anything below it.
-          if (!held.every(isKnown)) continue;
-          // Built only for an element that needs it, so levels of nested literals do not compare whole types again.
-          let elements: StaticType | undefined;
+          // A holder of values the compiler cannot know, such as `list`, may hold anything below it. Null holds none.
+          if (held.some((member) => member.kind === "unknown" || member.kind === "open")) continue;
           for (const element of literalElements(current)) {
             const nested = unwrap(element);
             if (
@@ -2193,13 +2191,23 @@ class TypeChecker {
               if (inner.length > 0) pending.push({ literal: nested, holders: inner });
               continue;
             }
-            elements ??= union(holders);
-            const unfit = this.#unfitResults(element, this.#typeOf(element), elements);
-            if (unfit === undefined) continue;
+            // Each holder is tested on its own: a union of them would compare the deeper levels again at every depth.
+            if (
+              (nested.kind !== "binaryExpression" && nested.kind !== "unaryExpression") ||
+              isKnown(this.#typeOf(element))
+            )
+              continue;
+            const results = this.#unknownOperations.get(nested);
+            if (
+              results === undefined ||
+              results.length === 0 ||
+              results.some((result) => held.some((member) => mayFit(member, result)))
+            )
+              continue;
             const text = operationText(element);
             this.#report(
               typeCode.typeMismatch,
-              `${place.subject}, so it cannot contain the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${members(elements).some((member) => isScalar(member, "string")) ? (text === null ? ' To show it as text, put the whole calculation inside "${" and "}".' : ` To show it as text, write "\${${text}}".`) : place.label === null ? " Change its type so its elements can hold that result." : ` Change the type of '${place.label}' so its elements can hold that result.`}`,
+              `${place.subject}, so it cannot contain the result of '${nested.operator}', which is ${describeValue(union([...results]))}.${held.some((member) => isScalar(member, "string")) ? (text === null ? ' To show it as text, put the whole calculation inside "${" and "}".' : ` To show it as text, write "\${${text}}".`) : place.label === null ? " Change its type so its elements can hold that result." : ` Change the type of '${place.label}' so its elements can hold that result.`}`,
               element.span,
             );
             return;
@@ -4557,9 +4565,11 @@ class TypeChecker {
       )
         return outcome.type;
       const possible = this.#possibleResults(operands, expression, result);
+      // Left unrecorded, an operation whose operand already failed passes that on without a message of its own, to the
+      // operations, stores, and compound assignments around it.
+      if (possible.failed) return outcome.type;
       if (possible.results.length > 0) this.#unknownOperations.set(expression, possible.results);
-      // What an inner operation can give works with nothing the other operand may be, so this always fails. Left
-      // unrecorded, an operation whose operand already failed passes that on without a message of its own.
+      // What an inner operation can give works with nothing the other operand may be, so this always fails.
       if (possible.results.length > 0 || possible.narrowed === null) return outcome.type;
       failed = possible.narrowed;
     } else failed = outcome.failed;
@@ -4605,7 +4615,11 @@ class TypeChecker {
     operands: readonly StaticType[],
     expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
     result: (...values: StaticType[]) => StaticType | undefined,
-  ): { readonly results: readonly StaticType[]; readonly narrowed: readonly StaticType[] | null } {
+  ): {
+    readonly results: readonly StaticType[];
+    readonly narrowed: readonly StaticType[] | null;
+    readonly failed: boolean;
+  } {
     const expressions =
       expression.kind === "binaryExpression"
         ? [expression.left, expression.right]
@@ -4635,6 +4649,7 @@ class TypeChecker {
       }
     return {
       results,
+      failed,
       narrowed:
         narrowed && !failed
           ? [lefts!, rights].flatMap((side) => (side === undefined ? [] : [union(side)]))
