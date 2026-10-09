@@ -786,6 +786,150 @@ test("an exception from reading a decision ends the operation as one from decide
   }
 });
 
+test("a chosen outcome is read once, so the outcome the engine checks is the one it uses", () => {
+  let reads = 0;
+  const outcome: RandomOutcome = { kind: "number", value: 0 };
+  // A host object whose value changes once read: 0.5 passes the check, 7 would not.
+  Object.defineProperty(outcome, "value", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return reads === 1 ? 0.5 : 7;
+    },
+  });
+  const session = createFreshRuntimeSession(
+    compileValidPlan('let a = random()\nsay "${a}", instant\nexit'),
+    {},
+    { randomControl: { decide: () => ({ kind: "choose", outcome }) } },
+  );
+  const result = session.run();
+  assert.equal(reads, 1);
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["0.5"],
+  );
+  assert.deepEqual(
+    result.randomChoices?.map((choice) => choice.outcome),
+    [{ kind: "number", value: 0.5 }],
+  );
+  assert.doesNotThrow(() => restoreRuntimeSession(session.exportCheckpoint()));
+});
+
+test("a chosen order is read item by item once, and only when its length fits the shuffle", () => {
+  const shuffle = compileValidPlan("let items = [1, 2, 3]\nlet s = items.shuffle()\nexit");
+  let reads = 0;
+  const order = [2, 1, 0];
+  // The first item reads 2 once; a later read would give 0, which would name an item twice.
+  Object.defineProperty(order, 0, {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return reads === 1 ? 2 : 0;
+    },
+  });
+  const chosen = createFreshRuntimeSession(
+    shuffle,
+    {},
+    { randomControl: { decide: () => ({ kind: "choose", outcome: { kind: "order", order } }) } },
+  );
+  const result = chosen.run();
+  assert.equal(reads, 1);
+  assert.deepEqual(
+    result.randomChoices?.map((choice) => choice.outcome),
+    [{ kind: "order", order: [2, 1, 0] }],
+  );
+  assert.doesNotThrow(() => restoreRuntimeSession(chosen.exportCheckpoint()));
+  // An order of another length is refused on its length without reading its items, however long it claims to be.
+  // The short order first: if the length rule broke, the long one would exhaust memory rather than fail here.
+  for (const wrong of [[0, 1], new Array(2 ** 32 - 1)]) {
+    let itemReads = 0;
+    Object.defineProperty(wrong, 0, {
+      enumerable: true,
+      get() {
+        itemReads += 1;
+        return 0;
+      },
+    });
+    const refused = createFreshRuntimeSession(
+      shuffle,
+      {},
+      {
+        randomControl: {
+          decide: () => ({ kind: "choose", outcome: { kind: "order", order: wrong } }),
+        },
+      },
+    );
+    assert.match(refused.run().randomRefusal?.message ?? "", /an order of all 3 items/);
+    assert.equal(itemReads, 0);
+  }
+});
+
+test("a chosen outcome's keys are counted only after the fields its kind holds pass", () => {
+  let keyLists = 0;
+  // An object whose key list could be as long as a typed array's; only its `kind` is read before it is refused.
+  const outcome = new Proxy<Record<string, unknown>>(
+    {},
+    {
+      ownKeys(target) {
+        keyLists += 1;
+        return Reflect.ownKeys(target);
+      },
+    },
+  );
+  const decision: RandomDecision = {
+    kind: "choose",
+    // EVIDENCE: fixture: a malformed outcome object, which the engine must refuse.
+    outcome: outcome as RandomOutcome,
+  };
+  const session = createFreshRuntimeSession(
+    compileValidPlan("let a = random()\nexit"),
+    {},
+    { randomControl: { decide: () => decision } },
+  );
+  assert.match(session.run().randomRefusal?.message ?? "", /random\(\) takes a number/);
+  assert.equal(keyLists, 0);
+  const decide = (chosen: Record<string, unknown>) => {
+    const decision: RandomDecision = {
+      kind: "choose",
+      // EVIDENCE: fixture: host outcome objects, some of them malformed.
+      outcome: chosen as RandomOutcome,
+    };
+    const run = createFreshRuntimeSession(
+      compileValidPlan("let a = random()\nexit"),
+      {},
+      { randomControl: { decide: () => decision } },
+    ).run();
+    return run.randomRefusal?.message ?? run.randomChoices?.[0]?.outcome;
+  };
+  // Once the fields pass, the keys are counted, once, and an extra key is refused.
+  const valid = new Proxy<Record<string, unknown>>(
+    { kind: "number", value: 0.5 },
+    {
+      ownKeys(target) {
+        keyLists += 1;
+        return Reflect.ownKeys(target);
+      },
+    },
+  );
+  assert.deepEqual(decide(valid), { kind: "number", value: 0.5 });
+  assert.equal(keyLists, 1);
+  assert.equal(
+    decide({ kind: "number", value: 0.5, extra: 1 }),
+    "An outcome holds only its kind and its value, index, or order.",
+  );
+  // A kind the draw does not take is refused without reading the field it would hold.
+  let valueReads = 0;
+  const boolean = Object.defineProperty({ kind: "boolean" }, "value", {
+    enumerable: true,
+    get() {
+      valueReads += 1;
+      return true;
+    },
+  });
+  assert.match(String(decide(boolean)), /random\(\) takes a number/);
+  assert.equal(valueReads, 0);
+});
+
 test("a run keeps its instruction budget across pauses", () => {
   const plan = compileValidPlan(
     "let n = 0\nwhile n < 1000 {\n  n += randomInteger(1..=2)\n}\nexit",
