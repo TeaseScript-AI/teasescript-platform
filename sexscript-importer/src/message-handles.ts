@@ -194,6 +194,7 @@ const QUIET: ReadonlySet<string> = new Set([
   "showImage",
   "hideImage",
   "playAudio",
+  "stopAudio",
 ]);
 
 /** Whether a statement before a counter's loop leaves the text before it on display: it has no effect but media. */
@@ -374,7 +375,7 @@ export function usedNames(statements: readonly IrStatement[]): Set<string> {
     for (const [key, field] of Object.entries(value)) {
       if (
         typeof field === "string" &&
-        (key === "name" || key === "variable" || key === "valueVariable" || key === "handle")
+        (key === "name" || key === "variable" || key === "valueVariable")
       )
         names.add(field);
       else visit(field);

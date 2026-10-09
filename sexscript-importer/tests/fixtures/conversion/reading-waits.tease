@@ -1,4 +1,3 @@
-// NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (2 texts in this file).
 // A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
 // button; a wait that timed the reading goes, also in milliseconds.
 showButton "Start"
@@ -90,14 +89,36 @@ let counting = false
 let tempTime = 0.5
 for tempSpankCount in 1..=3 {
   if counting {
-    say "**${message}**", instant
+    say "[size=x-large]**${message}**[/size]", instant
   } else {
     say """
-      **${message}**
-      **.${tempSpankCount}.**
+      [size=x-large]**${message}**[/size]
+      [size=x-large]**.${tempSpankCount}.**[/size]
     """, instant
   }
   playAudio async "DisciplinePack/hand${1 + randomInteger(0..3)}.wav"
   wait tempTime
 }
+// TSV060: a kept wait after a split text that the last paragraph's reading time would outlast.
+// DisciplineClinic Punish: the waits set the timing, so the text shows whole at once, then the waits.
+say "You've created a bunch of paperwork for me to document this."
+say "So you can expect me to be extra strict this time", instant
+wait 4
+wait 3
+// Domme3 maintenance: the rest of the wait after the earlier paragraphs is reading time, which goes before a button.
+say "You did well."
+say "I'm proud of you!"
+say "Get dressed."
+showButton "Thanks, Miss."
+// Domme3 punishment: before a call that may say a text at once, the text shows whole and the wait stays whole.
+function counted(messageValue) {
+  say "${messageValue}"
+  say "0"
+  wait 2
+}
+say "These last fifteen ...", instant
+say "will be slower ...", instant
+say "and harder!", instant
+wait 7
+counted("Alternating cheeks.")
 exit

@@ -4,8 +4,6 @@ import { hasEffect, ownEffect, withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
-// The generated helper that plays a legacy background sound (helpers.ts).
-const BACKGROUND_SOUND = "sexscriptLegacyPlayBackgroundSound";
 // The Player's default reading time of a `say` (docs/RUNTIME.md "Smart-autoplay session settings").
 const BASE_MS = 1500;
 const WORD_MS = 300;
@@ -164,12 +162,7 @@ function readsOnlyVariables(value: IrExpression): boolean {
 
 /** Whether a statement starts a sound and goes on at once, as legacy playBackgroundSound() did. */
 function startsSound(statement: IrStatement | undefined): boolean {
-  if (statement?.kind === "playAudio") return statement.async && statement.video !== true;
-  return (
-    statement?.kind === "expression" &&
-    statement.expression.kind === "call" &&
-    statement.expression.name === BACKGROUND_SOUND
-  );
+  return statement?.kind === "playAudio" && statement.async && statement.video !== true;
 }
 
 /**
@@ -311,10 +304,6 @@ function walkTexts(
     return [result, state];
   };
   const step = (item: IrStatement, running: Running): [IrStatement, Running] => {
-    // The background sound helper plays its sound as media do where it surely plays one: a file of text and at least
-    // one pass.
-    if (playsSound(item))
-      return [item, item.expression.positional.every(sayless) ? NONE : UNKNOWN_TIME(new Set())];
     // A message kept in a handle (withMessageHandles) is said as a `say` is, after its text is computed; one said at
     // once starts an animation or a counter, a beat.
     if ((item.kind === "let" || item.kind === "assign") && item.value.kind === "message") {
@@ -358,6 +347,7 @@ function walkTexts(
       // Media wait for the reading time first and then compute what they show, which may say something itself.
       case "showImage":
       case "hideImage":
+      case "stopAudio":
         return [item, own(item, NONE)];
       case "playAudio":
         return [
@@ -419,10 +409,18 @@ function withRestoredWaits(
   const block = (items: IrStatement[]): IrStatement[] => {
     const nested = items.map((item) => withNestedBlocks(item, block));
     const pieces = new Map<WaitStatement, number>();
+    const lastPieces = new Map<WaitStatement, IrExpression>();
     for (const item of nested)
-      if (item.kind === "say" && item.readingTime !== undefined && restored.has(item.readingTime))
+      if (item.kind === "say" && item.readingTime !== undefined && restored.has(item.readingTime)) {
         pieces.set(item.readingTime, (pieces.get(item.readingTime) ?? 0) + 1);
+        lastPieces.set(item.readingTime, item.value);
+      }
     if (pieces.size === 0) return nested;
+    // A split text whose last paragraph's reading time would outlast the wait (TSV060) shows whole at once, as legacy
+    // showed it, each paragraph said at once, as the wait sets the timing before the beat.
+    const outlasts = (wait: WaitStatement): boolean =>
+      pieces.get(wait)! > 1 &&
+      (literalMilliseconds(wait) ?? Infinity) < shortestReadingTime(lastPieces.get(wait)!);
     const seen = new Map<WaitStatement, number>();
     return nested.flatMap((item): IrStatement[] => {
       if (item.kind !== "say" || item.readingTime === undefined || !restored.has(item.readingTime))
@@ -431,7 +429,7 @@ function withRestoredWaits(
       const count = (seen.get(wait) ?? 0) + 1;
       seen.set(wait, count);
       const { readingTime: _readingTime, ...text } = item;
-      if (count < pieces.get(wait)!) return [text];
+      if (count < pieces.get(wait)!) return [outlasts(wait) ? { ...text, instant: true } : text];
       diagnostics.push({
         code: "SX_WAIT_FOR_BEAT",
         severity: "info",
@@ -440,27 +438,19 @@ function withRestoredWaits(
         span: item.span,
       });
       // Said at once again, the text keeps that as a beat does, and the texts before it keep their waits in turn.
-      return [pieces.get(wait) === 1 ? { ...text, instant: true, beat: true } : text, wait];
+      if (pieces.get(wait) === 1) return [{ ...text, instant: true, beat: true }, wait];
+      if (!outlasts(wait)) return [text, wait];
+      diagnostics.push({
+        code: "SX_PARAGRAPH_WAIT_BEAT",
+        severity: "info",
+        message:
+          "The last paragraph's reading time would outlast the legacy wait restored before the beat, which sets the timing, so every paragraph is said at once and the wait follows.",
+        span: item.span,
+      });
+      return [{ ...text, instant: true }, wait];
     });
   };
   return block(statements);
-}
-
-/** A call of the background sound helper that surely plays its sound, which waits for the reading time first. */
-function playsSound(
-  statement: IrStatement,
-): statement is Extract<IrStatement, { kind: "expression" }> & {
-  expression: Extract<IrExpression, { kind: "call" }>;
-} {
-  if (statement.kind !== "expression" || statement.expression.kind !== "call") return false;
-  if (statement.expression.name !== BACKGROUND_SOUND) return false;
-  const [file, passes] = statement.expression.positional;
-  return (
-    (file?.kind === "template" || (file?.kind === "literal" && typeof file.value === "string")) &&
-    passes?.kind === "literal" &&
-    typeof passes.value === "number" &&
-    passes.value >= 1
-  );
 }
 
 /** Whether computing a value says nothing: it has no effect but a random draw of the legacy random helper. */
@@ -524,7 +514,7 @@ function transparent(statement: IrStatement): boolean {
   if (statement.kind === "say" || statement.kind === "function" || LEAVING.has(statement.kind))
     return false;
   if (
-    ["showButton", "showImage", "hideImage", "playAudio", "permanentButton"].includes(
+    ["showButton", "showImage", "hideImage", "playAudio", "stopAudio", "permanentButton"].includes(
       statement.kind,
     )
   )

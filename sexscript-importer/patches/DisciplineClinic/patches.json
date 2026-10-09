@@ -111,6 +111,27 @@
       "category": "b",
       "reason": "Choosing Back in the offense level menu gives 0, and the clinic-offense test read offenseArray[-1] before the loop ended: the last offense of the category, which could wrongly show the clinic's refusal, and an error where the category has no offenses, such as the one for offenses not in the list, which failed in Groovy too. The test now runs only for a chosen offense, as resetOffense already did, so Back leaves the menu.",
       "diff": "offense-level-back.diff"
+    },
+    {
+      "id": "stale-dialog-questions",
+      "layer": "source",
+      "category": "b",
+      "reason": "Three questions in Punish ask getSelectedValue(dialog, …) with a dialog that an earlier pick set for another text: the mercy question after the mumble question (\"Please Stop\" …), the reply after a mercy answer that show(dialog) has just shown (\"Yes, Miss\" …), and the repeat-offense reply (\"I understand.\" …), where dialog still holds a text shown long before or in another function. Legacy showed that older text again above the buttons; the author meant the buttons under the text just shown, which a null question gives. Unread, the leftover dialog no longer keeps the clinic's random dialog lists whole (the paragraph rule).",
+      "diff": "stale-dialog-questions.diff"
+    },
+    {
+      "id": "counting-span-line",
+      "layer": "source",
+      "category": "b",
+      "reason": "In a long series that the player counts, spank() switches to \"Center cheek, Alternate sides\" and adds \"\\nKeep counting!\\n\" to that text, which each show then wraps in <font size='10'><b>. A message markup span ends at a line break, and this one only comes at runtime, so the converted say showed the size and bold markers as text. Keep the added line in its own variable, in the same font and bold, after the span; legacy rendered the same two lines.",
+      "diff": "counting-span-line.diff"
+    },
+    {
+      "id": "reboot-dots-span",
+      "layer": "source",
+      "category": "b",
+      "reason": "The account-manipulation reboot animation starts dialog with an opening <font size='20'><b> and shows dialog + \"</b></font>\" as the dots grow, so neither part of a show holds a whole span and the converted dots lost their size and bold. Grow only the dots and wrap each show in the font and bold, as legacy rendered it.",
+      "diff": "reboot-dots-span.diff"
     }
   ]
 }

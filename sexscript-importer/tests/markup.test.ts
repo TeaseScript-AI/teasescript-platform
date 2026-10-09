@@ -56,6 +56,47 @@ test("layout tags are dropped and reported, and interpolated values keep their p
   ]);
   assert.equal(result.dropped, true);
   assert.deepEqual(result.parts, [{ text: "Hello **" }, { value }, { text: "**" }]);
+  // catwoman: a size computed at runtime goes with its tag, and the shown values keep theirs.
+  const [m, ms, ss] = ["m", "ms", "ss"].map((name) => ({ kind: "variable" as const, name }));
+  const timer = legacyHtmlToMarkup([
+    { text: "<font size='" },
+    { value: m! },
+    { text: "'>" },
+    { value: ms! },
+    { text: ":" },
+    { value: ss! },
+    { text: "</font>" },
+  ]);
+  assert.equal(timer.dropped, true);
+  assert.deepEqual(timer.parts, [{ value: ms }, { text: ":" }, { value: ss }]);
+});
+
+test("a font size becomes a size span on each line, apart from the size of the text around it", () => {
+  // DisciplineClinic's spank intro: the size nests outside the bold, as legacy wrote them, on each line with text.
+  assert.equal(
+    converted("<font size='10'><b>Right cheek\n\n....... </b></font>"),
+    "[size=x-large]**Right cheek**[/size]\n\n[size=x-large]**.......**[/size]",
+  );
+  assert.equal(
+    converted("<font size=1>fine</font> <font size='3'>print</font> <font size=\"4\">big</font>"),
+    "[size=small]fine[/size] print [size=large]big[/size]",
+  );
+  // A size that legacy did not read as a whole number adds nothing, and is reported as dropped.
+  assert.deepEqual(legacyHtmlToMarkup(text('<font size="34px">Sissy</font>')), {
+    parts: text("Sissy"),
+    changed: true,
+    dropped: true,
+  });
+});
+
+test("a FONT that names a FACE is an editor's text format, whose size is no emphasis", () => {
+  // Milovana: the Flash editor wraps every paragraph in its FACE, its default size, and a colour.
+  assert.equal(
+    converted(
+      '<TEXTFORMAT LEADING="2"><P ALIGN="CENTER"><FONT FACE="FontSans" SIZE="6" COLOR="#000000" LETTERSPACING="0" KERNING="0">Wait for me.</FONT></P></TEXTFORMAT>',
+    ),
+    "[color=#000000]Wait for me.[/color]",
+  );
 });
 
 test("a text fragment keeps its surrounding whitespace, apart from what a tag at its start introduced", () => {

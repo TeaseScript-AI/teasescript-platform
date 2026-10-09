@@ -120,9 +120,9 @@ export type IrStatement =
       video?: true;
       async: boolean;
       repeatCount: IrExpression | null;
-      /** Declares a variable holding the handle of async media. */
-      handle?: string;
     })
+  /** Stops every sound the session started (V30 §22), as legacy stopped all background sounds. */
+  | (IrBase & { kind: "stopAudio" })
   /**
    * `valueType` is the type of the saved value where the importer knows it and the key is one literal, written as an
    * annotation, from which the package decides the key's type (storage-keys.ts). `open` marks a value of no known type

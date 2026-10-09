@@ -89,3 +89,20 @@ for (int tempSpankCount = 1; tempSpankCount <= 3; tempSpankCount++) {
 	playBackgroundSound("DisciplinePack/hand"+(1+getRandom(3))+".wav")
 	wait(tempTime)
 }
+// TSV060: a kept wait after a split text that the last paragraph's reading time would outlast.
+// DisciplineClinic Punish: the waits set the timing, so the text shows whole at once, then the waits.
+show("You've created a bunch of paperwork for me to document this.\n\nSo you can expect me to be extra strict this time")
+wait(4)
+wait(3)
+// Domme3 maintenance: the rest of the wait after the earlier paragraphs is reading time, which goes before a button.
+show("You did well. \n\nI'm proud of you! \n\nGet dressed.")
+wait(7)
+showButton("Thanks, Miss.")
+// Domme3 punishment: before a call that may say a text at once, the text shows whole and the wait stays whole.
+def counted = { message ->
+	show(message + "\n\n0")
+	wait(3)
+}
+show("These last fifteen ... \n\nwill be slower ... \n\nand harder!")
+wait(7)
+counted("Alternating cheeks.")

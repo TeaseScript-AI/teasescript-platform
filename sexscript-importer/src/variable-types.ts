@@ -21,7 +21,7 @@ export type TeaseType =
   | { kind: "optional"; value: TeaseType }
   /** A declared union of writable types (ADR 0021 §3), none of them null, optional, or itself a union. */
   | { kind: "union"; members: TeaseType[] }
-  | { kind: "object" | "range" | "handle" | "dict" }
+  | { kind: "object" | "range" | "dict" }
   /** A local date, time, or datetime, or a fixed timestamp (#532). */
   | { kind: "temporal"; name: "date" | "time" | "datetime" | "timestamp" };
 
@@ -1276,10 +1276,6 @@ function analyse(
         for (const switchCase of item.cases) block(switchCase.body, scope);
         block(item.default, scope);
         return;
-      case "playAudio":
-        if (item.handle !== undefined)
-          scope.names.set(item.handle, binding(item, item.handle, null, { kind: "handle" }));
-        return;
       case "save":
         if (item.key.kind === "literal" && typeof item.key.value === "string") {
           analysis.saved.set(item, typeOf(item.value, scope));
@@ -1944,8 +1940,6 @@ function describeValue(type: TeaseType): string {
       return "a dict";
     case "range":
       return "a range";
-    case "handle":
-      return "a media handle";
     case "temporal":
       return `a ${type.name}`;
     case "unknown":

@@ -29,7 +29,6 @@ import {
   packageMapUses,
   packageResultUses,
   packageStableNames,
-  packageStopsBackgroundSounds,
   photoCopy,
   storageKeyShape,
   withGuardedInputs,
@@ -791,7 +790,6 @@ export function lowerPackage(
   );
   // Function names and object field types are shared only by a script and the mixin modules it loads.
   const groups = compositionGroups(files, visible);
-  const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
   const resultUses = packageResultUses(files);
   // The files of each folder, as each file sees them (moduleVisibility).
   const directoryFiles = files.map((_, index) => {
@@ -826,7 +824,6 @@ export function lowerPackage(
       nonBooleanKeys,
       copiedImages,
       globalTypes: packageGlobalTypes(groups[index]!),
-      stopsBackgroundSounds,
       resultUses,
       directoryFiles: directoryFiles[index]!,
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
@@ -1021,8 +1018,8 @@ export function lowerPackage(
 /**
  * The generated parts that the files of a package share move to main.tease (ADR 0022 §1), which is generated anyway:
  * the system speaker (helpers.ts `systemSpeaker`), declared once, and each generated helper (helpers.ts) as one
- * `global function`, where it reads no file-level value and calls only built-ins and other such helpers, such as the
- * helpers that keep a file's background sounds (globalFunctionNames).
+ * `global function`, where it reads no file-level value and calls only built-ins and other such helpers
+ * (globalFunctionNames).
  */
 function withMainHelpers(
   programs: readonly MigrationProgram[],
@@ -1041,15 +1038,13 @@ function withMainHelpers(
   const functions = all.flatMap((program) =>
     program.statements.flatMap((statement) => (statement.kind === "function" ? [statement] : [])),
   );
-  // Generated state that spans files, such as the switch button's ID, becomes a global; a file's background sounds,
-  // which the legacy player stopped when the script ended, stay with the file.
+  // Generated state that spans files, such as the switch button's ID, becomes a global.
   const states = new Map<string, LetStatement>();
   for (const program of all)
     for (const statement of program.statements)
       if (
         statement.kind === "let" &&
         helperDefinitionOrder(statement) >= 0 &&
-        statement.name !== BACKGROUND_SOUNDS &&
         isLiteralValue(statement.value)
       )
         states.set(statement.name, statement);
@@ -1381,9 +1376,6 @@ function classFiles(
 
 type FunctionStatement = Extract<IrStatement, { kind: "function" }>;
 type LetStatement = Extract<IrStatement, { kind: "let" }>;
-
-/** The generated list of a file's background sound handles (helpers.ts), which stays with its file. */
-const BACKGROUND_SOUNDS = "sexscriptBackgroundSounds";
 
 /** The variables a function uses that it does not declare, and the names it calls. */
 function freeNames(statement: FunctionStatement): { variables: Set<string>; calls: Set<string> } {

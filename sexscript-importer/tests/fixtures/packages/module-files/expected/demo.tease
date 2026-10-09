@@ -9,31 +9,6 @@ function sexscriptLegacyCall(action, args) {
     return
   }
 }
-global sexscriptBackgroundSounds = []
-function sexscriptLegacyPlayBackgroundSound(file, passes) {
-  if file == null {
-    sexscriptLegacyStopBackgroundSounds()
-    return
-  }
-  if passes < 1 {
-    return
-  }
-  let sound = playAudio(file: file, async: true, repeat: passes times)
-  let playing = []
-  for kept in sexscriptBackgroundSounds {
-    if kept.state == "running" or kept.state == "paused" {
-      playing.add(kept)
-    }
-  }
-  playing.add(sound)
-  sexscriptBackgroundSounds = playing
-}
-global function sexscriptLegacyStopBackgroundSounds {
-  for sound in sexscriptBackgroundSounds {
-    sound.stop()
-  }
-  sexscriptBackgroundSounds = []
-}
 // NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
 let DATAFOLDER = ""
 function loadModules {
