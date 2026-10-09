@@ -332,16 +332,6 @@ const method = (target: IrExpression, name: string): IrExpression => ({
   arguments: [],
 });
 
-/**
- * The whole days between two dates, from their difference: its `days`, or in time model 2, where the difference of
- * two dates is a duration of whole days, the integer number of them.
- */
-export function wholeDays(difference: IrExpression): IrExpression {
-  return timeModel() === 2
-    ? call("toInteger", binary("/", difference, { kind: "duration", value: 1, unit: "day" }))
-    : property(difference, "days");
-}
-
 /** The moment of Unix time 0, from which a number of milliseconds counts. */
 const EPOCH = call("toTimestamp", literal("1970-01-01T00:00:00Z"));
 
@@ -553,7 +543,7 @@ function dateArithmetic(
   if (operator === "-" && temporalKind(operand, analysis) === "date") {
     const other = host.lower(operand);
     if (other === null) return null;
-    return wholeDays(binary("-", call("toDate", date), call("toDate", other)));
+    return property(binary("-", call("toDate", date), call("toDate", other)), "days");
   }
   if (!numberOperand(operand, analysis)) return undefined;
   const days = host.lower(operand);
@@ -601,7 +591,12 @@ export function temporalConstructor(
       ),
       binary("*", month!, { kind: "duration", value: 1, unit: "month", calendar: true }),
     ),
-    binary("*", binary("-", day!, literal(1)), { kind: "duration", value: 1, unit: "day" }),
+    binary("*", binary("-", day!, literal(1)), {
+      kind: "duration",
+      value: 1,
+      unit: "day",
+      calendar: true,
+    }),
   );
   const midnight = call("toDateTime", date, call("toTime", literal("00:00")));
   if (hours === undefined) return midnight;

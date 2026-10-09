@@ -63,7 +63,6 @@ import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import { timeName } from "./time-model.ts";
-import { wholeDays } from "./java-time.ts";
 import {
   BOOLEAN,
   inferType,
@@ -14182,7 +14181,11 @@ function dateTimeField(
       return {
         kind: "binary",
         operator: "+",
-        left: wholeDays({ kind: "binary", operator: "-", left: date, right: newYear }),
+        left: {
+          kind: "property",
+          target: { kind: "binary", operator: "-", left: date, right: newYear },
+          name: "days",
+        },
         right: literal(1),
       };
     }

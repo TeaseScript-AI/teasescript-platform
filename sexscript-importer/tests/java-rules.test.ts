@@ -190,8 +190,8 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
 
 // Time model 2 (#512, src/time-model.ts) keeps legacy's routing in its own forms: Groovy's and Calendar's day, month,
 // and year steps were calendar steps (the same clock time across a daylight-saving change), Calendar's time fields
-// added elapsed time, which model 2 adds to a moment only, Date minus Date counted whole calendar days, and the
-// timestamp family is named absoluteDateTime. Main does not compile model 2 yet, so the forms are checked as text.
+// added elapsed time, which model 2 adds to a moment only, a date moves by calendar days only, and the timestamp family
+// is named absoluteDateTime. Main does not compile model 2 yet, so the forms are checked as text.
 test("converts Calendar and Date values to time model 2", { skip }, async () => {
   const before = process.env.TIME_MODEL;
   process.env.TIME_MODEL = "2";
@@ -214,18 +214,16 @@ test("converts Calendar and Date values to time model 2", { skip }, async () => 
   assert.match(source, /^c = \(c\.toAbsoluteDateTime\(\) \+ 50 \* 1 min\)\.toDateTime\(\)$/mu);
   assert.match(source, /^c -= 1 \* 1 calendar day$/mu);
   assert.match(source, /^let later = moment \+ 2 \* 1 calendar day$/mu);
-  assert.match(source, /toInteger\(\(toDate\(later\) - toDate\(moment\)\) \/ 1 day\)/u);
+  assert.match(source, /\(toDate\(later\) - toDate\(moment\)\)\.days/u);
   assert.match(source, /getAbsoluteDateTime\(\)\.toMilliseconds\(\) > 0/u);
   assert.match(source, /toAbsoluteDateTime\("1970-01-01T00:00:00Z"\) \+ 1791289800123 \* 1 ms/u);
   assert.match(
     source,
-    /toDate\("1900-01-01"\) \+ 126 \* 1 calendar year \+ 9 \* 1 calendar month \+ \(6 - 1\) \* 1 day/u,
+    /toDate\("1900-01-01"\) \+ 126 \* 1 calendar year \+ 9 \* 1 calendar month \+ \(6 - 1\) \* 1 calendar day/u,
   );
-  assert.match(
-    source,
-    /toInteger\(\(getDate\(\) - toDate\("\$\{getDate\(\)\.year\}-01-01"\)\) \/ 1 day\) \+ 1/u,
-  );
-  assert.doesNotMatch(source, /Timestamp|\.days\b|TODO/u);
+  assert.match(source, /\(getDate\(\) - toDate\("\$\{getDate\(\)\.year\}-01-01"\)\)\.days \+ 1/u);
+  assert.match(source, /toDate\(value\) \+ days \* 1 calendar day/u);
+  assert.doesNotMatch(source, /Timestamp|TODO/u);
 });
 
 // Groovy changed a Calendar in place, so every variable, list, or record that shares it saw the change; a TeaseScript
