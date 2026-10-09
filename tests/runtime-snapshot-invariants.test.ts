@@ -119,6 +119,25 @@ test("validates loops paused in their bodies with or without the plan", () => {
   ]);
 });
 
+test("refuses a nested loop that claims the scopes of the loop around it", () => {
+  // The inner loop runs in the outer loop's body, so its scopes lie above the outer loop's. Restored at the outer loop's
+  // depth, the next iteration would drop the scope that holds 'count'.
+  const compiled = plan(
+    "repeat 2 {\n  let count = 1\n  repeat 2 {\n    wait 1 s\n    say count\n  }\n}\nexit",
+  );
+  const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  assert.equal(snapshot.status, "waiting");
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  // EVIDENCE: fixture: expose the readonly scope depth on a cloned snapshot to give the inner loop the outer one's.
+  (checkpoint.snapshot.loopFrames[1] as { scopeDepth: number }).scopeDepth =
+    checkpoint.snapshot.loopFrames[0]!.scopeDepth;
+  for (const withPlan of [compiled, undefined])
+    assert.deepEqual(validateRuntimeSnapshot(checkpoint.snapshot, withPlan).errors, [
+      "Runtime loop frame does not belong to its call context.",
+    ]);
+  assertCheckpointRejected(checkpoint, "TSK002");
+});
+
 test("validates allocator counters across the safe-integer boundary at snapshot and checkpoint entry", () => {
   const compiled = plan('say "one"\nsay "two"\nexit');
   const fields = ["nextEventSequence", "nextScopeId", "nextSpeakerId", "nextCallFrameId"] as const;

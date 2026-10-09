@@ -129,7 +129,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 68;
+export const RUNTIME_SNAPSHOT_VERSION = 69;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1476,6 +1476,8 @@ function validateLoopContexts(
     const context = serializedContext(snapshotValue, level);
     const active = new Set<number>();
     let previousStart = -1;
+    // A loop runs in the scopes above those of the loop around it, whose body opened a scope of its own.
+    let outerDepth = scopeStart;
     for (let index = loopStart; index < loopEnd; index += 1) {
       const frame = loops[index];
       if (!isPlainRecord(frame) || !nonNegativeSafeInteger(frame.loopId)) continue;
@@ -1490,7 +1492,7 @@ function validateLoopContexts(
       if (
         frame.callFrameId !== owner ||
         active.has(frame.loopId) ||
-        scopeDepth <= scopeStart ||
+        scopeDepth <= outerDepth ||
         (plan === undefined
           ? scopeDepth > scopeEnd
           : inBody
@@ -1502,6 +1504,7 @@ function validateLoopContexts(
         errors.push("Runtime loop frame does not belong to its call context.");
       }
       active.add(frame.loopId);
+      if (scopeDepth > outerDepth) outerDepth = scopeDepth;
       if (plan === undefined) continue;
       if (
         planned === undefined ||
