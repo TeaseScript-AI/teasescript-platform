@@ -326,6 +326,8 @@ export type IrExpression =
       outro?: IrExpression;
       /** Asks `as` this speaker. */
       speaker?: string;
+      /** An answer that the script never reads, whose line breaks stay (emit-tease.ts SINGLE_LINE). */
+      unread?: true;
     }
   /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }

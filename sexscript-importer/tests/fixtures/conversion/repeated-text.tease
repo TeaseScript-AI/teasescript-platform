@@ -15,7 +15,7 @@ wait 1
 // A question that repeats the text before it asks without saying it again.
 let days = askInteger "How many days?", prefill: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.
-let name = askText "Your name?", prefill: "pet"
+let name = askText("Your name?", prefill: "pet").replace("\n", " ")
 say "Hello ${name}."
 showImage "kneel.jpg"
 say "Kneel."

@@ -234,7 +234,7 @@ function work {
     say "Work ${v}"
   }
   if askBoolean "Ask?" {
-    let v = askText "Your name?", prefill: "x"
+    let v = askText("Your name?", prefill: "x").replace("\n", " ")
     if v == null {
       say "No name."
     }

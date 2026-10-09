@@ -1,0 +1,10 @@
+// Stay: an admission must start with "I ", and the script shows it again in a span. Legacy's field held one line, so a
+// line break typed in the answer becomes a space where it is asked.
+let whyhere = askText("Admit what you have done wrong. Use words that begin with I.").replace("\n", " ")
+if whyhere.length > 4 and whyhere.lowercase().substring(0, 2) == "i " {
+  say "Say it out loud: **${whyhere}**"
+}
+save whyhere as "stay.why"
+// An answer that the script ignores keeps its line breaks.
+let ignoredAnswer1 = askText "Round 1"
+exit

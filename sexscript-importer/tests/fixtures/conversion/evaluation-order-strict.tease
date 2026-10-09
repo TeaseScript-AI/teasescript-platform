@@ -26,7 +26,7 @@ let question = null
 if question != null {
   say question
 }
-let answer = askText
+let answer = askText().replace("\n", " ")
 let ignoredAnswer1 = askBoolean "Ready?"
 let match = 1
 if count == match {

@@ -32,13 +32,13 @@ let mood = askInteger """
   2 = so-so
 """, prefill: 1
 say "I trust you didn't fail or missed something!"
-let done = askText "Did you do everything as I told you?", prefill: "yes"
+let done = askText("Did you do everything as I told you?", prefill: "yes").replace("\n", " ")
 // Where no paragraph asks, the last one is the question; a word that only starts like an instruction is none.
 say "Let's be sure:"
-let locked = askText "Is this an image of you locked up", prefill: "yes"
+let locked = askText("Is this an image of you locked up", prefill: "yes").replace("\n", " ")
 let suffix = "tings"
 say "Set${suffix} can be changed."
 say "Seté is a name."
-let changed = askText "A remark.", prefill: "no"
+let changed = askText("A remark.", prefill: "no").replace("\n", " ")
 say "${multiplier} ${visits} ${mood} ${done} ${locked} ${changed}"
 exit

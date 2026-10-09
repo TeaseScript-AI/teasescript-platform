@@ -205,7 +205,7 @@ if askBoolean "Replay?" {
 }
 if askBoolean "Shoot?" {
   let shot = ""
-  shot = askText "Your shot (A1 to G7):"
+  shot = askText("Your shot (A1 to G7):").replace("\n", " ")
   say "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}"
 }
 // A list repeated by a count that may be missing is repeated as a number.

@@ -23,7 +23,7 @@ if conditional2 {
 say conditional2
 let conditional3 = false
 if conditional3 {
-  conditional3 = askText("Never ask") != ""
+  conditional3 = askText("Never ask").replace("\n", " ") != ""
 }
 if conditional3 {
   say "yes"
