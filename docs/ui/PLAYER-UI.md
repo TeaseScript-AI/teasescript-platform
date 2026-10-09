@@ -890,8 +890,9 @@ used, such as on a page that is not a secure context, a request that allows only
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
 viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay
 below it, without a count of the answers: each field shows its own. A toggle is a Player action button with toggle
-semantics (`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it
-shows `label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next
+semantics (`aria-pressed`), its label behind a check or cross mark that alone shows whether it is on; like any action
+button, it looks pressed in only while held (Owner decision on #512, 2026-10-09). With authored options it shows
+`label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next
 option. The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
 `label: value`, or `Set…` (`Not set` when optional) without one; activating it opens it in the composer, which takes the
 field's name, its `hint:` as the input hint (`label…` by default), and the numeric keyboard or the date or time control
