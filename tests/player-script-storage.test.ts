@@ -418,25 +418,30 @@ test("a value nested deeper than native JSON recursion allows is saved, replaced
 
 test("a value saved as a timestamp is read as an absoluteDateTime, also inside collections, and a script loads it", async () => {
   const epochMilliseconds = Date.UTC(2026, 9, 4, 12, 30);
-  const before = { kind: "timestamp", epochMilliseconds };
-  const now = { kind: "absoluteDateTime", epochMilliseconds };
-  const nested = (moment: object) => ({
+  const moment = (kind: string) => ({ kind, epochMilliseconds });
+  const nested = (kind: string) => ({
     kind: "list",
     items: [
-      { kind: "set", items: [moment] },
-      { kind: "object", properties: [{ name: "at", value: moment }] },
-      { kind: "dict", entries: [{ key: "at", value: moment }] },
+      { kind: "set", items: [moment(kind)] },
+      { kind: "object", properties: [{ name: "at", value: moment(kind) }] },
+      { kind: "dict", entries: [{ key: "at", value: moment(kind) }] },
     ],
   });
   const storage = new MemoryStorage();
-  storage.setItem(itemName("demo", "started"), JSON.stringify({ v: 1, value: before }));
-  storage.setItem(itemName("demo", "history"), JSON.stringify({ v: 1, value: nested(before) }));
+  storage.setItem(
+    itemName("demo", "started"),
+    JSON.stringify({ v: 1, value: moment("timestamp") }),
+  );
+  storage.setItem(
+    itemName("demo", "history"),
+    JSON.stringify({ v: 1, value: nested("timestamp") }),
+  );
   const entries = await createLocalScriptStorage(storage, "demo").load();
   assert.deepEqual(
     asMap(entries),
     new Map<string, unknown>([
-      ["started", now],
-      ["history", nested(now)],
+      ["started", moment("absoluteDateTime")],
+      ["history", nested("absoluteDateTime")],
     ]),
   );
   const plan = compileValidPlan(

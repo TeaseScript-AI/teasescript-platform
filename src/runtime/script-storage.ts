@@ -140,9 +140,9 @@ const RENAMED_VALUE_KINDS: ReadonlyMap<string, string> = new Map([
  * Upgrades, in place, saved values that an earlier Player wrote, before they are validated: a `timestamp` becomes an
  * `absoluteDateTime` with the same moment. Saved values outlive the plan and snapshot formats, so a value is read as
  * what it meant when it was saved and never dropped. `stored` is freshly read data, such as parsed JSON, which this
- * walks without recursion; anything else in it is left to validation. Returns `stored`.
+ * walks without recursion; anything else in it is left to validation.
  */
-export function upgradeStoredScriptValues(stored: unknown): unknown {
+export function upgradeStoredScriptValues(stored: unknown): void {
   const pending: unknown[] = [stored];
   const seen = new Set<object>();
   while (pending.length > 0) {
@@ -160,7 +160,6 @@ export function upgradeStoredScriptValues(stored: unknown): unknown {
     if (renamed !== undefined) record.kind = renamed;
     for (const field of Object.values(record)) pending.push(field);
   }
-  return stored;
 }
 
 /**
