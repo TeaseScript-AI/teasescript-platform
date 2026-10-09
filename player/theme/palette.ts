@@ -104,7 +104,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "text-on-accent": onAccent,
     "accent-solid": accent,
     "accent-soft": accentTone(accent, dark ? 25 : 92),
-    "accent-focus": accentTone(accent, dark ? (high ? 90 : 80) : high ? 25 : 40),
+    // An accent tone for marks on any surface, such as the code view's marked call.
+    "accent-mark": accentTone(accent, dark ? (high ? 90 : 80) : high ? 25 : 40),
     "overlay-surface": black,
     "overlay-text": white,
     "media-text": mediaText,
@@ -121,6 +122,9 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   };
   const roles = {
     ...base,
+    // Keyboard focus is neutral, the primary text tone, so it looks alike in both modes and stays apart from the accent
+    // of primary actions and preselected buttons (owner, #512).
+    "focus-ring": base["text-primary"],
     "syntax-keyword": base["text-primary"],
     "syntax-name": base["text-primary"],
     "syntax-comment": base["text-secondary"],
@@ -169,7 +173,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   ] as const) {
     inspect("text-primary", background, textTarget);
     inspect("text-secondary", background, textTarget);
-    inspect("accent-focus", background, high ? 4.5 : 3);
+    inspect("focus-ring", background, high ? 4.5 : 3);
+    inspect("accent-mark", background, high ? 4.5 : 3);
     inspect("border-strong", background, high ? 4.5 : 3);
   }
   for (const background of ["accent-solid", "accent-hover", "accent-pressed"] as const) {

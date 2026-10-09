@@ -135,7 +135,7 @@
   --border-strong: var(--theme-border-strong);
   --text-muted: var(--theme-text-secondary);
   --popover: var(--theme-surface-floating);
-  --focus-ring: var(--theme-accent-focus);
+  --focus-ring: var(--theme-focus-ring);
   /* UI ambience follows the surface family; exact scene/media color remains content-owned. */
   --player-ambient: var(--theme-ambient-wash);
   accent-color: var(--theme-accent-solid);
@@ -166,7 +166,7 @@
   background: var(--theme-surface-chrome);
 }
 :root[data-player-theme] .tool-panel-strip:focus-visible {
-  outline-color: var(--theme-accent-focus);
+  outline-color: var(--theme-focus-ring);
 }
 
 /* Native controls and Reka menu items share the same semantic states. */
@@ -179,7 +179,7 @@
 
 :root[data-player-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
 :root[data-player-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
-  outline: 2px solid var(--theme-accent-focus);
+  outline: 2px solid var(--theme-focus-ring);
   outline-offset: var(--player-focus-offset);
   /* The outline is the only focus mark; vendored shadcn rings would fill its separation. */
   --tw-ring-shadow: 0 0 #0000;
