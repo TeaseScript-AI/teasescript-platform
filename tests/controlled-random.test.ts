@@ -755,17 +755,22 @@ test("a callback's invalid outcome pauses the draw instead, and its exception en
 
 test("an exception from reading a decision ends the operation as one from decide does", () => {
   const thrown = new Error("explorer bug");
-  const throwing = (decision: RandomDecision, field: string): RandomDecision =>
-    Object.defineProperty(decision, field, {
+  const throwing = <T extends object>(value: T, field: string): T =>
+    Object.defineProperty(value, field, {
       get() {
         throw thrown;
       },
     });
-  // At a built-in draw and at a collection draw alike.
+  // At a built-in draw and at a collection draw alike, from the decision or from its outcome.
   for (const source of ["let a = random()\nexit", "let a = [1, 2, 3].random\nexit"]) {
     for (const decide of [
-      () => throwing({ kind: "natural" }, "kind"),
-      () => throwing({ kind: "choose", outcome: { kind: "index", index: 0 } }, "outcome"),
+      (): RandomDecision => throwing({ kind: "natural" }, "kind"),
+      (): RandomDecision =>
+        throwing({ kind: "choose", outcome: { kind: "index", index: 0 } }, "outcome"),
+      (): RandomDecision => ({
+        kind: "choose",
+        outcome: throwing<RandomOutcome>({ kind: "index", index: 0 }, "kind"),
+      }),
     ]) {
       const session = createFreshRuntimeSession(
         compileValidPlan(source),
