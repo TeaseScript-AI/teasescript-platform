@@ -11435,7 +11435,7 @@ function laterReadDefault(
 
 /**
  * Typed reads in the branch of an `if` that the null default after the `if` completes, as shockblackjack's
- * `if (...) { lives = loadInteger(k) }` and then `if (lives == null) lives = 6`: the default joins each read in the
+ * `if (...) { lives = loadInteger(k) }` and then `if (lives == null) lives = 6`: a fixed default joins each read in the
  * branch, where readThenDefault merges them, under laterReadDefault's conditions on the code between. The default after
  * the `if` goes too where nothing else gives the variable null; it stays where it still sees such a value. Null when
  * the `if` has no such reads.
@@ -11463,6 +11463,9 @@ function branchReadDefaults(
         if (seesBeforeDefault(statements[later]!, read.name, context)) break;
         continue;
       }
+      // Only a fixed default moves into the branch; another read, as tutorial's chain of loads, stays where it is.
+      const fixed = constantValue(found.fallback);
+      if (fixed === undefined || fixed === null) break;
       const between = [...rest, ...statements.slice(index + 1, later)];
       if (between.some((other) => setsFallback(other, found.fallback))) break;
       // The copy carries no position, so that the merged read keeps its own lines.
