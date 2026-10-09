@@ -471,9 +471,10 @@ export class DataFlow {
   }
 
   /**
-   * What a temporary holds at an instruction: the expression the nearest store before it in the same function put
-   * there (a condition `a and b` lowers to a temporary that holds `a`, then `b`); null when the nearest is the result of a
-   * call, or none is found within a short way back.
+   * What a temporary holds at an instruction, as far as the nearest store before it in the same function tells: the
+   * expression stored (a condition `a and b` lowers to a temporary that holds `a`, then `b`, or another temporary for a
+   * part of it); null when the nearest is the result of a call, or none is found within a short way back. A jump may skip
+   * that store, so it says what kind of value the temporary holds, not which.
    */
   heldAt(temporaryId: number, at: number): unknown {
     const owner = this.functionAt(at);
@@ -1140,9 +1141,10 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     source.kind === "storage" && at !== undefined
       ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
       : source;
-  // A temporary that holds a comparison (as `a and b` lowers) is read through: what it compares, not the truth of a
-  // stored value.
-  const atoms = atomsFor(condition, wanted, true).flatMap((atom): Atom[] => {
+  // A temporary that holds a truth the code computes, as a short-circuit `a and b` or `a or b` lowers to, holds what
+  // the way taken to the condition left there: no stored value to make true. Its atom is left out; the keys and clock
+  // it reads stay as dependencies (below).
+  const atoms = atomsFor(condition, wanted, true).filter((atom) => {
     const subject = record(atom.subject);
     if (
       at === undefined ||
@@ -1152,9 +1154,9 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       subject.kind !== "temporary" ||
       typeof subject.temporaryId !== "number"
     )
-      return [atom];
-    const held = flow.heldAt(subject.temporaryId, at);
-    return comparesTruth(held) ? atomsFor(held, atom.wanted, true) : [atom];
+      return true;
+    const held = record(flow.heldAt(subject.temporaryId, at));
+    return !comparesTruth(held) && held.kind !== "temporary";
   });
   for (const atom of atoms) {
     if (atom.against !== undefined) {

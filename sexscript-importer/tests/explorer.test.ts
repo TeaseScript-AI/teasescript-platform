@@ -674,7 +674,7 @@ test(
 );
 
 test(
-  "a condition that ands a stored value's test with a call is read through the truth the code computes: no stored value is asked to be true",
+  "a condition that ands a stored value's test with a call asks no stored value to be true: the temporary the code computes its truth in is no stored value",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -701,6 +701,38 @@ test(
       assert.ok(
         entry.parts.every((part) => !part.needs.includes("== true")),
         JSON.stringify(entry.parts),
+      );
+    }
+    // The truth of such a temporary depends on the way taken: a skipped part asks nothing of an `else if`'s guard, and
+    // parts kept in other temporaries, as `(a and f()) or (b and f())` lowers, ask no stored value to be true either.
+    const nested = (condition: string) => {
+      const written =
+        'function pick(ignore) {\n  return load("right", default: 0)\n}\nsave 0 as "left"\nsave 1 as "right"\n' +
+        `save 0 as "third"\nshowButton "Check"\nif ${condition} {\n  say "First."\n} else if load("third", default: 0) > 0 {\n` +
+        '  say "Second."\n}\nexit\n';
+      const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(compiled));
+      return explore(engine, compiled, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 2000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", written]]),
+        diagnostics: [],
+        realign: true,
+      }).coverage.unvisitedBranches.flatMap((entry) => entry.parts.map((part) => part.needs));
+    };
+    for (const needs of [
+      nested('load("left", default: 0) > 0 and pick(0) > 0'),
+      nested(
+        '(load("left", default: 0) > 0 and pick(0) > 0) or (load("third", default: 0) > 0 and pick(0) > 2)',
+      ),
+    ]) {
+      assert.ok(
+        needs.every((need) => !/[!=]= true|stored right <= 0/u.test(need)),
+        JSON.stringify(needs),
       );
     }
   },
