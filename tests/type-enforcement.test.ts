@@ -767,6 +767,76 @@ test("an operation of unknown result keeps the types it can give, also inside an
     mismatches(inFunction("let zs: boolean[] | date[] = [x / 4]", "say zs"))[0]?.[1] ?? "",
     /cannot contain the result of '\/'.* Change the type of 'zs' so its elements can hold that result\.$/u,
   );
+  // What an inner operation can give works with nothing the other operand may be, so the operation always fails.
+  assert.deepEqual(mismatches(inFunction('say (x / 4) + "!"')), [
+    [
+      "TSV043",
+      "'+' joins text only with other text, not with a number or a duration or a calendar duration. Put the value in the text instead, as in \"${value}!\".",
+      '(x / 4) + "!"',
+    ],
+  ]);
+  assert.deepEqual(mismatches(inFunction('say -(x + "a")')), [
+    ["TSV043", "'-' needs a number or a duration, but this is text (string).", '-(x + "a")'],
+  ]);
+  // An operand that already failed has its own message, and the operations, stores, and compound assignments around
+  // it add none.
+  for (const failing of [
+    'say ("a" * x) * (z + "a")',
+    'say (z + "a") * ("a" * x)',
+    'say (("a" * x) * (z + "a")) + 1',
+    'let s: string = (("a" * x) * (z + "a")) + 1',
+    'let t: string = "a"\nt += (("a" * x) * (z + "a")) + 1',
+    'let ys: string[][] | boolean[][] = [[(("a" * x) * (z + "a")) + 1]]',
+  ])
+    assert.deepEqual(
+      mismatches(inFunction(...failing.split("\n"))).map(([code, , text]) => [code, text]),
+      [["TSV043", '"a" * x']],
+      failing,
+    );
+  // Nested literals are checked against what the members' elements hold at their depth.
+  assert.deepEqual(
+    mismatches(inFunction("let ys: string[][] | boolean[][] = [[x / 4]]", "say ys")),
+    [
+      [
+        "TSV041",
+        "'ys' is declared as string[][] | boolean[][], so it cannot contain the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+        "x / 4",
+      ],
+    ],
+  );
+  for (const store of [
+    "let ys: (string dict)[] | (boolean dict)[] = [dict{ a: x / 4 }]",
+    "let ys: (string set)[] | (boolean set)[] = [set[x / 4]]",
+    "let ys: boolean[][] | date[][] = [[true], [x / 4]]",
+  ])
+    assert.deepEqual(
+      mismatches(inFunction(store, "say ys")).map(([code]) => code),
+      ["TSV041"],
+      store,
+    );
+  // A member that holds only null holds no result of an operation either.
+  for (const members of ["null[] | string[]", "string[] | null[]"])
+    assert.deepEqual(
+      mismatches(inFunction(`let ys: ${members} = [x / 4]`, "say ys")).map(([code, , text]) => [
+        code,
+        text,
+      ]),
+      [["TSV041", "x / 4"]],
+      members,
+    );
+  // Below a member that may hold anything, such as `list`, nothing is proven to fail: the report names the leaf that
+  // no member holds.
+  assert.deepEqual(
+    mismatches(
+      inFunction(
+        "let ys: (list | (string[] set))[] | (string[][] | (date[] set))[] = [[[x / 4]], set[[z / 2]]]",
+        "say ys",
+      ),
+    )
+      .filter(([code]) => code === "TSV041")
+      .map(([, , text]) => text),
+    ["z / 2"],
+  );
   // A result that may fit is checked when the script runs.
   assert.deepEqual(
     mismatches(
@@ -780,6 +850,9 @@ test("an operation of unknown result keeps the types it can give, also inside an
         "span += x * z",
         'let more: string = "a"',
         "more += x",
+        "say (x / 4) * (z / 2)",
+        "let rows: number[][] | string[][] = [[x / 4]]",
+        "let maybe: null[] | number[] = [x / 4]",
         "say text",
       ),
     ),

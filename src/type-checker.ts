@@ -2160,19 +2160,58 @@ class TypeChecker {
         );
         return;
       }
-      // An element that an operation of unknown result gives, which the elements of no member could hold, cannot fit.
+      // An element that an operation of unknown result gives, which the elements of no member could hold, cannot fit,
+      // also inside nested literals, against what the members' elements hold at that depth.
       if (candidates.length > 1) {
-        const elements = union(candidates.map((candidate) => candidate.element));
-        for (const element of literalElements(literal)) {
-          const unfit = this.#unfitResults(element, this.#typeOf(element), elements);
-          if (unfit === undefined) continue;
-          const text = operationText(element);
-          this.#report(
-            typeCode.typeMismatch,
-            `${place.subject}, so it cannot contain the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${members(elements).some((member) => isScalar(member, "string")) ? (text === null ? ' To show it as text, put the whole calculation inside "${" and "}".' : ` To show it as text, write "\${${text}}".`) : place.label === null ? " Change its type so its elements can hold that result." : ` Change the type of '${place.label}' so its elements can hold that result.`}`,
-            element.span,
+        const pending: {
+          readonly literal: Extract<
+            Expression,
+            { kind: "listLiteral" | "setLiteral" | "dictLiteral" }
+          >;
+          readonly holders: StaticType[];
+        }[] = [{ literal, holders: candidates.map((candidate) => candidate.element) }];
+        for (let next = 0; next < pending.length; next += 1) {
+          const { literal: current, holders } = pending[next]!;
+          const held = holders.flatMap((holder) =>
+            members(resolved(nonNullType(holder))).map(resolved),
           );
-          return;
+          // A holder of values the compiler cannot know, such as `list`, may hold anything below it. Null holds none.
+          if (held.some((member) => member.kind === "unknown" || member.kind === "open")) continue;
+          for (const element of literalElements(current)) {
+            const nested = unwrap(element);
+            if (
+              nested.kind === "listLiteral" ||
+              nested.kind === "setLiteral" ||
+              nested.kind === "dictLiteral"
+            ) {
+              const kind = literalCollectionKind(nested);
+              const inner = held
+                .filter((member): member is CollectionType => member.kind === kind)
+                .map((member) => member.element);
+              if (inner.length > 0) pending.push({ literal: nested, holders: inner });
+              continue;
+            }
+            // Each holder is tested on its own: a union of them would compare the deeper levels again at every depth.
+            if (
+              (nested.kind !== "binaryExpression" && nested.kind !== "unaryExpression") ||
+              isKnown(this.#typeOf(element))
+            )
+              continue;
+            const results = this.#unknownOperations.get(nested);
+            if (
+              results === undefined ||
+              results.length === 0 ||
+              results.some((result) => held.some((member) => mayFit(member, result)))
+            )
+              continue;
+            const text = operationText(element);
+            this.#report(
+              typeCode.typeMismatch,
+              `${place.subject}, so it cannot contain the result of '${nested.operator}', which is ${describeValue(union([...results]))}.${held.some((member) => isScalar(member, "string")) ? (text === null ? ' To show it as text, put the whole calculation inside "${" and "}".' : ` To show it as text, write "\${${text}}".`) : place.label === null ? " Change its type so its elements can hold that result." : ` Change the type of '${place.label}' so its elements can hold that result.`}`,
+              element.span,
+            );
+            return;
+          }
         }
       }
     }
@@ -4517,23 +4556,28 @@ class TypeChecker {
         : [expression.operand],
       result,
     );
+    let failed: readonly StaticType[];
     if ("type" in outcome) {
       if (
-        !isKnown(outcome.type) &&
-        this.diagnostics.length === reported &&
-        !["<", "<=", ">", ">="].includes(operator)
+        isKnown(outcome.type) ||
+        this.diagnostics.length !== reported ||
+        ["<", "<=", ">", ">="].includes(operator)
       )
-        this.#unknownOperations.set(
-          expression,
-          this.#possibleResults(operands, expression, result),
-        );
-      return outcome.type;
-    }
+        return outcome.type;
+      const possible = this.#possibleResults(operands, expression, result);
+      // Left unrecorded, an operation whose operand already failed passes that on without a message of its own, to the
+      // operations, stores, and compound assignments around it.
+      if (possible.failed) return outcome.type;
+      if (possible.results.length > 0) this.#unknownOperations.set(expression, possible.results);
+      // What an inner operation can give works with nothing the other operand may be, so this always fails.
+      if (possible.results.length > 0 || possible.narrowed === null) return outcome.type;
+      failed = possible.narrowed;
+    } else failed = outcome.failed;
     const command = this.#timeOperands.get(expression);
     this.#report(
       typeCode.invalidOperand,
-      (command === undefined ? null : groupedUnitMessage(command, expression, outcome.failed)) ??
-        operatorMessage(operator, expression, outcome.failed),
+      (command === undefined ? null : groupedUnitMessage(command, expression, failed)) ??
+        operatorMessage(operator, expression, failed),
       expression.span,
     );
     return UNKNOWN_TYPE;
@@ -4564,23 +4608,37 @@ class TypeChecker {
 
   /**
    * The types an operation of unknown result can give: every combination of its operands' members, where an operand of
-   * unknown type stands for what the operation that gives it can give, or else for every type an operator takes.
+   * unknown type stands for what the operation that gives it can give, or else for every type an operator takes. With
+   * an operand that such an operation gives, also the operand types this used, for the message when none works.
    */
   #possibleResults(
     operands: readonly StaticType[],
     expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
     result: (...values: StaticType[]) => StaticType | undefined,
-  ): readonly StaticType[] {
+  ): {
+    readonly results: readonly StaticType[];
+    readonly narrowed: readonly StaticType[] | null;
+    readonly failed: boolean;
+  } {
     const expressions =
       expression.kind === "binaryExpression"
         ? [expression.left, expression.right]
         : [expression.operand];
+    let narrowed = false;
+    // An operand that is an operation the check did not record already reported why it fails.
+    let failed = false;
     const [lefts, rights] = operands.map((operand, index) =>
-      members(resolved(nonNullTypeForUse(operand))).flatMap((member) =>
-        isKnown(member)
-          ? [member]
-          : (this.#unknownOperations.get(unwrap(expressions[index]!)) ?? OPERAND_KINDS),
-      ),
+      members(resolved(nonNullTypeForUse(operand))).flatMap((member) => {
+        if (isKnown(member)) return [member];
+        const operation = unwrap(expressions[index]!);
+        const given = this.#unknownOperations.get(operation);
+        if (given === undefined) {
+          failed ||= operation.kind === "binaryExpression" || operation.kind === "unaryExpression";
+          return OPERAND_KINDS;
+        }
+        narrowed = true;
+        return given;
+      }),
     );
     const results: StaticType[] = [];
     for (const left of lefts!)
@@ -4589,7 +4647,14 @@ class TypeChecker {
         if (type !== undefined && !results.some((known) => sameType(known, type)))
           results.push(type);
       }
-    return results;
+    return {
+      results,
+      failed,
+      narrowed:
+        narrowed && !failed
+          ? [lefts!, rights].flatMap((side) => (side === undefined ? [] : [union(side)]))
+          : null,
+    };
   }
 
   /**
