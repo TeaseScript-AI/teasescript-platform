@@ -187,7 +187,8 @@ validated state as checkpoint JSON, which includes the session's storage view, a
 rebuild its transcript; the plan is shared, and photos stay in the Player's captured-media store, which keeps every
 photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,
 in memory and the older ones in an IndexedDB database of its own (`teasescript-debug-history-<UUID>`). Without
-IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has. Turning
+IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has; a state too
+large to save (`TSK004`) ends it the same way. Turning
 either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
 Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
 its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
