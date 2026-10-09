@@ -100,12 +100,17 @@ test("a name given twice to a built-in or method is rejected at compile time", (
     compileSource('say pack(1, mode: "x", size: 2)\nexit', { builtins: ["pack"] }).diagnostics,
     [],
   );
-  for (const callee of ["(items.remove)", "[items.remove][0]", "pick().remove"])
+  for (const [callee, codes] of [
+    ["(items.remove)", ["TSV023"]],
+    // A list element is never a function either.
+    ["[items.remove][0]", ["TSV023", "TSV019"]],
+    ["pick().remove", ["TSV023"]],
+  ] as const)
     assert.deepEqual(
       diagnostics(
         `let items = ["a"]\nfunction pick {\n    return items\n}\nsay ${callee}(x: 1, x: 2)`,
       ).map(([code]) => code),
-      ["TSV023"],
+      codes,
       callee,
     );
 });
