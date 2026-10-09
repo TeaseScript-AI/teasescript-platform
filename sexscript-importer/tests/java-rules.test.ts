@@ -122,6 +122,31 @@ test("reads package text files that no script writes as converted", { skip }, as
   ]);
 });
 
+// A JsonSlurper's parse() of a package file that no script writes is the value it gave, written out at conversion
+// time: an object whose keys are names is an object, another a dict, and a number with a fraction a decimal, as
+// trick_or_treat_poker reads its mistress and GuessMyNumber its dommes.
+test("writes out a package JSON file that JsonSlurper parses", { skip }, async () => {
+  const source = await convert(
+    [
+      "def jsonSluper = new groovy.json.JsonSlurper()",
+      'def mistress = jsonSluper.parse(new File(getDataFolder() + "scripts/poker/faye.json"))',
+      'def doms = jsonSluper.parse(new File("${getDataFolder()}scripts/poker/doms.json"))',
+      'show(mistress.name + " " + mistress.clothes.size() + " " + mistress.clothes[1].images[0])',
+      'show("" + doms.size() + " " + mistress.goal)',
+    ],
+    {
+      "poker/faye.json":
+        '{"name": "Faye", "goal": 15, "clothes": [{"name": "blouse", "images": ["a.jpg"]}, {"name": "skirt", "images": ["b.jpg", "c.jpg"]}]}',
+      "poker/doms.json": '{"Alexis": {"shockTimeStart": 1.0}, "Miss D": {"shockTimeStart": 0.5}}',
+    },
+  );
+  assert.doesNotMatch(source, /TODO|jsonSluper/u);
+  assert.match(source, /NOTE SX_PACKAGE_TEXT_SNAPSHOT/u);
+  assert.match(source, /shockTimeStart: 1\.0/u);
+  assert.match(source, /"Miss D": \{ shockTimeStart: 0\.5 \}/u);
+  assert.deepEqual(run(source), ["Faye 2 b.jpg", "2 15"]);
+});
+
 // A file that some script of the package writes is no fixed text: its reads stay manual work, which names the write.
 test("keeps reads of a package file that a script writes as manual work", { skip }, async () => {
   const source = await convert(
