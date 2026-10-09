@@ -500,6 +500,20 @@ test("a receiver kept for the rest of its statement is explained by the value it
         candidate.location?.line === 10,
     ),
   );
+  // A property step that a change during the preparation makes a list's `random` draws once, while the receiver is
+  // prepared, not again for Debug: the traced run equals the untraced one (`traced` compares them).
+  const drawn = traced(
+    [
+      "let rows: (object | integer[][][])[] = [{ random: [[0]] }, [[[2]], [[3]]]]",
+      "function pick(value) {",
+      "    return value",
+      "}",
+      "rows[0].random[rows.removeFirst().random.removeFirst().removeFirst()].add(pick(7))",
+      "say rows, instant",
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(drawn.snapshot.failure, null);
 });
 
 test("interpolation selection and shuffle record the draws that chose the text", () => {

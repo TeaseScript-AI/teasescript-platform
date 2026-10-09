@@ -1369,16 +1369,25 @@ export class Evaluator {
       this.#traceVariableChange("assignment", receiverDescriptor, target.span);
   }
 
-  /** `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary. */
+  /**
+   * `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary. Gives
+   * the reference to store and the value it selects, which the debug trace shows instead of the reference.
+   */
   public prepareReference(
     expression: ExpressionPlan,
     keepsRoot: boolean,
-  ): SerializableRuntimeObject {
+  ): { readonly reference: SerializableRuntimeObject; readonly value: SerializableRuntimeValue } {
     this.#keepPreparedRoot = keepsRoot;
-    let descriptor = this.#buildPreparedReference(expression);
+    const prepared = this.#evaluateMachine(expression, true);
+    let descriptor = prepared.descriptor!;
     // A reference extended from one that keeps a copy for its own preparation shares that copy.
     if (!keepsRoot && !descriptor.detached) descriptor = { ...descriptor, capturedRoot: undefined };
-    return serializePreparedReference(this.#restorableDescriptor(descriptor, expression.span));
+    return {
+      reference: serializePreparedReference(
+        this.#restorableDescriptor(descriptor, expression.span),
+      ),
+      value: prepared.value,
+    };
   }
 
   /**
@@ -1506,22 +1515,6 @@ export class Evaluator {
             "takeLast",
           ]);
     if (!supported.has(method)) throw fault("TSR016", noCollectionMethod(receiver, method), span);
-  }
-
-  #buildPreparedReference(expression: ExpressionPlan): PreparedReferenceDescriptor {
-    return this.#evaluateMachine(expression, true).descriptor!;
-  }
-
-  /**
-   * The value a reference that `prepareReference` just gave selects, for the debug trace: Debug shows that value, not
-   * how the engine keeps the reference.
-   */
-  public preparedReferenceValue(
-    serialized: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): SerializableRuntimeValue {
-    // EVIDENCE: invariant: prepareReference stores only a reference that resolves, or fails before storing it.
-    return this.#resolveDescriptor(readPreparedReference(serialized, span), span);
   }
 
   #resolvePreparedReference(
