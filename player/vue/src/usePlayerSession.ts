@@ -61,7 +61,7 @@ import {
 import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
 import { DebugRecorder } from "../../debug-recorder.js";
 import {
-  capturedMediaReferencesInJson,
+  capturedMediaReferencesIn,
   keptPhotoReferences,
   keptSession,
   memoryKeptRoomStore,
@@ -1164,7 +1164,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const last = events[count - 1] ?? null;
     const planJson = kept.plan && from > 0 ? null : JSON.stringify(current.plan);
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
-    const references = capturedMediaReferencesInJson(snapshotJson + JSON.stringify(added));
+    const references = capturedMediaReferencesIn(snapshotJson, added);
     const inDebugRoom = room.value === "debug";
     const store = keptStore();
     // The room's saved data are in use once storage reached it.
@@ -1266,9 +1266,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (restored.state.status === "halted" || restored.state.status === "failed") return null;
     // The debug room reads its photos like its saved ones; a normal session's come back as session media.
     if (store === keptSessions)
-      for (const reference of capturedMediaReferencesInJson(
-        found.snapshotJson + JSON.stringify(found.events),
-      ))
+      for (const reference of capturedMediaReferencesIn(found.snapshotJson, found.events))
         capturedMedia.restoreSessionMedia(
           reference,
           await store.media.get(keptScope, reference).catch(() => null),

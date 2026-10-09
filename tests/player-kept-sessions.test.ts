@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import {
-  capturedMediaReferencesInJson,
+  capturedMediaReferencesIn,
+  keptPhotoReferences,
   keptSession,
   memoryKeptRoomStore,
   memoryKeptSessionStore,
@@ -160,13 +161,35 @@ test("a debug room keeps saved values of its own beside its session and photos, 
   await assert.rejects(values.load(), /no debug room/);
 });
 
+test("a kept session's photos are found in its state and events one text at a time, as in its JSON", async () => {
+  const reference = (n: number) => `captured-media:01234567-89ab-cdef-0123-456789abcdef:${n}`;
+  const snapshotJson = JSON.stringify({ stage: reference(1), values: [`x${reference(2)}y`] });
+  const kept = events("say", "actionRequested", "say");
+  Object.assign(kept[0]!, { text: `${reference(3)} and ${reference(4)}` });
+  Object.assign(kept[1]!, { action: { [reference(5)]: [[reference(6)]] } });
+  const session = stored({ snapshotJson, events: kept });
+  // The oracle: one search of the session's whole JSON, the text that is no longer built.
+  const inJson = new Set(JSON.stringify(session).match(/captured-media:[0-9a-f-]+:[0-9]+/gu));
+  assert.equal(inJson.size, 6);
+  assert.deepEqual(capturedMediaReferencesIn(snapshotJson, kept), inJson);
+  const store = memoryKeptSessionStore();
+  await store.publish("script", {
+    planJson: "{}",
+    snapshotJson,
+    eventsFrom: 0,
+    events: kept,
+    marks,
+  });
+  assert.deepEqual(await keptPhotoReferences(store)!("script"), inJson);
+});
+
 test("a photo a kept session holds comes back as session media, which a save stores again", async () => {
   const repository = new FakeMediaRepository();
   const media = new CapturedMediaStore(repository, urls, "script");
   const shown = media.add("image", new Blob(["shown"], { type: "image/png" }));
   const record = await media.read(shown.reference);
   assert.deepEqual(
-    [...capturedMediaReferencesInJson(JSON.stringify({ stage: shown.reference }))],
+    [...capturedMediaReferencesIn(JSON.stringify({ stage: shown.reference }))],
     [shown.reference],
   );
 

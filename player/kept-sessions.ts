@@ -135,15 +135,28 @@ const REFERENCES_IN_TEXT =
  * session that cannot be read rejects, so a sweep defers.
  */
 export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaInUse | undefined {
-  return (
-    store &&
-    (async (scope) => capturedMediaReferencesInJson(JSON.stringify(await store.session(scope))))
-  );
+  return store && (async (scope) => capturedMediaReferencesIn(await store.session(scope)));
 }
 
-/** The captured-media references in serialized state, such as photos a session shows or holds in variables. */
-export function capturedMediaReferencesInJson(json: string): Set<string> {
-  return new Set(json.match(REFERENCES_IN_TEXT));
+/**
+ * The captured-media references in session data, such as photos a session shows or holds in variables: in its texts,
+ * which may be serialized state, and in the texts of its records and lists, found one text at a time. A reference never
+ * spans two texts, so this finds what a search of the data as one JSON text would, without building a text that long.
+ */
+export function capturedMediaReferencesIn(...data: readonly unknown[]): Set<string> {
+  const found = new Set<string>();
+  const pending = [...data];
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+    if (typeof current === "string") {
+      for (const [reference] of current.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
+    } else if (Array.isArray(current)) {
+      // Item by item: a long list of events must not hit the native argument limit of a spread.
+      for (const item of current) pending.push(item);
+    } else if (isRecord(current)) {
+      for (const [key, value] of Object.entries(current)) pending.push(key, value);
+    }
+  }
+  return found;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
