@@ -51,7 +51,7 @@ export type {
   RuntimeCapabilities,
   RuntimeCapabilityCall,
 } from "./evaluator.js";
-import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import { internalFault, RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import { textTooLong } from "./text-length.js";
 import {
   assertCounterCanAdvance,
@@ -752,7 +752,11 @@ function executePlannedInstruction(
   switch (instruction.kind) {
     case "declareGlobal": {
       if (evaluator.binding(instruction.name) !== undefined) {
-        throw fault("TSR001", `Global '${instruction.name}' is already set up.`, instruction.span);
+        throw fault(
+          "TSR001",
+          internalFault(`The plan sets up global '${instruction.name}' twice.`),
+          instruction.span,
+        );
       }
       const value = evaluator.evaluateStartValue(instruction.value);
       if (instruction.typeCheck !== undefined)
@@ -770,7 +774,7 @@ function executePlannedInstruction(
         if (stagedEvaluator.binding(instruction.name) !== undefined) {
           throw fault(
             "TSR001",
-            `Speaker '${instruction.name}' is already set up.`,
+            internalFault(`The plan sets up speaker '${instruction.name}' twice.`),
             instruction.span,
           );
         }
@@ -789,7 +793,13 @@ function executePlannedInstruction(
         stagedSnapshot.contextualSpeaker = speaker.id;
         for (const property of instruction.properties) {
           if (speaker.properties.some((item) => item.name === property.name)) {
-            throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
+            throw fault(
+              "TSR007",
+              internalFault(
+                `The plan gives speaker '${instruction.name}' the property '${property.name}' twice.`,
+              ),
+              property.span,
+            );
           }
           const propertyValue = cloneCapturedSerializableValue(
             stagedEvaluator.evaluateStartValue(property.value),
@@ -828,7 +838,11 @@ function executePlannedInstruction(
       return;
     case "leaveScope":
       if (currentFrame(snapshot).file !== null) {
-        throw fault("TSR033", "Cannot leave the root lexical scope.", instruction.span);
+        throw fault(
+          "TSR033",
+          internalFault("The plan tries to leave its outermost scope."),
+          instruction.span,
+        );
       }
       leaveScopes(snapshot, snapshot.frames.length - 1);
       advance(snapshot);
@@ -839,7 +853,9 @@ function executePlannedInstruction(
       if (!rerun && evaluator.binding(instruction.name) !== undefined) {
         throw fault(
           "TSR001",
-          `Variable '${instruction.name}' is already visible in this scope.`,
+          internalFault(
+            `The plan declares variable '${instruction.name}' twice in the same scope.`,
+          ),
           instruction.span,
         );
       }
@@ -1117,7 +1133,11 @@ function executePlannedInstruction(
         !Number.isSafeInteger(snapshot.nextActionId) ||
         snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
       ) {
-        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+        throw fault(
+          "TSR051",
+          internalFault("The session has used up its action numbers."),
+          instruction.span,
+        );
       }
       assertEventSequenceCapacity(
         snapshot,
@@ -1160,7 +1180,7 @@ function executePlannedInstruction(
       ) {
         throw fault(
           "TSR050",
-          "Interaction result destination is already occupied.",
+          internalFault("The slot for an interaction's answer is already in use."),
           instruction.span,
         );
       }
@@ -1168,7 +1188,11 @@ function executePlannedInstruction(
         !Number.isSafeInteger(snapshot.nextActionId) ||
         snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
       ) {
-        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+        throw fault(
+          "TSR051",
+          internalFault("The session has used up its action numbers."),
+          instruction.span,
+        );
       }
       const backgroundPacingGate = snapshot.backgroundActions.some(
         (action) => action.kind === "chatPacingGate",
@@ -1302,13 +1326,21 @@ function executePlannedInstruction(
       if (
         snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary)
       ) {
-        throw fault("TSR050", "Capture result destination is already occupied.", instruction.span);
+        throw fault(
+          "TSR050",
+          internalFault("The slot for the result of takePhoto() is already in use."),
+          instruction.span,
+        );
       }
       if (
         !Number.isSafeInteger(snapshot.nextActionId) ||
         snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
       ) {
-        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+        throw fault(
+          "TSR051",
+          internalFault("The session has used up its action numbers."),
+          instruction.span,
+        );
       }
       // The request, a possible unavailable-camera warning, and the completion, besides what active actions reserve.
       assertEventSequenceCapacity(
@@ -1463,7 +1495,11 @@ function preparedInteractionSpeaker(
   const prepared = readTemporary(temporaries, temporaryId, span);
   if (prepared === null) return null;
   if (!isSpeakerReference(prepared)) {
-    throw fault("TSR052", "Prepared interaction speaker is invalid.", span);
+    throw fault(
+      "TSR052",
+      internalFault("The prepared speaker of an interaction is invalid."),
+      span,
+    );
   }
   return evaluator.speakerById(prepared.speakerId, span);
 }
@@ -1495,7 +1531,13 @@ function materializeInteractionUi(
   const read = (temporaryId: number): RuntimeTemporarySnapshot => {
     const temporary = temporaries.find((item) => item.id === temporaryId);
     if (temporary === undefined)
-      throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+      throw fault(
+        "TSR046",
+        internalFault(
+          `An internal value (temporary ${temporaryId}) is missing from the session's state.`,
+        ),
+        span,
+      );
     return temporary;
   };
   const readText = (temporaryId: number): string => {
@@ -1587,7 +1629,9 @@ function materializeInteractionUi(
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
       throw fault(
         "TSR052",
-        "Prepared choice options do not match the authored option count.",
+        internalFault(
+          "The prepared options of a choice do not match the options written in the script.",
+        ),
         span,
       );
     }
@@ -1668,7 +1712,8 @@ function imageInteractionUi(
   temporalContext: TemporalContext,
   span: SourceSpan,
 ): Extract<InteractionUiPayload, { kind: "image" }> {
-  if (!isObject(value)) throw fault("TSR052", "The prepared image request is malformed.", span);
+  if (!isObject(value))
+    throw fault("TSR052", internalFault("The prepared askImage request is malformed."), span);
   let question: string | null = null;
   let hint: string | null = null;
   let allowCamera = true;
@@ -1691,7 +1736,8 @@ function imageInteractionUi(
       const texts = imageFilterTexts(name, argument, span);
       if (name === "types") types = texts;
       else mime = texts;
-    } else throw fault("TSR052", "The prepared image request is malformed.", span);
+    } else
+      throw fault("TSR052", internalFault("The prepared askImage request is malformed."), span);
   }
   if (!allowCamera && !allowFile) throw fault("TSR052", IMAGE_NO_SOURCE_MESSAGE, span);
   return { kind: "image", question, hint, allowCamera, allowFile, types, mime, accessibleName };
@@ -1870,7 +1916,7 @@ function enterFunction(
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
-      `Maximum TeaseScript call depth of ${snapshot.maxCallDepth} exceeded.`,
+      `Function calls are nested ${snapshot.maxCallDepth} deep, the most this session allows. End the recursion sooner, or use a loop instead.`,
       instruction.span,
     );
   }
@@ -1930,12 +1976,22 @@ function bindSuppliedParameter(
     frame.parameterState.phase !== "supplied" ||
     frame.parameterState.parameterIndex !== instruction.parameterIndex
   ) {
-    throw fault("TSR048", "Supplied-parameter progress is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault(
+        "The progress of filling in a function call's parameters does not match the plan.",
+      ),
+      instruction.span,
+    );
   }
   const parameter = definition.parameters[instruction.parameterIndex];
   const argument = frame.arguments[instruction.parameterIndex];
   if (parameter === undefined || argument === undefined) {
-    throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The parameters of a function do not match its call."),
+      instruction.span,
+    );
   }
   if (argument.supplied) {
     declareFunctionBinding(plan, snapshot, parameter.name, argument.value, instruction.span);
@@ -1963,7 +2019,11 @@ function beginFunctionDefaults(
     frame.parameterState.phase !== "supplied" ||
     frame.parameterState.parameterIndex !== definition.parameters.length
   ) {
-    throw fault("TSR048", "Parameter binding did not reach the defaults phase.", span);
+    throw fault(
+      "TSR048",
+      internalFault("A function call reached its default parameters too early."),
+      span,
+    );
   }
   frame.parameterState = { phase: "defaults", parameterIndex: 0 };
   advance(snapshot);
@@ -1980,12 +2040,20 @@ function prepareParameterDefault(
     frame.parameterState.phase !== "defaults" ||
     frame.parameterState.parameterIndex !== instruction.parameterIndex
   ) {
-    throw fault("TSR048", "Default-parameter progress is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The default parameters of a function call are in an inconsistent state."),
+      instruction.span,
+    );
   }
   const parameter = definition.parameters[instruction.parameterIndex];
   const argument = frame.arguments[instruction.parameterIndex];
   if (parameter === undefined || argument === undefined) {
-    throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The parameters of a function do not match its call."),
+      instruction.span,
+    );
   }
   if (argument.supplied) {
     frame.parameterState.parameterIndex += 1;
@@ -1995,7 +2063,7 @@ function prepareParameterDefault(
   if (!parameter.hasDefault) {
     throw fault(
       "TSR049",
-      `Required parameter '${parameter.name}' was not supplied.`,
+      internalFault(`The required parameter '${parameter.name}' was not supplied.`),
       instruction.span,
     );
   }
@@ -2014,11 +2082,19 @@ function bindDefaultParameter(
     frame.parameterState.phase !== "defaults" ||
     frame.parameterState.parameterIndex !== instruction.parameterIndex
   ) {
-    throw fault("TSR048", "Default-parameter binding is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("A default parameter of a function call was bound inconsistently."),
+      instruction.span,
+    );
   }
   const parameter = definition.parameters[instruction.parameterIndex];
   if (parameter === undefined || !parameter.hasDefault) {
-    throw fault("TSR048", "Default-parameter metadata is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The default parameters of a function do not match its call."),
+      instruction.span,
+    );
   }
   const value = evaluator.evaluate(instruction.value);
   if (instruction.typeCheck !== undefined)
@@ -2052,7 +2128,11 @@ function enterFunctionBody(
     frame.parameterState.phase !== "defaults" ||
     frame.parameterState.parameterIndex !== definition.parameters.length
   ) {
-    throw fault("TSR048", "Function body entry has incomplete parameters.", span);
+    throw fault(
+      "TSR048",
+      internalFault("A function body started before all its parameters were bound."),
+      span,
+    );
   }
   frame.parameterState = { phase: "body", parameterIndex: definition.parameters.length };
   advance(snapshot);
@@ -2083,7 +2163,11 @@ function returnFromFunction(
   );
   const destinationTemporary = frame.destinationTemporary!;
   if (snapshot.temporaries.some((temporary) => temporary.id === destinationTemporary)) {
-    throw fault("TSR050", "Function result destination is already occupied.", span);
+    throw fault(
+      "TSR050",
+      internalFault("The slot for the result of a function call is already in use."),
+      span,
+    );
   }
   snapshot.temporaries.push({ id: destinationTemporary, value: returned });
   trace?.writeTemporary(
@@ -2111,7 +2195,11 @@ function activeFunction(
 } {
   const frame = activeFunctionFrame(snapshot);
   if (frame === undefined) {
-    throw fault("TSR051", "Function-only instruction executed without a call frame.", span);
+    throw fault(
+      "TSR051",
+      internalFault("A function instruction ran outside a function call."),
+      span,
+    );
   }
   return { frame, definition: functionDefinition(plan, frame.functionId, span) };
 }
@@ -2123,7 +2211,11 @@ function functionDefinition(
 ): InstructionPlan["functions"][number] {
   const definition = plan.functions[functionId - 1];
   if (definition === undefined || definition.id !== functionId) {
-    throw fault("TSR052", `Unknown compiled function ID '${functionId}'.`, span);
+    throw fault(
+      "TSR052",
+      internalFault(`The plan calls a function (ID ${functionId}) that it does not contain.`),
+      span,
+    );
   }
   return definition;
 }
@@ -2136,7 +2228,13 @@ function declareFunctionBinding(
   span: SourceSpan,
 ): void {
   if (findBinding(snapshot, plan, name) !== undefined) {
-    throw fault("TSR001", `Parameter '${name}' duplicates a visible binding.`, span);
+    throw fault(
+      "TSR001",
+      internalFault(
+        `The plan gives parameter '${name}' the name of a variable that is already visible.`,
+      ),
+      span,
+    );
   }
   currentFrame(snapshot).bindings.push({ name, value: cloneCapturedSerializableValue(value) });
 }
@@ -2157,7 +2255,7 @@ function executeLoopStart(
     ) {
       throw fault(
         "TSR042",
-        "Loop-frame nesting does not match the instruction plan.",
+        internalFault("The nesting of running loops does not match the plan."),
         instruction.span,
       );
     }
@@ -2230,12 +2328,16 @@ function executeLoopStart(
   }
 
   if (frame.kind !== instruction.loopKind) {
-    throw fault("TSR042", "Loop-frame kind does not match the instruction plan.", instruction.span);
+    throw fault(
+      "TSR042",
+      internalFault("The kind of a running loop does not match the plan."),
+      instruction.span,
+    );
   }
   if (snapshot.frames.length !== frame.scopeDepth) {
     throw fault(
       "TSR042",
-      "Loop scope state does not match the next instruction.",
+      internalFault("The scope of a running loop does not match the next instruction."),
       instruction.span,
     );
   }
@@ -2318,15 +2420,23 @@ function executeLoopControl(
   if (frame === undefined || frame.loopId !== instruction.loopId) {
     throw fault(
       "TSR042",
-      "Loop control does not match the active innermost loop.",
+      internalFault("A break or continue does not match the innermost running loop."),
       instruction.span,
     );
   }
   if (frame.callFrameId !== currentCallFrameId(snapshot)) {
-    throw fault("TSR042", "Loop control cannot cross a function boundary.", instruction.span);
+    throw fault(
+      "TSR042",
+      internalFault("A break or continue tried to leave a function."),
+      instruction.span,
+    );
   }
   if (snapshot.frames.length <= frame.scopeDepth) {
-    throw fault("TSR042", "Active loop iteration scope is missing.", instruction.span);
+    throw fault(
+      "TSR042",
+      internalFault("The scope of the running loop round is missing."),
+      instruction.span,
+    );
   }
   leaveScopes(snapshot, frame.scopeDepth);
   if (instruction.action === "break") snapshot.loopFrames.pop();
@@ -2397,7 +2507,13 @@ function readTemporary(
 ): SerializableRuntimeValue {
   const temporary = temporaries.find((item) => item.id === temporaryId);
   if (temporary === undefined) {
-    throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    throw fault(
+      "TSR046",
+      internalFault(
+        `An internal value (temporary ${temporaryId}) is missing from the session's state.`,
+      ),
+      span,
+    );
   }
   return temporary.value;
 }
@@ -2874,7 +2990,8 @@ function preparedOutputSpeaker(
 ): { readonly output: OutputSpeaker | null; readonly speakerId: number | null } {
   const value = readTemporary(temporaries, temporaryId, span);
   if (value === null) return { output: null, speakerId: null };
-  if (!isObject(value)) throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  if (!isObject(value))
+    throw fault("TSR052", internalFault("The prepared speaker of a say is invalid."), span);
   const identifier = getSerializableProperty(value, "identifier");
   const displayName = getSerializableProperty(value, "displayName");
   const color = getSerializableProperty(value, "color");
@@ -2890,7 +3007,7 @@ function preparedOutputSpeaker(
     typeof speakerId !== "number" ||
     !Number.isSafeInteger(speakerId)
   )
-    throw fault("TSR052", "Prepared say speaker is invalid.", span);
+    throw fault("TSR052", internalFault("The prepared speaker of a say is invalid."), span);
   return { output: Object.freeze({ identifier, displayName, color, font, avatar }), speakerId };
 }
 
@@ -2900,7 +3017,8 @@ function preparedSayText(
   span: SourceSpan,
 ): string {
   const value = readTemporary(temporaries, temporaryId, span);
-  if (typeof value !== "string") throw fault("TSR052", "Prepared say text is invalid.", span);
+  if (typeof value !== "string")
+    throw fault("TSR052", internalFault("The prepared text of a say is invalid."), span);
   return value;
 }
 
@@ -3019,7 +3137,7 @@ function validatePacingCreation(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", span);
+    throw fault("TSR051", internalFault("The session has used up its action numbers."), span);
   }
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewPacingGate(), span);
   try {
@@ -3268,7 +3386,11 @@ function startTimer(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   assertCounterCanAdvance(snapshot.nextTimerId, "nextTimerId");
   // The request, its eventual settlement, and the other active actions' completions must stay representable.
@@ -3411,7 +3533,11 @@ function writeStorage(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   // The request, the completion, a possible failure warning, and every active action's own completions.
   assertEventSequenceCapacity(
@@ -3576,7 +3702,11 @@ function startMedia(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER - 1
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   assertCounterCanAdvance(snapshot.nextMediaId, "nextMediaId");
   // Two requests, their eventual completions, a possible warning, and the other active actions' completions.
@@ -3731,7 +3861,11 @@ function showPermanentButton(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   assertCounterCanAdvance(snapshot.nextPermanentButtonId, "nextPermanentButtonId");
   // The request, its eventual removal, and the other active actions' completions must stay representable.

@@ -1537,7 +1537,7 @@ restart, and report the failure with its debug export.
 | `TSR009` | An operator that cannot combine its operands, such as values of different kinds, durations of different families, a date moved by clock time, or a calendar duration divided by zero. | Check or convert the operand the message names. |
 | `TSR010` | A named argument given twice. _Defect._ | Report it. |
 | `TSR011` | A built-in function the host does not provide. | Run the script in a host that provides it. |
-| `TSR012` | A host built-in failed, for the reason the message gives. | Correct the cause the message gives, or report it to the host. |
+| `TSR012` | A built-in function failed: a core one such as `randomInteger(...)` on its argument, with its own message, or a host one for the reason the message gives. | Correct what the message names, or report a host failure with a debug export. |
 | `TSR013` | A host built-in returned a value a script cannot hold. | Report it to the host. |
 | `TSR014` | A call of something that is not a function or a supported method. | Call a function or a method the value has. |
 | `TSR015` | Named arguments where a call takes only positional ones. | Remove the names. |
@@ -1547,7 +1547,7 @@ restart, and report the failure with its debug export.
 | `TSR019` | A random selection from an empty list or set. | Check that it has an element first. |
 | `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive). | Report it to the host. |
 | `TSR021` | A value that cannot be shown as text, such as a dict or a list inside a list. | Select an element or a property. |
-| `TSR022` | A speaker without a display name. | Give the speaker a name. |
+| `TSR022` | A speaker whose `displayName` is empty. | Give it a name, or leave `displayName` out. |
 | `TSR023` | A speaker that is not declared. | Declare the speaker. |
 | `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
 | `TSR025` | A list index or text position outside the valid range, or a text end before its start. | Check it against `length`, and an end against its start, first. |

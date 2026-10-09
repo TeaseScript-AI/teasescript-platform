@@ -29,7 +29,7 @@ import type {
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import type { TemporalContext } from "../../temporal.js";
 import { expandChoiceOptions } from "../choice-options.js";
-import { RuntimeFault } from "../errors.js";
+import { internalFault, RuntimeFault } from "../errors.js";
 import { copySpan } from "../operations/support.js";
 import {
   getSerializableProperty,
@@ -90,7 +90,8 @@ export function materializeForm(
   context: TemporalContext,
   span: SourceSpan,
 ): MaterializedForm {
-  if (!isObject(request)) throw fault("The prepared form request is malformed.", span);
+  if (!isObject(request))
+    throw fault(internalFault("The prepared askForm request is malformed."), span);
   let fieldsValue: SerializableRuntimeValue | undefined;
   let texts: SerializableRuntimeValue | undefined;
   let defaults: SerializableRuntimeValue | undefined;
@@ -111,7 +112,7 @@ export function materializeForm(
     else if (name === "cancel") cancel = formButton(name, value, context, span);
     else if (name === "timeout") timeoutValue = value;
     else if (name === "onTimeout") onTimeout = value;
-    else throw fault("The prepared form request is malformed.", span);
+    else throw fault(internalFault("The prepared askForm request is malformed."), span);
   }
 
   const fields: FormField[] = [];
@@ -134,7 +135,7 @@ export function materializeForm(
   };
   if (prepared.kind === "booleanList") {
     if (texts === undefined || defaults === undefined || fieldsValue !== undefined)
-      throw fault("The prepared form request is malformed.", span);
+      throw fault(internalFault("The prepared askForm request is malformed."), span);
     if (!isList(texts) || !isList(defaults))
       throw fault("askBooleans takes a list of texts and a prefill list.", span);
     if (texts.items.length !== defaults.items.length)
@@ -157,7 +158,7 @@ export function materializeForm(
     });
   } else {
     if (fieldsValue === undefined || texts !== undefined || defaults !== undefined)
-      throw fault("The prepared form request is malformed.", span);
+      throw fault(internalFault("The prepared askForm request is malformed."), span);
     const written =
       prepared.kind === "object" && isObject(fieldsValue)
         ? fieldsValue.properties.map(({ name, value }) => ({ id: name, value }))

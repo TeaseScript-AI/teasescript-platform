@@ -1266,7 +1266,10 @@ test("an answer whose run throws leaves the transcript as the Player showed it, 
   const session = restored(new DebugRecorder());
   const events = [...session.events];
   const transcript = [...session.transcriptEntries];
-  assert.throws(() => choose(session, "Long"), /nextScopeId cannot be advanced safely/u);
+  assert.throws(
+    () => choose(session, "Long"),
+    /nextScopeId is at its largest value, so it cannot advance/u,
+  );
   assert.deepEqual(session.events, events);
   assert.deepEqual(session.transcriptEntries, transcript);
 

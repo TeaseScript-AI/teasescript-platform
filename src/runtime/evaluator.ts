@@ -42,7 +42,7 @@ import {
 } from "./list-statistics.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
-import { RuntimeFault } from "./errors.js";
+import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector } from "./instruction-trace.js";
 import type {
   DeveloperWarningEvent,
@@ -122,7 +122,7 @@ import {
   clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
-  containsRuntimeIdentity,
+  findRuntimeIdentity,
   createCapturedSerializableList,
   createCapturedSerializableSet,
   dictProperty,
@@ -784,7 +784,9 @@ export class Evaluator {
                 if (names.has(property.name))
                   throw fault(
                     "TSR007",
-                    `Duplicate object property '${property.name}'.`,
+                    internalFault(
+                      `The plan builds an object with the property '${property.name}' twice.`,
+                    ),
                     property.span,
                   );
                 names.add(property.name);
@@ -1059,7 +1061,7 @@ export class Evaluator {
               if (Object.hasOwn(frame.named!, argument.name))
                 throw fault(
                   "TSR010",
-                  `Duplicate named argument '${argument.name}'.`,
+                  internalFault(`The plan passes the named argument '${argument.name}' twice.`),
                   argument.span,
                 );
               frame.named![argument.name] = captured;
@@ -1143,7 +1145,12 @@ export class Evaluator {
 
   #unknownName(name: string, span: SourceSpan): RuntimeFault {
     return (
-      this.#unsetVariable(name, span) ?? fault("TSR006", `Unknown identifier '${name}'.`, span)
+      this.#unsetVariable(name, span) ??
+      fault(
+        "TSR006",
+        internalFault(`The plan uses the name '${name}' but does not declare it.`),
+        span,
+      )
     );
   }
 
@@ -1177,7 +1184,11 @@ export class Evaluator {
       if (location === undefined) {
         throw (
           this.#unsetVariable(target.name, target.span) ??
-          fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span)
+          fault(
+            "TSR002",
+            internalFault(`The plan assigns to '${target.name}' but does not declare it.`),
+            target.span,
+          )
         );
       }
       if (isSpeakerReference(location.binding.value)) {
@@ -1439,7 +1450,11 @@ export class Evaluator {
         (candidate) => candidate.name === descriptor.rootName,
       );
       if (binding === undefined) {
-        throw fault("TSR053", "Prepared reference root is no longer available.", span);
+        throw fault(
+          "TSR053",
+          internalFault("A prepared reference points to a variable that no longer exists."),
+          span,
+        );
       }
       value = binding.value;
     } else {
@@ -1453,19 +1468,33 @@ export class Evaluator {
       if (step.kind === "key") {
         const entry = isDict(value) ? getSerializableDictEntry(value, step.key) : undefined;
         if (entry === undefined)
-          throw fault("TSR053", "Prepared reference key no longer addresses a dict entry.", span);
+          throw fault(
+            "TSR053",
+            internalFault("A prepared reference points to a dict entry that no longer exists."),
+            span,
+          );
         value = entry.value;
         continue;
       }
       // Only a list is addressed by position; a set member is always read as a copy.
       if (isList(value)) {
         if (step.index < 0 || step.index >= value.items.length) {
-          throw fault("TSR025", `Collection index ${step.index} is outside the valid range.`, span);
+          throw fault(
+            "TSR025",
+            internalFault(
+              `A prepared reference points to list position ${step.index}, which no longer exists.`,
+            ),
+            span,
+          );
         }
         value = value.items[step.index]!;
         continue;
       }
-      throw fault("TSR008", "Prepared reference index no longer addresses a collection.", span);
+      throw fault(
+        "TSR008",
+        internalFault("A prepared reference points to a list position that no longer exists."),
+        span,
+      );
     }
     return value;
   }
@@ -1473,14 +1502,15 @@ export class Evaluator {
   public speakerByName(name: string, span: SourceSpan): RuntimeSpeakerSnapshot {
     const binding = this.binding(name);
     if (binding === undefined || !isSpeakerReference(binding.value)) {
-      throw fault("TSR023", `'${name}' is not a declared speaker.`, span);
+      throw fault("TSR023", internalFault(`'${name}' is not a declared speaker.`), span);
     }
     return this.speakerById(binding.value.speakerId, span);
   }
 
   public speakerById(id: number, span: SourceSpan): RuntimeSpeakerSnapshot {
     const speaker = this.snapshot.speakers.find((item) => item.id === id);
-    if (speaker === undefined) throw fault("TSR023", `Speaker ID '${id}' is not declared.`, span);
+    if (speaker === undefined)
+      throw fault("TSR023", internalFault(`The session has no speaker with ID ${id}.`), span);
     return speaker;
   }
 
@@ -1509,7 +1539,7 @@ export class Evaluator {
       if (explicit.length === 0) {
         throw fault(
           "TSR022",
-          `Speaker '${speaker.identifier}' has no resolvable display name.`,
+          `Speaker '${speaker.identifier}' has an empty displayName. Give it a name, or leave displayName out to show '${speaker.identifier}'.`,
           span,
         );
       }
@@ -1676,7 +1706,14 @@ export class Evaluator {
       return expression.operator === "==" ? equal : !equal;
     }
     if (expression.operator === "in") {
-      if (!isRange(right)) throw fault("TSR035", "Unsupported binary operation.", expression.span);
+      if (!isRange(right))
+        throw fault(
+          "TSR035",
+          internalFault(
+            `The plan applies 'in' to ${describeShownValue(right)}, but 'in' needs a range on its right side.`,
+          ),
+          expression.span,
+        );
       return (
         typeof left === "number" &&
         left >= right.start &&
@@ -1729,7 +1766,11 @@ export class Evaluator {
         result = leftNumber % rightNumber;
         break;
       default:
-        throw fault("TSR035", "Unsupported binary operation.", expression.span);
+        throw fault(
+          "TSR035",
+          internalFault(`The engine has no arithmetic for the operator '${expression.operator}'.`),
+          expression.span,
+        );
     }
     if (!Number.isFinite(result)) throw noArithmeticResult(expression, left, right);
     return result;
@@ -1879,7 +1920,7 @@ export class Evaluator {
       if (hostBuiltin && builtin === undefined && recorded === undefined) {
         throw fault(
           "TSR011",
-          `Unknown built-in function '${expression.callee.name}'.`,
+          internalFault(`The Playroom does not provide the built-in function '${name}'.`),
           expression.callee.span,
         );
       }
@@ -1916,14 +1957,17 @@ export class Evaluator {
         if (error instanceof RandomControlSignal) throw error;
         if (error instanceof SerializableValueError) {
           const code = error.code === "cyclic" ? "TSR031" : "TSR013";
-          throw fault(code, error.message, expression.span);
+          throw fault(code, invalidReturn(name, error.message), expression.span);
         }
         // A text that would be too long fails as it does anywhere else.
         if (error instanceof RuntimeFault && error.code === "TSR084") throw error;
-        const message = error instanceof Error ? error.message : String(error);
+        // A core built-in's own failure already says what to do; a host's comes with the built-in's name.
+        if (!hostBuiltin && error instanceof RuntimeFault)
+          throw fault("TSR012", error.message, expression.span);
+        const message = messageText(error instanceof Error ? error.message : String(error));
         throw fault(
           "TSR012",
-          `Built-in '${expression.callee.name}' failed: ${message}`,
+          `The built-in function '${name}' failed: ${message.replace(/[.!?]?$/u, ".")} Check the values the script passes to '${name}'. If they are correct, report this with a debug export.`,
           expression.span,
         );
       }
@@ -1931,20 +1975,19 @@ export class Evaluator {
       try {
         copied = cloneSerializableValue(returned);
       } catch (error) {
-        if (error instanceof SerializableValueError) {
-          throw fault(
-            "TSR013",
-            `Built-in '${expression.callee.name}' returned an invalid value: ${error.message}`,
-            expression.span,
-          );
-        }
+        if (error instanceof SerializableValueError)
+          throw fault("TSR013", invalidReturn(name, error.message), expression.span);
         throw error;
       }
       // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
-      if (containsRuntimeIdentity(copied)) {
+      const identity = findRuntimeIdentity(copied);
+      if (identity !== null) {
+        const kind = describeRuntimeValue(identity);
         throw fault(
           "TSR013",
-          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer, media, or message handle or a speaker reference, which only the runtime creates.`,
+          internalFault(
+            `The built-in function '${name}' returned a value that contains ${kind}. Only the engine creates ${kind.replace(/^an? /u, "")}s, so a built-in cannot return one.`,
+          ),
           expression.span,
         );
       }
@@ -2015,7 +2058,7 @@ export class Evaluator {
     }
     throw fault(
       "TSR014",
-      "Only injected built-ins and supported collection methods are callable.",
+      internalFault("The plan calls something that is not a function or a method."),
       expression.callee.span,
     );
   }
@@ -2303,7 +2346,12 @@ export class Evaluator {
 
   #timer(handle: SerializableTimerHandle, span: SourceSpan): RuntimeTimerSnapshot {
     const timer = timerRecord(this.snapshot, handle.timerId);
-    if (timer === undefined) throw fault("TSR053", "Timer handle refers to no timer.", span);
+    if (timer === undefined)
+      throw fault(
+        "TSR053",
+        internalFault("A timer handle refers to a timer that the session does not have."),
+        span,
+      );
     return timer;
   }
 
@@ -2408,7 +2456,12 @@ export class Evaluator {
 
   #media(handle: SerializableMediaHandle, span: SourceSpan): RuntimeMediaSnapshot {
     const media = mediaRecord(this.snapshot, handle.mediaId);
-    if (media === undefined) throw fault("TSR053", "Media handle refers to no media.", span);
+    if (media === undefined)
+      throw fault(
+        "TSR053",
+        internalFault("A media handle refers to media that the session does not have."),
+        span,
+      );
     return media;
   }
 
@@ -2534,7 +2587,11 @@ export class Evaluator {
       if (id < handle.messageId) low = middle + 1;
       else high = middle - 1;
     }
-    throw fault("TSR053", "Message handle refers to no message.", span);
+    throw fault(
+      "TSR053",
+      internalFault("A message handle refers to a message that the session does not have."),
+      span,
+    );
   }
 
   /**
@@ -2824,7 +2881,13 @@ export class Evaluator {
         ? nextXorShift32(this.snapshot.rng)
         : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
-      throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
+      throw fault(
+        "TSR020",
+        internalFault(
+          `The random source returned ${describeShownValue(random)}, but it must return a number that is at least 0 and less than 1.`,
+        ),
+        span,
+      );
     }
     return random;
   }
@@ -3461,7 +3524,7 @@ export class Evaluator {
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      return fault("TSR031", error.message, span);
+      return fault("TSR031", internalFault(error.message), span);
     }
     throw error;
   }
@@ -3733,6 +3796,13 @@ function isZero(value: SerializableRuntimeValue): boolean {
   return value === 0 || (isDuration(value) && durationFamily(durationParts(value)) === "zero");
 }
 
+/** `TSR013` or `TSR031`: the host built-in `name` returned a value that a script cannot hold, for `reason`. */
+function invalidReturn(name: string, reason: string): string {
+  return internalFault(
+    `The built-in function '${name}' returned a value that a script cannot hold: ${reason.replace(/[.]$/u, "")}.`,
+  );
+}
+
 /** A method a list, set, or dict does not have, in the compiler's wording. */
 function noCollectionMethod(receiver: SerializableRuntimeValue, name: string): string {
   if (!isDict(receiver)) return `${isSet(receiver) ? "Sets" : "Lists"} have no method '${name}'.`;
@@ -3988,7 +4058,13 @@ function readTemporary(
 ): SerializableRuntimeValue {
   const temporary = temporaries.find((item) => item.id === temporaryId);
   if (temporary === undefined) {
-    throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    throw fault(
+      "TSR046",
+      internalFault(
+        `An internal value (temporary ${temporaryId}) is missing from the session's state.`,
+      ),
+      span,
+    );
   }
   return temporary.value;
 }
