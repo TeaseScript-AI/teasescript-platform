@@ -22,7 +22,7 @@ export function secondsToPacingMilliseconds(seconds: SerializableRuntimeValue): 
     milliseconds > MAX_RUNTIME_SESSION_TIME_MS
   ) {
     throw new RangeError(
-      `This say pacing of ${seconds} s is too long for scene time to reach. Use a shorter pause.`,
+      `This say pacing of ${seconds} seconds is too long for scene time to reach. Use a shorter pause.`,
     );
   }
   return milliseconds;

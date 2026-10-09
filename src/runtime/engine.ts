@@ -3710,7 +3710,7 @@ function startMedia(
   if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
     throw fault(
       "TSR050",
-      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? "0 s" : describeShownValue(startAt)}.`,
+      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? formatDuration(0) : describeShownValue(startAt)}.`,
       instruction.endAt.span,
     );
   }

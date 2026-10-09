@@ -1,7 +1,7 @@
 import type { Program, SayStatement, Statement, WaitStatement } from "./ast.js";
 import { calculateSmartPacingDurationMs, DEFAULT_CHAT_PACING_SETTINGS } from "./chat-pacing.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { DURATION_UNIT_MILLISECONDS, isCalendar } from "./duration.js";
+import { DURATION_UNIT_MILLISECONDS, formatDuration, isCalendar } from "./duration.js";
 import { parseMessageMarkup } from "./message-markup.js";
 import { staticQuantity, staticVisibleText } from "./static-evaluation.js";
 
@@ -66,7 +66,7 @@ function shortWait(say: SayStatement, wait: WaitStatement): Diagnostic | null {
   return createDiagnostic(
     DiagnosticSeverity.Warning,
     SHORT_WAIT_CODE,
-    `At the default reading speed, the previous message takes at least ${seconds(readingMs)} s to read, so this ${seconds(waitMs)} s wait adds no time unless the player skips the message. Add \`instant\` to that \`say\` to make the wait the only pause, or remove the wait.`,
+    `At the default reading speed, the previous message takes at least ${formatDuration(readingMs)} to read, so this wait of ${formatDuration(waitMs)} adds no time unless the player skips the message. Add \`instant\` to that \`say\` to make the wait the only pause, or remove the wait.`,
     wait.span,
   );
 }
@@ -78,9 +78,4 @@ function knownWaitMs(wait: WaitStatement): number | undefined {
     return known < 0 ? undefined : known * DURATION_UNIT_MILLISECONDS[wait.unit ?? "s"];
   if (known === undefined || wait.unit !== null) return undefined;
   return !isCalendar(known) && known.milliseconds >= 0 ? known.milliseconds : undefined;
-}
-
-/** Milliseconds as seconds, to the millisecond. */
-function seconds(milliseconds: number): string {
-  return String(Number((milliseconds / 1000).toFixed(3)));
 }

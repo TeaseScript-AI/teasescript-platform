@@ -1811,8 +1811,8 @@ reads the line at another point:
 
 ```text
 let laps = linearRegression([62 s, 60 s, 59 s, 57 s])
-say "You gain ${-laps.slope} per lap."              // 1.6 s
-say "Next lap: ${predict(laps, 4)}"                 // 55.5 s
+say "You gain ${-laps.slope} per lap."              // 1.6 seconds
+say "Next lap: ${predict(laps, 4)}"                 // 55.5 seconds
 
 let trend = linearRegression(sessions, x: "day", y: "count")
 say "About ${round(trend.slope, decimals: 1)} more each day."
@@ -3479,7 +3479,7 @@ body, after a message used as a value, and one whose duration is not known:
 ```text
 for i in 1..=10 {
     say ".${i}."
-    wait 0.5 s      // TSV060: the message takes at least 1.5 s to read
+    wait 0.5 s      // TSV060: the message takes at least 1.5 seconds to read
 }
 ```
 
