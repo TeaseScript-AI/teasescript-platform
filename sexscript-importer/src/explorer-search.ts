@@ -11,6 +11,7 @@ import {
   conjunctive,
   constantConditions,
   DataFlow,
+  difference,
   distance,
   goalsFor,
   KEY_PLACEHOLDER,
@@ -116,6 +117,12 @@ const RANDOM_DRAWS_PER_STEP = 4;
  */
 const CHOSEN_SHARE = 1 / 16;
 /**
+ * With depth phases: the share of play work that goes to the open depths other than the one gaining most, each in turn,
+ * so that a depth whose gain rises again is seen. An eighth, as for a chain's routes: most work goes to the depth gaining
+ * most, and every open depth is measured again now and then.
+ */
+const DEPTH_EXPLORE_SHARE = 1 / 8;
+/**
  * Until stalled: the operations without progress after which a run stops, at least, and more per coverable line; and
  * how many times the longest stretch without progress that progress still ended the window grows to.
  */
@@ -138,6 +145,16 @@ const MIN_REGION = 10;
 const GUIDED = -1;
 /** Sessions one chain toward a stored value may take. */
 const MAX_CHAIN = 100;
+/** A chain's route replays at most this many inputs. */
+const MAX_ROUTE_INPUTS = 1000;
+/**
+ * Every this many sessions of a chain, one replays another route than the best measured: effects depend on the state,
+ * and a route that was worse can become better as the stored value changes. One in eight keeps most of the work on the
+ * best route while every route seen gets measured over a chain of a few dozen sessions.
+ */
+const ROUTE_EXPLORE_EVERY = 8;
+/** Routes kept per chain, the most efficient seen. */
+const MAX_ROUTES = 8;
 /** Next sessions started from the storage of completed sessions without a target. */
 const MAX_NEXT_SESSIONS = 10;
 /** With quit-anywhere next visits: next sessions started from the storage of states a session did not complete. */
@@ -300,6 +317,19 @@ export interface ExploreOptions {
    */
   readonly quitAnywhere?: boolean;
   /**
+   * Depth phases: the search decides how its play work goes to session numbers (depths) by their gain per operation,
+   * new lines and condition ways, instead of fixed shares. A new player's first session goes first; the next depth opens
+   * when the deepest open one levels off (in the last quarter of its play work, under half its average gain per
+   * operation) and left storage of completed sessions to start from, and then gets a quarter of that depth's work first.
+   * States whose step reached new code go first in any open depth, as without phases. Otherwise the open depth with the
+   * most gain per operation in the last quarter of its own work gets play, and an
+   * eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets
+   * work back when it gains again. A depth starts a next session (from the storage with the most compared values no
+   * session of that depth started from had) when none of its open states reached new code. Directed work and random
+   * outcomes keep their shares. Off by default.
+   */
+  readonly depthPhases?: boolean;
+  /**
    * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
    * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
    * a missed way needs. New cells are counted but do not hold a run up: cells of counters keep coming long after
@@ -434,6 +464,8 @@ export interface UnvisitedBranch {
   parts: Part[];
   /** The unmet part measured furthest from holding, from `parts`: what keeps the way closed, as far as measured. */
   best?: Closest;
+  /** The session chains toward the stored values the way needs that started sessions (see {@link ChainReport}). */
+  chains?: ChainReport[];
   /** For a `clock` way, the shortest path found to it. */
   repro?: Repro;
 }
@@ -448,11 +480,44 @@ export interface Part {
   closest?: Closest;
 }
 
+/**
+ * A session chain toward a stored value: the sessions it ran, the closest value it reached, its result (`reached`
+ * the way; storage `holds` what the way needs but a session from it did not reach it; its next session still `queued`
+ * when the run ended; stopped at the session `limit`; or `stopped` as no route left brought the value closer), the
+ * route it repeats, the routes it replayed (that one too, the most progress per operation first), and its last switches
+ * between routes, with why.
+ */
+export interface ChainReport {
+  key: string;
+  sessions: number;
+  closest: string;
+  result: "reached" | "holds" | "queued" | "limit" | "stopped";
+  route: RouteReport | null;
+  routes: RouteReport[];
+  switches: { sessions: number; from: string | null; to: string; reason: string }[];
+}
+
+/**
+ * A route of a session chain: its first inputs and where its session ended, how many inputs its replay takes, the
+ * sessions that replayed it and those of them that brought the value no closer, and its progress per 1,000 runtime
+ * operations over whole sessions: over those sessions, or the session it comes from before any.
+ */
+export interface RouteReport {
+  at: string;
+  inputs: number;
+  sessions: number;
+  failures: number;
+  progressPer1000Operations: number;
+}
+
 /** The closest an explored state, or a storage one left, came to a part of what a missed way needs. */
 export interface Closest {
   /** The part's comparison, as in {@link Part.needs}. */
   needs: string;
-  /** A boolean variable's value is a boolean; a stored value is its JSON text. */
+  /**
+   * A boolean variable's value is a boolean; for two values compared, their difference; a stored value is its JSON
+   * text.
+   */
   value: number | boolean | string;
   /** How far `value` is from the comparison holding, as directed search measures it. */
   distance: number;
@@ -500,6 +565,8 @@ export interface ReachedBranch {
   sources: SourceKind[];
   /** The sessions of its shortest path: 1 within the first session. */
   sessions: number;
+  /** The session chains toward stored values that started sessions for it. */
+  chains?: ChainReport[];
   /** The shortest path found to it, a play one when there is. */
   repro: Repro;
 }
@@ -591,10 +658,33 @@ export interface ExploreResult {
     /** With quit-anywhere next visits: those started from the storage of a state a session did not complete. */
     quitVisits?: number;
     /**
-     * By session number (the first session first): the sessions started, and the explored states that completed one,
-     * such as how often a long first session came to its end, which later sessions need.
+     * By session number, the depth of a session (the first session of a new player first): the sessions started; the
+     * explored states that completed one, such as how often a long first session came to its end, which later sessions
+     * need; the runtime operations its sessions ran; the coverable lines its sessions reached first, and those of them
+     * reached in the last quarter of those operations, its marginal gain; the condition ways it took first; and its
+     * states (or stored values) that came closer to what a missed way needs.
      */
-    bySession: { started: number[]; completed: number[] };
+    bySession: {
+      started: number[];
+      completed: number[];
+      operations: number[];
+      linesFirst: number[];
+      linesFirstLastQuarter: number[];
+      waysFirst: number[];
+      closer: number[];
+    };
+    /**
+     * With depth phases, by session number as `bySession`: the operations at which each depth opened (null for one that
+     * did not), the play work of its expansions and next sessions, the lines and ways they reached first, the next
+     * sessions it started, and the play work of exploration turns in all.
+     */
+    phases?: {
+      openedAt: (number | null)[];
+      playOperations: number[];
+      playGain: number[];
+      nextSessions: number[];
+      explorationOperations: number;
+    };
   };
   endStates: { completed: number; failed: number; stuck: number; open: number };
   coverage: {
@@ -613,6 +703,16 @@ export interface ExploreResult {
     staticContradictions: number;
     files: FileCoverage[];
     unvisitedBranches: UnvisitedBranch[];
+    /**
+     * Lines play reached, by the session numbers that ran them, as observed (a line no first session ran may still not
+     * need a later one): those only a new player's first session ran, such as an intro; by the smallest session number
+     * that ran them; and per file, those only the first session ran and those it never ran.
+     */
+    bySession: {
+      onlyFirst: number;
+      least: number[];
+      files: { path: string; onlyFirst: number; notFirst: number }[];
+    };
   };
   directed: {
     /** Condition ways steps had left one way when directed search looked at them. */
@@ -812,6 +912,103 @@ class SplitFrontier {
     return this.#chosen.size > 0 && (this.#play.size === 0 || this.#turn())
       ? this.#chosen.pop()
       : this.#play.pop();
+  }
+}
+
+/**
+ * Open states with depth phases ({@link ExploreOptions.depthPhases}): those with a lead, those after a chosen random
+ * outcome, and the others by their session number, each in its own queue, so that the search chooses the depth to
+ * expand. A depth also counts its open states whose step reached new code.
+ */
+class DepthFrontier {
+  readonly #lead: Pick<Frontier, "size" | "push" | "pop">;
+  readonly #chosen: Pick<Frontier, "size" | "push" | "pop">;
+  readonly #depths: Pick<Frontier, "size" | "push" | "pop">[] = [];
+  readonly #fresh: number[] = [];
+  readonly #freshNodes = new Set<number>();
+  readonly #make: () => Pick<Frontier, "size" | "push" | "pop">;
+  readonly #depthOf: (node: number) => number;
+  readonly #isChosen: (node: number) => boolean;
+  #size = 0;
+
+  constructor(
+    make: (chosen: boolean) => Pick<Frontier, "size" | "push" | "pop">,
+    depthOf: (node: number) => number,
+    isChosen: (node: number) => boolean,
+  ) {
+    this.#lead = make(false);
+    this.#chosen = make(true);
+    this.#make = () => make(false);
+    this.#depthOf = depthOf;
+    this.#isChosen = isChosen;
+  }
+
+  get size(): number {
+    return this.#size;
+  }
+
+  get leads(): number {
+    return this.#lead.size;
+  }
+
+  get chosen(): number {
+    return this.#chosen.size;
+  }
+
+  /** The open states of a depth, and its fresh ones: play states whose step reached new code, not resumed. */
+  sizeOf(depth: number): number {
+    return this.#depths[depth]?.size ?? 0;
+  }
+
+  freshOf(depth: number): number {
+    return this.#fresh[depth] ?? 0;
+  }
+
+  /** The deepest depth with a queue. */
+  get deepest(): number {
+    return this.#depths.length - 1;
+  }
+
+  /** Queues a state at `rank` (see `order`): by its lead (`rank[1]` 0), its chosen outcome, or else its depth. */
+  push(node: number, rank: readonly number[]): void {
+    this.#size += 1;
+    if (this.#isChosen(node)) return this.#chosen.push(node, rank);
+    if (rank[1] === 0) return this.#lead.push(node, rank);
+    const depth = this.#depthOf(node);
+    while (this.#depths.length <= depth) this.#depths.push(this.#make());
+    this.#depths[depth]!.push(node, rank);
+    // Fresh: a play state (not resumed from a corpus, not on the clock) whose step reached new code, which comes first
+    // in its depth's queue.
+    if (rank[0] === 0 && rank[1] === 1 && rank[2] === 0 && !this.#freshNodes.has(node)) {
+      this.#freshNodes.add(node);
+      this.#fresh[depth] = (this.#fresh[depth] ?? 0) + 1;
+    }
+  }
+
+  popLead(): number | undefined {
+    return this.#taken(this.#lead.pop());
+  }
+
+  popChosen(): number | undefined {
+    return this.#taken(this.#chosen.pop());
+  }
+
+  /** The first state with a lead, else after a chosen outcome, else of the shallowest depth. */
+  pop(): number | undefined {
+    if (this.#lead.size > 0) return this.popLead();
+    const depth = this.#depths.findIndex((queue) => queue !== undefined && queue.size > 0);
+    return depth >= 0 ? this.popDepth(depth) : this.popChosen();
+  }
+
+  popDepth(depth: number): number | undefined {
+    const node = this.#taken(this.#depths[depth]?.pop());
+    if (node !== undefined && this.#freshNodes.delete(node)) this.#fresh[depth]! -= 1;
+    return node;
+  }
+
+  #taken(node: number | undefined): number | undefined {
+    if (node !== undefined) this.#size -= 1;
+    return node;
   }
 }
 
@@ -1056,6 +1253,20 @@ class Cells {
     }
     return { cell, values, novel, fresh };
   }
+
+  /** The compared values of a storage: each stored key a slot matches, with its value's bucket for that slot. */
+  storageValues(entries: readonly StorageEntry[]): string[] {
+    const values: string[] = [];
+    for (const { key, value } of entries) {
+      let slots = this.#byKey.get(key);
+      if (slots === undefined) {
+        slots = this.#patterns.filter(({ matches }) => matches(key)).map(({ slot }) => slot);
+        this.#byKey.set(key, slots);
+      }
+      for (const slot of slots) values.push(`${slot}:${key}=${bucket(this.slots[slot]!, value)}`);
+    }
+    return values;
+  }
 }
 
 /** A value's bucket for a slot (see {@link Cells}); a length as the runtime counts it, in code points or entries. */
@@ -1137,19 +1348,43 @@ interface Chain {
   /** The storage entry with that value, as text, and the sessions it took. */
   value: string;
   sessions: number;
-  /** Sessions this chain started. */
+  /** Sessions of this chain that ran (one more may be queued). */
   started: number;
-  /** Passes without a closer value since the last session it started. */
-  stale: number;
   /** An attempt of this chain is still queued. */
   queued: boolean;
   /** The storages measured so far, and the closest of them. */
   scanned: number;
   closest: { left: Left; distance: number; value: string } | null;
   readonly matches: (key: string) => boolean;
+  /**
+   * Routes: the sessions seen to bring the stored value closer, by their inputs (a hash of them as JSON), with the work
+   * and progress of the first such session and, once replayed, the measured work and progress of the replays. The
+   * chosen one; those replayed since the last closer value; the exploration turns taken; and the switches.
+   */
+  readonly routes: Map<string, Route>;
+  route: string | null;
+  readonly tried: Set<string>;
+  turns: number;
+  readonly switches: { sessions: number; from: number | null; to: number; reason: string }[];
 }
 
-/** A comparison of a variable with a constant that a target's missed way needs, and the closest state so far. */
+/** A session seen to bring a chain's stored value closer, replayed as a route: the path to `node`. */
+interface Route {
+  readonly node: number;
+  readonly work: number;
+  readonly progress: number;
+  tries: number;
+  /** Replays in a row that brought the value no closer. */
+  fails: number;
+  failures: number;
+  workSum: number;
+  progressSum: number;
+}
+
+/**
+ * A comparison of a variable with a constant, or with another value by their difference, that a target's missed way
+ * needs, and the closest state so far.
+ */
 interface Watch {
   readonly target: number;
   readonly goal: Goal;
@@ -1159,7 +1394,9 @@ interface Watch {
   readonly operator: string;
   readonly constant: number;
   readonly shown: number | boolean;
-  /** `closer` once a state came closer than the first one watched. */
+  /** The other value of a comparison of two values ({@link Goal.comparison}); undefined for a constant. */
+  readonly against: unknown;
+  /** `closer` once a state came closer than the first one watched; `value` is the difference for two values. */
   closest: {
     value: number | boolean;
     distance: number;
@@ -1172,6 +1409,67 @@ interface Watch {
 /** A storage's identity: a hash of its entries as JSON, so that the storages kept do not hold their JSON twice. */
 function storageKey(entries: readonly StorageEntry[]): string {
   return createHash("sha1").update(JSON.stringify(entries)).digest("base64");
+}
+
+/** The chains of a target that started sessions, as the report gives them (see {@link ChainReport}). */
+function chainReports(
+  target: Target | undefined,
+  routeOf: (node: number) => { at: string; inputs: number },
+): ChainReport[] {
+  return [...(target?.chains ?? [])]
+    .filter(([, chain]) => chain.started > 0 || chain.queued)
+    .map(([key, chain]) => {
+      const report = (route: Route): RouteReport => ({
+        ...routeOf(route.node),
+        sessions: route.tries,
+        failures: route.failures,
+        progressPer1000Operations: Number((routeRateOf(route) * 1000).toPrecision(3)),
+      });
+      // The route the chain repeats: the usable one with the most progress per operation, not one an exploration turn
+      // replayed last.
+      const [route] = [...chain.routes.values()]
+        .filter((known) => known.fails < 2)
+        .sort((left, right) => routeRateOf(right) - routeRateOf(left));
+      return {
+        key: key.replaceAll(KEY_PLACEHOLDER, "*"),
+        sessions: chain.started,
+        closest: chain.value,
+        result:
+          target?.reach != null && target.reach.label !== "chosen"
+            ? "reached"
+            : chain.queued
+              ? "queued"
+              : chain.best === 0
+                ? "holds"
+                : chain.started >= MAX_CHAIN
+                  ? "limit"
+                  : "stopped",
+        route: route === undefined ? null : report(route),
+        routes: [...chain.routes.values()]
+          .filter((known) => known.tries > 0)
+          .sort((left, right) => routeRateOf(right) - routeRateOf(left))
+          .map(report),
+        switches: chain.switches
+          .slice(-5)
+          .map((change) => ({
+            sessions: change.sessions,
+            from: change.from === null ? null : routeOf(change.from).at,
+            to: routeOf(change.to).at,
+            reason: change.reason,
+          })),
+      };
+    });
+}
+
+/**
+ * A route's progress per runtime operation over whole sessions, their starts included: as its replays measured it, or
+ * as the session it comes from did before any. The work to get there is the distance left over this, so the route with
+ * the most is the one with the least work in all, however long its sessions are.
+ */
+function routeRateOf(route: Route): number {
+  return route.tries === 0
+    ? route.progress / Math.max(1, route.work)
+    : route.progressSum / Math.max(1, route.workSum);
 }
 
 /** How the comparisons of a condition combine to take a way: all needed, any one enough, both, or one comparison. */
@@ -1263,13 +1561,17 @@ interface Attempt {
   readonly start: Start | null;
   readonly inputs: readonly ExplorerInput[];
   readonly chain?: string;
+  /** A chain's attempt: the goal it measures, and the route it replays, if any (see {@link Chain.routes}). */
+  readonly goal?: Goal;
+  readonly route?: string;
   /** With forward time, an attempt that continues later: like a clock attempt, its states take no first place. */
   readonly later?: true;
 }
 
 /**
- * What steers the search toward a target by closeness: a variable's to a comparison, or, for a way that needs all parts
- * of its condition, the condition's branch distance (`conditionDistance`).
+ * What steers the search toward a target by closeness: a variable's to a comparison (with `against`, its difference from
+ * another value, see {@link Goal.comparison}), or, for a way that needs all parts of its condition, the condition's
+ * branch distance (`conditionDistance`).
  */
 type DistanceTarget =
   | {
@@ -1278,6 +1580,7 @@ type DistanceTarget =
       readonly name: string;
       readonly operator: string;
       readonly constant: number;
+      readonly against: unknown;
     }
   | {
       readonly kind: "condition";
@@ -1328,7 +1631,8 @@ interface Left {
  *   starts from it and replays the witness path; otherwise a session starts from the storage closest to it and
  *   replays the path that led to that storage, as long as each session gets closer ({@link MAX_CHAIN} at most);
  * - the clock: the player continues at other wall clock times before the witness step (`clock`);
- * - a variable the code counts or sets: states closer to the comparison, by `distance`, take the first place.
+ * - a variable the code counts or sets: states closer to the comparison, by `distance` (compared with another value,
+ *   of their `difference`), take the first place.
  *
  * An answer attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target
  * is reached (a session chain goes on from the storage it reached instead), and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; clock states
@@ -1451,15 +1755,26 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         : cells.expansions[node.cell]!;
   const queue = (expansions: (cell: number) => number): Pick<Frontier, "size" | "push" | "pop"> =>
     cells === null ? new Frontier() : new CellFrontier((node) => nodes[node]!.cell, expansions);
-  // Also for a corpus whose paths chose outcomes: their states keep to their share as well.
-  const frontier = session.randomChoices
-    ? new SplitFrontier(
-        queue((cell) => cells?.expansions[cell] ?? 0),
-        queue((cell) => chosenExpansions[cell] ?? 0),
+  const phased = options.depthPhases === true;
+  const depthFrontier = phased
+    ? new DepthFrontier(
+        (chosen) =>
+          queue((cell) => (chosen ? chosenExpansions[cell] : cells?.expansions[cell]) ?? 0),
+        (node) => starts[nodes[node]!.start]!.session,
         (node) => nodes[node]!.chosen,
-        () => withinChosenShare(),
       )
-    : queue((cell) => cells?.expansions[cell] ?? 0);
+    : null;
+  // Also for a corpus whose paths chose outcomes: their states keep to their share as well.
+  const frontier: Pick<Frontier, "size" | "push" | "pop"> =
+    depthFrontier ??
+    (session.randomChoices
+      ? new SplitFrontier(
+          queue((cell) => cells?.expansions[cell] ?? 0),
+          queue((cell) => chosenExpansions[cell] ?? 0),
+          (node) => nodes[node]!.chosen,
+          () => withinChosenShare(),
+        )
+      : queue((cell) => cells?.expansions[cell] ?? 0));
   const crashes = new Map<string, CrashReport>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
@@ -1676,6 +1991,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * state since each became a target. Only read, never steering.
    */
   const watched = new Map<string, Watch[]>();
+  /** Per state, the runtime operations its session took to reach it. */
+  const costOf: number[] = [];
   /** Per instruction, the function it is in, or 0. */
   const functionAt = new Int32Array(instructions.length);
   for (const definition of list(plan.functions))
@@ -1703,6 +2020,87 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     sinceProgress.clear();
   };
   const waysTaken = new Uint8Array(instructions.length * 2);
+  /**
+   * What each session number (each depth: 1 for a new player's first session) did, indexed by it: the runtime
+   * operations its steps ran, the condition ways it took first, and its states that came closer to what a missed way
+   * needs. Operations go to the session whose runtime runs them ({@link working}).
+   */
+  const depthWork: number[] = [0, 0];
+  const depthWays: number[] = [];
+  const depthCloser: number[] = [];
+  let depthNow = 1;
+  let depthMark = 0;
+  /** Charges the operations run since the last call to the session that ran them; the next ones run in `depth`. */
+  const working = (depth: number): void => {
+    depthWork[depthNow] = (depthWork[depthNow] ?? 0) + session.operations - depthMark;
+    depthMark = session.operations;
+    depthNow = depth;
+  };
+  /**
+   * Coverable lines (a file's line that an instruction starts on), by instruction (-1 for none): per line, the session
+   * that reached it first and the operations that session had run by then, the smallest session that ran it, and
+   * whether a session after the first did. Play with or without chosen random outcomes, as line coverage counts it.
+   */
+  const lineIds = new Int32Array(instructions.length).fill(-1);
+  const lineFiles: string[] = [];
+  {
+    const known = new Map<string, number>();
+    instructions.forEach((instruction, index) => {
+      const line = compactSpan(instruction.span)?.line;
+      if (line == null) return;
+      const key = `${files[index]}\u0000${line}`;
+      let id = known.get(key);
+      if (id === undefined) {
+        id = lineFiles.length;
+        known.set(key, id);
+        lineFiles.push(files[index]!);
+      }
+      lineIds[index] = id;
+    });
+  }
+  /**
+   * With depth phases ({@link ExploreOptions.depthPhases}), per depth: the play work its expansions and next sessions
+   * took, the lines and condition ways they reached first, marks of both at each analysis pass, its work in exploration
+   * turns, the work it still gets first after it opened, and the next sessions it started; then the deepest open depth,
+   * the operations at which each depth opened, all play work, the work of exploration turns, and the storages left to
+   * start a next session of each depth from.
+   */
+  const depths: {
+    work: number;
+    gain: number;
+    readonly marks: { work: number; gain: number }[];
+    explored: number;
+    owed: number;
+    seeds: number;
+  }[] = [];
+  const depthOf = (depth: number) =>
+    (depths[depth] ??= {
+      work: 0,
+      gain: 0,
+      marks: [{ work: 0, gain: 0 }],
+      explored: 0,
+      owed: 0,
+      seeds: 0,
+    });
+  let deepestOpen = 1;
+  const openedAt: number[] = [0, 0];
+  let playWork = 0;
+  let explorationWork = 0;
+  const pendingSeeds: number[] = [];
+  /**
+   * Lines reached first and condition ways taken first so far, by any step; and by the session number of the step, with
+   * the first session's start and a corpus replay too, which no play work is charged for.
+   */
+  let gainCount = 0;
+  const depthNew: number[] = [];
+  /** A storage a session of `depth` left that a session of the next depth can start from. */
+  const seedLeft = (depth: number): void => {
+    pendingSeeds[depth + 1] = (pendingSeeds[depth + 1] ?? 0) + 1;
+  };
+  const lineFirst = new Uint16Array(lineFiles.length);
+  const lineFirstWork = new Float64Array(lineFiles.length);
+  const lineLeast = new Uint16Array(lineFiles.length);
+  const lineLater = new Uint8Array(lineFiles.length);
   // Answers in the same session go first, then session chains, then clock attempts.
   const playAttempts: Attempt[] = [];
   /**
@@ -1711,6 +2109,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    */
   const timeJobs: { node: number | null; start: number }[] = [];
   const chainAttempts: Attempt[] = [];
+  /**
+   * A chain's next session along a route, right after a session of that chain: these go before other attempts, so that
+   * a route that brings the value closer is repeated at once. A chain's other sessions (from a storage's own session,
+   * or toward the condition once storage holds the value) wait their turn among the chain attempts.
+   */
+  const repeatAttempts: Attempt[] = [];
   const clockAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
   /** Waiting states by the ask instruction they wait at, a few each. */
@@ -1842,6 +2246,22 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ? null
       : (lead ?? (parent !== null && active(parent.lead) ? parent.lead : null));
     const length = (parent === null ? 0 : parent.depth) + (input === null ? 0 : 1);
+    // The lines the step ran, for the session that ran them; its operations go to that session too.
+    const depth = start.session;
+    working(depth);
+    if (!clock)
+      for (const instruction of step.instructions) {
+        const line = lineIds[instruction] ?? -1;
+        if (line < 0) continue;
+        if (lineFirst[line] === 0) {
+          gainCount += 1;
+          depthNew[depth] = (depthNew[depth] ?? 0) + 1;
+          lineFirst[line] = depth;
+          lineFirstWork[line] = depthWork[depth] ?? 0;
+          lineLeast[line] = depth;
+        } else if (depth < lineLeast[line]!) lineLeast[line] = depth;
+        if (depth > 1) lineLater[line] = 1;
+      }
     const stepItems = items === null ? NO_ITEMS : items.of(step, clock);
     let first = false;
     for (const item of stepItems) {
@@ -1901,7 +2321,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         step.forced,
       ) ?? null;
     lastStepNew = step.newInstructions > 0 || place?.novel === true || place?.fresh === true;
-    const newWay = step.ways.some((way) => waysTaken[way] === 0);
+    const newWays = step.ways.filter((way) => waysTaken[way] === 0).length;
+    const newWay = newWays > 0;
+    depthWays[depth] = (depthWays[depth] ?? 0) + newWays;
+    depthNew[depth] = (depthNew[depth] ?? 0) + newWays;
+    gainCount += newWays;
     for (const way of step.ways) waysTaken[way] = 1;
     if (step.newInstructions > 0) progressed("code");
     else if (newWay) progressed("ways");
@@ -1944,6 +2368,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       waitsAt: typeof waitsAt === "number" ? waitsAt : null,
     };
     nodes.push(node);
+    // The runtime operations from the session's start to this state, as the steps that reached it took them.
+    costOf[node.id] = (parent === null ? 0 : costOf[parent.id]!) + step.operations;
     if (later) wallEnd[node.id] = wallClockOf(step.snapshot);
     byState.set(stateKey, node.id);
     if (watched.size > 0) watch(step.snapshot, start.session);
@@ -1997,6 +2423,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         completedLeft.push(left.length - 1);
         completedKeys.add(key);
       }
+      if (node.status === "completed" || quitAnywhere) seedLeft(starts[node.start]!.session);
       return;
     }
     if (node.status !== "completed" || completedKeys.has(key)) return;
@@ -2008,6 +2435,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       sessions: starts[node.start]!.session,
     });
     completedLeft.push(left.length - 1);
+    if (!quitAnywhere) seedLeft(starts[node.start]!.session);
   };
 
   /**
@@ -2052,6 +2480,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * the explorer or the runtime, counted with the engine errors; null then.
    */
   const restore = (node: Node, snapshot: TaggedSnapshot): Runtime | null => {
+    working(starts[node.start]!.session);
     try {
       return session.restoreTagged(snapshot);
     } catch (error) {
@@ -2068,6 +2497,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * way.
    */
   const step = (node: Node, runtime: Runtime, input: ExplorerInput): Step | null => {
+    working(starts[node.start]!.session);
     try {
       const next = session.apply(runtime, input, node.clock, node.chosen);
       if (next === null) rejectedInputs += 1;
@@ -2127,15 +2557,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const startSession = (
     start: Start,
     lead: Lead | null,
-  ): { node: Node; runtime: Runtime | null } => {
+  ): { node: Node; runtime: Runtime | null; first: Step } => {
     starts.push(start);
+    working(start.session);
     const first = session.start(start, chosenStart(start));
     const node = transition(null, null, first, starts.length - 1, lead);
     firstNodeOf.set(starts.length - 1, node.id);
     // A session that ends in its first step keeps no snapshot; its time steps read the state it ended in.
     if (later && first.snapshot.status !== "waiting")
       startSnapshots.set(starts.length - 1, first.snapshot);
-    return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null };
+    return { node, runtime: first.snapshot.status === "waiting" ? first.runtime : null, first };
   };
 
   /** Variables' values in a state, by name: the innermost binding, numbers and booleans as numbers. */
@@ -2160,12 +2591,35 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const globals = new Map(
       list(snapshot.globals).map((binding) => [binding.name, binding.value] as const),
     );
+    let stored: ((subject: unknown) => AtomValue) | null = null;
     for (const [name, watches] of watched) {
       for (const entry of watches) {
         // A function's variables only while it runs; a value of another type than the constant compares as no value.
         const variables = scopes.get(entry.scope);
         if (variables === undefined) continue;
-        const value = variables.has(name) ? variables.get(name) : globals.get(name);
+        const read = (variable: string) =>
+          variables.has(variable) ? variables.get(variable) : globals.get(variable);
+        let value = read(name);
+        if (entry.against !== undefined) {
+          // Two values: their difference, when the other one can be read too, as a variable there, or else a stored
+          // value or a variable that only holds one load; both numbers, or both booleans.
+          const other = record(entry.against);
+          const known =
+            other.kind === "identifier" &&
+            typeof other.name === "string" &&
+            (variables.has(other.name) || globals.has(other.name));
+          const gap = difference(
+            value,
+            known
+              ? read(String(other.name))
+              : (stored ??= atomReader(
+                  new Map(),
+                  new Map(storageOf(snapshot).map((item) => [item.key, item.value])),
+                ))(entry.against),
+          );
+          if (gap === undefined) continue;
+          value = gap;
+        }
         if (
           typeof value !== typeof entry.shown ||
           (typeof value !== "number" && typeof value !== "boolean")
@@ -2177,8 +2631,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           entry.closest !== null &&
           away < entry.closest.distance &&
           !settled(targets.get(entry.target))
-        )
+        ) {
           progressed("closer");
+          depthCloser[number] = (depthCloser[number] ?? 0) + 1;
+        }
         if (entry.closest === null || away < entry.closest.distance)
           entry.closest = {
             value,
@@ -2245,6 +2701,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           new Map(storageOf(snapshot).map((entry) => [entry.key, entry.value])),
         );
         return branchDistance(conditionDistance(goal.condition, goal.wanted, read));
+      }
+      if (goal.against !== undefined) {
+        read ??= atomReader(
+          variablesOf(snapshot),
+          new Map(storageOf(snapshot).map((entry) => [entry.key, entry.value])),
+        );
+        const gap = difference(read({ kind: "identifier", name: goal.name }), read(goal.against));
+        return gap === undefined ? Infinity : distance(gap, goal.operator, goal.constant);
       }
       const value = values.get(goal.name);
       return value === undefined ? Infinity : distance(value, goal.operator, goal.constant);
@@ -2342,6 +2806,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const chain = attempt.chain === undefined ? undefined : target.chains.get(attempt.chain);
     if (chain !== undefined) chain.queued = false;
     if (settled(target)) return;
+    if (chain !== undefined) chain.started += 1;
     attemptCount += 1;
     const work = session.operations;
     // A chain's next session comes from the storage it reached, so its states take no first place of their own.
@@ -2351,8 +2816,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         : { remaining: attempt.later === true ? 0 : ATTEMPT_EXPANSIONS, target: attempt.target };
     let node: Node;
     let runtime: Runtime | null;
+    // The last step the attempt took: in a new session, its start's at least, which can store already.
+    let reached: Step | null = null;
     if (attempt.start !== null) {
-      ({ node, runtime } = startSession(attempt.start, lead));
+      ({ node, runtime, first: reached } = startSession(attempt.start, lead));
       directedTransitions += 1;
     } else {
       node = nodes[attempt.from ?? 0]!;
@@ -2373,9 +2840,29 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (next === null) break;
       directedTransitions += 1;
       node = transition(node, input, next, node.start, lead);
+      reached = next;
       runtime = next.snapshot.status === "waiting" ? next.runtime : null;
     }
     directedWork += session.operations - work;
+    // A chain's session: what its route did, measured from the storage it started at to the one it reached; then the
+    // next session at once, while the value gets closer.
+    if (chain === undefined || attempt.goal === undefined || reached === null) return;
+    const route = attempt.route === undefined ? undefined : chain.routes.get(attempt.route);
+    if (route !== undefined) {
+      const gain =
+        chain.best -
+        chainDistance(target, chain, attempt.goal, storageOf(reached.snapshot)).distance;
+      route.tries += 1;
+      route.workSum += session.operations - work;
+      if (Number.isFinite(gain) && gain > 0) {
+        route.progressSum += gain;
+        route.fails = 0;
+      } else {
+        route.fails += 1;
+        route.failures += 1;
+      }
+    }
+    chainStep(attempt.target, target, attempt.goal, true);
   };
 
   /** The witness of a target: its state, the inputs from its session start through its step, and that start. */
@@ -2392,7 +2879,78 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * session that replays the witness path when that storage satisfies the condition, or else the path that led to that
    * storage, to get closer still. Stops when sessions stop getting closer.
    */
-  const chainStep = (code: number, target: Target, goal: Goal): boolean => {
+  /** How far a storage is from what a chain's goal needs: with its guards, and the parts of a whole condition. */
+  const chainDistance = (
+    target: Target,
+    chain: Chain,
+    goal: Goal,
+    entries: readonly StorageEntry[],
+  ): { distance: number; value: string } => {
+    const condition =
+      instructions[target.instruction]!.condition ?? instructions[target.instruction]!.expression;
+    const whole = options.conjunctive === true && conjunctive(condition, target.way === 0);
+    const measured = storageDistance(entries, chain.matches, goal);
+    // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
+    for (const guard of target.guards) measured.distance += guardDistance(entries, guard);
+    // With the parts on other keys: fewer parts unsatisfied first, then the nearer in sum.
+    if (whole && measured.distance < Infinity) {
+      const parts = conditionDistance(
+        condition,
+        target.way === 0,
+        atomReader(new Map(), storageMap(entries), chain.matches),
+      );
+      measured.distance = branchDistance({
+        unsatisfied: parts.unsatisfied + (measured.distance > 0 ? 1 : 0),
+        sum: parts.sum + measured.distance,
+      });
+    }
+    return measured;
+  };
+
+  const routeRate = routeRateOf;
+
+  /**
+   * The route a chain's next session replays. After a closer value: the one with the most progress per operation
+   * (see {@link routeRateOf}), except every {@link ROUTE_EXPLORE_EVERY}th session, which replays another usable route,
+   * each in turn in the order they were found. After a session that came no closer (`stale`): the usable route with the
+   * most progress per operation not replayed since the last closer value; none when every one was. A route stays
+   * usable until two replays in a row bring the value no closer.
+   */
+  const chooseRoute = (chain: Chain, stale: boolean): { route: string; reason: string } | null => {
+    const usable = [...chain.routes].filter(
+      ([id, route]) => route.fails < 2 && !(stale && chain.tried.has(id)),
+    );
+    const [best] = [...usable].sort(([, left], [, right]) => routeRate(right) - routeRate(left));
+    if (best === undefined) return null;
+    if (stale)
+      return {
+        route: best[0],
+        reason: "no closer value: the best route not replayed since the last closer one",
+      };
+    const others = usable.filter(([id]) => id !== best[0]);
+    if (others.length > 0 && chain.started % ROUTE_EXPLORE_EVERY === ROUTE_EXPLORE_EVERY - 1) {
+      const [route] = others[chain.turns % others.length]!;
+      chain.turns += 1;
+      return { route, reason: "another route, measured again" };
+    }
+    return {
+      route: best[0],
+      reason:
+        best[1].tries === 0
+          ? "most progress per operation seen"
+          : "most progress per operation measured",
+    };
+  };
+
+  /**
+   * One step of a session chain toward a stored value: from the closest storage an explored play state left, a
+   * session that replays the witness path when that storage satisfies the condition, or else a route that brought the
+   * value closer before, to get closer still: the one with the most progress per operation, now and then another
+   * (see {@link chooseRoute}); the storage's own session when no route is known. After a session that came no closer,
+   * the other routes in turn; then the chain waits until play leaves a closer storage. `repeat`: right after a session
+   * of the chain, whose next one then goes first when it replays a route (see `repeatAttempts`).
+   */
+  const chainStep = (code: number, target: Target, goal: Goal, repeat = false): boolean => {
     if (goal.source.kind !== "storage" || settled(target)) return false;
     const key = goal.source.key;
     let chain = target.chains.get(key);
@@ -2402,54 +2960,68 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         value: "",
         sessions: 0,
         started: 0,
-        stale: 0,
         queued: false,
         scanned: 0,
         closest: null,
         matches: keyMatcher(key),
+        routes: new Map(),
+        route: null,
+        tried: new Set(),
+        turns: 0,
+        switches: [],
       };
       target.chains.set(key, chain);
     }
-    if (chain.queued || chain.stale >= 2) return false;
-    // A way that needs all parts of its condition: a storage is also as far as the parts on other keys are.
-    const condition =
-      instructions[target.instruction]!.condition ?? instructions[target.instruction]!.expression;
-    const whole = options.conjunctive === true && conjunctive(condition, target.way === 0);
+    const found = chain;
+    if (found.queued) return false;
     // Only the storages found since the last pass are measured.
-    for (; chain.scanned < left.length; chain.scanned += 1) {
-      const entry = left[chain.scanned]!;
-      const measured = storageDistance(entry.entries, chain.matches, goal);
-      // With realignment, a storage is only as close as the earlier conditions of the chain let it be.
-      for (const guard of target.guards) measured.distance += guardDistance(entry.entries, guard);
-      // With the parts on other keys: fewer parts unsatisfied first, then the nearer in sum.
-      if (whole && measured.distance < Infinity) {
-        const parts = conditionDistance(
-          condition,
-          target.way === 0,
-          atomReader(new Map(), storageMap(entry.entries), chain.matches),
-        );
-        measured.distance = branchDistance({
-          unsatisfied: parts.unsatisfied + (measured.distance > 0 ? 1 : 0),
-          sum: parts.sum + measured.distance,
-        });
-      }
-      const closest = chain.closest;
+    for (; found.scanned < left.length; found.scanned += 1) {
+      const entry = left[found.scanned]!;
+      const measured = chainDistance(target, found, goal, entry.entries);
+      const closest = found.closest;
       if (
         measured.distance < Infinity &&
         (closest === null ||
           measured.distance < closest.distance ||
           (measured.distance === closest.distance && entry.sessions < closest.left.sessions))
       )
-        chain.closest = { left: entry, ...measured };
+        found.closest = { left: entry, ...measured };
+      // A session that brought the value closer is a route: its inputs, from its start's storage to the storage it
+      // left. Sessions with the same inputs are one route, whose replays measure it.
+      if (measured.distance === Infinity) continue;
+      const start = starts[nodes[entry.node]!.start]!;
+      const progress =
+        chainDistance(target, found, goal, start.storage).distance - measured.distance;
+      if (!Number.isFinite(progress) || progress <= 0) continue;
+      const inputs = pathTo(nodes, nodes[entry.node]!).slice(0, MAX_ROUTE_INPUTS);
+      const id = createHash("sha1").update(JSON.stringify(inputs)).digest("base64");
+      if (found.routes.has(id)) continue;
+      found.routes.set(id, {
+        node: entry.node,
+        work: costOf[entry.node] ?? 0,
+        progress,
+        tries: 0,
+        fails: 0,
+        failures: 0,
+        workSum: 0,
+        progressSum: 0,
+      });
+      // The most efficient routes are kept, and the chosen one.
+      if (found.routes.size > MAX_ROUTES) {
+        const [worst] = [...found.routes]
+          .filter(([known]) => known !== found.route)
+          .sort(([, a], [, b]) => routeRate(a) - routeRate(b));
+        if (worst !== undefined) found.routes.delete(worst[0]);
+      }
     }
-    const best = chain.closest;
+    const best = found.closest;
     const need = describeNeed(key, goal);
     if (best === null) {
       target.note = `needs ${need}; no explored session stored it`;
       return false;
     }
     // With forward time, the next session follows the rhythm of the one that left the storage: as long after it.
-    const fromBest = (inputs: readonly ExplorerInput[]): Attempt => ({
+    const fromBest = (inputs: readonly ExplorerInput[], route?: string): Attempt => ({
       target: code,
       from: null,
       start: later
@@ -2460,43 +3032,69 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             wallClockMs: EPOCH_MS,
             session: best.left.sessions + 1,
           },
-      inputs,
+      inputs: inputs.slice(0, MAX_ROUTE_INPUTS),
       chain: key,
+      goal,
+      ...(route === undefined ? {} : { route }),
     });
+    // A session of a route from the closest storage; the storage's own session when no route is known.
+    const replay = (choice: { route: string; reason: string } | null): void => {
+      const route = choice === null ? undefined : found.routes.get(choice.route)!;
+      if (choice !== null && route !== undefined && choice.route !== found.route) {
+        const from = found.route === null ? undefined : found.routes.get(found.route);
+        found.switches.push({
+          sessions: best.left.sessions + 1,
+          from: from?.node ?? null,
+          to: route.node,
+          reason: choice.reason,
+        });
+        found.route = choice.route;
+      }
+      if (choice !== null) found.tried.add(choice.route);
+      found.queued = true;
+      (repeat && route !== undefined ? repeatAttempts : chainAttempts).push(
+        fromBest(pathTo(nodes, nodes[route?.node ?? best.left.node]!), choice?.route),
+      );
+    };
     // A storage closer than the chain's best so far (not its first measure) is progress.
-    if (best.distance < chain.best && Number.isFinite(chain.best)) progressed("closer");
+    if (best.distance < found.best && Number.isFinite(found.best)) {
+      progressed("closer");
+      depthCloser[best.left.sessions] = (depthCloser[best.left.sessions] ?? 0) + 1;
+    }
     if (best.distance === 0) {
-      if (chain.best === 0) {
-        chain.stale = 2;
+      if (found.best === 0) {
         target.note = `needs ${need}; a session from storage that has it did not reach the condition`;
         return false;
       }
-      Object.assign(chain, {
+      Object.assign(found, {
         best: 0,
         value: best.value,
         sessions: best.left.sessions,
         queued: true,
       });
-      chain.started += 1;
       chainAttempts.push(fromBest(witnessOf(target).inputs.slice(0, MAX_SUFFIX)));
       return true;
     }
-    if (best.distance < chain.best && chain.started < MAX_CHAIN) {
-      Object.assign(chain, {
+    const noted = () => {
+      target.note = `needs ${need}; best reached: ${found.value} after ${found.sessions} session${found.sessions === 1 ? "" : "s"}`;
+      return false;
+    };
+    if (found.started >= MAX_CHAIN) return noted();
+    if (best.distance < found.best) {
+      Object.assign(found, {
         best: best.distance,
         value: best.value,
         sessions: best.left.sessions,
-        stale: 0,
-        queued: true,
       });
-      chain.started += 1;
-      // The path that led to the closest storage, played again from it, to raise the value once more.
-      chainAttempts.push(fromBest(pathTo(nodes, nodes[best.left.node]!).slice(0, MAX_SUFFIX)));
+      found.tried.clear();
+      replay(chooseRoute(found, false));
       return true;
     }
-    chain.stale += 1;
-    target.note = `needs ${need}; best reached: ${chain.value} after ${chain.sessions} session${chain.sessions === 1 ? "" : "s"}`;
-    return false;
+    // No closer storage: another usable route from the same one, while one was not replayed since.
+    const choice = chooseRoute(found, true);
+    if (choice === null) return noted();
+    replay(choice);
+    return true;
   };
 
   /** With realignment: the guard of each earlier condition of an `else if` chain, one for all the conditions after it. */
@@ -2510,9 +3108,183 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const alias = flow.loadAlias(name);
       if (alias !== null) aliases.set(name, alias);
     }
-    const guard = { condition: before, aliases, goals: goalsFor(flow, before, false) };
+    const guard = { condition: before, aliases, goals: goalsFor(flow, before, false, earlier) };
     guardsByCondition.set(earlier, guard);
     return guard;
+  };
+
+  /** A next visit from the storage a state left: a minute later, and in the windows of the comparisons read. */
+  const visitFrom = (entry: (typeof left)[number], key: string, completed: boolean): void => {
+    if (quitAnywhere)
+      for (const cell of cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage))
+        seedCells.add(cell);
+    const work = session.operations;
+    if (later) {
+      // A minute later; then in the windows of the clock comparisons sessions read (`sessionGaps`), as its first
+      // state reads them; a day later when none can be read.
+      const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
+      const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
+      const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
+      const now = wallEnd[first.node.id]!;
+      // A quit visit gets the windows read so far once, not again as sessions read more.
+      if (snapshot !== null && completed) sessionOrigins.push({ key, entry, snapshot, now, begun });
+      const steps =
+        snapshot === null
+          ? []
+          : sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
+      for (const gap of steps)
+        startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
+      timeStepsTaken.sessions += steps.length;
+      if (steps.length === 0 && readsClock)
+        startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
+    } else
+      startSession(
+        {
+          origin: entry.node,
+          storage: entry.entries,
+          wallClockMs: EPOCH_MS,
+          session: entry.sessions + 1,
+        },
+        null,
+      );
+    nextWork += session.operations - work;
+  };
+
+  /** With depth phases: a depth's gain per operation in the last quarter of its own play work (as marked). */
+  const recentRate = (depth: number): number => {
+    const known = depthOf(depth);
+    if (known.work === 0) return Infinity;
+    const from = known.marks.findLast((mark) => mark.work <= known.work * 0.75) ?? known.marks[0]!;
+    return (known.gain - from.gain) / (known.work - from.work);
+  };
+  /** Opens the depths down to `depth`; the deepest gets `owed` play work first. */
+  const openDepth = (depth: number, owed: number): void => {
+    for (let next = deepestOpen + 1; next <= depth; next += 1) openedAt[next] = session.operations;
+    deepestOpen = depth;
+    depthOf(depth).owed = owed;
+  };
+  /**
+   * At each analysis pass: marks each depth's work and gain, and opens the next depth when the deepest open one levels
+   * off (in the last quarter of its work, at most half its average gain per operation) and storage to start from is left.
+   */
+  const markDepths = (): void => {
+    for (const known of depths)
+      if (known !== undefined && known.work > known.marks.at(-1)!.work)
+        known.marks.push({ work: known.work, gain: known.gain });
+    // A depth with nothing left to expand or start from has levelled off too; one that reached nothing new opens none.
+    const deepest = depthOf(deepestOpen);
+    const idle = depthFrontier!.sizeOf(deepestOpen) === 0 && (pendingSeeds[deepestOpen] ?? 0) === 0;
+    if (
+      (depthNew[deepestOpen] ?? 0) > 0 &&
+      (pendingSeeds[deepestOpen + 1] ?? 0) > 0 &&
+      (idle ||
+        (deepest.owed <= 0 &&
+          deepest.work > 0 &&
+          recentRate(deepestOpen) <= deepest.gain / deepest.work / 2))
+    )
+      openDepth(deepestOpen + 1, deepest.work / 4);
+  };
+  const charge = (depth: number, work: number, gain: number, exploring: boolean): void => {
+    const known = depthOf(depth);
+    known.work += work;
+    known.gain += gain;
+    known.owed -= work;
+    playWork += work;
+    if (!exploring) return;
+    known.explored += work;
+    explorationWork += work;
+  };
+  /**
+   * The depth whose play goes next, among the open ones with open states or storage to start from, and whether it is
+   * an exploration turn: a depth with states whose step reached new code first; when the open depths have nothing
+   * left, the next depth with something opens; null when none.
+   */
+  const chooseDepth = (): { depth: number; exploring: boolean } | null => {
+    const frontierOf = depthFrontier!;
+    const has = (depth: number) => frontierOf.sizeOf(depth) > 0 || (pendingSeeds[depth] ?? 0) > 0;
+    const open: number[] = [];
+    for (let depth = 1; depth <= deepestOpen; depth += 1) if (has(depth)) open.push(depth);
+    // Nothing left in the open depths: the next with open states opens, such as states of chain sessions, or the next
+    // one to start from when the deepest open one reached something new.
+    if (open.length === 0) {
+      const next = deepestOpen + 1;
+      const opens =
+        (depthNew[deepestOpen] ?? 0) > 0 && (pendingSeeds[next] ?? 0) > 0
+          ? next
+          : Array.from(
+              { length: frontierOf.deepest - deepestOpen },
+              (_, index) => next + index,
+            ).find((depth) => frontierOf.sizeOf(depth) > 0);
+      if (opens === undefined) return null;
+      openDepth(opens, 0);
+      open.push(opens);
+    }
+    // States whose step reached new code go first in any open depth, as without phases: the one gaining most first.
+    const fresh = open.filter((depth) => frontierOf.freshOf(depth) > 0);
+    if (fresh.length > 0) {
+      const [first] = fresh.sort(
+        (left, right) => recentRate(right) - recentRate(left) || left - right,
+      );
+      return { depth: first!, exploring: false };
+    }
+    const owed = open.findLast((depth) => depthOf(depth).owed > 0);
+    if (owed !== undefined) return { depth: owed, exploring: false };
+    const [best, ...others] = open.sort(
+      (left, right) => recentRate(right) - recentRate(left) || left - right,
+    );
+    if (others.length > 0 && explorationWork < playWork * DEPTH_EXPLORE_SHARE) {
+      const [least] = others.sort(
+        (left, right) => depthOf(left).explored - depthOf(right).explored || left - right,
+      );
+      return { depth: least!, exploring: true };
+    }
+    return { depth: best!, exploring: false };
+  };
+  /**
+   * Starts a next session of `depth` from the storage a session of the depth before left, of those not started from:
+   * the one with the most compared values no session of `depth` started from had, completed sessions' first. With
+   * `varied`, only from one that has such a value. False when none is left (with `varied`: none such).
+   */
+  const seededValues: Set<string>[] = [];
+  const valuesOfLeft = new Map<number, readonly string[]>();
+  const startSeed = (depth: number, exploring: boolean, varied: boolean): boolean => {
+    const seen = (seededValues[depth] ??= new Set());
+    let best: number | null = null;
+    let bestNew = -1;
+    const consider = (index: number) => {
+      const entry = left[index]!;
+      if (entry.sessions !== depth - 1 || startedFrom.has(entry.key)) return;
+      let values = valuesOfLeft.get(index);
+      if (values === undefined) {
+        values = cells?.storageValues(entry.entries) ?? [];
+        valuesOfLeft.set(index, values);
+      }
+      const fresh = values.filter((value) => !seen.has(value)).length;
+      if (fresh > bestNew) {
+        best = index;
+        bestNew = fresh;
+      }
+    };
+    for (const index of completedLeft) consider(index);
+    if (quitAnywhere) left.forEach((_, index) => consider(index));
+    if (best === null) {
+      pendingSeeds[depth] = 0;
+      return false;
+    }
+    if (varied && bestNew <= 0) return false;
+    const entry = left[best]!;
+    startedFrom.add(entry.key);
+    pendingSeeds[depth] = Math.max(0, (pendingSeeds[depth] ?? 0) - 1);
+    for (const value of valuesOfLeft.get(best) ?? []) seen.add(value);
+    const work = session.operations;
+    const gain = gainCount;
+    const before = starts.length;
+    const completed = completedKeys.has(entry.key);
+    if (!completed) quitVisits += 1;
+    visitFrom(entry, entry.key, completed);
+    depthOf(depth).seeds += starts.length - before;
+    charge(depth, session.operations - work, gainCount - gain, exploring);
+    return true;
   };
 
   /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
@@ -2535,7 +3307,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const conditional = instruction.kind === "jumpIfFalse" || instruction.loopKind === "while";
       const guards = options.realign === true ? (elseIfs.get(index) ?? []).map(guardOf) : [];
       const goals = [
-        ...(conditional ? goalsFor(flow, condition, way === 0) : []),
+        ...(conditional ? goalsFor(flow, condition, way === 0, index) : []),
         ...guards.flatMap((guard) => guard.goals),
       ];
       const witness = chosenWays.get(code);
@@ -2576,50 +3348,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             operator,
             constant,
             shown,
+            against: goal.comparison.against?.subject,
             closest: null,
           });
       }
       scheduled = schedule(code, target) || scheduled;
     });
-    /** A next visit from the storage a state left: a minute later, and in the windows of the comparisons read. */
-    const visitFrom = (entry: (typeof left)[number], key: string, completed: boolean): void => {
-      if (quitAnywhere)
-        for (const cell of cellsOf(entry.entries, starts[nodes[entry.node]!.start]!.storage))
-          seedCells.add(cell);
-      const work = session.operations;
-      if (later) {
-        // A minute later; then in the windows of the clock comparisons sessions read (`sessionGaps`), as its first
-        // state reads them; a day later when none can be read.
-        const first = startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP), null);
-        const snapshot = store.get(first.node.id) ?? startSnapshots.get(first.node.start) ?? null;
-        const begun = wallEnd[entry.node]! + NEXT_SESSION_GAP;
-        const now = wallEnd[first.node.id]!;
-        // A quit visit gets the windows read so far once, not again as sessions read more.
-        if (snapshot !== null && completed)
-          sessionOrigins.push({ key, entry, snapshot, now, begun });
-        const steps =
-          snapshot === null
-            ? []
-            : sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
-        for (const gap of steps)
-          startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
-        timeStepsTaken.sessions += steps.length;
-        if (steps.length === 0 && readsClock)
-          startSession(laterStart(entry.node, entry.entries, NEXT_DAY_GAP), null);
-      } else
-        startSession(
-          {
-            origin: entry.node,
-            storage: entry.entries,
-            wallClockMs: EPOCH_MS,
-            session: entry.sessions + 1,
-          },
-          null,
-        );
-      nextWork += session.operations - work;
-    };
-    // A few next sessions from what completed sessions stored, as the player's next visit.
-    for (; nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
+    // A few next sessions from what completed sessions stored, as the player's next visit; with depth phases, a depth
+    // starts them when it needs one (see `startSeed`).
+    for (; !phased && nextFromCompleted < completedLeft.length; nextFromCompleted += 1) {
       // With quit-anywhere next visits, completed ones have their own count.
       if (
         (quitAnywhere
@@ -2638,7 +3375,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     // With quit-anywhere next visits, one per pass from the storage of a state a session did not complete: the one with
     // the most stored cells no next visit started from had.
-    if (quitAnywhere && quitVisits < MAX_QUIT_SESSIONS && withinNextShare()) {
+    if (!phased && quitAnywhere && quitVisits < MAX_QUIT_SESSIONS && withinNextShare()) {
       let best: number | null = null;
       let bestNew = 0;
       left.forEach((entry, index) => {
@@ -2667,14 +3404,20 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const learned = [...clockAfter.values()].reduce((sum, after) => sum + after.size, 0);
     if (later && learned > learnedAtOrigins) {
       learnedAtOrigins = learned;
+      // With depth phases, all of them, as play work of the depth they start.
       for (const { key, entry, snapshot, now, begun } of sessionOrigins) {
-        if (!withinNextShare()) break;
+        if (!phased && !withinNextShare()) break;
         const work = session.operations;
+        const gain = gainCount;
         const steps = sessionGaps(snapshot, now, `storage ${key}`).map((gap) => now + gap - begun);
         for (const gap of steps)
           startSession(laterStart(entry.node, entry.entries, NEXT_SESSION_GAP + gap), null);
         timeStepsTaken.sessions += steps.length;
         nextWork += session.operations - work;
+        if (phased) {
+          charge(entry.sessions + 1, session.operations - work, gainCount - gain, false);
+          depthOf(entry.sessions + 1).seeds += steps.length;
+        }
         scheduled = scheduled || steps.length > 0;
       }
     }
@@ -2824,6 +3567,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             name: source.name,
             operator: goal.comparison.operator,
             constant: goal.comparison.constant,
+            against: goal.comparison.against?.subject,
           });
       }
     }
@@ -3072,6 +3816,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       sinceAnalysis = 0;
       analyzedAt = performance.now();
       analyzedOps = session.operations;
+      if (phased) markDepths();
       analyze();
       guide();
     }
@@ -3082,13 +3827,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     // Directed attempts and the rest of the search take turns, by steps.
     const pending =
-      playAttempts.length > 0
-        ? playAttempts
-        : chainAttempts.length > 0
-          ? chainAttempts
-          : laterAttempts.length > 0
-            ? laterAttempts
-            : clockAttempts;
+      repeatAttempts.length > 0
+        ? repeatAttempts
+        : playAttempts.length > 0
+          ? playAttempts
+          : chainAttempts.length > 0
+            ? chainAttempts
+            : laterAttempts.length > 0
+              ? laterAttempts
+              : clockAttempts;
     if (pending.length > 0 && (frontier.size === 0 || withinShare())) {
       runAttempt(pending.shift()!);
       continue;
@@ -3099,14 +3846,41 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       chosenAt += 1;
       continue;
     }
-    if (frontier.size === 0) {
+    // With depth phases, the states with a lead first, then those after a chosen outcome in their turn, then the depth
+    // chosen; a depth whose open states reached no new code starts a next session first when it can.
+    let turn: { depth: number; exploring: boolean } | null = null;
+    let picked: number | undefined;
+    if (depthFrontier !== null) {
+      if (depthFrontier.leads > 0) picked = depthFrontier.popLead();
+      else if (depthFrontier.chosen > 0 && withinChosenShare()) picked = depthFrontier.popChosen();
+      else {
+        turn = chooseDepth();
+        if (turn === null) {
+          if (depthFrontier.chosen > 0) picked = depthFrontier.popChosen();
+          else if (analyze()) continue;
+          else break;
+        } else if (
+          depthFrontier.freshOf(turn.depth) === 0 &&
+          (pendingSeeds[turn.depth] ?? 0) > 0 &&
+          startSeed(turn.depth, turn.exploring, depthFrontier.sizeOf(turn.depth) > 0)
+        )
+          continue;
+        else if (depthFrontier.sizeOf(turn.depth) === 0) continue;
+        else picked = depthFrontier.popDepth(turn.depth);
+      }
+    } else if (frontier.size === 0) {
       if (analyze()) continue;
       break;
-    }
-    const node = nodes[frontier.pop()!]!;
+    } else picked = frontier.pop();
+    const node = nodes[picked!]!;
     if (node.status !== "open") continue;
+    // With depth phases, a state whose lead was spent goes back to its depth.
+    if (depthFrontier !== null && turn === null && !node.chosen && !leads(node)) {
+      frontier.push(node.id, order(node));
+      continue;
+    }
     // A lead that was spent, or whose target was reached, gives its states back their own place.
-    if (node.lead !== null && !leads(node) && frontier.size > 0) {
+    if (depthFrontier === null && node.lead !== null && !leads(node) && frontier.size > 0) {
       const own = order(node);
       const next = frontier.pop()!;
       frontier.push(next, order(nodes[next]!));
@@ -3118,6 +3892,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const leading = leads(node);
     if (leading && node.lead !== null) node.lead.remaining -= 1;
     let refunded = false;
+    const workBefore = session.operations;
+    const gainBefore = gainCount;
     // The state's runtime session stays as it is: each input is tried in a fork of it, the last one in it.
     const tagged = store.getTagged(node.id);
     const base = tagged === null ? replayTo(node) : restore(node, tagged);
@@ -3184,6 +3960,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const stop = spent();
       if (stop !== null) {
         stoppedBy = stop;
+        if (turn !== null && !leading)
+          charge(
+            turn.depth,
+            session.operations - workBefore,
+            gainCount - gainBefore,
+            turn.exploring,
+          );
         break search;
       }
       const tried = node.chosen ? JSON.stringify(input) : "";
@@ -3231,6 +4014,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         at.inputs.add(inputKey(input));
       }
     }
+    if (turn !== null && !leading)
+      charge(turn.depth, session.operations - workBefore, gainCount - gainBefore, turn.exploring);
     if (cut) {
       node.status = "open";
       node.left = inputs.filter((input) => node.tried?.has(JSON.stringify(input)) !== true);
@@ -3243,6 +4028,32 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
 
   storageMaps.clear();
+  /**
+   * A route as its first inputs read and where its session ended, and how many inputs its replay takes; once per route,
+   * as targets share them.
+   */
+  const described = new Map<number, { at: string; inputs: number }>();
+  const routeOf = (node: number): { at: string; inputs: number } => {
+    const known = described.get(node);
+    if (known !== undefined) return known;
+    const path = pathTo(nodes, nodes[node]!);
+    const label = (input: ExplorerInput): string =>
+      input.kind === "option" || input.kind === "button"
+        ? input.label
+        : input.kind === "text"
+          ? `"${input.text}"`
+          : input.kind;
+    const at = nodes[node]!.waitsAt;
+    const span = at === null ? null : compactSpan(instructions[at]?.span);
+    const end =
+      at === null ? "the session's end" : `${files[at]}${span === null ? "" : `:${span.line}`}`;
+    const route = {
+      at: `${path.length === 0 ? "no input" : path.slice(0, 3).map(label).join(" → ")}${path.length > 3 ? " → …" : ""} to ${end}`,
+      inputs: Math.min(path.length, MAX_ROUTE_INPUTS),
+    };
+    described.set(node, route);
+    return route;
+  };
   const coverage = lineCoverage(
     plan,
     instructions,
@@ -3257,6 +4068,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     fixed,
     targets,
     watched,
+    routeOf,
     session.randomChoices,
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
@@ -3302,13 +4114,44 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
   const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
   const sessionCount = Math.max(0, ...starts.map((start) => start.session));
+  working(depthNow);
+  const bySessionNumber = <T>(value: (depth: number) => T): T[] =>
+    Array.from({ length: sessionCount }, (_, index) => value(index + 1));
   const bySession = {
-    started: Array.from({ length: sessionCount }, () => 0),
-    completed: Array.from({ length: sessionCount }, () => 0),
+    started: bySessionNumber(() => 0),
+    completed: bySessionNumber(() => 0),
+    operations: bySessionNumber((depth) => depthWork[depth] ?? 0),
+    linesFirst: bySessionNumber(() => 0),
+    linesFirstLastQuarter: bySessionNumber(() => 0),
+    waysFirst: bySessionNumber((depth) => depthWays[depth] ?? 0),
+    closer: bySessionNumber((depth) => depthCloser[depth] ?? 0),
   };
   for (const start of starts) bySession.started[start.session - 1]! += 1;
   for (const node of nodes)
     if (node.status === "completed") bySession.completed[starts[node.start]!.session - 1]! += 1;
+  // Lines by the sessions that ran them: the one that reached each first (in the last quarter of its work or before),
+  // and per file, those only the first session ran and those it never ran, by the smallest session that did.
+  const linesBySession = {
+    onlyFirst: 0,
+    least: bySessionNumber(() => 0),
+    files: new Map<string, { onlyFirst: number; notFirst: number }>(),
+  };
+  lineFirst.forEach((depth, line) => {
+    if (depth === 0) return;
+    bySession.linesFirst[depth - 1]! += 1;
+    if (lineFirstWork[line]! * 4 >= (depthWork[depth] ?? 0) * 3)
+      bySession.linesFirstLastQuarter[depth - 1]! += 1;
+    const least = lineLeast[line]!;
+    linesBySession.least[least - 1]! += 1;
+    const onlyFirst = least === 1 && lineLater[line] === 0;
+    if (onlyFirst) linesBySession.onlyFirst += 1;
+    if (!onlyFirst && least === 1) return;
+    const file = lineFiles[line]!;
+    const counts = linesBySession.files.get(file) ?? { onlyFirst: 0, notFirst: 0 };
+    if (onlyFirst) counts.onlyFirst += 1;
+    else counts.notFirst += 1;
+    linesBySession.files.set(file, counts);
+  });
   const traps = findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start));
 
   /**
@@ -3395,6 +4238,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     targets,
     attemptCount,
     directedTransitions,
+    routeOf,
     session.randomChoices,
   );
   const corpus = corpusResult();
@@ -3437,6 +4281,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         replays,
       },
       bySession,
+      ...(phased
+        ? {
+            phases: {
+              openedAt: bySessionNumber((depth) => openedAt[depth] ?? null),
+              playOperations: bySessionNumber((depth) => depths[depth]?.work ?? 0),
+              playGain: bySessionNumber((depth) => depths[depth]?.gain ?? 0),
+              nextSessions: bySessionNumber((depth) => depths[depth]?.seeds ?? 0),
+              explorationOperations: explorationWork,
+            },
+          }
+        : {}),
       ...(cells === null ? {} : { cells: cells.stats }),
       ...(map === null
         ? {}
@@ -3458,7 +4313,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       stuck: count("stuck"),
       open: count("open") + count("partial"),
     },
-    coverage,
+    coverage: {
+      ...coverage,
+      bySession: {
+        onlyFirst: linesBySession.onlyFirst,
+        least: linesBySession.least,
+        files: [...linesBySession.files]
+          .sort(([left], [right]) => (left < right ? -1 : 1))
+          .map(([path, counts]) => ({ path, ...counts })),
+      },
+    },
     directed,
     crashes: [...crashes.values()],
     traps: traps.map((trap) => trap.report),
@@ -3934,8 +4798,9 @@ function lineCoverage(
   fixed: ReadonlyMap<number, { value: boolean; reason: string }>,
   targets: ReadonlyMap<number, Target>,
   watched: ReadonlyMap<string, readonly Watch[]>,
+  routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
-): ExploreResult["coverage"] {
+): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
   instructions.forEach((_, index) => {
@@ -4086,7 +4951,9 @@ function lineCoverage(
     for (const goal of target.goals) {
       const { source, comparison } = goal;
       const compared =
-        comparison === null ? "" : ` ${comparison.operator} ${String(comparison.shown)}`;
+        comparison === null
+          ? ""
+          : `${comparison.against === undefined ? "" : ` - ${comparison.against.text}`} ${comparison.operator} ${String(comparison.shown)}`;
       const needs =
         source.kind === "variable"
           ? `${source.name}${compared}`
@@ -4109,7 +4976,12 @@ function lineCoverage(
           trend:
             watch.closer && watch.operations * 4 > session.operations * 3 ? "improving" : "flat",
         };
-      else if (chain !== undefined && Number.isFinite(chain.best))
+      // A stored value measures a part only as the constant's type: a timestamp is no distance from `true`.
+      else if (
+        chain !== undefined &&
+        Number.isFinite(chain.best) &&
+        (typeof comparison?.shown !== "boolean" || /= (true|false)$/u.test(chain.value))
+      )
         closest = { needs, value: chain.value, distance: chain.best, session: chain.sessions };
       const status =
         closest === undefined ? "unmeasured" : closest.distance === 0 ? "met" : "unmet";
@@ -4157,6 +5029,7 @@ function lineCoverage(
           : undefined;
     const reached = directed?.reach;
     const parts = partsOf(directed);
+    const chains = chainReports(directed, routeOf);
     // What keeps the way closed, as far as measured: of the condition's own unmet parts, the furthest from holding when
     // the way needs all of them, the nearest when any one would do; none when they combine both ways.
     const combined = combination(condition, way === 0);
@@ -4185,6 +5058,7 @@ function lineCoverage(
       behindLines: behind(missedTarget ? target : index + 1),
       parts,
       ...(best === undefined ? {} : { best }),
+      ...(chains.length === 0 ? {} : { chains }),
       ...(label === "clock" && reached != null ? { repro: reached.repro } : {}),
     });
   });
@@ -4208,6 +5082,7 @@ function directedSummary(
   targets: ReadonlyMap<number, Target>,
   attempts: number,
   transitions: number,
+  routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
 ): ExploreResult["directed"] {
   const bySource: ExploreResult["directed"]["bySource"] = {
@@ -4236,6 +5111,7 @@ function directedSummary(
     multiSession.longestChain = Math.max(multiSession.longestChain, sessions);
     const instruction = instructions[target.instruction]!;
     const path = files[target.instruction]!;
+    const chains = chainReports(target, routeOf);
     ways.push({
       path,
       line: compactSpan(instruction.span)?.line ?? 0,
@@ -4245,6 +5121,7 @@ function directedSummary(
       via: target.reach.via,
       sources: kinds,
       sessions,
+      ...(chains.length === 0 ? {} : { chains }),
       repro: target.reach.repro,
     });
   }

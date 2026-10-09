@@ -7,7 +7,7 @@
  *          [--workers 1|2] [--until-stalled]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
- *          [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>
+ *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
@@ -21,10 +21,11 @@
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
  * (replays go on past inputs that no longer fit, and a condition after `else` aims at its chain too), and conjunctive
- * steering (a way that needs all parts of its condition is steered to by their summed distance), and random choices (the
- * explorer also chooses other outcomes of random draws) are on by default (`--no-cells`, `--no-later`,
+ * steering (a way that needs all parts of its condition is steered to by their summed distance), and random choices
+ * (the explorer also chooses other outcomes of random draws) are on by default (`--no-cells`, `--no-later`,
  * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
- * off). `--guidance` leads states toward the largest region of code not reached yet (see `src/explorer-search.ts`).
+ * off). `--guidance` leads states toward the largest region of code not reached yet, and `--depth-phases` lets play work
+ * go to session numbers by their gain per operation (see `src/explorer-search.ts` and the README).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
  * minimized, with whether the run was exhausted; a unit exhausted with the same seed and `.tease` content is skipped.
@@ -66,6 +67,16 @@ const HEAP_GROWING = "--heap-growing-percent";
 const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
 /** Missed ways the summary lists per unit, by the code behind them. */
 const WORKING_TOWARD_ROWS = 8;
+/** Session numbers shown one by one; the later ones are shown together. */
+const SESSION_ROWS = 10;
+/** A chain's result, in words. */
+const CHAIN_RESULTS: Readonly<Record<string, string>> = {
+  reached: "reached",
+  holds: "storage holds the value, the way not reached",
+  queued: "still going at the end",
+  limit: "stopped at the session limit",
+  stopped: "stopped, no route came closer",
+};
 
 /** The search strategies a corpus records, in one order. */
 const STRATEGIES = [
@@ -78,6 +89,7 @@ const STRATEGIES = [
   "guidance",
   "randomChoices",
   "quitAnywhere",
+  "depthPhases",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -142,6 +154,7 @@ async function main(args: string[]): Promise<void> {
       guidance: { type: "boolean", default: false },
       "random-choices": { type: "boolean", default: true },
       "quit-anywhere": { type: "boolean", default: false },
+      "depth-phases": { type: "boolean", default: false },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -199,7 +212,7 @@ async function main(args: string[]): Promise<void> {
         "         [--workers 1|2] [--until-stalled]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
-        "         [--[no-]random-choices] [--[no-]quit-anywhere] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -245,6 +258,7 @@ async function main(args: string[]): Promise<void> {
             guidance: values.guidance,
             randomChoices: values["random-choices"],
             quitAnywhere: values["quit-anywhere"],
+            depthPhases: values["depth-phases"],
           },
         },
         out,
@@ -293,6 +307,7 @@ interface RunSettings {
     guidance: boolean;
     randomChoices: boolean;
     quitAnywhere: boolean;
+    depthPhases: boolean;
   };
 }
 
@@ -718,6 +733,15 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     `Explorer \`${text(first.explorer)}\`, seed ${count(first.seed)}, at most ${count(first.maxStates)} states per ` +
       `unit; each unit's budget is in its row, as rounds double it. Reports: \`${out}/<unit>.json\`.`,
     "",
+    // Depth phases are opt-in; say so, and why, when a run went without them.
+    ...(reports.some((report) => isRecord(fields(report.search).phases))
+      ? []
+      : [
+          "Depth phases are off (opt-in, `--depth-phases`): on the 13-unit gate they gained where a first session " +
+            "levels off early (DisciplineClinic +4.5 points) but cost units whose first session still gains, such as " +
+            "jewell's trap loops, as the second session opens on an early lull. See the README.",
+          "",
+        ]),
     "| Unit | Budget | Coverage | From corpus | States | Stopped by | Crashes | Traps | Completed | Failed | Stuck | " +
       "Open | Operations | Time | CPU | Most expansions at |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -854,7 +878,17 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
           `(and ${count(progress.cells)} new cells, which do not hold a run up)`,
       );
     }
+    lines.push(
+      ...sessionDepths(fields(fields(report.search).bySession), fields(coverage.bySession)),
+      ...depthPhases(fields(fields(report.search).phases)),
+    );
     lines.push(...workingToward(records(coverage.unvisitedBranches)));
+    lines.push(
+      ...sessionChains([
+        ...records(coverage.unvisitedBranches),
+        ...records(fields(report.directed).ways),
+      ]),
+    );
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);
     if (count(engineErrors.count) > 0)
@@ -864,6 +898,146 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * What each session number added: its sessions, its share of the operations, the lines and ways it reached first, its
+ * marginal gain (lines first reached in the last quarter of its operations, per 1,000 of them), and its states that came
+ * closer to what a missed way needs; then the lines only a first session ran and those it never ran, as observed.
+ */
+function sessionDepths(
+  bySession: Readonly<Record<string, unknown>>,
+  lines: Readonly<Record<string, unknown>>,
+): string[] {
+  const column = (name: string): number[] =>
+    Array.isArray(bySession[name]) ? bySession[name].map(count) : [];
+  const operations = column("operations");
+  if (operations.length < 2) return [];
+  const [started, completed, first, lastQuarter, ways, closer] = [
+    "started",
+    "completed",
+    "linesFirst",
+    "linesFirstLastQuarter",
+    "waysFirst",
+    "closer",
+  ].map(column);
+  const total = operations.reduce((sum, value) => sum + value, 0);
+  const sum = (values: number[] | undefined, from: number, to: number) =>
+    (values ?? []).slice(from, to).reduce((all, value) => all + value, 0);
+  const row = (label: string, from: number, to: number): string => {
+    const work = sum(operations, from, to);
+    const gain = sum(lastQuarter, from, to);
+    return (
+      `  - ${label}: ${sum(started, from, to)} started, ${sum(completed, from, to)} completed, ` +
+      `${work} operations (${total === 0 ? 0 : Math.round((work / total) * 100)}%); ` +
+      `${sum(first, from, to)} lines first, ${gain} of them in its last quarter ` +
+      `(${work === 0 ? 0 : Number(((gain / (work / 4)) * 1000).toPrecision(3))} per 1,000 operations); ` +
+      `${sum(ways, from, to)} ways first, ${sum(closer, from, to)} closer`
+    );
+  };
+  const rows = operations
+    .slice(0, SESSION_ROWS)
+    .map((_, index) => row(`Session ${index + 1}`, index, index + 1));
+  if (operations.length > SESSION_ROWS)
+    rows.push(row(`Sessions ${SESSION_ROWS + 1}+`, SESSION_ROWS, operations.length));
+  const least = Array.isArray(lines.least) ? lines.least.map(count) : [];
+  const later = least
+    .map((lineCount, index) => ({ session: index + 1, lineCount }))
+    .filter(({ session, lineCount }) => session > 1 && lineCount > 0);
+  const files = records(lines.files)
+    .filter((file) => count(file.notFirst) > 0)
+    .sort((left, right) => count(right.notFirst) - count(left.notFirst))
+    .slice(0, 5);
+  return [
+    "- By session number (1 is a new player's first session):",
+    ...rows,
+    `  - Lines only a first session ran: ${count(lines.onlyFirst)}; lines no first session ran: ` +
+      `${sum(
+        later.map(({ lineCount }) => lineCount),
+        0,
+        later.length,
+      )}` +
+      (later.length === 0
+        ? ""
+        : ` (by the smallest session number that ran them: ${later.map(({ session, lineCount }) => `${session}: ${lineCount}`).join(", ")})`) +
+      (files.length === 0
+        ? ""
+        : `; most in ${files.map((file) => `\`${text(file.path)}\` ${count(file.notFirst)}`).join(", ")}`),
+  ];
+}
+
+/**
+ * With depth phases: when each session number opened, and its share of the play work and the lines and condition ways it
+ * reached first.
+ */
+function depthPhases(phases: Readonly<Record<string, unknown>>): string[] {
+  if (!Array.isArray(phases.openedAt)) return [];
+  const work = Array.isArray(phases.playOperations) ? phases.playOperations.map(count) : [];
+  const gain = Array.isArray(phases.playGain) ? phases.playGain.map(count) : [];
+  const total = work.reduce((sum, value) => sum + value, 0);
+  const opened = phases.openedAt
+    .map((at, index) => ({ at, session: index + 1 }))
+    .filter(({ at, session }) => typeof at === "number" && session > 1)
+    .slice(0, SESSION_ROWS - 1);
+  return [
+    `- Depth phases: ${opened.length === 0 ? "only session 1 opened" : opened.map(({ at, session }) => `session ${session} opened after ${count(at)} operations`).join(", ")}; ` +
+      `play work by session ${work
+        .slice(0, SESSION_ROWS)
+        .map(
+          (value, index) =>
+            `${index + 1}: ${total === 0 ? 0 : Math.round((value / total) * 100)}% (${gain[index] ?? 0} new)`,
+        )
+        .join(
+          ", ",
+        )}; exploration turns ${total === 0 ? 0 : Math.round((count(phases.explorationOperations) / total) * 100)}%`,
+  ];
+}
+
+/**
+ * The session chains toward stored values with the most sessions: their result, the route each repeats (its progress
+ * per operation), the other routes it replayed, and its last switch between routes, with why.
+ */
+function sessionChains(ways: readonly Readonly<Record<string, unknown>>[]): string[] {
+  const chains = ways
+    .flatMap((way) =>
+      records(way.chains).map((chain) => ({ chain, at: `${text(way.path)}:${count(way.line)}` })),
+    )
+    .sort((left, right) => count(right.chain.sessions) - count(left.chain.sessions))
+    .slice(0, WORKING_TOWARD_ROWS);
+  if (chains.length === 0) return [];
+  return [
+    "- Session chains (the most sessions first):",
+    ...chains.map(({ chain, at }) => {
+      const route = fields(chain.route);
+      const others = records(chain.routes).filter((other) => text(other.at) !== text(route.at));
+      const last = records(chain.switches).at(-1);
+      return (
+        `  - \`${at}\` \`${text(chain.key)}\`: ${CHAIN_RESULTS[text(chain.result)] ?? text(chain.result)} after ` +
+        `${count(chain.sessions)} sessions, closest ${text(chain.closest)}; ` +
+        (chain.route === null || chain.route === undefined
+          ? "no session from a storage that has the key brought it closer"
+          : `route ${routeText(route)}`) +
+        (others.length === 0
+          ? ""
+          : `; also replayed: ${others.map((other) => routeText(other)).join("; ")}`) +
+        (last === undefined
+          ? ""
+          : `; last switch at session ${count(last.sessions)}: ${text(last.reason)}`)
+      );
+    }),
+  ];
+}
+
+/** A chain's route: where it goes, its inputs, and its progress per operation over its replays. */
+function routeText(route: Readonly<Record<string, unknown>>): string {
+  const replays = count(route.sessions);
+  return (
+    `${text(route.at)} (${count(route.inputs)} inputs, ` +
+    `${count(route.progressPer1000Operations)} progress per 1,000 operations` +
+    (replays === 0
+      ? " in the session it comes from)"
+      : ` over ${replays} replays, ${count(route.failures)} no closer)`)
+  );
 }
 
 /** Ways still missed, those with the most code behind them first: what each needs, and why play did not get there. */

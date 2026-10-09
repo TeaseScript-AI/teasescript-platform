@@ -756,6 +756,83 @@ test(
 );
 
 test(
+  "a comparison of two variables is measured as their difference: read where the condition's function runs, it reports the closest difference and its trend, and each closer one is progress until stalled",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // `warmUp` holds its own `reps` above its `target`: only `lift`'s pair counts, while `lift` runs.
+    const source =
+      'function warmUp(target) {\n  let reps = 99\n  showButton "Warm up"\n}\nfunction lift(target) {\n' +
+      '  let reps = 0\n  while true {\n    let pick = choose more: "More", stop: "Stop"\n' +
+      '    if pick == "stop" {\n      return\n    }\n    reps += 1\n    if reps >= target {\n' +
+      '      say "Set done."\n    }\n  }\n}\nwarmUp(1)\nlift(1000)\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const run = (untilStalled: boolean, budgetOps: number) =>
+      explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps,
+        maxStates: Number.MAX_SAFE_INTEGER,
+        sources: new Map(),
+        diagnostics: [],
+        untilStalled,
+      });
+    const set = run(false, 600).coverage.unvisitedBranches.find((entry) => entry.line === 13);
+    assert.deepEqual(
+      set?.parts.map((part) => [part.needs, part.status]),
+      [["reps - target >= 0", "unmet"]],
+    );
+    const best = set?.best;
+    assert.equal(best?.needs, "reps - target >= 0");
+    assert.equal(best?.trend, "improving");
+    assert.ok(typeof best?.value === "number" && best.value > -1000 && best.value < 0);
+    assert.equal(best?.distance, -Number(best?.value));
+    // Every round brings the pair closer: only the cap ends the run.
+    const capped = run(true, 6000).search;
+    assert.equal(capped.audit?.result, "capped");
+    assert.ok((capped.audit?.progress.closer ?? 0) > 100);
+  },
+);
+
+test(
+  "a key a helper loads by a template, also through a helper it calls, is the one key its argument names at the condition, so other keys of the template are no closest storage",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'global ROPE = "rope"\nglobal KNIFE = "knife"\nfunction owns(item) {\n' +
+      '  return packed(item) or load("gear.${item}", default: false) == true\n}\n' +
+      'function packed(thing) {\n  return load("pack.${thing}", default: false) == true\n}\n' +
+      'let pick = choose rope: "Rope", knife: "Knife"\nif pick == "rope" {\n  save true as "gear.${ROPE}"\n' +
+      '} else {\n  save false as "gear.${KNIFE}"\n}\nshowButton "Next"\nif owns(KNIFE) {\n' +
+      '  say "Sharp."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+    });
+    // Also through the helper `owns` calls with its own parameter.
+    const sharp = result.coverage.unvisitedBranches.find((entry) => entry.line === 16);
+    assert.deepEqual(sharp?.dependsOn, ["stored gear.knife", "stored pack.knife"]);
+    assert.deepEqual(
+      sharp?.parts.map((part) => [part.needs, part.status, part.closest?.value]),
+      [
+        ["stored gear.knife == true", "unmet", "gear.knife = false"],
+        ["stored pack.knife == true", "unmeasured", undefined],
+      ],
+    );
+  },
+);
+
+test(
   "until stalled, a run ends complete when nothing is left to try, as a spiral when one place took the work since the last progress, and capped while a counter still comes closer",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
@@ -845,6 +922,221 @@ test(
     assert.deepEqual(
       endless.traps.map((trap) => trap.kind),
       ["loop"],
+    );
+  },
+);
+
+test(
+  "a chain toward a stored count repeats the route with the most progress per operation over whole sessions, whether its sessions are short or long, measures the others now and then, tries another when one stops helping, and reports its routes",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const run = (source: string, need = "visits >= 40") => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const result = explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 3000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+      });
+      const way = [...result.directed.ways, ...result.coverage.unvisitedBranches].find(
+        (entry) =>
+          (typeof entry.condition === "string" ? entry.condition : entry.condition?.text) === need,
+      );
+      return { way, chain: way?.chains?.[0] };
+    };
+    // The short way adds one visit after one press; the long way adds `gain` after `presses` presses.
+    const ways = (presses: number, gain: number, need: number) =>
+      'let visits = load "fixture.visits", default: 0\n' +
+      'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
+      `if pick == "long" {\n  for step in 1..=${presses} {\n    showButton "Step"\n  }\n` +
+      `  save visits + ${gain} as "fixture.visits"\n}\n` +
+      'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
+      `if visits >= ${need} {\n  say "Regular."\n}\nexit\n`;
+    // Two visits for twenty presses: the short way does more per operation, though less per session.
+    const twoWays = run(ways(20, 2, 40));
+    assert.equal(twoWays.way?.reach, "play");
+    assert.equal(twoWays.chain?.key, "fixture.visits");
+    assert.ok((twoWays.chain?.sessions ?? 0) >= 30);
+    // The route repeated is the short way, two inputs; the long way was replayed too, as another route.
+    assert.deepEqual(
+      twoWays.chain?.route && [
+        twoWays.chain.route.at.startsWith("Short way"),
+        twoWays.chain.route.inputs,
+      ],
+      [true, 2],
+    );
+    assert.ok(
+      twoWays.chain?.routes.some((route) => route.at.startsWith("Long way") && route.sessions > 0),
+    );
+    assert.ok(
+      twoWays.chain?.switches.some((change) => change.reason === "another route, measured again"),
+    );
+    assert.equal(twoWays.chain?.result, "reached");
+    // Five visits for four presses: now the long way does more per operation, and it is the one repeated.
+    const fiveWays = run(ways(4, 5, 100), "visits >= 100");
+    assert.equal(fiveWays.way?.reach, "play");
+    assert.ok(fiveWays.chain?.route?.at.startsWith("Long way"));
+    const [long, short] = ["Long way", "Short way"].map((name) =>
+      fiveWays.chain?.routes.find((route) => route.at.startsWith(name)),
+    );
+    assert.ok(short !== undefined && long !== undefined && short.sessions > 0);
+    assert.ok(long.progressPer1000Operations > short.progressPer1000Operations);
+    // The cheap way stops adding at fifteen; the other way, fifteen presses for two, still adds: once the cheap way brings
+    // the count no closer, the other way is replayed, and the chain goes on with it.
+    const cheapStops = run(
+      'let visits = load "fixture.visits", default: 0\nif visits >= 40 {\n  say "Regular."\n  exit\n}\n' +
+        'let pick = choose cheap: "Cheap", other: "Other", leave: "Leave"\n' +
+        'if pick == "cheap" {\n  showButton "Go"\n  if visits < 15 {\n    save visits + 1 as "fixture.visits"\n  }\n}\n' +
+        'if pick == "other" {\n  for step in 1..=15 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\nexit\n',
+    );
+    assert.equal(cheapStops.way?.reach, "play");
+    assert.ok(cheapStops.chain?.route?.at.startsWith("Other"));
+    assert.ok(
+      cheapStops.chain?.routes.some((route) => route.at.startsWith("Cheap") && route.failures > 0),
+    );
+    // A session that counts without any input is a route of no inputs, measured like any other.
+    const noInputs = run(
+      'let visits = load "fixture.visits", default: 0\nsave visits + 1 as "fixture.visits"\n' +
+        'if visits >= 40 {\n  say "Regular."\n}\nexit\n',
+    );
+    assert.equal(noInputs.way?.reach, "play");
+    assert.deepEqual(
+      noInputs.chain?.route && [noInputs.chain.route.inputs, noInputs.chain.route.sessions > 0],
+      [0, true],
+    );
+  },
+);
+
+test(
+  "the report gives what each session number added: its operations, the lines it reached first, the lines only a first session ran, and those it never ran",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // A greeting only a new player gets; one from the second visit on; one from the third on.
+    const source =
+      'let visits = load "fixture.visits", default: 0\nif visits == 0 {\n  say "Welcome, new player."\n}\n' +
+      'if visits >= 1 {\n  say "Welcome back."\n}\nif visits >= 2 {\n  say "Third time."\n}\n' +
+      'save visits + 1 as "fixture.visits"\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const { bySession } = result.search;
+    const sum = (values: readonly number[]) => values.reduce((all, value) => all + value, 0);
+    // Every operation went to a session number, and every line play reached to the one that reached it first.
+    assert.equal(sum(bySession.operations), result.search.operations);
+    assert.equal(sum(bySession.linesFirst), result.coverage.visitedLines);
+    // The second and third visits each reached their greeting first; only the new player's greeting is first-only.
+    const firstSession = result.coverage.visitedLines - 2;
+    assert.deepEqual(bySession.linesFirst.slice(0, 3), [firstSession, 1, 1]);
+    assert.deepEqual(result.coverage.bySession.least.slice(0, 3), [firstSession, 1, 1]);
+    assert.equal(result.coverage.bySession.onlyFirst, 1);
+    assert.deepEqual(result.coverage.bySession.files, [
+      { path: "main.tease", onlyFirst: 1, notFirst: 2 },
+    ]);
+  },
+);
+
+test(
+  "with depth phases, a new player's first session goes first until it levels off, then the next session numbers get play work, so content behind steps that reach nothing new in later sessions is reached",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // The first visit goes round a menu without end; the second and third visits each need six presses that run the
+    // same code again before their content.
+    const source =
+      'let visits = load "fx.visits", default: 0\nif visits == 0 {\n  say "Welcome."\n  let rounds = 0\n' +
+      '  let going = true\n  while going {\n    let pick = choose again: "Again", done: "Done"\n' +
+      '    if pick == "done" {\n      going = false\n    }\n    rounds += 1\n  }\n}\n' +
+      'if visits >= 1 {\n  for step in 1..=6 {\n    showButton "Next"\n  }\n  say "Return content."\n}\n' +
+      'if visits >= 2 {\n  for step in 1..=6 {\n    showButton "On"\n  }\n  say "Third visit."\n}\n' +
+      'save visits + 1 as "fx.visits"\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 4000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      cells: true,
+      depthPhases: true,
+    });
+    const visited = (text: string) => {
+      const line = source.split("\n").findIndex((written) => written.includes(text)) + 1;
+      const file = result.coverage.files.find((entry) => entry.path === "main.tease");
+      return !(file?.unvisited ?? []).some(({ lines }) => {
+        const [from = 0, to = from] = lines.split("-").map(Number);
+        return from <= line && line <= to;
+      });
+    };
+    assert.ok(visited("Return content."));
+    assert.ok(visited("Third visit."));
+    const phases = result.search.phases;
+    assert.ok(phases !== undefined);
+    // Session 2 opened after session 1 had play work, and session 3 after session 2; each reached its own lines first.
+    const [first, second = null, third = null] = phases.openedAt;
+    assert.ok(first === 0 && second !== null && third !== null && second > 0 && third > second);
+    assert.ok(phases.playGain[1]! > 0 && phases.playGain[2]! > 0);
+    // A session number that reached nothing new opens no deeper one.
+    assert.ok(phases.openedAt.length < 6);
+  },
+);
+
+test(
+  "with depth phases, a next session still comes after a first session that ends in its first step, and in a return window a later session reads",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const missed = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const result = explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 100,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        cells: true,
+        later: true,
+        depthPhases: true,
+      });
+      return result.coverage.files.flatMap((file) =>
+        file.unvisited.filter((range) => range.reach === "unknown").map((range) => range.lines),
+      );
+    };
+    // The first session saves and ends without an input: the second is still started from what it saved.
+    assert.deepEqual(
+      missed(
+        'let events = load "events", default: []\nif events.contains("saved") {\n  say "Welcome back."\n}\n' +
+          'save ["saved"] as "events"\nexit\n',
+      ),
+      [],
+    );
+    // The window the player must come back in is read by a later session: next sessions start in it too.
+    assert.deepEqual(
+      missed(
+        'let last = load "last", default: 0\nlet away = getTimestamp().toSeconds() - last\nshowButton "Go"\n' +
+          'if last > 0 {\n  if away >= 7200 and away <= 18000 {\n    say "Welcome back."\n  }\n  exit\n}\n' +
+          'save getTimestamp().toSeconds() as "last"\nexit\n',
+      ),
+      [],
     );
   },
 );
@@ -1114,6 +1406,73 @@ test(
       !file.unvisited.some((range) => {
         const [from = 0, to = from] = range.lines.split("-").map(Number);
         return done >= from && done <= to;
+      }),
+    );
+  },
+);
+
+test(
+  "a key template stays a pattern where a helper rebinds the parameter that names its key, or where its result also reads the template another way",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'global KNIFE = "knife"\nlet kind = choose rope: "Rope", saw: "Saw"\n' +
+      'let spare = load("gear.${kind}", default: false)\n' +
+      'function owns(item) {\n  return load("gear.${item}", default: false) == true\n}\n' +
+      'function plural(item) {\n  item = "${item}s"\n  return load("gear.${item}", default: false) == true\n}\n' +
+      "function either(item) {\n  return owns(item) or spare == true\n}\n" +
+      'showButton "Go"\nif owns(KNIFE) {\n  say "One."\n}\nif plural(KNIFE) {\n  say "Two."\n}\n' +
+      'if either(KNIFE) {\n  say "Three."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const flow = new DataFlow(plan, instructions);
+    const keys = instructions.flatMap((instruction, index) =>
+      instruction.kind === "jumpIfFalse" && flow.functionAt(index) === 0
+        ? [flow.keyAt("gear.\u0000", instruction.condition, index).replaceAll("\u0000", "*")]
+        : [],
+    );
+    // `owns` names its key; `plural` rebinds `item` first; `either` also reads `spare`, which any key of it may be.
+    assert.deepEqual(keys, ["gear.knife", "gear.*", "gear.*"]);
+  },
+);
+
+test(
+  "with progress leads, a loop that runs until one variable reaches another is followed to its end beside a wide tree of choices",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // As above, but the climb ends where `height` reaches `summit`, a variable: no constant to come closer to.
+    const branches = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `  let path${index} = choose left: "L${index}", right: "R${index}", back: "B${index}"\n` +
+        `  if path${index} == "left" {\n    say "left${index}"\n  }\n  showButton "On${index}"\n`,
+    ).join("");
+    const source =
+      `let way = choose trail: "Trail", climb: "Climb"\nif way == "trail" {\n${branches}  exit\n}\n` +
+      'let height = 0\nlet summit = 60 + 40\nwhile height < summit {\n  showButton "Step"\n  height += 1\n}\n' +
+      'say "Summit."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2400,
+      maxStates: 100_000,
+      sources: new Map(),
+      diagnostics: [],
+      progressLeads: true,
+    });
+    const summit = source.split("\n").findIndex((line) => line.includes('say "Summit."')) + 1;
+    const file = result.coverage.files.find((entry) => entry.path === "main.tease")!;
+    assert.ok(
+      !file.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return summit >= from && summit <= to;
       }),
     );
   },

@@ -371,6 +371,8 @@ export interface Step {
    * with nothing to do but wait, as the ones before it did.
    */
   readonly forced: boolean;
+  /** The runtime operations the step took, its session's start included for a first step. */
+  readonly operations: number;
 }
 
 function record(value: unknown): Data {
@@ -422,7 +424,7 @@ function execute(runtime: Runtime): Execution {
 }
 
 /** A step before the state it reached is exported. */
-type Settled = Omit<Step, "snapshot" | "tagged" | "runtime">;
+type Settled = Omit<Step, "snapshot" | "tagged" | "runtime" | "operations">;
 
 /**
  * The project's plan with the engine, which runs inputs and records the instructions and condition ways they execute.
@@ -477,6 +479,8 @@ export class Session {
    * runs, inputs, and automatic answers, but not restoring, forking, exporting, or reading a state.
    */
   operations = 0;
+  /** {@link operations} when the current step began. */
+  #stepStart = 0;
   readonly #engine: Engine;
   readonly #plan: Data;
   readonly #instructions: Data[];
@@ -520,6 +524,7 @@ export class Session {
    * a `chosen` one after a session whose path chose a random outcome.
    */
   start(setup: Setup = PLAY_SETUP, chosen = false): Step {
+    this.#stepStart = this.operations;
     this.operations += 1;
     const runtime = this.#counted(
       this.#engine.createFreshRuntimeSession(
@@ -571,6 +576,7 @@ export class Session {
    * each a fork.
    */
   apply(runtime: Runtime, input: ExplorerInput, clock: boolean, chosen = false): Step | null {
+    this.#stepStart = this.operations;
     const settled = this.#apply(runtime, input, clock, chosen);
     return settled === null ? null : this.#reached(runtime, settled);
   }
@@ -707,7 +713,13 @@ export class Session {
 
   #reached(runtime: Runtime, settled: Settled): Step {
     const tagged = runtime.exportTaggedSnapshot();
-    return { ...settled, snapshot: parseSnapshot(tagged.json), tagged, runtime };
+    return {
+      ...settled,
+      operations: this.operations - this.#stepStart,
+      snapshot: parseSnapshot(tagged.json),
+      tagged,
+      runtime,
+    };
   }
 
   /** Gives the session in the state `view` shows one input; whether the runtime accepted it. */

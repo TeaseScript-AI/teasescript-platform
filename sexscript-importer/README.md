@@ -353,21 +353,39 @@ a run's length and result then do not depend on the machine's load.
 
 Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
-stored value (also by a key template such as `"script${i}.time"`), the clock, or a variable the code assigns. Its
+stored value (also by a key template such as `"script${i}.time"`; one whose computed parts are constants at the
+condition, such as the argument of `has(KNIFE)` for a helper `has(name)` that loads `"toys.${name}"`, also in a helper
+it passes `name` to, is the one key it names), the clock, or a variable the code assigns. Its
 comparisons with constants give the values that take the missed way. An ask is answered again with them on the path of
 the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
 that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
 that satisfies the condition, a session starts from it and replays that path; otherwise a session starts from the
-storage closest to it and plays again the path that led there, to raise the value once more, for as long as each
-session gets closer (100 sessions at most). When no explored session gets there, the way stays `unknown` with the
-reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. For the clock, without forward time
+storage closest to it and replays a route: the inputs of a session seen to bring the value closer from storage that
+already had it (up to 1,000 inputs; sessions with the same inputs are one route). The goal is the way with the least
+work in all, the sessions it takes times their work, so the route repeated is the one with the most progress per
+runtime operation over whole sessions, their starts included: as the session it comes from did, then as its replays
+measure it. A long session that moves the value by five can beat a short one that moves it by one. Every eighth session
+replays another of the routes kept (eight at most) instead, each in turn in the order they were found, as effects
+depend on the state and a route that was worse can become better. Each session is real play from the storage the one
+before it left, and the next starts at once while sessions get closer (100 sessions at most). After one that does not,
+the routes not replayed since the last closer value are tried, the best first; a route that twice in a row brings the
+value no closer is dropped. The chain then waits until play leaves a closer storage. A session from storage without
+the value is no route, as repeating it cannot bring the value further. When no explored session gets there, the way
+stays `unknown` with the reason, such as `needs score > 100; best reached: score = 37 after 37 sessions`. The report
+gives each chain that started sessions with its way (`chains`): its sessions, the closest value, its result (`reached`,
+storage that `holds` the value without the way reached, `queued` at the run's end, the session `limit`, or `stopped`),
+the route it repeats, the routes it replayed (for each its first inputs and end, its inputs, its replays and those that
+came no closer, and its progress per 1,000 operations), and its last switches between routes, with why;
+`summary.md` lists the chains with the most sessions. For the clock, without forward time
 (below), the player continues at other wall clock times (times of day, weekdays, later dates) before that step, as a
 real player's time varies; a step after that is a clock step. An answer attempt's states share the first place for 20
 expansions in all, until the condition takes the missed way (a session chain goes on from the storage it reached
-instead), and play states that bring a variable the code counts or sets closer to the comparison share it for 40 (with
-progress leads, on by default and off with `--no-progress-leads`, an expansion in that first place that brings a state
-closer again does not count, so a loop that needs many rounds is followed to the constant, while one that gets no
-closer uses its 40 up); clock states take only their attempt's own steps and otherwise come after all play states.
+instead), and play states that bring a variable the code counts or sets closer to the comparison share it for 40 (a
+comparison of two values, such as `reps >= target`, measures the difference of a variable the code counts from the
+other side, a variable or a stored value with a literal key, against 0; with progress leads, on by default and off
+with `--no-progress-leads`, an expansion in that first place that brings a state closer again does not count, so a
+loop that needs many rounds is followed to the constant, while one that gets no closer uses its 40 up); clock states
+take only their attempt's own steps and otherwise come after all play states.
 With conjunctive steering (on by default, off with `--no-conjunctive`), a way that needs all parts of its condition
 (`a >= 5 and b <= 6` true, an `or` false) is steered by the condition's branch distance instead of each part's
 closeness: a state is closer when fewer of the parts it can read are unsatisfied, or as many but nearer in sum (an `or`
@@ -381,7 +399,26 @@ A step that brings a state nearer to that region shares a lead toward it, as clo
 expansions; once the region is reached or its lead spent, the next largest region not tried yet is. It is off by
 default: on the units measured it gained nothing. Directed work (attempts and expansions in the first place) takes at
 most a third of all runtime operations (fresh sessions, runs, inputs, and automatic answers), a deterministic measure
-of what steps cost; starting next visits takes at most another third, apart from it.
+of what steps cost. Without depth phases, starting next visits takes at most another third, apart from it, from the
+storage of the first ten completed sessions, and a session number goes before the next one in the search order.
+
+Depth phases (`--depth-phases`, opt-in) let the search decide how play work goes to session numbers, the depth of a
+session from a new player's first. Each depth's play work (its expansions and the next sessions it starts) and gain (the
+lines and condition ways those reach first) are measured as the run goes. The first session goes first. The next depth
+opens when the deepest open one levels off, its gain per operation in the last quarter of its own work at most half its
+average, or has nothing left; only a depth that reached something new opens another, and only when a session of it left
+storage to start from (a completed one's; with `--quit-anywhere`, any). States whose step reached new code go first in
+any open depth, as without phases. Apart from those, a newly opened depth first gets a quarter of the work of the depth
+before it; then the open depth with the most gain per operation in the last quarter of its work gets play, and an
+eighth of play goes to the other open depths in turn, the one explored least first, so that an earlier depth gets work
+back when it gains again. A depth starts a next session when none of its open states reached new code, from storage a
+session of the depth before left: the one with the most compared values (each compared key's value bucket, as cells
+read them) no session of that depth started from yet, and while the depth has open states only one that adds such a
+value. Directed work and random outcomes keep their shares. The report gives, per session number, when it opened and
+its play work, gain, and next sessions (`search.phases`). They are opt-in because on the 13-unit gate (3 seeds, gate
+budgets) they gained where a first session levels off early (DisciplineClinic +4.5 points, BreatheAcademy +3.2) but cost
+units whose first session still gains: the second session opens on an early lull in the first, so jewell lost its trap
+loops and 2.3 points, and Domme3 and ToyExpanded 0.8.
 
 With random choices (on by default; `--no-random-choices` switches them off), random outcomes are choices too
 (`docs/RUNTIME.md#controlled-randomness`): sessions let the explorer decide the draws that pick what happens (`chance`,
@@ -479,10 +516,12 @@ The report `<out>/<unit>.json` has these parts:
   far as measured: of the condition's own unmet parts, the furthest from holding when the way needs all of them, the
   nearest when any one would do, and none when they combine both ways; and `case` for a `switch` case, whose condition
   text is its pattern. A variable is read in the innermost running call of the condition's function, over the
-  top-level variables of its file, as a value of the compared constant's type; its closest state counts from when the
-  condition became a target, with its value, its session, the operations done when a state first came that close, and
-  `trend` (`improving` when a state beat the first one watched and did so in the last quarter of the run's
-  operations, else `flat`). For a stored value, it is the closest storage a state left;
+  top-level variables of its file, as a value of the compared constant's type; for two values, `needs` shows their
+  difference (`reps - target >= 0`), read there when both sides are numbers, or both booleans; its closest state
+  counts from when the condition became a target, with its value (for two values, the difference), its session, the
+  operations done when a state first came that close, and `trend` (`improving` when a state beat the first one watched
+  and did so in the last quarter of the run's operations, else `flat`). For a stored value, it is the closest storage
+  a state left;
 - `directed`: the condition ways directed search aimed at and reached, by label, by what they depend on, how (a
   directed attempt or the search), and in how many sessions, each with its shortest path, which `--way` replays;
 - one crash per runtime failure code and source span, with the shortest path found from the start (a play one when
@@ -503,6 +542,13 @@ A path has the inputs of each session: the earlier sessions (`earlier`), each fr
 and the last one, with its start clock when that is not the play one. `summary.md` has one table row per unit, and
 per unit the missed ways with the most lines behind them: what each needs, and why play did not get there (the closest
 state to the comparison it needs, still improving or not, the reason directed search knows, or what it depends on).
+Per session number, the depth of a session from a new player's first (`search.bySession`), the report gives what that
+depth added: its sessions started and completed, the runtime operations its sessions ran (each operation goes to the
+session whose runtime ran it, replays of evicted states included), the lines it reached first and how many of them in
+the last quarter of those operations (its marginal gain), the condition ways it took first, and its states or stored
+values that came closer to what a missed way needs. `coverage.bySession` gives the lines only a first session ran, such
+as an intro, and the lines no first session ran, by the smallest session number that ran them and per file; these are
+observed, so a line first run in a later session may still be reachable in a first one. `summary.md` shows both.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
 runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime
@@ -554,12 +600,24 @@ node tools/explore-compare.ts <base-out> <candidate-out> [--favourite <unit>]...
 Each folder holds the reports of one run, or one subfolder per seed (`s1/`, `s2/`, ...). The first table has the
 coverage by seed, how the search stopped, states per second, and the gate: a unit fails when the candidate's mean is
 more than 1 pp below the base's lowest, when a seed the base exhausted is not exhausted at least as well, or when a crash
-or trap the base found is missing. A net change can hide a loss elsewhere, so the second table counts the lines and
+or trap the base found is missing (with how many base seeds found it). Which deep loops and crashes a seed reaches
+varies: a trap or crash the base found in one seed of three is a weak signature, so before a change is held for it, run
+more seeds of that unit on both sides (seeds 4 to 6) and compare how often each side finds it; the change passes when the
+candidate finds it about as often as the base. A net change can hide a loss elsewhere, so the second table counts the lines and
 condition ways each side visited and the other did not, per seed, and the lines consistently lost or gained (visited by
 one side in at least two thirds of the seeds and by the other in none), with their files and ranges and the search
 figures that help explain them (states, sessions, time steps, quit visits, traps, open states, the top hotspot). A
-`--favourite` unit with consistently lost lines is marked `EXPLAIN`. Lines are counted from compiling each unit, as the
-explorer counts them.
+`--favourite` unit with consistently lost lines is marked `EXPLAIN`; lines first-ever reached (by a candidate seed and by
+no base seed) are counted and listed too. Lines are counted from compiling each unit, as the explorer counts them. A
+last table shows progress without new lines: for each way both sides missed with a measured part (the target report's
+`best`), the closest any seed of each side came, with how many ways came closer or went further and the top examples,
+such as "needs `visits >= 20`: 3 → 12".
+
+To gate a change aimed at one class of problem on the units of that class (plus a few controls, at a larger budget),
+`tools/explore-tags.ts <unit-dir>...` tags units from their compiled plans: `clock-saves` (saves a value read from the
+clock), `session-counters` (saves a stored key from its own load), `random` (100 or more random draw sites per thousand
+lines), `typed-asks` (compares a typed answer with a constant), and `large` (5,000 or more coverable lines);
+`--class <tag>` prints the folders of the units with that tag. Run the full gate as well before a push.
 
 Known limits:
 
