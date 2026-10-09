@@ -3264,7 +3264,9 @@ Rules:
   unknown type that does not fit the declared type of the variable it starts.
 - Persistent plain data is storable. Timer, media, and message handles and speaker references exist only in the
   current session and cannot be saved, including when nested inside lists or objects (`TSR055`); save a message's
-  `text` instead. Nested `null` is allowed.
+  `text` instead. Because `load` gives its default in place of a saved value, a default whose type is known to hold a
+  speaker, camera view, permanent button, or timer, media, or message handle is a compile error (`TSV043`). Nested
+  `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
 - A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
   media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage

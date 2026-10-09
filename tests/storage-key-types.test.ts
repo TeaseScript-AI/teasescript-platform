@@ -91,6 +91,43 @@ test("every load needs a default, and null says the value may be missing", () =>
   );
 });
 
+test("a default that cannot be saved is a compile error", () => {
+  const unsaveable =
+    "Speakers, camera views, permanent buttons, and timer, media, or message handles cannot be saved.";
+  assert.deepEqual(errors('let t = timer async 10 s\nlet x = load("k", default: t)\nexit'), [
+    [
+      "TSV043",
+      `A load's default must be a value that can be saved, because 'load' gives the default in place of a saved value. This default is a timer handle. ${unsaveable} Give a default such as a number, a text, or a list of numbers or texts.`,
+      "t",
+    ],
+  ]);
+  // Also inside a list, as a button, or for a variable or key with a declared type, which reports no second error.
+  for (const source of [
+    'let t = timer async 10 s\nlet x = load "k", default: [t]\nexit',
+    'let x = load "k", default: (showPermanentButton "Stop" { exit })\nexit',
+    'let t = timer async 10 s\nlet x: integer = load "k", default: t\nexit',
+    'let t = timer async 10 s\nlet x: integer = 0\nx = load "k", default: t\nexit',
+    'let x: integer = load "k", default: 0\nlet t = timer async 10 s\nlet y = load "k", default: t\nexit',
+  ])
+    assert.deepEqual(codes(source), ["TSV043"], source);
+  // A message handle gets the text to use instead, named after the variable that holds it.
+  assert.match(
+    errors('let greeting = say "Hi"\nlet x = load "k", default: greeting\nexit')[0]?.[1] ?? "",
+    /cannot be saved\. Use the message's text instead, as in 'default: greeting\.text'\.$/u,
+  );
+  for (const source of [
+    'let greeting = say "Hi"\nlet x = load "k", default: [greeting]\nexit',
+    'let greeting = say "Hi"\nlet greetings = [greeting]\nlet x = load "k", default: greetings\nexit',
+  ])
+    assert.match(
+      errors(source)[0]?.[1] ?? "",
+      /cannot be saved\. Use the message's text instead\.$/u,
+      source,
+    );
+  // A list of plain values, such as the options of a button, can be saved.
+  assert.deepEqual(codes('let options = load "options", default: ["Yes", "No"]\nexit'), []);
+});
+
 test("a load reads the declared type of its variable, or else its default's type", () => {
   assert.deepEqual(
     codes(
