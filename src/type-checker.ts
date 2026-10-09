@@ -159,7 +159,7 @@ import {
   settle,
   STRING_TYPE,
   TIME_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
   SCRIPT_TYPE,
   typeFromAnnotation,
   typeName,
@@ -775,6 +775,7 @@ class TypeChecker {
         }[];
       }
     | { readonly kind: "dict"; readonly start: StaticType | null; readonly answer: StaticType }
+    | { readonly kind: "unknown" }
   >();
 
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
@@ -1148,6 +1149,10 @@ class TypeChecker {
             : null;
     };
     for (const [expression, form] of this.#forms) {
+      if (form.kind === "unknown") {
+        shapes.set(expression, form);
+        continue;
+      }
       if (form.kind === "dict") {
         shapes.set(expression, {
           kind: "dict",
@@ -2952,7 +2957,7 @@ class TypeChecker {
         if (typeof parts === "string")
           this.#report(
             typeCode.invalidOperand,
-            `${parts}; a calendar duration counts whole days or months. Write the exact time instead, as in '36 h'.`,
+            `${parts}. A calendar duration counts whole days or months. Write the exact time instead, as in '36 h'.`,
             expression.span,
           );
         return DURATION_TYPE;
@@ -3116,7 +3121,7 @@ class TypeChecker {
           if (kept?.declared === true && kept.at !== expression.span && !sameType(kept.type, read))
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load; the others take it.`,
+              `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load only. The other loads use that type.`,
               expression.span,
             );
         } else if (kept?.declared === true) {
@@ -3284,7 +3289,7 @@ class TypeChecker {
         if (!finite && !toggle && (start === undefined || unwrap(start).kind === "nullLiteral"))
           this.#report(
             typeCode.invalidOperand,
-            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
+            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
             property.value.span,
           );
       }
@@ -3350,7 +3355,7 @@ class TypeChecker {
           for (const { entry } of starts)
             this.#report(
               typeCode.invalidOperand,
-              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers. Add type: "integer" or type: "number".`,
               entry.value.span,
             );
         const element = union(entries.map(({ field }) => field.result));
@@ -3373,7 +3378,9 @@ class TypeChecker {
           `'fields:' takes an object or dict of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
           fields.expression.span,
         );
-      this.#forms.set(expression, { kind: "object", fields: [] });
+      // Fields the compiler cannot know, such as an untyped parameter's, may be an object or a dict: the form takes the
+      // shape of the value when it opens.
+      this.#forms.set(expression, { kind: "unknown" });
       return UNKNOWN_TYPE;
     }
     const literal = unwrap(fields.expression);
@@ -3644,7 +3651,7 @@ class TypeChecker {
     )
       this.#report(
         typeCode.invalidOperand,
-        `askBooleans has ${textsList.elements.length} texts but ${prefillList.elements.length} prefill values; give one for each text.`,
+        `askBooleans has ${textsList.elements.length} ${textsList.elements.length === 1 ? "text" : "texts"} but ${prefillList.elements.length} prefill ${prefillList.elements.length === 1 ? "value" : "values"}. Give one prefill value for each text.`,
         prefillList.span,
       );
     const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
@@ -3777,7 +3784,7 @@ class TypeChecker {
     this.#report(
       typeCode.emptyTagQuery,
       query.catalog === "scripts"
-        ? "No file in the project that runs something has these tags; a file of declarations only is never picked."
+        ? "No file in the project that runs something has these tags. A file of declarations only is never picked."
         : candidates.length === 0
           ? "The package has no images to pick from."
           : "No image in the package has these tags.",
@@ -4164,9 +4171,9 @@ class TypeChecker {
   }
 
   /**
-   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different
-   * families, moving a timestamp by calendar parts or a date by exact time, and calendar parts that would not stay whole.
-   * Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
+   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different families,
+   * moving an absolute date and time by calendar parts or a date by exact time, and calendar parts that would not stay
+   * whole. Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
    */
   #checkKnownDurations(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -4187,15 +4194,15 @@ class TypeChecker {
     };
     let problem: string | number | DurationParts | undefined;
     if (operator === "+" || operator === "-") {
-      // Only a timestamp or a date moved by a known duration has something to check.
-      const moved = isScalar(left, "timestamp")
-        ? "timestamp"
+      // Only an absolute date and time or a date moved by a known duration has something to check.
+      const moved = isScalar(left, "absoluteDateTime")
+        ? "absoluteDateTime"
         : isScalar(left, "date")
           ? "date"
           : undefined;
       const b = moved !== undefined && rightDuration ? duration(expression.right) : undefined;
-      if (b !== undefined && moved === "timestamp" && !isExactDuration(b))
-        problem = `a timestamp moves only by exact time such as 24 h, not by ${formatDuration(b)}; convert it with toDateTime() first`;
+      if (b !== undefined && moved === "absoluteDateTime" && !isExactDuration(b))
+        problem = `an absolute date and time moves only by exact time such as 24 h, not by ${formatDuration(b)}. Convert it with toDateTime() first`;
       else if (b !== undefined && moved === "date" && b.milliseconds !== 0)
         problem = `a date moves only by days, weeks, months, or years, not by ${formatDuration(b)}`;
     } else if (leftDuration && rightDuration) {
@@ -4611,8 +4618,8 @@ class TypeChecker {
           ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
           : failing.kind === "dict"
             ? method === "add"
-              ? "Dicts have no method 'add'; store a value by its key, as in dict[key] = value."
-              : `Dicts have no method '${method}'; use contains, remove, clear, or get.`
+              ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
+              : `Dicts have no method '${method}'. Use contains, remove, clear, or get.`
             : failing.kind === "timer" ||
                 failing.kind === "media" ||
                 failing.kind === "camera" ||
@@ -4774,7 +4781,7 @@ class TypeChecker {
           `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
-      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type; ${fix}.`,
+      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type. ${capitalize(fix)}.`,
       span,
     );
   }
@@ -4963,7 +4970,7 @@ class TypeChecker {
             this.#typeOf(item.value),
             (member) => familyOf(member) !== undefined && familyOf(member) === family,
             item.value,
-            `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps`,
+            `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times`,
           );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
@@ -4988,7 +4995,7 @@ class TypeChecker {
       case "toDate":
       case "toTime":
       case "toDateTime":
-      case "toTimestamp":
+      case "toAbsoluteDateTime":
         this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return scalarType(CONVERSION_RESULTS.get(name)!);
       case "escapeMarkup":
@@ -5003,7 +5010,7 @@ class TypeChecker {
       case "getDate":
       case "getTime":
       case "getDateTime":
-      case "getTimestamp":
+      case "getAbsoluteDateTime":
         // The current date and time take no arguments (V30 §35).
         if (expression.arguments.length > 0)
           this.#report(
@@ -5017,7 +5024,7 @@ class TypeChecker {
             ? TIME_TYPE
             : name === "getDateTime"
               ? DATETIME_TYPE
-              : TIMESTAMP_TYPE;
+              : ABSOLUTE_DATE_TIME_TYPE;
       case "script": {
         // `script(path)` or `script(path, label: name)`, both text (V30 §29).
         const positional = expression.arguments.filter(
@@ -5033,7 +5040,7 @@ class TypeChecker {
           if (item.kind === "namedArgument" && item.name.name !== "label")
             this.#report(
               typeCode.unknownNamedArgument,
-              `script(...) has no parameter '${item.name.name}'; its only named argument is label:.`,
+              `script(...) has no parameter '${item.name.name}'. Its only named argument is 'label:'.`,
               item.name.span,
             );
           else if (item.kind === "namedArgument" || positional === 1)
@@ -5090,11 +5097,11 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
-    // A timestamp has no local fields until it is converted through the player's zone.
-    if (isScalar(value, "timestamp") && temporalFieldType("datetime", name) !== undefined) {
+    // An absolute date and time has no local fields until it is converted through the player's zone.
+    if (isScalar(value, "absoluteDateTime") && temporalFieldType("datetime", name) !== undefined) {
       this.#report(
         typeCode.invalidOperand,
-        `A timestamp has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        `An absolute date and time has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -5111,9 +5118,9 @@ class TypeChecker {
     this.#report(
       typeCode.invalidOperand,
       value.kind === "list" || value.kind === "set"
-        ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
+        ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`
         : value.kind === "dict"
-          ? `Dicts have no property '${name}'; use length, keys, or values, or read a value by its key, as in ${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}].`
+          ? `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}]'.`
           : value.kind === "timer" ||
               value.kind === "media" ||
               value.kind === "camera" ||
@@ -5199,7 +5206,7 @@ class TypeChecker {
       this.#report(
         typeCode.unknownNamedArgument,
         method === "get"
-          ? `get(...) has no parameter '${unknown.name.name}'; its only named argument is 'default:'.`
+          ? `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`
           : `${method}(...) takes no named arguments.`,
         unknown.name.span,
       );
@@ -5417,7 +5424,7 @@ class TypeChecker {
     if (mixed === undefined) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(mixed)}. A place keeps one type; ${unnamedMixFix(mixed) ?? fix(typeName(mixed))}.`,
+      `This choose returns ${describeValue(mixed)}. A place keeps one type. ${capitalize(unnamedMixFix(mixed) ?? fix(typeName(mixed)))}.`,
       expression.span,
     );
   }
@@ -5539,7 +5546,7 @@ class TypeChecker {
     if (value.elements.length === 0)
       this.#report(
         typeCode.unshowableValue,
-        "An interpolated list must contain at least one element to select from.",
+        "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
         value.span,
       );
     for (const element of value.elements)
@@ -5580,7 +5587,7 @@ class TypeChecker {
     if (isKnown(nonNullType(type)) && !isScalar(nonNullType(type), "string"))
       this.#report(
         typeCode.invalidInteractionChoice,
-        "Expected an opaque CSS button background colour.",
+        'A button background must be an opaque CSS colour, such as "#336699".',
         expression.span,
       );
   }
@@ -6070,7 +6077,7 @@ class TypeChecker {
             `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`);
       this.#report(
         typeCode.mixedTypes,
-        `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
+        `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type. ${capitalize(fix)}.`,
         literal.span,
       );
     }
@@ -6616,7 +6623,7 @@ const OPERAND_KINDS: readonly StaticType[] = [
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
   { kind: "list", element: UNKNOWN_TYPE },
 ];
 
@@ -7142,19 +7149,19 @@ const TEMPORAL_KINDS: ReadonlySet<ScalarTypeName> = new Set([
   "date",
   "time",
   "datetime",
-  "timestamp",
+  "absoluteDateTime",
 ]);
 
-/** Whether a value of this type is a date, time, date and time, or timestamp. */
+/** Whether a value of this type is a date, time, date and time, or absolute date and time. */
 function isTemporal(type: StaticType): boolean {
   const value = resolved(type);
   return value.kind === "scalar" && TEMPORAL_KINDS.has(value.name);
 }
 
-/** The type of a read-only field of a date or time value (V30 §35); a timestamp has none. */
+/** The type of a read-only field of a date or time value (V30 §35); an absolute date and time has none. */
 function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
   if (kind === "date" || kind === "datetime") {
-    if (name === "year" || name === "month" || name === "day") return INTEGER_TYPE;
+    if (["year", "month", "day", "weekNumber", "weekYear"].includes(name)) return INTEGER_TYPE;
     if (name === "weekday") return WEEKDAY_TYPE;
     if (name === "weekdayNumber") return WEEKDAY_NUMBER_TYPE;
   }
@@ -7177,14 +7184,14 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
     case "formatTime":
       return kind === "date" ? undefined : STRING_TYPE;
     case "formatDateTime":
-      return kind === "datetime" || kind === "timestamp" ? STRING_TYPE : undefined;
-    case "toTimestamp":
-      return kind === "datetime" ? TIMESTAMP_TYPE : undefined;
+      return kind === "datetime" || kind === "absoluteDateTime" ? STRING_TYPE : undefined;
+    case "toAbsoluteDateTime":
+      return kind === "datetime" ? ABSOLUTE_DATE_TIME_TYPE : undefined;
     case "toDateTime":
-      return kind === "timestamp" ? DATETIME_TYPE : undefined;
+      return kind === "absoluteDateTime" ? DATETIME_TYPE : undefined;
     case "toSeconds":
     case "toMilliseconds":
-      return kind === "timestamp" ? INTEGER_TYPE : undefined;
+      return kind === "absoluteDateTime" ? INTEGER_TYPE : undefined;
     default:
       return undefined;
   }
@@ -7228,7 +7235,7 @@ function assignableProperty(
   if (member.kind === "object" && member.properties === null) return { type: null };
   if (member.kind === "scalar" && temporalFieldType(member.name, name) !== undefined)
     return {
-      problem: `Property '${name}' of ${describeValue(member)} cannot be assigned; date and time values do not change.`,
+      problem: `Property '${name}' of ${describeValue(member)} cannot be assigned. Date and time values do not change.`,
     };
   if (member.kind === "dict")
     return {
@@ -7638,19 +7645,19 @@ function handleMemberMessage(
 ): string {
   if (handle === "messageHandle")
     return use === "call"
-      ? `Message handles have no method '${name}'; change the message with its text property.`
-      : `Message handles have no property '${name}'; use text.`;
+      ? `Message handles have no method '${name}'. Change the message with its text property.`
+      : `Message handles have no property '${name}'. Use the text property.`;
   if (handle === "camera")
     return use === "call"
-      ? `Camera views have no method '${name}'; hide them with hideCamera.`
-      : `Camera views have no property '${name}'; use placement.`;
+      ? `Camera views have no method '${name}'. Hide them with hideCamera.`
+      : `Camera views have no property '${name}'. Use the placement property.`;
   const kind = handle === "timer" ? "Timer" : "Media";
   if (use === "call")
-    return `${kind} handles have no method '${name}'; use pause(), resume(), or stop().`;
+    return `${kind} handles have no method '${name}'. Use pause(), resume(), or stop().`;
   if (use === "read") return `${kind} handles have no property '${name}'.`;
   return handle === "timer"
-    ? `Timer handle property '${name}' cannot be assigned; assign remaining, display, or repeatDuration.`
-    : `Media handle property '${name}' cannot be assigned; assign position, remaining, or volume.`;
+    ? `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
+    : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
 }
 
 function operatorMessage(
@@ -7685,8 +7692,8 @@ function operatorMessage(
   if (isScalar(left!, "time") || isScalar(right!, "time"))
     return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.`;
   if (expression.kind === "binaryExpression" && (operator === "+" || operator === "-")) {
-    // A timestamp or a date and time moves by a duration written after it.
-    if (isScalar(left!, "timestamp", "datetime")) {
+    // An absolute date and time or a date and time moves by a duration written after it.
+    if (isScalar(left!, "absoluteDateTime", "datetime")) {
       const subject = describeValue(left!);
       const added =
         operator === "+"
@@ -7699,7 +7706,7 @@ function operatorMessage(
           : "";
       return `${added}, not ${describeValue(right!)}.${fix}`;
     }
-    if (operator === "+" && duration(left!) && isScalar(right!, "timestamp", "datetime"))
+    if (operator === "+" && duration(left!) && isScalar(right!, "absoluteDateTime", "datetime"))
       return `'+' cannot add ${describeValue(right!)} to a duration. Write it first, as in '${expressionLabel(expression.right) ?? "value"} + 1 h'.`;
   }
   return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}.`;
@@ -7772,8 +7779,9 @@ function temporalNoun(type: StaticType): string {
 }
 
 /**
- * How to compare or subtract a date and time and a value of another kind: convert one of them. A date and time and a
- * timestamp convert through the player's zone; a date or a time is compared with that part of a date and time.
+ * How to compare or subtract a date and time and a value of another kind: convert one of them. A date and time and an
+ * absolute date and time convert through the player's zone; a date or a time is compared with that part of a date and
+ * time.
  */
 function temporalPairFix(
   expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -7785,7 +7793,8 @@ function temporalPairFix(
   if (local < 0) return "";
   const other = local === 0 ? right : left;
   const label = expressionLabel(local === 0 ? expression.left : expression.right) ?? "value";
-  if (isScalar(other, "timestamp")) return ` Convert one first, as in '${label}.toTimestamp()'.`;
+  if (isScalar(other, "absoluteDateTime"))
+    return ` Convert one first, as in '${label}.toAbsoluteDateTime()'.`;
   if (operator === "-") return "";
   if (isScalar(other, "date")) return ` Compare its date, as in 'toDate(${label})'.`;
   if (isScalar(other, "time")) return ` Compare its time, as in 'toTime(${label})'.`;
@@ -7807,8 +7816,8 @@ function unitFix(number: Expression | null): string {
  */
 function operandFix(operand: StaticType, type: StaticType, statement: AssignmentStatement): string {
   if (isNumeric(operand)) return " Use a number instead.";
-  // A timestamp or a date and time moves by a duration as well.
-  if (isScalar(operand, "duration", "timestamp", "datetime")) {
+  // An absolute date and time or a date and time moves by a duration as well.
+  if (isScalar(operand, "duration", "absoluteDateTime", "datetime")) {
     const literal = unwrap(statement.value);
     return literal.kind === "numberLiteral"
       ? ` Give the number a unit, such as '${literal.raw} s'.`
@@ -7947,7 +7956,7 @@ function returnUnionFix(
 ): string {
   const both = union([first, other]);
   if (!isAnnotatable(both))
-    return " A function returns one type; use a separate function for values of another type.";
+    return " A function returns one type. Use a separate function for values of another type.";
   const parameters = declaration.parameters.length === 0 ? "" : "(...)";
   return ` To return both, declare the result type, as in 'function ${declaration.name.name}${parameters}: ${typeName(both)}'.`;
 }
@@ -8015,7 +8024,7 @@ const GENERIC_FORM_ANSWER_TYPE = union([
   DATETIME_TYPE,
   // A cycle may return any choice value but `null`.
   DURATION_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
 ]);
 
 /** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */

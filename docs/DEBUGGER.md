@@ -252,11 +252,11 @@ When the record would outgrow its retention (4,096 calls or 2 Mi characters of a
 than a script limit), it starts again from the state before the Player's next call, never dropping a call in between. A
 call that fails the session or throws freezes the record, which keeps the state that call reached, or for a call that
 threw, the state it started from, as the export's checkpoint, so that later observations, such as on hiding the page,
-cannot evict or outdate it; a call the recorder cannot copy, or a media store that throws during a call, marks it
-incomplete. The recorder also lets the Player continue after a call throws, which ends the session's [runtime
-session](RUNTIME.md#runtime-sessions): the Player rebuilds the state it showed last from the recorded calls. For that,
-the recorder keeps logging calls after the record froze without changing the record, and after a call it cannot copy, it
-starts that log again at the Player's next call.
+cannot evict or outdate it; a call the recorder cannot copy, or a media store or random decision callback that throws
+during a call, marks it incomplete. The recorder also lets the Player continue after a call throws, which ends the
+session's [runtime session](RUNTIME.md#runtime-sessions): the Player rebuilds the state it showed last from the recorded
+calls. For that, the recorder keeps logging calls after the record froze without changing the record, and after a call
+it cannot copy, it starts that log again at the Player's next call.
 
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The
@@ -285,7 +285,9 @@ the anchor in a worker and compares each result and the final state. It reports 
 the first divergence with its source location and calls (1), an incomplete export (2), an unsupported version, for
 which a checkout of the recorded build is needed (3), an invalid export (4), or a timeout (`--timeout`, default 60 s;
 5). Exact replay covers the engine path; browser and device failures are diagnosed from their recorded reports, which
-replay substitutes for the devices.
+replay substitutes for the devices. The final state is compared exactly, failure messages included, so an export from a
+build whose engine differs, such as one with other error wording, can diverge. Replay it with a checkout of its recorded
+build.
 
 Debugger history may snapshot selected boundaries; this does not imply that production execution persists every internal
 instruction. Simulation is debugger tooling when execution uses disposable or test state, not an editor semantic.

@@ -87,7 +87,7 @@ export function executeTransfer(
     if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
       throw new RuntimeFault(
         "TSR047",
-        `Maximum TeaseScript call depth of ${snapshot.maxCallDepth} exceeded.`,
+        `Calls are nested ${snapshot.maxCallDepth} deep, the most this session allows. End the recursion sooner, or use a loop instead.`,
         copySpan(instruction.span),
       );
     }
@@ -356,11 +356,18 @@ function removeNonPersistentWork(
   for (const action of stopping) {
     if (action.kind === "timer") stopTimerAction(snapshot, action, span, events);
   }
-  // A finished timer may still have queued blocks; they belong to the activation the transfer leaves.
-  const dropped = new Set(snapshot.settledTimers.filter(leaves).map((timer) => timer.timerId));
+  // A finished timer may still have queued blocks, which run in the activation that started it: they go with it unless
+  // the timer persists.
+  const fleeting = new Set(
+    snapshot.settledTimers.filter((timer) => !timer.persist).map((timer) => timer.timerId),
+  );
   for (let index = snapshot.pendingTimerHandlers.length - 1; index >= 0; index -= 1) {
     const invocation = snapshot.pendingTimerHandlers[index]!;
-    if ("timerId" in invocation && dropped.has(invocation.timerId)) {
+    if (
+      "timerId" in invocation &&
+      fleeting.has(invocation.timerId) &&
+      left.has(invocation.rootScopeId)
+    ) {
       snapshot.pendingTimerHandlers.splice(index, 1);
     }
   }

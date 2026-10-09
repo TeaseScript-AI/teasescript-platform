@@ -25,11 +25,13 @@ const QUERY_FORM =
 /**
  * Converts a parsed predicate such as `("bedroom" or "bathroom") and "punishment" > minimum` to postfix steps. A quoted
  * name tests a tag; a quoted name before a comparison reads the tag's number, compared with an ordinary expression.
- * Returns `null` after reporting the first part that is not a tag predicate.
+ * Returns `null` after reporting the first part that is not a tag predicate, or at a quoted name that is `recovered`
+ * from an error already reported.
  */
 export function tagPredicateSteps(
   expression: Expression,
   report: (message: string, span: SourceSpan) => void,
+  recovered: (literal: StringLiteral) => boolean,
 ): TagQueryStep[] | null {
   const steps: TagQueryStep[] = [];
   // An explicit stack instead of recursion, because predicates may nest as deeply as the parser allows.
@@ -55,7 +57,7 @@ export function tagPredicateSteps(
         pending.push({ node: node.right, combine: false }, { node: node.left, combine: false });
       }
     } else if (node.kind === "stringLiteral") {
-      const name = queryTagName(node, report);
+      const name = queryTagName(node, report, recovered);
       if (name === null) return null;
       steps.push({ kind: "tag", name, span: node.span });
     } else if (node.kind === "binaryExpression" && isTagComparisonOperator(node.operator)) {
@@ -70,7 +72,7 @@ export function tagPredicateSteps(
         );
         return null;
       }
-      const name = queryTagName(tag, report);
+      const name = queryTagName(tag, report, recovered);
       if (name === null) return null;
       steps.push({
         kind: "tagCompare",
@@ -93,10 +95,13 @@ export function tagPredicateSteps(
 function queryTagName(
   literal: StringLiteral,
   report: (message: string, span: SourceSpan) => void,
+  recovered: (literal: StringLiteral) => boolean,
 ): string | null {
+  // The literal already reported an error inside an interpolation.
+  if (recovered(literal)) return null;
   if (literal.form !== "singleLine" || literal.parts.some((part) => part.kind !== "stringText")) {
     report(
-      "Write a tag name in a query out in full; for computed names, use all:, none:, or any: with a list.",
+      "Write a tag name in a query out in full. For computed names, use all:, none:, or any: with a list.",
       literal.span,
     );
     return null;

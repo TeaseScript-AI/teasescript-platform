@@ -15,8 +15,8 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, type checking,
   and compilation for the implemented TeaseScript subset.
-- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values, variables,
-  assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated single-line and block
+- **Language foundation:** values including elapsed durations and date, time, datetime, and `absoluteDateTime` values,
+  variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated single-line and block
   strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion, control flow,
   deterministic random, weighted choice, and distributions, rounding, numeric, exponential, logarithm, angle,
   `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, and `takeLast`, `+` on two

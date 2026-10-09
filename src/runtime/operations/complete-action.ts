@@ -296,7 +296,7 @@ function completeStorageWrite(
         code: "TSW014",
         message: `${action.value === null ? "delete" : "save"} could not persist ${JSON.stringify(
           messageText(action.key),
-        )}; the previous value is kept.`,
+        )}, so the previous value is kept.`,
         span,
       } satisfies DeveloperWarningEvent),
     );

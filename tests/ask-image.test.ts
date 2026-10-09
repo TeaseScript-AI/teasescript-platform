@@ -337,7 +337,7 @@ test("a computed source or filter that the request cannot use fails before it as
     },
   ).snapshot;
   assert.equal(long.failure?.code, "TSR052");
-  assert.match(long.failure?.message ?? "", /aggregate UTF-8 byte limit/u);
+  assert.match(long.failure?.message ?? "", /adds up to more than 65,536 bytes of UTF-8/u);
 });
 
 test("an external plan cannot call askImage as an ordinary function", () => {

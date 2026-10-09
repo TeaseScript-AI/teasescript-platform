@@ -15,15 +15,15 @@ function codes(source: string): [string, string][] {
   return diagnostics(source).map(([code, , text]) => [code, text]);
 }
 
-test("timestamp is a type name for annotations and type tests, and a protected name", () => {
+test("absoluteDateTime is a type name for annotations and type tests, and a protected name", () => {
   assert.deepEqual(
     codes(
       [
-        "function latest(moments: timestamp[], backup: timestamp?): timestamp? {",
+        "function latest(moments: absoluteDateTime[], backup: absoluteDateTime?): absoluteDateTime? {",
         "    return backup",
         "}",
-        "function kind(value: date | time | datetime | timestamp): string {",
-        '    if value is timestamp { return "moment" }',
+        "function kind(value: date | time | datetime | absoluteDateTime): string {",
+        '    if value is absoluteDateTime { return "moment" }',
         '    return "local"',
         "}",
         "exit",
@@ -32,16 +32,51 @@ test("timestamp is a type name for annotations and type tests, and a protected n
     [],
   );
   assert.deepEqual(
-    diagnostics('function f(at: timestamp) {\n    at = "2026-10-04T12:30:00Z"\n}\nexit'),
+    diagnostics('function f(at: absoluteDateTime) {\n    at = "2026-10-04T12:30:00Z"\n}\nexit'),
     [
       [
         "TSV041",
-        "'at' holds a timestamp, so it cannot be set to text (string). Convert the text with toTimestamp(...).",
+        "'at' holds an absolute date and time, so it cannot be set to text (string). Convert the text with toAbsoluteDateTime(...).",
         '"2026-10-04T12:30:00Z"',
       ],
     ],
   );
-  assert.deepEqual(codes("let timestamp = 1"), [["TSV001", "timestamp"]]);
+  assert.deepEqual(codes("let absoluteDateTime = 1"), [["TSV001", "absoluteDateTime"]]);
+});
+
+test("the earlier timestamp names are compile errors that name the fix", () => {
+  assert.deepEqual(diagnostics("let started: timestamp = getAbsoluteDateTime()\nexit"), [
+    ["TSP021", "'timestamp' is not a type. Use 'absoluteDateTime'.", "timestamp"],
+  ]);
+  assert.deepEqual(
+    diagnostics(
+      [
+        "let started = getTimestamp()",
+        'let parsed = toTimestamp("2026-10-04T12:30:00Z")',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV018", "Unknown function 'getTimestamp'. Use 'getAbsoluteDateTime'.", "getTimestamp"],
+      ["TSV018", "Unknown function 'toTimestamp'. Use 'toAbsoluteDateTime'.", "toTimestamp"],
+    ],
+  );
+  // The earlier method name is an error on any value, also one whose type the compiler does not know.
+  for (const source of [
+    'let moment = toDateTime("2026-10-04T18:00").toTimestamp()\nexit',
+    "function identity(value) {\n    return value\n}\nlet t = identity(getDateTime()).toTimestamp()\nexit",
+    "function f(v: datetime | absoluteDateTime) {\n    return v.toTimestamp()\n}\nexit",
+  ])
+    assert.deepEqual(
+      diagnostics(source),
+      [["TSV018", "Unknown method 'toTimestamp'. Use 'toAbsoluteDateTime()'.", "toTimestamp"]],
+      source,
+    );
+  // The earlier names stay protected, so an author's own declaration cannot hide the fix.
+  assert.deepEqual(codes("let timestamp = 1\nlet getTimestamp = 2"), [
+    ["TSV001", "timestamp"],
+    ["TSV001", "getTimestamp"],
+  ]);
 });
 
 test("conversions read ISO text and convert between temporal kinds", () => {
@@ -51,11 +86,11 @@ test("conversions read ISO text and convert between temporal kinds", () => {
         'let day: date = toDate("2026-10-04")',
         'let clock: time = toTime("14:30:15.250")',
         'let dinner: datetime = toDateTime("2026-10-04T18:00")',
-        'let started: timestamp = toTimestamp("2026-10-04T14:30:00+02:00")',
+        'let started: absoluteDateTime = toAbsoluteDateTime("2026-10-04T14:30:00+02:00")',
         "let combined: datetime = toDateTime(day, clock)",
         "let same: date = toDate(day, default: day)",
         "let part: time = toTime(dinner)",
-        'let utc: timestamp = toTimestamp("2026-10-04T12:30:00Z", default: started)',
+        'let utc: absoluteDateTime = toAbsoluteDateTime("2026-10-04T12:30:00Z", default: started)',
         "function read(text: string): date {",
         "    return toDate(text)",
         "}",
@@ -70,7 +105,7 @@ test("constant text that is not a valid value is a compile error, also with a de
   const cases = [
     [
       'toDate("4-10-2026")',
-      'toDate(...) cannot convert "4-10-2026"; the text must be ISO date text such as "2026-10-04".',
+      'toDate(...) cannot convert "4-10-2026". The text must be ISO date text such as "2026-10-04".',
     ],
     [
       'toDate("2026-02-30", default: toDate("2026-01-01"))',
@@ -78,15 +113,15 @@ test("constant text that is not a valid value is a compile error, also with a de
     ],
     [
       'toTime("2:30 PM")',
-      'toTime(...) cannot convert "2:30 PM"; the text must be ISO time text such as "14:30".',
+      'toTime(...) cannot convert "2:30 PM". The text must be ISO time text such as "14:30".',
     ],
     [
       'toDateTime("2026-10-04T18:00Z")',
-      'toDateTime(...) cannot convert "2026-10-04T18:00Z"; the text must be local ISO date and time text without an offset, such as "2026-10-04T18:00".',
+      'toDateTime(...) cannot convert "2026-10-04T18:00Z". The text must be local ISO date and time text without an offset, such as "2026-10-04T18:00".',
     ],
     [
-      'toTimestamp("2026-10-04T12:30")',
-      'toTimestamp(...) cannot convert "2026-10-04T12:30"; the text must be ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z".',
+      'toAbsoluteDateTime("2026-10-04T12:30")',
+      'toAbsoluteDateTime(...) cannot convert "2026-10-04T12:30". The text must be ISO text with Z or an offset, such as "2026-10-04T12:30:00Z".',
     ],
   ] as const;
   for (const [call, message] of cases) {
@@ -99,9 +134,9 @@ test("conversions report wrong arguments, argument counts, and named arguments",
   assert.deepEqual(
     diagnostics(
       [
-        "function check(dinner: datetime, started: timestamp) {",
+        "function check(dinner: datetime, started: absoluteDateTime) {",
         "    let a = toDate(5)",
-        "    let b = toTimestamp(dinner)",
+        "    let b = toAbsoluteDateTime(dinner)",
         "    let c = toDateTime(started)",
         '    let d = toDateTime("2026-10-04", toTime("18:00"))',
         '    let e = toDate("2026-10-04", default: "2026-10-04")',
@@ -117,12 +152,12 @@ test("conversions report wrong arguments, argument counts, and named arguments",
       ],
       [
         "TSV043",
-        "toTimestamp(...) converts text or a timestamp, not a date and time. Convert it with 'dinner.toTimestamp()'.",
+        "toAbsoluteDateTime(...) converts text or an absolute date and time, not a date and time. Convert it with 'dinner.toAbsoluteDateTime()'.",
         "dinner",
       ],
       [
         "TSV043",
-        "toDateTime(...) converts text, a date and time, or a date and a time, not a timestamp. Convert it with 'started.toDateTime()'.",
+        "toDateTime(...) converts text, a date and time, or a date and a time, not an absolute date and time. Convert it with 'started.toDateTime()'.",
         "started",
       ],
       [
@@ -145,7 +180,7 @@ test("conversions report wrong arguments, argument counts, and named arguments",
     [
       ["TSV020", "toDate(...) takes 1 argument (value), received 0."],
       ["TSV020", "toDateTime(...) takes 1 argument (value) or 2 (date, time), received 3."],
-      ["TSV022", "toDate(...) has no parameter 'fallback'; its only named argument is default:."],
+      ["TSV022", "toDate(...) has no parameter 'fallback'. Its only named argument is 'default:'."],
     ],
   );
   assert.deepEqual(diagnostics('let day: date = "2026-10-04"\nexit'), [
@@ -161,13 +196,14 @@ test("date and time values have read-only fields and methods by kind", () => {
   assert.deepEqual(
     codes(
       [
-        "function parts(day: date, clock: time, dinner: datetime, started: timestamp) {",
+        "function parts(day: date, clock: time, dinner: datetime, started: absoluteDateTime) {",
         "    let fields: integer = day.year + day.month + day.day + day.weekdayNumber",
         "    let clockFields: integer = clock.hour + clock.minute + clock.second + clock.millisecond",
         "    let both: integer = dinner.year + dinner.millisecond",
+        "    let weeks: integer = day.weekNumber + day.weekYear + dinner.weekNumber + dinner.weekYear",
         "    let name: string = dinner.weekday",
         "    let texts: string[] = [day.toISO(), clock.formatTime(), dinner.formatDateTime(), started.formatDate()]",
-        "    let moment: timestamp = dinner.toTimestamp()",
+        "    let moment: absoluteDateTime = dinner.toAbsoluteDateTime()",
         "    let local: datetime = started.toDateTime()",
         "    let unix: integer = started.toSeconds() + started.toMilliseconds()",
         "}",
@@ -179,11 +215,11 @@ test("date and time values have read-only fields and methods by kind", () => {
   assert.deepEqual(
     diagnostics(
       [
-        "function parts(day: date, clock: time, started: timestamp) {",
+        "function parts(day: date, clock: time, started: absoluteDateTime) {",
         "    let a = clock.year",
         "    let b = started.hour",
         "    let c = day.formatTime()",
-        "    let d = clock.toTimestamp()",
+        "    let d = clock.toAbsoluteDateTime()",
         '    let e = day.formatDate("dd-MM")',
         "    day.year = 2027",
         "}",
@@ -194,11 +230,11 @@ test("date and time values have read-only fields and methods by kind", () => {
       ["TSV043", "A time has no property 'year'.", "year"],
       [
         "TSV043",
-        "A timestamp has no property 'hour'. Convert it first, as in 'started.toDateTime().hour'.",
+        "An absolute date and time has no property 'hour'. Convert it first, as in 'started.toDateTime().hour'.",
         "hour",
       ],
       ["TSV043", "A date has no method 'formatTime'.", "formatTime"],
-      ["TSV043", "A time has no method 'toTimestamp'.", "toTimestamp"],
+      ["TSV043", "A time has no method 'toAbsoluteDateTime'.", "toAbsoluteDateTime"],
       [
         "TSV020",
         "formatDate() takes no arguments: it shows the value in the player's own date and time format.",
@@ -206,7 +242,7 @@ test("date and time values have read-only fields and methods by kind", () => {
       ],
       [
         "TSV043",
-        "Property 'year' of a date cannot be assigned; date and time values do not change.",
+        "Property 'year' of a date cannot be assigned. Date and time values do not change.",
         "year",
       ],
     ],
@@ -240,14 +276,14 @@ test("a comparison of weekday fields with values they never have gives a warning
   );
 });
 
-test("date and time values order within one kind, and timestamps and dates and times move by durations", () => {
+test("date and time values order within one kind, and absolute and local dates and times move by durations", () => {
   assert.deepEqual(
     codes(
       [
-        "function moments(day: date, clock: time, dinner: datetime, started: timestamp, later: timestamp) {",
+        "function moments(day: date, clock: time, dinner: datetime, started: absoluteDateTime, later: absoluteDateTime) {",
         "    let ordered: boolean = day <= day and clock > clock and dinner < dinner and started >= later",
         "    let same: boolean = day == dinner",
-        "    let deadline: timestamp = started + 1 h - 30 min",
+        "    let deadline: absoluteDateTime = started + 1 h - 30 min",
         "    let earlier: datetime = dinner - 90 min",
         "    let waited: duration = later - started",
         "    let between: duration = dinner - earlier",
@@ -266,7 +302,7 @@ test("ordering and arithmetic across kinds or on other values name the kinds and
   assert.deepEqual(
     diagnostics(
       [
-        "function moments(day: date, clock: time, dinner: datetime, started: timestamp) {",
+        "function moments(day: date, clock: time, dinner: datetime, started: absoluteDateTime) {",
         "    let a = day < dinner",
         "    let b = dinner >= started",
         "    let c = started < 5",
@@ -287,12 +323,12 @@ test("ordering and arithmetic across kinds or on other values name the kinds and
       ],
       [
         "TSV043",
-        "'>=' compares a date and time only with another date and time, not with a timestamp. Convert one first, as in 'dinner.toTimestamp()'.",
+        "'>=' compares a date and time only with another date and time, not with an absolute date and time. Convert one first, as in 'dinner.toAbsoluteDateTime()'.",
         "dinner >= started",
       ],
       [
         "TSV043",
-        "'<' compares a timestamp only with another timestamp, not with a whole number (integer).",
+        "'<' compares an absolute date and time only with another absolute date and time, not with a whole number (integer).",
         "started < 5",
       ],
       [
@@ -300,15 +336,19 @@ test("ordering and arithmetic across kinds or on other values name the kinds and
         "'+' cannot combine a time and a duration: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.",
         "clock + 1 h",
       ],
-      ["TSV043", "'+' adds only a duration to a timestamp, not a timestamp.", "started + started"],
       [
         "TSV043",
-        "'-' subtracts only a duration or another timestamp from a timestamp, not a date and time. Convert one first, as in 'dinner.toTimestamp()'.",
+        "'+' adds only a duration to an absolute date and time, not an absolute date and time.",
+        "started + started",
+      ],
+      [
+        "TSV043",
+        "'-' subtracts only a duration or another absolute date and time from an absolute date and time, not a date and time. Convert one first, as in 'dinner.toAbsoluteDateTime()'.",
         "started - dinner",
       ],
       [
         "TSV043",
-        "'+' cannot add a timestamp to a duration. Write it first, as in 'started + 1 h'.",
+        "'+' cannot add an absolute date and time to a duration. Write it first, as in 'started + 1 h'.",
         "1 h + started",
       ],
       [
@@ -324,7 +364,7 @@ test("date and time values show as text, give buttons, and are set elements", ()
   assert.deepEqual(
     codes(
       [
-        "function show(day: date, clock: time, dinner: datetime, started: timestamp) {",
+        "function show(day: date, clock: time, dinner: datetime, started: absoluteDateTime) {",
         '    say "${day} ${clock} ${dinner} ${started} ${[day, day]}"',
         "    showButton started",
         "    let answer = askText dinner",
@@ -332,7 +372,7 @@ test("date and time values show as text, give buttons, and are set elements", ()
         '    let moment = choose [{ text: "Now", value: started }, { text: "Later", value: started + 1 h }]',
         '    let days: date set = set[day, toDate("2026-10-05")]',
         "    let spans: duration set = set[1 h, 2 h]",
-        "    let mixed: (time | timestamp) set = set[]",
+        "    let mixed: (time | absoluteDateTime) set = set[]",
         "}",
         "exit",
       ].join("\n"),

@@ -8,6 +8,7 @@ import type {
   RuntimeStatus,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-capture.js";
+import { RandomDecisionError } from "../src/runtime/random-control.js";
 import {
   debugExportJson,
   rebuildRecordedSession,
@@ -76,7 +77,8 @@ const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2
  * its recording incomplete. A session that starts or is restored begins a new recording. When the recording would
  * outgrow its limits, it starts again from the state before the next call of the Player, never dropping a call in
  * between. A call that ends the session in failure, or that throws, freezes the recording, so later calls cannot evict
- * its evidence.
+ * its evidence. A host callback that throws during a recorded call, the media store or the random decision, leaves the
+ * recording incomplete, because a replay has only the answers it gave.
  *
  * A call that pauses at a random draw stays one record: each resolution that continues it adds its events to it, and a
  * chosen one also its outcome, rather than a record of its own, so many natural resolutions add no record. When the log
@@ -216,19 +218,21 @@ export class DebugRecorder {
     continuation = false,
   ): R {
     // Another engine's call, such as one of a session the recorder has moved on from, never reaches the recording.
+    // Host code that runs during the call, such as a random decision, may begin another session's recording with this
+    // recorder, so each write checks the owner again.
     if (owner !== this.#owner) return invoke((store) => store);
     const paused = this.#paused.draw;
     // While the session stands paused at a random draw, the engine refuses every call but its resolution: such a call
     // changes nothing and needs no record, so the log, which it never copies, stays as it was.
     if (paused !== null && kind !== "resumeRandomDraw") {
       const result = invoke((store) => store);
-      if (!unchangedWhilePaused(result, paused)) {
+      if (owner === this.#owner && !unchangedWhilePaused(result, paused)) {
         this.#skip("A call changed a session paused at a random draw.", null);
         this.#paused = { draw: result.pausedAt, record: false };
       }
       return result;
     }
-    const prepared = this.#prepare(input, args, continuation);
+    const prepared = this.#prepare(owner, input, args, continuation);
     // A resolution continues the record of the call that paused, unless the log started again before it.
     const continues = kind === "resumeRandomDraw" && this.#paused.record && !this.#broken;
     const queries: DebugAdmissionQuery[] = [];
@@ -240,7 +244,7 @@ export class DebugRecorder {
         } catch (error) {
           // The recording keeps only the store's answers, so a store that throws cannot be replayed. A frozen record
           // holds no later call, so it keeps its evidence as it was.
-          if (this.#frozen === null)
+          if (owner === this.#owner && this.#frozen === null)
             this.#problem ??= "The media store failed during a recorded call.";
           throw error;
         }
@@ -252,11 +256,17 @@ export class DebugRecorder {
     try {
       result = invoke(admission);
     } catch (error) {
+      if (owner !== this.#owner) throw error;
+      // The recording keeps only the decisions the host made, so a decision callback that throws cannot be replayed. A
+      // frozen record holds no later call, so it keeps its evidence as it was.
+      if (error instanceof RandomDecisionError && this.#frozen === null)
+        this.#problem ??= "The random decision callback failed during a recorded call.";
       if (prepared !== null)
         this.#add(kind, prepared, queries, null, error instanceof Error ? error.name : "Error");
       throw error;
     }
-    if (paused !== null && unchangedWhilePaused(result, paused)) return result;
+    if (owner !== this.#owner || (paused !== null && unchangedWhilePaused(result, paused)))
+      return result;
     let recorded = false;
     if (prepared !== null) {
       if (continues) this.#continue(result);
@@ -290,6 +300,7 @@ export class DebugRecorder {
 
   /** The copied arguments to log, or `null` when this call is not logged. */
   #prepare(
+    owner: PlayerRuntimeEngine,
     input: () => RuntimeSnapshot,
     args: readonly unknown[],
     continuation: boolean,
@@ -302,12 +313,15 @@ export class DebugRecorder {
       if (this.#broken) this.#restart(input);
       // JSON would turn a value such as NaN into null and replay a different call, and a cycle has no JSON form, so
       // such a call is not recorded; the engine's own validation then still refuses or admits it.
-      if (!captureExternalData(args).ok) {
+      const exact = captureExternalData(args).ok;
+      // Written without recursion, so a deeply nested argument is recorded like any other.
+      const json = exact ? debugExportJson(args) : "";
+      // Reading an argument, such as a proxy, may run host code.
+      if (owner !== this.#owner) return null;
+      if (!exact) {
         this.#skip("A call's arguments could not be copied exactly.", input);
         return null;
       }
-      // Written without recursion, so a deeply nested argument is recorded like any other.
-      const json = debugExportJson(args);
       const bytes = json.length;
       if (bytes > this.#limits.argumentBytes) {
         this.#skip("A recorded call was larger than the recording keeps.", input);
@@ -327,7 +341,7 @@ export class DebugRecorder {
       if (!Array.isArray(copy)) throw new TypeError("The arguments are not a list.");
       return { args: copy, bytes };
     } catch {
-      this.#skip("The recorder could not copy a call.", null);
+      if (owner === this.#owner) this.#skip("The recorder could not copy a call.", null);
       return null;
     }
   }

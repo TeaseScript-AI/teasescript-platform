@@ -19,6 +19,7 @@ import type {
   InstructionPlan,
   PlanSourceLocation,
   PlanTag,
+  RangeExpressionPlan,
   TagQueryExpressionPlan,
   TagQueryStepPlan,
   TypeCheckPlan,
@@ -41,7 +42,7 @@ import {
 } from "./list-statistics.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
-import { RuntimeFault } from "./errors.js";
+import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector } from "./instruction-trace.js";
 import type {
   DeveloperWarningEvent,
@@ -104,6 +105,7 @@ import {
   negateDurationParts,
   scaleDurationParts,
   storedDuration,
+  ZERO_DIVISOR,
   type DurationParts,
 } from "../duration.js";
 import {
@@ -114,18 +116,13 @@ import {
   stringLength,
 } from "./string-operations.js";
 import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
-import {
-  LOAD_KEY_MESSAGE,
-  findScriptStorageEntry,
-  storageKey,
-  storageKeyPlace,
-} from "./script-storage.js";
+import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
   addSerializableSetValue,
   clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
-  containsRuntimeIdentity,
+  findRuntimeIdentity,
   createCapturedSerializableList,
   createCapturedSerializableSet,
   dictProperty,
@@ -179,19 +176,20 @@ import {
 } from "./value-predicates.js";
 import {
   assertValueType,
+  describeShownValue,
+  shownChoice,
   describeValue as describeTypedValue,
   matchesValueType,
   storedValueMismatch,
 } from "./value-types.js";
 import {
-  mediaEndMs,
   mediaProperty,
   pauseMedia,
   resumeMedia,
   seekMedia,
   setMediaVolume,
+  type MediaHandleRecord,
   type MediaWarning,
-  type RuntimeMediaSnapshot,
 } from "./media.js";
 import {
   activeMediaAction,
@@ -206,7 +204,7 @@ import {
   setTimerRemaining,
   setTimerRepeatDuration,
   timerProperty,
-  type RuntimeTimerSnapshot,
+  type TimerHandleRecord,
   type TimerWarning,
 } from "./timers.js";
 import {
@@ -588,9 +586,10 @@ export class Evaluator {
                 ["first", "last", "random"].includes(expression.name)
               ) {
                 if (base.items.length === 0)
-                  throw fault(
-                    expression.name === "random" ? "TSR019" : "TSR018",
-                    `Cannot read '.${expression.name}' from an empty collection.`,
+                  throw emptyCollection(
+                    expression.name,
+                    base,
+                    this.#receiverLabel(expression.object),
                     expression.span,
                   );
                 const index =
@@ -618,7 +617,12 @@ export class Evaluator {
               } else if (isMessageHandle(base)) {
                 // A message's text is state of the message, outside the value that holds the handle, so the
                 // reference keeps the text read now, as it would keep a text variable's value.
-                const text = this.#getProperty(base, expression.name, expression.span);
+                const text = this.#getProperty(
+                  base,
+                  expression.name,
+                  expression.span,
+                  expression.object,
+                );
                 frame.descriptor = {
                   rootFrameId: null,
                   rootName: null,
@@ -629,7 +633,12 @@ export class Evaluator {
                 frame.value = text;
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
-                frame.value = this.#getProperty(base, expression.name, expression.span);
+                frame.value = this.#getProperty(
+                  base,
+                  expression.name,
+                  expression.span,
+                  expression.object,
+                );
               }
               result = {
                 value: frame.value,
@@ -640,7 +649,7 @@ export class Evaluator {
               pending.pop();
               continue;
             }
-            this.#assertIndexable(frame.value, expression.span);
+            this.#assertIndexable(frame.value, expression.object, expression.span);
             frame.epoch = this.#referenceEpoch;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
@@ -661,8 +670,13 @@ export class Evaluator {
           }
           // EVIDENCE: invariant: index reference stage 1 validates and retains the list or dict receiver.
           const object = frame.value as SerializableRuntimeList;
-          const index = this.#index(result.value, expression.index.span);
-          this.#assertIndex(object, index, expression.index.span);
+          const index = this.#listPosition(
+            object,
+            expression.object,
+            expression.index,
+            result.value,
+            "read",
+          );
           frame.descriptor!.path.push({ kind: "index", index });
           result = {
             value: object.items[index]!,
@@ -769,7 +783,9 @@ export class Evaluator {
                 if (names.has(property.name))
                   throw fault(
                     "TSR007",
-                    `Duplicate object property '${property.name}'.`,
+                    internalFault(
+                      `The plan builds an object with the property '${property.name}' twice.`,
+                    ),
                     property.span,
                   );
                 names.add(property.name);
@@ -880,7 +896,12 @@ export class Evaluator {
             pending.push(evaluationFrame(expression.object));
             continue;
           }
-          value = this.#getProperty(result.value, expression.name, expression.span);
+          value = this.#getProperty(
+            result.value,
+            expression.name,
+            expression.span,
+            expression.object,
+          );
           break;
         case "index":
           if (frame.stage === 0) {
@@ -890,7 +911,7 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
-            this.#assertIndexable(frame.value, expression.span);
+            this.#assertIndexable(frame.value, expression.object, expression.span);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
@@ -904,10 +925,15 @@ export class Evaluator {
             break;
           }
           {
-            const index = this.#index(result.value, expression.index.span);
             // EVIDENCE: invariant: stage 1 validates and retains the index receiver.
             const object = frame.value as SerializableRuntimeList;
-            this.#assertIndex(object, index, expression.index.span);
+            const index = this.#listPosition(
+              object,
+              expression.object,
+              expression.index,
+              result.value,
+              "read",
+            );
             value = object.items[index]!;
           }
           break;
@@ -925,7 +951,12 @@ export class Evaluator {
           }
           if (expression.operator === "not") {
             if (typeof result.value !== "boolean")
-              throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
+              throw notBoolean(
+                "'not' needs true or false (boolean)",
+                expression.operand,
+                result.value,
+                expression.operand.span,
+              );
             value = !result.value;
           } else if (isDuration(result.value)) {
             const parts = durationParts(result.value);
@@ -933,8 +964,18 @@ export class Evaluator {
               expression.operator === "+" ? parts : negateDurationParts(parts),
             );
           } else {
-            const number = this.#number(result.value, expression.operand.span);
-            value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
+            if (typeof result.value !== "number") {
+              const operand = operandLabel(expression.operand);
+              throw notNumber(
+                `'${expression.operator}${operand ?? ""}'`,
+                operand,
+                "",
+                result.value,
+                expression.operand.span,
+              );
+            }
+            // Negating a finite number gives a finite number.
+            value = expression.operator === "+" ? result.value : -result.value;
           }
           break;
         case "binary":
@@ -959,7 +1000,12 @@ export class Evaluator {
               frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
               if (typeof frame.value !== "boolean")
-                throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+                throw notBoolean(
+                  `'${expression.operator}' needs true or false (boolean) values`,
+                  expression.left,
+                  frame.value,
+                  expression.left.span,
+                );
               if (expression.operator === "and" ? !frame.value : frame.value) {
                 value = frame.value;
                 break;
@@ -978,7 +1024,7 @@ export class Evaluator {
             continue;
           }
           if (frame.stage === 1) {
-            frame.value = this.#number(result.value, expression.start.span);
+            frame.value = rangeBound(expression, "start", result.value);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.end));
             continue;
@@ -988,7 +1034,7 @@ export class Evaluator {
             kind: "range",
             // EVIDENCE: invariant: range stage 1 validates and retains the numeric start.
             start: frame.value as number,
-            end: this.#number(result.value, expression.end.span),
+            end: rangeBound(expression, "end", result.value),
             inclusive: expression.inclusive,
           };
           break;
@@ -1014,7 +1060,7 @@ export class Evaluator {
               if (Object.hasOwn(frame.named!, argument.name))
                 throw fault(
                   "TSR010",
-                  `Duplicate named argument '${argument.name}'.`,
+                  internalFault(`The plan passes the named argument '${argument.name}' twice.`),
                   argument.span,
                 );
               frame.named![argument.name] = captured;
@@ -1052,7 +1098,7 @@ export class Evaluator {
             continue;
           }
           if (frame.stage === 1) {
-            const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
+            const key = storageKey(result.value, "load", expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
             if (
               entry !== undefined &&
@@ -1098,7 +1144,12 @@ export class Evaluator {
 
   #unknownName(name: string, span: SourceSpan): RuntimeFault {
     return (
-      this.#unsetVariable(name, span) ?? fault("TSR006", `Unknown identifier '${name}'.`, span)
+      this.#unsetVariable(name, span) ??
+      fault(
+        "TSR006",
+        internalFault(`The plan uses the name '${name}' but does not declare it.`),
+        span,
+      )
     );
   }
 
@@ -1132,11 +1183,19 @@ export class Evaluator {
       if (location === undefined) {
         throw (
           this.#unsetVariable(target.name, target.span) ??
-          fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span)
+          fault(
+            "TSR002",
+            internalFault(`The plan assigns to '${target.name}' but does not declare it.`),
+            target.span,
+          )
         );
       }
       if (isSpeakerReference(location.binding.value)) {
-        throw fault("TSR034", `Cannot replace speaker '${target.name}'.`, target.span);
+        throw fault(
+          "TSR034",
+          `Cannot replace speaker '${target.name}': a speaker stays the same for the whole session. Change its properties instead, such as '${target.name}.name'.`,
+          target.span,
+        );
       }
       detachPreparedReferencesForMutation(this.snapshot, {
         rootFrameId: location.frame.id,
@@ -1212,13 +1271,9 @@ export class Evaluator {
         this.#assignMessageProperty(object, target.name, value, target.span);
         return;
       }
-      throw fault(
-        "TSR003",
-        "Only objects, speakers, timer, media, and message handles, and camera views have assignable properties.",
-        target.span,
-      );
+      throw this.#noAssignableProperties(target.object, object, target.span);
     }
-    if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
       // A new key is added at the end; an existing key keeps its position.
       const key = this.#dictKey(this.evaluate(target.index), target.index.span);
@@ -1238,10 +1293,14 @@ export class Evaluator {
         this.#traceVariableChange("assignment", receiverDescriptor, target.span);
       return;
     }
-    if (!isList(object))
-      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
-    const index = this.#index(this.evaluate(target.index), target.index.span);
-    this.#assertIndex(object, index, target.index.span);
+    if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
+    const index = this.#listPosition(
+      object,
+      target.object,
+      target.index,
+      this.evaluate(target.index),
+      "assign",
+    );
     if (receiverDescriptor !== null && !receiverDescriptor.detached) {
       const mutationStep: PreparedReferenceStep = { kind: "index", index };
       detachPreparedReferencesForMutation(this.snapshot, {
@@ -1286,24 +1345,17 @@ export class Evaluator {
         !isMessageHandle(object) &&
         !isCameraView(object)
       ) {
-        throw fault(
-          "TSR003",
-          "Only objects, speakers, timer and media handles, and camera views have assignable properties.",
-          target.span,
-        );
+        throw this.#noAssignableProperties(target.object, object, target.span);
       }
       return;
     }
-    if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
       this.#dictKey(this.evaluate(target.index), target.index.span);
       return;
     }
-    if (!isList(object)) {
-      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
-    }
-    const index = this.#index(this.evaluate(target.index), target.index.span);
-    this.#assertIndex(object, index, target.index.span);
+    if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
+    this.#listPosition(object, target.object, target.index, this.evaluate(target.index), "assign");
   }
 
   public validateCallReceiver(
@@ -1314,14 +1366,14 @@ export class Evaluator {
     if (isCameraView(receiver))
       throw fault(
         "TSR016",
-        `Camera views have no method '${method}'; hide them with hideCamera.`,
+        `Camera views have no method '${method}'. Hide them with hideCamera.`,
         span,
       );
     if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
       if (!["pause", "resume", "stop"].includes(method)) {
         throw fault(
           "TSR016",
-          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'.`,
+          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'. Use pause(), resume(), or stop().`,
           span,
         );
       }
@@ -1334,7 +1386,11 @@ export class Evaluator {
     }
     if (isTemporal(receiver)) {
       if (!hasTemporalMethod(receiver, method))
-        throw fault("TSR016", `Unsupported method '${method}'.`, span);
+        throw fault(
+          "TSR016",
+          `${describeRuntimeValue(receiver).replace(/^a/u, "A")} has no method '${method}'.`,
+          span,
+        );
       return;
     }
     if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
@@ -1361,9 +1417,7 @@ export class Evaluator {
             "take",
             "takeLast",
           ]);
-    if (!supported.has(method)) {
-      throw fault("TSR016", `Unsupported method '${method}'.`, span);
-    }
+    if (!supported.has(method)) throw fault("TSR016", noCollectionMethod(receiver, method), span);
   }
 
   #buildPreparedReference(expression: ExpressionPlan): PreparedReferenceDescriptor {
@@ -1395,7 +1449,11 @@ export class Evaluator {
         (candidate) => candidate.name === descriptor.rootName,
       );
       if (binding === undefined) {
-        throw fault("TSR053", "Prepared reference root is no longer available.", span);
+        throw fault(
+          "TSR053",
+          internalFault("A prepared reference points to a variable that no longer exists."),
+          span,
+        );
       }
       value = binding.value;
     } else {
@@ -1409,19 +1467,31 @@ export class Evaluator {
       if (step.kind === "key") {
         const entry = isDict(value) ? getSerializableDictEntry(value, step.key) : undefined;
         if (entry === undefined)
-          throw fault("TSR053", "Prepared reference key no longer addresses a dict entry.", span);
+          throw fault(
+            "TSR053",
+            `The dict entry this statement changes no longer exists: something in the same statement removed the key ${quotedText(messageText(step.key))}. Make the change in a separate statement.`,
+            span,
+          );
         value = entry.value;
         continue;
       }
       // Only a list is addressed by position; a set member is always read as a copy.
       if (isList(value)) {
         if (step.index < 0 || step.index >= value.items.length) {
-          throw fault("TSR025", `Collection index ${step.index} is outside the valid range.`, span);
+          throw fault(
+            "TSR025",
+            `The list element this statement changes no longer exists: something in the same statement removed position ${step.index}. Make the change in a separate statement.`,
+            span,
+          );
         }
         value = value.items[step.index]!;
         continue;
       }
-      throw fault("TSR008", "Prepared reference index no longer addresses a collection.", span);
+      throw fault(
+        "TSR008",
+        "The list this statement changes was replaced while the statement ran. Make the change in a separate statement.",
+        span,
+      );
     }
     return value;
   }
@@ -1429,14 +1499,15 @@ export class Evaluator {
   public speakerByName(name: string, span: SourceSpan): RuntimeSpeakerSnapshot {
     const binding = this.binding(name);
     if (binding === undefined || !isSpeakerReference(binding.value)) {
-      throw fault("TSR023", `'${name}' is not a declared speaker.`, span);
+      throw fault("TSR023", internalFault(`'${name}' is not a declared speaker.`), span);
     }
     return this.speakerById(binding.value.speakerId, span);
   }
 
   public speakerById(id: number, span: SourceSpan): RuntimeSpeakerSnapshot {
     const speaker = this.snapshot.speakers.find((item) => item.id === id);
-    if (speaker === undefined) throw fault("TSR023", `Speaker ID '${id}' is not declared.`, span);
+    if (speaker === undefined)
+      throw fault("TSR023", internalFault(`The session has no speaker with ID ${id}.`), span);
     return speaker;
   }
 
@@ -1465,7 +1536,7 @@ export class Evaluator {
       if (explicit.length === 0) {
         throw fault(
           "TSR022",
-          `Speaker '${speaker.identifier}' has no resolvable display name.`,
+          `Speaker '${speaker.identifier}' has an empty displayName. Give it a name, or leave displayName out to show '${speaker.identifier}'.`,
           span,
         );
       }
@@ -1517,7 +1588,7 @@ export class Evaluator {
     if (value.items.length === 0)
       throw fault(
         "TSR019",
-        "An interpolated list must contain at least one element to select from.",
+        "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
         span,
       );
     if (!value.items.every(isVisibleScalar))
@@ -1619,7 +1690,12 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.operator === "and" || expression.operator === "or") {
       if (typeof right !== "boolean")
-        throw fault("TSR026", "Expected a boolean value.", expression.right.span);
+        throw notBoolean(
+          `'${expression.operator}' needs true or false (boolean) values`,
+          expression.right,
+          right,
+          expression.right.span,
+        );
       return right;
     }
     if (expression.operator === "==" || expression.operator === "!=") {
@@ -1627,7 +1703,14 @@ export class Evaluator {
       return expression.operator === "==" ? equal : !equal;
     }
     if (expression.operator === "in") {
-      if (!isRange(right)) throw fault("TSR035", "Unsupported binary operation.", expression.span);
+      if (!isRange(right))
+        throw fault(
+          "TSR035",
+          internalFault(
+            `The plan applies 'in' to ${describeShownValue(right)}, but 'in' needs a range on its right side.`,
+          ),
+          expression.span,
+        );
       return (
         typeof left === "number" &&
         left >= right.start &&
@@ -1653,33 +1736,41 @@ export class Evaluator {
         (typeof left !== "number" || typeof right !== "number") &&
         (typeof left !== "string" || typeof right !== "string")
       ) {
-        throw fault(
-          "TSR009",
-          "Comparison operands must both be numbers or both be strings.",
-          expression.span,
-        );
+        throw notComparable(expression, left, right);
       }
       if (expression.operator === "<") return left < right;
       if (expression.operator === "<=") return left <= right;
       if (expression.operator === ">") return left > right;
       return left >= right;
     }
-    const leftNumber = this.#number(left, expression.left.span);
-    const rightNumber = this.#number(right, expression.right.span);
+    const leftNumber = operandNumber(expression, "left", left);
+    const rightNumber = operandNumber(expression, "right", right);
+    let result: number;
     switch (expression.operator) {
       case "+":
-        return this.#finite(leftNumber + rightNumber, expression.span);
+        result = leftNumber + rightNumber;
+        break;
       case "-":
-        return this.#finite(leftNumber - rightNumber, expression.span);
+        result = leftNumber - rightNumber;
+        break;
       case "*":
-        return this.#finite(leftNumber * rightNumber, expression.span);
+        result = leftNumber * rightNumber;
+        break;
       case "/":
-        return this.#finite(leftNumber / rightNumber, expression.span);
+        result = leftNumber / rightNumber;
+        break;
       case "%":
-        return this.#finite(leftNumber % rightNumber, expression.span);
+        result = leftNumber % rightNumber;
+        break;
       default:
-        throw fault("TSR035", "Unsupported binary operation.", expression.span);
+        throw fault(
+          "TSR035",
+          internalFault(`The engine has no arithmetic for the operator '${expression.operator}'.`),
+          expression.span,
+        );
     }
+    if (!Number.isFinite(result)) throw noArithmeticResult(expression, left, right);
+    return result;
   }
 
   /**
@@ -1716,16 +1807,17 @@ export class Evaluator {
     const span = expression.span;
     const operator = expression.operator;
     const result = (parts: DurationParts | string): SerializableRuntimeDuration => {
+      if (parts === ZERO_DIVISOR) throw noArithmeticResult(expression, left, right, "TSR009");
       if (typeof parts === "string")
         throw fault("TSR009", `Operator '${operator}': ${parts}.`, span);
       // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
-      if (!Number.isSafeInteger(parts.months) || !Number.isSafeInteger(parts.days))
-        throw fault(
-          "TSR036",
-          `Operator '${operator}': the result has too many calendar days or months to represent.`,
-          span,
-        );
-      return storedDuration({ ...parts, milliseconds: this.#finite(parts.milliseconds, span) });
+      if (
+        !Number.isSafeInteger(parts.months) ||
+        !Number.isSafeInteger(parts.days) ||
+        !Number.isFinite(parts.milliseconds)
+      )
+        throw noArithmeticResult(expression, left, right);
+      return storedDuration(parts);
     };
     if (isDuration(left) && isDuration(right)) {
       const [a, b] = [durationParts(left), durationParts(right)];
@@ -1736,15 +1828,16 @@ export class Evaluator {
         case "-":
           return result(addDurationParts(a, b, -1));
         case "/": {
-          if (exact) return this.#finite(a.milliseconds / b.milliseconds, span);
-          const ratio = durationRatio(a, b);
+          const ratio = exact ? a.milliseconds / b.milliseconds : durationRatio(a, b);
+          if (ratio === ZERO_DIVISOR) throw noArithmeticResult(expression, left, right, "TSR009");
           if (typeof ratio === "string")
             throw fault(
               "TSR009",
               `${formatDuration(a)} cannot be divided by ${formatDuration(b)}: ${ratio}.`,
               span,
             );
-          return this.#finite(ratio, span);
+          if (!Number.isFinite(ratio)) throw noArithmeticResult(expression, left, right);
+          return ratio;
         }
         case "<":
         case "<=":
@@ -1775,7 +1868,9 @@ export class Evaluator {
     }
     throw fault(
       "TSR009",
-      `Operator '${operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
+      ["<", "<=", ">", ">="].includes(operator)
+        ? `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use a duration on both sides.`
+        : `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
       span,
     );
   }
@@ -1789,7 +1884,13 @@ export class Evaluator {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
       if (isConversionName(name))
-        return this.#conversionBuiltin(name, positional, named, expression.span);
+        return this.#conversionBuiltin(
+          name,
+          positional,
+          named,
+          expression.arguments[0]?.value,
+          expression.span,
+        );
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
@@ -1814,9 +1915,12 @@ export class Evaluator {
       // called, so it need not be registered then.
       const recorded = hostBuiltin ? this.control?.replayedBuiltin() : undefined;
       if (hostBuiltin && builtin === undefined && recorded === undefined) {
+        // The compiler rejects a call of a parenthesized name that is not a function, such as `(x)()`, but a plan
+        // compiled before it did may still hold one, so the message does not blame the Playroom.
+        const bound = this.binding(name);
         throw fault(
           "TSR011",
-          `Unknown built-in function '${expression.callee.name}'.`,
+          `'${name}' is ${bound === undefined ? "not a function the Playroom provides" : `${describeShownValue(bound.value)}, not a function`}, so it cannot be called. Call a function by its name instead.`,
           expression.callee.span,
         );
       }
@@ -1853,14 +1957,19 @@ export class Evaluator {
         if (error instanceof RandomControlSignal) throw error;
         if (error instanceof SerializableValueError) {
           const code = error.code === "cyclic" ? "TSR031" : "TSR013";
-          throw fault(code, error.message, expression.span);
+          throw fault(code, invalidReturn(name, error.message), expression.span);
         }
         // A text that would be too long fails as it does anywhere else.
         if (error instanceof RuntimeFault && error.code === "TSR084") throw error;
-        const message = error instanceof Error ? error.message : String(error);
+        // A core built-in's own failure keeps its code and already says what to do; a host's comes with the built-in's
+        // name.
+        if (!hostBuiltin && error instanceof RuntimeFault) throw error;
+        const message = messageText(error instanceof Error ? error.message : String(error)).trim();
+        const reason =
+          message === "" ? "" : `: ${/[.!?…]$/u.test(message) ? message : `${message}.`}`;
         throw fault(
           "TSR012",
-          `Built-in '${expression.callee.name}' failed: ${message}`,
+          `The built-in function '${name}' failed${reason === "" ? "." : reason} Check the values the script passes to '${name}'. If they are correct, report this with a debug export.`,
           expression.span,
         );
       }
@@ -1868,20 +1977,19 @@ export class Evaluator {
       try {
         copied = cloneSerializableValue(returned);
       } catch (error) {
-        if (error instanceof SerializableValueError) {
-          throw fault(
-            "TSR013",
-            `Built-in '${expression.callee.name}' returned an invalid value: ${error.message}`,
-            expression.span,
-          );
-        }
+        if (error instanceof SerializableValueError)
+          throw fault("TSR013", invalidReturn(name, error.message), expression.span);
         throw error;
       }
       // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
-      if (containsRuntimeIdentity(copied)) {
+      const identity = findRuntimeIdentity(copied);
+      if (identity !== null) {
+        const kind = describeRuntimeValue(identity);
         throw fault(
           "TSR013",
-          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer, media, or message handle or a speaker reference, which only the runtime creates.`,
+          internalFault(
+            `The built-in function '${name}' returned a value that contains ${kind}. Only the engine creates ${kind.replace(/^an? /u, "")}s, so a built-in cannot return one.`,
+          ),
           expression.span,
         );
       }
@@ -1917,7 +2025,7 @@ export class Evaluator {
       if (name !== undefined)
         throw fault(
           "TSR015",
-          `${expression.callee.name}() takes its arguments without names; remove '${name}:'.`,
+          `${expression.callee.name}() takes its arguments without names. Remove '${name}:'.`,
           expression.span,
         );
       return callStringMethod(receiver, expression.callee.name, positional, expression.span);
@@ -1939,6 +2047,7 @@ export class Evaluator {
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
+        expression.callee.object,
         expression.callee.name,
         positional,
         named,
@@ -1949,9 +2058,10 @@ export class Evaluator {
             { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
+    const callee = expression.callee.kind === "literal" ? null : planLabel(expression.callee);
     throw fault(
       "TSR014",
-      "Only injected built-ins and supported collection methods are callable.",
+      `Only a function or a method can be called, but ${callee === null ? "this" : `'${callee}'`} is neither. Call a function by its name instead.`,
       expression.callee.span,
     );
   }
@@ -1959,6 +2069,7 @@ export class Evaluator {
   /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
   #callCollection(
     receiver: SerializableRuntimeValue,
+    receiverPlan: ExpressionPlan,
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
@@ -1968,13 +2079,18 @@ export class Evaluator {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
       throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
-    if (Object.keys(named).length !== 0)
-      throw fault("TSR015", "Collection methods accept positional arguments only.", span);
+    const namedArgument = Object.keys(named)[0];
+    if (namedArgument !== undefined)
+      throw fault(
+        "TSR015",
+        `${name}() takes its arguments without names. Remove '${namedArgument}:'.`,
+        span,
+      );
     const expect = (count: number): void => {
       if (positional.length !== count)
         throw fault(
           "TSR028",
-          `Expected ${count} positional argument(s), received ${positional.length}.`,
+          `${name}() takes ${count === 0 ? "no arguments" : count === 1 ? "one argument" : `${count} arguments`}, but this call has ${positional.length === 0 ? "none" : positional.length}.`,
           span,
         );
     };
@@ -2019,7 +2135,7 @@ export class Evaluator {
               span,
             );
           default:
-            throw fault("TSR016", `Unsupported method '${name}'.`, span);
+            throw fault("TSR016", noCollectionMethod(receiver, name), span);
         }
       }
       switch (name) {
@@ -2051,7 +2167,7 @@ export class Evaluator {
           else {
             this.#warn(
               "TSW002",
-              "list.remove(value) found no matching value; the list was left unchanged.",
+              "remove(...) found no matching value, so the list is unchanged.",
               span,
             );
           }
@@ -2059,8 +2175,14 @@ export class Evaluator {
         }
         case "removeAt": {
           expect(1);
-          const index = this.#index(positional[0]!, span);
-          this.#assertIndex(receiver, index, span);
+          const index = this.#listPosition(
+            receiver,
+            receiverPlan,
+            null,
+            positional[0]!,
+            "remove",
+            span,
+          );
           return this.#removeListItem(receiver, index);
         }
         case "removeFirst":
@@ -2139,7 +2261,7 @@ export class Evaluator {
           return texts.join(separator);
         }
         default:
-          throw fault("TSR016", `Unsupported method '${name}'.`, span);
+          throw fault("TSR016", noCollectionMethod(receiver, name), span);
       }
     } catch (error) {
       if (error instanceof RuntimeFault) throw error;
@@ -2158,7 +2280,7 @@ export class Evaluator {
     const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
     const name = callee.name;
     const span = expression.span;
-    if (!DICT_METHODS.has(name)) throw fault("TSR016", `Dicts have no method '${name}'.`, span);
+    if (!DICT_METHODS.has(name)) throw fault("TSR016", noCollectionMethod(receiver, name), span);
     const names = Object.keys(named);
     const expected = name === "clear" ? 0 : 1;
     if (
@@ -2225,9 +2347,14 @@ export class Evaluator {
     return null;
   }
 
-  #timer(handle: SerializableTimerHandle, span: SourceSpan): RuntimeTimerSnapshot {
+  #timer(handle: SerializableTimerHandle, span: SourceSpan): TimerHandleRecord {
     const timer = timerRecord(this.snapshot, handle.timerId);
-    if (timer === undefined) throw fault("TSR053", "Timer handle refers to no timer.", span);
+    if (timer === undefined)
+      throw fault(
+        "TSR053",
+        internalFault("A timer handle refers to a timer that the session does not have."),
+        span,
+      );
     return timer;
   }
 
@@ -2240,7 +2367,11 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault("TSR016", `Timer handles have no method '${name}'.`, span);
+      throw fault(
+        "TSR016",
+        `Timer handles have no method '${name}'. Use pause(), resume(), or stop().`,
+        span,
+      );
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
       throw fault("TSR028", `Timer ${name}() takes no arguments.`, span);
@@ -2278,7 +2409,11 @@ export class Evaluator {
       warning = setTimerDisplay(timer, timerDisplayValue(value, span));
     } else if (name === "remaining" || name === "repeatDuration") {
       if (!isDuration(value)) {
-        throw fault("TSR050", `Timer ${name} must be assigned a duration such as 10 s.`, span);
+        throw fault(
+          "TSR050",
+          `Timer ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
+          span,
+        );
       }
       exactDurationMilliseconds(value, `Timer ${name}`, span);
       if (name === "remaining") {
@@ -2294,7 +2429,7 @@ export class Evaluator {
         ) {
           throw fault(
             "TSR050",
-            "Timer repeatDuration must be a positive representable duration.",
+            `Timer repeatDuration must be longer than zero and short enough for scene time to reach, but this is ${describeShownValue(value)}.`,
             span,
           );
         }
@@ -2303,7 +2438,7 @@ export class Evaluator {
     } else {
       throw fault(
         "TSR003",
-        `Timer handle property '${name}' cannot be assigned; assign remaining, display, or repeatDuration.`,
+        `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`,
         span,
       );
     }
@@ -2322,9 +2457,14 @@ export class Evaluator {
     }
   }
 
-  #media(handle: SerializableMediaHandle, span: SourceSpan): RuntimeMediaSnapshot {
+  #media(handle: SerializableMediaHandle, span: SourceSpan): MediaHandleRecord {
     const media = mediaRecord(this.snapshot, handle.mediaId);
-    if (media === undefined) throw fault("TSR053", "Media handle refers to no media.", span);
+    if (media === undefined)
+      throw fault(
+        "TSR053",
+        internalFault("A media handle refers to media that the session does not have."),
+        span,
+      );
     return media;
   }
 
@@ -2337,7 +2477,11 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault("TSR016", `Media handles have no method '${name}'.`, span);
+      throw fault(
+        "TSR016",
+        `Media handles have no method '${name}'. Use pause(), resume(), or stop().`,
+        span,
+      );
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
       throw fault("TSR028", `Media ${name}() takes no arguments.`, span);
@@ -2365,7 +2509,11 @@ export class Evaluator {
     const media = this.#media(handle, span);
     if (name === "volume") {
       if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
-        throw fault("TSR050", "Media volume must be a number from 0 through 1.", span);
+        throw fault(
+          "TSR050",
+          `Media volume must be a number from 0 through 1, but this is ${describeShownValue(value)}.`,
+          span,
+        );
       }
       this.#mediaWarning(setMediaVolume(media, value), span);
       return;
@@ -2373,20 +2521,25 @@ export class Evaluator {
     if (name !== "position" && name !== "remaining") {
       throw fault(
         "TSR003",
-        `Media handle property '${name}' cannot be assigned; assign position, remaining, or volume.`,
+        `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`,
         span,
       );
     }
     if (!isDuration(value) || !Number.isFinite(value.milliseconds)) {
-      throw fault("TSR050", `Media ${name} must be assigned a duration such as 10 s.`, span);
+      throw fault(
+        "TSR050",
+        `Media ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
+        span,
+      );
     }
     exactDurationMilliseconds(value, `Media ${name}`, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
     // Playback already reached by now is committed before the seek starts a new segment.
     if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
-    const target =
-      name === "position" ? value.milliseconds : mediaEndMs(media) - value.milliseconds;
-    this.#mediaWarning(seekMedia(media, target, this.snapshot.currentSessionTimeMs, name), span);
+    this.#mediaWarning(
+      seekMedia(media, value.milliseconds, this.snapshot.currentSessionTimeMs, name),
+      span,
+    );
     // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
     if (action !== undefined) {
       drainMediaEvents(null, this.snapshot, action, this.events, span, true);
@@ -2405,14 +2558,22 @@ export class Evaluator {
     if (name !== "placement")
       throw fault(
         "TSR003",
-        `Camera view property '${name}' cannot be assigned; assign placement.`,
+        `Camera view property '${name}' cannot be assigned. You can assign placement.`,
         span,
       );
     if (value !== "window" && value !== "stage")
-      throw fault("TSR050", 'Camera placement must be "window" or "stage".', span);
+      throw fault(
+        "TSR050",
+        `Camera placement must be "window" or "stage", but this is ${shownChoice(value)}.`,
+        span,
+      );
     const view = this.#cameraView();
     if (!view.shown) {
-      this.#warn("TSW010", "This camera view is hidden; showCamera shows it again.", span);
+      this.#warn(
+        "TSW010",
+        "This camera view is hidden, so its placement does not change. Show it with showCamera first.",
+        span,
+      );
       return;
     }
     view.placement = value;
@@ -2430,7 +2591,11 @@ export class Evaluator {
       if (id < handle.messageId) low = middle + 1;
       else high = middle - 1;
     }
-    throw fault("TSR053", "Message handle refers to no message.", span);
+    throw fault(
+      "TSR053",
+      internalFault("A message handle refers to a message that the session does not have."),
+      span,
+    );
   }
 
   /**
@@ -2446,13 +2611,13 @@ export class Evaluator {
     if (name !== "text")
       throw fault(
         "TSR003",
-        `Message handle property '${name}' cannot be assigned; assign text.`,
+        `Message handle property '${name}' cannot be assigned. You can assign text.`,
         span,
       );
     if (typeof value !== "string")
       throw fault(
         "TSR050",
-        `Message text must be text (string), not ${describeRuntimeValue(value)}.`,
+        `Message property 'text' must be text (string), but this is ${describeShownValue(value)}. Convert it with toString(...) first.`,
         span,
       );
     const index = this.#liveMessage(handle, span);
@@ -2516,15 +2681,19 @@ export class Evaluator {
     value: SerializableRuntimeList | SerializableRuntimeSet,
     name: string,
     span: SourceSpan,
+    collection: ExpressionPlan | null,
   ): SerializableRuntimeValue {
     if (name === "length") return value.items.length;
-    if (name === "first" || name === "last") {
-      if (value.items.length === 0)
-        throw fault("TSR018", `Cannot read '.${name}' from an empty collection.`, span);
+    if (value.items.length === 0 && (name === "first" || name === "last" || name === "random"))
+      throw emptyCollection(name, value, this.#optionalLabel(collection), span);
+    if (name === "first" || name === "last")
       return value.items[name === "first" ? 0 : value.items.length - 1]!;
-    }
     if (name === "random") return this.#randomItem(value.items, span, "collectionRandom");
-    throw fault("TSR017", `Unknown collection property '${name}'.`, span);
+    throw fault(
+      "TSR017",
+      `${isList(value) ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`,
+      span,
+    );
   }
 
   #getSpeakerProperty(
@@ -2538,7 +2707,8 @@ export class Evaluator {
     } else if (property === undefined && name === "shortTitle") {
       property = speaker.properties.find((item) => item.name === "title")?.value;
     }
-    if (property === undefined) throw fault("TSR017", `Unknown property '${name}'.`, span);
+    if (property === undefined)
+      throw fault("TSR017", `Speaker '${speaker.identifier}' has no property '${name}'.`, span);
     return property;
   }
 
@@ -2546,9 +2716,11 @@ export class Evaluator {
     object: SerializableRuntimeObject,
     name: string,
     span: SourceSpan,
+    plan: ExpressionPlan | null,
   ): SerializableRuntimeValue {
     const value = getSerializableProperty(object, name);
-    if (value === undefined) throw fault("TSR017", `Unknown property '${name}'.`, span);
+    if (value === undefined)
+      throw fault("TSR017", noObjectProperty(object, name, this.#optionalLabel(plan)), span);
     return value;
   }
 
@@ -2713,7 +2885,13 @@ export class Evaluator {
         ? nextXorShift32(this.snapshot.rng)
         : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
-      throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
+      throw fault(
+        "TSR020",
+        internalFault(
+          `The random source returned ${typeof random === "number" ? String(random) : random === null ? "null" : `a value of type ${typeof random}`}, but it must return a number that is at least 0 and less than 1.`,
+        ),
+        span,
+      );
     }
     return random;
   }
@@ -2733,11 +2911,11 @@ export class Evaluator {
 
   #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
     this.#expectBuiltinArguments("chance", call, 1);
-    const percent = call.positional[0];
+    const percent = call.positional[0]!;
     if (typeof percent !== "number" || percent < 0 || percent > 100) {
       throw fault(
         "TSR039",
-        "chance(percent) requires a finite percentage from 0 through 100.",
+        `chance(...) needs a percentage from 0 through 100, not ${describeShownValue(percent)}.`,
         call.span,
       );
     }
@@ -2757,7 +2935,11 @@ export class Evaluator {
     this.#expectBuiltinArguments("randomInteger", call, 1);
     const range = call.positional[0]!;
     if (!isRange(range)) {
-      throw fault("TSR040", "randomInteger(range) requires a range value.", call.span);
+      throw fault(
+        "TSR040",
+        `randomInteger(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
+        call.span,
+      );
     }
     return this.randomIntegerInRange(range, call.span, "randomInteger(range)", "randomInteger");
   }
@@ -2769,10 +2951,14 @@ export class Evaluator {
     subject: string,
     operation: RuntimeDebugRandomOperation,
   ): number {
-    assertIntegerRange(range, span);
+    assertIntegerRange(range, subject, span);
     const length = rangeLength(range);
     if (length < 1) {
-      throw fault("TSR041", `${subject} requires a non-empty range.`, span);
+      throw fault(
+        "TSR041",
+        `${subject} needs a range that holds at least one whole number, but ${rangeText(range)} holds none. Check that the range is not empty first.`,
+        span,
+      );
     }
     let drawn = this.#draw(span, operation, length, range, (draw) =>
       sampleRangeInteger(draw, range, length),
@@ -2794,6 +2980,7 @@ export class Evaluator {
     name: ConversionName,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
+    argument: ExpressionPlan | undefined,
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const extra = Object.keys(named).find((key) => key !== "default");
@@ -2825,16 +3012,7 @@ export class Evaluator {
         `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    const shown = typeof value === "string" ? ` ${JSON.stringify(messageText(value))}` : "";
-    const reason =
-      typeof value === "string" && isTemporalConversionResult(result)
-        ? (temporalTextProblem(result, value) ?? "")
-        : "";
-    throw fault(
-      "TSR058",
-      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}${reason}. Give a fallback with default: if the value may not convert.`,
-      span,
-    );
+    throw fault("TSR058", conversionFailure(name, result, value, argument), span);
   }
 
   /** The converted value, or `undefined` when `value` cannot be converted. */
@@ -2903,7 +3081,7 @@ export class Evaluator {
       throw fault(
         "TSR059",
         other === undefined
-          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps.`
+          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or absolute dates and times.`
           : `${name}(...) needs numbers, durations, or date and time values, not ${describeRuntimeValue(other)}.`,
         span,
       );
@@ -3025,8 +3203,13 @@ export class Evaluator {
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
-    const text = call.positional[0];
-    if (typeof text !== "string") throw new TypeError("escapeMarkup(text) requires a string.");
+    const text = call.positional[0]!;
+    if (typeof text !== "string")
+      throw fault(
+        "TSR059",
+        `escapeMarkup(...) needs text, not ${describeRuntimeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
+        call.span,
+      );
     // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
     if (text.length * 2 > MAX_TEXT_LENGTH)
       checkTextLength(escapedMarkupLength(text), "escapeMarkup", call.span);
@@ -3037,7 +3220,7 @@ export class Evaluator {
     if (call.positional.length !== count || Object.keys(call.named).length !== 0) {
       throw fault(
         "TSR028",
-        `${name} expects ${count} positional argument(s) and no named arguments.`,
+        `${name}(...) takes ${count === 1 ? "one argument, without a name" : `${count} arguments, without names`}.`,
         call.span,
       );
     }
@@ -3099,23 +3282,30 @@ export class Evaluator {
     operation: RuntimeDebugRandomOperation,
   ): SerializableRuntimeValue {
     if (items.length === 0)
-      throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
+      throw fault(
+        "TSR019",
+        "Cannot select '.random' from an empty collection. Check its length first.",
+        span,
+      );
     const item = items[this.#drawIndex(span, operation, items)]!;
     this.trace?.randomResult(item);
     return item;
   }
 
+  /** `name` of `value`, which `object` gives where the plan has it, to name it in a failure. */
   #getProperty(
     value: SerializableRuntimeValue,
     name: string,
     span: SourceSpan,
+    object: ExpressionPlan | null = null,
   ): SerializableRuntimeValue {
-    if (isObject(value)) return this.#getObjectProperty(value, name, span);
+    if (isObject(value)) return this.#getObjectProperty(value, name, span, object);
     if (this.trace !== null) this.#readState(value, name);
     if (isSpeakerReference(value)) {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
-    if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (isList(value) || isSet(value))
+      return this.#getCollectionProperty(value, name, span, object);
     if (typeof value === "string") {
       if (name === "length") return stringLength(value);
       throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
@@ -3125,14 +3315,18 @@ export class Evaluator {
       if (property === undefined)
         throw fault(
           "TSR017",
-          `Dicts have no property '${name}'; use length, keys, or values, or read a value as dict[key].`,
+          `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${this.#optionalLabel(object) ?? "dict"}[${JSON.stringify(name)}]'.`,
           span,
         );
       return property;
     }
     if (isCameraView(value)) {
       if (name !== "placement")
-        throw fault("TSR017", `Camera views have no property '${name}'; use placement.`, span);
+        throw fault(
+          "TSR017",
+          `Camera views have no property '${name}'. Use the placement property.`,
+          span,
+        );
       return this.#cameraView().placement;
     }
     if (isMediaHandle(value)) {
@@ -3163,8 +3357,8 @@ export class Evaluator {
       if (property === undefined)
         throw fault(
           "TSR017",
-          value.kind === "timestamp"
-            ? `Timestamps have no property '${name}'; convert with toDateTime() to read local fields.`
+          value.kind === "absoluteDateTime"
+            ? `An absolute date and time has no property '${name}'. Convert it with toDateTime() to read local fields.`
             : `This ${value.kind} has no property '${name}'.`,
           span,
         );
@@ -3182,17 +3376,20 @@ export class Evaluator {
     }
     if (isMessageHandle(value)) {
       if (name !== "text")
-        throw fault("TSR017", `Message handles have no property '${name}'; use text.`, span);
+        throw fault(
+          "TSR017",
+          `Message handles have no property '${name}'. Use the text property.`,
+          span,
+        );
       return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }
 
   /** Only lists and dicts are indexed. */
-  #assertIndexable(value: SerializableRuntimeValue, span: SourceSpan): void {
-    if (isSet(value)) throw fault("TSR004", "Sets are not indexable.", span);
-    if (!isList(value) && !isDict(value))
-      throw fault("TSR008", "Only lists and dicts can be indexed.", span);
+  #assertIndexable(value: SerializableRuntimeValue, plan: ExpressionPlan, span: SourceSpan): void {
+    if (isSet(value)) throw this.#notIndexable("TSR004", plan, value, span);
+    if (!isList(value) && !isDict(value)) throw this.#notIndexable("TSR008", plan, value, span);
   }
 
   #dictKey(value: SerializableRuntimeValue, span: SourceSpan): string {
@@ -3222,6 +3419,11 @@ export class Evaluator {
     return entry.value;
   }
 
+  /** How the source spells the value `plan` gives, where there is a plan, or `null`. */
+  #optionalLabel(plan: ExpressionPlan | null): string | null {
+    return plan === null ? null : this.#receiverLabel(plan);
+  }
+
   /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
   #receiverLabel(plan: ExpressionPlan): string | null {
     if (plan.kind !== "preparedReference") return planLabel(plan);
@@ -3237,31 +3439,101 @@ export class Evaluator {
     return descriptor.rootName === null ? null : [descriptor.rootName, ...names].join(".");
   }
 
-  #index(value: SerializableRuntimeValue, span: SourceSpan): number {
-    if (typeof value !== "number" || !Number.isInteger(value))
-      throw fault("TSR024", "A list index must be an integer.", span);
-    return value;
+  /**
+   * The position `value` gives in `list`, which `receiver` gives: `TSR024` unless it is a whole number and `TSR025` unless
+   * the list has it. `indexPlan` is the index as written, or `null` for an argument such as of `removeAt(...)`.
+   */
+  #listPosition(
+    list: SerializableRuntimeList,
+    receiver: ExpressionPlan,
+    indexPlan: ExpressionPlan | null,
+    value: SerializableRuntimeValue,
+    use: "read" | "assign" | "remove",
+    span: SourceSpan = indexPlan!.span,
+  ): number {
+    const whole = typeof value === "number" && Number.isInteger(value);
+    if (whole && value >= 0 && value < list.items.length) return value;
+    // A label is only written for the failure.
+    const indexLabel =
+      indexPlan === null
+        ? null
+        : indexPlan.kind === "literal"
+          ? typeof indexPlan.value === "number"
+            ? String(indexPlan.value)
+            : null
+          : planLabel(indexPlan);
+    if (!whole) {
+      const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
+      const fix =
+        typeof value === "number"
+          ? " Round it with floor(...), round(...), or ceil(...) first."
+          : value === null
+            ? ` Check that ${indexLabel === null ? "the index" : `'${indexLabel}'`} is not null first.`
+            : typeof value === "string" && numberFromText(value) !== undefined
+              ? " Convert the text with toInteger(...) first."
+              : "";
+      throw fault(
+        "TSR024",
+        `A list index must be a whole number (integer), but ${subject} is ${describeShownValue(value)}.${fix}`,
+        span,
+      );
+    }
+    const length = list.items.length;
+    const owner = this.#receiverLabel(receiver);
+    const named = owner === null ? "the list" : `'${owner}'`;
+    const action = `Cannot ${use === "assign" ? "assign to" : use} ${owner === null || indexLabel === null ? `index ${value}` : `'${owner}[${indexLabel}]'`}`;
+    const given =
+      owner === null || indexLabel === null || indexLabel === String(value)
+        ? ""
+        : `'${indexLabel}' is ${value}, and `;
+    throw fault(
+      "TSR025",
+      length === 0
+        ? `${action}: ${given}${named} is empty. Check ${owner === null ? "its length" : `'${owner}.length'`} first.`
+        : `${action}: ${given}${named} has ${length === 1 ? "1 element, so its only index is 0" : `${length} elements, so its indexes run from 0 through ${length - 1}`}. Check the index against ${owner === null ? "the list's length" : `'${owner}.length'`} first.`,
+      span,
+    );
   }
 
-  #assertIndex(list: SerializableRuntimeList, index: number, span: SourceSpan): void {
-    if (index < 0 || index >= list.items.length)
-      throw fault("TSR025", `List index ${index} is outside the valid range.`, span);
+  /** `TSR004` for a set, and `code` for any other value, which `plan` gives, that is not a list or dict to index. */
+  #notIndexable(
+    code: "TSR004" | "TSR005" | "TSR008",
+    plan: ExpressionPlan,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): RuntimeFault {
+    const label = this.#receiverLabel(plan);
+    const subject = label === null ? "this" : `'${label}'`;
+    return isSet(value)
+      ? fault(
+          "TSR004",
+          `Only a list or a dict can be indexed, but ${subject} is a set. Copy it into a list with toList() first.`,
+          span,
+        )
+      : fault(
+          code,
+          `Only a list or a dict can be indexed, but ${subject} is ${describeShownValue(value)}.`,
+          span,
+        );
   }
 
-  #number(value: SerializableRuntimeValue, span: SourceSpan): number {
-    if (typeof value !== "number") throw fault("TSR027", "Expected a numeric value.", span);
-    return value;
-  }
-
-  #finite(value: number, span: SourceSpan): number {
-    if (!Number.isFinite(value))
-      throw fault("TSR036", "Numeric operation produced a non-finite result.", span);
-    return value;
+  /** `TSR003` for a property assignment on a value, which `plan` gives, that has no properties to assign. */
+  #noAssignableProperties(
+    plan: ExpressionPlan,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): RuntimeFault {
+    const label = this.#receiverLabel(plan);
+    return fault(
+      "TSR003",
+      `Only objects, speakers, camera views, and handles for timers, media, and messages have assignable properties, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.`,
+      span,
+    );
   }
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      return fault("TSR031", error.message, span);
+      return fault("TSR031", internalFault(error.message), span);
     }
     throw error;
   }
@@ -3344,8 +3616,245 @@ function missingKey(
   );
 }
 
+/** How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. */
+function operandLabel(plan: ExpressionPlan): string | null {
+  let current = plan;
+  while (current.kind === "group") current = current.expression;
+  if (current.kind === "literal")
+    return typeof current.value === "number" ? String(current.value) : null;
+  return planLabel(current);
+}
+
+/** How the source spells `left operator right`, when it spells both operands, or `null`. */
+function binaryLabel(expression: BinaryExpressionPlan): string | null {
+  const left = operandLabel(expression.left);
+  const right = operandLabel(expression.right);
+  return left === null || right === null ? null : `${left} ${expression.operator} ${right}`;
+}
+
+/** An operand of `expression` as a number, or `TSR027`, which names the operand where the source spells it. */
+function operandNumber(
+  expression: BinaryExpressionPlan,
+  side: "left" | "right",
+  value: SerializableRuntimeValue,
+): number {
+  if (typeof value === "number") return value;
+  const label = binaryLabel(expression);
+  throw notNumber(
+    label === null ? `'${expression.operator}'` : `'${label}'`,
+    operandLabel(expression[side]),
+    ` on its ${side} side`,
+    value,
+    expression[side].span,
+  );
+}
+
+/** A bound of `range` as a number, or `TSR027`, which names the range and the bound. */
+function rangeBound(
+  range: RangeExpressionPlan,
+  bound: "start" | "end",
+  value: SerializableRuntimeValue,
+): number {
+  if (typeof value === "number") return value;
+  const start = operandLabel(range.start);
+  const end = operandLabel(range.end);
+  throw notNumber(
+    start === null || end === null
+      ? "A range"
+      : `'${start}${range.inclusive ? "..=" : ".."}${end}'`,
+    operandLabel(range[bound]),
+    ` as its ${bound}`,
+    value,
+    range[bound].span,
+  );
+}
+
+/**
+ * `TSR027`: `subject` needs a number for the operand the source spells `operand`, or else `place`, but got `value`. The
+ * fix depends on the value: a null check, a conversion of numeric text, or another value.
+ */
+function notNumber(
+  subject: string,
+  operand: string | null,
+  place: string,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): RuntimeFault {
+  const fix =
+    value === null
+      ? `Check that ${operand === null ? "the value" : `'${operand}'`} is not null before using it.`
+      : typeof value === "string" && numberFromText(value) !== undefined
+        ? "Convert the text with toNumber(...) first."
+        : "Use a number instead.";
+  return fault(
+    "TSR027",
+    `${subject} needs a number${operand === null ? place : ` for '${operand}'`}, but received ${describeShownValue(value)}. ${fix}`,
+    span,
+  );
+}
+
+/**
+ * Why `value` does not convert to `result`, and what to do: a comparison for `toBoolean` of a number or text, `join()`
+ * for a collection of shown values, and otherwise a `default:` fallback.
+ */
+function conversionFailure(
+  name: ConversionName,
+  result: ConversionResult,
+  value: SerializableRuntimeValue,
+  argument: ExpressionPlan | undefined,
+): string {
+  const label = (argument === undefined ? null : planLabel(argument)) ?? "value";
+  const fallback = " Give a fallback with 'default:' if the value may not convert.";
+  const shown = describeShownValue(value);
+  // `toBoolean` keeps 1, 0, and other texts invalid: an explicit comparison says what the script means.
+  if (result === "boolean" && typeof value !== "string")
+    return typeof value === "number"
+      ? `toBoolean(...) converts text and true or false (boolean), not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
+      : `toBoolean(...) converts text and true or false (boolean), not ${shown}.${fallback}`;
+  const failed = `${name}(...) cannot convert ${shown} to ${describeConversionResult(result)}`;
+  if (typeof value === "string") {
+    if (result === "boolean")
+      return `${failed}. The text must be "true" or "false". Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
+    if (isTemporalConversionResult(result))
+      return `${failed}${temporalTextProblem(result, value) ?? ""}.${fallback}`;
+    if (result !== "string")
+      return `${failed}. The text must be a number such as 2.5 or -3.${fallback}`;
+  }
+  if (result === "string" && (isList(value) || isSet(value) || isDict(value))) {
+    const items = isDict(value) ? value.entries.map((entry) => entry.value) : value.items;
+    if (items.every(isVisibleScalar))
+      return `${failed}. Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
+  }
+  return `${failed}.${fallback}`;
+}
+
+/**
+ * `TSR026`: `rule`, such as "A condition must be true or false (boolean)", with the value `plan` gave instead and, where
+ * the source spells it, the compiler's fix.
+ */
+export function notBoolean(
+  rule: string,
+  plan: ExpressionPlan,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): RuntimeFault {
+  const label = plan.kind === "literal" ? null : planLabel(plan);
+  let fix = "";
+  if (value === null || typeof value === "number" || typeof value === "string")
+    fix = ` Compare it instead${label === null ? "" : `, such as '${label} ${value === null ? "== true" : typeof value === "number" ? "> 0" : '!= ""'}'`}.`;
+  else if (isList(value) || isSet(value) || isDict(value))
+    fix = ` Check its length instead${label === null ? "" : `, such as '${label}.length > 0'`}.`;
+  return fault(
+    "TSR026",
+    `${rule}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.${fix}`,
+    span,
+  );
+}
+
+/**
+ * Why an arithmetic step has no finite result: a division or remainder by zero, or a number or duration too large. It
+ * names the operands as the source spells them, where the plan still does, and shows their values.
+ */
+function noArithmeticResult(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  code = "TSR036",
+): RuntimeFault {
+  const { operator } = expression;
+  const label = binaryLabel(expression);
+  const values = `${operandText(left)} ${operator} ${operandText(right)}`;
+  const subject = label === null ? values : `'${label}'`;
+  if ((operator === "/" || operator === "%") && isZero(right)) {
+    const divisor = operandLabel(expression.right);
+    const zero = operandText(right);
+    const cause = divisor === null ? "" : ` because '${divisor}' is ${zero}`;
+    return fault(
+      code,
+      `${operator === "/" ? "Division" : "Remainder"} by zero: ${subject} has no result${cause}. Check that ${divisor === null ? "the divisor" : `'${divisor}'`} is not ${zero} first.`,
+      expression.span,
+    );
+  }
+  // A duration divided by a duration is a number, and any other step with a duration gives a duration.
+  const what =
+    (isDuration(left) || isDuration(right)) &&
+    !(operator === "/" && isDuration(left) && isDuration(right))
+      ? "a duration too long"
+      : "a number too large";
+  return fault(
+    code,
+    `${label === null ? values : `${subject} is ${values}, which`} gives ${what} to represent. Use smaller values.`,
+    expression.span,
+  );
+}
+
+/** An operand's kind, with the value of a number or duration, such as `a duration (1 s)`. */
+function kindAndValue(value: SerializableRuntimeValue): string {
+  return typeof value === "number" || isDuration(value)
+    ? `${describeRuntimeValue(value)} (${operandText(value)})`
+    : describeRuntimeValue(value);
+}
+
+/** A number or duration operand as a message shows it. */
+function operandText(value: SerializableRuntimeValue): string {
+  if (typeof value === "number") return String(withoutNegativeZero(value));
+  return isDuration(value) ? formatDuration(durationParts(value)) : describeRuntimeValue(value);
+}
+
+function isZero(value: SerializableRuntimeValue): boolean {
+  return value === 0 || (isDuration(value) && durationFamily(durationParts(value)) === "zero");
+}
+
+/** `TSR013` or `TSR031`: the host built-in `name` returned a value that a script cannot hold, for `reason`. */
+function invalidReturn(name: string, reason: string): string {
+  return internalFault(
+    `The built-in function '${name}' returned a value that a script cannot hold: ${reason.replace(/[.]$/u, "")}.`,
+  );
+}
+
+/** A method a list, set, or dict does not have, in the compiler's wording. */
+function noCollectionMethod(receiver: SerializableRuntimeValue, name: string): string {
+  if (!isDict(receiver)) return `${isSet(receiver) ? "Sets" : "Lists"} have no method '${name}'.`;
+  return name === "add"
+    ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
+    : `Dicts have no method '${name}'. Use contains, remove, clear, or get.`;
+}
+
+/** `TSR018` for `.first` or `.last`, or `TSR019` for `.random`, of an empty list or set the source may spell `label`. */
+function emptyCollection(
+  name: string,
+  collection: SerializableRuntimeList | SerializableRuntimeSet,
+  label: string | null,
+  span: SourceSpan,
+): RuntimeFault {
+  return fault(
+    name === "random" ? "TSR019" : "TSR018",
+    label === null
+      ? `Cannot read '.${name}' from an empty ${isSet(collection) ? "set" : "list"}. Check its length first.`
+      : `Cannot read '${label}.${name}': '${label}' is empty. Check '${label}.length' first.`,
+    span,
+  );
+}
+
+/** A property an object, which the source may spell `label`, does not have, with the first ten it has. */
+function noObjectProperty(
+  object: SerializableRuntimeObject,
+  name: string,
+  label: string | null,
+): string {
+  const subject = label === null ? "This object" : `'${label}'`;
+  const names = object.properties.slice(0, 10).map((property) => `'${property.name}'`);
+  const more = object.properties.length - names.length;
+  if (names.length === 0) return `${subject} has no properties, so it has no '${name}'.`;
+  const listed =
+    names.length === 1
+      ? `Its only property is ${names[0]}`
+      : `Its properties are ${more > 0 ? `${names.join(", ")}, and ${more} more` : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`}`;
+  return `${subject} has no property '${name}'. ${listed}.`;
+}
+
 /** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */
-function planLabel(plan: ExpressionPlan): string | null {
+export function planLabel(plan: ExpressionPlan): string | null {
   const names: string[] = [];
   let current = plan;
   for (;;) {
@@ -3368,7 +3877,9 @@ function assertRepresentableRound(nowMs: number, remainingMs: number, span: Sour
   if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
     throw fault(
       "TSR050",
-      "Timer remaining time is outside the supported session-time range.",
+      isValidSessionTime(deadlineMs)
+        ? `Timer remaining time of ${formatDuration(remainingMs)} is too short to measure this late in the scene. Use a longer duration.`
+        : `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }
@@ -3379,7 +3890,11 @@ function timerDisplayValue(
   span: SourceSpan,
 ): "visible" | "mystery" | "hidden" {
   if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
+  throw fault(
+    "TSR050",
+    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
+    span,
+  );
 }
 
 function optionalSpeakerString(
@@ -3396,7 +3911,11 @@ function optionalSpeakerString(
       span,
     );
   if (typeof value !== "string")
-    throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
+    throw fault(
+      "TSR030",
+      `Speaker property '${name}' must be text (string), but this is ${describeShownValue(value)}.`,
+      span,
+    );
   return value;
 }
 
@@ -3407,7 +3926,11 @@ function setSpeakerProperty(
   span: SourceSpan,
 ): void {
   if (name === "defaultSaySkippable" && typeof value !== "boolean") {
-    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+    throw fault(
+      "TSR050",
+      `Speaker property 'defaultSaySkippable' must be true or false (boolean), but this is ${describeShownValue(value)}.`,
+      span,
+    );
   }
   const property = speaker.properties.find((item) => item.name === name);
   if (property === undefined)
@@ -3436,11 +3959,7 @@ function scriptReference(
   span: SourceSpan,
 ): SerializableScriptReference {
   if (positional.length !== 1 || Object.keys(named).some((name) => name !== "label")) {
-    throw fault(
-      "TSR028",
-      "script expects 1 positional argument (path) and the optional named argument label:.",
-      span,
-    );
+    throw fault("TSR028", "script(...) takes one path and an optional 'label:'.", span);
   }
   const text = (value: SerializableRuntimeValue, part: string): string => {
     if (typeof value === "string") return value;
@@ -3548,7 +4067,13 @@ function readTemporary(
 ): SerializableRuntimeValue {
   const temporary = temporaries.find((item) => item.id === temporaryId);
   if (temporary === undefined) {
-    throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    throw fault(
+      "TSR046",
+      internalFault(
+        `An internal value (temporary ${temporaryId}) is missing from the session's state.`,
+      ),
+      span,
+    );
   }
   return temporary.value;
 }
@@ -3557,15 +4082,60 @@ function rangeLength(range: SerializableRuntimeRange): number {
   return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
 }
 
-function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): void {
+/** `TSR045` unless `range` has whole-number bounds and a length that a number counts exactly. */
+export function assertIntegerRange(
+  range: SerializableRuntimeRange,
+  subject: string,
+  span: SourceSpan,
+): void {
   const length = rangeLength(range);
   if (
     !Number.isSafeInteger(range.start) ||
     !Number.isSafeInteger(range.end) ||
     !Number.isSafeInteger(length)
   ) {
-    throw fault("TSR045", "Range iteration requires safe integer bounds.", span);
+    throw fault(
+      "TSR045",
+      !Number.isInteger(range.start) || !Number.isInteger(range.end)
+        ? `${subject} needs a range of whole numbers, but this range is ${rangeText(range)}. Round its bounds with floor(...), round(...), or ceil(...) first.`
+        : Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end)
+          ? `${subject} needs a range it can count, but ${rangeText(range)} holds too many numbers. Use a smaller range.`
+          : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
+      span,
+    );
   }
+}
+
+/** A range as the source writes it, such as `1..=6`. */
+function rangeText(range: SerializableRuntimeRange): string {
+  return `${withoutNegativeZero(range.start)}${range.inclusive ? "..=" : ".."}${withoutNegativeZero(range.end)}`;
+}
+
+/**
+ * `TSR009`: `<`, `<=`, `>`, or `>=` with operands that are not two numbers or two texts, with the values and, for null or
+ * numeric text, the fix.
+ */
+function notComparable(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+): RuntimeFault {
+  let fix = "";
+  if (left === null || right === null) {
+    const label = planLabel(left === null ? expression.left : expression.right);
+    fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
+  } else if (
+    (typeof left === "number" &&
+      typeof right === "string" &&
+      numberFromText(right) !== undefined) ||
+    (typeof right === "number" && typeof left === "string" && numberFromText(left) !== undefined)
+  )
+    fix = " Convert the text with toNumber(...) first.";
+  return fault(
+    "TSR009",
+    `'${expression.operator}' compares two numbers, two texts, or two durations, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,
+    expression.span,
+  );
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

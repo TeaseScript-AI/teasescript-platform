@@ -34,7 +34,12 @@ test("rejects statically known non-iterable loop sources", () => {
   for (const source of ["for item in 1 { say item }", 'for item in "text" { say item }']) {
     const result = compileSource(source);
     assert.equal(result.plan, null);
-    assert.ok(result.semanticDiagnostics.some((item) => item.code === "TSV012"));
+    assert.deepEqual(
+      result.semanticDiagnostics
+        .filter((item) => item.code === "TSV012")
+        .map((item) => item.message),
+      ["A for-loop source must be a list, set, dict, or integer range."],
+    );
   }
 });
 

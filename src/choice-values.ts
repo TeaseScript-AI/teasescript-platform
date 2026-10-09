@@ -12,7 +12,7 @@ const CHOICE_VALUE_KINDS: ReadonlySet<string> = new Set([
   "date",
   "time",
   "datetime",
-  "timestamp",
+  "absoluteDateTime",
 ]);
 
 /**

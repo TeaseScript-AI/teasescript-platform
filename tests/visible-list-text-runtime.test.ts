@@ -180,7 +180,7 @@ test("interpolation checks the whole list before selecting, so the outcome does 
   const empty = runSource('let values = []\nsay "${values}"\nexit', []);
   assert.equal(
     empty.result.snapshot.failure?.message,
-    "An interpolated list must contain at least one element to select from.",
+    "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
   );
 });
 
@@ -194,7 +194,7 @@ test("interpolated values the compiler can see are checked when compiling", () =
     [
       'let answer = askText "${[]}"\nexit',
       "[]",
-      "An interpolated list must contain at least one element to select from.",
+      "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
     ],
     [
       'speaker vera {}\nsay "${[vera]}"\nexit',

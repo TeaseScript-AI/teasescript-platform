@@ -313,7 +313,7 @@ test("a malformed tag query names the accepted form", () => {
     ],
     [
       'showImage tagged "room-${1}"',
-      "Write a tag name in a query out in full; for computed names, use all:, none:, or any: with a list.",
+      "Write a tag name in a query out in full. For computed names, use all:, none:, or any: with a list.",
     ],
     [
       'showImage tagged "a" + "b"',
@@ -338,7 +338,7 @@ test("a malformed tag query names the accepted form", () => {
     ],
     [
       'say findImages(where: "a", where: "b")',
-      "The option 'where' appears more than once; combine the tags with and.",
+      "The option 'where' appears more than once. Combine the tags with 'and'.",
     ],
     [
       'say findImages(from: "images/*")',

@@ -314,7 +314,7 @@ export const DURATION_TYPE = scalar("duration");
 export const DATE_TYPE = scalar("date");
 export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
-export const TIMESTAMP_TYPE = scalar("timestamp");
+export const ABSOLUTE_DATE_TIME_TYPE = scalar("absoluteDateTime");
 export const SCRIPT_TYPE = scalar("script");
 
 export function openType(): OpenType {
@@ -1538,7 +1538,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
-  timestamp: "a timestamp",
+  absoluteDateTime: "an absolute date and time",
   script: "a script reference",
 };
 
@@ -1581,10 +1581,10 @@ export function describeValue(type: StaticType): string {
 }
 
 /**
- * The result type of arithmetic on known operand types, or `undefined` when the operator does not support them.
- * Integer arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to
- * a timestamp or a date and time after it, not before it. `+` also joins two texts, and two lists into a new list whose
- * element types join as in a list literal of both; lists that would mix types give `undefined` (V30 §4).
+ * The result type of arithmetic on known operand types, or `undefined` when the operator does not support them. Integer
+ * arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to an
+ * absolute date and time or a date and time after it, not before it. `+` also joins two texts, and two lists into a new
+ * list whose element types join as in a list literal of both; lists that would mix types give `undefined` (V30 §4).
  */
 export function arithmeticType(
   operator: string,
@@ -1618,8 +1618,9 @@ export function arithmeticType(
   if (left.name === "duration" && numeric(right.name) && (operator === "*" || operator === "/"))
     return DURATION_TYPE;
   if (numeric(left.name) && right.name === "duration" && operator === "*") return DURATION_TYPE;
-  // A date, timestamp, or local date and time moves by a duration, and two of one kind differ by one (V30 §35).
-  if (left.name === "timestamp" || left.name === "datetime" || left.name === "date") {
+  // A date, absolute date and time, or local date and time moves by a duration, and two of one kind differ by one
+  // (V30 §35).
+  if (left.name === "absoluteDateTime" || left.name === "datetime" || left.name === "date") {
     if (right.name === "duration" && (operator === "+" || operator === "-"))
       return scalar(left.name);
     if (right.name === left.name && operator === "-") return DURATION_TYPE;

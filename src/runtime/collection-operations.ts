@@ -15,7 +15,7 @@ export const SET_OPERATIONS: ReadonlySet<string> = new Set(["intersection", "uni
 /**
  * The ascending, stable order of sortable list items as their old indexes: numbers (integers and numbers together),
  * text by Unicode code point, durations, or date and time values. Every item must be of one of these kinds, and all of
- * the same kind; dates, times, datetimes, and timestamps are four kinds (V30 §35).
+ * the same kind; dates, times, datetimes, and absolute dates and times are four kinds (V30 §35).
  */
 export function sortOrder(items: readonly SerializableRuntimeValue[], span: SourceSpan): number[] {
   let kind: keyof typeof KIND_DESCRIPTIONS | undefined;
@@ -80,7 +80,7 @@ const KIND_DESCRIPTIONS = {
   date: "dates",
   time: "times",
   datetime: "dates and times",
-  timestamp: "timestamps",
+  absoluteDateTime: "absolute dates and times",
 } as const;
 
 function sortKey(value: SerializableRuntimeValue): number {

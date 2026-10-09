@@ -158,7 +158,10 @@ let rounds = choose 5, 10, 15, prefill: 10
 
 A trailing `prefill:` preselects the first button with that value: it is marked, and Space in the empty composer
 activates it, but it is never chosen by itself ([preselected button](specifications/accepted-syntaxes-v30.md#preselected-button)).
-The compact form keeps every option in one statement and separates options with commas. Options with and without a written value may be mixed; until union types arrive (#504), one `choose` may not mix identifier and numeric values before `:`. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices) defines the complete option rules.
+The compact form keeps every option in one statement and separates options with commas. Options with and without a
+written value may be mixed; values of different types, such as text and numbers, are kept only by a place declared with
+a union type. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices)
+defines the complete option rules.
 
 `choose` is the author-facing construct. `choice` is the internal interaction/action noun.
 
@@ -272,20 +275,20 @@ defined in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage
 boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
 Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
-and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
-asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
+and `absoluteDateTime` values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`,
+and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
 restore, and permanent buttons whose clicks run their blocks like expiry interrupts. Timer, media, and button blocks
 share the variables of the code that creates them
 ([§14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)). Accepted forms and current
 limits are defined in specification [§27](specifications/accepted-syntaxes-v30.md#27-timers),
 [§28](specifications/accepted-syntaxes-v30.md#28-permanent-buttons), and
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-and-durations).
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
 `playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,
 `stopAudio` for every sound at once, and checkpoint restore. Player load and progress reports drive playback state;
-browser integration is tracked in #446 and browser video playback is not implemented. Accepted forms are defined in specification
-[§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video).
+the Player shows images and plays audio (#446), and browser video playback is not implemented. Accepted forms are
+defined in specification [§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video).
 
 The current function subset includes:
 

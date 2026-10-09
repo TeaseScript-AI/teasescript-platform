@@ -147,7 +147,7 @@ export function beyondLengthMessage(
 }
 
 export function endBeforeStartMessage(member: TextMember, start: number, end: number): string {
-  return `${member.name}() needs 'end' not before 'start'; ${end} is before ${start}.`;
+  return `${member.name}() needs 'end' not before 'start', but ${end} is before ${start}.`;
 }
 
 /** The failure message for an unknown text member, suggesting the TeaseScript name for a common one. */

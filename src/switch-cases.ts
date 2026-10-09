@@ -298,7 +298,7 @@ function reportOverlaps(values: readonly CaseValue[], report: SwitchCaseReport):
       earlier.kind === "literal" && later.kind === "literal"
         ? `The case value ${later.text} already appears on line ${earlier.span.start.line + 1}. Remove one of them.`
         : `The case value ${later.text} overlaps ${earlier.text} on line ${earlier.span.start.line + 1}. ` +
-            "Each value may match only one case; change or remove one of them.",
+            "Each value may match only one case. Change or remove one of them.",
       later.span,
     );
   }

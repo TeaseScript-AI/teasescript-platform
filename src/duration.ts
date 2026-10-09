@@ -184,9 +184,12 @@ export function scaleDurationParts(parts: DurationParts, factor: number): Durati
   };
 }
 
+/** Why a division of a duration has no result when its divisor is zero. */
+export const ZERO_DIVISOR = "the divisor is zero";
+
 /** A duration divided by a number, or why not: calendar parts must stay whole and the divisor must not be zero. */
 export function divideDurationParts(parts: DurationParts, divisor: number): DurationParts | string {
-  if (divisor === 0) return "the divisor is zero";
+  if (divisor === 0) return ZERO_DIVISOR;
   const months = parts.months / divisor;
   const days = parts.days / divisor;
   if (!Number.isInteger(months) || !Number.isInteger(days))
@@ -205,7 +208,7 @@ export function divideDurationParts(parts: DurationParts, divisor: number): Dura
 export function durationRatio(dividend: DurationParts, divisor: DurationParts): number | string {
   const family = sharedFamily(dividend, divisor);
   if (typeof family !== "string") return family.problem;
-  if (family === "zero" || familyAmount(divisor, family) === 0) return "the divisor is zero";
+  if (family === "zero" || familyAmount(divisor, family) === 0) return ZERO_DIVISOR;
   return familyAmount(dividend, family) / familyAmount(divisor, family);
 }
 

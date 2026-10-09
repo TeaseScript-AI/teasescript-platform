@@ -318,6 +318,98 @@ type Mutable<Value> = Value extends readonly (infer Item)[]
 
 type MutablePlan = Mutable<InstructionPlan>;
 
+test("a block function belongs to one timer, media, or button block", () => {
+  const compiled = plan(
+    [
+      "function start(n: integer): media {",
+      '  let x = playAudio async "x" {',
+      '    at 300 ms { say "x ${n}", instant }',
+      '    at 400 ms { say "x again", instant }',
+      '    finish { say "x done", instant }',
+      "  }",
+      '  let y = playAudio async "y" {',
+      '    at 500 ms { say "y", instant }',
+      "  }",
+      "  return x",
+      "}",
+      "let p = start(1)",
+      'timer async 1 { say "a" }',
+      'timer async 1 { say "b" }',
+      'showPermanentButton "A" { say "a" }',
+      'showPermanentButton "B" { say "b" }',
+      "wait 2",
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+  type Mutated = MutablePlan["instructions"][number];
+  const ofKind = <K extends Mutated["kind"]>(value: MutablePlan, kind: K) =>
+    value.instructions.filter(
+      (instruction): instruction is Extract<Mutated, { kind: K }> => instruction.kind === kind,
+    );
+  // Each case gives one block's function to another block and returns where the second use stands.
+  const cases: readonly (readonly [string, (value: MutablePlan) => number])[] = [
+    // Two blocks of one play, which the engine's own restore refused on an earlier revision.
+    [
+      "two cues of one play",
+      (value) => {
+        const [x] = ofKind(value, "playMedia");
+        x!.cues[1]!.functionId = x!.cues[0]!.functionId;
+        return value.instructions.indexOf(x!);
+      },
+    ],
+    [
+      "a cue and the finish of one play",
+      (value) => {
+        const [x] = ofKind(value, "playMedia");
+        x!.cues[0]!.functionId = x!.finishFunctionId!;
+        return value.instructions.indexOf(x!);
+      },
+    ],
+    // Plays whose blocks share different variables, which then failed the engine with TSR101.
+    [
+      "cues of two plays",
+      (value) => {
+        const [x, y] = ofKind(value, "playMedia");
+        x!.cues[0]!.functionId = y!.cues[0]!.functionId;
+        return value.instructions.indexOf(y!);
+      },
+    ],
+    [
+      "two timers",
+      (value) => {
+        const [first, second] = ofKind(value, "startTimer");
+        second!.handlerFunctionId = first!.handlerFunctionId;
+        return value.instructions.indexOf(second!);
+      },
+    ],
+    [
+      "two permanent buttons",
+      (value) => {
+        const [first, second] = ofKind(value, "showPermanentButton");
+        second!.handlerFunctionId = first!.handlerFunctionId;
+        return value.instructions.indexOf(second!);
+      },
+    ],
+  ];
+  for (const [name, share] of cases) {
+    const shared = mutable(compiled);
+    const index = share(shared);
+    assertInvalid(
+      shared,
+      `$.instructions[${index}]`,
+      "belongs to one timer, media, or button block",
+    );
+    assert.equal(
+      validateInstructionPlan(shared).errors.filter((error) =>
+        error.message.includes("belongs to one timer, media, or button block"),
+      ).length,
+      1,
+      name,
+    );
+  }
+});
+
 function functionName(compiled: InstructionPlan, id: number): string | undefined {
   return compiled.functions.find((definition) => definition.id === id)?.name;
 }

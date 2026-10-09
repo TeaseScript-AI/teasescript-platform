@@ -178,6 +178,11 @@ interface SharedParse {
    * `say` values nested there, so each is parsed once per context; parsed again at every level, nesting is exponential.
    */
   readonly sayValues: Map<number, ParsedSayValue[]>;
+  /**
+   * Strings with an interpolation that reported an error. They keep what parsed, so that what they belong to stays in
+   * the program; where only text written out in quotes is allowed, they count as failed, without a further error.
+   */
+  readonly recoveredStrings: WeakSet<StringLiteral>;
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -296,6 +301,7 @@ class Parser {
       bracketed: bracketContexts(tokens),
       closers: null,
       sayValues: new Map(),
+      recoveredStrings: new WeakSet(),
     },
   ) {
     this.#shared = shared;
@@ -939,21 +945,23 @@ class Parser {
   /**
    * `skippable` and `unskippable` predate their modifier meaning as ordinary
    * identifiers. Keep that interpretation whenever the existing say grammar
-   * can consume a complete value (and optional pacing) from this position.
+   * can consume a complete value (and optional pacing) from this position,
+   * also one that recovered from an error, such as a string with a failed
+   * interpolation.
    */
   *#canParseCompleteSayValue(statement: boolean): ParseTask<boolean> {
     const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current;
 
     const value = yield* parseChild(speculative.#parseOr());
-    if (value === null || speculative.#diagnostics.length > 0) return false;
+    if (value === null) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
       if (speculative.#canParseInstantPacingAlias(statement)) {
         speculative.#advance();
       } else {
         const pacing = yield* parseChild(speculative.#parseOr());
-        if (pacing === null || speculative.#diagnostics.length > 0) return false;
+        if (pacing === null) return false;
       }
     }
 
@@ -962,14 +970,15 @@ class Parser {
 
   /**
    * Whether the `(` here, after a `say` statement's mode and skip word, holds the text and pacing of its bounded form: a
-   * comma follows its first value. Grouping parentheses, valid or not, hold one value.
+   * comma follows its first value, also one that recovered from an error, such as a string with a failed interpolation.
+   * Grouping parentheses, valid or not, hold one value.
    */
   *#opensBoundedSayText(): ParseTask<boolean> {
     const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current + 1;
     speculative.#skipNewlines();
     const value = yield* parseChild(speculative.#withinDelimiters(speculative.#parseOr()));
-    if (value === null || speculative.#diagnostics.length > 0) return false;
+    if (value === null) return false;
     speculative.#skipNewlines();
     return speculative.#check(TokenKind.Comma);
   }
@@ -1072,7 +1081,7 @@ class Parser {
       return null;
     }
     const literal = yield* parseChild(this.#parseStringLiteral(start));
-    if (literal === null) return null;
+    if (literal === null || this.#shared.recoveredStrings.has(literal)) return null;
     if (literal.form !== "singleLine" || literal.parts.some((part) => part.kind !== "stringText")) {
       this.#reportSpan(
         parserDiagnosticCode.expectedLabelName,
@@ -1107,7 +1116,7 @@ class Parser {
     ) {
       this.#reportToken(
         parserDiagnosticCode.expectedExpression,
-        "Wait uses command syntax; write 'wait 1' rather than 'wait(1)'.",
+        "Wait uses command syntax. Write 'wait 1' rather than 'wait(1)'.",
         this.#peek(),
       );
       this.#synchronizeStatement();
@@ -1268,7 +1277,7 @@ class Parser {
         default:
           this.#reportSpan(
             parserDiagnosticCode.invalidTimerForm,
-            `Unknown timer argument '${name}'; use duration, async, display, label, repeat, or persist.`,
+            `Unknown timer argument '${name}'. Use duration, async, display, label, repeat, or persist.`,
             argument.name.span,
           );
           valid = false;
@@ -1394,7 +1403,7 @@ class Parser {
       } else if (name.lexeme !== "persist") {
         this.#reportSpan(
           parserDiagnosticCode.invalidMediaForm,
-          `Unknown showPermanentButton option '${name.lexeme}'; the only option is 'persist'.`,
+          `Unknown showPermanentButton option '${name.lexeme}'. The only option is 'persist'.`,
           name.span,
         );
         valid = false;
@@ -1603,7 +1612,7 @@ class Parser {
         if (options.has(option)) {
           this.#reportSpan(
             parserDiagnosticCode.invalidTagQuery,
-            "The option 'where' appears more than once; combine the tags with and.",
+            "The option 'where' appears more than once. Combine the tags with 'and'.",
             argument.name.span,
           );
           return call;
@@ -1647,6 +1656,7 @@ class Parser {
       return null;
     }
     options.add("from");
+    if (value.kind === "stringLiteral" && this.#shared.recoveredStrings.has(value)) return null;
     if (
       value.kind !== "stringLiteral" ||
       value.form !== "singleLine" ||
@@ -1666,8 +1676,10 @@ class Parser {
   }
 
   #tagPredicate(predicate: Expression): TagQueryStep[] | null {
-    return tagPredicateSteps(predicate, (message, span) =>
-      this.#reportSpan(parserDiagnosticCode.invalidTagQuery, message, span),
+    return tagPredicateSteps(
+      predicate,
+      (message, span) => this.#reportSpan(parserDiagnosticCode.invalidTagQuery, message, span),
+      (literal) => this.#shared.recoveredStrings.has(literal),
     );
   }
 
@@ -1856,7 +1868,7 @@ class Parser {
         if (!sawNamed && value !== null) {
           this.#reportSpan(
             code,
-            `${command.lexeme}(...) takes one unnamed value; name the others, such as '${names[0]}:'.`,
+            `${command.lexeme}(...) takes one unnamed value. Name the others, such as '${names[0]}:'.`,
             argument.span,
           );
         }
@@ -1869,7 +1881,7 @@ class Parser {
       if (!names.includes(name)) {
         this.#reportSpan(
           code,
-          `Unknown ${command.lexeme} option '${name}'; use ${names.map((known) => `'${known}:'`).join(" or ")}.`,
+          `Unknown ${command.lexeme} option '${name}'. Use ${names.map((known) => `'${known}:'`).join(" or ")}.`,
           argument.name.span,
         );
         valid = false;
@@ -1889,7 +1901,7 @@ class Parser {
     if (
       this.#rejectAdjacentParenthesis(
         command,
-        "showCamera uses command syntax; write 'showCamera' or 'showCamera stage'.",
+        "showCamera uses command syntax. Write 'showCamera' or 'showCamera stage'.",
       )
     )
       return null;
@@ -1902,7 +1914,7 @@ class Parser {
   #parseHideCameraStatement(): HideCameraStatement | null {
     const command = this.#advance();
     if (
-      this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments; write 'hideCamera'.")
+      this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments. Write 'hideCamera'.")
     )
       return null;
     return Object.freeze({ kind: "hideCameraStatement", span: copySpan(command.span) });
@@ -1911,7 +1923,7 @@ class Parser {
   #parseHideImageStatement(): HideImageStatement | null {
     const command = this.#advance();
     if (
-      this.#rejectAdjacentParenthesis(command, "hideImage takes no arguments; write 'hideImage'.")
+      this.#rejectAdjacentParenthesis(command, "hideImage takes no arguments. Write 'hideImage'.")
     )
       return null;
     return Object.freeze({ kind: "hideImageStatement", span: copySpan(command.span) });
@@ -2045,7 +2057,7 @@ class Parser {
         if (argument === undefined) {
           this.#reportSpan(
             parserDiagnosticCode.invalidMediaForm,
-            `Unknown ${command.lexeme} argument '${name.name}'; use ${MEDIA_ARGUMENTS.join(", ")}.`,
+            `Unknown ${command.lexeme} argument '${name.name}'. Use ${MEDIA_ARGUMENTS.join(", ")}.`,
             name.span,
           );
           valid = false;
@@ -2464,6 +2476,13 @@ class Parser {
         );
         return null;
       }
+      const renamed = RENAMED_TYPE_NAMES.get(first.lexeme);
+      if (first.kind === TokenKind.Identifier && renamed !== undefined)
+        this.#reportToken(
+          parserDiagnosticCode.invalidType,
+          `'${first.lexeme}' is not a type. Use '${renamed}'.`,
+          first,
+        );
       this.#advance();
       type = Object.freeze({ kind: "namedType", name, span: first.span });
     }
@@ -2693,7 +2712,7 @@ class Parser {
     if (this.#atComparedValue()) {
       this.#reportToken(
         parserDiagnosticCode.invalidType,
-        "'case is' checks a type; to compare with a value, write the value itself, as in 'case \"open\"'.",
+        "'case is' checks a type. To compare with a value, write the value itself, as in 'case \"open\"'.",
         this.#peek(),
       );
       return null;
@@ -3269,7 +3288,7 @@ class Parser {
       const compared = yield* parseChild(this.#parseRange());
       this.#reportSpan(
         parserDiagnosticCode.invalidType,
-        "'is' checks a type; use '==' to compare values.",
+        "'is' checks a type. Use '==' to compare values.",
         compared?.span ?? first.span,
       );
       return value;
@@ -3761,7 +3780,7 @@ class Parser {
           ) {
             this.#reportSpan(
               parserDiagnosticCode.unsupportedInteractionForm,
-              `Unknown ${command.lexeme} option '${unknown.lexeme}'; use ${names.map((known) => `'${known}:'`).join(", ")}.`,
+              `Unknown ${command.lexeme} option '${unknown.lexeme}'. Use ${names.map((known) => `'${known}:'`).join(", ")}.`,
               unknown.span,
             );
             this.#synchronizeStatement();
@@ -4038,7 +4057,7 @@ class Parser {
     if (name.name !== removedPrefillName(interactionKind)) return name;
     this.#reportSpan(
       parserDiagnosticCode.unsupportedInteractionForm,
-      `${command.lexeme} has no '${name.name}:'; use 'prefill:'.`,
+      `${command.lexeme} has no '${name.name}:'. Use 'prefill:'.`,
       name.span,
     );
     return Object.freeze({ ...name, name: "prefill" });
@@ -4084,7 +4103,7 @@ class Parser {
     if (question !== null && has("message"))
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
-        `${command.lexeme} has a question and 'message:'; keep one.`,
+        `${command.lexeme} has a question and 'message:'. Keep one.`,
         named.find((argument) => argument.name.name === "message")!.name.span,
       );
     const option = (name: string) =>
@@ -4410,15 +4429,22 @@ class Parser {
   *#parseStringLiteral(start: Token): ParseTask<StringLiteral | null> {
     const parts: StringPart[] = [];
     let valid = true;
+    let recovered = false;
     while (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
       if (this.#match(TokenKind.StringText)) {
         parts.push(this.#stringText(this.#previous()));
         continue;
       }
       if (this.#match(TokenKind.InterpolationStart)) {
+        const diagnosticCount = this.#diagnostics.length;
+        // An interpolation without an expression is left out.
         const interpolation = yield* parseChild(this.#parseStringInterpolation(this.#previous()));
-        if (interpolation === null) valid = false;
-        else parts.push(interpolation);
+        if (interpolation !== null) parts.push(interpolation);
+        // Also when only the lexer reported a missing `}`.
+        recovered ||=
+          interpolation === null ||
+          this.#diagnostics.length !== diagnosticCount ||
+          this.#previous().kind !== TokenKind.InterpolationEnd;
         continue;
       }
       this.#reportToken(
@@ -4431,12 +4457,14 @@ class Parser {
     }
     if (!this.#match(TokenKind.StringEnd)) return null;
     if (!valid) return null;
-    return Object.freeze({
+    const literal: StringLiteral = Object.freeze({
       kind: "stringLiteral",
       form: start.lexeme.length === 3 ? "block" : "singleLine",
       parts: Object.freeze(parts),
       span: spanFrom(start.span, this.#previous().span),
     });
+    if (recovered) this.#shared.recoveredStrings.add(literal);
+    return literal;
   }
 
   *#parseStringInterpolation(start: Token): ParseTask<StringInterpolation | null> {
@@ -4454,9 +4482,10 @@ class Parser {
     }
     const diagnosticCount = this.#diagnostics.length;
     const expression = yield* parseChild(this.#parseOr());
-    if (expression === null || this.#diagnostics.length !== diagnosticCount) {
-      // Only a failure that reported nothing itself gets this generic error.
-      if (this.#diagnostics.length === diagnosticCount) {
+    // Only a failure that reported nothing itself gets an error here.
+    const reported = this.#diagnostics.length !== diagnosticCount;
+    if (expression === null) {
+      if (!reported) {
         this.#reportToken(
           parserDiagnosticCode.unsupportedStringExpression,
           "Expected a supported expression inside the string interpolation.",
@@ -4469,7 +4498,7 @@ class Parser {
     }
     this.#skipNewlines();
     if (!this.#match(TokenKind.InterpolationEnd)) {
-      if (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
+      if (!reported && !this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
         const message = this.#check(TokenKind.Colon)
           ? "Only identifiers and chained property access are supported in string interpolation."
           : "Only one complete expression is allowed in string interpolation.";
@@ -4477,8 +4506,8 @@ class Parser {
       }
       this.#synchronizeInterpolation();
       this.#match(TokenKind.InterpolationEnd);
-      return null;
     }
+    // An expression that reported an error, or that more follows, stays as written so far: the error is reported once.
     return Object.freeze({
       kind: "stringInterpolation",
       expression,
@@ -4778,7 +4807,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "date",
       "time",
       "datetime",
-      "timestamp",
+      "absoluteDateTime",
       "duration",
       "list",
       "dict",
@@ -4792,11 +4821,16 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
   ).map((name) => [name, name]),
 );
 
+/** The earlier names of types, which are compile errors that name the fix (ADR 0026). */
+const RENAMED_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map([
+  ["timestamp", "absoluteDateTime"],
+]);
+
 /** The type name a token spells in type position; `speaker`, `set`, and `null` are keywords elsewhere. */
 function typeName(token: Token): TypeName | undefined {
   switch (token.kind) {
     case TokenKind.Identifier:
-      return IDENTIFIER_TYPE_NAMES.get(token.lexeme);
+      return IDENTIFIER_TYPE_NAMES.get(token.lexeme) ?? RENAMED_TYPE_NAMES.get(token.lexeme);
     case TokenKind.KeywordSpeaker:
       return "speaker";
     case TokenKind.KeywordSet:

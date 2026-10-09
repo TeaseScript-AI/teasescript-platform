@@ -562,7 +562,7 @@ test("a form that cannot be built fails when it opens, with a message that names
     // A failure inside a field's options also names the field.
     [
       `{ level: { type: "cycle", options: [{ text: "Low", background: "not-a-colour" }] } }`,
-      "askForm field 'level': Expected an opaque CSS button background colour.",
+      `askForm field 'level': A button background must be an opaque CSS colour, such as "#336699", but this is text (string) "not-a-colour".`,
     ],
     // A text start longer than any answer would make a form that could not be saved.
     [
@@ -671,7 +671,10 @@ test("a form with a cancel button cancels as a whole, dropping its edits, and re
       interactionKind: "form",
       payload: { kind: "cancel" },
     }).outcome,
-    { kind: "invalidPayload", message: "This form has no cancel button; it must be submitted." },
+    {
+      kind: "invalidPayload",
+      message: "This form has no cancel button, so it can only be submitted.",
+    },
   );
   const submittedNoCancel = submit(noCancel, pending).snapshot;
   const forged = structuredClone(submittedNoCancel);

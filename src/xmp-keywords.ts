@@ -47,7 +47,7 @@ export function readImageXmpKeywords(bytes: Uint8Array): XmpKeywordsResult {
     return keywordsOf(tiffPacket(bytes));
   }
   return unsupported(
-    "The file is not a JPEG, PNG, WebP, GIF, or TIFF image; save its tags in a sidecar file instead.",
+    "The file is not a JPEG, PNG, WebP, GIF, or TIFF image. Save its tags in a sidecar file instead.",
   );
 }
 
@@ -124,7 +124,7 @@ function readJpegKeywords(bytes: Uint8Array): XmpKeywordsResult {
   if (xmp.keywords !== null) return { kind: "keywords", keywords: xmp.keywords };
   if (xmp.hasExtendedXmp) {
     return unsupported(
-      "The JPEG stores part of its XMP as Extended XMP, which may hold its keywords; save the tags in a sidecar file instead.",
+      "The JPEG stores part of its XMP as Extended XMP, which may hold its keywords. Save the tags in a sidecar file instead.",
     );
   }
   return { kind: "none" };
@@ -158,7 +158,7 @@ function internationalText(fields: Uint8Array): Extraction {
   }
   if (compressed === 1) {
     return unsupported(
-      "The PNG stores its XMP compressed; save the tags in a sidecar file instead.",
+      "The PNG stores its XMP compressed. Save the tags in a sidecar file instead.",
     );
   }
   return fields.subarray(translatedKeyword + 1);
@@ -252,7 +252,7 @@ function tiffPacket(bytes: Uint8Array): Extraction {
   const data = view(bytes);
   const little = bytes[0] === 0x49;
   if (data.getUint16(2, little) === 43) {
-    return unsupported("The image is a BigTIFF; save its tags in a sidecar file instead.");
+    return unsupported("The image is a BigTIFF. Save its tags in a sidecar file instead.");
   }
   if (bytes.length < 8) return invalid(TIFF_MALFORMED);
   const directory = data.getUint32(4, little);
@@ -276,7 +276,7 @@ function tiffPacket(bytes: Uint8Array): Extraction {
 function readPacket(bytes: Uint8Array): Packet | Failure {
   if (bytes.length > MAX_XMP_PACKET_BYTES) {
     return unsupported(
-      `The XMP is larger than ${MAX_XMP_PACKET_BYTES / 1024 / 1024} MiB, the most this reader accepts; save the tags in a smaller sidecar file instead.`,
+      `The XMP is larger than ${MAX_XMP_PACKET_BYTES / 1024 / 1024} MiB, the most this reader accepts. Save the tags in a smaller sidecar file instead.`,
     );
   }
   const text = decodePacket(bytes);
@@ -298,7 +298,7 @@ function decodePacket(bytes: Uint8Array): string | Failure {
     [0x3c, 0x00, 0x00, 0x00],
   ];
   if (utf32.some((prefix) => startsWith(bytes, prefix))) {
-    return unsupported("The XMP is encoded as UTF-32; save it as UTF-8 instead.");
+    return unsupported("The XMP is encoded as UTF-32. Save it as UTF-8 instead.");
   }
   const encoding = startsWith(bytes, [0xfe, 0xff])
     ? "utf-16be"

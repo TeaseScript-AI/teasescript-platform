@@ -29,7 +29,7 @@ import {
   resolved,
   STRING_TYPE,
   TIME_TYPE,
-  TIMESTAMP_TYPE,
+  ABSOLUTE_DATE_TIME_TYPE,
   type StaticType,
 } from "./static-types.js";
 import {
@@ -85,15 +85,15 @@ export function memberProblems(
     if (member.parameters === null)
       return call === null
         ? []
-        : problem("length is a property, not a method; write .length without parentheses.");
+        : problem("'length' is a property, not a method. Write .length without parentheses.");
     if (call === null)
       return problem(
-        `${name} is a method; write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
+        `'${name}' is a method. Write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
       );
     return argumentProblems(member, call, typeOf, staticVisibleText(receiver));
   }
   if (type.kind === "list" && name === "join") {
-    if (call === null) return problem("join is a method; write .join() with parentheses.");
+    if (call === null) return problem("'join' is a method. Write .join() with parentheses.");
     const problems = argumentProblems(LIST_JOIN, call, typeOf, undefined);
     const element = unshowableElement(receiver, type.element, typeOf);
     if (element !== undefined)
@@ -120,7 +120,7 @@ export function memberProblems(
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
   const fix =
     type.kind === "scalar" && TEXT_MEMBERS.has(name)
-      ? " Text operations need text; convert the value first with toString(...)."
+      ? " Convert it to text first with toString(...)."
       : "";
   return problem(
     `${capitalized(describeValue(type))} has no ${call === null ? "property" : "method"} '${name}'.${fix}`,
@@ -135,7 +135,7 @@ function shapeProblems(member: TextMember, call: CallExpression): OperationProbl
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${member.name}() takes its arguments without names; remove '${named.name.name}:'.`,
+        message: `${member.name}() takes its arguments without names. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -258,7 +258,7 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments; remove '${named.name.name}:'.`,
+        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -299,7 +299,7 @@ export function builtinCallProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'; its only named argument is default:.`,
+        message: `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
         span: argument.name.span,
       });
   }
@@ -354,8 +354,8 @@ function numericFunctionProblems(
         kind: "unknownNamedArgument",
         message:
           named.length === 0
-            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'; its only named argument is ${named[0]}:.`,
+            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
+            : `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is '${named[0]}:'.`,
         span: argument.name.span,
       });
   }
@@ -392,7 +392,7 @@ function minMaxProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments; remove '${named.name.name}:'.`,
+        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -411,8 +411,8 @@ function minMaxProblems(
     // Numbers, durations, or date and time values of one kind (V30 §35) compare with each other.
     const kind = isAssignable(NUMBER_TYPE, type)
       ? NUMBER_TYPE
-      : [DURATION_TYPE, DATE_TYPE, TIME_TYPE, DATETIME_TYPE, TIMESTAMP_TYPE].find((candidate) =>
-          isAssignable(candidate, type),
+      : [DURATION_TYPE, DATE_TYPE, TIME_TYPE, DATETIME_TYPE, ABSOLUTE_DATE_TIME_TYPE].find(
+          (candidate) => isAssignable(candidate, type),
         );
     const message =
       kind === undefined
@@ -464,9 +464,9 @@ function candidateConversionProblem(
         return `toString(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that toString(...) converts.`;
     }
     return type.kind === "list" || type.kind === "set"
-      ? `toString(...) cannot convert ${describeValue(type)}; use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
+      ? `toString(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
-        ? `toString(...) cannot convert ${describeValue(type)}; use .values.join() to combine its values as text.`
+        ? `toString(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`
         : `toString(...) converts text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
@@ -485,23 +485,26 @@ function candidateConversionProblem(
     if (isScalar(type, "string"))
       return text === undefined || booleanFromText(text) !== undefined
         ? undefined
-        : `toBoolean(...) cannot convert ${JSON.stringify(text)}; the text must be "true" or "false".`;
+        : `toBoolean(...) cannot convert ${JSON.stringify(text)}. The text must be "true" or "false".`;
     return `toBoolean(...) converts text and true or false (boolean), not ${describeValue(type)}.${isScalar(type, "integer", "number") ? " Compare the number instead, such as value != 0." : ""}`;
   }
   if (isScalar(type, "integer", "number")) return undefined;
   if (isScalar(type, "string"))
     return text === undefined || numberFromText(text) !== undefined
       ? undefined
-      : `${name}(...) cannot convert ${JSON.stringify(text)}; the text must be a number such as 2.5 or -3.`;
+      : `${name}(...) cannot convert ${JSON.stringify(text)}. The text must be a number such as 2.5 or -3.`;
   return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : ""}`;
 }
 
-/** A local date and time and a timestamp convert into each other with a method, through the player's zone (V30 §35). */
+/**
+ * A local date and time and an absolute date and time convert into each other with a method, through the player's zone
+ * (V30 §35).
+ */
 function zoneMethodFix(result: ConversionResult, type: StaticType, value: Expression): string {
   const method =
-    result === "timestamp" && isScalar(type, "datetime")
-      ? "toTimestamp"
-      : result === "datetime" && isScalar(type, "timestamp")
+    result === "absoluteDateTime" && isScalar(type, "datetime")
+      ? "toAbsoluteDateTime"
+      : result === "datetime" && isScalar(type, "absoluteDateTime")
         ? "toDateTime"
         : null;
   return method === null
@@ -644,7 +647,7 @@ export function collectionMethodProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its arguments without names; remove '${named.name.name}:'.`,
+        message: `${name}() takes its arguments without names. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -701,7 +704,7 @@ function takeProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its count without a name; remove '${named.name.name}:'.`,
+        message: `${name}() takes its count without a name. Remove '${named.name.name}:'.`,
         span: named.name.span,
       },
     ];
@@ -744,8 +747,8 @@ function sortProblem(element: StaticType): string | undefined {
               ? "times"
               : isScalar(candidate, "datetime")
                 ? "dates and times"
-                : isScalar(candidate, "timestamp")
-                  ? "timestamps"
+                : isScalar(candidate, "absoluteDateTime")
+                  ? "absolute dates and times"
                   : undefined;
   const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
   if (unsortable !== undefined)

@@ -94,6 +94,21 @@ export function weekdayName(date: DateFields): string {
 }
 
 /**
+ * The ISO 8601 week of a date and the year it belongs to (ADR 0026): weeks start on Monday, and week 1 holds the year's
+ * first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is week 53 of 2020. The week year of 0000-01-01 is -1.
+ */
+export function isoWeek(date: DateFields): {
+  readonly weekYear: number;
+  readonly weekNumber: number;
+} {
+  // The Thursday of the date's week lies in its week year.
+  const thursday = daysFromEpoch(date) + 4 - isoWeekdayNumber(date);
+  const weekYear = dateFromEpochDays(thursday).year;
+  const firstOfYear = daysFromEpoch({ year: weekYear, month: 1, day: 1 });
+  return { weekYear, weekNumber: Math.floor((thursday - firstOfYear) / 7) + 1 };
+}
+
+/**
  * A date moved by whole months and then whole days (V30 §35): a day the target month lacks becomes its last day, so
  * January 31 plus one month is February 28 or 29. `undefined` outside the years 0000 to 9999.
  */
@@ -133,7 +148,7 @@ export function compareDateTimes(left: DateTimeFields, right: DateTimeFields): n
   return Math.sign(fieldsAsUtc(left) - fieldsAsUtc(right));
 }
 
-/** The earliest and latest representable timestamps: 0000-01-01T00:00:00Z and 9999-12-31T23:59:59.999Z. */
+/** The earliest and latest representable moments: 0000-01-01T00:00:00Z and 9999-12-31T23:59:59.999Z. */
 export const MIN_EPOCH_MILLISECONDS =
   daysFromEpoch({ year: MIN_YEAR, month: 1, day: 1 }) * MS_PER_DAY;
 export const MAX_EPOCH_MILLISECONDS =
@@ -147,7 +162,7 @@ export function isValidEpochMilliseconds(value: number): boolean {
   );
 }
 
-/** The UTC date and time of a valid timestamp. */
+/** The UTC date and time of a valid moment. */
 export function utcFields(epochMilliseconds: number): DateTimeFields {
   const days = Math.floor(epochMilliseconds / MS_PER_DAY);
   let rest = epochMilliseconds - days * MS_PER_DAY;
@@ -219,7 +234,7 @@ export function parseIsoDateTime(text: string): TemporalResult<DateTimeFields> {
   return { ok: true, value: { ...date.value, ...time.value } };
 }
 
-/** Reads a date and time with `Z` or a `±HH:MM` offset as a timestamp in epoch milliseconds. */
+/** Reads a date and time with `Z` or a `±HH:MM` offset as a moment in epoch milliseconds. */
 export function parseIsoTimestamp(text: string): TemporalResult<number> {
   const offsetStart = Math.max(text.lastIndexOf("Z"), text.lastIndexOf("+"), text.lastIndexOf("-"));
   const timeStart = text.indexOf("T");
@@ -697,7 +712,7 @@ function dateProblem(date: DateFields): string | null {
 }
 
 function timeProblem(time: TimeFields): string | null {
-  if (time.hour === 24) return "there is no hour 24; midnight is 00:00";
+  if (time.hour === 24) return "there is no hour 24. Midnight is 00:00";
   if (time.hour > 23) return `there is no hour ${time.hour}`;
   if (time.minute > 59) return `there is no minute ${time.minute}`;
   if (time.second > 59) return `there is no second ${time.second}`;

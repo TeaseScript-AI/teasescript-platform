@@ -162,11 +162,11 @@ test("askForm reports what the compiler can see is wrong", () => {
     // At the time limit the answers are submitted as they stand, so each written field starts with one.
     [
       'askForm fields: { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
-      `askForm field 'n': onTimeout: "submit" needs a value in every field; give it value:.`,
+      `askForm field 'n': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
     ],
     [
       'askForm fields: dict { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
-      `askForm field 'n': onTimeout: "submit" needs a value in every field; give it value:.`,
+      `askForm field 'n': onTimeout: "submit" needs a value in every field. Give it 'value:'.`,
     ],
   ];
   for (const [form, message] of cases) {
@@ -414,6 +414,69 @@ test("a dict of fields keeps its keys and order, labels its buttons by text, and
   assert.equal(binding(rated, "pain"), 7);
 });
 
+test("a loop goes through the answers of a dict of fields where the form is asked, as through any dict", () => {
+  const plan = compileValidPlan(
+    [
+      'for id, owned in askForm "Which toys do you own?", fields: dict { "rope": false, "gag": false } {',
+      '  say "${id}: ${owned}"',
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  const first = opened(plan);
+  const { finished } = submitted(plan, select(plan, first.snapshot, "gag", 1));
+  assert.deepEqual(said(finished.events), [
+    "bubble nobody: rope: false",
+    "bubble nobody: gag: true",
+  ]);
+  // A form of object fields returns an object, which a loop does not go through.
+  assert.deepEqual(
+    compileSource(
+      'for id in askForm("Which?", fields: { rope: false }) { say id }\nexit',
+    ).diagnostics.map((diagnostic) => diagnostic.message),
+    ["A for-loop goes through a list, a set, a dict, or a range, but this is an object."],
+  );
+});
+
+test("fields the compiler cannot know open the form with the shape of their value", () => {
+  const ask = (argument: string, use: string) =>
+    compileValidPlan(
+      `function ask(fields) {\n    let answers = askForm fields: fields\n    ${use}\n}\nask(${argument})\nexit`,
+    );
+  const restored = (plan: InstructionPlan, snapshot: RuntimeSnapshot) =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot;
+
+  // A dict opens a dict form, whose answers a loop goes through, and an object still opens an object form, also when
+  // the open form and the settled one are restored.
+  for (const [argument, use, shape, said] of [
+    [
+      'dict { "rope": false, "gag": true }',
+      "for key in answers { say key, instant }",
+      "dict",
+      ["rope", "gag"],
+    ],
+    ["{ rope: true }", "say answers.rope, instant", "object", ["true"]],
+  ] as const) {
+    const plan = ask(argument, use);
+    const { snapshot, ui } = opened(plan);
+    assert.equal(ui.shape, shape);
+    const { finished } = submitted(plan, restored(plan, snapshot));
+    assert.deepEqual(
+      finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      said,
+    );
+    restored(plan, finished.snapshot);
+  }
+
+  // Any other value fails when the form would open.
+  const number = ask("5", "say answers, instant");
+  const failure = run(number, createImmediatePacingRuntimeSnapshot(number)).snapshot.failure;
+  assert.deepEqual(
+    [failure?.code, failure?.message],
+    ["TSR052", "askForm fields: must be an object or a dict of fields, not a number."],
+  );
+});
+
 test("a dict of fields of different kinds says each type, and answers in the union to narrow", () => {
   const menu = [
     'let settingId = "impact"',
@@ -501,8 +564,8 @@ test("a written dict of fields types each entry by what it shows", () => {
   );
   // One dict has one number kind for fields without `type:`.
   assert.deepEqual(diagnostics('let r = askForm fields: dict { "a": 1, "b": 2.5 }'), [
-    `askForm field 'a': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
-    `askForm field 'b': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+    `askForm field 'a': its dict mixes whole and decimal numbers. Add type: "integer" or type: "number".`,
+    `askForm field 'b': its dict mixes whole and decimal numbers. Add type: "integer" or type: "number".`,
   ]);
 });
 
@@ -600,7 +663,7 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   const errors = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
   assert.deepEqual(errors('let a = askBooleans(texts: ["A", "B"], prefill: [true])'), [
-    "askBooleans has 2 texts but 1 prefill values; give one for each text.",
+    "askBooleans has 2 texts but 1 prefill value. Give one prefill value for each text.",
   ]);
   assert.deepEqual(errors('let a = askBooleans("Q", texts: ["A"])'), [
     `askBooleans needs prefill:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
@@ -620,7 +683,10 @@ test("askBooleans asks with one toggle per text and returns their states in orde
   const failure = run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure;
   assert.deepEqual(
     [failure?.code, failure?.message],
-    ["TSR058", "askBooleans has 2 texts but 1 prefill values; give one for each text."],
+    [
+      "TSR058",
+      "askBooleans has 2 texts but 1 prefill value. Give one prefill value for each text.",
+    ],
   );
   // A host cannot configure the engine's name as its own.
   for (const option of ["builtins", "globals"] as const)

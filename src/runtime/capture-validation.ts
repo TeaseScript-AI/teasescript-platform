@@ -4,8 +4,8 @@ import type { SnapshotValidationAnalysis } from "./snapshot-validation-analysis.
 /**
  * Restore validation for the variables blocks share with the code that created them (V30 §14). Each resource, queued
  * block, and running block names the variables its plan instruction lists, each in a block, loop, or function scope
- * that holds it. A retained scope of that kind exists only while one of them shares it. Settled handle records keep
- * their list without owning its scopes.
+ * that holds it. A retained scope of that kind exists only while one of them shares it. Settled timer and media
+ * records keep none.
  */
 export function validateCaptureState(
   snapshot: Record<string, unknown>,
@@ -29,7 +29,6 @@ export function validateCaptureState(
   const check = (
     list: unknown,
     functionId: unknown,
-    live: boolean,
     /** For a running block: the depth its own scopes start at, which it cannot share. */
     below: number = Number.POSITIVE_INFINITY,
   ): void => {
@@ -49,7 +48,6 @@ export function validateCaptureState(
       malformed = true;
       return;
     }
-    if (!live) return;
     for (const { name, scopeId } of captures) {
       const scope = scopes.get(scopeId);
       if (
@@ -71,21 +69,17 @@ export function validateCaptureState(
     : []) {
     if (!isPlainRecord(action)) continue;
     if (action.kind === "timer" && isPlainRecord(action.timer)) {
-      check(action.timer.captures, action.timer.handlerFunctionId, true);
+      check(action.timer.captures, action.timer.handlerFunctionId);
     } else if (action.kind === "media" && isPlainRecord(action.media)) {
-      check(action.media.captures, mediaFunctionId(action.media), true);
+      check(action.media.captures, mediaFunctionId(action.media));
     } else if (action.kind === "permanentButton" && isPlainRecord(action.button)) {
-      check(action.button.captures, action.button.handlerFunctionId, true);
+      check(action.button.captures, action.button.handlerFunctionId);
     }
   }
-  for (const timer of Array.isArray(snapshot.settledTimers) ? snapshot.settledTimers : [])
-    if (isPlainRecord(timer)) check(timer.captures, timer.handlerFunctionId, false);
-  for (const media of Array.isArray(snapshot.settledMedia) ? snapshot.settledMedia : [])
-    if (isPlainRecord(media)) check(media.captures, mediaFunctionId(media), false);
   for (const invocation of Array.isArray(snapshot.pendingTimerHandlers)
     ? snapshot.pendingTimerHandlers
     : [])
-    if (isPlainRecord(invocation)) check(invocation.captures, invocation.handlerFunctionId, true);
+    if (isPlainRecord(invocation)) check(invocation.captures, invocation.handlerFunctionId);
   for (const frame of Array.isArray(snapshot.callFrames) ? snapshot.callFrames : []) {
     if (!isPlainRecord(frame) || frame.kind !== "function") continue;
     const definition = nonNegativeSafeInteger(frame.functionId)
@@ -95,7 +89,6 @@ export function validateCaptureState(
     check(
       frame.captures,
       definition?.handler === null ? null : frame.functionId,
-      true,
       nonNegativeSafeInteger(frame.scopeBaseDepth) ? frame.scopeBaseDepth : 0,
     );
   }

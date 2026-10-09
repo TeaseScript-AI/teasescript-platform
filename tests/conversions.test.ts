@@ -106,19 +106,19 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say toNumber("hello")\nexit',
       "TSV043",
-      'toNumber(...) cannot convert "hello"; the text must be a number such as 2.5 or -3.',
+      'toNumber(...) cannot convert "hello". The text must be a number such as 2.5 or -3.',
       '"hello"',
     ],
     [
       'say toInteger("${2} apples", default: 0)\nexit',
       "TSV043",
-      'toInteger(...) cannot convert "2 apples"; the text must be a number such as 2.5 or -3.',
+      'toInteger(...) cannot convert "2 apples". The text must be a number such as 2.5 or -3.',
       '"${2} apples"',
     ],
     [
       'say toBoolean("yes")\nexit',
       "TSV043",
-      'toBoolean(...) cannot convert "yes"; the text must be "true" or "false".',
+      'toBoolean(...) cannot convert "yes". The text must be "true" or "false".',
       '"yes"',
     ],
     [
@@ -148,7 +148,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say toString([1, 2])\nexit",
       "TSV043",
-      "toString(...) cannot convert a list (integer[]); use .join() to combine its elements as text.",
+      "toString(...) cannot convert a list (integer[]). Use .join() to combine its elements as text.",
       "[1, 2]",
     ],
     [
@@ -166,7 +166,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say toString(set[1, 2])\nexit",
       "TSV043",
-      "toString(...) cannot convert a set (integer set); use .toList().join() to combine its elements as text.",
+      "toString(...) cannot convert a set (integer set). Use .toList().join() to combine its elements as text.",
       "set[1, 2]",
     ],
     [
@@ -196,7 +196,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say toNumber("5", fallback: 0)\nexit',
       "TSV022",
-      "toNumber(...) has no parameter 'fallback'; its only named argument is default:.",
+      "toNumber(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
       "fallback",
     ],
     [
@@ -220,7 +220,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say ceil(2, to: 1)\nexit",
       "TSV022",
-      "ceil(...) takes no named arguments; remove 'to:'.",
+      "ceil(...) takes no named arguments. Remove 'to:'.",
       "to",
     ],
   ];
@@ -234,25 +234,31 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       "say toNumber(value)\nexit",
       { value: "many" },
       "TSR058",
-      'toNumber(...) cannot convert text (string) "many" to a number. Give a fallback with default: if the value may not convert.',
+      `toNumber(...) cannot convert text (string) "many" to a number. The text must be a number such as 2.5 or -3. Give a fallback with 'default:' if the value may not convert.`,
     ],
     [
       "say toInteger(value)\nexit",
       { value: true },
       "TSR058",
-      "toInteger(...) cannot convert true or false (boolean) to a whole number (integer). Give a fallback with default: if the value may not convert.",
+      "toInteger(...) cannot convert true (boolean) to a whole number (integer). Give a fallback with 'default:' if the value may not convert.",
     ],
     [
       "say toBoolean(value)\nexit",
       { value: "yes" },
       "TSR058",
-      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). Give a fallback with default: if the value may not convert.',
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false". Compare the text instead, such as \'value == "yes"\'.',
+    ],
+    [
+      "say toBoolean(value)\nexit",
+      { value: 1 },
+      "TSR058",
+      "toBoolean(...) converts text and true or false (boolean), not the number 1. Compare the number instead, such as 'value != 0'.",
     ],
     [
       "say toNumber(value)\nexit",
       { value: "1e400" },
       "TSR058",
-      'toNumber(...) cannot convert text (string) "1e400" to a number. Give a fallback with default: if the value may not convert.',
+      `toNumber(...) cannot convert text (string) "1e400" to a number. The text must be a number such as 2.5 or -3. Give a fallback with 'default:' if the value may not convert.`,
     ],
     [
       "say toNumber(value, default: backup)\nexit",
@@ -288,7 +294,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
     [list.snapshot.failure?.code, list.snapshot.failure?.message],
     [
       "TSR058",
-      "toString(...) cannot convert a list to text (string). Give a fallback with default: if the value may not convert.",
+      "toString(...) cannot convert a list to text (string). Use .join() to combine its elements as text.",
     ],
   );
 });

@@ -212,6 +212,40 @@ test("a block's goto abandons the file its activation called and keeps that acti
   );
 });
 
+test("a block's goto that leaves a called file keeps the caller's finished timers' waiting blocks", () => {
+  // The caller's one-shot timer finishes at 1 s while middle.tease's block waits, so its block waits too; the goto then
+  // leaves only middle.tease, whose own finished timer's block goes.
+  assert.deepEqual(
+    said(
+      project(
+        [
+          'timer(duration: 1, async: true, display: "hidden") { say "main a" }',
+          'call "middle.tease"',
+          'say "back in main"',
+          "wait 5",
+          "exit",
+        ].join("\n"),
+        {
+          "middle.tease": [
+            'timer(duration: 500 ms, async: true, display: "hidden") {',
+            "    wait 2",
+            "    goto there",
+            "}",
+            'timer(duration: 1, async: true, display: "hidden") { say "middle a" }',
+            "wait 10",
+            "end",
+            "label there",
+            'say "middle there"',
+            "wait 5",
+            "end",
+          ].join("\n"),
+        },
+      ),
+    ),
+    ["main a", "middle there", "back in main", "exit"],
+  );
+});
+
 test("a timer of a file that called another fires during the call, and its goto continues that file", () => {
   // The owner's example on #570: main's timer ends the corner time and continues main with its own variables.
   assert.deepEqual(

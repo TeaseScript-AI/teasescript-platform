@@ -6,6 +6,7 @@ import type { TemporalContext } from "../temporal.js";
 import {
   type DelayDisplay,
   type DurationUnitPlan,
+  type ExpressionPlan,
   type Instruction,
   type InstructionPlan,
   type InteractionAccessibleName,
@@ -38,7 +39,10 @@ import {
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
   type Evaluator,
+  assertIntegerRange,
   findBinding,
+  notBoolean,
+  planLabel,
   RuntimeExecutionContext,
   type RuntimeCapabilities,
 } from "./evaluator.js";
@@ -47,7 +51,7 @@ export type {
   RuntimeCapabilities,
   RuntimeCapabilityCall,
 } from "./evaluator.js";
-import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import { internalFault, RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import { textTooLong } from "./text-length.js";
 import {
   assertCounterCanAdvance,
@@ -118,7 +122,6 @@ import type {
 import {
   assertPersistable,
   storageKey,
-  WRITE_KEY_MESSAGE,
   storageKeyPlace,
   storageKeyType,
   writeScriptStorage,
@@ -198,7 +201,8 @@ import {
 import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
-import { assertValueType } from "./value-types.js";
+import { assertValueType, describeShownValue, shownChoice } from "./value-types.js";
+import { numberFromText } from "../conversions.js";
 import {
   describeRuntimeValue,
   isDate,
@@ -217,7 +221,7 @@ import {
 import { fieldText } from "./value-text.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
-import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
+import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -748,7 +752,11 @@ function executePlannedInstruction(
   switch (instruction.kind) {
     case "declareGlobal": {
       if (evaluator.binding(instruction.name) !== undefined) {
-        throw fault("TSR001", `Global '${instruction.name}' is already set up.`, instruction.span);
+        throw fault(
+          "TSR001",
+          internalFault(`The plan sets up global '${instruction.name}' twice.`),
+          instruction.span,
+        );
       }
       const value = evaluator.evaluateStartValue(instruction.value);
       if (instruction.typeCheck !== undefined)
@@ -766,7 +774,7 @@ function executePlannedInstruction(
         if (stagedEvaluator.binding(instruction.name) !== undefined) {
           throw fault(
             "TSR001",
-            `Speaker '${instruction.name}' is already set up.`,
+            internalFault(`The plan sets up speaker '${instruction.name}' twice.`),
             instruction.span,
           );
         }
@@ -785,17 +793,19 @@ function executePlannedInstruction(
         stagedSnapshot.contextualSpeaker = speaker.id;
         for (const property of instruction.properties) {
           if (speaker.properties.some((item) => item.name === property.name)) {
-            throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
+            throw fault(
+              "TSR007",
+              internalFault(
+                `The plan gives speaker '${instruction.name}' the property '${property.name}' twice.`,
+              ),
+              property.span,
+            );
           }
           const propertyValue = cloneCapturedSerializableValue(
             stagedEvaluator.evaluateStartValue(property.value),
           );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-            throw fault(
-              "TSR050",
-              "Speaker property 'defaultSaySkippable' must be a boolean.",
-              property.span,
-            );
+            throw fault("TSR050", notSkippableFlag(propertyValue), property.span);
           }
           speaker.properties.push({ name: property.name, value: propertyValue });
         }
@@ -828,7 +838,11 @@ function executePlannedInstruction(
       return;
     case "leaveScope":
       if (currentFrame(snapshot).file !== null) {
-        throw fault("TSR033", "Cannot leave the root lexical scope.", instruction.span);
+        throw fault(
+          "TSR033",
+          internalFault("The plan tries to leave its outermost scope."),
+          instruction.span,
+        );
       }
       leaveScopes(snapshot, snapshot.frames.length - 1);
       advance(snapshot);
@@ -839,7 +853,9 @@ function executePlannedInstruction(
       if (!rerun && evaluator.binding(instruction.name) !== undefined) {
         throw fault(
           "TSR001",
-          `Variable '${instruction.name}' is already visible in this scope.`,
+          internalFault(
+            `The plan declares variable '${instruction.name}' twice in the same scope.`,
+          ),
           instruction.span,
         );
       }
@@ -908,7 +924,12 @@ function executePlannedInstruction(
     case "jumpIfFalse": {
       const condition = evaluator.evaluate(instruction.condition);
       if (typeof condition !== "boolean") {
-        throw fault("TSR026", "Expected a boolean value.", instruction.condition.span);
+        throw notBoolean(
+          "A condition must be true or false (boolean)",
+          instruction.condition,
+          condition,
+          instruction.condition.span,
+        );
       }
       evaluator.trace?.branch(condition, instruction.target, instruction.span);
       snapshot.nextInstruction = condition ? snapshot.nextInstruction + 1 : instruction.target;
@@ -926,7 +947,13 @@ function executePlannedInstruction(
     case "storeTemporary": {
       const value = evaluator.evaluate(instruction.value);
       if (instruction.expectBoolean && typeof value !== "boolean") {
-        throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
+        // Only the operands of a lowered 'and' or 'or' expect true or false.
+        throw notBoolean(
+          "'and' and 'or' need true or false (boolean) values",
+          instruction.value,
+          value,
+          instruction.value.span,
+        );
       }
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
@@ -1106,7 +1133,11 @@ function executePlannedInstruction(
         !Number.isSafeInteger(snapshot.nextActionId) ||
         snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
       ) {
-        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+        throw fault(
+          "TSR051",
+          internalFault("The session has used up its action numbers."),
+          instruction.span,
+        );
       }
       assertEventSequenceCapacity(
         snapshot,
@@ -1149,7 +1180,7 @@ function executePlannedInstruction(
       ) {
         throw fault(
           "TSR050",
-          "Interaction result destination is already occupied.",
+          internalFault("The slot for an interaction's answer is already in use."),
           instruction.span,
         );
       }
@@ -1157,7 +1188,11 @@ function executePlannedInstruction(
         !Number.isSafeInteger(snapshot.nextActionId) ||
         snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
       ) {
-        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+        throw fault(
+          "TSR051",
+          internalFault("The session has used up its action numbers."),
+          instruction.span,
+        );
       }
       const backgroundPacingGate = snapshot.backgroundActions.some(
         (action) => action.kind === "chatPacingGate",
@@ -1291,13 +1326,21 @@ function executePlannedInstruction(
       if (
         snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary)
       ) {
-        throw fault("TSR050", "Capture result destination is already occupied.", instruction.span);
+        throw fault(
+          "TSR050",
+          internalFault("The slot for the result of takePhoto() is already in use."),
+          instruction.span,
+        );
       }
       if (
         !Number.isSafeInteger(snapshot.nextActionId) ||
         snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
       ) {
-        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+        throw fault(
+          "TSR051",
+          internalFault("The session has used up its action numbers."),
+          instruction.span,
+        );
       }
       // The request, a possible unavailable-camera warning, and the completion, besides what active actions reserve.
       assertEventSequenceCapacity(
@@ -1452,7 +1495,11 @@ function preparedInteractionSpeaker(
   const prepared = readTemporary(temporaries, temporaryId, span);
   if (prepared === null) return null;
   if (!isSpeakerReference(prepared)) {
-    throw fault("TSR052", "Prepared interaction speaker is invalid.", span);
+    throw fault(
+      "TSR052",
+      internalFault("The prepared speaker of an interaction is invalid."),
+      span,
+    );
   }
   return evaluator.speakerById(prepared.speakerId, span);
 }
@@ -1484,7 +1531,13 @@ function materializeInteractionUi(
   const read = (temporaryId: number): RuntimeTemporarySnapshot => {
     const temporary = temporaries.find((item) => item.id === temporaryId);
     if (temporary === undefined)
-      throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+      throw fault(
+        "TSR046",
+        internalFault(
+          `An internal value (temporary ${temporaryId}) is missing from the session's state.`,
+        ),
+        span,
+      );
     return temporary;
   };
   const readText = (temporaryId: number): string => {
@@ -1497,7 +1550,11 @@ function materializeInteractionUi(
   const backgroundColor = (value: SerializableRuntimeValue): string => {
     const normalized = normalizeOpaqueColor(value);
     if (normalized === null)
-      throw fault("TSR052", "Expected an opaque CSS button background colour.", span);
+      throw fault(
+        "TSR052",
+        `A button background must be an opaque CSS colour, such as "#336699", but this is ${describeShownValue(value)}.`,
+        span,
+      );
     return normalized;
   };
 
@@ -1572,7 +1629,9 @@ function materializeInteractionUi(
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
       throw fault(
         "TSR052",
-        "Prepared choice options do not match the authored option count.",
+        internalFault(
+          "The prepared options of a choice do not match the options written in the script.",
+        ),
         span,
       );
     }
@@ -1653,7 +1712,8 @@ function imageInteractionUi(
   temporalContext: TemporalContext,
   span: SourceSpan,
 ): Extract<InteractionUiPayload, { kind: "image" }> {
-  if (!isObject(value)) throw fault("TSR052", "The prepared image request is malformed.", span);
+  if (!isObject(value))
+    throw fault("TSR052", internalFault("The prepared askImage request is malformed."), span);
   let question: string | null = null;
   let hint: string | null = null;
   let allowCamera = true;
@@ -1676,7 +1736,8 @@ function imageInteractionUi(
       const texts = imageFilterTexts(name, argument, span);
       if (name === "types") types = texts;
       else mime = texts;
-    } else throw fault("TSR052", "The prepared image request is malformed.", span);
+    } else
+      throw fault("TSR052", internalFault("The prepared askImage request is malformed."), span);
   }
   if (!allowCamera && !allowFile) throw fault("TSR052", IMAGE_NO_SOURCE_MESSAGE, span);
   return { kind: "image", question, hint, allowCamera, allowFile, types, mime, accessibleName };
@@ -1819,7 +1880,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its labels, hints, prefill or choice values, or file filters.`,
         span,
       );
     aggregate += bytes;
@@ -1855,7 +1916,7 @@ function enterFunction(
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
-      `Maximum TeaseScript call depth of ${snapshot.maxCallDepth} exceeded.`,
+      `Function calls are nested ${snapshot.maxCallDepth} deep, the most this session allows. End the recursion sooner, or use a loop instead.`,
       instruction.span,
     );
   }
@@ -1915,12 +1976,22 @@ function bindSuppliedParameter(
     frame.parameterState.phase !== "supplied" ||
     frame.parameterState.parameterIndex !== instruction.parameterIndex
   ) {
-    throw fault("TSR048", "Supplied-parameter progress is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault(
+        "The progress of filling in a function call's parameters does not match the plan.",
+      ),
+      instruction.span,
+    );
   }
   const parameter = definition.parameters[instruction.parameterIndex];
   const argument = frame.arguments[instruction.parameterIndex];
   if (parameter === undefined || argument === undefined) {
-    throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The parameters of a function do not match its call."),
+      instruction.span,
+    );
   }
   if (argument.supplied) {
     declareFunctionBinding(plan, snapshot, parameter.name, argument.value, instruction.span);
@@ -1948,7 +2019,11 @@ function beginFunctionDefaults(
     frame.parameterState.phase !== "supplied" ||
     frame.parameterState.parameterIndex !== definition.parameters.length
   ) {
-    throw fault("TSR048", "Parameter binding did not reach the defaults phase.", span);
+    throw fault(
+      "TSR048",
+      internalFault("A function call reached its default parameters too early."),
+      span,
+    );
   }
   frame.parameterState = { phase: "defaults", parameterIndex: 0 };
   advance(snapshot);
@@ -1965,12 +2040,20 @@ function prepareParameterDefault(
     frame.parameterState.phase !== "defaults" ||
     frame.parameterState.parameterIndex !== instruction.parameterIndex
   ) {
-    throw fault("TSR048", "Default-parameter progress is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The default parameters of a function call are in an inconsistent state."),
+      instruction.span,
+    );
   }
   const parameter = definition.parameters[instruction.parameterIndex];
   const argument = frame.arguments[instruction.parameterIndex];
   if (parameter === undefined || argument === undefined) {
-    throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The parameters of a function do not match its call."),
+      instruction.span,
+    );
   }
   if (argument.supplied) {
     frame.parameterState.parameterIndex += 1;
@@ -1980,7 +2063,7 @@ function prepareParameterDefault(
   if (!parameter.hasDefault) {
     throw fault(
       "TSR049",
-      `Required parameter '${parameter.name}' was not supplied.`,
+      internalFault(`The required parameter '${parameter.name}' was not supplied.`),
       instruction.span,
     );
   }
@@ -1999,11 +2082,19 @@ function bindDefaultParameter(
     frame.parameterState.phase !== "defaults" ||
     frame.parameterState.parameterIndex !== instruction.parameterIndex
   ) {
-    throw fault("TSR048", "Default-parameter binding is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("A default parameter of a function call was bound inconsistently."),
+      instruction.span,
+    );
   }
   const parameter = definition.parameters[instruction.parameterIndex];
   if (parameter === undefined || !parameter.hasDefault) {
-    throw fault("TSR048", "Default-parameter metadata is inconsistent.", instruction.span);
+    throw fault(
+      "TSR048",
+      internalFault("The default parameters of a function do not match its call."),
+      instruction.span,
+    );
   }
   const value = evaluator.evaluate(instruction.value);
   if (instruction.typeCheck !== undefined)
@@ -2037,7 +2128,11 @@ function enterFunctionBody(
     frame.parameterState.phase !== "defaults" ||
     frame.parameterState.parameterIndex !== definition.parameters.length
   ) {
-    throw fault("TSR048", "Function body entry has incomplete parameters.", span);
+    throw fault(
+      "TSR048",
+      internalFault("A function body started before all its parameters were bound."),
+      span,
+    );
   }
   frame.parameterState = { phase: "body", parameterIndex: definition.parameters.length };
   advance(snapshot);
@@ -2068,7 +2163,11 @@ function returnFromFunction(
   );
   const destinationTemporary = frame.destinationTemporary!;
   if (snapshot.temporaries.some((temporary) => temporary.id === destinationTemporary)) {
-    throw fault("TSR050", "Function result destination is already occupied.", span);
+    throw fault(
+      "TSR050",
+      internalFault("The slot for the result of a function call is already in use."),
+      span,
+    );
   }
   snapshot.temporaries.push({ id: destinationTemporary, value: returned });
   trace?.writeTemporary(
@@ -2096,7 +2195,11 @@ function activeFunction(
 } {
   const frame = activeFunctionFrame(snapshot);
   if (frame === undefined) {
-    throw fault("TSR051", "Function-only instruction executed without a call frame.", span);
+    throw fault(
+      "TSR051",
+      internalFault("A function instruction ran outside a function call."),
+      span,
+    );
   }
   return { frame, definition: functionDefinition(plan, frame.functionId, span) };
 }
@@ -2108,7 +2211,11 @@ function functionDefinition(
 ): InstructionPlan["functions"][number] {
   const definition = plan.functions[functionId - 1];
   if (definition === undefined || definition.id !== functionId) {
-    throw fault("TSR052", `Unknown compiled function ID '${functionId}'.`, span);
+    throw fault(
+      "TSR052",
+      internalFault(`The plan calls a function (ID ${functionId}) that it does not contain.`),
+      span,
+    );
   }
   return definition;
 }
@@ -2121,7 +2228,13 @@ function declareFunctionBinding(
   span: SourceSpan,
 ): void {
   if (findBinding(snapshot, plan, name) !== undefined) {
-    throw fault("TSR001", `Parameter '${name}' duplicates a visible binding.`, span);
+    throw fault(
+      "TSR001",
+      internalFault(
+        `The plan gives parameter '${name}' the name of a variable that is already visible.`,
+      ),
+      span,
+    );
   }
   currentFrame(snapshot).bindings.push({ name, value: cloneCapturedSerializableValue(value) });
 }
@@ -2142,20 +2255,15 @@ function executeLoopStart(
     ) {
       throw fault(
         "TSR042",
-        "Loop-frame nesting does not match the instruction plan.",
+        internalFault("The nesting of running loops does not match the plan."),
         instruction.span,
       );
     }
     const scopeDepth = snapshot.frames.length;
     if (instruction.loopKind === "repeat") {
       const value = evaluator.evaluate(instruction.expression);
-      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-        throw fault(
-          "TSR043",
-          "repeat requires a non-negative integer count.",
-          instruction.expression.span,
-        );
-      }
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+        throw badRepeatCount(instruction.expression, value);
       frame = {
         kind: "repeat",
         loopId: instruction.loopId,
@@ -2174,9 +2282,10 @@ function executeLoopStart(
       const evaluated = evaluator.evaluate(instruction.expression);
       const pair = instruction.valueVariable !== undefined;
       if (pair && !isDict(evaluated)) {
+        const label = planLabel(instruction.expression);
         throw fault(
           "TSR044",
-          "for key, value requires a dict source.",
+          `'for ${instruction.variable}, ${instruction.valueVariable}' goes through the keys and values of a dict, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
           instruction.expression.span,
         );
       }
@@ -2186,13 +2295,14 @@ function executeLoopStart(
           ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
           : evaluated;
       if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
+        const label = planLabel(instruction.expression);
         throw fault(
           "TSR044",
-          "for requires a list, set, dict, or range source.",
+          `A 'for' loop goes through a list, set, dict, or range, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
           instruction.expression.span,
         );
       }
-      if (isRange(source)) assertIntegerRange(source, instruction.expression.span);
+      if (isRange(source)) assertIntegerRange(source, "A 'for' loop", instruction.expression.span);
       frame = {
         kind: "for",
         loopId: instruction.loopId,
@@ -2218,12 +2328,16 @@ function executeLoopStart(
   }
 
   if (frame.kind !== instruction.loopKind) {
-    throw fault("TSR042", "Loop-frame kind does not match the instruction plan.", instruction.span);
+    throw fault(
+      "TSR042",
+      internalFault("The kind of a running loop does not match the plan."),
+      instruction.span,
+    );
   }
   if (snapshot.frames.length !== frame.scopeDepth) {
     throw fault(
       "TSR042",
-      "Loop scope state does not match the next instruction.",
+      internalFault("The scope of a running loop does not match the next instruction."),
       instruction.span,
     );
   }
@@ -2242,7 +2356,12 @@ function executeLoopStart(
   if (frame.kind === "while") {
     const condition = evaluator.evaluate(instruction.expression);
     if (typeof condition !== "boolean") {
-      throw fault("TSR026", "Expected a boolean value.", instruction.expression.span);
+      throw notBoolean(
+        "A condition must be true or false (boolean)",
+        instruction.expression,
+        condition,
+        instruction.expression.span,
+      );
     }
     if (!condition) {
       snapshot.loopFrames.pop();
@@ -2301,15 +2420,23 @@ function executeLoopControl(
   if (frame === undefined || frame.loopId !== instruction.loopId) {
     throw fault(
       "TSR042",
-      "Loop control does not match the active innermost loop.",
+      internalFault("A break or continue does not match the innermost running loop."),
       instruction.span,
     );
   }
   if (frame.callFrameId !== currentCallFrameId(snapshot)) {
-    throw fault("TSR042", "Loop control cannot cross a function boundary.", instruction.span);
+    throw fault(
+      "TSR042",
+      internalFault("A break or continue tried to leave a function."),
+      instruction.span,
+    );
   }
   if (snapshot.frames.length <= frame.scopeDepth) {
-    throw fault("TSR042", "Active loop iteration scope is missing.", instruction.span);
+    throw fault(
+      "TSR042",
+      internalFault("The scope of the running loop round is missing."),
+      instruction.span,
+    );
   }
   leaveScopes(snapshot, frame.scopeDepth);
   if (instruction.action === "break") snapshot.loopFrames.pop();
@@ -2344,15 +2471,33 @@ function rangeLength(range: SerializableRuntimeRange): number {
   return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
 }
 
-function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): void {
-  const length = rangeLength(range);
-  if (
-    !Number.isSafeInteger(range.start) ||
-    !Number.isSafeInteger(range.end) ||
-    !Number.isSafeInteger(length)
-  ) {
-    throw fault("TSR045", "Range iteration requires safe integer bounds.", span);
+/** `TSR043` for a `repeat` count that is not a whole number of at least 0, with the fix for the value it is. */
+function badRepeatCount(plan: ExpressionPlan, value: SerializableRuntimeValue): RuntimeFault {
+  const label = planLabel(plan);
+  let fix = "";
+  if (value === null)
+    fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
+  else if (typeof value === "number")
+    fix = !Number.isInteger(value)
+      ? " Round it with floor(...), round(...), or ceil(...) first."
+      : value < 0
+        ? " Check that it is at least 0 first."
+        : " Use a smaller count.";
+  else if (typeof value === "string" && numberFromText(value) !== undefined) {
+    // Converting the text gives the count it holds, which may still be too small or too large.
+    const count = Math.trunc(numberFromText(value)!);
+    fix =
+      count < 0
+        ? " Convert the text with toInteger(...), and check that it is at least 0 first."
+        : Number.isSafeInteger(count)
+          ? " Convert the text with toInteger(...) first."
+          : " Use a smaller count.";
   }
+  return fault(
+    "TSR043",
+    `A repeat count must be a whole number (integer) of at least 0, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.${fix}`,
+    plan.span,
+  );
 }
 
 function readTemporary(
@@ -2362,7 +2507,13 @@ function readTemporary(
 ): SerializableRuntimeValue {
   const temporary = temporaries.find((item) => item.id === temporaryId);
   if (temporary === undefined) {
-    throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    throw fault(
+      "TSR046",
+      internalFault(
+        `An internal value (temporary ${temporaryId}) is missing from the session's state.`,
+      ),
+      span,
+    );
   }
   return temporary.value;
 }
@@ -2449,7 +2600,13 @@ function cloneInteractionAction(
 function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: SourceSpan): number {
   const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs)
-    throw fault("TSR052", "The askForm timeout is outside the supported session-time range.", span);
+    throw fault(
+      "TSR052",
+      isValidSessionTime(deadlineMs)
+        ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        : "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+      span,
+    );
   return timeoutMs;
 }
 
@@ -2464,7 +2621,7 @@ function buttonTimeoutMs(
   if (timeoutMs === null) {
     throw fault(
       "TSR050",
-      "The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms'.",
+      `The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms', but this is ${describeShownValue(value)}.`,
       span,
     );
   }
@@ -2472,7 +2629,9 @@ function buttonTimeoutMs(
   if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      "The showButton timeout is outside the supported session-time range.",
+      isValidSessionTime(deadlineMs)
+        ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        : "This showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
       span,
     );
   }
@@ -2831,7 +2990,8 @@ function preparedOutputSpeaker(
 ): { readonly output: OutputSpeaker | null; readonly speakerId: number | null } {
   const value = readTemporary(temporaries, temporaryId, span);
   if (value === null) return { output: null, speakerId: null };
-  if (!isObject(value)) throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  if (!isObject(value))
+    throw fault("TSR052", internalFault("The prepared speaker of a say is invalid."), span);
   const identifier = getSerializableProperty(value, "identifier");
   const displayName = getSerializableProperty(value, "displayName");
   const color = getSerializableProperty(value, "color");
@@ -2847,7 +3007,7 @@ function preparedOutputSpeaker(
     typeof speakerId !== "number" ||
     !Number.isSafeInteger(speakerId)
   )
-    throw fault("TSR052", "Prepared say speaker is invalid.", span);
+    throw fault("TSR052", internalFault("The prepared speaker of a say is invalid."), span);
   return { output: Object.freeze({ identifier, displayName, color, font, avatar }), speakerId };
 }
 
@@ -2857,7 +3017,8 @@ function preparedSayText(
   span: SourceSpan,
 ): string {
   const value = readTemporary(temporaries, temporaryId, span);
-  if (typeof value !== "string") throw fault("TSR052", "Prepared say text is invalid.", span);
+  if (typeof value !== "string")
+    throw fault("TSR052", internalFault("The prepared text of a say is invalid."), span);
   return value;
 }
 
@@ -2895,7 +3056,7 @@ function effectiveSaySkippable(
   );
   if (configured === undefined) return true;
   if (typeof configured.value !== "boolean") {
-    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+    throw fault("TSR050", notSkippableFlag(configured.value), span);
   }
   return configured.value;
 }
@@ -2976,7 +3137,7 @@ function validatePacingCreation(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", span);
+    throw fault("TSR051", internalFault("The session has used up its action numbers."), span);
   }
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewPacingGate(), span);
   try {
@@ -3096,17 +3257,25 @@ export function timerDurationMs(
   const drawn =
     range === null || range.start < 0
       ? value
-      : evaluator.randomIntegerInRange(range, span, "timer", "duration");
+      : evaluator.randomIntegerInRange(range, span, "A timer", "duration");
   const amount =
     isDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
       : drawn;
+  if (command === "timer" && isRange(drawn))
+    throw fault(
+      "TSR050",
+      unit !== null && unit !== "s"
+        ? "A timer range counts whole seconds. Other units are not supported for ranges yet."
+        : `A timer range must not start below zero seconds, but this range is ${drawn.start}${drawn.inclusive ? "..=" : ".."}${drawn.end}.`,
+      span,
+    );
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     throw fault(
       "TSR050",
-      command === "timer"
-        ? "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds."
-        : "Wait duration must be a non-negative duration or finite number.",
+      typeof amount === "number" && amount < 0
+        ? `${commandName(command)} duration must not be negative, but this is ${describeShownValue(drawn)}.`
+        : `A ${command} duration is a duration such as '30 s'${command === "timer" ? ", a number of seconds, or a range of whole seconds" : " or a number of seconds"}, but this is ${describeShownValue(drawn)}.`,
       span,
     );
   }
@@ -3114,7 +3283,7 @@ export function timerDurationMs(
   if (!Number.isFinite(durationMs)) {
     throw fault(
       "TSR050",
-      `${commandName(command)} duration is outside the supported session-time range.`,
+      `This ${command} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }
@@ -3132,18 +3301,23 @@ export function futureDeadline(
   if (!isValidSessionTime(deadlineMs)) {
     throw fault(
       "TSR050",
-      `${commandName(command)} duration is outside the supported session-time range.`,
+      `This ${command} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
   }
   if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      `${commandName(command)} duration cannot produce a representable future deadline.`,
+      `This ${command} of ${formatDuration(durationMs)} is too short to measure this late in the scene. Use a longer duration.`,
       span,
     );
   }
   return deadlineMs;
+}
+
+/** `defaultSaySkippable` holds `value`, which is not true or false. */
+function notSkippableFlag(value: SerializableRuntimeValue): string {
+  return `Speaker property 'defaultSaySkippable' must be true or false (boolean), but this is ${describeShownValue(value)}.`;
 }
 
 function commandName(command: "wait" | "timer"): string {
@@ -3157,7 +3331,12 @@ export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): s
       'A list cannot be a timer label. Select one element with "${list}" or list.random.',
       span,
     );
-  if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
+  if (typeof value !== "string")
+    throw fault(
+      "TSR050",
+      `A timer label must be text (string), but this is ${describeShownValue(value)}. Convert it with toString(...) first.`,
+      span,
+    );
   return value;
 }
 
@@ -3189,7 +3368,7 @@ function startTimer(
   const zeroRoundFault = () =>
     fault(
       "TSR050",
-      "A repeating timer needs every round to last longer than zero.",
+      `A repeating timer needs every round to last longer than zero, but this round can be ${range === null ? describeShownValue(duration) : `${range.start} s`}. Use a duration of at least 1 s.`,
       instruction.duration.span,
     );
   // A range that allows a zero-length round is rejected before its first round is drawn.
@@ -3207,7 +3386,11 @@ function startTimer(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   assertCounterCanAdvance(snapshot.nextTimerId, "nextTimerId");
   // The request, its eventual settlement, and the other active actions' completions must stay representable.
@@ -3293,14 +3476,18 @@ function showImage(
 ): void {
   const image = instruction.image === null ? null : evaluator.evaluate(instruction.image);
   if (image !== null && typeof image !== "string") {
-    throw fault("TSR050", "showImage needs an image file reference or null.", instruction.span);
+    throw fault(
+      "TSR050",
+      `showImage needs an image file reference or null, but this is ${describeShownValue(image)}.`,
+      instruction.span,
+    );
   }
   if (instruction.image !== null && image === null) {
     emitDeveloperWarning(
       snapshot,
       events,
       "TSW011",
-      "showImage received null; the Stage shows no image.",
+      "showImage received null, so the Stage shows no image.",
       instruction.span,
     );
   }
@@ -3328,7 +3515,7 @@ function writeStorage(
       : cloneCapturedSerializableValue(evaluator.evaluate(instruction.value));
   const key = storageKey(
     evaluator.evaluate(instruction.key),
-    WRITE_KEY_MESSAGE,
+    instruction.value === null ? "delete" : "save",
     instruction.key.span,
   );
   assertPersistable(value, instruction.span);
@@ -3346,7 +3533,11 @@ function writeStorage(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   // The request, the completion, a possible failure warning, and every active action's own completions.
   assertEventSequenceCapacity(
@@ -3396,7 +3587,7 @@ function mediaMilliseconds(
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     throw fault(
       "TSR050",
-      `Media ${subject} must be a non-negative duration or number of seconds.`,
+      `Media ${subject} must be a duration or a number of seconds of at least 0, but this is ${describeShownValue(value)}.`,
       span,
     );
   }
@@ -3413,7 +3604,7 @@ function mediaRepeat(
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
       throw fault(
         "TSR050",
-        "A media repeat count must be a whole number of at least 1.",
+        `A repeat count must be a whole number of at least 1, such as '3 times', but this is ${describeShownValue(value)}.`,
         repeat.count.span,
       );
     }
@@ -3428,7 +3619,7 @@ function mediaRepeat(
   }
   throw fault(
     "TSR050",
-    "Media repeat must be true, false, a count such as '3 times', or a positive duration.",
+    `Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is ${describeShownValue(value)}.`,
     repeat.value.span,
   );
 }
@@ -3457,16 +3648,24 @@ function startMedia(
   const volume = instruction.volume === null ? null : evaluator.evaluate(instruction.volume);
   const offsets = instruction.cues.map((cue) => evaluator.evaluate(cue.offset));
   if (file !== null && typeof file !== "string") {
-    throw fault("TSR050", "Media file must be a file reference or null.", instruction.file.span);
+    throw fault(
+      "TSR050",
+      `Media file must be a file reference or null, but this is ${describeShownValue(file)}.`,
+      instruction.file.span,
+    );
   }
   const repeat = mediaRepeat(instruction, repeatValue);
   if (!instruction.async && repeat.kind === "indefinite") {
-    throw fault("TSR050", "Blocking media cannot repeat indefinitely.", instruction.span);
+    throw fault(
+      "TSR050",
+      `Blocking media cannot repeat indefinitely. Use '${instruction.media === "audio" ? "playAudio" : "playVideo"} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
+      instruction.span,
+    );
   }
   if (repeat.kind === "indefinite" && instruction.finishFunctionId !== null) {
     throw fault(
       "TSR050",
-      "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+      "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.",
       instruction.span,
     );
   }
@@ -3478,7 +3677,11 @@ function startMedia(
   const endAtMs =
     instruction.endAt === null ? null : mediaMilliseconds(endAt, "endAt", instruction.endAt.span);
   if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
-    throw fault("TSR050", "Media endAt must be later than startAt.", instruction.endAt.span);
+    throw fault(
+      "TSR050",
+      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? "0 s" : describeShownValue(startAt)}.`,
+      instruction.endAt.span,
+    );
   }
   if (
     instruction.volume !== null &&
@@ -3486,7 +3689,7 @@ function startMedia(
   ) {
     throw fault(
       "TSR050",
-      "Media volume must be a number from 0 through 1.",
+      `Media volume must be a number from 0 through 1, but this is ${describeShownValue(volume)}.`,
       instruction.volume.span,
     );
   }
@@ -3499,7 +3702,11 @@ function startMedia(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER - 1
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   assertCounterCanAdvance(snapshot.nextMediaId, "nextMediaId");
   // Two requests, their eventual completions, a possible warning, and the other active actions' completions.
@@ -3573,7 +3780,7 @@ function startMedia(
       snapshot,
       events,
       "TSW011",
-      `${instruction.media === "audio" ? "playAudio" : "playVideo"} received null; nothing plays.`,
+      `${instruction.media === "audio" ? "playAudio" : "playVideo"} received null, so nothing plays.`,
       instruction.span,
     );
     stopMediaAction(plan, snapshot, action, events, instruction.span);
@@ -3654,7 +3861,11 @@ function showPermanentButton(
     !Number.isSafeInteger(snapshot.nextActionId) ||
     snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
   ) {
-    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+    throw fault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      instruction.span,
+    );
   }
   assertCounterCanAdvance(snapshot.nextPermanentButtonId, "nextPermanentButtonId");
   // The request, its eventual removal, and the other active actions' completions must stay representable.
@@ -3711,7 +3922,11 @@ function isPacedHandle(value: SerializableRuntimeValue): boolean {
 
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {
   if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
+  throw fault(
+    "TSR050",
+    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
+    span,
+  );
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
@@ -3743,7 +3958,7 @@ function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonl
     if (addTag(tags, tag) === "conflict") {
       throw fault(
         "TSR083",
-        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers.`,
+        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers. Keep one number for each tag.`,
         span,
       );
     }

@@ -5,7 +5,7 @@ import {
   createSourceSpan,
   type SourceSpan as RichSourceSpan,
 } from "../source.js";
-import { RuntimeFault } from "./errors.js";
+import { internalFault, RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import {
   createCapturedSerializableList,
@@ -113,7 +113,11 @@ export function readPreparedReference(
   span: SourceSpan,
 ): PreparedReferenceDescriptor {
   if (!isObject(value)) {
-    throw fault("TSR053", "Prepared reference state is malformed.", span);
+    throw fault(
+      "TSR053",
+      internalFault("A prepared reference in the saved state is malformed."),
+      span,
+    );
   }
   const marker = getSerializableProperty(value, "marker");
   const rootFrameId = getSerializableProperty(value, "rootFrameId");
@@ -131,18 +135,30 @@ export function readPreparedReference(
     capturedRoot === undefined ||
     typeof detached !== "boolean"
   ) {
-    throw fault("TSR053", "Prepared reference state is malformed.", span);
+    throw fault(
+      "TSR053",
+      internalFault("A prepared reference in the saved state is malformed."),
+      span,
+    );
   }
   const path: PreparedReferenceStep[] = [];
   for (const item of pathValue.items) {
     if (!isObject(item)) {
-      throw fault("TSR053", "Prepared reference path is malformed.", span);
+      throw fault(
+        "TSR053",
+        internalFault("The path of a prepared reference in the saved state is malformed."),
+        span,
+      );
     }
     const kind = getSerializableProperty(item, "kind");
     if (kind === "property") {
       const name = getSerializableProperty(item, "name");
       if (typeof name !== "string" || name.length === 0) {
-        throw fault("TSR053", "Prepared reference property path is malformed.", span);
+        throw fault(
+          "TSR053",
+          internalFault("A property step of a prepared reference in the saved state is malformed."),
+          span,
+        );
       }
       path.push({ kind, name });
       continue;
@@ -150,7 +166,11 @@ export function readPreparedReference(
     if (kind === "key") {
       const key = getSerializableProperty(item, "key");
       if (typeof key !== "string") {
-        throw fault("TSR053", "Prepared reference key path is malformed.", span);
+        throw fault(
+          "TSR053",
+          internalFault("A key step of a prepared reference in the saved state is malformed."),
+          span,
+        );
       }
       path.push({ kind, key });
       continue;
@@ -158,12 +178,20 @@ export function readPreparedReference(
     if (kind === "index") {
       const index = getSerializableProperty(item, "index");
       if (typeof index !== "number" || !Number.isInteger(index)) {
-        throw fault("TSR053", "Prepared reference index path is malformed.", span);
+        throw fault(
+          "TSR053",
+          internalFault("An index step of a prepared reference in the saved state is malformed."),
+          span,
+        );
       }
       path.push({ kind, index });
       continue;
     }
-    throw fault("TSR053", "Prepared reference path kind is malformed.", span);
+    throw fault(
+      "TSR053",
+      internalFault("A step of a prepared reference in the saved state has an unknown kind."),
+      span,
+    );
   }
   return { rootFrameId, rootName, path, capturedRoot, detached };
 }

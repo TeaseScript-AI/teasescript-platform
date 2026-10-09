@@ -25,8 +25,9 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 const keyMessage = "Storage key must be a string.";
 const loadKeyMessage =
   "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
-const unstorableMessage =
-  "save cannot store a timer, media, or message handle or a speaker reference; they exist only in the current session.";
+/** The TSR055 message for a session-only `kind`, saved directly or nested in another value. */
+const unstorableMessage = (kind: string, nested: boolean) =>
+  `save cannot store ${nested ? `this value: it holds ${kind}, which exists` : `${kind}: it exists`} only in the current session. ${kind === "a message handle" ? "Save the message's text instead." : "Save values such as text, numbers, or lists instead."}`;
 
 /**
  * The compact and the bounded spelling of `load`, which behave the same. Without a fallback, the default is `null` and
@@ -242,7 +243,7 @@ test("failed persistent saves and deletes keep the old value or absence and allo
         [
           {
             code: "TSW014",
-            message: `${command.startsWith("save") ? "save" : "delete"} could not persist "k"; the previous value is kept.`,
+            message: `${command.startsWith("save") ? "save" : "delete"} could not persist "k", so the previous value is kept.`,
           },
         ],
       );
@@ -652,11 +653,11 @@ test("a bounded load takes one key and the option 'default:', and names what is 
     ],
     [
       'let v = load("k", "j")',
-      "TSP040 0:18 load(...) takes one unnamed value; name the others, such as 'default:'.",
+      "TSP040 0:18 load(...) takes one unnamed value. Name the others, such as 'default:'.",
     ],
     [
       'let v = load("k", fallback: 1)',
-      "TSP040 0:18 Unknown load option 'fallback'; use 'default:'.",
+      "TSP040 0:18 Unknown load option 'fallback'. Use 'default:'.",
     ],
     ['let v = load("k", default: 1, default: 2)', "TSP040 0:30 Duplicate load option 'default'."],
     // The earlier grouped-key fallback is now a bounded load followed by a stray option.
@@ -727,11 +728,12 @@ test("string-producing keys compile and run for save, load, and delete", () => {
 
 test("dynamic non-string keys fail with TSR054 and the command's message", () => {
   // `dynamic` hides the key's type from the compiler, which rejects a known non-string key before runtime.
-  for (const [command, message] of [
-    ["let value = load key, default: null", loadKeyMessage],
-    ["save 7 as key", keyMessage],
-    ["delete key", keyMessage],
+  for (const [command, use] of [
+    ["let value = load key, default: null", "load"],
+    ["save 7 as key", "save"],
+    ["delete key", "delete"],
   ]) {
+    const message = `Cannot ${use} with key 1: storage keys must be text (string). Use "1" as the key, or convert it with toString(...).`;
     const compiled = plan(
       `function dynamic(input) {\n  return input\n}\nlet key = dynamic(1)\n${command}\nexit`,
     );
@@ -744,12 +746,12 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
 });
 
 test("save rejects session handles and speaker references at the top level and nested with TSR055", () => {
-  for (const declaration of [
-    "let handle = timer async 1 s",
-    'let handle = playAudio async "a.mp3"',
-    "speaker vera {}\nlet handle = vera",
-    'let handle = say "Shown", instant',
-  ]) {
+  for (const [declaration, kind] of [
+    ["let handle = timer async 1 s", "a timer handle"],
+    ['let handle = playAudio async "a.mp3"', "a media handle"],
+    ["speaker vera {}\nlet handle = vera", "a speaker"],
+    ['let handle = say "Shown", instant', "a message handle"],
+  ] as const) {
     for (const value of ["handle", "{ nested: [handle] }"]) {
       // `dynamic` hides the value's type from the compiler, which rejects a known speaker or handle before runtime.
       const source = `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"\nexit`;
@@ -768,7 +770,7 @@ test("save rejects session handles and speaker references at the top level and n
       }
       assert.equal(result.snapshot.status, "failed", `${declaration}: ${value}`);
       assert.equal(result.snapshot.failure?.code, "TSR055");
-      assert.equal(result.snapshot.failure?.message, unstorableMessage);
+      assert.equal(result.snapshot.failure?.message, unstorableMessage(kind, value !== "handle"));
       assert.deepEqual(result.snapshot.scriptStorage, []);
     }
   }
@@ -832,15 +834,15 @@ test("a load the compiler cannot type is checked where its value is stored", () 
   // A load checks a default it cannot know against its own type before the variable takes it.
   assert.deepEqual(failure('let backup: number = load("missing", default: identity("backup"))'), [
     "TSR058",
-    'Storage key "missing" holds a number or null, so it cannot take text (string).',
+    'Storage key "missing" holds a number or null, so it cannot take text (string) "backup".',
   ]);
   assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k" + "", default: 0'), [
     "TSR058",
-    "'assigned' holds a number, so it cannot take text (string).",
+    `'assigned' holds a number, so it cannot take text (string) "stored".`,
   ]);
   assert.deepEqual(failure('let indirect: number = identity(load "k" + "", default: null)'), [
     "TSR058",
-    "'indirect' holds a number, so it cannot take text (string).",
+    `'indirect' holds a number, so it cannot take text (string) "stored".`,
   ]);
 
   const optional = plan(
@@ -990,7 +992,7 @@ test("a ', default:' belongs to the nearest load before it, and is an error afte
     parse('let v = load askText "Key?", default: "x"').diagnostics.map(
       (diagnostic) => diagnostic.message,
     ),
-    ["askText has no 'default:'; use 'prefill:'."],
+    ["askText has no 'default:'. Use 'prefill:'."],
   );
   const askKey = initializer('let v = load((askText "Key?"), default: "x")');
   assert.ok(askKey.kind === "loadExpression" && askKey.defaultValue !== null);

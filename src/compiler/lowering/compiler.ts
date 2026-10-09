@@ -1909,11 +1909,7 @@ export class InstructionCompiler {
         shape:
           expression.interactionKind === "booleans"
             ? { kind: "booleanList" }
-            : (this.formShapes.get(expression) ?? {
-                kind: "object",
-                numericKinds: [],
-                answers: [],
-              }),
+            : (this.formShapes.get(expression) ?? { kind: "unknown" }),
         accessibleName: { kind: "localizedDefault", key: "answer" },
       },
       expression.span,

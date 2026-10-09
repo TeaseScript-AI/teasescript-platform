@@ -10,7 +10,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 const NO_FILE =
-  "No file in the project that runs something has these tags; a file of declarations only is never picked.";
+  "No file in the project that runs something has these tags. A file of declarations only is never picked.";
 
 /** Tagged modules that finish with `ending`: `exit` after a `goto`, `end` to return from a `call`. */
 function modules(ending: "end" | "exit"): Record<string, string> {
@@ -286,7 +286,7 @@ test("a file of declarations only is never picked or listed, as for globs", () =
   assert.deepEqual(onlyLib('call tagged "helpers"\nexit'), [
     [
       "TST002",
-      "No file in the project that runs something has these tags; a file of declarations only is never picked.",
+      "No file in the project that runs something has these tags. A file of declarations only is never picked.",
     ],
   ]);
   assert.deepEqual(onlyLib('let found = findScripts(from: "lib.tease")\nexit'), [

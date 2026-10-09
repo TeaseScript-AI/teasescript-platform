@@ -4,7 +4,7 @@ import { cloneInteractionResult } from "../../choice-values.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { planLocationToSourceSpan } from "../../plan/source-location.js";
-import { RuntimeFault } from "../errors.js";
+import { internalFault, RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
 import type { InstructionTraceCollector } from "../instruction-trace.js";
 import {
@@ -111,7 +111,10 @@ export function cloneSettlement(
 
 export function assertCounterCanAdvance(value: number, field: string): void {
   if (value >= Number.MAX_SAFE_INTEGER) {
-    throw new RuntimeDataError("TSR101", `Runtime ${field} cannot be advanced safely.`);
+    throw new RuntimeDataError(
+      "TSR101",
+      `The runtime counter ${field} is at its largest value, so it cannot advance.`,
+    );
   }
 }
 
@@ -122,7 +125,11 @@ export function assertEventSequenceCapacity(
 ): void {
   if (snapshot.nextEventSequence <= Number.MAX_SAFE_INTEGER - count) return;
   if (span !== undefined)
-    throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", copySpan(span));
+    throw new RuntimeFault(
+      "TSR051",
+      internalFault("The session has used up its event numbers."),
+      copySpan(span),
+    );
   throw new RuntimeDataError(
     "TSR101",
     "Runtime nextEventSequence cannot satisfy the pending action atomically.",

@@ -37,7 +37,7 @@ test("each saved value is previewed by its type", () => {
       'save toDate("2026-10-06") as "date"',
       'save toTime("21:30") as "time"',
       'save toDateTime("2026-10-06T21:30") as "datetime"',
-      'save toTimestamp("2026-10-06T19:30:00Z") as "timestamp"',
+      'save toAbsoluteDateTime("2026-10-06T19:30:00Z") as "absoluteDateTime"',
       'save dict{ "a b": 1 } as "dict"',
       `save "${reference}" as "photo"`,
       'save "captured-media:note" as "note"',
@@ -69,7 +69,7 @@ test("each saved value is previewed by its type", () => {
     photo: null,
     size: null,
   });
-  assert.equal(preview("timestamp").type, "Timestamp");
+  assert.equal(preview("absoluteDateTime").type, "Absolute date and time");
   assert.deepEqual(preview("dict"), { type: "Dict", text: "1 entry", photo: null, size: 1 });
   assert.deepEqual(
     storageMembers(saved.get("dict")!).map((member) => member.label),
