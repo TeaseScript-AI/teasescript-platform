@@ -763,6 +763,10 @@ test("an operation of unknown result keeps the types it can give, also inside an
       "x / 4",
     ],
   ]);
+  assert.match(
+    mismatches(inFunction("let zs: boolean[] | date[] = [x / 4]", "say zs"))[0]?.[1] ?? "",
+    /cannot contain the result of '\/'.* Change the type of 'zs' so its elements can hold that result\.$/u,
+  );
   // A result that may fit is checked when the script runs.
   assert.deepEqual(
     mismatches(
