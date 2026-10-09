@@ -208,7 +208,11 @@ export interface FeasibilityReport {
    * again before a beat (`keptForBeats`); `keptPaced` texts that keep their reading time where a replaced
    * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`. A sound that
    * starts between a text and its wait makes the text a beat where the wait stays (`soundBeats`), and starts before
-   * its text where the wait goes (`soundsWithText`).
+   * its text where the wait goes (`soundsWithText`). A split text whose last paragraph's reading time would outlast
+   * the wait after it (TSV060) shows whole at once, each paragraph said at once, where waits that another wait or a
+   * timer follows set its timing (`timed`), where a long kept wait leaves less before a statement that the reading time
+   * does not cover (`paragraphsWhole`), and where a wait restored before a beat follows it (`paragraphsBeforeBeat`, part
+   * of `keptForBeats`); before a statement that it covers, the rest of the long kept wait goes (`paragraphWaitsRead`).
    */
   readingWaits: {
     replaced: number;
@@ -219,6 +223,10 @@ export interface FeasibilityReport {
     ticks: number;
     soundBeats: number;
     soundsWithText: number;
+    timed: number;
+    paragraphsWhole: number;
+    paragraphsBeforeBeat: number;
+    paragraphWaitsRead: number;
     shortened: number;
     dropped: number;
   };
@@ -399,6 +407,10 @@ export function analyzeFeasibility(
       ticks: 0,
       soundBeats: 0,
       soundsWithText: 0,
+      timed: 0,
+      paragraphsWhole: 0,
+      paragraphsBeforeBeat: 0,
+      paragraphWaitsRead: 0,
       shortened: 0,
       dropped: 0,
     },
@@ -551,6 +563,10 @@ export function analyzeFeasibility(
       else if (code === "SX_WAIT_TICK") report.readingWaits.ticks += 1;
       else if (code === "SX_WAIT_SOUND_BEAT") report.readingWaits.soundBeats += 1;
       else if (code === "SX_SOUND_WITH_TEXT") report.readingWaits.soundsWithText += 1;
+      else if (code === "SX_WAIT_TIMED") report.readingWaits.timed += 1;
+      else if (code === "SX_PARAGRAPH_WAIT_WHOLE") report.readingWaits.paragraphsWhole += 1;
+      else if (code === "SX_PARAGRAPH_WAIT_BEAT") report.readingWaits.paragraphsBeforeBeat += 1;
+      else if (code === "SX_PARAGRAPH_WAIT_READ") report.readingWaits.paragraphWaitsRead += 1;
       else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
       else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
       else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;
@@ -779,12 +795,11 @@ function runPackageProject(
   // Isolated runs start with the storage the run from main.tease left, as a player who played it first.
   const entryStorage = new Map<string, RuntimeValue>();
   const run = (files: readonly TeaseProjectFile[], entry: string, isolated: boolean): void => {
-    const answers = new Map<string, number>();
     const visits: string[] = [];
     let blocked: string | null = null;
     let started = false;
     const hosts: Record<string, HostFunction> = {};
-    for (const { shim } of entries) Object.assign(hosts, pendingHostFunctions(shim, answers));
+    for (const { shim } of entries) Object.assign(hosts, pendingHostFunctions(shim));
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
     hosts[START] = () => (started ? "" : ((started = true), entry));

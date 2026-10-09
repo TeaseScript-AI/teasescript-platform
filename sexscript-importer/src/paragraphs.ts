@@ -62,13 +62,16 @@ export function withParagraphs(
       statement,
     );
   const block = (items: IrStatement[]): IrStatement[] => {
-    // The reading time of the paragraphs before the last of the text just split, which the wait after it now follows.
+    // The reading time of the paragraphs before the last of the text just split, which the wait after it now follows,
+    // and that of its last paragraph.
     let readBefore: number | null = null;
-    return items.flatMap((item): IrStatement[] => {
+    let readLast = 0;
+    return items.flatMap((item, index): IrStatement[] => {
       if (readBefore !== null && item.kind !== "blank" && item.kind !== "comment") {
         const read = readBefore;
         readBefore = null;
-        if (item.kind === "wait" && item.afterText === true) return shortenedWait(item, read);
+        if (item.kind === "wait" && item.afterText === true)
+          return shortenedWait(item, read, readLast, readingCovers(next(items, index)));
       }
       const statement = withNestedBlocks(item, block);
       if (statement.kind === "say") {
@@ -88,10 +91,49 @@ export function withParagraphs(
           "The legacy display showed one text, whose paragraphs a blank line separated; each paragraph is a message of its own.",
           statement,
         );
-        const { instant: _instant, beat, ...paced } = statement;
+        const { instant, beat, ...paced } = statement;
         readBefore = split.paragraphs
           .slice(0, -1)
           .reduce((total, value) => total + shortestReadingTime(value), 0);
+        const last = split.paragraphs.at(-1)!;
+        readLast = shortestReadingTime(last);
+        const wait = next(items, index);
+        const waitMs = wait?.kind === "wait" ? literalWaitMs(wait) : null;
+        const after = wait === undefined ? undefined : next(items, items.indexOf(wait));
+        // Legacy showed the text whole at once. Where a kept wait after it sets its timing and the last paragraph's
+        // reading time would outlast the time the wait leaves it (TSV060), the text keeps showing whole at once, each
+        // paragraph said at once, and the wait stays whole: waits that another wait or a timer follows, an author's
+        // pause, and a long kept wait before a statement that the reading time does not cover, such as a timer or a
+        // text said at once.
+        const timed =
+          instant === true &&
+          wait?.kind === "wait" &&
+          wait.afterText !== true &&
+          wait.visible !== true &&
+          after?.kind === "wait" &&
+          waitMs !== null &&
+          waitMs < readLast;
+        const rest =
+          wait?.kind === "wait" && wait.afterText === true && waitMs !== null
+            ? Math.round((waitMs - readBefore) / 1000) * 1000
+            : Infinity;
+        const whole = instant === true && rest > 0 && rest < readLast && !readingCovers(after);
+        if (timed || whole) {
+          readBefore = null;
+          if (timed)
+            report(
+              "SX_WAIT_TIMED",
+              "The legacy waits after this text set its timing, and the first is shorter than the last paragraph's reading time, so every paragraph is said at once and the waits follow, as legacy showed the text.",
+              statement,
+            );
+          else
+            report(
+              "SX_PARAGRAPH_WAIT_WHOLE",
+              "The legacy wait after this text sets its timing, and what it leaves after the paragraphs' reading times is shorter than the last one's, before a statement that this reading time does not cover, so every paragraph is said at once and the wait stays whole, as legacy showed the text.",
+              statement,
+            );
+          return split.paragraphs.map((value) => ({ ...paced, value, instant: true }));
+        }
         // A beat's paragraphs keep `instant`, so that the text shows whole at once, as legacy showed it, and its wait
         // keeps the beat.
         return split.paragraphs.map((value) =>
@@ -166,16 +208,28 @@ export function withParagraphs(
   /**
    * The legacy wait after a split text started when the whole text appeared, and the paragraphs before the last now
    * take their reading time first, so a kept wait keeps only the rest, in whole seconds, and goes when none is left
-   * (owner decision 2026-10-07): the next statement comes as long after the text first appeared as before.
+   * (owner decision 2026-10-07): the next statement comes as long after the text first appeared as before. The rest
+   * also goes where it is shorter than the last paragraph's reading time (`last`) and that reading time covers the next
+   * statement (`covered`), as reading time replaces such a wait.
    */
   const shortenedWait = (
     wait: Extract<IrStatement, { kind: "wait" }>,
     read: number,
+    last: number,
+    covered: boolean,
   ): IrStatement[] => {
     const { duration } = wait;
     if (duration.kind !== "literal" || typeof duration.value !== "number") return [wait];
     const milliseconds = wait.unit === "ms" ? duration.value : duration.value * 1000;
     const seconds = Math.round((milliseconds - read) / 1000);
+    if (seconds > 0 && covered && seconds * 1000 < last) {
+      report(
+        "SX_PARAGRAPH_WAIT_READ",
+        "The last paragraph's reading time covers what the legacy wait after the text leaves, so the wait goes.",
+        wait,
+      );
+      return [];
+    }
     if (seconds <= 0) {
       report(
         "SX_PARAGRAPH_WAIT_DROPPED",
@@ -193,6 +247,37 @@ export function withParagraphs(
     return [{ ...wait, duration: { kind: "literal", value } }];
   };
   return block(statements);
+}
+
+/** The next statement after `items[index]` that is no blank line or comment. */
+function next(items: readonly IrStatement[], index: number): IrStatement | undefined {
+  return items.slice(index + 1).find((item) => item.kind !== "blank" && item.kind !== "comment");
+}
+
+/** A wait's milliseconds where it is a number literal. */
+function literalWaitMs(wait: Extract<IrStatement, { kind: "wait" }>): number | null {
+  const { duration } = wait;
+  if (duration.kind !== "literal" || typeof duration.value !== "number") return null;
+  return wait.unit === "ms" ? duration.value : duration.value * 1000;
+}
+
+/**
+ * Whether the reading time of the text before a statement covers a wait between them: a text not said at once and
+ * media wait for that reading time, and before a button or an ask a reading wait goes, as the player decides when to go
+ * on (owner decision 2026-10-07). Before anything else the wait adds time: a wait or a timer runs alongside the reading
+ * time, and a call may say a text at once, which ends it.
+ */
+function readingCovers(statement: IrStatement | undefined): boolean {
+  if (statement === undefined) return false;
+  if (statement.kind === "say") return statement.instant !== true;
+  if (["showButton", "showImage", "hideImage", "playAudio"].includes(statement.kind)) return true;
+  const value =
+    statement.kind === "let" || statement.kind === "assign" || statement.kind === "save"
+      ? statement.value
+      : statement.kind === "expression"
+        ? statement.expression
+        : null;
+  return value !== null && (value.kind === "choice" || isAsk(value));
 }
 
 type Ask = Extract<IrExpression, { kind: "input" | "call" }>;

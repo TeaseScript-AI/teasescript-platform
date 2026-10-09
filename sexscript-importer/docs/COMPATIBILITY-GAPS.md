@@ -146,7 +146,17 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it. The wait
   started when the whole text appeared, so a kept wait after the last piece keeps only what the reading time of the
   earlier pieces leaves, in whole seconds, and goes when nothing is left (owner decision 2026-10-07;
-  `readingWaits.shortened` and `dropped`). An ask's question (also `askImage`'s message) is the last paragraph that ends with a
+  `readingWaits.shortened` and `dropped`). Where the last piece's reading time would outlast the wait after it, the
+  compiler warns that the wait adds no time (`TSV060`, #714), which holds before a text or media, which wait for that
+  reading time; before a wait or a timer, which run alongside it, a button or an ask, which end it, or a text said at
+  once, the wait adds its time. So, by the rules above, where the legacy wait set the timing the text shows whole at
+  once, each piece said at once, and the waits follow: where another wait or a timer follows its wait (`SX_WAIT_TIMED`,
+  `timed`), before a wait restored for a beat (`SX_PARAGRAPH_WAIT_BEAT`, `paragraphsBeforeBeat`), and where the rest of
+  a long kept wait is shorter than the last piece's reading time before a statement that this reading time does not
+  cover (`SX_PARAGRAPH_WAIT_WHOLE`, `paragraphsWhole`); before a text, media, a button, or an ask, where a reading wait
+  goes, that rest is reading time and goes (`SX_PARAGRAPH_WAIT_READ`, `paragraphWaitsRead`). A text that was not split
+  keeps its timing as below; where it waits for a reading time before it, the warning stays, and its waits still add
+  their time. An ask's question (also `askImage`'s message) is the last paragraph that ends with a
   question mark, ignoring closing brackets, quotes, and markup, or else the last that starts with an instruction or
   question word (Enter, Type, Choose, Select, Pick, Write, Tell, Give, Name, How, What, Which, Please, Input, Insert,
   Answer, Click, Press, Set); the paragraphs before it are said before the ask, and the remarks after it, such as
@@ -573,7 +583,7 @@ File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and 
 date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
 rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
 `load "key", default:` (#545), permanent buttons (#612), `for key, value in dict` (#639), forms with `askForm` and
-`askBooleans` (#661, #663, #665, #668, #669), and image tags with
+`askBooleans` (#661, #663, #665, #668, #669), `askBoolean` (#712) and the asks' `prefill:` (#713), and image tags with
 `findImages` (#572): a legacy count of an images folder becomes a query for one generated tag of the folder's full
 path, which an XMP sidecar gives each image (`SX_IMAGE_TAGS`, owner decision 2026-10-05), and a listing of the folder
 the package paths of its images, also where a name test keeps file names (`listing.findAll { f ->
@@ -600,8 +610,7 @@ canvas from a loaded image's `getWidth()` and `getHeight()`, so overlay percenta
 draw in loops, and only 6 read a literal base path. A clean mapping needs overlay positions relative to the
 background's own pixel size, or an image-size query.
 
-`askBoolean` with custom labels already converts to a two-option `choose` compared with its first label. Legacy
-`getFile(title)` was used for a photo of the player, so it becomes `askImage(title)` (#608), which the player answers
+Legacy `getFile(title)` was used for a photo of the player, so it becomes `askImage(title)` (#608), which the player answers
 with an image file or the camera (`SX_FILE_PHOTO`, owner decision 2026-10-05; a cancelled chooser gave null, which
 askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 

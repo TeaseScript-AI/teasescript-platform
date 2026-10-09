@@ -99,4 +99,26 @@ for tempSpankCount in 1..=3 {
   playAudio async "DisciplinePack/hand${1 + randomInteger(0..3)}.wav"
   wait tempTime
 }
+// TSV060: a kept wait after a split text that the last paragraph's reading time would outlast.
+// DisciplineClinic Punish: the waits set the timing, so the text shows whole at once, then the waits.
+say "You've created a bunch of paperwork for me to document this."
+say "So you can expect me to be extra strict this time", instant
+wait 4
+wait 3
+// Domme3 maintenance: the rest of the wait after the earlier paragraphs is reading time, which goes before a button.
+say "You did well."
+say "I'm proud of you!"
+say "Get dressed."
+showButton "Thanks, Miss."
+// Domme3 punishment: before a call that may say a text at once, the text shows whole and the wait stays whole.
+function counted(messageValue) {
+  say "${messageValue}"
+  say "0"
+  wait 2
+}
+say "These last fifteen ...", instant
+say "will be slower ...", instant
+say "and harder!", instant
+wait 7
+counted("Alternating cheeks.")
 exit

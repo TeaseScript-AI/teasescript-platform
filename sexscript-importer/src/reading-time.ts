@@ -419,10 +419,18 @@ function withRestoredWaits(
   const block = (items: IrStatement[]): IrStatement[] => {
     const nested = items.map((item) => withNestedBlocks(item, block));
     const pieces = new Map<WaitStatement, number>();
+    const lastPieces = new Map<WaitStatement, IrExpression>();
     for (const item of nested)
-      if (item.kind === "say" && item.readingTime !== undefined && restored.has(item.readingTime))
+      if (item.kind === "say" && item.readingTime !== undefined && restored.has(item.readingTime)) {
         pieces.set(item.readingTime, (pieces.get(item.readingTime) ?? 0) + 1);
+        lastPieces.set(item.readingTime, item.value);
+      }
     if (pieces.size === 0) return nested;
+    // A split text whose last paragraph's reading time would outlast the wait (TSV060) shows whole at once, as legacy
+    // showed it, each paragraph said at once, as the wait sets the timing before the beat.
+    const outlasts = (wait: WaitStatement): boolean =>
+      pieces.get(wait)! > 1 &&
+      (literalMilliseconds(wait) ?? Infinity) < shortestReadingTime(lastPieces.get(wait)!);
     const seen = new Map<WaitStatement, number>();
     return nested.flatMap((item): IrStatement[] => {
       if (item.kind !== "say" || item.readingTime === undefined || !restored.has(item.readingTime))
@@ -431,7 +439,7 @@ function withRestoredWaits(
       const count = (seen.get(wait) ?? 0) + 1;
       seen.set(wait, count);
       const { readingTime: _readingTime, ...text } = item;
-      if (count < pieces.get(wait)!) return [text];
+      if (count < pieces.get(wait)!) return [outlasts(wait) ? { ...text, instant: true } : text];
       diagnostics.push({
         code: "SX_WAIT_FOR_BEAT",
         severity: "info",
@@ -440,7 +448,16 @@ function withRestoredWaits(
         span: item.span,
       });
       // Said at once again, the text keeps that as a beat does, and the texts before it keep their waits in turn.
-      return [pieces.get(wait) === 1 ? { ...text, instant: true, beat: true } : text, wait];
+      if (pieces.get(wait) === 1) return [{ ...text, instant: true, beat: true }, wait];
+      if (!outlasts(wait)) return [text, wait];
+      diagnostics.push({
+        code: "SX_PARAGRAPH_WAIT_BEAT",
+        severity: "info",
+        message:
+          "The last paragraph's reading time would outlast the legacy wait restored before the beat, which sets the timing, so every paragraph is said at once and the wait follows.",
+        span: item.span,
+      });
+      return [{ ...text, instant: true }, wait];
     });
   };
   return block(statements);
