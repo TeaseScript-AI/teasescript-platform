@@ -16,7 +16,9 @@ import {
   mediaCuePointMs,
   mediaEndMs,
   nextMediaEvent,
+  settledMediaRecord,
   stopMedia,
+  type MediaHandleRecord,
   type MediaTimelineEvent,
   type RuntimeMediaSnapshot,
 } from "../media.js";
@@ -39,7 +41,7 @@ export function activeMediaAction(
 export function mediaRecord(
   snapshot: RuntimeSnapshot,
   mediaId: number,
-): RuntimeMediaSnapshot | undefined {
+): MediaHandleRecord | undefined {
   return (
     activeMediaAction(snapshot, mediaId)?.media ??
     snapshot.settledMedia.find((media) => media.mediaId === mediaId)
@@ -186,7 +188,7 @@ function dropQueuedCues(snapshot: RuntimeSnapshot, mediaId: number): void {
 }
 
 /**
- * Removes finished or stopped media from background work, retains its handle data, publishes its `actionCompleted`,
+ * Removes finished or stopped media from background work, keeps what its handle reads, publishes its `actionCompleted`,
  * and releases a script waiting on it. Media settlements are not retained as `lastSettlement`.
  */
 function settleMediaAction(
@@ -203,7 +205,7 @@ function settleMediaAction(
   assertEventSequenceCapacity(snapshot, 1);
   const completionEventSequence = takeSequence(snapshot, 1);
   snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
-  snapshot.settledMedia.push(action.media);
+  snapshot.settledMedia.push(settledMediaRecord(action.media));
   sweepRetainedScopes(snapshot, false);
   const settlement: RuntimeMediaSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
@@ -378,6 +380,6 @@ export function stopAllMediaForSessionEnd(snapshot: RuntimeSnapshot): void {
     if (action.kind !== "media") continue;
     stopMedia(action.media, snapshot.currentSessionTimeMs);
     snapshot.backgroundActions.splice(index, 1);
-    snapshot.settledMedia.push(action.media);
+    snapshot.settledMedia.push(settledMediaRecord(action.media));
   }
 }

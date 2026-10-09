@@ -97,7 +97,7 @@ import {
 import {
   cloneMedia,
   type RuntimeMediaCueInvocationSnapshot,
-  type RuntimeMediaSnapshot,
+  type RuntimeSettledMediaSnapshot,
 } from "./media.js";
 import type { RuntimePermanentButtonInvocationSnapshot } from "./permanent-buttons.js";
 import { validatePermanentButtonState } from "./permanent-button-validation.js";
@@ -118,7 +118,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 62;
+export const RUNTIME_SNAPSHOT_VERSION = 63;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -446,7 +446,7 @@ export interface RuntimeSnapshot {
    * Finished or stopped media that a handle or a queued or running cue block still reaches; a public operation drops the
    * others before it returns. Active media are background actions.
    */
-  readonly settledMedia: RuntimeMediaSnapshot[];
+  readonly settledMedia: RuntimeSettledMediaSnapshot[];
   nextMediaId: number;
   /** The default camera's view, or `null` before the first `showCamera`. */
   cameraView: RuntimeCameraViewSnapshot | null;
@@ -750,7 +750,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     capturedImages: snapshot.capturedImages.map(cloneCapturedImage),
     scriptStorage: cloneScriptStorage(snapshot.scriptStorage),
     scriptStoragePersistent: snapshot.scriptStoragePersistent,
-    settledMedia: snapshot.settledMedia.map(cloneMedia),
+    settledMedia: snapshot.settledMedia.map((media) => ({ ...media })),
     nextMediaId: snapshot.nextMediaId,
     cameraView: snapshot.cameraView === null ? null : { ...snapshot.cameraView },
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
