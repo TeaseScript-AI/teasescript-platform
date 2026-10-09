@@ -9,6 +9,25 @@ shared UI definitions and the story-button wrapper. `player/vue/components.json`
 resolution; the component and theme boundaries remain defined by the Player implementation and its maintained UI
 specification.
 
+## Adding a shadcn-vue component
+
+`shadcn-vue add` copies a component's source into `src/components/ui/` after `npm ci` at the root. It needs a
+`package.json` beside `components.json`, which `player/vue` does not have, and it would install the component's npm
+packages there. Give it a temporary one, keep npm from installing anything, and remove it again:
+
+```shell
+cd player/vue
+printf '{ "private": true, "type": "module" }\n' > package.json
+npm_config_dry_run=true npx shadcn-vue add <component> --yes
+rm package.json
+npx prettier --write 'src/components/ui/<component>/*.ts'
+```
+
+`npx shadcn-vue view <component>` lists the npm packages the component needs. Most, such as `reka-ui` and
+`@vueuse/core`, are root dependencies already. Any other one is added to the root `package.json` under the dependency
+rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScript settings, such as
+`exactOptionalPropertyTypes`, so run `npm run typecheck:player`. Knip reports a component that nothing imports yet.
+
 ## Responsibility boundaries
 
 - `PlayerApp.vue` composes the product Player from props and slots. It installs `usePlayerKeyboardFocus.ts`
