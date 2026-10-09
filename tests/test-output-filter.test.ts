@@ -7,7 +7,12 @@ import test from "node:test";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
-function runFixtures(fixtures: Record<string, string>, fullOutput = false) {
+/** Runs the filter on `fixtures`, or on the arguments `argumentsIn` gives for the fixtures' directory. */
+function runFixtures(
+  fixtures: Record<string, string>,
+  fullOutput = false,
+  argumentsIn?: (directory: string) => string[],
+) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
@@ -21,7 +26,11 @@ function runFixtures(fixtures: Record<string, string>, fullOutput = false) {
   try {
     return spawnSync(
       process.execPath,
-      [filterPath, ...(fullOutput ? ["--full-output"] : []), ...fixturePaths],
+      [
+        filterPath,
+        ...(fullOutput ? ["--full-output"] : []),
+        ...(argumentsIn?.(directory) ?? fixturePaths),
+      ],
       { encoding: "utf8", env: environment },
     );
   } finally {
@@ -98,4 +107,36 @@ test("filter leaves skipped output and todo totals untouched", () => {
   assert.match(result.stdout, /skipped test/);
   assert.match(result.stdout, /ℹ skipped 1/);
   assert.match(result.stdout, /ℹ todo 1/);
+});
+
+test("filter refuses a path that matches no test file before Node runs any", () => {
+  const fixtures = {
+    "passing.test.mjs": `
+      import test from "node:test";
+      test("passing test", () => {});
+    `,
+  };
+  const misspelled = runFixtures(fixtures, false, (directory) => [
+    resolve(directory, "passing.test.mjs"),
+    resolve(directory, "pasing.test.mjs"),
+  ]);
+  assert.equal(misspelled.status, 1, misspelled.stderr);
+  assert.match(misspelled.stderr, /no test file matches '.*pasing\.test\.mjs'/);
+  assert.doesNotMatch(misspelled.stdout, /ℹ tests/);
+
+  // Node matches path arguments as globs, so a quoted pattern that matches runs its files.
+  const pattern = runFixtures(fixtures, false, (directory) => [
+    resolve(directory, "pass*.test.mjs"),
+  ]);
+  assert.equal(pattern.status, 0, pattern.stderr);
+  assert.match(pattern.stdout, /ℹ pass 1/);
+
+  // The value of a Node option given without `=` is not a path.
+  const option = runFixtures(fixtures, false, (directory) => [
+    "--test-name-pattern",
+    "passing test",
+    resolve(directory, "passing.test.mjs"),
+  ]);
+  assert.equal(option.status, 0, option.stderr);
+  assert.match(option.stdout, /ℹ pass 1/);
 });
