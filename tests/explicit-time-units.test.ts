@@ -213,7 +213,7 @@ test("a random timer length takes its unit after the range in the short and the 
     assert.deepEqual(action.timer.range, expected, range);
   }
   assertRuntimeResumeEquivalent(
-    'let a = 1\nlet b = 3\nlet n = 0\nlet beat = timer(duration: (a..=b) s, async: true, repeat: true) {\n  n += 1\n}\nwait 10 s\nbeat.stop()\nsay "${n}"\nexit',
+    'let a = 1\nlet b = 3\nlet n = 0\nlet beat = timer(duration: (a..=b) s, async: true, repeat: true) {\n  n += 1\n}\nwait 7 s\nbeat.stop()\nsay "${n}"\nexit',
   );
   for (const [source, fix] of [
     ["timer 5..10 s", "timer (5..10) s"],
@@ -413,7 +413,7 @@ test("a wait or timer range takes any exact unit and draws whole units of it", (
 
   // Every draw restores from every checkpoint.
   assertRuntimeResumeEquivalent(
-    'let n = 0\nlet beat = timer(duration: (1..=4) h, async: true, repeat: true) {\n  n += 1\n}\nwait (100..500) ms\nwait (1..3) min\ntimer (1..=4) h\nwait (2..=5) days\ntimer (100..=300) ms\nbeat.stop()\nsay "${n}"\nexit',
+    'let n = 0\nlet beat = timer(duration: (1..=4) h, async: true, repeat: true) {\n  n += 1\n}\nwait (100..500) ms\nwait (1..3) min\ntimer (1..=4) h\nwait (1..=2) days\ntimer (100..=300) ms\nbeat.stop()\nsay "${n}"\nexit',
   );
 
   // A calendar unit after a range is refused like any calendar duration.

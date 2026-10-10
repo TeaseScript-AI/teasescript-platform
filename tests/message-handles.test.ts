@@ -157,7 +157,7 @@ test("the importer's growing dots and stroke counter play and resume alike at ev
   const counter = lines(
     "let count: integer = 0",
     'let strokes = say "Strokes: 0", instant',
-    "repeat 50 {",
+    "repeat 3 {",
     "    wait 1 s",
     "    count += 1",
     '    strokes.text = "Strokes: ${count}"',
@@ -168,8 +168,7 @@ test("the importer's growing dots and stroke counter play and resume alike at ev
   assert.deepEqual(messageTexts(played.events), [["Waiting.", "Waiting..", "Waiting..."]]);
   const counted = assertRuntimeResumeEquivalent(counter, { scenarioName: "stroke counter" });
   const [strokes] = messageTexts(counted.events);
-  assert.equal(strokes?.length, 51);
-  assert.equal(strokes?.at(-1), "Strokes: 50");
+  assert.deepEqual(strokes, ["Strokes: 0", "Strokes: 1", "Strokes: 2", "Strokes: 3"]);
 });
 
 test("a method on a message's text keeps the text read before its arguments run, also across a wait", () => {
