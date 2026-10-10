@@ -1288,6 +1288,21 @@ test("a first null is remembered wherever a first value decides a type", () => {
     ["for v in [[null]]", "v[0] + 1"],
   ] as const)
     assert.deepEqual(codes(`${loop} {\n    say ${use}\n}\nexit`), [["TSV043", use]], loop);
+  // Also once an inner loop or a shared block may have stored null in it, which no longer leaves a null fact (#810).
+  for (const loop of ["for v in [null]", "for v in set[null]", "for k, v in dict{ a: null }"]) {
+    assert.deepEqual(
+      codes(`${loop} {\n    repeat 2 {\n        say v + 1\n        v = null\n    }\n}\nexit`),
+      [["TSV043", "v + 1"]],
+      loop,
+    );
+    assert.deepEqual(
+      codes(
+        `${loop} {\n    let t = timer async 1 s {\n        v = null\n    }\n    wait 2 s\n    say v + 1\n}\nexit`,
+      ),
+      [["TSV043", "v + 1"]],
+      loop,
+    );
+  }
   assert.deepEqual(
     codes("let door = {}\ndoor.owner = null\ndoor.owner = 1\ndoor.owner = null\nexit"),
     [],
