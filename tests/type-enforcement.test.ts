@@ -950,9 +950,22 @@ test("a variable that starts as null takes the type of its first non-null value 
       store,
     );
   }
-  // A place that holds itself is never decided further, so the check ends.
+  // A first value that still leaves a part undecided, such as a property that only took null, decides the place for an
+  // earlier read too, so a null check there holds in either checking order: also after a value the compiler cannot
+  // know, and for a copy of another variable.
+  const profile = (calls: string) =>
+    `let profile = null\nfunction stats {\n    if profile != null {\n        profile.images = []\n        let images = profile.images\n        if images != null {\n            say "\${images.length}"\n        }\n    }\n}\nfunction create {\n    profile = { images: null }\n}\n${calls}\nexit`;
+  assert.deepEqual(sayTexts(profile("stats()\ncreate()\nstats()")), ["0"]);
+  assert.deepEqual(sayTexts(profile("create()\nstats()")), ["0"]);
+  const loaded = (calls: string) =>
+    `let id = load "id", default: ""\nlet me = null\nfunction stats {\n    me = load "p-\${id}", default: null\n    if me != null {\n        me.images = []\n        let images = me.images\n    }\n}\nfunction create {\n    let map = { images: null, name: null }\n    me = map\n}\n${calls}\nexit`;
+  assert.deepEqual(codes(loaded("stats()\ncreate()")), []);
+  assert.deepEqual(codes(loaded("create()\nstats()")), []);
+  // A place that holds itself is never decided further, also through another place, so the check ends.
   assert.deepEqual(
-    codes("let a = []\na.add(a)\nlet b = { n: null }\nlet c = b.n\nb.n = b\nexit"),
+    codes(
+      "let a = []\na.add(a)\nlet b = { n: null }\nlet c = b.n\nb.n = b\nlet p = []\nlet q = []\nlet x = p\nlet y = q\np.add(q)\nq.add(p)\nexit",
+    ),
     [],
   );
 });
