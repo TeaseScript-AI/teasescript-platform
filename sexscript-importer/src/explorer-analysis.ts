@@ -473,6 +473,7 @@ export class DataFlow {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
     cells: string[];
+    wide: string[];
   } | null = null;
   /** {@link #cellsMeeting} by cell, and the matchers of key patterns by pattern. */
   readonly #meetings = new Map<string, readonly string[]>();
@@ -925,7 +926,7 @@ export class DataFlow {
     for (let read = pending.pop(); read !== undefined; read = pending.pop())
       for (const reader of [
         ...(graph.readers.get(read) ?? []),
-        ...(read.startsWith("s ") ? this.#cellsMeeting(read, graph.cells) : []),
+        ...(read.startsWith("s ") ? this.#cellsMeeting(read, graph) : []),
       ])
         if (!reached.has(reader)) {
           reached.add(reader);
@@ -946,6 +947,7 @@ export class DataFlow {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
     cells: string[];
+    wide: string[];
   } {
     const readers = new Map<string, string[]>();
     const seeds = new Map<string, string[]>();
@@ -994,7 +996,12 @@ export class DataFlow {
     const cells = new Set(
       [...readers.keys(), ...[...readers.values()].flat()].filter((each) => each.startsWith("s ")),
     );
-    return { readers, seeds, cells: [...cells] };
+    return {
+      readers,
+      seeds,
+      cells: [...cells],
+      wide: [...cells].filter((cell) => cell === "s ?" || cell.includes(KEY_PLACEHOLDER)),
+    };
   }
 
   /**
@@ -1002,11 +1009,16 @@ export class DataFlow {
    * computed past knowing (`s ?`). Cells of the same text are one; distinct literal keys never meet. Worked out once
    * per cell, when a stored key's carriers first reach it.
    */
-  #cellsMeeting(cell: string, cells: readonly string[]): readonly string[] {
+  #cellsMeeting(
+    cell: string,
+    graph: { readonly cells: readonly string[]; readonly wide: readonly string[] },
+  ): readonly string[] {
     const known = this.#meetings.get(cell);
     if (known !== undefined) return known;
     const text = cell.slice(2);
     const wide = (other: string) => other === "?" || other.includes(KEY_PLACEHOLDER);
+    // A literal key meets only patterns and unknown keys.
+    const cells = wide(text) ? graph.cells : graph.wide;
     const matches = (pattern: string, key: string) =>
       (
         this.#keyMatchers.get(pattern) ??
