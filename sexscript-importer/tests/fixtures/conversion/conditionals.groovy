@@ -34,3 +34,7 @@ dare += leashed ? "On the leash." : "Free, " + (gagged ? "quiet." : "speaking.")
 show(dare)
 // A conditional used as a statement runs one call per branch.
 leashed ? show("Leashed.") : setImage("free.jpg")
+// A value's class compared with such a class is a type test too, also with its package (ShockYourself's stats panel).
+def entry = ["Shocks", [2, 5]]
+if (entry[1].class == java.util.ArrayList) show("A bar")
+if (entry[0].getClass() != String) show("Not a text")
