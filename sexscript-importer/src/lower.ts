@@ -13674,9 +13674,14 @@ function lowerObjectMethodCallExpression(
         return useHelper(context, "listMax", [target]);
       case "min":
         return useHelper(context, "listMin", [target]);
-      case "sum":
-        // Groovy sum() joins text; the helper adds numbers only.
-        if (!onlyOf(listElementType(targetNode, context), NUMBER)) {
+      case "sum": {
+        // Groovy sum() adds numbers and joins texts, so a list of texts only is its elements joined, `xs.join("")`
+        // (ToyExpanded's number memory game); an empty list, null in Groovy, joins to the empty text.
+        const elements = listElementType(targetNode, context);
+        if (elements !== 0 && onlyOf(elements, STRING))
+          return listJoin(target, { kind: "literal", value: "" });
+        // The helper adds numbers only.
+        if (!onlyOf(elements, NUMBER)) {
           return unsupportedExpression(
             context,
             node,
@@ -13685,6 +13690,7 @@ function lowerObjectMethodCallExpression(
           );
         }
         return useHelper(context, "listSum", [target]);
+      }
       case "unique":
         // Groovy unique() also deduplicates the receiver in place; as an expression only the result is kept.
         return useHelper(context, "unique", [target]);

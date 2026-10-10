@@ -70,6 +70,12 @@ function sexscriptLegacyListText(valueValue2) {
   }
   return "${valueValue2}"
 }
+function sexscriptLegacyCastText(valueValue3): string? {
+  if valueValue3 == null {
+    return null
+  }
+  return toString(valueValue3)
+}
 function sexscriptLegacySplit(text, separator) {
   let partsValue2 = text.split(separator)
   if text == "" {
@@ -426,4 +432,13 @@ let entryCopy = entryParts
 // NOTE SX_SHARED_LIST_WRITE line 172: Groovy shared the list in entryParts with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
 entryParts[0] = "x"
 say "Copy ${entryCopy.length}"
+// The sum of texts joins them, so an answer compares with the digits a game showed (ToyExpanded's number memory game).
+let digits = []
+for it in 0..3 {
+  digits.add(sexscriptLegacyCastText(it))
+}
+let sumResult = digits.join("")
+if "012" == sumResult {
+  say "All digits"
+}
 exit

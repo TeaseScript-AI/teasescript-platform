@@ -171,3 +171,7 @@ def entryParts = loadString("game.entries")?.split(",")
 def entryCopy = entryParts
 entryParts[0] = "x"
 show("Copy " + entryCopy.size())
+// The sum of texts joins them, so an answer compares with the digits a game showed (ToyExpanded's number memory game).
+def digits = []
+3.times { digits << (it as String) }
+if ("012" == digits.sum()) show("All digits")
