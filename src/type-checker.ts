@@ -488,14 +488,28 @@ function decidingSlots(slots: readonly OpenType[]): {
   return { deciding, unknown };
 }
 
-/** An operation whose operands held only null when it was checked, with what it reports if they still do at the end. */
-interface NullOnlyOperation {
+/**
+ * A check kept for the end of the check: an operation whose operands held only null when it was checked, with what it
+ * reports if they still do, or a store of an operation of unknown result into a place that no value decided yet, which
+ * is checked against the type a later value decided.
+ */
+type DeferredCheck = {
   readonly file: number;
-  /** Where among the diagnostics of its file the operation reports. */
+  /** Where among the diagnostics of its file the check reports. */
   readonly at: number;
-  readonly slots: readonly OpenType[];
-  readonly diagnostics: readonly Diagnostic[];
-}
+} & (
+  | {
+      readonly kind: "nullOnly";
+      readonly slots: readonly OpenType[];
+      readonly diagnostics: readonly Diagnostic[];
+    }
+  | {
+      readonly kind: "lateStore";
+      readonly place: Place;
+      readonly expression: Expression;
+      readonly value: StaticType;
+    }
+);
 
 /**
  * The undecided slot of a type that so far held only null, such as the type of `v` after `let v = null` once nothing
@@ -868,7 +882,10 @@ interface Place {
   readonly elementOf?: string | null;
   /** For the elements of a list stored at once, as by `addAll`: a test checks that whole list. */
   readonly listed?: boolean;
-  /** For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`. */
+  /**
+   * For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`: the type as it
+   * is when a message reads it, which a later value may have decided. A copy made by spreading keeps the text of then.
+   */
   readonly subject: string;
   /** What the value would do: `start as`, `be set to`, `contain`, `take`, or `return`. */
   readonly verb: string;
@@ -947,9 +964,10 @@ class TypeChecker {
 
   /**
    * Operations on a variable, element, or property that so far held only null, which fail if it holds only null to the
-   * end: the check reports them once it has checked every store (see {@link #reportNullOnlyOperations}).
+   * end, and stores into a place whose type a later value may decide: the check reports them once it has checked every
+   * store (see {@link #reportDeferred}).
    */
-  readonly #nullOnlyOperations: NullOnlyOperation[] = [];
+  readonly #deferred: DeferredCheck[] = [];
 
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
@@ -1311,7 +1329,7 @@ class TypeChecker {
       }
       this.#handlers.length = 0;
     }
-    this.#reportNullOnlyOperations();
+    this.#reportDeferred();
   }
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionType {
@@ -2459,23 +2477,20 @@ class TypeChecker {
         this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       return;
     }
-    const unfit = this.#unfitResults(expression, value, place.type);
-    if (unfit !== undefined) {
-      const text = operationText(expression);
-      // Another place suggests the type the operator gives for numbers, which is what such a value usually holds.
-      const results = members(unfit.results);
-      const fix = members(kept).some((member) => isScalar(member, "string"))
-        ? text === null
-          ? ' To show it as text, put the whole calculation inside "${" and "}".'
-          : ` To show it as text, write "\${${text}}".`
-        : place.fix(results.find((result) => isNumeric(result)) ?? results[0]!, expression);
-      this.#report(
-        typeCode.typeMismatch,
-        `${place.subject}, so it cannot ${place.verb} the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${fix}`,
-        expression.span,
-      );
-      return;
-    }
+    if (this.#reportUnfit(place, expression, value)) return;
+    // A value that decides the place later may leave no result of the operation that fits: the end of the check tells.
+    if (
+      members(place.type).some((member) => member.kind === "open") &&
+      this.#unknownOperations.has(unwrap(expression))
+    )
+      this.#deferred.push({
+        kind: "lateStore",
+        file: this.#file,
+        at: this.diagnostics.length,
+        place,
+        expression,
+        value,
+      });
     if (isAssignable(place.type, value)) {
       // A place without a written type, or whose type the value would decide, cannot keep a mixed `choose`.
       if (place.inferred !== undefined || members(place.type).some((member) => !isKnown(member)))
@@ -2779,13 +2794,7 @@ class TypeChecker {
     const owner = collections.length === 1 ? this.#pathOf(collectionExpression, scope) : undefined;
     const places = collections.flatMap((member) =>
       isCollection(member)
-        ? [
-            {
-              ...elementPlace(member, label, nullable, this.#text, inferred, owner),
-              ...(verb === undefined ? {} : { verb }),
-              listed,
-            },
-          ]
+        ? [elementPlace(member, label, nullable, this.#text, inferred, owner, verb, listed)]
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
@@ -4846,6 +4855,31 @@ class TypeChecker {
   }
 
   /**
+   * Reports a value from an operation that gives no type that fits the place (see {@link #unfitResults}), and returns
+   * whether it did.
+   */
+  #reportUnfit(place: Place, expression: Expression, value: StaticType): boolean {
+    const unfit = this.#unfitResults(expression, value, place.type);
+    if (unfit === undefined) return false;
+    const text = operationText(expression);
+    // Another place suggests the type the operator gives for numbers, which is what such a value usually holds.
+    const results = members(unfit.results);
+    const fix = members(resolved(nonNullType(place.type))).some((member) =>
+      isScalar(member, "string"),
+    )
+      ? text === null
+        ? ' To show it as text, put the whole calculation inside "${" and "}".'
+        : ` To show it as text, write "\${${text}}".`
+      : place.fix(results.find((result) => isNumeric(result)) ?? results[0]!, expression);
+    this.#report(
+      typeCode.typeMismatch,
+      `${place.subject}, so it cannot ${place.verb} the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${fix}`,
+      expression.span,
+    );
+    return true;
+  }
+
+  /**
    * The types an operation of unknown result can give: every combination of its operands' members, where an operand of
    * unknown type stands for what the operation that gives it can give, or else for every type an operator takes. With
    * an operand that such an operation gives, also the operand types this used, for the message when none works.
@@ -4905,29 +4939,51 @@ class TypeChecker {
     check();
     const found = this.diagnostics.splice(before);
     if (found.length > 0)
-      this.#nullOnlyOperations.push({ file: this.#file, at: before, slots, diagnostics: found });
+      this.#deferred.push({
+        kind: "nullOnly",
+        file: this.#file,
+        at: before,
+        slots,
+        diagnostics: found,
+      });
   }
 
   /**
-   * Reports the operations of {@link #nullOnlyOperations} whose operands held only null to the end of the check, at the
-   * place among the other diagnostics of their file where they would have been reported.
+   * Reports the checks of {@link #deferred} that fail at the end of the check, at the place among the other diagnostics
+   * of their file where they would have been reported: operations whose operands held only null to the end, and stores
+   * that no result of their operation could fit once a later value decided the place's type.
    */
-  #reportNullOnlyOperations(): void {
+  #reportDeferred(): void {
     const known = new Map<OpenType, boolean>();
-    const byFile = new Map<number, NullOnlyOperation[]>();
-    for (const operation of this.#nullOnlyOperations) {
-      if (!operation.slots.every((slot) => heldOnlyNull(slot, known))) continue;
-      const operations = byFile.get(operation.file) ?? [];
-      operations.push(operation);
-      byFile.set(operation.file, operations);
+    const byFile = new Map<
+      number,
+      { readonly at: number; readonly found: readonly Diagnostic[] }[]
+    >();
+    const current = this.#file;
+    for (const check of this.#deferred) {
+      let found: readonly Diagnostic[] = [];
+      if (check.kind === "nullOnly") {
+        if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
+      } else {
+        // The message names lines as seen from the store's file.
+        this.#file = check.file;
+        const before = this.diagnostics.length;
+        if (this.#reportUnfit(check.place, check.expression, check.value))
+          found = this.diagnostics.splice(before);
+      }
+      if (found.length === 0) continue;
+      const reports = byFile.get(check.file) ?? [];
+      reports.push({ at: check.at, found });
+      byFile.set(check.file, reports);
     }
-    for (const [file, operations] of byFile) {
+    this.#file = current;
+    for (const [file, reports] of byFile) {
       const diagnostics = this.fileDiagnostics[file]!;
       const merged: Diagnostic[] = [];
       let next = 0;
-      for (const operation of operations) {
-        for (; next < operation.at; next += 1) merged.push(diagnostics[next]!);
-        for (const diagnostic of operation.diagnostics) merged.push(diagnostic);
+      for (const report of reports) {
+        for (; next < report.at; next += 1) merged.push(diagnostics[next]!);
+        for (const diagnostic of report.found) merged.push(diagnostic);
       }
       for (; next < diagnostics.length; next += 1) merged.push(diagnostics[next]!);
       this.fileDiagnostics[file] = merged;
@@ -7605,7 +7661,9 @@ function variablePlace(variable: Variable, text: PlaceText): Place {
       variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
-    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`,
+    get subject() {
+      return `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`;
+    },
     verb: "be set to",
     fix: (rejected, expression) => typeFix(name, type, rejected, expression, text.keyword(name)),
   };
@@ -7618,20 +7676,24 @@ function elementPlace(
   text: PlaceText,
   inferred = false,
   owner?: PlacePath,
+  verb = "contain",
+  listed = false,
 ): Place {
-  const subject = name === null ? `This ${collection.kind}` : `'${name}'`;
-  const element = resolved(collection.element);
+  const holder = name === null ? `This ${collection.kind}` : `'${name}'`;
   return {
     type: collection.element,
     widening: extendPath(owner, "[]"),
     inferred: inferred ? "part" : undefined,
     label: null,
     elementOf: name,
-    subject:
-      element.kind === "open"
-        ? `${subject} holds a ${collection.kind}`
-        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`,
-    verb: "contain",
+    get subject() {
+      const element = resolved(collection.element);
+      return element.kind === "open"
+        ? `${holder} holds a ${collection.kind}`
+        : `${holder} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`;
+    },
+    verb,
+    listed,
     fix: (value) => elementFix(name, collection, value, nullable, text.keyword(name)),
   };
 }
@@ -7667,7 +7729,9 @@ function propertyPlace(
     // No type can be written for a property.
     inferred: "part",
     label,
-    subject: `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`,
+    get subject() {
+      return `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`;
+    },
     verb: "be set to",
     fix: (value, expression) => {
       const conversion = conversionFix(type, value, expression);
