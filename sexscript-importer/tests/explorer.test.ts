@@ -1229,13 +1229,38 @@ test(
     ).coverage.unvisitedBranches.find((entry) => entry.line === 3);
     assert.ok(climb !== undefined && climb.attempts > 1, JSON.stringify(climb));
     assert.equal(climb.attempts, climb.chains?.[0]?.sessions);
-    // A value stored before the condition is first met: play going on from it and the next session are two attempts.
+    // A value stored before the condition is first met: play going on from it, a state of its visit back at the prompt the
+    // witness passed, and the next session are three attempts.
     const stored = run(
       'save true as "seen.flag"\nshowButton "Look"\nif load("seen.flag", default: false) and randomInteger(0..9) == 99 {\n' +
         '  say "Never."\n}\nexit\n',
       2000,
     ).coverage.unvisitedBranches.find((entry) => entry.line === 3 && entry.missed === "true");
-    assert.equal(stored?.attempts, 2, JSON.stringify(stored));
+    assert.equal(stored?.attempts, 3, JSON.stringify(stored));
+    // Without stored-value leads: a hub replay queued in the last directed pass, as nothing else is left, runs before the
+    // search ends; the way's attempts, a next session and the replay, are both among the attempts run (three in all).
+    const lastSource =
+      'function hub(ignore) {\n  showButton "Hub"\n}\nif load("flag", default: false) {\n  showButton "Returning"\n' +
+      '  exit\n}\nhub(0)\nif load("flag", default: false) and randomInteger(0..9) == 99 {\n  say "Never."\n}\n' +
+      'showButton "Begin"\nsave true as "flag"\nrepeat 200 {\n  showButton "Return"\n}\nhub(0)\nexit\n';
+    const { plan: lastPlan } = engine.compileProject([{ path: "main.tease", source: lastSource }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(lastPlan));
+    const lastPass = explore(engine, lastPlan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 20000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", lastSource]]),
+      diagnostics: [],
+    });
+    assert.equal(lastPass.search.stoppedBy, "exhausted");
+    assert.equal(
+      lastPass.coverage.unvisitedBranches.find((entry) => entry.line === 9)?.attempts,
+      2,
+    );
+    assert.equal(lastPass.directed.attempts, 3);
     // A menu that stores a flag another one reads, where a next visit starts elsewhere: play goes on from the state that
     // stored it, in the same visit.
     const source = [

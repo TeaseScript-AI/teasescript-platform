@@ -95,8 +95,10 @@ const ATTEMPT_EXPANSIONS = 20;
 const CLOSER_EXPANSIONS = 40;
 /** States of the session that stored a value a target needs, nearest first, given the lead to go on from it. */
 const STORED_LEAD_STATES = 16;
-/** States looked through for them. */
+/** States looked through for them, and for a state of that session back at a prompt the witness passed. */
 const STORED_LEAD_SEARCH = 256;
+/** Directed passes that look for such a state, while the session that stored the value is explored further. */
+const HUB_ROUTE_PASSES = 8;
 /**
  * The part of all runtime operations that directed work may take: directed attempts, next sessions, and expansions of
  * states in the first place. Above it, play goes first again until it has caught up.
@@ -1424,6 +1426,9 @@ interface Chain {
   started: number;
   /** Play went on from a state whose storage met the goal, with a lead of its own ({@link chainStep}). */
   led: boolean;
+  /** The passes that looked for a hub route, and whether one was replayed ({@link hubRoute}). */
+  hubPasses: number;
+  hubbed: boolean;
   /** An attempt of this chain is still queued. */
   queued: boolean;
   /** The storages measured so far, and the closest of them. */
@@ -3207,10 +3212,58 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
 
   /**
+   * The condition may come later in the same visit as the state that stored the value it needs, on another trip
+   * through a prompt the witness passed (a menu the player comes back to): from that state's session, a state back at
+   * such a prompt replays the witness's inputs from its last time there, the latest such prompt first, nearest first.
+   * Looked for in a few passes, as the session is explored further; replayed once per chain. Whether it queued one.
+   */
+  const hubRoute = (code: number, target: Target, chain: Chain, writer: number): boolean => {
+    if (chain.hubbed || chain.hubPasses >= HUB_ROUTE_PASSES) return false;
+    chain.hubPasses += 1;
+    const { node: witnessNode, inputs } = witnessOf(target);
+    if (witnessNode === null) return false;
+    // The last time the witness waited at each prompt, by the index of the input it gave there.
+    const lastAt = new Map<number, number>();
+    ancestry(nodes, witnessNode).forEach((node, index) => {
+      if (node.waitsAt !== null && index < inputs.length) lastAt.set(node.waitsAt, index);
+    });
+    const origin = nodes[writer]!;
+    let best: { node: Node; at: number } | null = null;
+    const queue = [writer];
+    const seen = new Set(queue);
+    for (let at = 0; at < queue.length && at < STORED_LEAD_SEARCH; at += 1) {
+      const node = nodes[queue[at]!]!;
+      const index = node.waitsAt === null ? undefined : lastAt.get(node.waitsAt);
+      if (index !== undefined && (best === null || index > best.at)) best = { node, at: index };
+      for (const next of node.edges) {
+        const child = nodes[next]!;
+        if (seen.has(next) || child.start !== origin.start || child.clock || child.chosen) continue;
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+    if (best === null) return false;
+    chain.hubbed = true;
+    target.attempts += 1;
+    // The replay reaches the condition or not; its states take no first place after it, and one with a clock step is a
+    // clock attempt.
+    const replayed = inputs.slice(best.at, best.at + MAX_SUFFIX);
+    (replayed.some(isClockInput) ? clockAttempts : playAttempts).push({
+      target: code,
+      from: best.node.id,
+      start: null,
+      inputs: replayed,
+      later: true,
+    });
+    return true;
+  };
+
+  /**
    * One step of a session chain toward a stored value: from the closest storage an explored play state left, a
-   * session that replays the witness path when that storage satisfies the condition, or else a route that brought the
-   * value closer before, to get closer still: the one with the most progress per operation, now and then another
-   * (see {@link chooseRoute}); the storage's own session when no route is known. After a session that came no closer,
+   * session that replays the witness path when that storage satisfies the condition (and, in the same visit, a hub route:
+   * {@link hubRoute}), or else a route that brought the value closer before, to get closer still: the one with the most
+   * progress per operation, now and then another (see {@link chooseRoute}); the storage's own session when no route is
+   * known. After a session that came no closer,
    * the other routes in turn; then the chain waits until play leaves a closer storage. `repeat`: right after a session
    * of the chain, whose next one then goes first when it replays a route (see `repeatAttempts`).
    */
@@ -3225,6 +3278,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         sessions: 0,
         started: 0,
         led: false,
+        hubPasses: 0,
+        hubbed: false,
         queued: false,
         scanned: 0,
         closest: null,
@@ -3334,12 +3389,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         leadOnFrom(best.left.node, code);
         target.attempts += 1;
       }
+      // A replay queued is work: the search does not end before it runs.
+      const hubQueued = hubRoute(code, target, found, best.left.node);
       if (found.best === 0) {
         target.notes.set(
           goal,
           `needs ${need}; a session from storage that has it did not reach the condition`,
         );
-        return false;
+        return hubQueued;
       }
       Object.assign(found, {
         best: 0,

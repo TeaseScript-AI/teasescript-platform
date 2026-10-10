@@ -380,10 +380,14 @@ item == ROPE` loads one key per branch reads one key for `owns(ROPE)`, also thro
 on, three calls deep). Its comparisons with constants give the values that take the missed way. An ask is answered
 again with them on the path of the step that first evaluated the condition, and the rest of that path is replayed; the
 values also become answers of that ask wherever the search meets it. For a stored value, sessions are chained: when an
-explored state left storage that satisfies the condition, a session starts from it and replays that path (with
-`--stored-leads`, off by default as it cost coverage on the gate, play also goes on from the state that stored it, in
-its own session: that state, or once it was expanded its open successors in that session, 16 at most, nearest first,
-share the first place for 20 expansions in all, once per chain); otherwise a session starts from the
+explored state left storage that satisfies the condition, a session starts from it and replays that path; and in
+the same visit, as the condition may come on a later trip through a menu the player returns to, a state of that
+session back at a prompt the path passed (the latest such prompt, then the state nearest the one that stored it, of
+256 looked through, in up to 8 directed passes while the session is explored further) replays the path from its last
+time there, once per chain (with `--stored-leads`, off by default as it cost coverage on the gate, play also goes on
+from the state that stored it, in its own session: that state, or once it was expanded its open successors in that
+session, 16 at most, nearest first, share the first place for 20 expansions in all, once per chain); otherwise a
+session starts from the
 storage closest to it and replays a route: the inputs of a session seen to bring the value closer from storage that
 already had it (up to 1,000 inputs; sessions with the same inputs are one route). The goal is the way with the least
 work in all, the sessions it takes times their work, so the route repeated is the one with the most progress per
