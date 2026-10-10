@@ -114,7 +114,11 @@ const MAX_CANDIDATES = 3;
 const MAX_DIRECTED_ANSWERS = 6;
 /** Inputs replayed after a changed answer, or in a new session, to reach the condition again. */
 const MAX_SUFFIX = 60;
-/** Variables whose closeness to a comparison steers the search at the same time. */
+/**
+ * Variables whose closeness to a comparison steers the search at the same time. A slot is given back when its target's
+ * way is reached or its closer states spent their lead, and goes to the back of the line when its variable could not be
+ * read since the last directed pass (a helper's own variable, while no state waits in the helper).
+ */
 const MAX_DISTANCE_TARGETS = 8;
 /**
  * With random choices: the other outcomes tried of one draw, the outcomes they are taken from (all of a small support,
@@ -2214,6 +2218,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const repeatAttempts: Attempt[] = [];
   const clockAttempts: Attempt[] = [];
   const distanceTargets: DistanceTarget[] = [];
+  /** Those waiting for a slot, in turn; and those whose closeness was read since the last directed pass. */
+  const waitingDistances: DistanceTarget[] = [];
+  const measuredDistances = new Set<DistanceTarget>();
   /** Waiting states by the ask instruction they wait at, a few each. */
   const askNodes = new Map<number, number[]>();
   /** Each distinct storage a play state left, in the order found, and the ones of completed sessions. */
@@ -2848,6 +2855,33 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const known = closerLeads.get(target) ?? { remaining: CLOSER_EXPANSIONS, target };
     closerLeads.set(target, known);
     return known;
+  };
+  /** Whether a distance target steers no more: its way is reached, or its closer states spent their lead. */
+  const steered = (goal: DistanceTarget): boolean =>
+    settled(targets.get(goal.target)) || (closerLeads.get(goal.target)?.remaining ?? 1) <= 0;
+  /**
+   * Before a directed pass: the slots of targets that steer no more are given back, and those whose closeness could not
+   * be read since the last pass go to the back of the line.
+   */
+  const releaseDistances = (): void => {
+    const kept = distanceTargets.filter((goal) => {
+      if (steered(goal)) return false;
+      if (!measuredDistances.has(goal)) waitingDistances.push(goal);
+      return measuredDistances.has(goal);
+    });
+    distanceTargets.splice(0, distanceTargets.length, ...kept);
+    measuredDistances.clear();
+  };
+  /** After a directed pass: free slots go to those waiting, in turn. */
+  const fillDistances = (): void => {
+    // Those taken or passed over leave the line at once, not one shift at a time.
+    let taken = 0;
+    while (distanceTargets.length < MAX_DISTANCE_TARGETS && taken < waitingDistances.length) {
+      const goal = waitingDistances[taken]!;
+      taken += 1;
+      if (!steered(goal)) distanceTargets.push(goal);
+    }
+    waitingDistances.splice(0, taken);
   };
 
   /**
@@ -3555,6 +3589,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
   const analyze = (): boolean => {
     storageMaps.clear();
+    releaseDistances();
     let scheduled = false;
     instructions.forEach((instruction, index) => {
       if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
@@ -3691,6 +3726,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         scheduled = scheduled || steps.length > 0;
       }
     }
+    fillDistances();
     return scheduled;
   };
 
@@ -3820,10 +3856,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
               inputs: fullPath,
             });
         }
-      } else if (goal.comparison !== null && distanceTargets.length < MAX_DISTANCE_TARGETS) {
+      } else if (goal.comparison !== null) {
         if (whole) {
           if (!measuredWhole)
-            distanceTargets.push({
+            waitingDistances.push({
               kind: "condition",
               target: code,
               condition,
@@ -3831,7 +3867,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             });
           measuredWhole = true;
         } else
-          distanceTargets.push({
+          waitingDistances.push({
             kind: "variable",
             target: code,
             name: source.name,
@@ -4232,6 +4268,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       distanceTargets.length === 0
         ? []
         : distances(storedSnapshot() ?? base.exportTrustedSnapshot());
+    const measured = (values: readonly number[]) => {
+      for (const [index, value] of values.entries())
+        if (value !== Infinity) measuredDistances.add(distanceTargets[index]!);
+    };
+    measured(closeness);
     // A state after a chosen random outcome goes back to its queue when its share is spent, to go on later with the
     // inputs it has not tried.
     let ran = 0;
@@ -4264,6 +4305,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (next === null) continue;
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
+      measured(after);
       const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
       // With guidance, a step that brings a state nearer to the region of code not reached yet shares the guidance lead.
       const guideLead = guidance.lead;

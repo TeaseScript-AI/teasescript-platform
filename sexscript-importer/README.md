@@ -408,8 +408,11 @@ instead), and play states that bring a variable the code counts or sets closer t
 comparison of two values, such as `reps >= target`, measures the difference of a variable the code counts from the
 other side, a variable or a stored value with a literal key, against 0; with progress leads, on by default and off
 with `--no-progress-leads`, an expansion in that first place that brings a state closer again does not count, so a
-loop that needs many rounds is followed to the constant, while one that gets no closer uses its 40 up); clock states
-take only their attempt's own steps and otherwise come after all play states.
+loop that needs many rounds is followed to the constant, while one that gets no closer uses its 40 up; eight
+comparisons steer at a time: one whose way is reached or whose 40 are used up gives its place to the next one waiting,
+and one whose variable no state could read since the last directed pass, such as a helper's own while no state waits
+in the helper, goes to the back of the line); clock states take only their attempt's own steps and otherwise come
+after all play states.
 With conjunctive steering (on by default, off with `--no-conjunctive`), a way that needs all parts of its condition
 (`a >= 5 and b <= 6` true, an `or` false) is steered by the condition's branch distance instead of each part's
 closeness: a state is closer when fewer of the parts it can read are unsatisfied, or as many but nearer in sum (an `or`
