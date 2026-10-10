@@ -445,6 +445,77 @@ test("compound, property, index, and collection changes give the whole variable 
   );
 });
 
+test("a receiver kept for the rest of its statement is explained by the value it selects", () => {
+  const played = traced(
+    [
+      "function pick(value) {",
+      "    return value",
+      "}",
+      "function scores {",
+      "    return [10, 20, 30]",
+      "}",
+      "let best = scores()[pick(1)]",
+      "let rows = [[0], [5]]",
+      "let i = 1",
+      "rows[i].add(pick(7))",
+      "let s = set[[1]]",
+      "let first = s.first[pick(0)]",
+      'say "${best} ${first} ${rows.length}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  // How the engine keeps such a receiver is no value of the script.
+  assert.deepEqual(
+    records(played.trace).filter((candidate) => candidate.preview?.includes("preparedReference")),
+    [],
+  );
+  const declaration = (name: string) =>
+    records(played.trace).find(
+      (candidate) => candidate.kind === "declaration" && candidate.target === name,
+    )!;
+  // `scores()` only copies the call's result, so the result explains `best` directly.
+  assert.deepEqual(
+    causes(played.trace, declaration("best")).map((cause) => [cause.kind, cause.preview]),
+    [
+      ["return", "[10, 20, 30]"],
+      ["return", "1"],
+    ],
+  );
+  // `s.first` selects a member: an intermediate value shows it, explained by the set.
+  const selected = causes(played.trace, declaration("first")).find(
+    (cause) => cause.kind === "temporary",
+  )!;
+  assert.deepEqual([selected.preview, selected.location?.line], ["[1]", 12]);
+  assert.deepEqual(
+    causes(played.trace, selected).map((cause) => [cause.kind, cause.target]),
+    [["declaration", "s"]],
+  );
+  // `rows[i]` shows the element it changes.
+  assert.ok(
+    records(played.trace).some(
+      (candidate) =>
+        candidate.kind === "temporary" &&
+        candidate.preview === "[5]" &&
+        candidate.location?.line === 10,
+    ),
+  );
+  // A property step that a change during the preparation makes a list's `random` draws once, while the receiver is
+  // prepared, not again for Debug: the traced run equals the untraced one (`traced` compares them).
+  const drawn = traced(
+    [
+      "let rows: (object | integer[][][])[] = [{ random: [[0]] }, [[[2]], [[3]]]]",
+      "function pick(value) {",
+      "    return value",
+      "}",
+      "rows[0].random[rows.removeFirst().random.removeFirst().removeFirst()].add(pick(7))",
+      "say rows, instant",
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(drawn.snapshot.failure, null);
+});
+
 test("interpolation selection and shuffle record the draws that chose the text", () => {
   const played = traced(
     [

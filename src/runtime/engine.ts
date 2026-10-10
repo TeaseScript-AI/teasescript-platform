@@ -890,18 +890,32 @@ function executePlannedInstruction(
       return;
     }
     case "prepareReference": {
-      const reference = evaluator.prepareReference(
+      const { reference, value } = evaluator.prepareReference(
         instruction.expression,
         snapshotValidationAnalysis(plan).preparedReferenceTemporaries.get(
           instruction.destinationTemporary,
         ) === true,
       );
       setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
-      evaluator.trace?.writeTemporary(
-        evaluator.callFrameId(),
-        instruction.destinationTemporary,
-        reference,
-      );
+      if (evaluator.trace !== null) {
+        // Debug explains the value the reference selected while it was prepared, as it explains a temporary that holds
+        // that value. Resolving the reference again could draw a random element a second time.
+        if (
+          instruction.expression.kind === "temporary" ||
+          instruction.expression.kind === "identifier"
+        )
+          evaluator.trace.copyTemporary(
+            evaluator.callFrameId(),
+            instruction.destinationTemporary,
+            value,
+          );
+        else
+          evaluator.trace.writeTemporary(
+            evaluator.callFrameId(),
+            instruction.destinationTemporary,
+            value,
+          );
+      }
       advance(snapshot);
       return;
     }
