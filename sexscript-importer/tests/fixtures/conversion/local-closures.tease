@@ -3,6 +3,9 @@
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args) {
+  if action == "again" {
+    return again(args[0], args[1])
+  }
   if action == "scriptCallback4" {
     scriptCallback4()
     return
@@ -57,4 +60,12 @@ if askBoolean "Hurry?" {
   // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
 }
 wait 1 s
+// A closure that gets itself as its parameter, and calls it, calls itself directly, as every call passes it.
+function again(againValue, times) {
+  if times > 0 {
+    say "Again ${times}"
+    return again(againValue, times - 1)
+  }
+}
+again("again", 2)
 exit
