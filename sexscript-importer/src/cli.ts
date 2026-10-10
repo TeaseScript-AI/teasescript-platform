@@ -41,12 +41,15 @@ const accepted: ReadonlySet<AcceptedForm> =
   acceptedArgument === undefined ? new Set() : parseAcceptedForms(acceptedArgument.slice(11));
 // `--keep-paragraphs` keeps texts with blank lines as one message each (a unit's keepParagraphs).
 const keepParagraphs = rawArgs.includes("--keep-paragraphs");
+// `--held=<path>` holds a stand-alone script back from the start choice (a unit's heldStandAlone).
+const heldScripts = rawArgs.flatMap((arg) => (arg.startsWith("--held=") ? [arg.slice(7)] : []));
 const args = rawArgs.filter(
   (arg) =>
     arg !== "--compile" &&
     arg !== "--run" &&
     arg !== acceptedArgument &&
-    arg !== "--keep-paragraphs",
+    arg !== "--keep-paragraphs" &&
+    !arg.startsWith("--held="),
 );
 
 if (command === "inventory") {
@@ -77,6 +80,7 @@ if (command === "inventory") {
     options.readFile = packageFileReader(dataRoot);
     const internal = await internalScripts(args[0]!);
     if (internal !== null) options.internalScripts = internal;
+    if (heldScripts.length > 0) options.heldScripts = heldScripts;
     const versions = await releases(args[0]!);
     if (versions.length > 0) options.releases = versions;
   }
@@ -152,6 +156,7 @@ async function convertPackage(
     files,
     readFile: packageFileReader(dataRoot),
     ...(internal === null ? {} : { internalScripts: internal }),
+    ...(heldScripts.length === 0 ? {} : { heldScripts }),
     ...(versions.length === 0 ? {} : { releases: versions }),
   });
   const programs = lowered.composed;

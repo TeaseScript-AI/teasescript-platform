@@ -319,6 +319,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
       cliPath,
       "convert-package",
       ...(patches?.keepParagraphs == null ? [] : ["--keep-paragraphs"]),
+      ...heldArguments(patches),
       path.join(unitRoot, "scripts"),
       packageRoot,
     ]);
@@ -335,7 +336,12 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     step = "media";
     const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
     step = "report";
-    const report = await unitReport(unitRoot, packageRoot, patches?.keepParagraphs != null);
+    const report = await unitReport(
+      unitRoot,
+      packageRoot,
+      patches?.keepParagraphs != null,
+      heldArguments(patches),
+    );
     const record: ConversionRecord = {
       source: path.join(corpusRoot, id),
       converter: options.converter,
@@ -412,7 +418,12 @@ export async function reportUnit(options: UnitOptions): Promise<UnitResult | "re
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
     step = "report";
-    const report = await unitReport(unitRoot, published, patches?.keepParagraphs != null);
+    const report = await unitReport(
+      unitRoot,
+      published,
+      patches?.keepParagraphs != null,
+      heldArguments(patches),
+    );
     const temporary = path.join(published, ".report.json.tmp");
     await writeFile(temporary, `${JSON.stringify(report)}\n`);
     await rename(temporary, path.join(published, ".report.json"));
@@ -510,6 +521,11 @@ async function linkMedia(
   return { linkedMedia, linkedResourceMedia, collisions, resourcePacks: [...packs].sort() };
 }
 
+/** The CLI arguments that hold a unit's stand-alone scripts back from the start choice. */
+function heldArguments(patches: UnitPatches | null): string[] {
+  return [...(patches?.heldStandAlone.keys() ?? [])].map((file) => `--held=${file}`);
+}
+
 /**
  * The importer's report of a unit's sources, with compiler checks and smoke runs, and with `finalPackage` checking
  * the package as written. A report that fails or is not a JSON object fails the unit.
@@ -518,12 +534,14 @@ async function unitReport(
   unitRoot: string,
   packageRoot: string,
   keepParagraphs: boolean,
+  held: readonly string[],
 ): Promise<Record<string, unknown>> {
   const { exitCode, stdout, stderr } = await run(process.execPath, [
     cliPath,
     "report",
     "--run",
     ...(keepParagraphs ? ["--keep-paragraphs"] : []),
+    ...held,
     "--package",
     packageRoot,
     path.join(unitRoot, "scripts"),

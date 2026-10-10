@@ -57,6 +57,11 @@ export interface UnitPatches {
    * art or tables (`"keepParagraphs": { "reason": ... }` in the manifest); null where texts split into paragraphs.
    */
   readonly keepParagraphs: string | null;
+  /**
+   * Stand-alone scripts the start does not offer until the owner decides, by their paths from the scripts folder, with
+   * why (`"heldStandAlone": { path: reason }` in the manifest), such as a development leftover.
+   */
+  readonly heldStandAlone: ReadonlyMap<string, string>;
 }
 
 /** A patch that is invalid, stale, or does not apply. */
@@ -88,7 +93,7 @@ export async function readUnitPatches(
   }
   if (
     !isRecord(manifest) ||
-    !onlyKeys(manifest, ["patches", "keepParagraphs"]) ||
+    !onlyKeys(manifest, ["patches", "keepParagraphs", "heldStandAlone"]) ||
     !Array.isArray(manifest.patches)
   )
     throw new PatchError(`${where} must be an object with a "patches" list`);
@@ -101,6 +106,12 @@ export async function readUnitPatches(
       keep.reason.trim() === "")
   )
     throw new PatchError(`${where} has a "keepParagraphs" that is not { "reason": text }`);
+  const held = manifest.heldStandAlone ?? {};
+  if (
+    !isRecord(held) ||
+    !Object.values(held).every((reason) => typeof reason === "string" && reason.trim() !== "")
+  )
+    throw new PatchError(`${where} has a "heldStandAlone" that is not { path: reason }`);
   const patches: UnitPatch[] = [];
   const hashes = new Map<string, string>();
   for (const [index, entry] of manifest.patches.entries()) {
@@ -120,6 +131,7 @@ export async function readUnitPatches(
     patches,
     hashes,
     keepParagraphs: isRecord(keep) && typeof keep.reason === "string" ? keep.reason : null,
+    heldStandAlone: new Map(Object.entries(held as Record<string, string>)),
   };
 }
 

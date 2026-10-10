@@ -89,6 +89,8 @@ export interface FeasibilityOptions {
   readFile?: PackageFileReader;
   /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
   internalScripts?: readonly string[];
+  /** Stand-alone scripts held back from the start choice (PackageOptions.heldScripts). */
+  heldScripts?: readonly string[];
   /** Releases that a corpus merge put side by side (PackageOptions.releases). */
   releases?: ReadonlyArray<readonly string[]>;
   /**
@@ -313,6 +315,7 @@ export function analyzeFeasibility(
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
     ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
+    ...(options.heldScripts === undefined ? {} : { heldScripts: options.heldScripts }),
     ...(options.releases === undefined ? {} : { releases: options.releases }),
   });
   const isScriptBodyAt = (index: number): boolean =>

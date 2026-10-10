@@ -108,6 +108,11 @@ export interface PackageOptions {
    */
   internalScripts?: readonly string[];
   /**
+   * Stand-alone scripts that the start does not offer beside the main story until the owner decides, by their paths
+   * from the legacy scripts folder, such as a development leftover (a unit's `heldStandAlone`).
+   */
+  heldScripts?: readonly string[];
+  /**
    * Releases of the package that a corpus merge put side by side, each the files of one release by their paths from
    * the legacy scripts folder, such as an older version of a script with its own module versions
    * (`toy__sha256_<hash>.groovy` with `toy/misc__sha256_<hash>.groovy`): a file of a release loads only that release's
@@ -422,6 +427,8 @@ function entryMenu(
   scripts: PackageScripts,
   programs: readonly MigrationProgram[],
   internal: ReadonlySet<number>,
+  /** Stand-alone scripts held back until the owner decides (PackageOptions.heldScripts). */
+  heldBack: ReadonlySet<number>,
 ): MigrationProgram {
   const targets = new Set<string>();
   // The literal transfers of each script, by its path.
@@ -605,7 +612,7 @@ function entryMenu(
   // through a computed transfer of a folder above them, and localized variants, such as Lines' Reset scripts. With one
   // entry, main.tease starts with a choice of the main story or one of them.
   const lowerPaths = new Set(paths.map((path) => path.toLowerCase()));
-  const extras = [...scripts.pathOf]
+  const candidates = [...scripts.pathOf]
     .flatMap(([index, path]) => (internal.has(index) ? [] : [path]))
     .filter(
       (path) =>
@@ -615,24 +622,30 @@ function entryMenu(
         !(base(path) !== path && lowerPaths.has(base(path).toLowerCase())),
     )
     .sort(versionOrder);
-  // A package with several entries, or more than five such scripts, keeps its start until the owner decides.
-  const heldBack = extras.length > 0 && (choices.length > 1 || extras.length > 5);
-  const held: MigrationDiagnostic[] = heldBack
-    ? [
-        {
-          code: "SX_ENTRY_EXTRAS_HELD",
-          severity: "info",
-          message: `The legacy player also listed ${extras.join(", ")} for the player to open directly; the start does not offer them yet (${choices.length > 1 ? "the package has several entries" : "more than five such scripts"}), pending an owner decision.`,
-          span: null,
-        },
-      ]
-    : [];
-  if (choices.length === 1 && extras.length > 0 && !heldBack)
+  const heldPaths = new Set([...heldBack].map((index) => scripts.pathOf.get(index)));
+  const extras = candidates.filter((path) => !heldPaths.has(path));
+  // A package with several entries, or more than five such scripts, keeps its start until the owner decides, as do
+  // the scripts a unit holds back.
+  const heldAll = extras.length > 0 && (choices.length > 1 || extras.length > 5);
+  const notOffered = heldAll ? candidates : candidates.filter((path) => heldPaths.has(path));
+  const held: MigrationDiagnostic[] =
+    notOffered.length === 0
+      ? []
+      : [
+          {
+            code: "SX_ENTRY_EXTRAS_HELD",
+            severity: "info",
+            message: `The legacy player also listed ${notOffered.join(", ")} for the player to open directly; the start does not offer ${notOffered.length === 1 ? "it" : "them"} yet (${heldAll ? (choices.length > 1 ? "the package has several entries" : "more than five such scripts") : "held back by the unit"}), pending an owner decision.`,
+            span: null,
+          },
+        ];
+  const heldBackAll = heldAll;
+  if (choices.length === 1 && extras.length > 0 && !heldBackAll)
     return {
       sourceName: `${scripts.root}/main.tease`,
       metadata,
       statements: startChoice(choices[0]!, extras, variants, scripts, programs),
-      diagnostics: [],
+      diagnostics: held,
       startChoice: true,
     };
   // One entry needs no menu and no note: main.tease goes there.
@@ -1066,7 +1079,12 @@ export function lowerPackage(
   const generated: MigrationProgram | null =
     legacyMain !== null
       ? null
-      : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
+      : entryMenu(
+          scripts,
+          withClasses,
+          internalScripts(files, options.internalScripts),
+          internalScripts(files, options.heldScripts),
+        );
   const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses);
   const outputIndexes = [
     ...new Set([...scriptIndexes, ...classOutputs.keys(), ...moduleFiles.keys()]),

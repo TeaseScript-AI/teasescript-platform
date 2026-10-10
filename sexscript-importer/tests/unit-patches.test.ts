@@ -314,6 +314,33 @@ test(
   },
 );
 
+test(
+  "a stand-alone script that a unit holds back stays out of the start choice",
+  { skip: unbuilt },
+  async () => {
+    const { work, options } = await fixture();
+    try {
+      const scripts = path.join(options.corpusRoot, "Walk/scripts");
+      await writeFile(
+        path.join(scripts, "walk.groovy"),
+        'setInfos(9, "Walk", "A walk", "Author", "1", 0, "en", [])\nshow("Walk on")\nreturn "start"\n',
+      );
+      await writeFile(path.join(scripts, "reset.groovy"), 'save("walk.step", null)\n');
+      converted(await convertUnit(options));
+      const main = path.join(options.outputRoot, "Walk/main.tease");
+      assert.match(await readFile(main, "utf8"), /Extra, not part of the story: reset/u);
+      await writeFile(
+        path.join(work, "patches/Walk/patches.json"),
+        JSON.stringify({ heldStandAlone: { "reset.groovy": "A leftover." }, patches: [] }),
+      );
+      converted(await convertUnit(options));
+      assert.doesNotMatch(await readFile(main, "utf8"), /Extra, not part of the story/u);
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  },
+);
+
 test("patch manifests are checked before anything is applied", async () => {
   const { work, options } = await fixture();
   try {
@@ -344,6 +371,11 @@ test("patch manifests are checked before anything is applied", async () => {
       JSON.stringify({ keepParagraphs: true, patches: [] }),
     );
     await assert.rejects(readUnitPatches(options.patchesRoot, "Walk"), /"keepParagraphs"/u);
+    await writeFile(
+      path.join(work, "patches/Walk/patches.json"),
+      JSON.stringify({ heldStandAlone: { "reset.groovy": "" }, patches: [] }),
+    );
+    await assert.rejects(readUnitPatches(options.patchesRoot, "Walk"), /"heldStandAlone"/u);
     assert.equal(await readUnitPatches(options.patchesRoot, "Elsewhere"), null);
   } finally {
     await rm(work, { recursive: true, force: true });
