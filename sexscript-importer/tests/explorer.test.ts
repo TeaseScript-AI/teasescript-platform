@@ -1103,6 +1103,39 @@ test(
   },
 );
 
+test(
+  "a run counts as exhausted only once the draws whose outcomes were not all offered have offered the rest",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    let source =
+      'say "Shuffle."\nshowButton "Deal"\nlet face = randomInteger(0..40)\nswitch face {\n';
+    for (let index = 0; index < 40; index += 1)
+      source += `  case ${index} {\n    say "Face ${index}."\n  }\n`;
+    source += '}\nshowButton "Again"\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 20_000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      randomChoices: true,
+    });
+    assert.equal(result.search.stoppedBy, "exhausted");
+    // Every face of the forty, of which a draw first offers sixteen; only the last case's other way, no face beyond it, is
+    // left.
+    assert.deepEqual(
+      result.coverage.unvisitedBranches.map((entry) => entry.missed),
+      ["false"],
+    );
+    assert.equal(result.coverage.reach.unknown, 0);
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

@@ -489,7 +489,9 @@ the first four draws it made (`randomDrawAlternatives`: all of a small support, 
 at most three per draw, each outcome of a draw site once per waiting place and input) as steps with the same input and
 that outcome chosen, also after directed steps. Those steps and the expansions of the states after them take at most a
 sixteenth of all runtime operations while other states are open, checked before each input (a state cut short goes on
-later with the inputs it has not tried), and all of them when none is; they can cost much more than other steps. Such
+later with the inputs it has not tried), and all of them when none is; they can cost much more than other steps. Once
+nothing else is left to do, a draw whose outcomes were not all offered offers the rest there, from four times as many
+representative outcomes each time (1,024 at most), before the run counts as exhausted. Such
 states are apart from play's, also where the runtime state is the same, with their own loop keys and cell expansions,
 so that they do not move play states back; they give no leads, time steps, directed attempts, or storage for next
 visits, and a way only they reached stays a goal of directed search. A path records only the outcomes it

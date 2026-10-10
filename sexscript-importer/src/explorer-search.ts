@@ -123,6 +123,8 @@ const MAX_DISTANCE_TARGETS = 8;
 const RANDOM_ALTERNATIVES = 3;
 const RANDOM_SUPPORT = 16;
 const RANDOM_DRAWS_PER_STEP = 4;
+/** Once nothing else is left to do: the outcomes of a draw, at most, that the rest of its outcomes are taken from. */
+const RANDOM_WIDE_SUPPORT = 1024;
 /**
  * With random choices: the share of all runtime operations that steps with a chosen random outcome and the expansions
  * of states after one may take while play states are open. Such steps can cost much more than others.
@@ -1734,6 +1736,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const randomTried = new Set<string>();
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
+  /**
+   * With random choices: the draws, once per place, input, and site, whose outcomes were not all offered, with how many
+   * outcomes they were taken from (see {@link widenDraws}).
+   */
+  const partialDraws: { node: number; input: ExplorerInput; draw: Data; support: number }[] = [];
+  const partialKeys = new Set<string>();
   let chosenAt = 0;
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
@@ -2593,7 +2601,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /**
    * With random choices, queues the other outcomes of the draws a step made, each as a step with the same input: each
    * outcome of a site once per place and input, the first ones not tried there yet. An outcome chosen for the same draw
-   * before is replaced.
+   * before is replaced. A draw whose outcomes were not all offered is kept for {@link widenDraws}.
    */
   const offerChoices = (node: Node, input: ExplorerInput, next: Step): void => {
     if (!chooses) return;
@@ -2601,23 +2609,82 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const context = `${node.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
     for (const draw of next.draws.slice(0, RANDOM_DRAWS_PER_STEP)) {
       if (typeof draw.drawId !== "number" || typeof draw.site !== "string") continue;
-      let taken = 0;
-      for (const outcome of engine.randomDrawAlternatives(draw, RANDOM_SUPPORT).alternatives) {
-        if (taken === RANDOM_ALTERNATIVES) break;
-        const tried = `${context} ${draw.site} ${JSON.stringify(outcome)}`;
-        if (randomTried.has(tried)) continue;
-        randomTried.add(tried);
-        taken += 1;
-        const others = (input.random ?? []).filter((choice) => choice.drawId !== draw.drawId);
-        chosenSteps.push({
-          node: node.id,
-          input: {
-            ...input,
-            random: [...others, { drawId: draw.drawId, site: draw.site, outcome }],
-          },
-        });
+      const found = engine.randomDrawAlternatives(draw, RANDOM_SUPPORT);
+      const taken = queueOutcomes(
+        node,
+        input,
+        draw,
+        found.alternatives,
+        context,
+        RANDOM_ALTERNATIVES,
+      );
+      // A draw whose outcomes were not all offered gets the rest once nothing else is left to do.
+      const key = `${context} ${draw.site}`;
+      if ((!found.complete || taken < found.alternatives.length) && !partialKeys.has(key)) {
+        partialKeys.add(key);
+        partialDraws.push({ node: node.id, input, draw, support: RANDOM_SUPPORT });
       }
     }
+  };
+
+  /**
+   * Queues steps of `input` from `node` with outcomes of `draw` not tried at its place yet, at most `limit`; an outcome
+   * chosen for the same draw before is replaced. How many outcomes it went through, tried ones included.
+   */
+  const queueOutcomes = (
+    node: Node,
+    input: ExplorerInput,
+    draw: Data,
+    outcomes: readonly Data[],
+    context: string,
+    limit: number,
+  ): number => {
+    let taken = 0;
+    let seen = 0;
+    for (const outcome of outcomes) {
+      if (taken === limit) break;
+      seen += 1;
+      const tried = `${context} ${String(draw.site)} ${JSON.stringify(outcome)}`;
+      if (randomTried.has(tried)) continue;
+      randomTried.add(tried);
+      taken += 1;
+      const others = (input.random ?? []).filter((choice) => choice.drawId !== draw.drawId);
+      chosenSteps.push({
+        node: node.id,
+        input: {
+          ...input,
+          random: [...others, { drawId: Number(draw.drawId), site: String(draw.site), outcome }],
+        },
+      });
+    }
+    return seen;
+  };
+
+  /**
+   * With random choices, once nothing else is left to do: the outcomes of the draws whose outcomes were not all
+   * offered, from four times as many as before (up to {@link RANDOM_WIDE_SUPPORT}), all those not tried at their place
+   * yet. Whether it queued any.
+   */
+  const widenDraws = (): boolean => {
+    const before = chosenSteps.length;
+    for (let index = 0; index < partialDraws.length;) {
+      const entry = partialDraws[index]!;
+      const { random: _, ...plain } = entry.input;
+      const context = `${nodes[entry.node]!.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
+      entry.support = Math.min(entry.support * 4, RANDOM_WIDE_SUPPORT);
+      const found = engine.randomDrawAlternatives(entry.draw, entry.support);
+      queueOutcomes(
+        nodes[entry.node]!,
+        entry.input,
+        entry.draw,
+        found.alternatives,
+        context,
+        Infinity,
+      );
+      if (found.complete || entry.support === RANDOM_WIDE_SUPPORT) partialDraws.splice(index, 1);
+      else index += 1;
+    }
+    return chosenSteps.length > before;
   };
 
   /**
@@ -4037,7 +4104,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         turn = chooseDepth();
         if (turn === null) {
           if (depthFrontier.chosen > 0) picked = depthFrontier.popChosen();
-          else if (analyze()) continue;
+          else if (analyze() || widenDraws()) continue;
           else break;
         } else if (
           depthFrontier.freshOf(turn.depth) === 0 &&
@@ -4049,7 +4116,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         else picked = depthFrontier.popDepth(turn.depth);
       }
     } else if (frontier.size === 0) {
-      if (analyze()) continue;
+      if (analyze() || widenDraws()) continue;
       break;
     } else picked = frontier.pop();
     const node = nodes[picked!]!;
