@@ -2,6 +2,7 @@ import { datePatternFields, datePatternKind } from "./java-time.ts";
 import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
+import { withLoopedTailCalls } from "./tail-calls.ts";
 import {
   constantString,
   groovyParameters,
@@ -2414,7 +2415,7 @@ let helperResults: ReadonlyMap<string, TeaseType> | undefined;
  */
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
   helperResults ??= functionResultTypes(allHelperStatements());
-  const result = enforceVariableTypes(statements, helperResults);
+  const result = enforceVariableTypes(withLoopedTailCalls(statements), helperResults);
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
