@@ -3289,7 +3289,9 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
             context,
             node,
             "SX_LABELLED_JUMP",
-            `${node.kind} ${node.label} jumps to a labelled loop or statement, which Groovy also allowed outside any loop as a jump back to that statement; TeaseScript ${node.kind} affects only the innermost loop. Restructure the code, for example with a loop and a flag.`,
+            node.kind === "continue"
+              ? `continue ${node.label} jumps to a labelled loop or statement, which Groovy also allowed outside any loop as a jump back to that statement; TeaseScript continue affects only the innermost loop. Restructure the code, for example with a loop and a flag.`
+              : `break ${node.label} leaves an outer labelled loop; TeaseScript break affects only the innermost loop. Restructure the loops, for example with a flag.`,
           ),
         ];
       }
@@ -10736,7 +10738,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
     // A part of a split read at a fixed position, `text.split(",")[1]`, is the same with or without trailing empty parts
-    // where Java had it; past its parts, where Java failed, TeaseScript reads an empty part.
+    // where Java had it; within the trailing empty parts Java dropped, where Java failed, TeaseScript reads an empty
+    // part, and farther positions fail in both.
     const fixed = indexNode === null ? undefined : constantValue(indexNode);
     if (
       targetNode?.kind === "methodCall" &&
