@@ -14663,7 +14663,8 @@ function growingListWrite(
   const list = target.target;
   // A literal position known to be inside the list is a plain write; one known to be its length appends.
   if (literalSets.has(targetNode)) return null;
-  if (literalEnds.has(targetNode))
+  const end = constantValue(indexNode);
+  if (literalEnds.has(targetNode) && typeof end === "number")
     return [
       {
         kind: "if",
@@ -14671,7 +14672,7 @@ function growingListWrite(
           kind: "binary",
           operator: "==",
           left: { kind: "property", target: list, name: "length" },
-          right: { kind: "literal", value: constantValue(indexNode) as number },
+          right: { kind: "literal", value: end },
         },
         then: [
           {

@@ -1,6 +1,8 @@
+import { isRecord } from "./ast.ts";
 import { allHelperStatements, SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
+import { mapChildren } from "./variable-types.ts";
 
 /** The wait each pass of a clock loop takes: short enough to keep a redrawn animation moving. */
 const TICK_SECONDS = 0.1;
@@ -245,17 +247,10 @@ function advancesIn(value: IrExpression, advancing: ReadonlySet<string>): boolea
 /** The expressions directly inside an expression, also the values of a text's parts and an object's properties. */
 function childExpressions(value: IrExpression): IrExpression[] {
   const children: IrExpression[] = [];
-  const add = (item: unknown): void => {
-    if (typeof item !== "object" || item === null) return;
-    if (Array.isArray(item)) {
-      for (const element of item) add(element);
-      return;
-    }
-    const node = item as Record<string, unknown>;
-    if (typeof node.kind === "string") children.push(node as unknown as IrExpression);
-    else add(node.value);
-  };
-  for (const child of Object.values(value)) add(child);
+  mapChildren(value, (child) => {
+    children.push(child);
+    return child;
+  });
   return children;
 }
 
@@ -302,10 +297,11 @@ function mayWaitHere(
 ): boolean {
   switch (node.kind) {
     case "wait": {
-      const duration = node.duration as IrExpression;
+      const duration = node.duration;
       return !(
-        (duration.kind === "literal" && duration.value === 0) ||
-        (duration.kind === "duration" && duration.value === 0)
+        isRecord(duration) &&
+        (duration.kind === "literal" || duration.kind === "duration") &&
+        duration.value === 0
       );
     }
     case "showButton":
@@ -555,10 +551,9 @@ function fixedPoint(
 /** Whether `test` holds for a node of `value`, an IR statement or expression tree. */
 function some(value: unknown, test: (node: Record<string, unknown>) => boolean): boolean {
   if (Array.isArray(value)) return value.some((item) => some(item, test));
-  if (typeof value !== "object" || value === null) return false;
-  const node = value as Record<string, unknown>;
-  if (typeof node.kind === "string" && test(node)) return true;
-  return Object.values(node).some((child) => some(child, test));
+  if (!isRecord(value)) return false;
+  if (typeof value.kind === "string" && test(value)) return true;
+  return Object.values(value).some((child) => some(child, test));
 }
 
 /** Every name the statements bind or read, also a loop's variables, which a new name must not take. */

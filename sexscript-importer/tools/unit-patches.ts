@@ -131,7 +131,11 @@ export async function readUnitPatches(
     patches,
     hashes,
     keepParagraphs: isRecord(keep) && typeof keep.reason === "string" ? keep.reason : null,
-    heldStandAlone: new Map(Object.entries(held as Record<string, string>)),
+    heldStandAlone: new Map(
+      Object.entries(held).flatMap(([file, reason]) =>
+        typeof reason === "string" ? [[file, reason] as const] : [],
+      ),
+    ),
   };
 }
 
