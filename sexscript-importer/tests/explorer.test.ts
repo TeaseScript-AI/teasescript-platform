@@ -2047,6 +2047,33 @@ test(
 );
 
 test(
+  "a loop whose only way out is a random draw is not reported as a trap while its states or their other outcomes are not all explored",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // Each round leaves the loop with a chance of one in a thousand: a player gets out, though the outcomes the
+    // explorer tried may all stay inside.
+    const source =
+      'say "Start."\nlet going = true\nwhile going {\n  showButton "Again"\n' +
+      '  if randomInteger(1..1000) == 1 {\n    going = false\n  }\n}\nsay "Out."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 5000,
+      maxStates: 50,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      cells: true,
+      randomChoices: true,
+    });
+    assert.deepEqual(result.traps, []);
+  },
+);
+
+test(
   "a long run of waits with nothing else to do takes one cell however far it goes, so its passes do not look new, and an endless one is still a trap",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

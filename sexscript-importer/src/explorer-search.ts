@@ -1769,6 +1769,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const partialDraws: { node: number; input: ExplorerInput; draw: Data; support: number }[] = [];
   const partialKeys = new Set<string>();
   let chosenAt = 0;
+  /** States a step from which made random draws whose other outcomes are not offered. */
+  const drawsLeft = new Set<number>();
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
     number,
@@ -2635,6 +2637,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * before is replaced. A draw whose outcomes were not all offered is kept for {@link widenDraws}.
    */
   const offerChoices = (node: Node, input: ExplorerInput, next: Step): void => {
+    // A draw whose other outcomes are not offered leaves the state's future open (see `findTraps`).
+    if (
+      next.draws.length > (chooses ? RANDOM_DRAWS_PER_STEP : 0) ||
+      next.draws.some((draw) => typeof draw.drawId !== "number" || typeof draw.site !== "string")
+    )
+      drawsLeft.add(node.id);
     if (!chooses) return;
     const { random: _, ...plain } = input;
     const context = `${node.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
@@ -4542,7 +4550,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     else counts.notFirst += 1;
     linesBySession.files.set(file, counts);
   });
-  const traps = findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start));
+  // A state with other outcomes of its draws not tried yet has a future not explored.
+  for (const job of chosenSteps.slice(chosenAt)) drawsLeft.add(job.node);
+  for (const entry of partialDraws) drawsLeft.add(entry.node);
+  const traps = findTraps(
+    nodes,
+    instructions,
+    files,
+    (node) => reproOf(node, null, node.start),
+    (node) => drawsLeft.has(node.id),
+  );
 
   /**
    * The corpus to keep: the paths to crashes and traps, then, by greedy set cover, paths of steps that covered a line or
@@ -5655,8 +5672,11 @@ function directedSummary(
 /**
  * Traps: loops the player cannot leave. Explored states are grouped by loop key (the state without clock, random
  * state, and settled handles), with an edge wherever an explored input leads from one group to another. A group
- * escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
- * future is unknown; so does every group with an edge to an escaping group. The remaining groups form the trapped
+ * escapes when one of its states ended (completed or failed), or when its future is unknown: none of its states was
+ * fully expanded, or a step from one made random draws whose other outcomes were not all tried at its place
+ * (`randomOpen`), as a state that comes back to the same place with another random state may draw its way out; so
+ * does every group with an edge to an escaping group. Its states that differ only in time or settled handles are taken
+ * to go on as an expanded one does. The remaining groups form the trapped
  * part: every explored input from them leads back into it. Each strongly connected part of it that no explored input
  * leaves is one trap; trapped groups outside such a part lead into one and are counted as its feeders. A state where
  * the player can do nothing and nothing will happen is a `stuck` trap of its own.
@@ -5669,6 +5689,7 @@ function findTraps(
   instructions: readonly Data[],
   files: readonly string[],
   reproOf: (node: Node) => Repro,
+  randomOpen: (node: Node) => boolean,
 ): { report: TrapReport; entry: number }[] {
   const groups = new Map<string, Node[]>();
   for (const node of nodes) {
@@ -5687,7 +5708,7 @@ function findTraps(
   for (const [loop, members] of groups) {
     const ended = members.some((node) => node.status === "completed" || node.status === "failed");
     const explored = members.some((node) => node.status === "expanded" || node.status === "stuck");
-    if (ended || !explored) escaping.add(loop);
+    if (ended || !explored || members.some(randomOpen)) escaping.add(loop);
   }
   const predecessors = new Map<string, string[]>();
   for (const [loop, next] of successors) {
