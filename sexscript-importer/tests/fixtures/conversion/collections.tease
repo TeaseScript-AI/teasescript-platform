@@ -1,8 +1,15 @@
-// MIGRATION INCOMPLETE: 3 error diagnostics.
+// MIGRATION INCOMPLETE: 4 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
-function sexscriptLegacyShuffled(itemsValue) {
-  let shuffled = itemsValue
+function sexscriptLegacyArray(size, valueValue) {
+  let itemsValue = []
+  repeat size {
+    itemsValue.add(valueValue)
+  }
+  return itemsValue
+}
+function sexscriptLegacyShuffled(itemsValue2) {
+  let shuffled = itemsValue2
   let index = shuffled.length - 1
   while index > 0 {
     let other = randomInteger(0..=index)
@@ -22,12 +29,12 @@ function sexscriptLegacyMenuOptions(texts, first) {
   }
   return options
 }
-function sexscriptLegacyListMax(itemsValue2) {
-  if itemsValue2.length == 0 {
+function sexscriptLegacyListMax(itemsValue3) {
+  if itemsValue3.length == 0 {
     return null
   }
-  let best = itemsValue2.first
-  for item in itemsValue2 {
+  let best = itemsValue3.first
+  for item in itemsValue3 {
     if item > best {
       best = item
     }
@@ -43,17 +50,17 @@ function sexscriptLegacyItemAt(listValue, position) {
   }
   return listValue[position]
 }
-function sexscriptLegacyListText(valueValue) {
-  if valueValue is list or valueValue is set {
+function sexscriptLegacyListText(valueValue2) {
+  if valueValue2 is list or valueValue2 is set {
     let partsValue: string[] = []
-    for item in valueValue {
+    for item in valueValue2 {
       partsValue.add(sexscriptLegacyListText(item))
     }
     return "[${partsValue.join(", ")}]"
   }
-  if valueValue is dict {
+  if valueValue2 is dict {
     let entries: string[] = []
-    for key, item in valueValue {
+    for key, item in valueValue2 {
       entries.add("${key}:${sexscriptLegacyListText(item)}")
     }
     if entries.length == 0 {
@@ -61,7 +68,7 @@ function sexscriptLegacyListText(valueValue) {
     }
     return "[${entries.join(", ")}]"
   }
-  return "${valueValue}"
+  return "${valueValue2}"
 }
 function sexscriptLegacySplit(text, separator) {
   let partsValue2 = text.split(separator)
@@ -73,11 +80,11 @@ function sexscriptLegacySplit(text, separator) {
   }
   return partsValue2
 }
-function sexscriptLegacyReversed(itemsValue3) {
+function sexscriptLegacyReversed(itemsValue4) {
   let result = []
-  let index = itemsValue3.length - 1
+  let index = itemsValue4.length - 1
   while index >= 0 {
-    result.add(itemsValue3[index])
+    result.add(itemsValue4[index])
     index -= 1
   }
   return result
@@ -388,4 +395,33 @@ if askBoolean "Pick?" {
   }
 }
 say "Picks ${picks.length}"
+// A collect() closure that returns early inside a try with a finally block stays a TODO: a continue would skip it.
+let finallyCount = 0
+// TODO SX_UNSUPPORTED_LIST_METHOD line 153: Groovy list method collect() is not safely mapped yet.
+// | def finallyKept = [1, 2].collect { item ->
+// | 	try {
+// | 		if (item == 1) return item
+// | 	} finally {
+// | 		finallyCount++
+// | 	}
+// | 	return item + 1
+// | }
+let finallyKept = []
+say "Kept ${finallyKept.length} ${finallyCount}"
+// A list that starts empty and may later hold a Java array, whose length is fixed, does not grow.
+let fixedSlots = []
+let fixedFilled = 0
+// NOTE SX_JAVA_ARRAY_CONVERSION line 165: A Java int[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
+if askBoolean "Fixed?" {
+  fixedSlots = sexscriptLegacyArray(2, 0)
+}
+fixedSlots[fixedFilled] = 5
+fixedFilled += 1
+say "Slots ${fixedSlots.length}"
+// A value of unknown type that another variable is assigned from shares its list too, so a change through it is noted.
+let entryParts = sexscriptLegacySplit(load("game.entries", default: ""), ",")
+let entryCopy = entryParts
+// NOTE SX_SHARED_LIST_WRITE line 172: Groovy shared the list in entryParts with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
+entryParts[0] = "x"
+say "Copy ${entryCopy.length}"
 exit

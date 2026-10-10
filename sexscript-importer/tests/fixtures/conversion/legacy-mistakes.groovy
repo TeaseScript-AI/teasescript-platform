@@ -37,3 +37,6 @@ switch (platform) {
 		def voiceless = "No voice"
 		show(voiceless)
 }
+// A name that a loop binds too is another variable there, so the variable keeps its declaration.
+if (getBoolean("Unset?")) { def seat; show("Unset " + seat) }
+for (seat in [1, 2]) show("Seat " + seat)

@@ -57,4 +57,13 @@ if true {
   let voiceless = "No voice"
   say voiceless
 }
+// A name that a loop binds too is another variable there, so the variable keeps its declaration.
+if askBoolean "Unset?" {
+  // NOTE SX_NULL_START_NUMBER line 41: Groovy showed seat as null until its first value; it starts at 0 here, so a text shown before then says 0.
+  let seat = 0
+  say "Unset ${seat}"
+}
+for seat in [1, 2] {
+  say "Seat ${seat}"
+}
 exit

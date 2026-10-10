@@ -148,3 +148,26 @@ if (getBoolean("Pick?")) {
 	picks[1] = "c"
 }
 show("Picks " + picks.size())
+// A collect() closure that returns early inside a try with a finally block stays a TODO: a continue would skip it.
+def finallyCount = 0
+def finallyKept = [1, 2].collect { item ->
+	try {
+		if (item == 1) return item
+	} finally {
+		finallyCount++
+	}
+	return item + 1
+}
+show("Kept " + finallyKept.size() + " " + finallyCount)
+// A list that starts empty and may later hold a Java array, whose length is fixed, does not grow.
+def fixedSlots = []
+def fixedFilled = 0
+if (getBoolean("Fixed?")) fixedSlots = new int[2]
+fixedSlots[fixedFilled] = 5
+fixedFilled++
+show("Slots " + fixedSlots.size())
+// A value of unknown type that another variable is assigned from shares its list too, so a change through it is noted.
+def entryParts = loadString("game.entries")?.split(",")
+def entryCopy = entryParts
+entryParts[0] = "x"
+show("Copy " + entryCopy.size())

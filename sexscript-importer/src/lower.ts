@@ -236,7 +236,7 @@ interface LowerContext {
   scriptPaths: ReadonlyMap<string, string> | null;
   /** Variables assigned once with the current date (`new Date()`, `Calendar.getInstance()`). */
   dateValues: ReadonlySet<string>;
-  /** List variables that Groovy shared with another variable by an assignment of one to the other. */
+  /** Bindings of lists, or values that may be lists, that Groovy shared with another variable by an assignment. */
   aliasedLists: ReadonlySet<string>;
   /** Bindings of closure parameters and loop variables (parameterBindings). */
   parameterBindings: ReadonlySet<string>;
@@ -1347,20 +1347,44 @@ function declaredWrites(body: AstNode, keys: BindingKeys): DeclaredWrites {
 /**
  * Variables that only ever hold null: declared without a value or with null, and never set, counted, or changed
  * anywhere else in the script, as SubChallenges' `def ChallengeType0` beside `typeout = ChallengeType0`. They are the
- * legacy script's dead variables, whose every read gave null.
+ * legacy script's dead variables, whose every read gave null. A name that a loop or another declaration binds too is
+ * left alone, since its reads may be another variable's.
  */
 function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
   const declared = new Set<string>();
   const changed = new Set<string>();
   const read = new Set<string>();
   const declarationTargets = new Set<unknown>();
+  // How often a binding key is bound: script-level blocks and loops share their names' keys, so a loop variable or a
+  // second declaration of the name is another variable under the same key.
+  const bound = new Map<string, number>();
+  const bind = (key: string | null): void => {
+    if (key !== null) bound.set(key, (bound.get(key) ?? 0) + 1);
+  };
   walkAst(body, (node) => {
     if (node.kind === "declaration") {
-      declarationTargets.add(node.left);
-      const key = bindingKey(node.left, context.bindings);
-      // `int count` starts at 0 and `boolean ready` at false, not null.
-      const primitive = PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "");
+      const left = asNode(node.left);
+      for (const target of left?.kind === "arguments" ? nodeArray(left.items) : [left]) {
+        declarationTargets.add(target);
+        bind(bindingKey(target, context.bindings));
+      }
+      const key = left?.kind === "arguments" ? null : bindingKey(node.left, context.bindings);
+      // `int count` starts at 0, `boolean ready` at false, and `char c` at character 0, not null.
+      const type = text(left?.originType) ?? "";
+      const primitive = PRIMITIVE_DEFAULTS.has(type) || type === "char";
       if (key !== null && !primitive) declared.add(key);
+    } else if (node.kind === "for" && typeof node.variable === "string") {
+      bind(context.bindings.get(node) ?? node.variable);
+    } else if (
+      node.kind === "binary" &&
+      node.operator === "=" &&
+      asNode(node.left)?.kind === "arguments"
+    ) {
+      // A multiple assignment, `(x, y) = values`, gives each target a value.
+      for (const target of nodeArray(asNode(node.left)?.items)) {
+        const key = bindingKey(target, context.bindings);
+        if (key !== null) changed.add(key);
+      }
     } else if (node.kind === "postfix" || node.kind === "prefix") {
       const key = bindingKey(node.value, context.bindings);
       if (key !== null) changed.add(key);
@@ -1374,6 +1398,7 @@ function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
     [...declared].filter(
       (key) =>
         read.has(key) &&
+        bound.get(key) === 1 &&
         !changed.has(key) &&
         !context.compoundValues.has(key) &&
         (context.assignedValues.get(key) ?? []).every(
@@ -1608,7 +1633,7 @@ export function lowerParsedFile(
       options.globalTypes,
     );
     context.dateValues = currentDateVariables(body, context.types);
-    context.aliasedLists = aliasedListVariables(body, context.types);
+    context.aliasedLists = aliasedListVariables(body, context.types, context.bindings);
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
@@ -7524,7 +7549,8 @@ function listElementType(node: AstNode, context: LowerContext): number {
  * The body of a collect() closure that returns early, as loop statements that add each returned element to the
  * accumulator and go on with the next element: `return v` becomes `accumulator.add(v)` and `continue`, and a last value
  * is added too (SissyPlaytimeExposure's exposure check). Null where a return sits in a loop or switch of the body,
- * which a continue would not leave, or where the body does not end in a return or a value.
+ * which a continue would not leave, or in a try with a finally block, which it would skip, or where the body does not
+ * end in a return or a value.
  */
 function collectReturnsBody(closure: AstNode, accumulator: AstNode): AstNode[] | null {
   let jumps = true;
@@ -7555,7 +7581,11 @@ function collectReturnsBody(closure: AstNode, accumulator: AstNode): AstNode[] |
         ],
       };
     }
-    const nested = inJump || ["for", "while", "doWhile", "switch"].includes(node.kind);
+    // A continue would also skip a finally block that the return ran (Groovy ran it before the closure returned).
+    const nested =
+      inJump ||
+      ["for", "while", "doWhile", "switch"].includes(node.kind) ||
+      (node.kind === "tryCatch" && nodeArray(asNode(node.finally)?.statements).length > 0);
     const result: AstNode = { ...node };
     for (const [key, value] of Object.entries(node)) {
       if (isAstNode(value)) result[key] = rewrite(value, nested);
@@ -13840,7 +13870,8 @@ function isCurrentDate(node: AstNode): boolean {
 
 function noteSharedListWrite(list: AstNode | null, node: AstNode, context: LowerContext): void {
   const name = list === null ? null : variableName(list);
-  if (name === null || !context.aliasedLists.has(name)) return;
+  if (name === null || !context.aliasedLists.has(bindingKey(list, context.bindings) ?? name))
+    return;
   addDiagnostic(
     context,
     "SX_SHARED_LIST_WRITE",
@@ -13870,7 +13901,7 @@ function parameterListWrite(
   if (context.parameterBindings.has(key)) {
     return `Groovy changed the list that ${name} refers to, which the caller or the iterated collection shares; in TeaseScript ${name} holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.`;
   }
-  if (context.aliasedLists.has(name)) {
+  if (context.aliasedLists.has(key)) {
     noteSharedListWrite(root, node, context);
   } else if ((context.assignedValues.get(key) ?? []).some((value) => sharesList(value, context))) {
     addDiagnostic(
@@ -13932,20 +13963,25 @@ function sharesList(value: AstNode, context: LowerContext): boolean {
   }
 }
 
-function aliasedListVariables(body: AstNode, types: TypeEnvironment): Set<string> {
-  const names = new Set<string>();
+function aliasedListVariables(
+  body: AstNode,
+  types: TypeEnvironment,
+  bindings: BindingKeys,
+): Set<string> {
+  const keys = new Set<string>();
   walkAst(body, (node) => {
     const assigns =
       node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
-    const target = assigns ? variableName(node.left) : null;
-    const source = assigns ? variableName(node.right) : null;
+    const target = assigns ? bindingKey(node.left, bindings) : null;
+    const source = assigns ? bindingKey(node.right, bindings) : null;
     if (target === null || source === null) return;
-    if (onlyOf(types.variables.get(source) ?? UNKNOWN, LIST | NULL)) {
-      names.add(target);
-      names.add(source);
+    // A value of unknown type may be a list too (SissyPlaytimeExposure's `thisSissy = sissy`, a split of an entry).
+    if ((inferType(asNode(node.right)!, types) & LIST) !== 0) {
+      keys.add(target);
+      keys.add(source);
     }
   });
-  return names;
+  return keys;
 }
 
 /** Groovy map methods that use a map as a lookup table (#536); `clear`, `size`, and `isEmpty` alone do not. */
@@ -14550,9 +14586,16 @@ function growingListWrite(
   // A list that starts empty and is later set to lists of unknown length, `imp = []`, then `imp[nimp] = …` beside
   // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows by appending where the writes count up with a
   // counter; a write at another position of such a list is taken to lie inside it, as in a list of unknown length.
+  // A Java array has a fixed length, which a write past its end failed on, so a variable that may hold one does not grow.
+  const array = (node: AstNode): boolean =>
+    node.kind === "array" ||
+    (node.kind === "cast" && /^\[|\[\]$/u.test(text(node.type) ?? "")) ||
+    callParts(node)?.name === "toArray";
   const refilled =
     isEmptyList(assigned[0]) &&
-    assigned.every((node) => node.kind !== "list" || nodeArray(node.items).length === 0) &&
+    assigned.every(
+      (node) => (node.kind !== "list" || nodeArray(node.items).length === 0) && !array(node),
+    ) &&
     sequentialWrites.has(targetNode);
   // A literal position at or past the end of the literal list the variable starts as, `label = ["<", ">"]` then
   // `label[2] = exit`, grows it too.
