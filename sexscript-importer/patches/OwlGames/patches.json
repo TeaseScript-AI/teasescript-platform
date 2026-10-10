@@ -20,6 +20,13 @@
       "category": "b",
       "reason": "SlideLadderDare, as in the SlideLadderDare unit: The board setup writes `map` from position 1 on and sets `map[0]=0` only afterwards, and the end squares at `map[nmap+i]`, so Groovy's list grew with a null at position 0 until then; the list is therefore typed as holding null, and every later `map[i]` read needs a null test that the moves never make (22 compile errors). `map` is empty when the setup starts, the shuffled blocks hold exactly `nblock` squares each and `imap` ends at `nmap`, so setting `map[0]` first and appending each square in turn builds the same list; a Groovy run gives identical maps for every board size from 30 to 2000.",
       "diff": "sld-map-without-gaps.diff"
+    },
+    {
+      "id": "escape-guess-digits",
+      "layer": "source",
+      "category": "b",
+      "reason": "Escape, as in the Escape unit: getguess fills the caller's list guess digit by digit, guess[iinp]=..., which Groovy shared with bigloop; a TeaseScript parameter is a copy and an empty list has no position to write (TSR025 at the first guess). getguess checks each digit in its own variable, and bigloop fills guess from the answer getguess returns, which always has cfgdigits digits; the same digits reach the same comparisons.",
+      "diff": "escape-guess-digits.diff"
     }
   ]
 }
