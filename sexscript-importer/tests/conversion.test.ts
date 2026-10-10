@@ -961,6 +961,7 @@ test(
       "module-files",
       "entry-hub",
       "entry-own-folder",
+      "stand-alone",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");

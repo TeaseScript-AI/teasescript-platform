@@ -42,7 +42,7 @@ import {
   withDispatcherResultTypes,
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { legacyProfilePrompt } from "./profile.ts";
+import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./profile.ts";
 import { withStorageDefaults } from "./storage-keys.ts";
 import {
   expressionType,
@@ -600,13 +600,48 @@ function entryMenu(
           },
         ];
   const metadata = entryMetadata(choices, scripts, programs);
+  // The stand-alone scripts (owner decision 2026-10-10): the other scripts of the package that a player could open in
+  // the legacy player, also without setInfos, apart from internal scripts, those that something chains to, also
+  // through a computed transfer of a folder above them, and localized variants, such as Lines' Reset scripts. With one
+  // entry, main.tease starts with a choice of the main story or one of them.
+  const lowerPaths = new Set(paths.map((path) => path.toLowerCase()));
+  const extras = [...scripts.pathOf]
+    .flatMap(([index, path]) => (internal.has(index) ? [] : [path]))
+    .filter(
+      (path) =>
+        !choices.includes(path) &&
+        !targeted(path) &&
+        ![...computed].some((from) => path.toLowerCase().startsWith(folderOf(from))) &&
+        !(base(path) !== path && lowerPaths.has(base(path).toLowerCase())),
+    )
+    .sort(versionOrder);
+  // A package with several entries, or more than five such scripts, keeps its start until the owner decides.
+  const heldBack = extras.length > 0 && (choices.length > 1 || extras.length > 5);
+  const held: MigrationDiagnostic[] = heldBack
+    ? [
+        {
+          code: "SX_ENTRY_EXTRAS_HELD",
+          severity: "info",
+          message: `The legacy player also listed ${extras.join(", ")} for the player to open directly; the start does not offer them yet (${choices.length > 1 ? "the package has several entries" : "more than five such scripts"}), pending an owner decision.`,
+          span: null,
+        },
+      ]
+    : [];
+  if (choices.length === 1 && extras.length > 0 && !heldBack)
+    return {
+      sourceName: `${scripts.root}/main.tease`,
+      metadata,
+      statements: startChoice(choices[0]!, extras, variants, scripts, programs),
+      diagnostics: [],
+      startChoice: true,
+    };
   // One entry needs no menu and no note: main.tease goes there.
   if (choices.length === 1 && variants.length === 0)
     return {
       sourceName: `${scripts.root}/main.tease`,
       metadata,
       statements: chain,
-      diagnostics: [],
+      diagnostics: held,
     };
   return {
     sourceName: `${scripts.root}/main.tease`,
@@ -616,8 +651,84 @@ function entryMenu(
       ...question,
       ...chain,
     ],
-    diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
+    diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }, ...held],
   };
+}
+
+/**
+ * The start of a package whose one entry, the main story, has stand-alone scripts beside it (owner decision
+ * 2026-10-10): a choice of the main story, first and labelled as such, or one of them, each labelled as no part of the
+ * story by its legacy name; the main story asks the profile first, as without the choice, and a stand-alone script
+ * only where it reads profile keys the prompt asks (withProfile adds the prompt).
+ */
+function startChoice(
+  main: string,
+  extras: readonly string[],
+  variants: readonly string[],
+  scripts: PackageScripts,
+  programs: readonly MigrationProgram[],
+): IrStatement[] {
+  const indexOf = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
+  const asked = new Set(askedProfileKeys(programs));
+  const readsProfile = (path: string): boolean => {
+    const program = programs[indexOf.get(path) ?? -1];
+    return program !== undefined && [...keysRead(program)].some((key) => asked.has(key));
+  };
+  const file = (path: string): string => path.replace(/^.*\//u, "").replace(/\.tease$/iu, "");
+  // The legacy name of a script, its path from the scripts folder where another offered script has its file name.
+  const legacyName = (path: string): string =>
+    extras.filter((other) => file(other).toLowerCase() === file(path).toLowerCase()).length > 1
+      ? path.replace(/\.tease$/iu, "")
+      : file(path);
+  const id = menuIds([main, ...extras]);
+  const goto = (path: string): IrStatement => ({
+    kind: "goto",
+    target: { kind: "file", path },
+    span: null,
+  });
+  const message =
+    `The legacy player also listed ${extras.join(", ")} for the player to open directly; the start offers them after the main story (owner decision 2026-10-10).` +
+    (variants.length === 0
+      ? ""
+      : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
+  return [
+    { kind: "comment", text: `// NOTE SX_ENTRY_EXTRAS: ${message}`, trailing: false, span: null },
+    {
+      kind: "say",
+      value: { kind: "literal", value: "Which script do you want to start?" },
+      span: null,
+    },
+    {
+      kind: "let",
+      name: "picked",
+      value: {
+        kind: "choice",
+        options: [
+          {
+            kind: "literal",
+            value: `${menuLabels([main], scripts, programs).get(main)!} (main story)`,
+          },
+          ...extras.map((path): IrExpression => ({
+            kind: "literal",
+            value: `Extra, not part of the story: ${legacyName(path)}`,
+          })),
+        ],
+        labels: [main, ...extras].map((path) => id.get(path)!),
+      },
+      span: null,
+    },
+    {
+      kind: "switch",
+      value: { kind: "variable", name: "picked" },
+      cases: extras.map((path) => ({
+        matches: [{ kind: "literal", value: id.get(path)! }],
+        body: [...(readsProfile(path) ? [profileCall()] : []), goto(path)],
+        span: null,
+      })),
+      default: [...(asked.size > 0 ? [profileCall()] : []), goto(main)],
+      span: null,
+    },
+  ];
 }
 
 /**
@@ -1605,12 +1716,15 @@ function packageSavedKeys(
   return keys;
 }
 
-/** A generated entry menu that first asks the legacy player's profile the package reads but never saves. */
+/**
+ * A generated entry menu that first asks the legacy player's profile the package reads but never saves; a start
+ * choice defines the prompt there and calls it in its options (startChoice).
+ */
 function withProfile(
   menu: MigrationProgram,
   programs: readonly MigrationProgram[],
 ): MigrationProgram {
-  const profile = legacyProfilePrompt(programs, menu);
+  const profile = legacyProfilePrompt(programs, menu, menu.startChoice !== true);
   return profile.length === 0
     ? menu
     : renameConflictingIdentifiers(

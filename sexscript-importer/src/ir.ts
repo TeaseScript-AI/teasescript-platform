@@ -35,6 +35,8 @@ export interface MigrationProgram {
   loadsModuleDirectories?: string[];
   /** Functions used as closure-value action IDs (and a marker when actions are called). */
   actions?: string[];
+  /** A generated main.tease that starts with a choice of the main story or a stand-alone script (startChoice). */
+  startChoice?: true;
 }
 
 export interface MixinModuleInfo {
