@@ -78,7 +78,7 @@ if picture == null or picture == "" {
 say "Picture ${picture}"
 // A read of the script's own with a default, which a whole-number default makes a whole number.
 function loadIntegerVal(keyword, defaultValue) {
-  let stored = sexscriptLegacyLoadInteger(keyword)
+  let stored: integer? = sexscriptLegacyLoadInteger(keyword)
   if stored == null {
     return defaultValue
   } else {

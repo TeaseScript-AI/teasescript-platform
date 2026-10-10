@@ -706,6 +706,7 @@ function analyse(
   bindings: Map<BindingKey, Binding>,
   results: ReadonlyMap<string, TeaseType>,
 ): Analysis {
+  const testedIntegerReads = nullTestedIntegerReads(statements);
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -1102,6 +1103,9 @@ function analyse(
         const fixed = item.type === undefined ? undefined : parseAnnotation(item.type);
         const declared = binding(item, item.name, item, fixed);
         let initial = typeOf(item.value, scope);
+        // A whole-number read without a default gives a whole number or null (nullTestedIntegerReads).
+        if (testedIntegerReads.has(item) && fixed === undefined && !declared.integer)
+          initial = { kind: "optional", value: scalar("integer") };
         if (declared.integer && isText(initial)) {
           conflict(
             declared,
@@ -2454,6 +2458,62 @@ function guardedCompare(
     },
     right: { kind: "binary", operator, left, right },
   };
+}
+
+/**
+ * The declarations in functions that a whole-number storage read without a default starts, `let age = load(k)` for
+ * loadInteger(k), and that their function tests for null or orders (`sexscriptLegacyCompare`) but copies into no
+ * other variable: the read gives a whole number or null, which their type then says, so that such a test narrows them.
+ * Elsewhere the read stays as open as a `load`, also where a copy would take its null on.
+ */
+function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrStatement> {
+  const found = new Set<IrStatement>();
+  // Visits the nodes of a function body, not those of a function inside it.
+  const walk = (value: unknown, visit: (node: Record<string, unknown>) => void): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, visit);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    const node = value as Record<string, unknown>;
+    if (node.kind === "function") return;
+    if (typeof node.kind === "string") visit(node);
+    for (const child of Object.values(node)) walk(child, visit);
+  };
+  const isNull = (value: unknown): boolean =>
+    (value as IrExpression).kind === "literal" && (value as { value: unknown }).value === null;
+  const nameOf = (value: unknown): string | null =>
+    (value as IrExpression).kind === "variable" ? (value as { name: string }).name : null;
+  for (const statement of statements) {
+    if (statement.kind !== "function") continue;
+    const tested = new Set<string>();
+    const copied = new Set<string>();
+    walk(statement.body, (node) => {
+      if (node.kind === "let" || (node.kind === "assign" && node.operator === "="))
+        copied.add(nameOf(node.value) ?? "");
+      if (node.kind === "binary" && (node.operator === "==" || node.operator === "!=")) {
+        if (isNull(node.right)) tested.add(nameOf(node.left) ?? "");
+        if (isNull(node.left)) tested.add(nameOf(node.right) ?? "");
+      }
+      if (node.kind === "call" && node.name === COMPARE_HELPER && Array.isArray(node.positional))
+        for (const side of node.positional) tested.add(nameOf(side) ?? "");
+    });
+    walk(statement.body, (node) => {
+      const item = node as unknown as IrStatement;
+      if (
+        item.kind === "let" &&
+        item.type === undefined &&
+        item.integer !== true &&
+        item.value.kind === "load" &&
+        item.value.integer === true &&
+        item.value.defaultValue === undefined &&
+        tested.has(item.name) &&
+        !copied.has(item.name)
+      )
+        found.add(item);
+    });
+  }
+  return found;
 }
 
 /** Whether evaluating a value can neither fail nor change anything: a literal, a variable, or `+`, `-`, `*` of these. */
