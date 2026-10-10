@@ -25,8 +25,20 @@ export function withClockLoopTicks(
   const functions = new Map<string, IrStatement[]>();
   for (const statement of [...allHelperStatements(), ...statements])
     if (statement.kind === "function") functions.set(statement.name, statement.body);
-  const clockFunctions = fixedPoint(functions, (body, found) => readsClock(body, found));
-  const waiting = fixedPoint(functions, (body, found) => alwaysWaits(body, found));
+  // The functions whose results the clock gives, `def now = { -> getTime() }`.
+  const clockFunctions = fixedPoint(functions, (body, found) =>
+    some(body, (node) => node.kind === "return" && readsClock(node.value, found)),
+  );
+  // The functions whose calls may wait, also through others; a call of one the file does not define may.
+  const mayWait = fixedPoint(functions, (body, found) =>
+    some(body, (node) => waitsHere(node, { known: found, unknown: true }, functions)),
+  );
+  // The functions every way through which, to its end or a return, passes something that may wait.
+  const surely = fixedPoint(
+    functions,
+    (body, found) =>
+      passEnd(body, "return", { known: found, unknown: false }, functions) === "waits",
+  );
   // The functions a clock loop calls, also through others, whose waits are its time.
   const callees = new Set<string>();
   const taken = usedNames(statements);
@@ -46,12 +58,26 @@ export function withClockLoopTicks(
         ![...clocked].some((name) => reads(nested.condition, name))
       )
         return [nested];
-      for (const name of calledFunctions(nested.body, functions)) callees.add(name);
-      // A loop that surely waits on each pass keeps its waits, which a text's reading time would not replace.
-      if (waitsEachPass(nested.body, waiting))
+      const called = calledFunctions(nested.body, functions);
+      for (const name of called) callees.add(name);
+      // A loop whose condition or every way back to it passes something that may wait, or that can end otherwise than
+      // by time passing, as when its body changes another value the condition reads, keeps its waits, which a text's
+      // reading time would not replace.
+      const surelyWaiting = { known: surely, unknown: false };
+      const others = [...variablesRead(nested.condition)].filter((name) => !clocked.has(name));
+      if (
+        some(nested.condition, (node) => waitsHere(node, surelyWaiting, functions)) ||
+        others.some((name) =>
+          changes([nested.body, ...[...called].map((callee) => functions.get(callee))], name),
+        ) ||
+        passEnd(nested.body, "continue", surelyWaiting, functions) === "waits"
+      )
         return [{ ...nested, body: clockWaits(nested.body) }];
-      const message =
-        "The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.";
+      // Only a loop that waits nowhere only redraws its texts, which become one message.
+      const redraws = !some(nested.body, (node) =>
+        waitsHere(node, { known: mayWait, unknown: true }, functions),
+      );
+      const message = `The legacy loop polled the clock until the time was up${redraws ? ", redrawing its text as fast as it could," : ", with a way through a pass that waits for nothing,"} at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes${redraws ? ", and the texts the loop says are one message that changes in place" : ""}.`;
       diagnostics.push({ code: "SX_CLOCK_LOOP", severity: "warning", message, span: nested.span });
       const note: IrStatement = {
         kind: "comment",
@@ -69,7 +95,8 @@ export function withClockLoopTicks(
       };
       const body = [tick, ...clockWaits(nested.body)];
       const speakers = new Set(says(body).map((say) => say.speaker));
-      if (says(body).length === 0 || speakers.size !== 1) return [note, { ...nested, body }];
+      if (!redraws || says(body).length === 0 || speakers.size !== 1)
+        return [note, { ...nested, body }];
       const frame = fresh("frame");
       return [
         note,
@@ -201,6 +228,42 @@ function readsClock(value: unknown, clockFunctions: ReadonlySet<string>): boolea
   );
 }
 
+/** The variables a value reads. */
+function variablesRead(value: unknown): Set<string> {
+  const names = new Set<string>();
+  some(value, (node) => {
+    if (node.kind === "variable" && typeof node.name === "string") names.add(node.name);
+    return false;
+  });
+  return names;
+}
+
+/**
+ * Whether statements may change a variable: set it or a part of it, call a method on it, such as a list's `add`, or
+ * pass it to a call, whose function may change what it holds.
+ */
+function changes(statements: unknown, name: string): boolean {
+  const rooted = (target: unknown): boolean => {
+    let node = target as Record<string, unknown> | undefined;
+    while (node !== undefined && (node.kind === "property" || node.kind === "index"))
+      node = node.target as Record<string, unknown> | undefined;
+    return node?.kind === "variable" && node.name === name;
+  };
+  return some(statements, (node) => {
+    if (
+      (node.kind === "assign" && rooted(node.target)) ||
+      (node.kind === "let" && node.name === name)
+    )
+      return true;
+    if (node.kind === "methodCall" && rooted(node.target)) return true;
+    return (
+      node.kind === "call" &&
+      Array.isArray(node.positional) &&
+      node.positional.some((argument) => rooted(argument))
+    );
+  });
+}
+
 function reads(value: unknown, name: string): boolean {
   return some(value, (node) => node.kind === "variable" && node.name === name);
 }
@@ -229,81 +292,123 @@ function calledFunctions(
   return found;
 }
 
-/**
- * Whether a loop body surely waits on each pass: one of its own statements waits, or calls a function that surely
- * does (`waiting`), before any statement that may `continue` past it.
- */
-function waitsEachPass(statements: readonly IrStatement[], waiting: ReadonlySet<string>): boolean {
-  for (const statement of statements) {
-    if (waitsSurely(statement, waiting)) return true;
-    if (mayLeave(statement, "continue")) return false;
-  }
-  return false;
-}
-
-/** Whether a function body surely waits before it returns. */
-function alwaysWaits(statements: readonly IrStatement[], waiting: ReadonlySet<string>): boolean {
-  for (const statement of statements) {
-    if (waitsSurely(statement, waiting)) return true;
-    if (mayLeave(statement, "return")) return false;
-  }
-  return false;
+/** The functions whose calls count as waiting (`known`), and whether a call of one the file does not define does. */
+interface Waiting {
+  known: ReadonlySet<string>;
+  unknown: boolean;
 }
 
 /**
- * Whether one statement waits whenever it runs: a wait of a known time, a button, ask, choice, audio played to its end,
- * or a call of a function that surely waits.
+ * How the ways through a loop pass, or a function body, end: every way to the end, or to a `continue` (of a pass) or
+ * `return` (of a function), passes something that may wait (`waits`), or one reaches that jump before
+ * (`continues`) or the end (`falls`). Leaving the loop otherwise, by `break`, a `return` from a pass, or a transfer,
+ * comes not back. A wait inside a nested loop may not run, and that loop's own `continue` stays inside it.
  */
-function waitsSurely(statement: IrStatement, waiting: ReadonlySet<string>): boolean {
+function passEnd(
+  statements: readonly IrStatement[],
+  jump: "continue" | "return",
+  waiting: Waiting,
+  functions: ReadonlyMap<string, IrStatement[]>,
+): "waits" | "continues" | "falls" {
+  for (const statement of statements) {
+    if (statementWaits(statement, waiting, functions)) return "waits";
+    switch (statement.kind) {
+      case "continue":
+      case "return":
+        return statement.kind === jump ? "continues" : "waits";
+      case "break":
+      case "exit":
+      case "goto":
+        return "waits";
+      case "if":
+      case "switch": {
+        const ends = (
+          statement.kind === "if"
+            ? [statement.then, statement.else]
+            : [...statement.cases.map((item) => item.body), statement.default]
+        ).map((body) => passEnd(body, jump, waiting, functions));
+        if (ends.includes("continues")) return "continues";
+        if (ends.every((end) => end === "waits")) return "waits";
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return "falls";
+}
+
+/** Whether a statement's own values or action may wait, not those of the blocks it holds. */
+function statementWaits(
+  statement: IrStatement,
+  waiting: Waiting,
+  functions: ReadonlyMap<string, IrStatement[]>,
+): boolean {
   switch (statement.kind) {
-    // Only a wait known to take time: one of no time, or of a time known only when it runs, may pass none.
+    // A condition, value, or collection runs before the block it leads to.
+    case "if":
+    case "while":
+      return some(statement.condition, (node) => waitsHere(node, waiting, functions));
+    case "switch":
+      return some(statement.value, (node) => waitsHere(node, waiting, functions));
+    case "for":
+      return some(statement.collection, (node) => waitsHere(node, waiting, functions));
+    case "repeat":
+      return some(statement.count, (node) => waitsHere(node, waiting, functions));
     case "wait":
-      return (
-        (statement.duration.kind === "literal" &&
-          typeof statement.duration.value === "number" &&
-          statement.duration.value > 0) ||
-        (statement.duration.kind === "duration" && statement.duration.value > 0)
-      );
     case "showButton":
-      return true;
     case "playAudio":
-      return !statement.async;
+      return waitsHere(statement, waiting, functions);
     case "let":
+    case "say":
+      return some(statement.value, (node) => waitsHere(node, waiting, functions));
     case "assign":
-      return asks(statement.value);
-    case "expression":
-      return (
-        asks(statement.expression) ||
-        (statement.expression.kind === "call" &&
-          statement.expression.local === true &&
-          waiting.has(statement.expression.name))
+      return some([statement.target, statement.value], (node) =>
+        waitsHere(node, waiting, functions),
       );
+    case "expression":
+      return some(statement.expression, (node) => waitsHere(node, waiting, functions));
     default:
       return false;
   }
 }
 
-/** Whether a value asks the player, which waits for the answer. */
-function asks(value: IrExpression): boolean {
-  return ["input", "choice", "listChoice", "button"].includes(value.kind);
-}
-
-/** Whether a statement may leave the pass early: a `continue` of the loop, or a `return`. */
-function mayLeave(statement: IrStatement, jump: "continue" | "return"): boolean {
-  if (statement.kind === jump) return true;
-  if (statement.kind === "function") return false;
-  // A loop's own `continue` stays inside it.
-  if (
-    jump === "continue" &&
-    (statement.kind === "while" || statement.kind === "repeat" || statement.kind === "for")
-  )
-    return false;
-  let found = false;
-  withNestedBlocks(statement, (body) => {
-    found ||= body.some((item) => mayLeave(item, jump));
-    return body;
-  });
-  return found;
+/**
+ * Whether a node may wait by itself: a wait of a time other than a known zero, a button, an ask or a choice, audio
+ * played to its end, or a call of a function that counts as waiting (`waiting`).
+ */
+function waitsHere(
+  node: Record<string, unknown> | IrStatement,
+  waiting: Waiting,
+  functions: ReadonlyMap<string, IrStatement[]>,
+): boolean {
+  const item = node as Record<string, unknown>;
+  switch (item.kind) {
+    case "wait": {
+      const duration = item.duration as IrExpression;
+      return !(
+        (duration.kind === "literal" && duration.value === 0) ||
+        (duration.kind === "duration" && duration.value === 0)
+      );
+    }
+    case "showButton":
+    case "input":
+    case "choice":
+    case "listChoice":
+    case "button":
+    case "showPopup":
+      return true;
+    case "playAudio":
+      return item.async !== true;
+    case "call":
+      return (
+        item.local === true &&
+        typeof item.name === "string" &&
+        (functions.has(item.name) ? waiting.known.has(item.name) : waiting.unknown)
+      );
+    default:
+      return false;
+  }
 }
 
 /** The names of `functions` for which `test` holds, growing until it holds for no other. */

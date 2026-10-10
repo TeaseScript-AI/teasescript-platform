@@ -699,12 +699,14 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   what it adds.
 - Clock loops: a legacy loop that polled the clock until a time passed (`getTime()`, `System.currentTimeMillis()`)
   ran on real time, but a TeaseScript clock advances only at waits, and a text's reading time passes none. A loop that
-  only redraws a countdown becomes a visible timer over the same time (`SX_BUSY_COUNTDOWN`); one whose passes do not
-  surely wait (a wait of a known time, a button, an ask, or a call of a function that surely waits, before anything that
-  may `continue`), such as
-  ZapEdgeStrip's dice roll or Nim's closing window, starts each pass with a wait of a tenth of a second, which also
-  sets how many passes it makes, and its texts become one message that changes in place, as the legacy display redrew
-  one text (`SX_CLOCK_LOOP`). The clock counts also where a function the loop calls reads it. A wait in a loop that
+  only redraws a countdown becomes a visible timer over the same time (`SX_BUSY_COUNTDOWN`). Another loop whose
+  condition only time can change (it reads the clock, directly, through a variable the body sets from it, or through a
+  function that returns it, and the body changes nothing else the condition reads), with a way back to its condition
+  that passes nothing that may wait (a wait other than of no time, a button, an ask, or a call of a function every way
+  through which may wait), starts each pass with a wait of a tenth of a second, which also sets how many passes it
+  makes (`SX_CLOCK_LOOP`): ZapEdgeStrip's dice rolls, Nim's closing window, BreatheAcademy's countdown, and the loops
+  of guessit, selfbt, smackedforcash, and trick_or_treat_poker. Where nothing in the loop may wait, it only redrew its
+  texts, which become one message that changes in place, as the legacy display redrew one text. A wait in a loop that
   polls the clock, or in a function it calls, stays, also after a text whose reading time would replace it elsewhere
   (`SX_WAIT_CLOCK`).
 - Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while

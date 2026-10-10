@@ -75,3 +75,20 @@ while (getTime() < frameEnd) {
 // A wait of no time passes none, so the pass still waits at its start.
 def zeroEnd = getTime() + 1
 while (getTime() < zeroEnd) wait(0)
+// A loop whose body waits on some ways only also waits at the start of each pass, but keeps its texts as messages; one
+// that can end otherwise than by time passing, as its body changes the count it also compares, is left as it is.
+def strokeEnd = getTime() + 2
+def rest = getInteger("Rest?", 0)
+while (getTime() < strokeEnd) {
+	show("Stroke")
+	if (rest > 0) wait(rest)
+}
+def strokesLeft = 3
+while (strokesLeft > 0 && getTime() < strokeEnd + 5) strokesLeft--
+// A number a redrawing loop shows becomes its message's text.
+def tickEnd = getTime() + 1
+def ticks = 0
+while (getTime() < tickEnd) {
+	ticks++
+	show(ticks)
+}
