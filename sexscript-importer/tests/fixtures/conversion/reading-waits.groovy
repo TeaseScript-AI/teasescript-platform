@@ -158,3 +158,12 @@ switch (getRandom(3)) {
 show(reply)
 wait(2)
 show("Done")
+// A sound between such a text and its wait starts before the wait on that path too.
+def cue = ""
+switch (getRandom(2)) {
+	case 0: cue = "Listen."; break
+}
+show(cue)
+playBackgroundSound("beat.wav")
+wait(2)
+show("Heard")

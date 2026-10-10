@@ -68,8 +68,10 @@ export function withReadingTimes(
     };
     const result = [...nested];
     const dropped = new Set<number>();
-    // The texts that moved after the sound that legacy started after them, by their places.
+    // The texts that moved after the sound that legacy started after them, by their places, and the places of the waits
+    // that texts' reading times replaced.
     const moved = new Map<number, number>();
+    const waitOf = new Map<number, number>();
     nested.forEach((statement, index) => {
       // A sound that starts between a text and its wait took no time in legacy, so the wait is the text's (owner
       // decision 2026-10-08).
@@ -168,12 +170,56 @@ export function withReadingTimes(
         moved.set(index, sound);
       } else result[index] = { ...statement, readingTime: wait };
       dropped.add(waitIndex);
+      waitOf.set(index, waitIndex);
     });
     for (const [index, guard] of guards) {
       const at = moved.get(index) ?? index;
       const text = result[at]!;
       const replaced = text.kind === "say" ? text.readingTime : undefined;
-      result[at] = { ...guard, then: [text], else: replaced === undefined ? [] : [replaced] };
+      const waitIndex = waitOf.get(index);
+      // What stays between the text and its wait, a sound or a setting, runs before the wait on the empty path too, so
+      // the wait stays where it was there, for that path only; where a setting there changes the text, the test would
+      // come too late, and the wait stays for both paths.
+      const crossed =
+        waitIndex === undefined || moved.has(index)
+          ? []
+          : nested.slice(index + 1, waitIndex).filter(significant);
+      const tested = guard.condition.kind === "binary" ? guard.condition.left : null;
+      if (
+        text.kind !== "say" ||
+        replaced === undefined ||
+        waitIndex === undefined ||
+        crossed.length === 0 ||
+        tested === null
+      ) {
+        result[at] = { ...guard, then: [text], else: replaced === undefined ? [] : [replaced] };
+        continue;
+      }
+      dropped.delete(waitIndex);
+      const name = tested.kind === "variable" ? tested.name : null;
+      const changes = crossed.some(
+        (item) =>
+          (item.kind === "let" && item.name === name) ||
+          (item.kind === "assign" && item.target.kind === "variable" && item.target.name === name),
+      );
+      if (changes) {
+        const { readingTime: _readingTime, ...said } = text;
+        result[at] = { ...guard, then: [{ ...said, instant: true }], else: [] };
+        continue;
+      }
+      result[at] = { ...guard, then: [text], else: [] };
+      result[waitIndex] = {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: tested,
+          right: { kind: "literal", value: "" },
+        },
+        then: [replaced],
+        else: [],
+        span: replaced.span,
+      };
     }
     return dropped.size === 0 ? result : result.filter((_, index) => !dropped.has(index));
   };

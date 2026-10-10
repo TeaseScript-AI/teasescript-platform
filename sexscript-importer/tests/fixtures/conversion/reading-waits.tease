@@ -202,4 +202,19 @@ if reply != "" {
   wait 2 s
 }
 say "Done"
+// A sound between such a text and its wait starts before the wait on that path too.
+let cue = ""
+switch randomInteger(0..2) {
+  case 0 {
+    cue = "Listen."
+  }
+}
+if cue != "" {
+  say cue
+}
+playAudio async "beat.wav"
+if cue == "" {
+  wait 2 s
+}
+say "Heard"
 exit
