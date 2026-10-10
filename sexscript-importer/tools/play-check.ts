@@ -848,15 +848,21 @@ export function formatAnswer(text: string, n: number): string | null {
   if (digits !== null) {
     const length = Number(digits[1]);
     const noZero = /(?:begin|start)s?\s+with\s+(?:a\s+)?(?:0|zero)/iu.test(text);
-    if (length > 0 && length <= 10) {
+    // Digits that the prompt names a range of, "buttons are labeled 1 through 6", come from that range.
+    const range = /\b(\d)\s*(?:through|to|-|–)\s*(\d)\b/u.exec(text);
+    const [low, high] = range === null ? [0, 9] : [Number(range[1]), Number(range[2])];
+    const choices = Array.from({ length: Math.max(0, high - low + 1) }, (_, index) =>
+      String(low + index),
+    );
+    if (length > 0 && length <= choices.length) {
       // Different digits fit a rule against repeated ones too.
       let answer = "";
-      for (let index = 0; answer.length < length; index += 1) {
-        const digit = String((n + index + (noZero ? 1 : 0)) % 10);
+      for (let index = 0; answer.length < length && index < 2 * choices.length; index += 1) {
+        const digit = choices[(n + index) % choices.length]!;
         if ((answer === "" && noZero && digit === "0") || answer.includes(digit)) continue;
         answer += digit;
       }
-      return answer;
+      if (answer.length === length) return answer;
     }
   }
   if (/\(optional\)/iu.test(text) && n % 2 === 0) return "";
