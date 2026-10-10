@@ -250,8 +250,15 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
   const present = new Set(files);
   const timed = timedButtons(sources);
   const outFolder = path.join(out, id);
+  // A result that cannot be read or parsed is no result to keep, so a check again replaces it.
   const last = await readFile(path.join(outFolder, "result.json"), "utf8").then(
-    (text) => parsePlayCheck(JSON.parse(text)),
+    (text) => {
+      try {
+        return parsePlayCheck(JSON.parse(text));
+      } catch {
+        return null;
+      }
+    },
     () => null,
   );
   // A package marked by hand as not playable keeps the mark; remove its result to check it again.
