@@ -400,7 +400,9 @@ export function withoutRepeatedChainText<
   const silentFunctions = new Map<string, boolean>();
   const silent = (value: unknown): boolean => {
     if (Array.isArray(value)) return value.every(silent);
-    if (typeof value !== "object" || value === null || !("kind" in value)) return true;
+    if (typeof value !== "object" || value === null) return true;
+    // A part without a kind of its own, such as a switch case, holds statements and values too.
+    if (!("kind" in value)) return Object.values(value).every(silent);
     const kind = value.kind;
     if (
       kind === "say" ||
@@ -749,9 +751,17 @@ export function withoutBlankText(
 ): IrStatement[] {
   const writes = new Map<string, number>();
   const blankStarts = new Set<string>();
+  // Every part is scanned, also one without a kind of its own, such as a switch case, whose body may write a variable.
   const scan = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(scan);
-    if (typeof value !== "object" || value === null || !("kind" in value)) return;
+    if (Array.isArray(value)) {
+      value.forEach(scan);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    if (!("kind" in value)) {
+      Object.values(value).forEach(scan);
+      return;
+    }
     if (value.kind === "let" && "name" in value && typeof value.name === "string") {
       writes.set(value.name, (writes.get(value.name) ?? 0) + 1);
       if ("value" in value && isBlank(value.value)) blankStarts.add(value.name);

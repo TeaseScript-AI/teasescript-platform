@@ -34,4 +34,17 @@ say "Color ${pickedColor}"
 // An exact repeat between waits goes, and the waits around it join.
 say "Processing.", instant
 wait 10 s
+// A variable that starts empty and gets its text in a switch case is said (Domme2's menu greetings).
+let greeting = ""
+switch randomInteger(0..2) {
+  case 0 {
+    greeting = "Did you behave yourself?"
+  }
+  case 1 {
+    greeting = "Back already?"
+  }
+}
+say greeting
+let picked = choose 0: "Ask", 1: "Chores"
+say "Picked ${picked}"
 exit

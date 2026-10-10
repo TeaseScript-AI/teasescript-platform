@@ -30,3 +30,38 @@ test("a transfer keeps its last text where the next script first shows an updata
   );
   assert.deepEqual(first!.statements, caller);
 });
+
+// A switch whose case says something is the next script's first output, though its cases have no kind of their own, so
+// the text before the transfer stays even where a later text of the next script repeats it.
+test("a transfer keeps its last text where the next script first says something in a switch case", () => {
+  const span = null;
+  const caller: IrStatement[] = [
+    { kind: "say", value: { kind: "literal", value: "Ready" }, span },
+    { kind: "goto", target: { kind: "file", path: "next.tease" }, span },
+  ];
+  const target: IrStatement[] = [
+    {
+      kind: "switch",
+      value: { kind: "literal", value: 1 },
+      cases: [
+        {
+          span,
+          matches: [{ kind: "literal", value: 1 }],
+          body: [{ kind: "say", value: { kind: "literal", value: "Welcome back" }, span }],
+        },
+      ],
+      default: [],
+      span,
+    },
+    { kind: "say", value: { kind: "literal", value: "Ready" }, span },
+    { kind: "exit", span },
+  ];
+  const [first] = withoutRepeatedChainText(
+    [
+      { statements: caller, diagnostics: [] },
+      { statements: target, diagnostics: [] },
+    ],
+    ["start.tease", "next.tease"],
+  );
+  assert.deepEqual(first!.statements, caller);
+});
