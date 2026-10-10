@@ -1,5 +1,5 @@
 // A closure kept in a local of a function becomes a function, which its calls call directly while nothing assigns
-// the local again; one that captures the function's locals cannot convert
+// the local again; one that captures another closure of the function cannot convert
 // and stays declared without an action, so the code that calls it still compiles.
 def countdown = { n ->
 	final announce = { t -> show("Count " + t) }

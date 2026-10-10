@@ -1925,14 +1925,14 @@ test(
   },
 );
 
-// The list-aliases fixture says what Groovy said: the element changes reached the list they came from.
-test("the list-aliases fixture says what Groovy's shared lists gave", async () => {
+/** What a conversion fixture says when it runs to its end, with time passing to each wait's end. */
+async function fixtureSays(name: string): Promise<string[]> {
   const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
   assert.ok(typeof runtime === "object" && runtime !== null);
   // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
   const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
   const tease = readFileSync(
-    fileURLToPath(new URL("./fixtures/conversion/list-aliases.tease", import.meta.url)),
+    fileURLToPath(new URL(`./fixtures/conversion/${name}.tease`, import.meta.url)),
     "utf8",
   );
   const { plan } = compileSource(tease);
@@ -1954,7 +1954,12 @@ test("the list-aliases fixture says what Groovy's shared lists gave", async () =
     note(step.events);
   }
   assert.equal(step.snapshot.status, "halted");
-  assert.deepEqual(said, [
+  return said;
+}
+
+// The list-aliases fixture says what Groovy said: the element changes reached the list they came from.
+test("the list-aliases fixture says what Groovy's shared lists gave", async () => {
+  assert.deepEqual(await fixtureSays("list-aliases"), [
     "Done 2",
     "Rows 3 2",
     "First false false",
@@ -1963,6 +1968,18 @@ test("the list-aliases fixture says what Groovy's shared lists gave", async () =
     "Counts 6 7,5,2",
     "Slots 5 1",
     "Held 1",
+  ]);
+});
+
+// The captured-locals fixture says what Groovy said where its closure values set and read their functions' locals; the
+// closures that stay unconverted, of a loop's pass or kept by the script, say nothing.
+test("the captured-locals fixture says what Groovy's closures gave", async () => {
+  assert.deepEqual(await fixtureSays("captured-locals"), [
+    "Rounds 2",
+    "Rounds 3",
+    "Rounds 3 4",
+    "Pick!",
+    "Count 1",
   ]);
 });
 

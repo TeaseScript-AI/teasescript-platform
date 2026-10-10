@@ -1,0 +1,62 @@
+// MIGRATION INCOMPLETE: 2 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+}
+// A closure value that reads or sets locals of its function, or its parameters, converts with them as script
+// variables under new names: the function sets each where it declared it, and copies a parameter in as it starts
+// (ShockQuiz's settings, whose closures set its `txt`).
+let configureTxt: string? = null
+let configureCount = 0
+function askCallback1(it = null) {
+  configureTxt = "Rounds ${configureCount}"
+  configureCount += 1
+  say configureTxt
+}
+function configure(start) {
+  configureCount = toInteger(start)
+  askCallback1()
+  askCallback1()
+  say "${configureTxt} ${configureCount}"
+}
+configure(2)
+// A closure value inside a closure value reads the locals of the closure around it the same way.
+let optionsSuffix = "!"
+let menuLabel = "Pick"
+function shoutCallback2 {
+  say "${menuLabel}${optionsSuffix}"
+}
+function optionsCallback2 {
+  optionsSuffix = "!"
+  return shoutCallback2()
+}
+function menu {
+  menuLabel = "Pick"
+  optionsCallback2()
+}
+menu()
+// A local declared anew on each pass of a loop stays, as each pass's closure saw its own, and so does the closure.
+function perPass {
+  for i in 0..2 {
+    let seen = i
+    // TODO SX_CAPTURING_CLOSURE line 32: This closure value captures local seen of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+    // | def tell = { show("Seen " + seen) }
+    let tell = null
+    sexscriptLegacyCall(tell, [])
+  }
+}
+perPass()
+// A closure value that something keeps may run while another call of its function runs, which one script variable
+// cannot keep apart, and so may a function that calls itself: their locals stay.
+let saved = null
+function create(start) {
+  let count = toInteger(start)
+  // TODO SX_CAPTURING_CLOSURE line 42: This closure value captures local count of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | def bump = { -> count++ }
+  let bump = null
+  saved = bump
+  say "Count ${count}"
+}
+create(1)
+exit

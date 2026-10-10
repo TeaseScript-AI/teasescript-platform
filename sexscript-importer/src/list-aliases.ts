@@ -963,15 +963,15 @@ function constant(value: number, span: AstNode["span"]): AstNode {
   return { kind: "constant", span, value };
 }
 
-function asNode(value: unknown): AstNode | null {
+export function asNode(value: unknown): AstNode | null {
   return isAstNode(value) ? value : null;
 }
 
-function nodeArray(value: unknown): AstNode[] {
+export function nodeArray(value: unknown): AstNode[] {
   return Array.isArray(value) ? value.filter(isAstNode) : [];
 }
 
-function children(node: AstNode): AstNode[] {
+export function children(node: AstNode): AstNode[] {
   const result: AstNode[] = [];
   for (const [key, value] of Object.entries(node)) {
     if (key === "span") continue;
@@ -982,7 +982,7 @@ function children(node: AstNode): AstNode[] {
 }
 
 /** The node with each child node replaced by `change`; arrays of nodes are followed. */
-function mapChildren(node: AstNode, change: (child: AstNode) => AstNode): AstNode {
+export function mapChildren(node: AstNode, change: (child: AstNode) => AstNode): AstNode {
   let changed = false;
   const mapNode = (value: AstNode): AstNode => {
     const next = change(value);

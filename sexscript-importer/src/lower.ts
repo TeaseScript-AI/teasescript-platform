@@ -70,6 +70,12 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
+import {
+  type CapturedLocal,
+  liftableCaptures,
+  spanKey,
+  withLiftedLocals,
+} from "./captured-locals.ts";
 import { withListAliasesAsPaths, withTupleAssignments } from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
@@ -238,6 +244,8 @@ interface LowerContext {
   } | null;
   /** Functions generated from closure values, emitted at the program root. */
   closureFunctions: IrStatement[];
+  /** The locals of their functions that closure values read or set, which the next lowering lifts (lowerParsedFile). */
+  capturedLocals: CapturedLocal[];
   /** Functions referenced by closure-value action IDs; the package dispatcher calls them. */
   actions: Set<string>;
   /** Counter for variables that keep an input result the legacy statement ignored. */
@@ -1638,6 +1646,36 @@ export function lowerParsedFile(
   file: ParsedGroovyFile,
   options: LowerOptions = {},
 ): MigrationProgram {
+  // A file whose closure values read or set locals of their functions lowers again with those locals lifted
+  // (withLiftedLocals); a closure value inside such a closure value shows what it captures only then.
+  let lifted: CapturedLocal[] = [];
+  for (let round = 0; ; round += 1) {
+    const found: CapturedLocals = { locals: [], body: null };
+    const program = lowerFileOnce(file, options, lifted, found);
+    const key = (local: CapturedLocal): string => `${local.body} ${local.closure} ${local.name}`;
+    const known = new Set(lifted.map(key));
+    const next = [...lifted, ...found.locals.filter((local) => !known.has(key(local)))];
+    // The file lowers again only where that lifts more locals.
+    const more =
+      found.body !== null &&
+      liftableCaptures(found.body, next).length > liftableCaptures(found.body, lifted).length;
+    if (!more || round === 2) return program;
+    lifted = next;
+  }
+}
+
+/** The locals that closure values captured in one lowering, and the script body it lowered before lifting any. */
+interface CapturedLocals {
+  locals: CapturedLocal[];
+  body: AstNode | null;
+}
+
+function lowerFileOnce(
+  file: ParsedGroovyFile,
+  options: LowerOptions,
+  lifted: readonly CapturedLocal[],
+  found: CapturedLocals,
+): MigrationProgram {
   const context: LowerContext = {
     diagnostics: [],
     metadata: null,
@@ -1670,6 +1708,7 @@ export function lowerParsedFile(
     loadsModuleDirectories: new Set(),
     currentFunction: null,
     closureFunctions: [],
+    capturedLocals: found.locals,
     actions: new Set(),
     ignoredInputs: 0,
     switchValues: 0,
@@ -1773,6 +1812,8 @@ export function lowerParsedFile(
       withTupleAssignments(body, (base) => freshName(base, context)),
       (base) => freshName(base, context),
     );
+    found.body = body;
+    body = withLiftedLocals(body, lifted, (base) => freshName(base, context));
   }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
@@ -2998,6 +3039,8 @@ function lowerHelperMethod(
       ),
     },
     closureFunctions: baseContext.closureFunctions,
+    // A helper class's methods are not script functions, whose locals withLiftedLocals lifts.
+    capturedLocals: [],
     actions: baseContext.actions,
     ignoredInputs: 0,
     switchValues: 0,
@@ -5905,8 +5948,9 @@ function functionLocalNames(body: AstNode, parameters: readonly string[]): Set<s
 /**
  * A closure used as a value (stored in data, passed as an argument, kept in a local) becomes a string action ID.
  * A closure that only forwards to a function (`{ f() }`, `{ a -> f(a) }`) uses that function's name; any other
- * closure body becomes a generated function. Calls of such values go through the package dispatcher. Closures
- * capturing local variables of their enclosing function are not converted.
+ * closure body becomes a generated function. Calls of such values go through the package dispatcher. A closure that
+ * captures locals of its enclosing function is not converted here; it records them, and the file lowers again with
+ * those locals as script variables (withLiftedLocals).
  */
 function lowerClosureValue(
   closure: AstNode,
@@ -5938,6 +5982,15 @@ function lowerClosureValue(
     if (name !== null && locals.has(name) && !ownNames.has(name)) captured.add(name);
   });
   if (captured.size > 0) {
+    for (const name of captured) {
+      context.capturedLocals.push({
+        body: spanKey(enclosing?.body?.span ?? null),
+        closure: spanKey(closure.span),
+        function: enclosing?.name ?? "",
+        parameters: enclosing?.parameters ?? [],
+        name,
+      });
+    }
     return unsupportedExpression(
       context,
       closure,
