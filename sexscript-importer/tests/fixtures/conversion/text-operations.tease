@@ -12,6 +12,13 @@ function sexscriptLegacyFixed(value, digits, factor) {
   let fraction = scaled - whole * factor
   return "${minus}${whole}.${toString(fraction).padStart(digits, "0")}"
 }
+function sexscriptLegacyTextAt(text, position) {
+  let at = position
+  if at < 0 {
+    at += text.length
+  }
+  return text.substring(at, at + 1)
+}
 function sexscriptLegacyTokenize(text, delimiters) {
   let tokens = []
   let current = ""
@@ -91,4 +98,14 @@ if pictures == "" or pictures == "" {
 }
 let pictureList = sexscriptLegacySplit(pictures, "|")
 say "${pictureList.length} pictures, first ${pictures.split("|")[0]}"
+// The parts tokenize() gives are texts, so a character of one is read as text (SubChallenges' FindImage).
+for word in sexscriptLegacyTokenize("Kneel, now.", " ") {
+  // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  if sexscriptLegacyTextAt(word, word.length - 1) == "," or sexscriptLegacyTextAt(word, word.length - 1) == "." {
+    word = word.substring(0, word.length - 1)
+  }
+  say "Word ${word}"
+}
 exit

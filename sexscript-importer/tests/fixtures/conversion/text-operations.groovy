@@ -40,3 +40,8 @@ show("${fields.size()} fields at ${stamp}")
 def pictures = loadString("game.pictures") ?: "a.jpg|b.jpg|"
 def pictureList = pictures.split("\\|")
 show("" + pictureList.size() + " pictures, first " + pictures.split("\\|")[0])
+// The parts tokenize() gives are texts, so a character of one is read as text (SubChallenges' FindImage).
+for (word in "Kneel, now.".tokenize(" ")) {
+	if (word[word.length() - 1] == "," || word[word.length() - 1] == ".") word = word.substring(0, word.length() - 1)
+	show("Word " + word)
+}
