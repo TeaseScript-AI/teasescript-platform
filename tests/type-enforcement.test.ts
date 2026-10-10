@@ -707,6 +707,68 @@ test("an operation on a value the compiler cannot know is rejected where no resu
   );
 });
 
+test("an operation of unknown result is rejected where a later value decides a type that no result fits", () => {
+  const inFunction = (...body: string[]): string =>
+    ["function f(x) {", ...body.map((line) => `    ${line}`), "}", "f(8)", "exit"].join("\n");
+  // The store fails whenever it runs, so it is reported as if the deciding value came first, naming that value's line.
+  assert.deepEqual(
+    mismatches(inFunction("let ys = []", "ys.add(x / 4)", 'ys.add("a")', "say ys")),
+    [
+      [
+        "TSV041",
+        "'ys' holds string values (string[]) since line 4, so it cannot contain the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+        "x / 4",
+      ],
+    ],
+  );
+  for (const body of [
+    ["let ys = []", "ys.addAll([x / 4])", 'ys.add("a")'],
+    ["let ys = []", 'ys = [x / 4, "a"]'],
+    ["let ys = [null]", "ys[0] = x / 4", 'ys.add("a")'],
+    ["let d = dict {}", 'd["k"] = x / 4', 'd["j"] = "a"'],
+    ["let s = set[]", "s.add(x / 4)", 's.add("a")'],
+    ["let y = null", "y = x / 4", "y = true"],
+    ["let o = { a: null }", "o.a = x / 4", 'o.a = "t"'],
+    ["let o = { a: null }", "o = { a: x / 4 }", 'o.a = "t"'],
+    ["let ys = [{ a: null }]", "ys[0].a = x / 4", 'ys[0].a = "t"'],
+    ["let ys = []", "for y in ys {", "    y = x / 4", "}", 'ys.add("a")'],
+    // Code that does not run is checked as well, as it is when the deciding value comes first.
+    ["let ys = []", "if false {", "    ys.add(x / 4)", "}", 'ys.add("a")'],
+  ])
+    assert.deepEqual(codes(inFunction(...body, "say 1")), [["TSV041", "x / 4"]], body.join("; "));
+  // A body checked at the call that needs its result comes before the caller's later value in checking order.
+  assert.deepEqual(
+    codes(
+      'let ys = []\nfunction g(x) {\n    ys.add(x / 4)\n    return 1\n}\nfunction f(x) {\n    let n = g(x)\n    ys.add("a")\n    say n\n}\nf(8)\nexit',
+    ),
+    [["TSV041", "x / 4"]],
+  );
+  // A type that a result may fit, such as a whole number that '/' may give, or a place no value decides, leaves the
+  // store to the check when it runs.
+  assert.deepEqual(
+    sayTexts(
+      inFunction(
+        "let ys = []",
+        "ys.add(x / 4)",
+        "ys.add(1)",
+        "let y = null",
+        "y = x / 4",
+        "y = 1.5",
+        "let o = { a: null }",
+        "o.a = x / 4",
+        "say ys",
+        "say y",
+        "say o",
+      ),
+    ),
+    ["[2, 1]", "1.5", "{ a: 2 }"],
+  );
+  assert.deepEqual(
+    mismatches(inFunction("let spans = []", "spans.add(x * 2)", "spans.add(3 s)", "say spans")),
+    [],
+  );
+});
+
 test("a union of collections takes an operation result that one of its members can hold, in either order", () => {
   // The member that holds the value is known only when the script runs, which checks the value then.
   const run = (...body: string[]): string[] => {
