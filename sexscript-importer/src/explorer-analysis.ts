@@ -190,12 +190,13 @@ export function constantConditions(
 
 /**
  * The instructions no execution can reach from the session start (instruction 0), when constant conditions take only
- * their one way.
+ * their one way; past an instruction of `stops`, none goes on.
  */
 export function unreachableInstructions(
   plan: Data,
   instructions: readonly Data[],
   constants: ReadonlyMap<number, boolean>,
+  stops: ReadonlySet<number> = new Set(),
 ): Uint8Array {
   const next = successors(plan, instructions, constants);
   // A function returns only to the calls of it that run: the return point of a call is reached once the call and a
@@ -225,6 +226,7 @@ export function unreachableInstructions(
   for (let position = 0; position < queue.length; position += 1) {
     const index = queue[position]!;
     const instruction = instructions[index]!;
+    if (stops.has(index)) continue;
     if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
       const owner = functionOf.get(index) ?? 0;
       if (returned.has(owner)) continue;
@@ -238,6 +240,128 @@ export function unreachableInstructions(
     for (const target of next[index] ?? []) reach(target);
   }
   return reached.map((value) => 1 - value);
+}
+
+/** Whether an expression's value is never null: a literal other than null, or a list, map, text, or the like it builds. */
+function neverNull(expression: unknown): boolean {
+  const value = record(expression);
+  switch (value.kind) {
+    case "group":
+      return neverNull(value.expression);
+    case "literal":
+      return value.value !== null && value.value !== undefined;
+    case "duration":
+    case "calendarDuration":
+    case "list":
+    case "set":
+    case "object":
+    case "dict":
+    case "template":
+    case "range":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The conditions that test a stored key for null (`load(K, default: null) == null`, or a variable that only ever holds
+ * loads of K) whose null way runs only when a save of K failed, by instruction, with the key and that way: every way
+ * to where K is read has saved K before, or found it saved. A save never removes a key, so the key stays once it is
+ * there; this holds when no delete and no save of a value that may be null can reach K, and every way to the read
+ * passes a save of K with a value that is never null, or the not-null way of such a test of K. A save to persistent
+ * storage can fail, and the script then goes on without the key: that way can run, so it is no constant.
+ */
+export function savedFirstChecks(
+  plan: Data,
+  instructions: readonly Data[],
+  constants: ReadonlyMap<number, boolean>,
+  flow: DataFlow,
+): Map<number, { key: string; way: boolean }> {
+  // The null tests: the key, the way the value is null, where the value is read, and the variable that holds it.
+  const tests: {
+    at: number;
+    key: string;
+    way: boolean;
+    reads: number[];
+    variable: string | null;
+    cuts: boolean;
+  }[] = [];
+  instructions.forEach((instruction, at) => {
+    if (instruction.kind !== "jumpIfFalse" || constants.has(at)) return;
+    let condition = record(instruction.condition);
+    while (condition.kind === "group") condition = record(condition.expression);
+    if (condition.kind !== "binary" || (condition.operator !== "==" && condition.operator !== "!="))
+      return;
+    const isNull = (side: Data) => side.kind === "literal" && side.value === null;
+    const [left, right] = [record(condition.left), record(condition.right)];
+    let subject = isNull(right) ? left : isNull(left) ? right : null;
+    while (subject?.kind === "group") subject = record(subject.expression);
+    if (subject === null) return;
+    const way = condition.operator === "==";
+    if (subject.kind === "storageLoad") {
+      const key = literalText(subject.key);
+      const fallback = record(subject.default);
+      if (key !== null)
+        tests.push({
+          at,
+          key,
+          way,
+          reads: [at],
+          variable: null,
+          cuts: subject.default == null || (fallback.kind === "literal" && fallback.value === null),
+        });
+      return;
+    }
+    if (subject.kind !== "identifier") return;
+    const loads = flow.loadsInto(subject);
+    if (loads !== null)
+      tests.push({
+        at,
+        key: loads.key,
+        way,
+        reads: loads.at,
+        variable: loads.variable,
+        cuts: loads.nullDefault,
+      });
+  });
+  const found = new Map<number, { key: string; way: boolean }>();
+  // A variable that holds a load is read from where it was assigned; one that may be read before is not known.
+  const assignedFirst = new Map<string, boolean>();
+  let work = 0;
+  for (const key of new Set(tests.map((test) => test.key))) {
+    const stops = new Set<number>();
+    let kept = true;
+    instructions.forEach((instruction, index) => {
+      if (instruction.kind !== "storageWrite") return;
+      const pattern = keyText(instruction.key);
+      if (pattern !== null && !keysMayMatch(pattern, key)) return;
+      if (instruction.value === null || !neverNull(instruction.value)) kept = false;
+      else if (pattern === key) stops.add(index);
+    });
+    if (!kept || stops.size === 0) continue;
+    if ((work += instructions.length) > SAVED_FIRST_WORK) break;
+    // The not-null way of a test of the key is a way on which the key is there.
+    const ways = new Map(constants);
+    for (const test of tests) if (test.key === key && test.cuts) ways.set(test.at, test.way);
+    const reached = unreachableInstructions(plan, instructions, ways, stops);
+    for (const test of tests) {
+      if (test.key !== key || test.reads.some((read) => reached[read] === 0)) continue;
+      if (test.variable !== null) {
+        let first = assignedFirst.get(test.variable);
+        if (first === undefined) {
+          if ((work += instructions.length) > SAVED_FIRST_WORK) break;
+          first =
+            unreachableInstructions(plan, instructions, constants, new Set(test.reads))[test.at] ===
+            1;
+          assignedFirst.set(test.variable, first);
+        }
+        if (!first) continue;
+      }
+      found.set(test.at, { key, way: test.way });
+    }
+  }
+  return found;
 }
 
 /** What a value in a condition comes from, as far as the plan shows. */
@@ -329,6 +453,12 @@ const CARRIER_WORK = 2_000_000;
  * and what they carry is kept loosely in a stored-value proof, so that the work stays bounded.
  */
 const KEYED_WORK = 500_000;
+
+/**
+ * How many instruction visits the reachability passes of {@link savedFirstChecks} take in all, per plan, after which
+ * it proves no more tests, so that the work stays bounded.
+ */
+const SAVED_FIRST_WORK = 20_000_000;
 
 /** How many stored keys' carriers ({@link DataFlow}) are kept at once, as each can reach much of a plan. */
 const CARRIER_KEYS = 32;
@@ -1796,6 +1926,30 @@ export class DataFlow {
       if (counter || !external) sources.push({ kind: "variable", name, counter });
     }
     return sources;
+  }
+
+  /**
+   * The stored key a variable only ever holds a load of, with the instructions that assign it, its scope key, and
+   * whether every one of those loads falls back to null; null for a variable assigned anything else.
+   */
+  loadsInto(
+    variable: unknown,
+  ): { key: string; at: number[]; variable: string; nullDefault: boolean } | null {
+    const scoped = this.#keyOf(variable);
+    const assignments = this.#assignmentsOf(scoped);
+    let key: string | null = null;
+    let nullDefault = true;
+    for (const { value } of assignments) {
+      const loaded = value.kind === "storageLoad" ? literalText(value.key) : null;
+      if (loaded === null || (key !== null && loaded !== key)) return null;
+      key = loaded;
+      const fallback = record(value.default);
+      nullDefault &&=
+        value.default == null || (fallback.kind === "literal" && fallback.value === null);
+    }
+    return key === null
+      ? null
+      : { key, at: assignments.map(({ index }) => index), variable: scoped, nullDefault };
   }
 
   /**

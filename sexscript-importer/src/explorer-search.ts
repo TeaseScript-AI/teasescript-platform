@@ -21,6 +21,7 @@ import {
   callsClock,
   successors,
   unreachableInstructions,
+  savedFirstChecks,
   type AtomValue,
   type Goal,
   type LoadAlias,
@@ -516,6 +517,11 @@ export interface UnvisitedBranch {
    * saved game also restores ({@link DataFlow.setInPlay}).
    */
   setInPlay?: true;
+  /**
+   * The stored key a null test reads, where the missed way is its null way and every way to the read has saved the key
+   * before or found it saved: the way runs only when a save of the key failed ({@link savedFirstChecks}).
+   */
+  savedFirst?: string;
   /**
    * Coverable lines that no explored state ran and that the missed way leads to without passing code a state ran:
    * how much code waits behind it.
@@ -4468,6 +4474,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     session.randomChoices,
     (subject) => (times === null ? null : exactPart(subject, times)),
     (condition, at) => flow.readsSetInPlay(condition, at),
+    savedFirstChecks(plan, instructions, constants, flow),
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -5285,6 +5292,7 @@ function lineCoverage(
   randomChoices: boolean,
   clockPartOf: (subject: unknown) => string | null,
   setInPlay: (condition: unknown, at: number) => boolean,
+  savedFirst: ReadonlyMap<number, { key: string; way: boolean }>,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -5527,6 +5535,7 @@ function lineCoverage(
     const missedTarget = way === 1;
     const constant = constants.get(index);
     const storage = fixed.get(index);
+    const saved = savedFirst.get(index);
     const directed = targets.get(index * 2 + way);
     const label: Exclude<Reach, "play" | "chosen"> =
       (clock & (way === 0 ? 1 : 2)) !== 0
@@ -5571,6 +5580,10 @@ function lineCoverage(
       attempts: directed?.attempts ?? 0,
       dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
       ...(setInPlay(condition, index) ? { setInPlay: true as const } : {}),
+      // The way taken when the test comes out true is the next instruction's.
+      ...(label === "unknown" && saved !== undefined && saved.way === !missedTarget
+        ? { savedFirst: saved.key }
+        : {}),
       behindLines: (regions[unvisitedBranches.length] = behind(missedTarget ? target : index + 1))
         .size,
       ownLines: 0,

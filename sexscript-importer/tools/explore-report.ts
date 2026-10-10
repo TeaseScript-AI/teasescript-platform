@@ -272,6 +272,12 @@ function missedWay(branch: Fields, measurable: boolean): string {
       : `; ${text(branch.reason)
           .replace(/^.*$/su, (all) => all.replace(/^needs .*?; /u, ""))
           .replace(reason[0], reason[1])}`;
+  if (typeof branch.savedFirst === "string")
+    return (
+      `- \`${text(branch.path)}:${count(branch.line)}\`: ${shown}` +
+      `${behind > 0 ? `, ${plural(behind, "line")} behind it` : ""}` +
+      `; every way here saves ${branch.savedFirst} first or finds it saved`
+    );
   return (
     `- \`${text(branch.path)}:${count(branch.line)}\`: ${shown}` +
     `${behind > 0 ? `, ${plural(behind, "line")} behind it` : ""}` +
@@ -296,10 +302,17 @@ function missedGroups(
     if (members.length > 0) groups.push({ title, about, source, members });
   };
   group(
+    "savedFirst",
+    "Runs only if a save failed",
+    "The condition tests whether a saved value is missing. Every way here saves that value first, or finds it saved, " +
+      "so this way runs only when the Player failed to save it.",
+    missed.filter((branch) => typeof branch.savedFirst === "string"),
+  );
+  group(
     "random",
     "Behind a random draw",
     "The condition draws at random itself. The playtester also chose the draw's other outcomes, where it could.",
-    missed.filter(drawsAtRandom),
+    missed.filter((branch) => !listed.has(branch) && drawsAtRandom(branch)),
   );
   for (const { source, title, about } of GROUPS)
     group(

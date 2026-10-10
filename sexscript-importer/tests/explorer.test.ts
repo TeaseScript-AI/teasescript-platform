@@ -1582,6 +1582,84 @@ test(
 );
 
 test(
+  "a null test of a key every way saves first or finds saved runs only if a save failed, not when the key may be deleted or saved as null",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source = [
+      'let first: integer? = load "fx.pack", default: null',
+      "if first == null {",
+      '  save 0 as "fx.pack"',
+      "}",
+      'save 1 as "fx.gone"',
+      "let one = 1",
+      'save one as "fx.maybe"',
+      "function later {",
+      '  let again: integer? = load "fx.pack", default: null',
+      "  if again == null {",
+      '    say "Lost the pack."',
+      "  }",
+      '  if load("fx.pack", default: null) == null {',
+      '    say "Lost it again."',
+      "  }",
+      '  let gone: integer? = load "fx.gone", default: null',
+      "  if gone == null {",
+      '    say "Gone."',
+      "  }",
+      '  let maybe: integer? = load "fx.maybe", default: null',
+      "  if maybe == null {",
+      '    say "Maybe."',
+      "  }",
+      "}",
+      "later()",
+      'showButton "Next"',
+      'if load("fx.never", default: false) == true {',
+      '  delete "fx.gone"',
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      later: true,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const branch = (text: string) =>
+      result.coverage.unvisitedBranches.find((entry) => entry.condition?.text === text);
+    assert.deepEqual(
+      [
+        "again == null",
+        'load("fx.pack", default: null) == null',
+        "gone == null",
+        "maybe == null",
+      ].map((text) => [branch(text)?.reach, branch(text)?.savedFirst]),
+      [
+        ["unknown", "fx.pack"],
+        ["unknown", "fx.pack"],
+        ["unknown", undefined],
+        ["unknown", undefined],
+      ],
+    );
+    const report = playtestReport(
+      JSON.parse(JSON.stringify({ unit: "pack", compile: { ok: true }, ...result })),
+    );
+    const failed = /### Runs only if a save failed[^#]*/u.exec(report)?.[0] ?? "";
+    assert.match(
+      failed,
+      /`again == null` being true, 1 line behind it; every way here saves fx\.pack first/u,
+    );
+    assert.doesNotMatch(failed, /fx\.gone|fx\.maybe/u);
+  },
+);
+
+test(
   "the creator report names why play stopped, groups a value set in play with values the script sets also when a saved game restores it, and lists a function nothing calls whole as code that can never run",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
