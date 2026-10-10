@@ -468,7 +468,12 @@ export class DataFlow {
   /** Where each temporary is cleared, by its ID, in order ({@link #temporaryNode}). */
   readonly #clearsOf = new Map<number, number[]>();
   /** {@link #carriers} by stored key, and the graph they are reached in, worked out when first needed. */
-  readonly #carriersOf = new Map<string, ReadonlySet<string>>();
+  readonly #carriersOf = new Map<
+    string,
+    { readonly own: ReadonlySet<string>; readonly saved: boolean }
+  >();
+  /** {@link #savedReach}, worked out when first needed. */
+  #saved: ReadonlySet<string> | null = null;
   #carrierGraph: {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
@@ -904,11 +909,18 @@ export class DataFlow {
   #mayCarry(value: unknown, at: number | undefined, key: string): boolean {
     if (this.flowOf(value).keys.has(key)) return true;
     const carriers = this.#carriers(key);
-    return this.#readsOf(value, at ?? 0).some((each) => carriers.has(each));
+    const shared = carriers.saved ? this.#savedReach() : null;
+    return this.#readsOf(value, at ?? 0).some(
+      (each) => carriers.own.has(each) || shared?.has(each) === true,
+    );
   }
 
-  /** What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what. */
-  #carriers(key: string): ReadonlySet<string> {
+  /**
+   * What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what (`own`),
+   * and when that reaches a saved value (`saved`), all that saved values reach ({@link #savedReach}), as what any save
+   * stores may be what any load reads.
+   */
+  #carriers(key: string): { readonly own: ReadonlySet<string>; readonly saved: boolean } {
     const known = this.#carriersOf.get(key);
     if (known !== undefined) {
       // The most recent last, as the oldest give way to new keys.
@@ -917,21 +929,40 @@ export class DataFlow {
       return known;
     }
     const graph = (this.#carrierGraph ??= this.#readersGraph());
-    const reached = new Set<string>(graph.seeds.get(key) ?? []);
+    const own = new Set<string>(graph.seeds.get(key) ?? []);
+    let saved = false;
+    const pending = [...own];
+    for (let read = pending.pop(); read !== undefined; read = pending.pop()) {
+      if (read.startsWith("s ")) {
+        saved = true;
+        continue;
+      }
+      for (const reader of graph.readers.get(read) ?? [])
+        if (!own.has(reader)) {
+          own.add(reader);
+          pending.push(reader);
+        }
+    }
+    const found = { own, saved };
+    this.#carriersOf.set(key, found);
+    if (this.#carriersOf.size > CARRIER_KEYS)
+      this.#carriersOf.delete(this.#carriersOf.keys().next().value!);
+    return found;
+  }
+
+  /** All that the saved values reach along what reads what, every cell of them included ({@link #carriers}). */
+  #savedReach(): ReadonlySet<string> {
+    if (this.#saved !== null) return this.#saved;
+    const graph = (this.#carrierGraph ??= this.#readersGraph());
+    const reached = new Set<string>(graph.cells);
     const pending = [...reached];
     for (let read = pending.pop(); read !== undefined; read = pending.pop())
-      for (const reader of [
-        ...(graph.readers.get(read) ?? []),
-        // What any save stores may be what any load reads, through one cell of all of them.
-        ...(read === "s *" ? graph.cells : read.startsWith("s ") ? ["s *"] : []),
-      ])
+      for (const reader of graph.readers.get(read) ?? [])
         if (!reached.has(reader)) {
           reached.add(reader);
           pending.push(reader);
         }
-    this.#carriersOf.set(key, reached);
-    if (this.#carriersOf.size > CARRIER_KEYS)
-      this.#carriersOf.delete(this.#carriersOf.keys().next().value!);
+    this.#saved = reached;
     return reached;
   }
 
