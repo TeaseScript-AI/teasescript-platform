@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "Handing a treasure to Elaina removes backPackArray[choice] from the backpack and then removes backPackArray[choice] from treasureArray, by which time that index names the next item (or nothing), so the wrong treasure, or none, left the treasure list. Remove the item from treasureArray first, then from the backpack, in both versions.",
       "diff": "treasure-removal-order.diff"
+    },
+    {
+      "id": "dragon-lance-name",
+      "layer": "source",
+      "category": "e",
+      "reason": "The Fairy room tests backPackArray.contains(\"DragonLance\"), but the lance is added and read everywhere else as \"Dragon Lance\", so the lance could be taken again on every visit and the revisit text never showed. Test \"Dragon Lance\".",
+      "diff": "dragon-lance-name.diff"
     }
   ]
 }

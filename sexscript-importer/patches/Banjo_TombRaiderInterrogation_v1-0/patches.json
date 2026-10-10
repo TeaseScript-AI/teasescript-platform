@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "saved-preferences-belt",
+      "layer": "source",
+      "category": "e",
+      "reason": "Two author errors. The start copies a saved punish_* preference only where it is true (if(loadBoolean(key))), so a saved \"No\" from the advanced setup, which says the preferences are saved for every session, was ignored on later visits: test that a value is saved (!=null). The belt branches test !spanktoy4==\"belt\", which compares the negated text with \"belt\" and is always false, so the basket implement was never fetched: test spanktoy4!=\"belt\".",
+      "diff": "saved-preferences-belt.diff"
+    }
+  ]
+}

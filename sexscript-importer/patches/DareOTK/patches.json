@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "mistressSet7/8/9 (Paris, Phoenix, Snow) were never written: the author commented out their names, the nine-name spanker menu, and their saved settings, and mistressArray holds six names, so the menu index stays below 6 and pick_mistress below 7. The calls are dead code that fails as undefined functions; comment them out in the author's own style.",
       "diff": "unselectable-mistresses.diff"
+    },
+    {
+      "id": "settings-met-image",
+      "layer": "source",
+      "category": "e",
+      "reason": "Three author errors. The settings menu saves Corner add, max corner, Corner end, Lines add and max lines under OTK.*, while the start reads DareOTK.* (and max lines from OTK.maxLines), so these settings were lost or crossed on the next start: use the DareOTK. prefix of every other key of the unit. Chloe, Courtney and Krissy read the integer counter DareOTK.met.<name> with loadBoolean, which is never true for a number, so they never recognised a returning player: read it with loadInteger, as the other mistresses do. setImageInfo draws getRandom(4)+1, so its Courtney case (5) never ran: draw getRandom(5)+1, as the identical setImageDare does.",
+      "diff": "settings-met-image.diff"
     }
   ]
 }
