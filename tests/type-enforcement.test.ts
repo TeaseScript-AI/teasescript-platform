@@ -1335,9 +1335,9 @@ test("a first null is remembered wherever a first value decides a type", () => {
   ]);
 });
 
-test("an operation result that can never be a whole number widens an inferred integer place", () => {
-  // `d / 2` with `d` of unknown type gives a number and never a whole number, so the place can store a non-whole
-  // number (rule 1.2); `d + 1` may give a whole number, so the place keeps its integer and the runtime checks it.
+test("an operation result whose types hold a number and no integer widens an inferred integer place", () => {
+  // `d / 2` with `d` of unknown type can give a number and no integer, so the place can store a non-whole number
+  // (rule 1.2); `d + 1` can give an integer, so the place keeps its integer and the runtime checks it.
   const inFunction = (argument: string, ...body: string[]): string =>
     ["function f(d) {", ...body.map((line) => `    ${line}`), "}", `f(${argument})`, "exit"].join(
       "\n",
@@ -1370,7 +1370,7 @@ test("an operation result that can never be a whole number widens an inferred in
       ],
     ],
   );
-  // A result that may be a whole number does not widen: the integer stays and the runtime checks the value.
+  // A result whose types hold an integer does not widen: the integer stays and the runtime checks the value.
   const whole = inFunction(
     "7",
     "let i = 0",

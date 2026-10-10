@@ -2217,7 +2217,7 @@ class TypeChecker {
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
     if (result !== undefined && !isKnown(result)) {
       this.#checkUnknownCompound(place, kept, statement);
-      // `p += d / 2` with `d` of unknown type gives a number and never a whole number, so it widens `p` (rule 1.2).
+      // `p += d / 2` with `d` of unknown type can give a number and no integer, so it widens `p` (rule 1.2).
       if (
         this.diagnostics.length === reported &&
         this.#givesNonWholeNumber(statement.value, (type) =>
@@ -2293,9 +2293,9 @@ class TypeChecker {
   }
 
   /**
-   * Whether an operation of unknown result can give a number and never a whole number, as `d / 2` with `d` of unknown
-   * type, so that storing it can store a non-whole number (rule 1.2). `stored` gives what a compound assignment stores
-   * for each type the operation can give.
+   * Whether the possible result types of an operation of unknown result include `number` but not `integer`, as for
+   * `d / 2` with `d` of unknown type, so that storing it can store a non-whole number (rule 1.2). `stored` gives what
+   * a compound assignment stores for each type the operation can give.
    */
   #givesNonWholeNumber(
     expression: Expression,
@@ -2529,9 +2529,9 @@ class TypeChecker {
         (mayGainParts || this.#unappliedWidening.has(place.widening.root))
       )
         this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
-      // An operation of unknown result that can give a number and never a whole number, such as `d / 2` with `d` of
-      // unknown type, can store a non-whole number (rule 1.2): it widens the integers the place holds as a number
-      // would, instead of leaving them to a whole-number check that fails when the script runs.
+      // An operation of unknown result whose possible result types include a number but no integer, such as `d / 2`
+      // with `d` of unknown type, can store a non-whole number (rule 1.2): it widens the integers the place holds as
+      // a number would, instead of leaving them to a whole-number check that fails when the script runs.
       if (decides && !isKnown(value) && this.#givesNonWholeNumber(expression))
         this.#widens(place, NUMBER_TYPE, expression);
       this.#follow(place.widening, value, expression.span);

@@ -291,8 +291,8 @@ test("a key computed at runtime has no type, and a division of its value widens 
       loads.push(instruction.value.type);
   assert.deepEqual(loads, [null, { kind: "integer" }]);
 
-  // The loaded value is checked where it is stored, and stays as it was saved. A division of it can never give a
-  // whole number, so an inferred integer that takes the result is a number (rule 1.2) instead of failing at runtime.
+  // The loaded value is checked where it is stored, and stays as it was saved. A division of it gives a number and
+  // no integer, so an inferred integer that takes the result is a number (rule 1.2) instead of failing at runtime.
   const result = assertRuntimeResumeEquivalent(
     [
       'let id = "a"',

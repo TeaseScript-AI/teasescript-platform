@@ -996,9 +996,9 @@ picks.add("three")    // compile error
 - A variable that starts as `null` takes the type of its first non-null value and may still hold `null`. The compiler
   infers no other combination of types.
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
-  number, wherever that assignment is, also an operation on a value of unknown type whose result can be a number and
-  never a whole number, such as `d / 2`; one that may give a whole number, such as `d + 1`, leaves the `integer` to
-  the runtime check. The elements and properties inside such a variable widen by the same rule. A
+  number, wherever that assignment is, also an operation on a value of unknown type whose possible result types include
+  `number` but not `integer`, such as `d / 2`; one whose possible result types include `integer`, such as `d + 1`,
+  leaves the `integer` to the runtime check. The elements and properties inside such a variable widen by the same rule. A
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict, and an integer-only use of a widened
   value, such as a list index, `removeAt`, or a repeat count, is a compile error:
 
