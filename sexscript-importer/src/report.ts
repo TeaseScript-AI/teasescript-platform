@@ -836,10 +836,11 @@ function runPackageProject(
   };
   const project = [...sources].map(([path, source]) => ({ path, source }));
   run(project, MAIN, false);
-  // Scripts that no other script transfers to start isolated runs first, so their targets run with their state.
+  // Scripts that no other script transfers to start isolated runs first, so their targets run with their state; the
+  // scripts main.tease offers count as such, as entries.
   const targets = new Set(
     entries.flatMap(({ path, program }) =>
-      runs(path)
+      runs(path) && path !== MAIN
         ? countIrStatements(program.statements).transfers.filter((target) => target !== path)
         : [],
     ),
