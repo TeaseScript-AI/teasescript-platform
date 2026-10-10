@@ -214,8 +214,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   goes through a helper with a note (`SX_INPUT_PREFILL`). A text default that may be no text becomes text
   (`"${level}"`, null staying null), and a list becomes `"[${list.join(", ")}]"`, as Groovy printed
   it; a map default is reported (`SX_INPUT_PREFILL_VALUE`). A default
-  computed with side effects stays manual work for text and number input (`SX_INPUT_PREFILL_EFFECT`): legacy computed
-  it before showing the question, which the converted ask says only after the default.
+  computed with side effects goes into a variable after the question's text and before the ask, where Groovy computed
+  it (`let prefill = randomInteger(0..365) + 1`, ChastityRoulette's holidays); one that a text input shows as a list or
+  map stays manual work (`SX_INPUT_PREFILL_EFFECT`), since its text reads it again.
 - Groovy turned a list into text as `[a, b]`; TeaseScript `${list}` selects one element and `say list` shows a quoted
   notation (PR #515). A list of text, numbers, and booleans becomes `"[${list.join(", ")}]"`; a list of lists, or of
   elements whose type the importer cannot tell, goes through a helper that shows lists and maps inside as Groovy did,

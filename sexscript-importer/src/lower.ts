@@ -17070,25 +17070,31 @@ function lowerSingleInput(
     );
   }
   const defaultNode = argumentNodes[1];
-  const prefill = defaultNode === undefined || isEmptyDefault(defaultNode) ? null : args[1]!;
-  if (prefill !== null && !isPure(defaultNode!, context)) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_INPUT_PREFILL_EFFECT",
-      `${name}() computes its pre-filled value with side effects, which legacy ran before showing the question; the question becomes a say before the input, so compute the value explicitly before the question.`,
-    );
-  }
+  let prefill = defaultNode === undefined || isEmptyDefault(defaultNode) ? null : args[1]!;
   // Legacy text input showed `String.valueOf(default)`; a text default is text in TeaseScript too (null shows "null"),
   // and a list shows as Groovy printed it, `[a, b]`.
   const defaultType = defaultNode === undefined ? UNKNOWN : inferType(defaultNode, context.types);
+  const shownCollection =
+    name === "getString" && defaultType !== UNKNOWN && (defaultType & (LIST | OBJECT)) !== 0;
+  // Groovy computed the pre-filled value after the question's text and before the input showed: one with effects goes
+  // into a temporary before the question's say, after its text. A list or map shown as text reads its parts again, so
+  // that one needs the value computed explicitly.
+  let prompted = false;
+  if (prefill !== null && !isPure(defaultNode!, context)) {
+    if (shownCollection)
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_INPUT_PREFILL_EFFECT",
+        `${name}() computes its pre-filled list or map with side effects, which legacy ran before showing the question; its text reads it again, so compute the value explicitly before the question.`,
+      );
+    const computed = { nodes: [defaultNode!], values: [prefill], base: "prefill" };
+    if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!, null, computed)) return null;
+    prefill = computed.values[0]!;
+    prompted = true;
+  }
   let textPrefill = prefill;
-  if (
-    prefill !== null &&
-    name === "getString" &&
-    defaultType !== UNKNOWN &&
-    (defaultType & (LIST | OBJECT)) !== 0
-  ) {
+  if (prefill !== null && shownCollection) {
     const parts = onlyOf(defaultType, LIST | NULL) ? listText(defaultNode!, context) : undefined;
     if (parts === null) return null;
     if (parts === undefined) {
@@ -17109,7 +17115,7 @@ function lowerSingleInput(
       name !== "getString" &&
       !notePrefill(name, defaultNode!, node, context)
     ) {
-      if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
+      if (!prompted && !pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
       return useHelper(context, name === "getInteger" ? "askInteger" : "askNumber", [prefill]);
     }
     // A text input's prefill that may be no text is shown as text, and null stays null.
@@ -17122,7 +17128,7 @@ function lowerSingleInput(
             : useHelper(context, "text", [prefill]);
     }
   }
-  if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
+  if (!prompted && !pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
   const input =
     name === "getString" ? "askText" : name === "getInteger" ? "askInteger" : "askNumber";
   return textPrefill === null
@@ -17177,11 +17183,12 @@ function pushPrompt(
   /** An argument whose statements already run before the prompt, such as the loop that builds a menu's options. */
   evaluated: AstNode | null = null,
   /**
-   * The lowered button texts or options and their nodes: one with effects, such as `"Yes, ${dommeTitle()}"`, is
-   * computed into a temporary before the question, in order after the question's own text, as Groovy evaluated every
-   * argument before showing it; `values` then holds the temporary.
+   * The lowered button texts, options, or pre-filled value and their nodes: one with effects, such as `"Yes,
+   * ${dommeTitle()}"`, is computed into a temporary before the question, in order after the question's own text, as
+   * Groovy evaluated every argument before showing it; `values` then holds the temporary, which `base` names (`option`
+   * by default).
    */
-  computed: { nodes: readonly AstNode[]; values: IrExpression[] } | null = null,
+  computed: { nodes: readonly AstNode[]; values: IrExpression[]; base?: string } | null = null,
 ): boolean {
   if (holdsOnlyNull(messageNode, context)) return true;
   const root = context.statementRoot;
@@ -17210,7 +17217,7 @@ function pushPrompt(
     if (!isPure(messageNode, context)) message = temporary(message, "question");
     computed.nodes.forEach((node, index) => {
       if (effects.includes(node))
-        computed.values[index] = temporary(computed.values[index]!, "option");
+        computed.values[index] = temporary(computed.values[index]!, computed.base ?? "option");
     });
   }
   if (!ordered) {
