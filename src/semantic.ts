@@ -67,6 +67,7 @@ import {
 import type { StatementFlow } from "./type-checker.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
 import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import { zoneArgumentProblem } from "./time-zones.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -176,6 +177,7 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  invalidZone: "TSV043",
   invalidListIndex: "TSV045",
   visibleOverflow: "TSV050",
   invalidLabel: "TSV051",
@@ -1995,6 +1997,9 @@ class SemanticValidator {
           scope.resolve(expression.callee.name)?.declaration !== undefined;
         // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
+        // A zone is written as text, so the Player can record its rules before the script runs (V30 §35).
+        const zone = zoneArgumentProblem(expression);
+        if (zone !== null) this.#report(semanticCode.invalidZone, zone.message, zone.span);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
         if (

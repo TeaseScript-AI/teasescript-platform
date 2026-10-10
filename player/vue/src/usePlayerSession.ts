@@ -147,9 +147,10 @@ export interface PlayerSessionOptions {
   decodeImage?: ImageDecoder;
   /**
    * The player's time zone and date and time presentation as they are now: the account settings, else the browser's,
-   * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
+   * which is the default, with the rules of the zones the script names. Start and Continue resolve it again, so a
+   * changed setting applies from that point on.
    */
-  temporalContext?: () => TemporalContext;
+  temporalContext?: (namedZones: readonly string[]) => TemporalContext;
   /**
    * Where the script's session is kept, so that a reload or a later visit in this browser continues it (PLAYER-UI
    * "Session start and user activation"); in this page's memory by default. Only a script with storage that the host
@@ -347,7 +348,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const resolved = capturedMedia.resolve(path);
     return resolved.state === "ready" ? resolved.url : null;
   };
-  const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
+  const resolveTemporalContext =
+    options.temporalContext ?? ((namedZones) => playerTemporalContext({}, namedZones));
   const session = shallowRef<PlayerRuntimeSession | null>(null);
   // Counts the times this script's saved data were replaced outside Debug's rewind, which ends its history.
   const rewindRetirements = ref(0);
@@ -1624,11 +1626,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     };
   }
   /**
-   * What Start and Continue record about the player now: the zone and presentation, then the wall clock, sampled last so
-   * that resolving the zone does not age it.
+   * What Start and Continue record about the player now: the zone and presentation, with the rules of the zones the
+   * script names (`plan.timeZones`), then the wall clock, sampled last so that resolving the zones does not age it.
    */
-  function temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number } {
-    const temporalContext = resolveTemporalContext();
+  function temporalCapture(namedZones: readonly string[] = []): {
+    temporalContext: TemporalContext;
+    wallClockMs: number;
+  } {
+    const temporalContext = resolveTemporalContext(namedZones);
     return { temporalContext, wallClockMs: Date.now() };
   }
   /**
@@ -1662,7 +1667,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (continued.state.debugMode !== debugMode)
           continued = setPlayerRuntimeDebugMode(continued, debugMode).session;
         applyRandomControl(continued);
-        return continuePlayerRuntimeSession(continued, temporalCapture()).session;
+        return continuePlayerRuntimeSession(continued, temporalCapture(continued.plan.timeZones))
+          .session;
       },
       ...(marks === undefined ? {} : { marks }),
     };

@@ -422,7 +422,7 @@ test("an absolute date and time moves only by exact time, and elapsed-time consu
     [
       [
         "TSV043",
-        "An absolute date and time has no calendar. Convert it first, as in '(t.toDateTime() + 1 calendar day).toAbsoluteDateTime()'.",
+        "An absolute date and time has no calendar, so '+' cannot move it by calendar units. Use add(...), which counts them in the player's time zone, as in 't.add(1 calendar day)'.",
       ],
     ],
   );

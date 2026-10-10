@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 79;
+export const INSTRUCTION_PLAN_VERSION = 80;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -35,6 +35,11 @@ export interface InstructionPlan {
    * load of the key accepts, which each value saved under the key has to fit (ADR 0021 §6, V30 §25).
    */
   readonly storageTypes: readonly StorageTypePlan[];
+  /**
+   * The zones the script names with `zone:`, other than `UTC`, unique and in name order: the host records their rules
+   * with the player's zone when the session starts or continues (V30 §35).
+   */
+  readonly timeZones: readonly string[];
 }
 
 /** A storage key and the type its stored value has to fit. */
