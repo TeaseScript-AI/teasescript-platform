@@ -1972,14 +1972,20 @@ test("the list-aliases fixture says what Groovy's shared lists gave", async () =
 });
 
 // The captured-locals fixture says what Groovy said where its closure values set and read their functions' locals; the
-// closures that stay unconverted, of a loop's pass or kept by the script, say nothing.
+// closure that the script keeps, which stays unconverted, says nothing.
 test("the captured-locals fixture says what Groovy's closures gave", async () => {
   assert.deepEqual(await fixtureSays("captured-locals"), [
     "Rounds 2",
     "Rounds 3",
     "Rounds 3 4",
     "Pick!",
+    "Seen 0",
+    "Seen 1",
     "Count 1",
+    "Item a at 1",
+    "Item inner at 0",
+    "Item b at 1",
+    "Item inner at 0",
   ]);
 });
 

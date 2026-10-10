@@ -75,6 +75,7 @@ import {
   liftableCaptures,
   spanKey,
   withLiftedLocals,
+  withPassedLocals,
 } from "./captured-locals.ts";
 import { withListAliasesAsPaths, withTupleAssignments } from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
@@ -1143,6 +1144,142 @@ function recordListFields(
 }
 
 /**
+ * The fields of maps that stay as written: a variable declared with a map literal of texts, numbers, or flags, or a sum
+ * of such maps, that nothing sets again, writes a field of, changes by a method, or passes on, and that is only read by
+ * a named field, by a key, or by a method that reads it, gone through by a loop, or added to another such map
+ * (fight_arena's ATTACK_TYPE and FAVOR_CHOICE, whose fields are its switches' cases). Each such field has the type of
+ * its value, or of the field of another such map it reads, as `binding.field`.
+ */
+function constantMapFields(
+  body: AstNode,
+  keys: BindingKeys,
+  types: TypeEnvironment,
+): Map<string, number> {
+  // The fields of each map declared with a literal or a sum of such maps, the later sum's field over the earlier's.
+  const literals = new Map<string, Map<string, AstNode>>();
+  // The maps each sum reads, which must stay as written too.
+  const sources = new Map<string, string[]>();
+  const rejected = new Set<string>();
+  const reads = new Set<AstNode>();
+  const entriesOf = (value: AstNode | null, used: string[]): Map<string, AstNode> | null => {
+    if (value?.kind === "map") {
+      const entries = new Map<string, AstNode>();
+      for (const entry of nodeArray(value.entries)) {
+        const field = constantString(entry.key);
+        const item = asNode(entry.value);
+        if (field !== null && item !== null) entries.set(field, item);
+      }
+      return entries;
+    }
+    if (value?.kind === "variable") {
+      const key = bindingKey(value, keys);
+      const entries = key === null ? undefined : literals.get(key);
+      if (key === null || entries === undefined) return null;
+      reads.add(value);
+      used.push(key);
+      return entries;
+    }
+    if (value?.kind === "binary" && value.operator === "+") {
+      const left = entriesOf(asNode(value.left), used);
+      const right = left === null ? null : entriesOf(asNode(value.right), used);
+      return left === null || right === null ? null : new Map([...left, ...right]);
+    }
+    return null;
+  };
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const target = assigns ? asNode(node.left) : null;
+    const key = target?.kind === "variable" ? bindingKey(target, keys) : null;
+    if (key === null || target === null) return;
+    reads.add(target);
+    const used: string[] = [];
+    const entries = node.kind === "declaration" ? entriesOf(asNode(node.right), used) : null;
+    if (entries === null || literals.has(key)) rejected.add(key);
+    else {
+      literals.set(key, entries);
+      sources.set(key, used);
+    }
+  });
+  walkAst(body, (node) => {
+    // Reads of a field, a key, or by a method that reads, and a loop's collection.
+    const receiver =
+      node.kind === "property"
+        ? asNode(node.object)
+        : node.kind === "binary" && node.operator === "["
+          ? asNode(node.left)
+          : node.kind === "methodCall" &&
+              (READING_COLLECTION_METHODS.has(constantString(node.method) ?? "") ||
+                [
+                  "each",
+                  "eachWithIndex",
+                  "keySet",
+                  "values",
+                  "containsKey",
+                  "containsValue",
+                  "get",
+                ].includes(constantString(node.method) ?? ""))
+            ? asNode(node.object)
+            : node.kind === "for"
+              ? asNode(node.collection)
+              : null;
+    if (receiver?.kind === "variable") reads.add(receiver);
+    // A write of a field or a key.
+    if (node.kind === "binary" && /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u.test(String(node.operator))) {
+      const left = asNode(node.left);
+      const written =
+        left?.kind === "property"
+          ? asNode(left.object)
+          : left?.kind === "binary" && left.operator === "["
+            ? asNode(left.left)
+            : null;
+      const key = written?.kind === "variable" ? bindingKey(written, keys) : null;
+      if (key !== null) rejected.add(key);
+    }
+    if (node.kind === "postfix" || node.kind === "prefix") {
+      const operand = asNode(node.expression) ?? asNode(node.value);
+      const owner =
+        operand?.kind === "property"
+          ? asNode(operand.object)
+          : operand?.kind === "binary" && operand.operator === "["
+            ? asNode(operand.left)
+            : null;
+      const key = owner?.kind === "variable" ? bindingKey(owner, keys) : null;
+      if (key !== null) rejected.add(key);
+    }
+  });
+  // Any other use, such as an argument, an alias, or another method, may change the map unseen.
+  walkAst(body, (node) => {
+    if (node.kind !== "variable" || reads.has(node)) return;
+    const key = bindingKey(node, keys);
+    if (key !== null && literals.has(key)) rejected.add(key);
+  });
+  const stays = (key: string, seen: ReadonlySet<string> = new Set()): boolean =>
+    !rejected.has(key) &&
+    !seen.has(key) &&
+    (sources.get(key) ?? []).every((source) => stays(source, new Set([...seen, key])));
+  // A field's type: that of its constant, or of the field of another such map it reads.
+  const fieldType = (value: AstNode, seen: ReadonlySet<AstNode>): number | null => {
+    if (value.kind === "constant") return value.value === null ? null : inferType(value, types);
+    const receiver = value.kind === "property" ? asNode(value.object) : null;
+    const field = value.kind === "property" ? constantString(value.property) : null;
+    const key = receiver?.kind === "variable" ? bindingKey(receiver, keys) : null;
+    const source = key === null || field === null ? undefined : literals.get(key)?.get(field);
+    if (key === null || source === undefined || seen.has(source) || !stays(key)) return null;
+    return fieldType(source, new Set([...seen, source]));
+  };
+  const fields = new Map<string, number>();
+  for (const [key, entries] of literals) {
+    if (!stays(key)) continue;
+    for (const [field, value] of entries) {
+      const type = fieldType(value, new Set([value]));
+      if (type !== null) fields.set(`${key}.${field}`, type);
+    }
+  }
+  return fields;
+}
+
+/**
  * Records one body's map uses: object fields; and for dicts, the types of their values (literal values, `map[key] =`,
  * `map.key =`, and `put`), the types of their keys, and the literal keys every assigned map has and nothing removes.
  */
@@ -1813,7 +1950,8 @@ function lowerFileOnce(
       (base) => freshName(base, context),
     );
     found.body = body;
-    body = withLiftedLocals(body, lifted, (base) => freshName(base, context));
+    const passed = withPassedLocals(body, lifted);
+    body = withLiftedLocals(passed.body, passed.rest, (base) => freshName(base, context));
   }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
@@ -1877,7 +2015,10 @@ function lowerFileOnce(
       variables,
       listElements,
       ...(context.types.bindingTypes === undefined ? {} : { bindingTypes }),
-      recordFields: new Map([...context.mapUses.recordListFields].map((field) => [field, LIST])),
+      recordFields: new Map([
+        ...constantMapFields(body, context.bindings, context.types),
+        ...[...context.mapUses.recordListFields].map((field): [string, number] => [field, LIST]),
+      ]),
     };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;

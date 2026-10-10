@@ -326,7 +326,12 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   arguments and returns null for an unknown action; Groovy failed in both cases. A script variable that starts as null
   and that one later statement sets to a closure, before which the script's own code calls nothing, is called
   directly instead, and its function takes the variable's name where nothing else reads it (BanjoRPG's world:
-  `worldEnd("quitmenu")`).
+  `worldEnd("quitmenu")`). A closure value that captures locals of its function, which its own function cannot see:
+  where it only reads them and its function only calls it, each call passes them as parameters (fight_arena's menu
+  `args`, ShockQuiz's `getDisplayText`); where it sets them, they become script variables named after the function and
+  the local, where no two calls of the function can share them (the shock units' settings, which set their `txt`).
+  Other captures stay a TODO: a closure that escapes, by a value the script keeps or passes on, or one whose function
+  may run again while it runs.
 - A list position that may be negative, which Groovy counted from the end, or past the end, where Groovy read null,
   including a literal position past a shorter literal list the variable is set to again later (Farkel's
   `contestants = [winner1]`), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly

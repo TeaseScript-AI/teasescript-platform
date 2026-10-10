@@ -2,6 +2,26 @@ import type { AstNode, SourceSpan } from "./ast.ts";
 import { constantString, variableName, walkAst } from "./ast.ts";
 import { asNode, children, mapChildren, nodeArray } from "./list-aliases.ts";
 
+// List and map methods that change their receiver in place.
+const CHANGING_METHODS = new Set([
+  "add",
+  "addAll",
+  "clear",
+  "leftShift",
+  "pop",
+  "push",
+  "put",
+  "putAll",
+  "remove",
+  "removeAll",
+  "removeAt",
+  "removeIf",
+  "retainAll",
+  "set",
+  "shuffle",
+  "sort",
+]);
+
 /** A local or parameter of a function that a closure value in it reads or sets (lowerClosureValue). */
 export interface CapturedLocal {
   /** The function's body and the closure value, by spanKey. */
@@ -72,12 +92,208 @@ export function withLiftedLocals(
   return { ...body, statements };
 }
 
-/** The captured locals that withLiftedLocals lifts. */
+/** The captured locals that withPassedLocals passes or withLiftedLocals lifts. */
 export function liftableCaptures(
   body: AstNode,
   captured: readonly CapturedLocal[],
 ): CapturedLocal[] {
-  return [...plan(body, captured).values()].flatMap((lift) => lift.locals);
+  const passes = passPlan(body, captured);
+  const rest = captured.filter((local) => !passes.has(local.closure));
+  return [
+    ...[...passes.values()].flatMap((pass) => pass.locals),
+    ...[...plan(body, rest).values()].flatMap((lift) => lift.locals),
+  ];
+}
+
+/**
+ * A closure value that only reads the locals it captures, and that its function only calls, gets them as parameters
+ * instead: each call passes them as they are where it calls (fight_arena's menu, whose `args` reads the player's choice
+ * of the list it was given, in a function that its own actions call again). The closure must change none of them,
+ * through itself or a closure of the function that it calls, so that its reads see what the call passed; and each
+ * call must pass all of its parameters. Returns the body and the captured locals that the other closures keep, which
+ * withLiftedLocals may lift.
+ */
+export function withPassedLocals(
+  body: AstNode,
+  captured: readonly CapturedLocal[],
+): { body: AstNode; rest: CapturedLocal[] } {
+  const passes = passPlan(body, captured);
+  const rest = captured.filter((local) => !passes.has(local.closure));
+  if (passes.size === 0) return { body, rest };
+  const owners = new Map<string, Map<string, Pass>>();
+  for (const pass of passes.values())
+    owners.set(pass.owner, new Map([...(owners.get(pass.owner) ?? []), [pass.name, pass]]));
+  const parameter = (name: string): { name: string; type: string; default: null } => ({
+    name,
+    type: "java.lang.Object",
+    default: null,
+  });
+  // The calls of the passed closures of a function, outside the closures in it, pass the locals.
+  const addArguments = (current: AstNode, calls: ReadonlyMap<string, Pass>): AstNode => {
+    if (current.kind === "closure") return current;
+    const next = mapChildren(current, (child) => addArguments(child, calls));
+    const called = calledClosure(next);
+    const pass = called === null ? undefined : calls.get(called);
+    if (pass === undefined) return next;
+    const list = asNode(next.arguments);
+    const items = nodeArray(list?.items);
+    const span = next.span;
+    const passed = [
+      ...(pass.implicit && items.length === 0 ? [{ kind: "constant", span, value: null }] : []),
+      ...items,
+      ...pass.names.map((name) => ({ kind: "variable", span, name, type: "java.lang.Object" })),
+    ];
+    return { ...next, arguments: { ...(list ?? { kind: "arguments", span }), items: passed } };
+  };
+  const rewrite = (node: AstNode): AstNode => {
+    let changed = mapChildren(node, rewrite);
+    if (node.kind !== "closure") return changed;
+    const calls = owners.get(spanKey(node.span));
+    const block = asNode(changed.body);
+    if (calls !== undefined && block !== null)
+      changed = { ...changed, body: addArguments(block, calls) };
+    const pass = passes.get(spanKey(node.span));
+    if (pass === undefined) return changed;
+    const implicit = node.parameterSpecified !== true;
+    return {
+      ...changed,
+      parameterSpecified: true,
+      // Every call passes every parameter, so a default the closure gave one is never used.
+      parameters: [
+        ...(implicit
+          ? [parameter("it")]
+          : (Array.isArray(node.parameters) ? node.parameters : []).map((item: unknown) =>
+              typeof item === "object" && item !== null ? { ...item, default: null } : item,
+            )),
+        ...pass.names.map(parameter),
+      ],
+    };
+  };
+  return { body: rewrite(body), rest };
+}
+
+interface Pass {
+  /** The function's closure, by spanKey. */
+  owner: string;
+  name: string;
+  implicit: boolean;
+  names: string[];
+  locals: CapturedLocal[];
+}
+
+/** The closure values that get their captured locals as parameters (withPassedLocals), by spanKey. */
+function passPlan(body: AstNode, captured: readonly CapturedLocal[]): Map<string, Pass> {
+  const passes = new Map<string, Pass>();
+  if (captured.length === 0) return passes;
+  const closures = closuresOf(body);
+  const byBody = new Map(
+    closures.map((item) => [spanKey(asNode(item.node.body)?.span ?? null), item]),
+  );
+  const byClosure = new Map(closures.map((item) => [spanKey(item.node.span), item]));
+  const byKey = new Map<string, CapturedLocal[]>();
+  for (const local of captured)
+    byKey.set(local.closure, [...(byKey.get(local.closure) ?? []), local]);
+  for (const [key, locals] of byKey) {
+    const closure = byClosure.get(key);
+    const owner = byBody.get(locals[0]!.body);
+    if (closure?.name == null || owner === undefined || !onlyCalled(owner.node, closure)) continue;
+    const names = [...new Set(locals.map((local) => local.name))];
+    if (names.includes("it")) continue;
+    // The closure changes none of them, and calls no closure of its function, which might.
+    const ownClosures = new Set(
+      closures.flatMap((item) => (item.parent === owner && item.name !== null ? [item.name] : [])),
+    );
+    let safe = names.every((name) => !changesName(closure.node, name));
+    walkAst(closure.node, (node) => {
+      const callee = calledClosure(node);
+      if (callee !== null && (ownClosures.has(callee) || callee === owner.name)) safe = false;
+    });
+    // Every call passes all of the closure's parameters, outside the closures of the function.
+    const implicit = closure.node.parameterSpecified !== true;
+    const count = Array.isArray(closure.node.parameters) ? closure.node.parameters.length : 0;
+    let calls = 0;
+    walkOutsideOwn(owner.node, (node, nested) => {
+      if (calledClosure(node) !== closure.name) return;
+      calls += 1;
+      const passed = nodeArray(asNode(node.arguments)?.items).length;
+      if (nested || (implicit ? passed > 1 : passed !== count)) safe = false;
+    });
+    if (!safe || calls === 0) continue;
+    passes.set(key, {
+      owner: spanKey(owner.node.span),
+      name: closure.name,
+      implicit,
+      names,
+      locals,
+    });
+  }
+  return passes;
+}
+
+/** Visits every node below a closure, telling whether it stands in a closure nested in it. */
+function walkOutsideOwn(closure: AstNode, visit: (node: AstNode, nested: boolean) => void): void {
+  const walk = (node: AstNode, nested: boolean): void => {
+    visit(node, nested);
+    for (const child of children(node)) walk(child, nested || node.kind === "closure");
+  };
+  for (const child of children(asNode(closure.body) ?? closure)) walk(child, false);
+}
+
+/** Whether the node sets `name`, changes it by `++` or `--`, or changes an element or a field of it, or by a method. */
+function changesName(node: AstNode, name: string): boolean {
+  let found = false;
+  const rooted = (target: AstNode | null): boolean => {
+    let at = target;
+    while (at !== null && at.kind !== "variable")
+      at =
+        at.kind === "binary" && at.operator === "["
+          ? asNode(at.left)
+          : at.kind === "property"
+            ? asNode(at.object)
+            : null;
+    return at !== null && variableName(at) === name;
+  };
+  walkAst(node, (child) => {
+    if (child.kind === "binary" && ASSIGNING_OPERATORS.has(String(child.operator)))
+      if (rooted(asNode(child.left))) found = true;
+    if (child.kind === "declaration" && variableName(child.left) === name) found = true;
+    if ((child.kind === "postfix" || child.kind === "prefix") && rooted(children(child)[0] ?? null))
+      found = true;
+    if (child.kind === "binary" && child.operator === "<<" && rooted(asNode(child.left)))
+      found = true;
+    if (
+      child.kind === "methodCall" &&
+      CHANGING_METHODS.has(constantString(child.method) ?? "") &&
+      rooted(asNode(child.object))
+    )
+      found = true;
+  });
+  return found;
+}
+
+/** The closure a node calls by name, `f(…)` or `f.call(…)`, or null. */
+function calledClosure(node: AstNode): string | null {
+  if (node.kind !== "methodCall") return null;
+  if (node.implicitThis === true) return constantString(node.method);
+  return constantString(node.method) === "call" ? variableName(node.object) : null;
+}
+
+/** The closures of the script, with the names a declaration or an assignment gives them and the closures around them. */
+function closuresOf(body: AstNode): Closure[] {
+  const closures: Closure[] = [];
+  const visit = (node: AstNode, parent: Closure | null, name: string | null): void => {
+    let inner = parent;
+    if (node.kind === "closure") {
+      inner = { node, name, parent };
+      closures.push(inner);
+    }
+    const assigned = setName(node);
+    const value = asNode(node.right);
+    for (const child of children(node))
+      visit(child, inner, assigned !== null && child === value ? assigned : null);
+  };
+  visit(body, null, null);
+  return closures;
 }
 
 /** A closure of the script, with the name a declaration or an assignment gives it, and the closure around it. */
@@ -94,19 +310,7 @@ function plan(
 ): Map<string, { function: string; locals: CapturedLocal[] }> {
   const lifts = new Map<string, { function: string; locals: CapturedLocal[] }>();
   if (captured.length === 0) return lifts;
-  const closures: Closure[] = [];
-  const visit = (node: AstNode, parent: Closure | null, name: string | null): void => {
-    let inner = parent;
-    if (node.kind === "closure") {
-      inner = { node, name, parent };
-      closures.push(inner);
-    }
-    const assigned = setName(node);
-    const value = asNode(node.right);
-    for (const child of children(node))
-      visit(child, inner, assigned !== null && child === value ? assigned : null);
-  };
-  visit(body, null, null);
+  const closures = closuresOf(body);
   const byBody = new Map(
     closures.map((item) => [spanKey(asNode(item.node.body)?.span ?? null), item]),
   );

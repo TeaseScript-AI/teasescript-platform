@@ -14,7 +14,8 @@ def configure = { int start ->
 	show(txt + " " + count)
 }
 configure(2)
-// A closure value inside a closure value reads the locals of the closure around it the same way.
+// A closure value inside a closure value gets the locals of the closures around it the same way, here as parameters,
+// since it only reads them.
 def menu = {
 	def label = "Pick"
 	def options = { ->
@@ -25,7 +26,8 @@ def menu = {
 	options()
 }
 menu()
-// A local declared anew on each pass of a loop stays, as each pass's closure saw its own, and so does the closure.
+// A closure that only reads a local declared anew on each pass of a loop gets it as a parameter, as each pass's closure
+// saw its own.
 def perPass = {
 	for (int i = 0; i < 2; i++) {
 		def seen = i
@@ -44,3 +46,17 @@ def create = { int start ->
 	show("Count " + count)
 }
 create(1)
+// A closure value that only reads the locals it captures, and that its function only calls, gets them as parameters,
+// also in a function that runs again while it runs (fight_arena's menu, whose `args` reads the player's choice).
+def nested = null
+def showMenu = { List items, int depth ->
+	int pick = 0
+	while (pick < items.size()) {
+		def label = { prefix -> prefix + " " + items[pick] + " at " + depth }
+		show(label("Item"))
+		if (depth > 0) nested(["inner"], depth - 1)
+		pick++
+	}
+}
+nested = showMenu
+showMenu(["a", "b"], 1)
