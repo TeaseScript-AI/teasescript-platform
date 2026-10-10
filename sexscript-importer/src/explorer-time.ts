@@ -1461,6 +1461,18 @@ export function timeContext(snapshot: Data): TimeContext {
         if (scope !== null) scoped.set(`${binding.name}\u0001${scope}`, binding.value);
       }
   });
+  // A call's root scope, also one kept after its file was left (a persistent button's or timer's), holds its file's
+  // own variables.
+  const roots = new Map(
+    [...list(snapshot.frames), ...list(snapshot.retainedScopes)].map((scope) => [scope.id, scope]),
+  );
+  for (const call of calls) {
+    const root = roots.get(call.rootScopeId);
+    if (typeof root?.file !== "number") continue;
+    for (const binding of list(root.bindings))
+      if (typeof binding.name === "string")
+        scoped.set(`${binding.name}\u0001file ${root.file}`, binding.value);
+  }
   const storage = new Map<string, unknown>();
   for (const entry of list(snapshot.scriptStorage))
     if (typeof entry.key === "string") storage.set(entry.key, entry.value);

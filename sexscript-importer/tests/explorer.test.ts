@@ -3641,6 +3641,39 @@ test(
       const holds = holdsAt(comparison, model, timeContext(before.snapshot), EPOCH_MS);
       assert.equal(holds, name === "receiver" ? false : true, name);
     }
+    // A persistent button's file variable after the file was left: the scope the button keeps, not the storage saved
+    // since, nor the other file's variable of that name.
+    const files = [
+      {
+        path: "main.tease",
+        source:
+          'let wantedHour = load("hour", default: 12)\nshowPermanentButton "Invoke", persist: true {\n' +
+          '  showButton "Check"\n  if getDateTime().hour == wantedHour {\n    say "Right."\n  } else {\n' +
+          '    say "Wrong."\n  }\n}\nsave 13 as "hour"\ngoto "other.tease"\n',
+      },
+      { path: "other.tease", source: 'let wantedHour = 13\nshowButton "Outside"\nexit\n' },
+    ];
+    const { plan } = engine.compileProject(files, { builtins: [] });
+    assert.ok(isRecord(plan));
+    const session = new Session(engine, plan, 1);
+    const start = session.start();
+    const invoke = session.options(start.runtime).find((input) => input.kind === "press");
+    assert.ok(invoke !== undefined);
+    const before = session.apply(start.runtime, invoke, false);
+    assert.ok(before !== null);
+    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
+    const model = clockModel(plan, instructions);
+    const [comparison] = [...model.comparisons.values()].flat();
+    assert.ok(comparison !== undefined);
+    const holds = holdsAt(
+      comparison,
+      model,
+      timeContext(before.snapshot),
+      wallClockOf(before.snapshot),
+    );
+    const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
+    assert.deepEqual(after?.texts, ["Right."]);
+    assert.equal(holds, true);
   },
 );
 
