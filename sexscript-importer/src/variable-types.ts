@@ -2500,26 +2500,85 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
       Number.isInteger(value.value) &&
       value.decimal !== true) ||
       (value.kind === "unary" && value.operator === "-" && isWhole(value.value)));
-  // A whole number: a whole literal, a whole-number read, an integer input, toInteger(), the variable itself, or the
-  // sum, difference, product, remainder, or negation of such numbers.
-  const wholeValue = (value: unknown, name: string): boolean =>
+  // A whole number: a whole literal, a whole-number read, an integer input, toInteger(), the variable itself, a local
+  // that only ever holds whole numbers, or the sum, difference, product, remainder, or sign of such numbers.
+  const wholeValue = (
+    value: unknown,
+    name: string,
+    locals: ReadonlySet<string>,
+    loads = true,
+  ): boolean =>
     isWhole(value) ||
     nameOf(value) === name ||
+    locals.has(nameOf(value) ?? "") ||
     (isRecord(value) &&
-      ((value.kind === "load" && value.integer === true && value.defaultValue === undefined) ||
+      ((loads &&
+        value.kind === "load" &&
+        value.integer === true &&
+        value.defaultValue === undefined) ||
         (value.kind === "input" && value.input === "askInteger") ||
         (value.kind === "call" &&
           (value.name === "toInteger" || value.name === "sexscriptLegacyAskInteger")) ||
-        (value.kind === "unary" && value.operator === "-" && wholeValue(value.value, name)) ||
+        (value.kind === "unary" &&
+          (value.operator === "-" || value.operator === "+") &&
+          wholeValue(value.value, name, locals, loads)) ||
         (value.kind === "binary" &&
           ["+", "-", "*", "%"].includes(String(value.operator)) &&
-          wholeValue(value.left, name) &&
-          wholeValue(value.right, name))));
-  // A value that keeps a variable a whole number or null.
-  const keepsWhole = (value: unknown, name: string): boolean =>
-    isNull(value) || wholeValue(value, name);
+          wholeValue(value.left, name, locals, loads) &&
+          wholeValue(value.right, name, locals, loads))));
+  // The locals of a function body, not its parameters or loop variables, whose every write is a whole number given
+  // the others, as `def answer = getInteger(...)` or `def step = 2`; a read of storage may be null and is open.
+  const wholeLocals = (
+    body: readonly IrStatement[],
+    parameters: readonly string[],
+  ): Set<string> => {
+    const writes = new Map<string, Array<{ operator: string; value: unknown }>>();
+    const excluded = new Set(parameters);
+    walk(body, (node) => {
+      if (node.kind === "let" && typeof node.name === "string")
+        writes.set(node.name, [
+          ...(writes.get(node.name) ?? []),
+          { operator: "=", value: node.value },
+        ]);
+      const target = node.kind === "assign" ? nameOf(node.target) : null;
+      if (target !== null)
+        writes.set(target, [
+          ...(writes.get(target) ?? []),
+          { operator: String(node.operator), value: node.value },
+        ]);
+      if (node.kind === "for") {
+        excluded.add(String(node.variable));
+        if (typeof node.valueVariable === "string") excluded.add(node.valueVariable);
+      }
+    });
+    const whole = new Set([...writes.keys()].filter((name) => !excluded.has(name)));
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const name of whole)
+        if (
+          !writes
+            .get(name)!
+            .every(({ operator, value }) =>
+              operator === "=" || operator === "+=" || operator === "-="
+                ? wholeValue(value, "", whole, false)
+                : false,
+            )
+        ) {
+          whole.delete(name);
+          changed = true;
+        }
+    }
+    return whole;
+  };
   for (const statement of statements) {
     if (statement.kind !== "function") continue;
+    const locals = wholeLocals(
+      statement.body,
+      statement.parameters.map((parameter) => parameter.name),
+    );
+    // A value that keeps a variable a whole number or null.
+    const keepsWhole = (value: unknown, name: string): boolean =>
+      isNull(value) || wholeValue(value, name, locals);
     const tested = new Set<string>();
     const copied = new Set<string>();
     const mixed = new Set<string>();
@@ -2534,7 +2593,10 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
       const target = node.kind === "assign" ? nameOf(node.target) : null;
       if (
         target !== null &&
-        !(node.operator === "=" ? keepsWhole(node.value, target) : isWhole(node.value))
+        !(node.operator === "="
+          ? keepsWhole(node.value, target)
+          : (node.operator === "+=" || node.operator === "-=") &&
+            wholeValue(node.value, target, locals))
       )
         mixed.add(target);
       if (node.kind === "binary" && (node.operator === "==" || node.operator === "!=")) {
@@ -2623,12 +2685,14 @@ function unguardedArithmetic(body: readonly IrStatement[]): Set<string> {
       return child;
     });
   };
-  // A value that is a number whenever it is computed: a literal number, an integer answer, or arithmetic.
-  const holdsValue = (value: IrExpression): boolean =>
+  // A value that is a number whenever it is computed: a literal number, an integer answer, arithmetic, or a variable
+  // known to hold a value.
+  const holdsValue = (value: IrExpression, known: ReadonlySet<string>): boolean =>
     (value.kind === "literal" && typeof value.value === "number") ||
     (value.kind === "input" && value.input === "askInteger") ||
+    (value.kind === "variable" && known.has(value.name)) ||
     (value.kind === "binary" && ["+", "-", "*", "/", "%"].includes(value.operator)) ||
-    (value.kind === "unary" && value.operator === "-");
+    (value.kind === "unary" && (value.operator === "-" || value.operator === "+"));
   const leaves = (items: readonly IrStatement[]): boolean => {
     const last = items.at(-1);
     return (
@@ -2694,10 +2758,10 @@ function unguardedArithmetic(body: readonly IrStatement[]): Set<string> {
       });
       if (item.kind === "assign" && item.target.kind === "variable") {
         if (item.operator !== "=") operand(item.target, known);
-        else if (holdsValue(item.value)) known.add(item.target.name);
+        else if (holdsValue(item.value, known)) known.add(item.target.name);
         else known.delete(item.target.name);
       } else if (item.kind === "let") {
-        if (holdsValue(item.value)) known.add(item.name);
+        if (holdsValue(item.value, known)) known.add(item.name);
         else known.delete(item.name);
       }
     }

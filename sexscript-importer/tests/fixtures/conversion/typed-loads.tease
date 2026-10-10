@@ -150,7 +150,8 @@ function readText {
   return x
 }
 say "Read ${readText()}"
-// An integer answer, whole arithmetic, a remainder, and a question shown from the read keep it a whole number or
+// An integer answer kept in a local, whole arithmetic with a whole local, a remainder, a sign, and a question shown
+// from the read keep it a whole number or
 // null, so a caller that tests its own read for null gets a whole number back.
 function fillLabel {
   say "Filling"
@@ -159,9 +160,11 @@ function fillLabel {
 function readAsked {
   let x: integer? = sexscriptLegacyLoadInteger("game.missing")
   if x == null {
-    x = askInteger "How many?", prefill: 3
+    let answer = askInteger "How many?", prefill: 3
+    x = answer
   }
-  x = (x + 1) * 2 % 50
+  let step = 1
+  x = +((x + step) * 2 % 50)
   let question: integer? = x
   let prefill = fillLabel()
   if question != null {

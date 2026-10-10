@@ -80,13 +80,18 @@ def readText = { ->
 	return x
 }
 show("Read " + readText())
-// An integer answer, whole arithmetic, a remainder, and a question shown from the read keep it a whole number or
+// An integer answer kept in a local, whole arithmetic with a whole local, a remainder, a sign, and a question shown
+// from the read keep it a whole number or
 // null, so a caller that tests its own read for null gets a whole number back.
 def fillLabel = { -> show("Filling"); return "label" }
 def readAsked = { ->
 	def x = loadInteger("game.missing")
-	if (x == null) { x = getInteger("How many?", 3) }
-	x = (x + 1) * 2 % 50
+	if (x == null) {
+		def answer = getInteger("How many?", 3)
+		x = answer
+	}
+	def step = 1
+	x = +((x + step) * 2 % 50)
 	def label = getString(x, fillLabel())
 	return x
 }
