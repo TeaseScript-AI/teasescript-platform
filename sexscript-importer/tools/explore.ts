@@ -8,7 +8,7 @@
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
  *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]
- *          [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--no-report]
+ *          [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--[no-]session-seeds] [--no-report]
  *          <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
@@ -29,7 +29,8 @@
  * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
  * off). `--guidance` leads states toward the largest region of code not reached yet, `--depth-phases` lets play work
  * go to session numbers by their gain per operation, `--stored-leads` lets play go on with a lead from the state that
- * stored a value a condition needs, and `--large-answers` also answers typed numbers with 1,000,000, to
+ * stored a value a condition needs, `--session-seeds` gives each later session a random seed of its own, and
+ * `--large-answers` also answers typed numbers with 1,000,000, to
  * probe a script's ranges (see `src/explorer-search.ts` and the README).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
@@ -100,6 +101,7 @@ const STRATEGIES = [
   "followChains",
   "storedLeads",
   "largeAnswers",
+  "sessionSeeds",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -173,6 +175,7 @@ async function main(args: string[]): Promise<void> {
       "follow-chains": { type: "boolean", default: false },
       "stored-leads": { type: "boolean", default: false },
       "large-answers": { type: "boolean", default: false },
+      "session-seeds": { type: "boolean", default: false },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -231,7 +234,8 @@ async function main(args: string[]): Promise<void> {
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
         "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]\n" +
-        "         [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--no-report] <unit-dir>... --out <dir>\n" +
+        "         [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--[no-]session-seeds] [--no-report]\n" +
+        "         <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
@@ -283,6 +287,7 @@ async function main(args: string[]): Promise<void> {
             followChains: values["follow-chains"],
             storedLeads: values["stored-leads"],
             largeAnswers: values["large-answers"],
+            sessionSeeds: values["session-seeds"],
           },
         },
         out,
@@ -338,6 +343,7 @@ interface RunSettings {
     followChains: boolean;
     storedLeads: boolean;
     largeAnswers: boolean;
+    sessionSeeds: boolean;
   };
 }
 
@@ -1318,7 +1324,11 @@ async function replayCommand(file: string, choice: ReplayChoice): Promise<number
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
-  const replayed = replay(engine, unit.plan, report.seed, inputs, { earlier, wallClockMs });
+  const replayed = replay(engine, unit.plan, report.seed, inputs, {
+    earlier,
+    wallClockMs,
+    sessionSeeds: isRecord(report.strategies) && report.strategies.sessionSeeds === true,
+  });
   // An earlier session that waits after its last input is one the player quit there; the narration stops where a
   // runtime operation threw.
   earlier.slice(0, replayed.earlier.length + 1).forEach((session, index) => {

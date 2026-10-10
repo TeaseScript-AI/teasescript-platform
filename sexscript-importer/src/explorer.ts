@@ -266,6 +266,23 @@ export interface Setup {
   readonly storage: readonly StorageEntry[];
   readonly wallClockMs: number;
   readonly clock?: boolean;
+  /** The sessions up to and including this one, 1 for the first ({@link sessionSeed}). */
+  readonly session?: number;
+}
+
+/**
+ * The seed a session draws with: the run's for the first session; for a later one, a seed of its own from the run's,
+ * its number, and its start wall clock, so that a player who comes back meets other draws than on the first visit, as
+ * a real player would, and the same ones whenever that session is replayed.
+ */
+export function sessionSeed(seed: number, session = 1, wallClockMs = EPOCH_MS): number {
+  if (session <= 1) return seed;
+  const mixed = Math.imul(
+    seed ^ Math.imul(session, 0x9e3779b1) ^ Math.floor(wallClockMs / 1000),
+    0x85ebca6b,
+  );
+  // A non-zero unsigned 32-bit integer, as the runtime's generator needs.
+  return (mixed ^ (mixed >>> 13)) >>> 0 || 1;
 }
 
 /** One session of a path: its inputs, and its start wall clock when that is not {@link EPOCH_MS}. */
@@ -449,6 +466,12 @@ export class Session {
    */
   randomChoices = false;
   /**
+   * Session seeds: a later session draws with a seed of its own ({@link sessionSeed}) instead of the run's. Off by
+   * default: a directed later session replays a path of inputs found under the run's seed, whose natural draws a seed of
+   * its own changes (in ToyExpanded such replays of a visit after the toy form no longer reached the dildo play).
+   */
+  sessionSeeds = false;
+  /**
    * Large answers: a typed number may also be 1,000,000, to probe how a script copes with one far beyond its range. Off
    * by default: a script that counts to such an answer without a range check (`repeat level * 10`) plays on for ever,
    * and that path takes the search's work.
@@ -538,7 +561,9 @@ export class Session {
       this.#engine.createFreshRuntimeSession(
         this.#plan,
         {
-          seed: this.#seed,
+          seed: this.sessionSeeds
+            ? sessionSeed(this.#seed, setup.session, setup.wallClockMs)
+            : this.#seed,
           baseDelayMs: 0,
           delayPerWordMs: 0,
           delayPerCharacterMs: 0,
@@ -1597,7 +1622,12 @@ export function replay(
   plan: Data,
   seed: number,
   inputs: readonly ExplorerInput[],
-  path: { readonly earlier?: readonly SessionPath[]; readonly wallClockMs?: number } = {},
+  path: {
+    readonly earlier?: readonly SessionPath[];
+    readonly wallClockMs?: number;
+    /** Whether the run drew with session seeds ({@link Session.sessionSeeds}). */
+    readonly sessionSeeds?: boolean;
+  } = {},
 ): {
   steps: ReplayStep[];
   snapshot: Data;
@@ -1607,13 +1637,19 @@ export function replay(
   earlier: string[];
 } {
   const session = new Session(engine, plan, seed);
+  session.sessionSeeds = path.sessionSeeds === true;
   // A path with chosen random outcomes replays them; its other draws stay natural, as without control.
   session.randomChoices = [...(path.earlier ?? []).map((earlier) => earlier.inputs), inputs].some(
     (list) => list.some((input) => input.random !== undefined),
   );
   let storage: readonly StorageEntry[] = [];
-  const run = (wallClockMs: number, list: readonly ExplorerInput[], record: boolean) => {
-    let step = session.start({ storage, wallClockMs });
+  const run = (
+    wallClockMs: number,
+    list: readonly ExplorerInput[],
+    record: boolean,
+    number: number,
+  ) => {
+    let step = session.start({ storage, wallClockMs, session: number });
     let clock = wallClockMs !== EPOCH_MS;
     const describe = (input: ExplorerInput | null, current: Step): ReplayStep => ({
       input,
@@ -1643,8 +1679,8 @@ export function replay(
     return { step, steps, error };
   };
   const ends: string[] = [];
-  for (const earlier of path.earlier ?? []) {
-    const done = run(earlier.wallClockMs ?? EPOCH_MS, earlier.inputs, false);
+  for (const [index, earlier] of (path.earlier ?? []).entries()) {
+    const done = run(earlier.wallClockMs ?? EPOCH_MS, earlier.inputs, false, index + 1);
     if (done.error !== null)
       return {
         steps: [],
@@ -1656,7 +1692,7 @@ export function replay(
     ends.push(String(done.step.snapshot.status));
     storage = storageOf(done.step.snapshot);
   }
-  const last = run(path.wallClockMs ?? EPOCH_MS, inputs, true);
+  const last = run(path.wallClockMs ?? EPOCH_MS, inputs, true, (path.earlier?.length ?? 0) + 1);
   return {
     steps: last.steps,
     snapshot: last.step.snapshot,

@@ -3348,6 +3348,42 @@ test(
 );
 
 test(
+  "with session seeds, a later visit draws with a seed of its own, which its replay draws with too",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // A visit tells its draw apart from the last visit's, which only a draw of its own can differ from.
+    const source =
+      'let roll = randomInteger(1..=1000000)\nlet last = load("roll", default: 0)\nsave roll as "roll"\n' +
+      'showButton "Go"\nif last != 0 and roll != last {\n  say "Different."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      budgetOps: 2000,
+      maxStates: 5000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      later: true,
+      sessionSeeds: true,
+    });
+    const line = source.split("\n").findIndex((text) => text.includes("Different.")) + 1;
+    const way = result.directed.ways.find(
+      (entry) => entry.line === line - 1 && entry.way === "true",
+    );
+    assert.ok(way !== undefined && way.repro.earlier?.length === 1, JSON.stringify(way));
+    const replayed = replay(engine, plan, 1, way.repro.inputs, {
+      earlier: way.repro.earlier,
+      ...(way.repro.wallClockMs === undefined ? {} : { wallClockMs: way.repro.wallClockMs }),
+      sessionSeeds: true,
+    });
+    assert.ok(replayed.steps.some((step) => step.texts.includes("Different.")));
+  },
+);
+
+test(
   "with quit-anywhere next visits, a player who quits after a save comes back with it: a return only such a visit reaches is play, and its path replays",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

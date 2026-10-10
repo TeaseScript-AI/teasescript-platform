@@ -646,7 +646,12 @@ conditions and keys are as the script writes them. A needed comparison with a sa
 static reading of the code, shown where the analysis finds that the condition compares the saved value itself: it can
 leave the comparison out where it does not follow how a value gets there, and is not proven right in every case.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
-session, and for a crash exits 0 only when the same failure returns. A
+session, and for a crash exits 0 only when the same failure returns. With `--session-seeds` (opt-in), a later session
+draws with a seed of its own, from the run's seed, its number, and its start wall clock, so that a player who comes back
+meets other draws than on the first visit; a replay derives the same seeds. It is off by default: a directed later
+session replays a path of inputs found under the run's seed, and a seed of its own changes that path's natural draws;
+on the catalog corpus (128,000 operations) it gained several units (biologyclass +5.5 points, Domme2 +3.3, Toy +2.7)
+but ToyExpanded lost its dildo play in three of four seeds, whose route replays a visit after the toy form. A
 runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime
 refuses to restore, is no crash of the package: it ends that runtime session, the search goes on from the state before
 the input, and the report counts these under `search.engineErrors` with the path of the first, which `--error` replays
