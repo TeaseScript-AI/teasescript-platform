@@ -4406,7 +4406,7 @@ function legacyApiCall(
 ): { name: string; arguments: AstNode[] } | null {
   const call = callParts(node);
   if (call === null || !call.inherited) return null;
-  if (callsHostOfOwnName(call.name, call.arguments.length, context)) return call;
+  if (callsHostOfOwnName(call.name, call.arguments.length, node, context)) return call;
   const shadowed =
     context.functions.has(call.name) ||
     context.packageFunctions.has(call.name) ||
@@ -4418,15 +4418,23 @@ function legacyApiCall(
 /**
  * Inside the closure a variable defines, the variable is not defined yet, so a call of its name called the SexScript
  * method of that name, as in `def getRandom = { low, high -> low + getRandom(high - low) }` or
- * `def waitWithGauge = { float wTime -> if (wTime > 0) waitWithGauge(wTime) }`; where no such method exists, the
+ * `def waitWithGauge = { float wTime -> if (wTime > 0) waitWithGauge(wTime) }`, unless a parameter or local of that
+ * name holds a closure to call there, `def wait = { wait, n -> wait(wait, n - 1) }`; where no such method exists, the
  * call failed, and a call with the closure's number of arguments stays a call of the closure.
  */
-function callsHostOfOwnName(name: string, count: number, context: LowerContext): boolean {
+function callsHostOfOwnName(
+  name: string,
+  count: number,
+  node: AstNode,
+  context: LowerContext,
+): boolean {
   if (context.currentFunction?.name !== name) return false;
   const info = context.functions.get(name);
   return (
     info !== undefined &&
-    (SEXSCRIPT_API_METHODS.has(name) || count < info.minArgs || count > info.maxArgs)
+    ((SEXSCRIPT_API_METHODS.has(name) && !isVisibleLocal(name, node, context)) ||
+      count < info.minArgs ||
+      count > info.maxArgs)
   );
 }
 
@@ -7003,7 +7011,7 @@ function lowerCallStatement(
     }));
   }
   if (
-    !callsHostOfOwnName(call.name, call.arguments.length, context) &&
+    !callsHostOfOwnName(call.name, call.arguments.length, node, context) &&
     (context.functions.has(call.name) ||
       context.packageFunctions.has(call.name) ||
       context.helperFunctions.has(call.name))
@@ -16286,7 +16294,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     const args = lowerArguments(call.arguments, context);
     return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
   }
-  const functionInfo = callsHostOfOwnName(call.name, call.arguments.length, context)
+  const functionInfo = callsHostOfOwnName(call.name, call.arguments.length, node, context)
     ? undefined
     : context.functions.get(call.name);
   // Groovy called a closure of one parameter without an argument with null.

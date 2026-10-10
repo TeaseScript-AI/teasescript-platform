@@ -1,5 +1,5 @@
 // Closures that call themselves or each other as their last step: a call in tail position leaves nothing of its
-// caller to run, so a function that calls itself so loops, and functions that call each other so run as steps of one
+// caller to run, so a function that calls itself so loops, and functions that call each other so run as steps of a
 // driver, without growing the call stack; a call that is not in tail position stays a call.
 
 def fib
@@ -10,6 +10,10 @@ def pong
 def isEven
 def isOdd
 def retry
+def countUp
+def countDown
+def first
+def second
 
 fib = { a, b, steps ->
 	// Returns the call of itself: the parameters take the arguments, which read the old values, and the loop goes on.
@@ -69,9 +73,35 @@ retry = { n ->
 	show("Retried")
 }
 
+countUp = { n ->
+	// Cycles whose functions return different types each run on their own driver, so a number stays a number.
+	if (n >= 3)
+		return n
+	return countDown(n + 2)
+}
+countDown = { n ->
+	if (n >= 3)
+		return n
+	return countUp(n - 1)
+}
+
+first = { n, limit = n ->
+	// A call that leaves out a default that reads another parameter cannot record its values, so this cycle nests.
+	if (n > 0)
+		return second(n - 1, limit)
+	return limit
+}
+second = { n, limit = n ->
+	if (n > 0)
+		return first(n - 1, limit)
+	return limit
+}
+
 show("Fibonacci 10: " + fib(0, 1, 10))
 countdown(3)
 unwind(2)
 ping(4)
 show("7 is even: " + isEven(7))
 retry(3)
+show("Counted to " + (countUp(0) + 1))
+show("Limit " + first(0) + " and " + second(2))

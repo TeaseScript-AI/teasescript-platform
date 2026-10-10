@@ -58,6 +58,13 @@ export function withLoopedTailCalls(statements: IrStatement[]): IrStatement[] {
     }
     if (fns.some((fn) => fn.global === true || fn.origin !== undefined || actions.has(fn.name)))
       continue;
+    // A call that leaves out a parameter whose default reads another parameter cannot pass its values as a step.
+    if (
+      localCalls(statements, names).some(
+        (call) => passedValues(functions.get(call.name)!, call) === null,
+      )
+    )
+      continue;
     cycles.push(members);
   }
   return cycles.length === 0 ? result : withSteps(result, cycles, quiet, functions);
@@ -168,6 +175,32 @@ function mapBodies(
     default:
       return statement;
   }
+}
+
+/** The calls of the named functions anywhere in the statements. */
+function localCalls(
+  statements: readonly IrStatement[],
+  names: ReadonlySet<string>,
+): CallExpression[] {
+  const calls: CallExpression[] = [];
+  const expression = (value: IrExpression): IrExpression => {
+    if (value.kind === "call" && value.local === true && names.has(value.name)) calls.push(value);
+    mapChildren(value, expression);
+    return value;
+  };
+  const block = (items: readonly IrStatement[]): void => {
+    for (const item of items) {
+      mapOwnExpressions(item, expression);
+      if (item.kind === "function") {
+        for (const parameter of item.parameters)
+          if (parameter.defaultValue !== null) expression(parameter.defaultValue);
+        block(item.body);
+      } else if (item.kind === "permanentButton" && item.body !== undefined) block(item.body);
+      else for (const body of nestedBodies(item)) block(body);
+    }
+  };
+  block(statements);
+  return calls;
 }
 
 /** The functions of the file that a value calls. */
@@ -398,6 +431,13 @@ function withSteps(
   functions: ReadonlyMap<string, FunctionStatement>,
 ): IrStatement[] {
   const stepped = new Set(cycles.flat());
+  // Each cycle has its own driver, so that a call gets the results of its own cycle's functions only.
+  const drivers = cycles.map((_, index) =>
+    index === 0 ? STEP_DRIVER : `${STEP_DRIVER}${index + 1}`,
+  );
+  const cycleOf = new Map(
+    cycles.flatMap((members, index) => members.map((name) => [name, index] as const)),
+  );
   const variable = (name: string): IrExpression => ({ kind: "variable", name });
   const literal = (value: string | null): IrExpression => ({ kind: "literal", value });
   const assign = (name: string, value: IrExpression, span: IrStatement["span"]): IrStatement => ({
@@ -417,23 +457,33 @@ function withSteps(
       named: {},
     })),
   });
-  // Every call of a step other than the tail calls between steps goes through the driver.
-  const throughDriver = (value: IrExpression): IrExpression => {
+  // A cycle whose functions return values, whose driver may also return the null of a step's return.
+  const valuedCycles = new Set(
+    cycles.flatMap((members, index) => (members.some((name) => !quiet.has(name)) ? [index] : [])),
+  );
+  // Every call of a step other than the tail calls between steps of its cycle goes through the cycle's driver. Where
+  // its value is used, the value is open, as the driver's result may also be the null that ends a step, which the
+  // function's own result was not.
+  const viaDriver = (value: IrExpression, used: boolean): IrExpression => {
     const mapped = mapChildren(value, throughDriver);
-    return mapped.kind === "call" && mapped.local === true && stepped.has(mapped.name)
-      ? {
-          kind: "call",
-          name: STEP_DRIVER,
-          positional: [literal(mapped.name), stepArguments(mapped)],
-          named: {},
-          local: true,
-        }
-      : mapped;
+    if (mapped.kind !== "call" || mapped.local !== true || !stepped.has(mapped.name)) return mapped;
+    const cycle = cycleOf.get(mapped.name)!;
+    const call: IrExpression = {
+      kind: "call",
+      name: drivers[cycle]!,
+      positional: [literal(mapped.name), stepArguments(mapped)],
+      named: {},
+      local: true,
+    };
+    return used && valuedCycles.has(cycle)
+      ? { kind: "call", name: OPEN_VALUE, positional: [call], named: {} }
+      : call;
   };
+  const throughDriver = (value: IrExpression): IrExpression => viaDriver(value, true);
   const tails = new Map<IrStatement, CallExpression>();
   for (const name of stepped)
     for (const site of tailCalls(functions.get(name)!, quiet, functions))
-      if (stepped.has(site.call.name)) tails.set(site.statement, site.call);
+      if (cycleOf.get(site.call.name) === cycleOf.get(name)) tails.set(site.statement, site.call);
   const block = (items: readonly IrStatement[]): IrStatement[] => {
     const result: IrStatement[] = [];
     let replaced = false;
@@ -460,79 +510,58 @@ function withSteps(
         });
       else if (item.kind === "permanentButton" && item.body !== undefined)
         result.push({ ...mapOwnExpressions(item, throughDriver), body: block(item.body) });
+      // A call made for its effect only, whose value nothing uses.
+      else if (item.kind === "expression")
+        result.push({ ...item, expression: viaDriver(item.expression, false) });
       else result.push(mapBodies(mapOwnExpressions(item, throughDriver), block));
     }
     return result;
   };
   const converted = block(statements);
-  const names = cycles.flat();
-  const valued = names.some((name) => !quiet.has(name));
-  const dispatch: IrStatement = {
-    kind: "switch",
-    value: variable("step"),
-    cases: names.map((name) => {
-      const call: IrExpression = {
-        kind: "call",
-        name,
-        positional: functions
-          .get(name)!
-          .parameters.map((_, position) => ({
-            kind: "index",
-            target: variable("stepArguments"),
-            index: { kind: "literal", value: position },
-          })),
-        named: {},
-        local: true,
-      };
-      const body: IrStatement[] = quiet.has(name)
-        ? [{ kind: "expression", expression: call, span: null }]
-        : [
-            { kind: "let", name: "result", value: call, span: null },
-            {
-              kind: "if",
-              condition: {
-                kind: "binary",
-                operator: "==",
-                left: variable(STEP_VARIABLE),
-                right: literal(null),
+  const driverFunction = (members: readonly string[], name: string): IrStatement => {
+    const valued = members.some((member) => !quiet.has(member));
+    const dispatch: IrStatement = {
+      kind: "switch",
+      value: variable("step"),
+      cases: members.map((member) => {
+        const call: IrExpression = {
+          kind: "call",
+          name: member,
+          positional: functions
+            .get(member)!
+            .parameters.map((_, position) => ({
+              kind: "index",
+              target: variable("stepArguments"),
+              index: { kind: "literal", value: position },
+            })),
+          named: {},
+          local: true,
+        };
+        const body: IrStatement[] = quiet.has(member)
+          ? [{ kind: "expression", expression: call, span: null }]
+          : [
+              { kind: "let", name: "result", value: call, span: null },
+              {
+                kind: "if",
+                condition: {
+                  kind: "binary",
+                  operator: "==",
+                  left: variable(STEP_VARIABLE),
+                  right: literal(null),
+                },
+                then: [{ kind: "return", value: variable("result"), span: null }],
+                else: [],
+                span: null,
               },
-              then: [{ kind: "return", value: variable("result"), span: null }],
-              else: [],
-              span: null,
-            },
-          ];
-      return { span: null, matches: [literal(name)], body };
-    }),
-    default: [],
-    span: null,
-  };
-  const listed = (items: readonly string[]): string =>
-    items.length === 1 ? items[0]! : `${items.slice(0, -1).join(", ")} and ${items.at(-1)!}`;
-  const legacy =
-    cycles.length > 1
-      ? `These functions called each other or themselves as their last step, each call inside the one before, which the legacy runtime allowed without end: ${cycles.map(listed).join("; ")}.`
-      : `${listed(cycles[0]!)} called ${cycles[0]!.length === 1 ? "itself as its" : "each other as their"} last step, each call inside the one before, which the legacy runtime allowed without end.`;
-  const note = `${legacy} They run one after another instead: a step records the next one and returns, and ${STEP_DRIVER} runs the steps.`;
-  const driver: IrStatement[] = [
-    ...commentLines(note).map((text): IrStatement => ({
-      kind: "comment",
-      text: `// ${text}`,
-      trailing: false,
+            ];
+        return { span: null, matches: [literal(member)], body };
+      }),
+      default: [],
       span: null,
-    })),
-    { kind: "let", name: STEP_VARIABLE, value: literal(null), type: "string?", span: null },
-    {
-      kind: "let",
-      name: STEP_ARGUMENTS_VARIABLE,
-      value: {
-        kind: "list",
-        items: [{ kind: "call", name: OPEN_VALUE, positional: [literal(null)], named: {} }],
-      },
-      span: null,
-    },
-    {
+    };
+    return {
       kind: "function",
-      name: STEP_DRIVER,
+      name,
       parameters: [
         { name: "firstStep", defaultValue: null },
         { name: "firstArguments", defaultValue: null },
@@ -564,7 +593,32 @@ function withSteps(
         ...(valued ? [{ kind: "return" as const, value: literal(null), span: null }] : []),
       ],
       span: null,
+    };
+  };
+  const listed = (items: readonly string[]): string =>
+    items.length === 1 ? items[0]! : `${items.slice(0, -1).join(", ")} and ${items.at(-1)!}`;
+  const note =
+    cycles.length > 1
+      ? `These functions called each other or themselves as their last step, each call inside the one before, which the legacy runtime allowed without end: ${cycles.map(listed).join("; ")}. They run one after another instead: a step records the next one and returns, and ${listed(drivers)} run the steps of each.`
+      : `${listed(cycles[0]!)} called ${cycles[0]!.length === 1 ? "itself as its" : "each other as their"} last step, each call inside the one before, which the legacy runtime allowed without end. They run one after another instead: a step records the next one and returns, and ${STEP_DRIVER} runs the steps.`;
+  const driver: IrStatement[] = [
+    ...commentLines(note).map((text): IrStatement => ({
+      kind: "comment",
+      text: `// ${text}`,
+      trailing: false,
+      span: null,
+    })),
+    { kind: "let", name: STEP_VARIABLE, value: literal(null), type: "string?", span: null },
+    {
+      kind: "let",
+      name: STEP_ARGUMENTS_VARIABLE,
+      value: {
+        kind: "list",
+        items: [{ kind: "call", name: OPEN_VALUE, positional: [literal(null)], named: {} }],
+      },
+      span: null,
     },
+    ...cycles.map((members, index) => driverFunction(members, drivers[index]!)),
     { kind: "blank", span: null },
   ];
   // The record and the driver go before the code that uses them, after the file's leading comments but before the
