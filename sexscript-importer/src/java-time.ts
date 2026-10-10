@@ -172,6 +172,18 @@ function dataFormats(tree: Tree, formatters: ReadonlyMap<string, string>): Set<A
       used.add(args[0]!);
   }
   const names = new Set([...used].flatMap((node) => variableName(node) ?? []));
+  // A variable that one of them is set from holds the same text, `copy = text` before `save(key, copy)`.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const name of [...names])
+      for (const value of tree.assignments.get(name) ?? []) {
+        const source = variableName(value);
+        if (source !== null && !names.has(source)) {
+          names.add(source);
+          changed = true;
+        }
+      }
+  }
   const result = new Set<AstNode>();
   const isFormat = (node: AstNode | null): node is AstNode =>
     node?.kind === "methodCall" && constantString(node.method) === "format";
@@ -740,8 +752,9 @@ export function patternText(
 
 /**
  * A SimpleDateFormat's parse(text) of a pattern of a year, a month, and a day as numbers with one separator, as
- * jewell's `y/M/d`: the date at midnight (a Java Date). Undefined for another pattern; a two-digit year, which Java
- * placed in a century by the current date, is another.
+ * jewell's `y/M/d`, which reads back the text the same pattern wrote: the date at midnight (a Java Date), with a note
+ * that Java's lenient parse also read other text, which stops the script here or reads another date. Undefined for
+ * another pattern, such as a month name or a two-digit year.
  */
 function parsedDate(
   pattern: string,
@@ -760,10 +773,19 @@ function parsedDate(
   const fields = [first, second, third];
   if (separator !== other || /[A-Za-z]/u.test(separator)) return undefined;
   const at = (letter: string): number => fields.findIndex((field) => field.startsWith(letter));
-  if (["y", "M", "d"].some((letter) => at(letter) < 0) || fields.some((field) => field === "yy"))
+  if (
+    ["y", "M", "d"].some((letter) => at(letter) < 0) ||
+    fields.some((field) => field === "yy" || (!field.startsWith("y") && field.length > 2))
+  )
     return undefined;
   const text = host.lower(textNode);
   if (text === null) return null;
+  noteOnce(
+    host,
+    "SX_DATE_PARSE",
+    `Java's lenient parse of the pattern ${JSON.stringify(pattern)} also read a day or month past its end, which it carried into the next, a year of one or two digits in the current century, and spaces or text after the date; the conversion reads the date the pattern writes, and stops the script on other text or reads another year.`,
+    textNode.span ?? null,
+  );
   return host.helper("dateFromText", [
     text,
     literal(separator),

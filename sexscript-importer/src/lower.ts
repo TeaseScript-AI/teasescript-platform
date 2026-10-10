@@ -15203,6 +15203,14 @@ function dateFormat(
   const data = context.java.temporal.dataFormats?.has(node) === true;
   const fields = pattern === null || (kind !== null && !data) ? null : datePatternFields(pattern);
   if (fields !== null) return fields;
+  if (data && pattern !== null && kind !== "isoDate") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DATE_FORMAT",
+      `The script saves or parses this date text again, so it needs Java's exact pattern ${JSON.stringify(pattern)}, whose names or time zone TeaseScript does not write; build the text from the date fields.`,
+    );
+  }
   if (kind === null) {
     return unsupportedExpression(
       context,

@@ -72,3 +72,6 @@ def frameEnd = getTime() + 1
 while (getTime() < frameEnd) {
 	for (frame in [1, 2]) show("Frame")
 }
+// A wait of no time passes none, so the pass still waits at its start.
+def zeroEnd = getTime() + 1
+while (getTime() < zeroEnd) wait(0)

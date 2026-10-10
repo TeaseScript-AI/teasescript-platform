@@ -50,13 +50,15 @@ export function withClockLoopTicks(
       // A loop that surely waits on each pass keeps its waits, which a text's reading time would not replace.
       if (waitsEachPass(nested.body, waiting))
         return [{ ...nested, body: clockWaits(nested.body) }];
-      diagnostics.push({
-        code: "SX_CLOCK_LOOP",
-        severity: "warning",
-        message:
-          "The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.",
+      const message =
+        "The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.";
+      diagnostics.push({ code: "SX_CLOCK_LOOP", severity: "warning", message, span: nested.span });
+      const note: IrStatement = {
+        kind: "comment",
+        text: `// NOTE SX_CLOCK_LOOP${nested.span === null ? "" : ` line ${nested.span.line}`}: ${message}`,
+        trailing: false,
         span: nested.span,
-      });
+      };
       const tick: IrStatement = {
         kind: "wait",
         duration: { kind: "literal", value: TICK_SECONDS },
@@ -67,9 +69,10 @@ export function withClockLoopTicks(
       };
       const body = [tick, ...clockWaits(nested.body)];
       const speakers = new Set(says(body).map((say) => say.speaker));
-      if (says(body).length === 0 || speakers.size !== 1) return [{ ...nested, body }];
+      if (says(body).length === 0 || speakers.size !== 1) return [note, { ...nested, body }];
       const frame = fresh("frame");
       return [
+        note,
         {
           kind: "let",
           name: frame,
@@ -247,10 +250,20 @@ function alwaysWaits(statements: readonly IrStatement[], waiting: ReadonlySet<st
   return false;
 }
 
-/** Whether one statement waits whenever it runs: a wait, button, ask, choice, audio played to its end, or a call. */
+/**
+ * Whether one statement waits whenever it runs: a wait of a known time, a button, ask, choice, audio played to its end,
+ * or a call of a function that surely waits.
+ */
 function waitsSurely(statement: IrStatement, waiting: ReadonlySet<string>): boolean {
   switch (statement.kind) {
+    // Only a wait known to take time: one of no time, or of a time known only when it runs, may pass none.
     case "wait":
+      return (
+        (statement.duration.kind === "literal" &&
+          typeof statement.duration.value === "number" &&
+          statement.duration.value > 0) ||
+        (statement.duration.kind === "duration" && statement.duration.value > 0)
+      );
     case "showButton":
       return true;
     case "playAudio":

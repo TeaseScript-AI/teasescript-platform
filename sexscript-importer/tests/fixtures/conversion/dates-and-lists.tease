@@ -91,7 +91,12 @@ let dayFormat = "y/M/d"
 let lastRun = load "game.lastRun", default: ""
 let thisRun = "${getDateTime().year}/${getDateTime().month}/${getDateTime().day}"
 save thisRun as "game.lastRun"
+// NOTE SX_DATE_PARSE line 50: Java's lenient parse of the pattern "y/M/d" also read a day or month past its end, which it carried into the next, a year of one or two digits in the current century, and spaces or text after the date; the conversion reads the date the pattern writes, and stops the script on other text or reads another year.
 if lastRun != "" and (toDate(sexscriptLegacyDateFromText(thisRun, "/", 0, 1, 2)) - toDate(sexscriptLegacyDateFromText(lastRun, "/", 0, 1, 2))).days > 2 {
   say "You stayed away too long."
 }
+// So is a text the script saves through a copy of it.
+let savedDay = "${getDateTime().year}-${getDateTime().month}-${getDateTime().day}"
+let savedCopy = savedDay
+save savedCopy as "game.savedDay"
 exit

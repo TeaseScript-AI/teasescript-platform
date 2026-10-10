@@ -36,6 +36,7 @@ addPoints(1000000)
 let rollUntil = getAbsoluteDateTime().toSeconds() + 2
 let rolled = 0
 let now = getAbsoluteDateTime().toSeconds()
+// NOTE SX_CLOCK_LOOP line 39: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
 let frame2: messageHandle? = null
 while now < rollUntil {
   wait 0.1 s
@@ -50,6 +51,7 @@ while now < rollUntil {
 say "You rolled ${rolled}"
 // So does one whose condition reads the clock itself, as Nim's closing window.
 let windowEnd = getAbsoluteDateTime().toSeconds() + 3
+// NOTE SX_CLOCK_LOOP line 47: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
 let frame3: messageHandle? = null
 while getAbsoluteDateTime().toSeconds() < windowEnd {
   wait 0.1 s
@@ -69,6 +71,7 @@ while getAbsoluteDateTime().toSeconds() < paced {
 // the message's text.
 let polls = 0
 let pollEnd = getAbsoluteDateTime().toSeconds() + 1
+// NOTE SX_CLOCK_LOOP line 58: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
 let frame4: messageHandle? = null
 while getAbsoluteDateTime().toSeconds() < pollEnd {
   wait 0.1 s
@@ -104,6 +107,7 @@ while clockNow() < beatEnd {
 }
 // A new message's name stays apart from a loop's variable.
 let frameEnd = getAbsoluteDateTime().toSeconds() + 1
+// NOTE SX_CLOCK_LOOP line 72: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
 let frame5: messageHandle? = null
 while getAbsoluteDateTime().toSeconds() < frameEnd {
   wait 0.1 s
@@ -114,5 +118,12 @@ while getAbsoluteDateTime().toSeconds() < frameEnd {
       frame5.text = "Frame"
     }
   }
+}
+// A wait of no time passes none, so the pass still waits at its start.
+let zeroEnd = getAbsoluteDateTime().toSeconds() + 1
+// NOTE SX_CLOCK_LOOP line 77: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so each pass starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
+while getAbsoluteDateTime().toSeconds() < zeroEnd {
+  wait 0.1 s
+  wait 0 s
 }
 exit

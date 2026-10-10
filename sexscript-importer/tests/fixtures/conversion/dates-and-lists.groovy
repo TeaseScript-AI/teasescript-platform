@@ -48,3 +48,7 @@ def lastRun = loadString("game.lastRun")
 def thisRun = dayFormat.format(new Date())
 save("game.lastRun", thisRun)
 if (lastRun != null && dayFormat.parse(thisRun) - dayFormat.parse(lastRun) > 2) show("You stayed away too long.")
+// So is a text the script saves through a copy of it.
+def savedDay = new Date().format("y-M-d")
+def savedCopy = savedDay
+save("game.savedDay", savedCopy)

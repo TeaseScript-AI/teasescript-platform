@@ -374,8 +374,11 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   that is no whole date or time, such as `dd/MM` or `HH`, is written from the current date and time's fields, exactly.
   The same holds for a Date's `format(pattern)` (Farkel's end of a denial) and for a `SimpleDateFormat` kept in a
   variable, whose `parse(text)` of a year, a month, and a day as numbers with one separator gives the date at midnight
-  (jewell's `y/M/d`). A text the script saves or parses again is data, written exactly from the fields also where it
-  shows a whole date or time, so that the day jewell keeps reads back the same.
+  (jewell's `y/M/d`), reading back the text the pattern writes; Java's lenient parse also read a day or month past its
+  end, a short year in the current century, and text after the date, which stops the script here or reads another
+  year (`SX_DATE_PARSE`). A text the script saves or parses again, also through a copy, is data, written exactly from
+  the fields also where it shows a whole date or time, so that the day jewell keeps reads back the same; one with
+  names or a time zone stays reported.
   A pattern with names (weekday, month) or a time zone stays reported (`SX_DATE_FORMAT`), as does a date built from a
   Unix time unless it shows a whole date or time (`SX_DATE_FROM_SECONDS`); see the observations below.
 - Legacy `getImage()` took a webcam picture without asking and returned its path, or null; only without a webcam did
@@ -697,7 +700,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Clock loops: a legacy loop that polled the clock until a time passed (`getTime()`, `System.currentTimeMillis()`)
   ran on real time, but a TeaseScript clock advances only at waits, and a text's reading time passes none. A loop that
   only redraws a countdown becomes a visible timer over the same time (`SX_BUSY_COUNTDOWN`); one whose passes do not
-  surely wait (a wait, button, ask, or a call of a function that waits, before anything that may `continue`), such as
+  surely wait (a wait of a known time, a button, an ask, or a call of a function that surely waits, before anything that
+  may `continue`), such as
   ZapEdgeStrip's dice roll or Nim's closing window, starts each pass with a wait of a tenth of a second, which also
   sets how many passes it makes, and its texts become one message that changes in place, as the legacy display redrew
   one text (`SX_CLOCK_LOOP`). The clock counts also where a function the loop calls reads it. A wait in a loop that
