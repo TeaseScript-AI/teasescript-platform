@@ -280,8 +280,8 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
 - An empty-text placeholder that later holds one other type (`def lineArray = ""`, later a list) starts with that
   type's empty value (`let lineArray: string[] = []`), which differs only where the empty text was read
   (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty, or at a
-  literal position past the end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), grew
-  the Groovy list, padding it with null up to the position. Where the writes are proven to count up (a counter that
+  literal position past the end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), or by
+  a loop counter whose bound may exceed the literal list's length (Farkel's seventh die), grew the Groovy list, padding it with null up to the position. Where the writes are proven to count up (a counter that
   grows with them, or literal positions in order) the conversion appends, or writes in place; elsewhere, such as a
   list filled from its end or from position 1, it first pads the list up to the position: with null where the code
   compares the list's elements with null, otherwise with the elements' empty value (0, "", or false), which Groovy
@@ -300,7 +300,8 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   directly instead, and its function takes the variable's name where nothing else reads it (BanjoRPG's world:
   `worldEnd("quitmenu")`).
 - A list position that may be negative, which Groovy counted from the end, or past the end, where Groovy read null,
-  goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
+  including a literal position past a shorter literal list the variable is set to again later (Farkel's
+  `contestants = [winner1]`), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
   names an element: a menu position, after a test that rules out the menu's written options, of a menu over
   `["Back"] + list` or over a list that a loop built with one option for each element of the read list, and a counter
   that started at 0 or more, only grew since, and is tested below the list's size, with nothing in between that may
