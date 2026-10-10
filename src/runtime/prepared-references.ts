@@ -48,9 +48,9 @@ export interface PreparedReferenceDescriptor {
   readonly rootName: string | null;
   readonly path: PreparedReferenceStep[];
   /**
-   * A copy of the root: the value of a detached reference, and for an attached one, where the plan keeps it, its
-   * fallback (`preparedReferenceTemporaries` of the snapshot validation analysis). `undefined` for an attached
-   * reference that keeps none.
+   * A copy of the root: the value a detached reference's path starts from, and for an attached one, where the plan
+   * keeps it, its fallback (`preparedReferenceTemporaries` of the snapshot validation analysis). `undefined` for an
+   * attached reference that keeps none.
    */
   readonly capturedRoot: SerializableRuntimeValue | undefined;
   readonly detached: boolean;
@@ -395,7 +395,7 @@ function freezePreparedReference(
   serialized: SerializableRuntimeObject,
   descriptor: PreparedReferenceDescriptor,
 ): void {
-  const resolution = resolvePreparedReferenceDescriptor(snapshot, descriptor);
+  const resolution = resolveStoredPreparedReference(snapshot, descriptor);
   if (!resolution.found) {
     // Every change that could break the path of an attached reference that keeps no copy of its root freezes it first.
     if (descriptor.capturedRoot === undefined) {
@@ -411,7 +411,7 @@ function freezePreparedReference(
   const frozen = serializePreparedReference({
     rootFrameId: null,
     rootName: null,
-    path: [],
+    path: descriptor.path.slice(resolution.rest),
     capturedRoot: cloneCapturedSerializableValue(resolution.value),
     detached: true,
   });
@@ -443,19 +443,34 @@ export function preparedReferenceSpeakerPath(
   return identity;
 }
 
-function resolvePreparedReferenceDescriptor(
+/**
+ * The last value on the path of `descriptor` that the session holds, and the position of the steps after it. A property
+ * of any value but an object, a speaker, or a collection, such as a timer's `state` or a date's `weekday`, is read at
+ * use, so a frozen reference keeps the value that has it and reads it from there.
+ */
+function resolveStoredPreparedReference(
   snapshot: RuntimeSnapshot,
   descriptor: PreparedReferenceDescriptor,
-): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
+): { readonly found: boolean; readonly value: SerializableRuntimeValue; readonly rest: number } {
   const root = preparedReferenceRoot(snapshot, descriptor);
-  if (!root.found) return root;
+  if (!root.found) return { ...root, rest: 0 };
   let current = root.value;
-  for (const step of descriptor.path) {
+  for (let index = 0; index < descriptor.path.length; index += 1) {
+    const step = descriptor.path[index]!;
+    if (
+      step.kind === "property" &&
+      !isObject(current) &&
+      !isSpeakerReference(current) &&
+      !isList(current) &&
+      !isSet(current) &&
+      !isDict(current)
+    )
+      return { found: true, value: current, rest: index };
     const next = resolvePreparedReferenceStep(snapshot, current, step);
-    if (!next.found) return next;
+    if (!next.found) return { ...next, rest: index };
     current = next.value;
   }
-  return { found: true, value: current };
+  return { found: true, value: current, rest: descriptor.path.length };
 }
 
 function preparedReferenceRoot(
