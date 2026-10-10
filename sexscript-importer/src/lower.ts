@@ -4957,8 +4957,11 @@ function lowerDeclaration(
     context.loopOnlyCounters.has(bindingKey(asNode(node.left), context.bindings) ?? "")
   )
     return [];
-  // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed.
+  // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed; a photo copy that it holds keeps
+  // the photo's reference (stripordie's `def File tempfile = new File(dir + "images/...") << ...`).
   if (isFileConstructor(right) && onlySizeReads(name, context)) return [];
+  if (photoCopy(right) !== null && onlySizeReads(name, context))
+    return lowerAssignment(right, span, context);
   const java = javaDeclaration(name, right, span, javaHost(context));
   if (java !== null) return java;
   if (context.classLoaderVariables.has(name) && isGroovyClassLoaderConstructor(right)) {
@@ -6345,7 +6348,8 @@ function lowerAssignment(
   const copy = photoCopy(node);
   if (operator === "<<" && copy !== null) {
     const source = lowerExpression(copy.source, context);
-    if (source === null) return [];
+    const prefix = copy.prefix === undefined ? null : lowerExpression(copy.prefix, context);
+    if (source === null || (copy.prefix !== undefined && prefix === null)) return [];
     addDiagnostic(
       context,
       "SX_PHOTO_COPY",
@@ -6356,7 +6360,15 @@ function lowerAssignment(
     return [
       {
         kind: "save",
-        key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copy.path}` },
+        // Under the key a delete of the same path clears (lowerExpressionStatement).
+        key:
+          prefix === null
+            ? { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copy.path}` }
+            : templateOrLiteral([
+                { text: SENT_IMAGE_PREFIX },
+                ...(prefix.kind === "template" ? prefix.parts : [{ value: prefix }]),
+                { text: `images/${copy.path}` },
+              ]),
         value: source,
         span,
       },
@@ -18876,16 +18888,22 @@ export function packageFilePath(path: string): string {
 
 /**
  * `new File("images/x.jpg") << new File(photo).getBytes()` (or `photo.getBytes()`): the target's path below `images/`
- * and the photo; null for another statement.
+ * and the photo; null for another statement. A path below the data folder, `new File(dir + "images/x.jpg")`, gives its
+ * folder as `prefix` (stripordie's `getDataFolder()`).
  */
-export function photoCopy(node: AstNode): { path: string; source: AstNode } | null {
+export function photoCopy(
+  node: AstNode,
+): { path: string; source: AstNode; prefix?: AstNode } | null {
   if (node.kind !== "binary" || node.operator !== "<<") return null;
   const target = asNode(node.left);
   const bytes = asNode(node.right);
-  const path =
+  const pathNode =
     target !== null && isFileConstructor(target)
-      ? constantString(nodeArray(asNode(target.arguments)?.items)[0])
+      ? asNode(nodeArray(asNode(target.arguments)?.items)[0])
       : null;
+  const joined =
+    pathNode?.kind === "binary" && pathNode.operator === "+" ? asNode(pathNode.left) : null;
+  const path = constantString(joined === null ? pathNode : asNode(pathNode?.right));
   if (path === null || !/^images\//iu.test(path)) return null;
   if (
     bytes?.kind !== "methodCall" ||
@@ -18897,7 +18915,12 @@ export function photoCopy(node: AstNode): { path: string; source: AstNode } | nu
     file !== null && isFileConstructor(file)
       ? (nodeArray(asNode(file.arguments)?.items)[0] ?? null)
       : file;
-  return source === null ? null : { path: path.slice("images/".length), source };
+  if (source === null) return null;
+  return {
+    path: path.slice("images/".length),
+    source,
+    ...(joined === null ? {} : { prefix: joined }),
+  };
 }
 
 function isFileConstructor(node: AstNode): boolean {
@@ -19071,7 +19094,12 @@ function isFileValue(node: AstNode | null, context: LowerContext): boolean {
   if (isFileConstructor(node)) return true;
   const key = node.kind === "variable" ? bindingKey(node, context.bindings) : null;
   const values = key === null ? undefined : context.assignedValues.get(key);
-  return values !== undefined && values.length > 0 && values.every(isFileConstructor);
+  // A file that a photo copy wrote, `new File(path) << photo.getBytes()`, is that file too.
+  return (
+    values !== undefined &&
+    values.length > 0 &&
+    values.every((value) => isFileConstructor(value) || photoCopy(value) !== null)
+  );
 }
 
 /**
