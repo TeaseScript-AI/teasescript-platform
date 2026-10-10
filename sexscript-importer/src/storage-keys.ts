@@ -146,6 +146,7 @@ const NUMERIC_CALLS = new Set([
   "toInteger",
   "toNumber",
   "floor",
+  "sign",
   "ceil",
   "round",
   "abs",

@@ -48,6 +48,7 @@ import {
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import {
+  hasEffect,
   withAskQuestions,
   withNestedBlocks,
   withoutBlankText,
@@ -1917,6 +1918,7 @@ export function lowerParsedFile(
   texts = withAskQuestions(texts, diagnostics);
   texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
   texts = withoutCutReadingTimes(texts, diagnostics);
+  texts = withGroovyRanges(texts, (base) => freshName(base, context));
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
@@ -2363,33 +2365,36 @@ function lowerHelperCompilationUnit(
     statements.push(lowered);
   }
   const { diagnostics } = baseContext;
-  const typedStatements = withoutCutReadingTimes(
-    withReadingTimes(
-      withMessageHandles(
-        withClockLoopTicks(
-          withElapsedDurations(
-            withFillableLoads(
-              withParsedLoads(
-                withSwitchLadders(
-                  withCounterLoops(
-                    withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+  const typedStatements = withGroovyRanges(
+    withoutCutReadingTimes(
+      withReadingTimes(
+        withMessageHandles(
+          withClockLoopTicks(
+            withElapsedDurations(
+              withFillableLoads(
+                withParsedLoads(
+                  withSwitchLadders(
+                    withCounterLoops(
+                      withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+                    ),
                   ),
+                  baseContext.syntheticHelpers,
                 ),
-                baseContext.syntheticHelpers,
+                true,
               ),
+              diagnostics,
               true,
             ),
             diagnostics,
-            true,
           ),
           diagnostics,
+          false,
         ),
         diagnostics,
-        false,
       ),
       diagnostics,
     ),
-    diagnostics,
+    (base) => freshName(base, baseContext),
   );
   return {
     sourceName: file.sourceName,
@@ -3119,10 +3124,7 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withGroovyRanges(
-    withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context)),
-    context,
-  );
+  return withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context));
 }
 
 /**
@@ -9680,22 +9682,113 @@ function rangeDirection(range: Extract<IrExpression, { kind: "range" }>): IrExpr
 }
 
 /**
- * The loops through a Groovy range whose direction shows only at runtime (rangeDirection) go through a helper that
- * counts either way; withCountedLoops has folded those that only count.
+ * The loops through a Groovy range whose direction shows only at runtime (rangeDirection) go through the positions of
+ * the range, an ascending TeaseScript range from 0, and take each number from the first bound in the range's
+ * direction, `for iOffset in 0..=abs(n - 1) { let i = 1 + iOffset * sign(n - 1) … }`, so that a pass may end the loop
+ * or wait before the next number is computed. A bound that the body may change, through a variable it sets or a
+ * function of the script it calls, is computed once before the loop, as Groovy computed the range. This runs after the
+ * passes that read a loop's range, such as the counters of withMessageHandles; withCountedLoops has folded the loops
+ * that only count.
  */
-function withGroovyRanges(statements: IrStatement[], context: LowerContext): IrStatement[] {
-  return statements.map((item) => {
-    const statement = withNestedBlocks(item, (body) => withGroovyRanges(body, context));
-    if (statement.kind !== "for" || statement.collection.kind !== "range") return statement;
-    const { from, to, inclusive, either } = statement.collection;
-    if (either !== true) return statement;
-    const collection = useHelper(context, "range", [
-      from,
-      to,
-      { kind: "literal", value: inclusive },
-    ]);
-    return { ...statement, collection };
+export function withGroovyRanges(
+  statements: IrStatement[],
+  fresh: (base: string) => string,
+): IrStatement[] {
+  return statements.flatMap((item): IrStatement[] => {
+    const statement = withNestedBlocks(item, (body) => withGroovyRanges(body, fresh));
+    if (
+      statement.kind !== "for" ||
+      statement.collection.kind !== "range" ||
+      statement.collection.either !== true
+    )
+      return [statement];
+    const { from, to, inclusive } = statement.collection;
+    const { variable, body, span } = statement;
+    const changed = changedInBody(body);
+    const before: IrStatement[] = [];
+    const bound = (value: IrExpression, suffix: string): IrExpression => {
+      if (value.kind === "literal" || (!hasEffect(value) && !readsAny(value, changed)))
+        return value;
+      const name = fresh(`${variable}${suffix}`);
+      before.push({ kind: "let", name, value, span });
+      return { kind: "variable", name };
+    };
+    const first = bound(from, "From");
+    const last = bound(to, "To");
+    const zero = first.kind === "literal" && first.value === 0;
+    const distance: IrExpression = zero
+      ? last
+      : { kind: "binary", operator: "-", left: last, right: first };
+    const offset = fresh(`${variable}Offset`);
+    const call = (name: string, value: IrExpression): IrExpression => ({
+      kind: "call",
+      name,
+      positional: [value],
+      named: {},
+    });
+    const step: IrExpression = {
+      kind: "binary",
+      operator: "*",
+      left: { kind: "variable", name: offset },
+      right: call("sign", distance),
+    };
+    const number: IrExpression = zero
+      ? step
+      : { kind: "binary", operator: "+", left: first, right: step };
+    return [
+      ...before,
+      {
+        ...statement,
+        variable: offset,
+        collection: {
+          kind: "range",
+          from: { kind: "literal", value: 0 },
+          to: call("abs", distance),
+          inclusive,
+        },
+        body: [{ kind: "let", name: variable, value: number, span }, ...body],
+      },
+    ];
   });
+}
+
+/**
+ * The variables that statements set, and `*` where they call a function of the script, which may set any script
+ * variable.
+ */
+function changedInBody(statements: readonly IrStatement[]): Set<string> {
+  const names = new Set<string>();
+  const visit = (statement: IrStatement): void => {
+    if (statement.kind === "let") names.add(statement.name);
+    if (statement.kind === "assign") {
+      let target = statement.target;
+      while (target.kind === "index" || target.kind === "property") target = target.target;
+      if (target.kind === "variable") names.add(target.name);
+    }
+    if (statement.kind === "for") names.add(statement.variable);
+    const calls = (value: IrExpression): IrExpression => {
+      if (value.kind === "call" && value.local === true) names.add("*");
+      return mapChildren(value, calls);
+    };
+    mapOwnExpressions(statement, (value) => calls(value));
+    withNestedBlocks(statement, (body) => {
+      body.forEach(visit);
+      return body;
+    });
+  };
+  statements.forEach(visit);
+  return names;
+}
+
+/** Whether a value reads a variable of `names`, or any variable where `names` holds `*`. */
+function readsAny(value: IrExpression, names: ReadonlySet<string>): boolean {
+  let found = false;
+  const visit = (child: IrExpression): IrExpression => {
+    if (child.kind === "variable" && (names.has("*") || names.has(child.name))) found = true;
+    return mapChildren(child, visit);
+  };
+  visit(value);
+  return found;
 }
 
 /**

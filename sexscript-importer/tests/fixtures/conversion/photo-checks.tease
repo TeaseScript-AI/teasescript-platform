@@ -21,24 +21,26 @@ if proof == null {
 // A photo the script uses without a test ends the session where none came, as the legacy script failed there.
 // NOTE SX_CAMERA_FALLBACK line 15: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 let face: string? = takePhoto()
-// NOTE SX_PHOTO_MISSING_END line 15: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
+// NOTE SX_PHOTO_MISSING_END line 16: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
 if face == null {
   exit
 }
 say "Your photo: ${face.lowercase()}"
-// A photo taken in a loop ends the session where it did not come, and so does a use of it after the loop.
+// A photo taken in a loop ends the session where a use of it after the loop finds none: a later pass may take one.
 let shot: string? = ""
 for it in 0..2 {
   // NOTE SX_CAMERA_FALLBACK line 19: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
   shot = takePhoto()
-  // NOTE SX_PHOTO_MISSING_END line 19: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
-  if shot == null {
-    exit
-  }
 }
 // NOTE SX_PHOTO_MISSING_END line 20: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
 if shot == null {
   exit
 }
 say "Last photo: ${shot.lowercase()}"
+// What the script does between a photo and its use still happens, also setting the variable to a text, which needs no
+// test.
+let image: string? = takePhoto()
+say "Continue"
+image = "fallback"
+say image.lowercase()
 exit

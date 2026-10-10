@@ -12,22 +12,6 @@ function sexscriptLegacyCall(action, args) {
     return
   }
 }
-function sexscriptLegacyRange(from, to, inclusive) {
-  let items = []
-  let step = 1
-  if from > to {
-    step = -1
-  }
-  let position = from
-  while (position - to) * step < 0 {
-    items.add(position)
-    position += step
-  }
-  if inclusive {
-    items.add(to)
-  }
-  return items
-}
 function announceCallback1(t) {
   say "Count ${t}"
 }
@@ -56,7 +40,8 @@ say "Estim connected?"
 function shock(message, shocks) {
   say message
   // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
-  for it in sexscriptLegacyRange(1, floor(shocks), true) {
+  for itOffset in 0..=abs(floor(shocks) - 1) {
+    let it = 1 + itOffset * sign(floor(shocks) - 1)
     wait 1 s
   }
 }

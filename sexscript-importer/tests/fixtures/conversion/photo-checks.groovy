@@ -14,7 +14,13 @@ else {
 // A photo the script uses without a test ends the session where none came, as the legacy script failed there.
 def face = getImage("Look into your webcam")
 show("Your photo: " + face.toLowerCase())
-// A photo taken in a loop ends the session where it did not come, and so does a use of it after the loop.
+// A photo taken in a loop ends the session where a use of it after the loop finds none: a later pass may take one.
 def shot = ""
 2.times { shot = getImage("Pose " + it) }
 show("Last photo: " + shot.toLowerCase())
+// What the script does between a photo and its use still happens, also setting the variable to a text, which needs no
+// test.
+def image = getImage()
+show("Continue")
+image = "fallback"
+show(image.toLowerCase())

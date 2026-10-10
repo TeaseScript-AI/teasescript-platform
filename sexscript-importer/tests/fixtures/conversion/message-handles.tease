@@ -138,4 +138,13 @@ function floorValue {
 say "${part}.", instant
 wait floorValue() s
 say "${part}.."
+// A counter through a range whose direction shows only at runtime is a counter too: the loop goes through the range's
+// positions and takes each number from them.
+let reps = 3
+let counter3 = say "0 reps", instant
+for rOffset in 0..=abs(reps - 1) {
+  let r = 1 + rOffset * sign(reps - 1)
+  counter3.text = "${r} reps"
+  wait 1 s
+}
 exit

@@ -212,3 +212,6 @@ save("game.lowest", 2)
 def lowest = load("game.lowest")
 def drawn = randomBetween(lowest, 5)
 show("Drawn " + (drawn as String).length())
+// A variable declared with a type converts what it is set to, so the function returns its type: a text here.
+def digits = { String x = ""; x = 3; return x }
+show(digits() + 1)

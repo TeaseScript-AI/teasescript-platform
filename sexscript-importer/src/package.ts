@@ -80,6 +80,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "removePermanentButton",
   "round",
   "showButton",
+  "sign",
   "sqrt",
   "takePhoto",
   "toBoolean",

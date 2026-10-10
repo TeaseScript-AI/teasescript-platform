@@ -363,4 +363,11 @@ save 2 as "game.lowest"
 let lowest: integer? = load "game.lowest", default: null
 let drawn = randomBetween(lowest, 5)
 say "Drawn ${toString(drawn).length}"
+// A variable declared with a type converts what it is set to, so the function returns its type: a text here.
+function digits {
+  let x = ""
+  x = "3"
+  return x
+}
+say "${digits()}${1}"
 exit

@@ -351,7 +351,10 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   `SX_RANGE_FLOOR`), as does `nextInt(b)`, which Java called with a whole number only; whole bounds stay as written.
   This keeps Groovy's steps for an ascending range from a whole number; a range kept in a variable is not rounded, and
   a descending range with a fractional bound, though rounded, does not go through the values Groovy did
-  (`5..<2.5` went through 5, 4, and 3).
+  (`5..<2.5` went through 5, 4, and 3). A Groovy range ran down where its first bound was greater (`1..0` went
+  through 1 and 0; owner decision 2026-10-10): a loop through one whose direction shows only at runtime goes through
+  its positions and takes each number in its direction, `for iOffset in 0..=abs(n - 1) { let i = 1 + iOffset *
+  sign(n - 1) … }`, and one of two literals that counts down goes through the list of its numbers.
 - Known residual differences, found by adversarial review and left as is because they need unusual input or fail
   loudly: Groovy integer ranges contain only whole numbers, while a converted range case also matches a fractional
   value; a `times` count or list index that is fractional, where the importer cannot tell, or negative only at runtime
@@ -405,8 +408,9 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   it open a file chooser titled with the message. `takePhoto()` returns a photo reference or null; the file-chooser
   fallback and the message are dropped with a `NOTE`, and the Player decides how the photo is taken (3 corpus sites).
   A script that used the photo without testing it for null (`file.toLowerCase()`) failed where none came; there the
-  session ends, with a `NOTE` (`SX_PHOTO_MISSING_END`, owner decision 2026-10-10), right after the photo and before a
-  later use that no earlier test covers. A script that tests the photo for null keeps its own handling.
+  session ends, with a `NOTE` (`SX_PHOTO_MISSING_END`, owner decision 2026-10-10), before the use, where no earlier
+  test covers it and the variable was not set to a text since; what the script does in between still happens. A
+  script that tests the photo for null keeps its own handling.
 - Rewrites that move evaluation (ternary branches, input prompts) are applied only when the expression is not behind
   `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
   reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`). A condition or assignment whose `&&`/`||` chain asks,

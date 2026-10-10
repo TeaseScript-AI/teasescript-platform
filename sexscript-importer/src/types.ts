@@ -704,11 +704,32 @@ function nameOf(key: string): string {
  * The values a closure returns: its `return` values (null for a bare `return`) and its last expression, or the last
  * expressions of a final `if`; a closure that ends otherwise returns null. Nested closures return for themselves.
  */
+/** Whether a Groovy declaration's type is one, not `def` or Object, whose variable converts what it is set to. */
+function hasDeclaredType(type: unknown): boolean {
+  return (
+    typeof type === "string" && type !== "java.lang.Object" && type !== "Object" && type !== "def"
+  );
+}
+
 function closureReturnValues(closure: AstNode): AstNode[] {
   const nullValue: AstNode = { kind: "constant", span: null, value: null };
   const values: AstNode[] = [];
   // `nr = Math.round(nr)` right before `return nr` in the same block: the result is the value just written, not every
-  // value the variable holds elsewhere (trick_or_treat_poker's getRandomBetween).
+  // value the variable holds elsewhere (trick_or_treat_poker's getRandomBetween). A variable declared with a type
+  // converts what it is set to (`String x = ""; x = 3` holds "3"), so its type stays the result's.
+  const typed = new Set<string>();
+  for (const parameter of Array.isArray(closure.parameters) ? closure.parameters : [])
+    if (
+      isRecord(parameter) &&
+      typeof parameter.name === "string" &&
+      hasDeclaredType(parameter.type)
+    )
+      typed.add(parameter.name);
+  walkAst(closure, (node) => {
+    const left = node.kind === "declaration" ? asNode(node.left) : null;
+    const name = variableName(left);
+    if (name !== null && hasDeclaredType(left?.originType)) typed.add(name);
+  });
   const written = new Map<AstNode, AstNode>();
   const markWrites = (node: AstNode): void => {
     if (node.kind === "closure" && node !== closure) return;
@@ -725,7 +746,8 @@ function closureReturnValues(closure: AstNode): AstNode[] {
           write?.kind === "binary" &&
           write.operator === "=" &&
           right !== null &&
-          variableName(write.left) === variableName(value)
+          variableName(write.left) === variableName(value) &&
+          !typed.has(variableName(value) ?? "")
         )
           written.set(statements[index]!, right);
       }

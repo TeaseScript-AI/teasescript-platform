@@ -115,3 +115,11 @@ def floor = { part = "Fourth"; return 1 }
 show(part + ".")
 wait(floor())
 show(part + "..")
+// A counter through a range whose direction shows only at runtime is a counter too: the loop goes through the range's
+// positions and takes each number from them.
+def reps = 3
+show("0 reps")
+for (r in 1..reps) {
+	show(r + " reps")
+	wait(1)
+}

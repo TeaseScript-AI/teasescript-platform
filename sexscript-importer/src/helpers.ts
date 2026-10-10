@@ -218,7 +218,6 @@ export type HelperName =
   | "listMin"
   | "listSum"
   | "textSum"
-  | "range"
   | "loadFirstTrue"
   | "max"
   | "menuOptions"
@@ -294,7 +293,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMin",
   "listSum",
   "textSum",
-  "range",
   "max",
   "min",
   "fixed",
@@ -2230,30 +2228,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ret(bin("+", at(v("items"), lit(0)), template(at(v("items"), lit(1))))),
           ]),
           ret(call(v("items"), "join", lit(""))),
-        ],
-      ),
-  },
-  // Groovy's from..to went through the whole numbers from one bound to the other, counting down where the first is
-  // greater (1..0 went through 1 and 0); an exclusive range, from..<to, stopped before its second bound.
-  range: {
-    name: "sexscriptLegacyRange",
-    build: () =>
-      fn(
-        "sexscriptLegacyRange",
-        ["from", "to", "inclusive"],
-        [
-          letS("items", { kind: "list", items: [] }),
-          letS("step", lit(1)),
-          ifS(bin(">", v("from"), v("to")), [set(v("step"), lit(-1))]),
-          letS("position", v("from")),
-          {
-            kind: "while",
-            condition: bin("<", bin("*", bin("-", v("position"), v("to")), v("step")), lit(0)),
-            body: [add("items", v("position")), set(v("position"), v("step"), "+=")],
-            span: null,
-          },
-          ifS(v("inclusive"), [add("items", v("to"))]),
-          ret(v("items")),
         ],
       ),
   },

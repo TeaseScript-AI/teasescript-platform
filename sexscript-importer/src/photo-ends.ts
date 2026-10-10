@@ -6,9 +6,10 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * Legacy getImage() gave null where neither the webcam nor the file chooser gave a picture, and a script that then used
  * the picture without testing it, `file.toLowerCase()`, failed there. takePhoto() returns null in that case too; where
  * the file reads a method, property, or element of the variable that keeps the photo and never tests it for null, the
- * session ends where the legacy script stopped (owner decision 2026-10-10), with a note: right after a photo that did
- * not come, and before a later use that a test there does not cover. A file that tests the variable keeps its own
- * handling, and one that only passes the photo on or shows it stays as it is.
+ * session ends where the legacy script stopped (owner decision 2026-10-10), with a note: before a use of the variable
+ * that holds null, which a guard before it on the same path does not cover. What the script does between the photo
+ * and that use, also setting the variable to something else, still happens. A file that tests the variable keeps its
+ * own handling, and one that only passes the photo on or shows it stays as it is.
  */
 export function withPhotoEnds(
   statements: IrStatement[],
@@ -60,14 +61,22 @@ export function withPhotoEnds(
           : loop
             ? new Set([...safe].filter((name) => !assigned.has(name)))
             : safe;
-      const next = withNestedBlocks(item, (body) => block(body, inner));
-      result.push(next);
+      result.push(withNestedBlocks(item, (body) => block(body, inner)));
       for (const name of assigned) safe.delete(name);
-      const photo = photoTarget(next);
-      if (photo !== null && ended.has(photo)) {
-        result.push(...guard(photo, next));
-        safe.add(photo);
-      }
+      // A text set in place of the photo holds a value.
+      const set =
+        item.kind === "let"
+          ? item.name
+          : item.kind === "assign" && item.operator === "=" && item.target.kind === "variable"
+            ? item.target.name
+            : null;
+      const value = item.kind === "let" || item.kind === "assign" ? item.value : null;
+      if (
+        set !== null &&
+        (value?.kind === "template" ||
+          (value?.kind === "literal" && typeof value.value === "string"))
+      )
+        safe.add(set);
     }
     return result;
   };

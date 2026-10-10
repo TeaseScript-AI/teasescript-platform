@@ -542,6 +542,7 @@ const PURE_CALLS: ReadonlySet<string> = new Set([
   "toNumber",
   "toString",
   "floor",
+  "sign",
   "ceil",
   "round",
   "min",
