@@ -631,17 +631,21 @@ export class DataFlow {
    * names where the block was set up. Values of a name alone and of its scoped keys are read together (see
    * {@link #variableFlow}).
    */
-  scopeKey(name: string, at: number): string {
-    const owner = this.functionAt(at);
-    // A block sees the variables where it was set up.
-    const creator = this.#creatorOf.get(owner);
-    if (
+  scopeKey(name: string, from: number): string {
+    // A block sees the variables where it was set up, also a block in a block (a loop, as blocks nest deep).
+    let at = from;
+    let owner = this.functionAt(at);
+    for (
+      let creator = this.#creatorOf.get(owner);
       owner !== 0 &&
       creator !== undefined &&
       this.functionAt(creator) !== owner &&
-      this.#functionBinds.get(owner)?.has(name) !== true
-    )
-      return this.scopeKey(name, creator);
+      this.#functionBinds.get(owner)?.has(name) !== true;
+      creator = this.#creatorOf.get(owner)
+    ) {
+      at = creator;
+      owner = this.functionAt(at);
+    }
     const file = this.#fileAt(at);
     const scoped =
       owner !== 0 && this.#functionBinds.get(owner)?.has(name) === true
