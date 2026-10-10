@@ -8,6 +8,13 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(toInteger(value))
 }
+function sexscriptLegacyLoadIntegerOr(key, whenMissing: integer): integer {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return toInteger(value)
+}
 function sexscriptLegacyLoadFloat(key, whenMissing = null) {
   let value = load key, default: null
   if value == null {
@@ -69,4 +76,19 @@ if picture == null or picture == "" {
   picture = saved
 }
 say "Picture ${picture}"
+// A read of the script's own with a default, which a whole-number default makes a whole number.
+function loadIntegerVal(keyword, defaultValue) {
+  let stored = sexscriptLegacyLoadInteger(keyword)
+  if stored == null {
+    return defaultValue
+  } else {
+    return stored
+  }
+}
+let squares = null
+if squares == null {
+  squares = sexscriptLegacyLoadIntegerOr("game.squares", 0) + 1
+  let limit = squares + 3
+  say "Limit ${limit}"
+}
 exit

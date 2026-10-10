@@ -38,3 +38,17 @@ def picture = loadString("game.picture")
 def saved = loadString("game.savedPicture")
 if (picture == null) picture = saved
 show("Picture " + picture)
+// A read of the script's own with a default, which a whole-number default makes a whole number.
+def loadIntegerVal = { keyword, defaultValue ->
+	def stored = loadInteger(keyword)
+	if (stored == null)
+		return defaultValue
+	else
+		return stored
+}
+def squares = null
+if (squares == null) {
+	squares = loadIntegerVal("game.squares", 0) + 1
+	def limit = squares + 3
+	show("Limit " + limit)
+}

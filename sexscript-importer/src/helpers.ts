@@ -191,6 +191,7 @@ export type HelperName =
   | "button"
   | "value"
   | "loadInteger"
+  | "loadIntegerOr"
   | "loadFloat"
   | "textMinus"
   | "textAt"
@@ -273,6 +274,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "loadFirstTrue",
   "value",
   "loadInteger",
+  "loadIntegerOr",
   "loadFloat",
   "button",
   "indexOf",
@@ -1180,6 +1182,27 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   loadInteger: {
     name: "sexscriptLegacyLoadInteger",
     build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),
+  },
+  // A script's own read with a whole-number default, `def loadIntegerVal = { key, value -> def stored = loadInteger(key);
+  // if (stored == null) return value else return stored }`, reads a whole number where its call passes one: the result
+  // declares it, which the open result of loadInteger cannot (lower.ts, isIntegerLoadOr).
+  loadIntegerOr: {
+    name: "sexscriptLegacyLoadIntegerOr",
+    build: () => ({
+      kind: "function",
+      name: "sexscriptLegacyLoadIntegerOr",
+      parameters: [
+        { name: "key", defaultValue: null },
+        { name: "whenMissing", defaultValue: null, type: "integer" },
+      ],
+      returnType: "integer",
+      body: [
+        letS("value", { kind: "load", key: v("key") }),
+        ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
+        ret({ kind: "call", name: "toInteger", positional: [v("value")], named: {} }),
+      ],
+      span: null,
+    }),
   },
   loadFloat: {
     name: "sexscriptLegacyLoadFloat",

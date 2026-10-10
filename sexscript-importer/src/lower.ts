@@ -104,6 +104,8 @@ interface ClosureInfo {
   maxArgs: number;
   /** Declared in a block of the script, such as an `if` body, and lifted to the top as a script function. */
   nested?: boolean;
+  /** A read of a stored whole number with a default of its own (isIntegerLoadOr). */
+  integerLoadOr?: true;
 }
 
 export interface HelperFunctionInfo {
@@ -16326,6 +16328,18 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         `Call to ${call.name} has ${call.arguments.length} arguments; expected ${functionInfo.minArgs}..${functionInfo.maxArgs}.`,
       );
     }
+    // A read whose default is a whole number reads one, which the typed helper declares; Groovy evaluated the default
+    // before the call, as a helper argument is.
+    if (
+      functionInfo.integerLoadOr === true &&
+      !context.functions.has("loadInteger") &&
+      isWholeNumber(call.arguments[1]!, context)
+    ) {
+      const args = lowerArguments(call.arguments, context);
+      if (args === null) return null;
+      context.syntheticHelpers.add("loadIntegerOr");
+      return helperCall("loadIntegerOr", args);
+    }
     const args = lowerArguments(call.arguments, context);
     return args === null
       ? null
@@ -18118,6 +18132,67 @@ function moduleLoaderDirectory(closure: AstNode): string | null {
   return evaluates && lists && exact ? directory : null;
 }
 
+/**
+ * Whether a closure reads a stored whole number with a default of its own, `{ key, value -> def stored =
+ * loadInteger(key); if (stored == null) return value else return stored }`, also with the last return after the `if`.
+ */
+function isIntegerLoadOr(closure: AstNode): boolean {
+  const parameters = groovyParameters(closure.parameters) ?? [];
+  if (
+    closure.parameterSpecified !== true ||
+    parameters.length !== 2 ||
+    parameters.some((parameter) => parameter.defaultValue !== null)
+  )
+    return false;
+  const [key, value] = parameters.map((parameter) => parameter.name);
+  const statements = nodeArray(asNode(closure.body)?.statements);
+  const only = (node: AstNode | null): AstNode | null => {
+    if (node?.kind !== "block") return node;
+    const items = nodeArray(node.statements);
+    return items.length === 1 ? items[0]! : null;
+  };
+  const returns = (node: AstNode | null, name: string | null): boolean => {
+    const item = only(node);
+    return item?.kind === "return" && name !== null && variableName(item.value) === name;
+  };
+  const declaration =
+    statements[0]?.kind === "expressionStatement" ? asNode(statements[0].expression) : null;
+  const stored = declaration?.kind === "declaration" ? variableName(declaration.left) : null;
+  const read = asNode(declaration?.right);
+  const readArguments = nodeArray(asNode(read?.arguments)?.items);
+  const test = statements[1];
+  const condition = asNode(test?.condition);
+  const sides = [asNode(condition?.left), asNode(condition?.right)];
+  if (
+    stored === null ||
+    read?.kind !== "methodCall" ||
+    read.implicitThis !== true ||
+    constantString(read.method) !== "loadInteger" ||
+    readArguments.length !== 1 ||
+    variableName(readArguments[0]) !== key ||
+    test?.kind !== "if" ||
+    condition?.kind !== "binary" ||
+    text(condition.operator) !== "==" ||
+    !sides.some((side) => variableName(side) === stored) ||
+    !sides.some((side) => side !== null && isNullConstant(side)) ||
+    !returns(asNode(test.then), value ?? null)
+  )
+    return false;
+  const otherwise = asNode(test.else);
+  if (statements.length === 2) return returns(otherwise, stored);
+  return (
+    statements.length === 3 &&
+    (otherwise === null || otherwise.kind === "empty") &&
+    returns(statements[2]!, stored)
+  );
+}
+
+/** Whether a Groovy value is a whole number, never null: one that mayBeFractional does not doubt, not written `1.0`. */
+function isWholeNumber(node: AstNode, context: LowerContext): boolean {
+  const type = inferType(node, context.types);
+  return type === NUMBER && !mayBeFractional(node, context) && !writtenDecimal(node, context);
+}
+
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
   const result = new Map<string, ClosureInfo>();
   const add = (name: string, closure: AstNode, nested: boolean): void => {
@@ -18131,6 +18206,7 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
       minArgs,
       maxArgs: implicitParameter ? 0 : parameters.length,
       ...(nested ? { nested } : {}),
+      ...(isIntegerLoadOr(closure) ? { integerLoadOr: true as const } : {}),
     });
   };
   for (const statement of nodeArray(body.statements)) {

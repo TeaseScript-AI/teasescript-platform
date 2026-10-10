@@ -2142,6 +2142,7 @@ const CALL_RESULTS = new Map<string, TeaseType>([
 /** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */
 const HELPER_RESULTS = new Map<string, TeaseType>([
   ["sexscriptLegacyLoadFirstTrue", { kind: "optional", value: scalar("string") }],
+  ["sexscriptLegacyLoadIntegerOr", scalar("integer")],
 ]);
 
 export function expressionType(
