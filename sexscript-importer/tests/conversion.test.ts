@@ -988,6 +988,7 @@ test(
       "module-files",
       "module-list-append",
       "stored-list",
+      "stored-main",
       "entry-hub",
       "entry-own-folder",
       "stand-alone",
@@ -1073,6 +1074,19 @@ test(
         );
         assert.equal(ran.status, "halted");
         assert.equal(storage.get("scene.laid"), "clamps whip cane ");
+      }
+      if (name === "stored-main") {
+        // The legacy main script holds the storage helpers, and the next script reads both lists back, also the one
+        // saved under a key a closure computed.
+        const storage = new Map<string, RuntimeValue>();
+        const ran = projectResult.runner(
+          shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+          {},
+          { storage },
+        );
+        assert.equal(ran.status, "halted");
+        assert.equal(storage.get("next.notes"), 2);
+        assert.equal(storage.get("next.toy"), "whip");
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.

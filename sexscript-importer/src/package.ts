@@ -1077,7 +1077,7 @@ export function lowerPackage(
         ),
         false,
       ),
-      false,
+      null,
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -1154,7 +1154,7 @@ export function lowerPackage(
   );
   // Legacy storage's elements go through helpers in main.tease, after the reads got their defaults and the profile its
   // prompts, which read the native storage operations (legacy-storage.ts).
-  const stored = withLegacyStorage(nullable, true);
+  const stored = withLegacyStorage(nullable, legacyMain === null ? 0 : legacyMain + 1);
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
   const chained = withoutRepeatedChainText(stored.slice(1), paths);
   const [main, ...programs] =

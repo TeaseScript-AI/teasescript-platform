@@ -20,11 +20,13 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  */
 export function withLegacyStorage(
   programs: readonly MigrationProgram[],
-  /** Whether the first program is the package's main.tease, which holds the helpers as global functions for all. */
-  shared: boolean,
+  /** The package's main.tease among the programs, which holds the helpers as global functions for all; else null. */
+  main: number | null,
 ): MigrationProgram[] {
   const calls = new Map<string, Array<{ call: CallExpression; caller: Scope }>>();
   const keys: Array<{ key: IrExpression; caller: Scope }> = [];
+  // The keys of the saves, deletes, and legacy `load()` reads, which the helpers would take over.
+  const routable = new Set<IrExpression>();
   for (const program of programs) {
     const constants = constantTexts(program.statements);
     const scopes = new Map<Caller, Scope>();
@@ -39,11 +41,16 @@ export function withLegacyStorage(
     };
     eachStatement(program.statements, null, (statement, function_) => {
       const caller = scopeOf(function_);
-      if (statement.kind === "save" || statement.kind === "delete")
+      if (statement.kind === "save" || statement.kind === "delete") {
         keys.push({ key: statement.key, caller });
+        routable.add(statement.key);
+      }
       mapOwnExpressions(statement, (value) => {
         eachExpression(value, (expression) => {
-          if (expression.kind === "load") keys.push({ key: expression.key, caller });
+          if (expression.kind === "load") {
+            keys.push({ key: expression.key, caller });
+            if (expression.rebuilds === true) routable.add(expression.key);
+          }
           if (expression.kind !== "call") return;
           if (expression.local === true)
             calls.set(expression.name, [
@@ -97,9 +104,14 @@ export function withLegacyStorage(
   if (hierarchical.size === 0) return [...programs];
   // A key that may be one of them goes through the helpers, and so does a key no shape resolves, which may be one too:
   // they store and read every key as legacy did, so that all accesses see one layout.
+  // A save, delete, or legacy `load()` of a key no shape resolves may be of any key, so where there is one, all of them go
+  // through the helpers, which keeps one layout for every key; photo references stay as they are.
+  const unresolved = [...routable].some((key) => known.get(key) === null);
   const routed = (key: IrExpression): boolean => {
     const found = known.get(key);
-    return found === null || found?.some((shape) => hierarchical.has(shape)) === true;
+    if (found === null) return true;
+    if (found === undefined || found.length === 0) return false;
+    return unresolved || found.some((shape) => hierarchical.has(shape));
   };
 
   // The helpers' own names may not be those of a file's variables or functions, which they would hide.
@@ -113,7 +125,7 @@ export function withLegacyStorage(
   const helpers = helperStatements(new Set(["storedSave", "storedLoad"] as const)).map(
     (helper): IrStatement => ({
       ...withFreshNames(helper, taken),
-      ...(shared ? { global: true } : {}),
+      ...(main !== null ? { global: true } : {}),
     }),
   );
   const withHelpers = (statements: IrStatement[]): IrStatement[] => {
@@ -180,11 +192,12 @@ export function withLegacyStorage(
     const statements = block(program.statements);
     if (!used) return program;
     usedAnywhere = true;
-    return { ...program, statements: shared ? statements : withHelpers(statements) };
+    return { ...program, statements: main !== null ? statements : withHelpers(statements) };
   });
-  if (!shared || !usedAnywhere) return rewritten;
-  const [main, ...others] = rewritten;
-  return [{ ...main!, statements: withHelpers(main!.statements) }, ...others];
+  if (main === null || !usedAnywhere) return rewritten;
+  return rewritten.map((program, index) =>
+    index === main ? { ...program, statements: withHelpers(program.statements) } : program,
+  );
 }
 
 type FunctionStatement = Extract<IrStatement, { kind: "function" }>;
