@@ -1129,6 +1129,39 @@ test(
       "score > 7",
     ]);
     assert.deepEqual(named("which", undefined, 'let which = askText "Which?"\n'), []);
+    // Nor through a copy of the key, which loads a key computed past knowing; and `+` passes a value on only for a key a
+    // call gives such a helper, not for one a helper loads by its own text beside a key the call computes.
+    const helper = (body: string, condition: string, before = "") =>
+      compared(
+        `${before}function get(key) {\n${body}\n}\nif ${condition} > 7 {\n  say "Yes"\n}\nexit\n`,
+      );
+    const computedThen = (load: string, last: string) =>
+      `  let more = ${load} + 1\n  if more > 3 {\n    return more\n  }\n  return ${last}`;
+    assert.deepEqual(
+      helper(
+        `  let copy = key\n${computedThen("(load copy, default: 0)", "load key, default: 0")}`,
+        'get("score")',
+      ),
+      ["score"],
+    );
+    assert.deepEqual(
+      helper(
+        `  let value = load key, default: 0\n${computedThen("value", 'load "score", default: 0')}`,
+        '+get("${name}")',
+        'let name = "score"\n',
+      ),
+      ["score"],
+    );
+    // A helper's variable passed through a chain of calls is read once per call.
+    const calls = Array.from({ length: 64 }, () => "  value = identity(value)\n").join("");
+    assert.deepEqual(
+      helper(
+        `  let value = load key, default: 0\n${calls}  return value`,
+        'get("score")',
+        "function identity(n) {\n  return n\n}\n",
+      ),
+      ["score > 7"],
+    );
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",

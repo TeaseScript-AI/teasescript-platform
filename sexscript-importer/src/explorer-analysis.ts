@@ -962,13 +962,17 @@ export class DataFlow {
 
   /**
    * What a load whose key a parameter names (`load key` in a helper, `s ?parameter`) may carry, of whichever key a call
-   * gives it ({@link #loadKey}): reached from what reads it, as {@link #carriers} reaches from what reads a key. Null
+   * gives it ({@link #loadKey}), and a load of another key computed past knowing (`s ?`, as a copy of such a key):
+   * those loads, and what is reached from what reads them, as {@link #carriers} reaches from what reads a key. Null
    * past the carriers' work.
    */
   #unknownCarriers(): { readonly own: ReadonlySet<string>; readonly saved: boolean } | null {
     if (this.#unknown === undefined) {
       const graph = (this.#carrierGraph ??= this.#readersGraph());
-      this.#unknown = this.#reachFrom(graph.readers.get("s ?parameter") ?? []);
+      const cells = ["s ?parameter", "s ?"];
+      const found = this.#reachFrom(cells.flatMap((cell) => graph.readers.get(cell) ?? []));
+      // Such a load itself, too.
+      this.#unknown = found && { own: new Set([...found.own, ...cells]), saved: found.saved };
     }
     return this.#unknown;
   }
@@ -1254,13 +1258,14 @@ export class DataFlow {
     const node = (
       name: string,
       need: Need,
-      values: { value: unknown; at: number | undefined; context: Context }[],
+      values: () => { value: unknown; at: number | undefined; context: Context }[],
       context: Context,
       loose: boolean,
       from: string,
     ): boolean => {
       const id = `${name}\u0000${key}\u0000${need}\u0000${context?.id ?? ""}${loose ? "\u0000~" : ""}`;
-      parents.set(id, [...(parents.get(id) ?? []), from]);
+      // A value read in many places is gone through once: its values are only listed then.
+      (parents.get(id) ?? parents.set(id, []).get(id)!).push(from);
       const known = this.#holds.get(id);
       if (known !== undefined) {
         if (known) loads.add(id);
@@ -1269,7 +1274,7 @@ export class DataFlow {
       if (visited.has(id)) return true;
       visited.add(id);
       let reading = 0;
-      for (const each of values)
+      for (const each of values())
         if (this.#flowIn(each.value, each.at, each.context).keys.has(key)) {
           pending.push({ ...each, need, loose: false, from: id });
           reading += 1;
@@ -1298,7 +1303,9 @@ export class DataFlow {
       }
       // A number's `+` is that number; one of anything else stops the script.
       if (value.kind === "unary" && value.operator === "+") {
-        if (need === "truth") return false;
+        // Only for a key a call gave a helper's `load key`, whose values from loads of keys computed past knowing are
+        // looked through ({@link #mayCarry}); as before for another.
+        if (need === "truth" || !this.#resolvedKeys.has(key)) return false;
         pending.push({ value: value.operand, at, need, context, loose, from });
         return true;
       }
@@ -1306,7 +1313,7 @@ export class DataFlow {
         return node(
           `variable ${this.#keyOf(value)}`,
           need,
-          this.#valuesIn(this.#keyOf(value), context),
+          () => this.#valuesIn(this.#keyOf(value), context),
           context,
           loose,
           from,
@@ -1339,7 +1346,7 @@ export class DataFlow {
           node(
             `temporary ${value.temporaryId} at ${at}`,
             need,
-            held.map((store) => ({ value: store.value, at: store.index, context })),
+            () => held.map((store) => ({ value: store.value, at: store.index, context })),
             context,
             loose,
             from,
@@ -1357,14 +1364,15 @@ export class DataFlow {
         return node(
           call === null ? `function ${id}` : `call ${call}`,
           need,
-          (call === null
-            ? (this.#returns.get(id) ?? [])
-            : this.#returnsFor(call, context?.constants)
-          ).map((index) => ({
-            value: this.#instructions[index]!.value,
-            at: index,
-            context: inner,
-          })),
+          () =>
+            (call === null
+              ? (this.#returns.get(id) ?? [])
+              : this.#returnsFor(call, context?.constants)
+            ).map((index) => ({
+              value: this.#instructions[index]!.value,
+              at: index,
+              context: inner,
+            })),
           context,
           loose,
           from,
@@ -1489,8 +1497,15 @@ export class DataFlow {
     const stores = this.#stores.get(temporaryId) ?? [];
     const owner = this.functionAt(at);
     const held: { value: Data; index: number }[] = [];
-    let nearest = stores.length - 1;
-    while (nearest >= 0 && stores[nearest]! >= at) nearest -= 1;
+    // The last store before `at`, by halves: the stores are in order, and a temporary of a long function has many.
+    let low = 0;
+    let high = stores.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (stores[middle]! < at) low = middle + 1;
+      else high = middle;
+    }
+    const nearest = low - 1;
     for (let store = nearest; store >= 0; store -= 1) {
       const index = stores[store]!;
       if (this.functionAt(index) !== owner) return null;
@@ -2028,10 +2043,34 @@ export class DataFlow {
     depth = HELPER_DEPTH,
     outer: ReadonlyMap<string, Flow> | null = null,
   ): Flow {
+    // By the call and what it is read with, before its arguments are read again: a helper's own variable read through
+    // a chain of calls (`value = identity(value)`) reads each call's arguments once.
+    const given = `call ${call} ${depth} ${this.#constantsId(bound)} ${outer === null ? "" : this.#substitutionId(outer)}`;
+    const read = this.#callFlows.get(given);
+    if (read !== undefined) return read;
     const substitute = this.#parameterFlows(call, bound, depth, outer);
     const constants = this.#constantArguments(call, bound);
     // By the function and what its parameters read, not by which call passed them, so that calls passing the same
     // share it.
+    const memo = `${String(this.#instructions[call]!.functionId)} ${depth} ${this.#constantsId(constants)} ${this.#substitutionId(substitute)}`;
+    const known = this.#callFlows.get(memo);
+    if (known !== undefined) {
+      this.#callFlows.set(given, known);
+      return known;
+    }
+    const found = emptyFlow();
+    for (const index of this.#returnsFor(call, bound))
+      merge(
+        found,
+        this.#flowAt(this.#instructions[index]!.value, index, substitute, constants, depth),
+      );
+    this.#callFlows.set(memo, found);
+    this.#callFlows.set(given, found);
+    return found;
+  }
+
+  /** A short id of parameter flows to substitute, the same for equal ones (see {@link #callFlow}). */
+  #substitutionId(substitute: ReadonlyMap<string, Flow>): string {
     const text = JSON.stringify(
       [...substitute]
         .map(([key, flow]) => [
@@ -2042,20 +2081,10 @@ export class DataFlow {
         ])
         .sort(([left], [right]) => (String(left) < String(right) ? -1 : 1)),
     );
-    const id =
+    return (
       this.#substitutionIds.get(text) ??
-      this.#substitutionIds.set(text, String(this.#substitutionIds.size)).get(text)!;
-    const memo = `${String(this.#instructions[call]!.functionId)} ${depth} ${this.#constantsId(constants)} ${id}`;
-    const known = this.#callFlows.get(memo);
-    if (known !== undefined) return known;
-    const found = emptyFlow();
-    for (const index of this.#returnsFor(call, bound))
-      merge(
-        found,
-        this.#flowAt(this.#instructions[index]!.value, index, substitute, constants, depth),
-      );
-    this.#callFlows.set(memo, found);
-    return found;
+      this.#substitutionIds.set(text, String(this.#substitutionIds.size)).get(text)!
+    );
   }
 
   /**
@@ -2114,7 +2143,8 @@ export class DataFlow {
    * call's result, also in a temporary that holds it, is read as that call's result with the `bound` constants and
    * `substitute` for its arguments ({@link #callFlow}), `depth` calls deep. With constants, a load's key that a
    * parameter names is the text the call gives it ({@link #loadKey}), also for a variable of the function's own that
-   * holds such a load or a value computed from one ({@link #keyedLocal}).
+   * holds such a load or a value computed from one ({@link #keyedLocal}): read as its assignments are, once for each
+   * way it is read ({@link #keyedFlow}), or within the reading of another such variable, `followed` along with it.
    */
   #flowAt(
     expression: unknown,
@@ -2122,10 +2152,10 @@ export class DataFlow {
     substitute: ReadonlyMap<string, Flow>,
     bound: ReadonlyMap<string, SavedScalar>,
     depth: number,
+    followed: Set<string> | null = null,
   ): Flow {
     const flow = emptyFlow();
     const texts = [...bound.values()].some((each) => typeof each === "string");
-    const followed = new Set<string>();
     const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
     for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
       const { value, at } = item;
@@ -2155,7 +2185,9 @@ export class DataFlow {
         // With a text among the constants, a variable of the function's own that holds a load whose key a variable
         // names, or a value computed from one, is read as its assignments are.
         const key = value.kind === "identifier" && texts ? this.#keyOf(value) : "";
-        if (key !== "" && !followed.has(key) && this.#keyedLocal(key)) {
+        if (key === "" || followed?.has(key) === true || !this.#keyedLocal(key)) continue;
+        if (followed === null) merge(flow, this.#keyedFlow(key, substitute, bound, depth));
+        else {
           followed.add(key);
           for (const each of this.#assigned.get(key) ?? [])
             pending.push({ value: each.value, at: each.index });
@@ -2182,6 +2214,28 @@ export class DataFlow {
       for (const [key, each] of Object.entries(value))
         if (key !== "span") pending.push({ value: each, at });
     }
+    return flow;
+  }
+
+  /**
+   * What a variable of a function's own that {@link #keyedLocal} names reads, as its assignments are read with
+   * `substitute` and the `bound` constants, `depth` calls deep, together with the variables of its kind they read: once
+   * for each such reading, kept with the call flows.
+   */
+  #keyedFlow(
+    key: string,
+    substitute: ReadonlyMap<string, Flow>,
+    bound: ReadonlyMap<string, SavedScalar>,
+    depth: number,
+  ): Flow {
+    const memo = `keyed ${key} ${depth} ${this.#constantsId(bound)} ${this.#substitutionId(substitute)}`;
+    const known = this.#callFlows.get(memo);
+    if (known !== undefined) return known;
+    const flow = emptyFlow();
+    const followed = new Set([key]);
+    for (const each of this.#assigned.get(key) ?? [])
+      merge(flow, this.#flowAt(each.value, each.index, substitute, bound, depth, followed));
+    this.#callFlows.set(memo, flow);
     return flow;
   }
 
