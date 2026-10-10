@@ -1794,10 +1794,21 @@ export function lowerParsedFile(
   let lifted: CapturedLocal[] = [];
   // The closures that stay unconverted, by spanKey, with the locals they capture.
   const excluded = new Map<string, string[]>();
+  // A script variable of a file whose functions modules call, or that is a module, is the package's, which the
+  // functions of other files may reach while one runs: such a file only passes locals (withPassedLocals).
+  let lifts = (options.mixinModules ?? []).length === 0;
   let previous: MigrationProgram | null = null;
   for (let round = 0; round < 6; round += 1) {
-    const found: CapturedLocals = { locals: [], body: null, excluded };
+    const found: CapturedLocals = { locals: [], body: null, excluded, lifts };
     const program = lowerFileOnce(file, options, lifted, found);
+    if (
+      lifts &&
+      (program.module !== undefined || (program.loadsModuleDirectories ?? []).length > 0)
+    ) {
+      lifts = false;
+      // A lowering that lifted locals lowers again without.
+      if (lifted.length > 0) continue;
+    }
     const failed = failedClosures(program, lifted, excluded);
     if (failed.length > 0) {
       for (const closure of failed)
@@ -1819,12 +1830,14 @@ export function lowerParsedFile(
     // The file lowers again only where that resolves more locals.
     const more =
       found.body !== null &&
-      liftableCaptures(found.body, next).length > liftableCaptures(found.body, lifted).length;
+      liftableCaptures(found.body, next, lifts).length >
+        liftableCaptures(found.body, lifted, lifts).length;
     if (!more) return program;
     lifted = next;
   }
   return (
-    previous ?? lowerFileOnce(file, options, [], { locals: [], body: null, excluded: new Map() })
+    previous ??
+    lowerFileOnce(file, options, [], { locals: [], body: null, excluded: new Map(), lifts: false })
   );
 }
 
@@ -1876,6 +1889,8 @@ interface CapturedLocals {
   locals: CapturedLocal[];
   body: AstNode | null;
   excluded: ReadonlyMap<string, readonly string[]>;
+  /** Whether the lowering may lift locals to script variables, besides passing them. */
+  lifts: boolean;
 }
 
 function lowerFileOnce(
@@ -2024,7 +2039,7 @@ function lowerFileOnce(
     );
     found.body = body;
     // The closures whose locals are passed, and the locals lifted, by their functions.
-    const resolvable = liftableCaptures(body, lifted);
+    const resolvable = liftableCaptures(body, lifted, found.lifts);
     const closures = new Set(resolvable.map((local) => local.closure));
     const names = new Set(resolvable.map((local) => `${local.body} ${local.name}`));
     const resolved = new Map<string, string[]>();
@@ -2036,7 +2051,9 @@ function lowerFileOnce(
     context.resolvedClosures = resolved;
     context.excludedClosures = found.excluded;
     const passed = withPassedLocals(body, lifted);
-    body = withLiftedLocals(passed.body, passed.rest, (base) => freshName(base, context));
+    body = found.lifts
+      ? withLiftedLocals(passed.body, passed.rest, (base) => freshName(base, context))
+      : passed.body;
   }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);

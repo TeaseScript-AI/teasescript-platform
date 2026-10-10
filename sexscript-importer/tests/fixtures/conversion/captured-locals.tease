@@ -11,7 +11,7 @@ function sexscriptLegacyCall(action, args) {
 // A closure value that reads or sets locals of its function, or its parameters, converts with them as script
 // variables under new names: the function sets each where it declared it, and copies a parameter in as it starts
 // (ShockQuiz's settings, whose closures set its `txt`).
-let configureTxt: string? = null
+let configureTxt = ""
 let configureCount = 0
 function askCallback1(it = null) {
   configureTxt = "Rounds ${configureCount}"
@@ -19,6 +19,7 @@ function askCallback1(it = null) {
   say configureTxt
 }
 function configure(start) {
+  configureTxt = ""
   configureCount = toInteger(start)
   askCallback1()
   askCallback1()

@@ -96,12 +96,13 @@ export function withLiftedLocals(
 export function liftableCaptures(
   body: AstNode,
   captured: readonly CapturedLocal[],
+  lifts = true,
 ): CapturedLocal[] {
   const passes = passPlan(body, captured);
   const rest = captured.filter((local) => !passes.has(local.closure));
   return [
     ...[...passes.values()].flatMap((pass) => pass.locals),
-    ...[...plan(body, rest).values()].flatMap((lift) => lift.locals),
+    ...(lifts ? [...plan(body, rest).values()].flatMap((lift) => lift.locals) : []),
   ];
 }
 
@@ -342,9 +343,22 @@ function plan(
       item.parent === null && item.name !== null ? [[item.name, item]] : [],
     ),
   );
-  // The script's functions that something takes as a value, which may then call them at any time.
+  // The script's functions that something takes as a value, which may then call them at any time; that a closure
+  // without a name calls, such as one kept in a map; or whose name the script binds more than once.
   const reads = valueReads(body);
   const taken = new Set([...reads].map(variableName).filter((name) => functions.has(name ?? "")));
+  for (const item of closures)
+    if (item.name === null && item.parent === null)
+      walkAst(item.node, (node) => {
+        const target = calledName(node) ?? calledClosure(node);
+        if (target !== null && functions.has(target)) taken.add(target);
+      });
+  const bindings = new Map<string, number>();
+  walkAst(body, (node) => {
+    const name = setName(node);
+    if (name !== null) bindings.set(name, (bindings.get(name) ?? 0) + 1);
+  });
+  for (const name of functions.keys()) if ((bindings.get(name) ?? 0) > 1) taken.add(name);
   // Whether a function of the script may be called again while it runs: a function it calls calls it.
   const callees = new Map<string, Set<string>>();
   for (const [name, item] of functions) {
@@ -381,16 +395,21 @@ function plan(
     const owner = byBody.get(key);
     const block = asNode(owner?.node.body);
     if (owner?.name == null || block?.kind !== "block" || !once(owner)) continue;
-    // A closure value lifts its locals where the function only calls it and all of them lift.
+    // A closure value lifts its locals where the function only calls it and all of them lift; a local lifts only where
+    // every closure value that captures it may lift it, as one that escapes would read the next call's.
+    const fails = (local: CapturedLocal): boolean => {
+      const closure = byClosure.get(local.closure);
+      return (
+        closure === undefined ||
+        !onlyCalled(owner.node, closure) ||
+        !liftable(block, local, parameterType(owner.node, local.name))
+      );
+    };
+    const failedNames = new Set(locals.filter(fails).map((local) => local.name));
     const stays = new Set(
-      locals.flatMap((local) => {
-        const closure = byClosure.get(local.closure);
-        return closure !== undefined &&
-          onlyCalled(owner.node, closure) &&
-          liftable(block, local, parameterType(owner.node, local.name))
-          ? []
-          : [local.closure];
-      }),
+      locals.flatMap((local) =>
+        fails(local) || failedNames.has(local.name) ? [local.closure] : [],
+      ),
     );
     const names = new Set<string>();
     const kept = locals.filter((local) => {
@@ -479,8 +498,15 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
     for (const child of children(node)) find(child, inner);
   };
   for (const child of children(block)) find(child, false);
+  // A text parameter may be null where it is read after a call, which a script variable cannot show; the closure gets
+  // it as a parameter instead, where it only reads it (withPassedLocals).
   if (local.parameters.includes(name))
-    return declarations.length === 0 && parameter !== null && typed(parameter);
+    return (
+      declarations.length === 0 &&
+      parameter !== null &&
+      typed(parameter) &&
+      !TEXT_TYPES.has(parameter)
+    );
   const [declared] = declarations;
   if (declarations.length !== 1 || declared === undefined || declared.nested) return false;
   if (declared.node.multipleAssignment === true) return false;
@@ -490,6 +516,8 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
   if (value?.kind === "closure") return false;
   if (type === "boolean") return false;
   if (value === null || isEmpty(value)) return ZERO_TYPES.has(type) || TEXT_TYPES.has(type);
+  // A text set to a computed value may be null where it is read after a call, as above.
+  if (TEXT_TYPES.has(type)) return literal(value);
   return literal(value) || typed(type);
 }
 
@@ -555,14 +583,16 @@ function liftLocal(
     },
   });
   const initial = asNode(declared?.right);
-  // The declaration sets the variable where it had a value, or where its type starts at 0 or false and something sets
-  // it again; a text without a value stays as the script variable starts.
+  // The declaration sets the variable where it had a value, or where something sets it again, to its type's start: 0,
+  // false, or for a text the empty text, as the conversion starts a text local that Groovy started as null.
+  const text = TEXT_TYPES.has(type);
   const set = (node: AstNode): AstNode[] => {
     const expression = node.kind === "expressionStatement" ? asNode(node.expression) : null;
     if (expression?.kind !== "declaration" || variableName(expression.left) !== lifted)
       return [mapBlocks(node, set)];
     const value = asNode(expression.right);
     if (value !== null && !isEmpty(value)) return [assignment(value, node.span)];
+    if (text) return [assignment({ kind: "constant", span: node.span, value: "" }, node.span)];
     return ZERO_TYPES.has(type) && writes > 0
       ? [assignment(startingValue(type, node.span), node.span)]
       : [];
@@ -597,7 +627,12 @@ function liftLocal(
         originType: type,
       },
       // A literal value is the script variable's from the start, so that it holds a value wherever it is read.
-      right: initial !== null && !isEmpty(initial) && literal(initial) ? initial : empty,
+      right:
+        initial !== null && !isEmpty(initial) && literal(initial)
+          ? initial
+          : text
+            ? { kind: "constant", span: at, value: "" }
+            : empty,
     },
   };
   return { body: result, declaration };
