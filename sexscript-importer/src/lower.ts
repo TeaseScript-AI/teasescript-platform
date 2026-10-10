@@ -9658,8 +9658,8 @@ function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>(
 
 /**
  * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that is set
- * to one or to null, also through another variable; the null start of a variable that starts with 0 (zeroStartNumbers)
- * is none.
+ * to one or to null, also through another variable; the null start of a variable that starts with 0, an empty text, or
+ * false instead (zeroStartNumbers, emptyStarts) is none.
  */
 function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   if (node.kind === "methodCall") {
@@ -9680,10 +9680,11 @@ function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string
   if (key === null || seen.has(key)) return false;
   seen.add(key);
   const values = context.assignedValues.get(key) ?? [];
-  const zeroStart = context.mapUses.zeroStartNumbers.has(key);
+  const replacedStart =
+    context.mapUses.zeroStartNumbers.has(key) || context.mapUses.emptyStarts.has(key);
   return values.some(
     (value, position) =>
-      !(zeroStart && position === 0) &&
+      !(replacedStart && position === 0) &&
       (isNullConstant(value) || mayReadNull(value, context, seen)),
   );
 }
@@ -10023,10 +10024,9 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   });
   const closureCases = matchNodes.map((matchNode) => closureCaseTest(matchNode));
   if (closureCases.every((test) => test === null) && isAcceptedSwitch(valueCases)) {
-    // A variable that may be null matched none of its literal cases there and ran the default, which a case for null
-    // runs too: the other cases then know that it holds a value, as Groovy's matched one did.
+    // A variable that may be null matched none of its literal cases there and ran the default (nullFirst).
     const subject = valueNode === null ? null : variableName(valueNode);
-    const nullCase =
+    const nullFirst =
       subject !== null &&
       mayReadNull(valueNode!, context) &&
       valueCases.every((switchCase) =>
@@ -10037,18 +10037,10 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
       {
         kind: "switch",
         value,
-        cases: nullCase
-          ? [
-              {
-                span: node.span,
-                matches: [{ kind: "literal", value: null }],
-                body: structuredClone(defaultStatements),
-              },
-              ...valueCases,
-            ]
-          : valueCases,
+        cases: valueCases,
         default: defaultStatements,
         span: node.span,
+        ...(nullFirst ? { nullFirst: true as const } : {}),
       },
     ];
   }

@@ -150,18 +150,19 @@ if randomInteger(0..2) == 0 {
 if picked == null {
   say "Nothing picked"
 }
-switch picked {
-  case null {
-    say "Other"
-  }
-  case 0 {
-    say "Zero ${picked + 1}"
-  }
-  case 1 {
-    say "One ${picked + 1}"
-  }
-  default {
-    say "Other"
+if picked == null {
+  say "Other"
+} else {
+  switch picked {
+    case 0 {
+      say "Zero ${picked + 1}"
+    }
+    case 1 {
+      say "One ${picked + 1}"
+    }
+    default {
+      say "Other"
+    }
   }
 }
 exit

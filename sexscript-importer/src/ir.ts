@@ -222,6 +222,11 @@ export type IrStatement =
       value: IrExpression;
       cases: IrSwitchCase[];
       default: IrStatement[];
+      /**
+       * The value, a variable, may be null, which matched none of the literal cases and ran the default in Groovy;
+       * variable typing tests it for null first where its type allows null, so the cases know that it holds a value.
+       */
+      nullFirst?: true;
     })
   | (IrBase & { kind: "break" })
   | (IrBase & { kind: "continue" })

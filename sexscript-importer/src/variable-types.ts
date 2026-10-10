@@ -599,12 +599,29 @@ export function enforceVariableTypes(
         case "repeat":
         case "for":
           return withIntegerIndexes({ ...statement, body: rewrite(statement.body) }, indexes);
-        case "switch":
-          return {
+        case "switch": {
+          const otherwise = rewrite(statement.default);
+          const rewritten: IrStatement = {
             ...statement,
             cases: statement.cases.map((item) => ({ ...item, body: rewrite(item.body) })),
-            default: rewrite(statement.default),
+            default: otherwise,
           };
+          // Null ran the default in Groovy; after the test, the cases know that the value is one.
+          return nullFirstSwitches.has(statement)
+            ? {
+                kind: "if",
+                condition: {
+                  kind: "binary",
+                  operator: "==",
+                  left: statement.value,
+                  right: { kind: "literal", value: null },
+                },
+                then: structuredClone(otherwise),
+                else: [rewritten],
+                span: statement.span,
+              }
+            : rewritten;
+        }
         case "save": {
           // The type of the value saved under a literal key, from which the package decides the key's type.
           const type = saved.get(statement);
@@ -1305,10 +1322,19 @@ function analyse(
         for (const child of item.body) statement(child, inner);
         return;
       }
-      case "switch":
+      case "switch": {
+        // A value that may be null is tested for it first where its type allows null (nullFirst).
+        const type = typeOf(item.value, scope);
+        if (
+          item.nullFirst === true &&
+          (type.kind === "optional" || nonNull(type).kind === "unknown")
+        )
+          nullFirstSwitches.add(item);
+        else nullFirstSwitches.delete(item);
         for (const switchCase of item.cases) block(switchCase.body, scope);
         block(item.default, scope);
         return;
+      }
       case "save":
         if (item.key.kind === "literal" && typeof item.key.value === "string") {
           analysis.saved.set(item, typeOf(item.value, scope));
@@ -2398,6 +2424,8 @@ const wholeBounds = new WeakSet<IrStatement>();
 const ORDER_OPERATORS = new Set(["<", "<=", ">", ">="]);
 /** Orderings of two sides that typing proves to be numbers, or texts, which read as the plain comparison. */
 const plainCompares = new WeakSet<IrExpression>();
+/** Switches on a value that may be null whose type allows null, which test for it first (nullFirst). */
+const nullFirstSwitches = new WeakSet<IrStatement>();
 /**
  * Orderings of a number variable that may be null and a settled number, with the side the variable is on, which test
  * for null first (guardedCompare).
