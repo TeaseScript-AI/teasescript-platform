@@ -565,7 +565,9 @@ Concrete points the migration surfaced in TeaseScript itself:
   `absoluteDateTime` from `getAbsoluteDateTime()` (#759, formerly `timestamp`) is the fixed moment for "how long ago".
   Legacy code measured elapsed time in Unix seconds (`getTime()`, 18 scripts), so it uses
   `getAbsoluteDateTime().toSeconds()`, while fields and formats keep the local
-  getters. Legacy arithmetic in seconds stays exact numbers. A legacy calendar step, Groovy's `date + n` or
+  getters. Legacy `getTime()` rounded to the nearest second where `toSeconds()` rounds down: a difference of two reads
+  is a whole number of seconds either way, at a phase that depended on when the session started in legacy too, so a
+  timed loop ends a second early or late as often as before (ZapEdgeStrip's signal loop). Legacy arithmetic in seconds stays exact numbers. A legacy calendar step, Groovy's `date + n` or
   `Calendar.add` of a day, month, or year field, keeps the same local clock time across a daylight-saving change, so it
   becomes `n * 1 calendar day` (or a `calendar` month or year; #763), also on a `date`, which moves by calendar units
   only; `Calendar.add` of a time field was elapsed time, which moves the moment:
@@ -839,7 +841,11 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   (`SX_EXTERNAL_PROGRAM_NOTICE`). An online read or a function that talks to an online service gives a notice with the
   request, secret query values hidden, and reads empty or returns as failed (`SX_ONLINE_REQUEST`). Java network
   settings are dropped (`SX_JVM_SETTING`), and a function that reads photo pixels to answer yes or no answers false
-  (`SX_PHOTO_PIXELS`). A try block without fallible calls runs without its catch (`SX_TRY_WITHOUT_CATCH`).
+  (`SX_PHOTO_PIXELS`). A try block without fallible calls runs without its catch (`SX_TRY_WITHOUT_CATCH`). In the
+  shock units (ShockYourself, ShockQuiz, ShockJack, PainStacks) such a catch stopped the sound and opened the tray when
+  a shock failed: legacy `showButton(text, seconds)` failed for a time below -0.01 s, which settings with a stop delay
+  longer than the shock could give; the converted button rejects a time of 0 or less and ends the session there, and
+  the sound plays on to the end of its file.
 
 ## Current state and remaining gaps
 
