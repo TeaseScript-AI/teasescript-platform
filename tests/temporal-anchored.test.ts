@@ -367,7 +367,8 @@ test("the compiler checks zones, options, and amounts that it knows", () => {
     diagnostics(["function move(value: date?) {", "    say value.add(1 calendar day)", "}"]),
     [["TSV043", "'value' may be null. Check it first: if value != null { ... }"]],
   );
-  // `add` on a date or time value is not a collection's `add`, so a union of both has neither.
+  // A date or time value's `add` is its own: a collection's `add` or a speaker's unknown methods are not it, so such a
+  // union is checked first, and a union of date and time values has its arguments checked.
   for (const amount of ["1 day", "dynamic(1 day)"])
     assert.deepEqual(
       diagnostics([
@@ -378,10 +379,31 @@ test("the compiler checks zones, options, and amounts that it knows", () => {
       [
         [
           "TSV043",
-          "'value' may be an absolute date and time. Check it first: if value is integer[] { ... }",
+          "'value' may be a list (integer[]). Check it first: if value is absoluteDateTime { ... }",
         ],
       ],
     );
+  assert.deepEqual(
+    diagnostics([
+      "speaker vera {}",
+      "function move(value: date | speaker, other: date | datetime, local: datetime | speaker) {",
+      "    say value.add(1 calendar day)",
+      "    say other.add(1)",
+      '    say local.toAbsoluteDateTime(zone: "UTC", bogus: 1)',
+      "}",
+    ]),
+    [
+      ["TSV043", "'value' may be a speaker. Check it first: if value is date { ... }"],
+      [
+        "TSV043",
+        "add() on a date takes a calendar duration, such as '1 calendar day', but this is a whole number (integer).",
+      ],
+      [
+        "TSV022",
+        "toAbsoluteDateTime() has no option 'bogus:'. Its options are 'zone:' and 'disambiguation:'.",
+      ],
+    ],
+  );
   assert.deepEqual(
     diagnostics(["let t = getAbsoluteDateTime() - 1 calendar month"])[0]?.[1],
     "An absolute date and time has no calendar, so '-' cannot move it by calendar units. Use add(...), which counts them in the player's time zone, as in 'value.add(-1 calendar month)'.",

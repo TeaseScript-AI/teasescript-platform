@@ -5390,15 +5390,19 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
-    // Every member of a union must have the method (ADR 0021 rule 3.5). `add` on a date or time value and `add` on a
-    // collection are different methods, so a union of both kinds has neither.
+    // Every member of a union must have the method (ADR 0021 rule 3.5). `add` of a date or time value and `toDuration`
+    // of a calendar duration are their own: a collection's `add`, which changes the collection, or a member whose
+    // methods are not known, such as a speaker, does not have them, so such a union is checked first (V30 §35).
     const all = members(value);
-    const mixedAdd =
-      method === "add" &&
-      all.some(isTemporal) &&
-      all.some((member) => isListOrSet(resolved(member)));
+    const ownMethod = (member: StaticType): StaticType | undefined => {
+      const kept = resolved(member);
+      return kept.kind === "scalar" ? temporalMethodType(kept.name, method) : undefined;
+    };
+    const ownOnly =
+      (method === "add" || method === "toDuration") &&
+      all.some((member) => ownMethod(member) !== undefined);
     const results = all.map((member) =>
-      mixedAdd && isTemporal(member) ? undefined : memberMethodType(member, method),
+      ownOnly ? ownMethod(member) : memberMethodType(member, method),
     );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
@@ -5436,8 +5440,12 @@ class TypeChecker {
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
-      if (all.every((member) => isTemporal(member) || isScalar(member, "calendarDuration")))
-        this.#checkTemporalArguments(expression, callee.property, all, values);
+      // A speaker's methods are checked when the script runs, a date or time value's arguments here.
+      const temporal = all.filter(
+        (member) => isTemporal(member) || isScalar(member, "calendarDuration"),
+      );
+      if (temporal.length > 0)
+        this.#checkTemporalArguments(expression, callee.property, temporal, values);
       const result = all.length === 1 ? results[0]! : union(results.map((result) => result!));
       // A value of unknown type as the default makes the result unknown, so a place checks it when the script runs.
       return fallback === undefined ? result : union([result, plainType(fallback)]);
