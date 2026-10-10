@@ -836,11 +836,9 @@ export function formatAnswer(text: string, n: number): string | null {
     const columns = last - first + 1;
     const rows = high - low + 1;
     if (columns > 0 && rows > 0) {
-      // A step that shares no factor with the number of cells visits each cell once before any comes back.
-      const total = columns * rows;
-      let stride = 7;
-      while (gcd(stride, total) !== 1) stride += 1;
-      const cell = (n * stride) % total;
+      // Row by row, so that answers one after another are adjacent, as a ship's squares must be, and each cell comes
+      // once before any comes back.
+      const cell = n % (columns * rows);
       return `${String.fromCharCode(first + (cell % columns))}${low + Math.floor(cell / columns)}`;
     }
   }
@@ -868,10 +866,6 @@ export function formatAnswer(text: string, n: number): string | null {
     return named[n % named.length]!;
   }
   return null;
-}
-
-function gcd(left: number, right: number): number {
-  return right === 0 ? left : gcd(right, left % right);
 }
 
 /**
