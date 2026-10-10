@@ -1158,6 +1158,7 @@ function validateCapturedRuntimeSnapshotDetails(
     typeof value.currentSessionTimeMs === "number" ? value.currentSessionTimeMs : Number.NaN,
     typeof value.observedSessionTimeMs === "number" ? value.observedSessionTimeMs : Number.NaN,
     typeof value.nextEventSequence === "number" ? value.nextEventSequence : Number.NaN,
+    plan?.timeZones,
   );
   if (temporalProblem !== null)
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);

@@ -17,6 +17,7 @@ import type { TemporalContext, ZoneRules } from "../src/temporal.js";
 import { captureTemporalContext } from "../src/temporal-capture.js";
 import { playerTemporalContext } from "../player/runtime-adapter.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
 
@@ -361,6 +362,21 @@ test("the compiler checks zones, options, and amounts that it knows", () => {
     ]).map(([code]) => code),
     ["TSV043"],
   );
+  // `add` on a date or time value is not a collection's `add`, so a union of both has neither.
+  for (const amount of ["1 day", "dynamic(1 day)"])
+    assert.deepEqual(
+      diagnostics([
+        DYNAMIC + "function move(value: absoluteDateTime | integer[]) {",
+        `    value.add(${amount})`,
+        "}",
+      ]),
+      [
+        [
+          "TSV043",
+          "'value' may be an absolute date and time. Check it first: if value is integer[] { ... }",
+        ],
+      ],
+    );
   assert.deepEqual(
     diagnostics(["let t = getAbsoluteDateTime() - 1 calendar month"])[0]?.[1],
     "An absolute date and time has no calendar, so '-' cannot move it by calendar units. Use add(...), which counts them in the player's time zone, as in 'value.add(-1 calendar month)'.",
@@ -493,12 +509,18 @@ test("a restored session keeps the rules of named zones while the player's zone 
     "2026-12-30T23:00:00Z",
     "2026-12-30T23:00:00Z",
   ]);
-  // A Continue may not bring the rules of a zone the script does not name.
+  // A Continue may not bring the rules of a zone the script does not name, and a checkpoint may not hold them.
   assert.equal(
     recordContinueCapture(plan, snapshot, { wallClockMs: NOW, temporalContext: AMSTERDAM_PLAYER })
       .outcome.kind,
     "invalidCapture",
   );
+  // EVIDENCE: fixture: the parsed checkpoint was serialized from a valid snapshot of this plan.
+  const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(plan, snapshot))) as {
+    snapshot: { temporalCaptures: { context: { namedZones: ZoneRules[] } }[] };
+  };
+  checkpoint.snapshot.temporalCaptures[0]!.context.namedZones.push(NEW_YORK_ZONE);
+  assertCheckpointRejected(checkpoint, "TSK002");
 });
 
 test("plan validation takes the named zones unique, sorted, and without UTC", () => {
