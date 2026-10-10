@@ -378,11 +378,11 @@ and with only the returns its constant arguments can reach (a helper `owns(item)
 item == ROPE` loads one key per branch reads one key for `owns(ROPE)`, also through a helper that passes its parameter
 on, three calls deep). Its comparisons with constants give the values that take the missed way. An ask is answered
 again with them on the path of the step that first evaluated the condition, and the rest of that path is replayed; the
-values also become answers of that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
-that satisfies the condition, a session starts from it and replays that path (with `--stored-leads`, off by default
-as it cost coverage on the gate, play also goes on from the state that stored it, in its own session: that state, or
-once it was expanded its open successors in that session, 16 at most, nearest first, share the first place for 20
-expansions in all, once per chain); otherwise a session starts from the
+values also become answers of that ask wherever the search meets it. For a stored value, sessions are chained: when an
+explored state left storage that satisfies the condition, a session starts from it and replays that path (with
+`--stored-leads`, off by default as it cost coverage on the gate, play also goes on from the state that stored it, in
+its own session: that state, or once it was expanded its open successors in that session, 16 at most, nearest first,
+share the first place for 20 expansions in all, once per chain); otherwise a session starts from the
 storage closest to it and replays a route: the inputs of a session seen to bring the value closer from storage that
 already had it (up to 1,000 inputs; sessions with the same inputs are one route). The goal is the way with the least
 work in all, the sessions it takes times their work, so the route repeated is the one with the most progress per
