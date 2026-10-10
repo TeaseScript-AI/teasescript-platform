@@ -235,4 +235,10 @@ function scale(factor) {
 }
 scale(0.25)
 say "Share ${share} ${tally}"
+// A list held only until the next statement picks one of its elements leaves the variable a number.
+let which = randomInteger(0..3)
+let image = 0
+image = [970, 807, 830][which]
+// NOTE SX_PLUS_OPERAND_TYPE line 138: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Image ${image + 1}"
 exit

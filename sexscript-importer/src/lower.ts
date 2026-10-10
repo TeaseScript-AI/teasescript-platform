@@ -2407,6 +2407,83 @@ function withClosureMethods(helperClass: AstNode): boolean {
 const SHOWN_HTML_TAG =
   /<\/?(?:b|strong|i|em|u|s|strike|del|br|p|div|font|span|h[1-6]|li|ul|ol|center|textformat)\b[^<>]*>/iu;
 
+/**
+ * A variable set to a list literal and, in the next statement, to one of its elements, `x = [970, 807]; x = x[sub]`,
+ * held the list only between the two, so it is set to the element at once, `x = [970, 807][sub]`, and keeps one type.
+ * The position is a literal or a variable, which cannot fail between the two.
+ */
+function withFoldedListPicks(statements: IrStatement[]): IrStatement[] {
+  const block = (items: IrStatement[]): IrStatement[] => {
+    const result: IrStatement[] = [];
+    for (const item of items.map((statement) => withNestedBlocks(statement, block))) {
+      // Comments between the two, such as a note on the element read, stay before the statement.
+      let at = result.length - 1;
+      while (at >= 0 && result[at]!.kind === "comment") at -= 1;
+      const previous = result[at];
+      const name = previous === undefined ? null : listLiteralTarget(previous);
+      const pick =
+        name !== null &&
+        item.kind === "assign" &&
+        item.operator === "=" &&
+        isVariable(item.target, name)
+          ? elementOf(item.value, name)
+          : null;
+      if (pick === null || (previous?.kind !== "let" && previous?.kind !== "assign")) {
+        result.push(item);
+        continue;
+      }
+      result.splice(at, 1);
+      result.push({ ...previous, value: pick(previous.value) });
+    }
+    return result;
+  };
+  return block(statements);
+}
+
+/** The variable a `let` without a written type, or a `=`, sets to a list literal, or null. */
+function listLiteralTarget(statement: IrStatement): string | null {
+  if (
+    statement.kind === "let" &&
+    statement.global !== true &&
+    statement.type === undefined &&
+    statement.value.kind === "list"
+  )
+    return statement.name;
+  return statement.kind === "assign" &&
+    statement.operator === "=" &&
+    statement.target.kind === "variable" &&
+    statement.value.kind === "list"
+    ? statement.target.name
+    : null;
+}
+
+function isVariable(value: IrExpression, name: string): boolean {
+  return value.kind === "variable" && value.name === name;
+}
+
+/**
+ * For an element read of the variable at a literal or variable position, `x[sub]` or its helper for a position Groovy
+ * read differently, the same read of another list; null for another value.
+ */
+function elementOf(
+  value: IrExpression,
+  name: string,
+): ((list: IrExpression) => IrExpression) | null {
+  const settled = (position: IrExpression): boolean =>
+    position.kind === "literal" || (position.kind === "variable" && position.name !== name);
+  if (value.kind === "index" && isVariable(value.target, name) && settled(value.index))
+    return (list) => ({ ...value, target: list });
+  if (
+    value.kind === "call" &&
+    value.name === "sexscriptLegacyItemAt" &&
+    value.positional.length === 2 &&
+    isVariable(value.positional[0]!, name) &&
+    settled(value.positional[1]!)
+  )
+    return (list) => ({ ...value, positional: [list, value.positional[1]!] });
+  return null;
+}
+
 /** What the generated helpers return, computed once. */
 let helperResults: ReadonlyMap<string, TeaseType> | undefined;
 
@@ -2417,7 +2494,7 @@ let helperResults: ReadonlyMap<string, TeaseType> | undefined;
  */
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
   helperResults ??= functionResultTypes(allHelperStatements());
-  const result = enforceVariableTypes(withLoopedTailCalls(statements), helperResults);
+  const result = enforceVariableTypes(withFoldedListPicks(withLoopedTailCalls(statements)), helperResults);
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))

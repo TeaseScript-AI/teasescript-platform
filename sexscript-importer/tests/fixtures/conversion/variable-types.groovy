@@ -130,3 +130,9 @@ double tally = 0
 def scale = { factor -> share = factor * 2; tally = factor + 1 }
 scale(0.25)
 show("Share ${share} ${tally}")
+// A list held only until the next statement picks one of its elements leaves the variable a number.
+def which = getRandom(3)
+def image = 0
+image = [970, 807, 830]
+image = image[which]
+show("Image ${image + 1}")
