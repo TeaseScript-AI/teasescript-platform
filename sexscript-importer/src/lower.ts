@@ -10735,7 +10735,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "[") {
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
-    // A part of a split read at a fixed position, `text.split(",")[1]`, is the same with or without trailing empty parts.
+    // A part of a split read at a fixed position, `text.split(",")[1]`, is the same with or without trailing empty parts
+    // where Java had it; past its parts, where Java failed, TeaseScript reads an empty part.
     const fixed = indexNode === null ? undefined : constantValue(indexNode);
     if (
       targetNode?.kind === "methodCall" &&
@@ -13380,7 +13381,7 @@ function textOperation(
       const target = lowerExpression(targetNode, context);
       if (target === null) return null;
       const plain: IrExpression = { kind: "literal", value: separator.replace(/\\(.)/gu, "$1") };
-      // A part read at a fixed position is the same where it exists, and a written text that does not end with the
+      // A part read at a fixed position is the same where Java had it, and a written text that does not end with the
       // separator has no trailing empty part; elsewhere a helper drops the trailing empty parts that Java dropped.
       const written = literalText(targetNode);
       const separatorText = String(plain.value);
