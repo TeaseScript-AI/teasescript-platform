@@ -806,13 +806,15 @@ type Value =
   | undefined;
 
 /**
- * A state to evaluate in: its variables by innermost binding, also by the scope that holds them as the model names
- * them ({@link scoped}): a function's own in that function's frames, a file's own in that file's; and its stored values
- * by key.
+ * A state to evaluate in: its variables by innermost binding, and those whose name it binds once, by the scope that
+ * holds them as the model names them ({@link scoped}): a function's own in that function's frames, a file's own in that
+ * file's frames or a scope it keeps; and its stored values by key.
  */
 export interface TimeContext {
   readonly bindings: ReadonlyMap<string, unknown>;
   readonly scoped: ReadonlyMap<string, unknown>;
+  /** The names the state binds anywhere: its frames, its globals, and the scopes it keeps. */
+  readonly named: ReadonlySet<string>;
   readonly storage: ReadonlyMap<string, unknown>;
 }
 
@@ -918,9 +920,14 @@ function valueAt(expression: unknown, reading: Reading): Value {
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
       if (defined == null) {
-        // A variable named by its scope takes only a binding of that scope; another, the innermost of its name.
-        const state = node.name === bareName(node.name) ? context.bindings : context.scoped;
-        if (state.has(node.name)) return runtimeValue(state.get(node.name));
+        // A variable named by its scope takes a binding only when the state binds its name once, in that scope; when the
+        // state binds the name otherwise, whose the binding is is not known. Another, the innermost of its name.
+        const bare = bareName(node.name);
+        if (bare === node.name) {
+          if (context.bindings.has(bare)) return runtimeValue(context.bindings.get(bare));
+        } else if (context.scoped.has(node.name))
+          return runtimeValue(context.scoped.get(node.name));
+        else if (context.named.has(bare)) return undefined;
         // Not set yet in the state: from the one value it is set to, as the session will set it.
         const set = model.once.get(node.name);
         if (set === undefined || reading.memo.has(set))
@@ -1430,7 +1437,7 @@ export function storedHolds(
   const value = valueAt(condition, {
     temporaries: none,
     model,
-    context: { bindings, scoped: new Map(), storage },
+    context: { bindings, scoped: new Map(), named: new Set(bindings.keys()), storage },
     now: 0,
     inside: new Map(),
     memo: new Map(),
@@ -1441,9 +1448,16 @@ export function storedHolds(
 /** The context of a state's snapshot: its variables, innermost binding first, and its stored values. */
 export function timeContext(snapshot: Data): TimeContext {
   const bindings = new Map<string, unknown>();
-  const scoped = new Map<string, unknown>();
-  for (const binding of list(snapshot.globals))
+  // Each binding of a name, with the scope that holds it when that is clear ({@link TimeContext}).
+  const held = new Map<string, { scope: string | null; value: unknown }[]>();
+  const hold = (name: unknown, scope: string | null, value: unknown) => {
+    if (typeof name === "string")
+      (held.get(name) ?? held.set(name, []).get(name)!).push({ scope, value });
+  };
+  for (const binding of list(snapshot.globals)) {
     if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+    hold(binding.name, null, binding.value);
+  }
   // The scope each frame belongs to: that of the function whose call's frames start at or before it, unless a file's
   // call started since; else the file of the nearest frame before it that names one (its own code, also in its blocks).
   const calls = list(snapshot.callFrames);
@@ -1454,27 +1468,26 @@ export function timeContext(snapshot: Data): TimeContext {
       if (call.scopeBaseDepth === depth)
         owner = call.kind === "function" ? `function ${String(call.functionId)}` : null;
     if (typeof frame.file === "number") file = `file ${frame.file}`;
-    const scope = owner ?? file;
-    for (const binding of list(frame.bindings))
-      if (typeof binding.name === "string") {
-        bindings.set(binding.name, binding.value);
-        if (scope !== null) scoped.set(`${binding.name}\u0001${scope}`, binding.value);
-      }
+    for (const binding of list(frame.bindings)) {
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+      hold(binding.name, owner ?? file, binding.value);
+    }
   });
-  // A call's root scope, also one kept after its file was left (a persistent button's or timer's), holds its file's
-  // own variables.
-  const roots = new Map(
-    [...list(snapshot.frames), ...list(snapshot.retainedScopes)].map((scope) => [scope.id, scope]),
-  );
-  for (const call of calls) {
-    const root = roots.get(call.rootScopeId);
-    if (typeof root?.file !== "number") continue;
-    for (const binding of list(root.bindings))
-      if (typeof binding.name === "string")
-        scoped.set(`${binding.name}\u0001file ${root.file}`, binding.value);
-  }
+  // A scope kept after its file was left (a persistent button's or timer's) holds that file's own variables.
+  for (const scope of list(snapshot.retainedScopes))
+    for (const binding of list(scope.bindings))
+      hold(
+        binding.name,
+        typeof scope.file === "number" ? `file ${scope.file}` : null,
+        binding.value,
+      );
+  // A variable named by its scope is read from the state only where the state binds its name once, in that scope.
+  const scoped = new Map<string, unknown>();
+  for (const [name, found] of held)
+    if (found.length === 1 && found[0]!.scope !== null)
+      scoped.set(`${name}\u0001${found[0]!.scope}`, found[0]!.value);
   const storage = new Map<string, unknown>();
   for (const entry of list(snapshot.scriptStorage))
     if (typeof entry.key === "string") storage.set(entry.key, entry.value);
-  return { bindings, scoped, storage };
+  return { bindings, scoped, named: new Set(held.keys()), storage };
 }

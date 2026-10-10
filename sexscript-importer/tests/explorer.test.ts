@@ -3639,41 +3639,65 @@ test(
       const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
       assert.deepEqual(after?.texts, ["Right."], name);
       const holds = holdsAt(comparison, model, timeContext(before.snapshot), EPOCH_MS);
-      assert.equal(holds, name === "receiver" ? false : true, name);
+      // The receiver is read as the parameter; a name another function binds leaves this one unknown, never wrong.
+      if (name === "receiver") assert.equal(holds, false, name);
+      else assert.ok(holds === undefined || holds, name);
     }
-    // A persistent button's file variable after the file was left: the scope the button keeps, not the storage saved
-    // since, nor the other file's variable of that name.
-    const files = [
-      {
-        path: "main.tease",
-        source:
-          'let wantedHour = load("hour", default: 12)\nshowPermanentButton "Invoke", persist: true {\n' +
-          '  showButton "Check"\n  if getDateTime().hour == wantedHour {\n    say "Right."\n  } else {\n' +
-          '    say "Wrong."\n  }\n}\nsave 13 as "hour"\ngoto "other.tease"\n',
-      },
-      { path: "other.tease", source: 'let wantedHour = 13\nshowButton "Outside"\nexit\n' },
-    ];
-    const { plan } = engine.compileProject(files, { builtins: [] });
-    assert.ok(isRecord(plan));
-    const session = new Session(engine, plan, 1);
-    const start = session.start();
-    const invoke = session.options(start.runtime).find((input) => input.kind === "press");
-    assert.ok(invoke !== undefined);
-    const before = session.apply(start.runtime, invoke, false);
-    assert.ok(before !== null);
-    const instructions = Array.isArray(plan.instructions) ? plan.instructions.filter(isRecord) : [];
-    const model = clockModel(plan, instructions);
-    const [comparison] = [...model.comparisons.values()].flat();
-    assert.ok(comparison !== undefined);
-    const holds = holdsAt(
-      comparison,
-      model,
-      timeContext(before.snapshot),
-      wallClockOf(before.snapshot),
+    // A persistent button's file variable after the file was left, or entered again: never the storage saved since, nor
+    // the other file's or the older scope's binding of that name, for what the runtime then says.
+    const kept = (files: { path: string; source: string }[], expected: boolean) => {
+      const { plan } = engine.compileProject(files, { builtins: [] });
+      assert.ok(isRecord(plan));
+      const session = new Session(engine, plan, 1);
+      const start = session.start();
+      const invoke = session
+        .options(start.runtime)
+        .find((input) => input.kind === "press" && input.label === "Invoke");
+      assert.ok(invoke !== undefined);
+      const before = session.apply(start.runtime, invoke, false);
+      assert.ok(before !== null);
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const model = clockModel(plan, instructions);
+      const [comparison] = [...model.comparisons.values()].flat();
+      assert.ok(comparison !== undefined);
+      const holds = holdsAt(
+        comparison,
+        model,
+        timeContext(before.snapshot),
+        wallClockOf(before.snapshot),
+      );
+      const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
+      assert.deepEqual(after?.texts, [expected ? "True." : "False."]);
+      assert.ok(holds === undefined || holds === expected);
+    };
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'let wantedHour = load("hour", default: 12)\nif wantedHour == 12 {\n' +
+            '  showPermanentButton "Invoke", persist: true {\n    call "main.tease"\n  }\n  save 13 as "hour"\n' +
+            '  goto "main.tease"\n}\nshowButton "Check"\nif getDateTime().hour == wantedHour {\n  say "True."\n' +
+            '} else {\n  say "False."\n}\nexit\n',
+        },
+      ],
+      false,
     );
-    const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
-    assert.deepEqual(after?.texts, ["Right."]);
-    assert.equal(holds, true);
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'let wantedHour = load("hour", default: 12)\nshowPermanentButton "Invoke", persist: true {\n' +
+            '  showButton "Check"\n  if getDateTime().hour == wantedHour {\n    say "True."\n  } else {\n' +
+            '    say "False."\n  }\n}\nsave 13 as "hour"\ngoto "other.tease"\n',
+        },
+        { path: "other.tease", source: 'let wantedHour = 13\nshowButton "Outside"\nexit\n' },
+      ],
+      true,
+    );
   },
 );
 
