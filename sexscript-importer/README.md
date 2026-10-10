@@ -256,9 +256,11 @@ format gets an answer in it: a cell of "(A1 to G7)", "4 digits", a URL, or one o
 prefers the choices that earlier runs tried least, and a package stops after a run that reaches nothing new. A run
 that reaches its limit `loops` when its second half only comes back to places with options its first half reached,
 whatever their texts say, a repetition heuristic, and is `parked` otherwise; both are tried again when `--steps`
-rises. A wait that would outlast a prompt's own time limit is skipped. A control that cannot be used is tried again
-after the state is read again, so a session that ended or failed meanwhile gives its end; every result keeps the run's
-path, steps, and screenshot. The session state is read from the Player's Vue tree, because the
+rises. A wait that would outlast a prompt's own time limit, as the time controls round it, is skipped. A control that
+cannot be used is tried again after the state is read again, so a session that ended or failed meanwhile gives its end;
+every result keeps the run's path, steps, and screenshot. A prompt can still change between the runner's look and its
+click, and a session that ends just as the four minutes run out may be reported as the time limit; the runner cannot
+rule those out. The session state is read from the Player's Vue tree, because the
 Player shows no runtime failure. The result in `<out>/<id>/result.json` records each run's stop, the path of answers,
 the files and interactions reached, missing media, legacy HTML shown as text, and a screenshot of each stop, for the
 package's current `.tease` files.

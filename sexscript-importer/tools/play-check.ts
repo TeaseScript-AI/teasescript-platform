@@ -644,33 +644,43 @@ async function playOnce(
           key === repeated.key
             ? { ...repeated, count: repeated.count + 1 }
             : { key, count: 1, waits: 0 };
-        // A wait must end before the prompt's own time limit, which would end the prompt instead of answering it.
-        const fits = (seconds: number): boolean =>
-          state.deadlineMs === null || seconds * 1_000 < state.deadlineMs;
-        let waited = false;
+        // A wait must end before the prompt's own time limit, which would end the prompt instead of answering it. With
+        // the time controls it lasts its +1 min and +10 s presses, which round it up to whole tens of seconds.
+        const fits = (seconds: number): boolean => {
+          const planned = dev
+            ? Math.floor(seconds / 60) * 60 + Math.ceil((seconds % 60) / 10) * 10
+            : seconds;
+          return state.deadlineMs === null || planned * 1_000 < state.deadlineMs;
+        };
+        // After time passed, the prompt may have changed; the next pass answers what is there now. Else the state is
+        // read afresh, with the time left before the prompt's limit.
+        const moved = async (): Promise<boolean> => {
+          const now = await readState(page);
+          if (now.site !== site || now.foreground !== state.foreground) return true;
+          state = now;
+          return false;
+        };
         if (
           repeated.count >= 3 &&
           repeated.waits < WAIT_STEPS_S.length &&
           (state.options.length > 0 || state.composer !== null)
         ) {
           const seconds = WAIT_STEPS_S[repeated.waits]!;
+          repeated = { key, count: 0, waits: repeated.waits + 1 };
           if (fits(seconds) && (await pass(seconds))) {
             taken.push(`[waited ${seconds} s]`);
-            waited = true;
+            if (await moved()) {
+              await idle(300);
+              continue;
+            }
           }
-          repeated = { key, count: 0, waits: repeated.waits + 1 };
         }
         // A button whose press the script times, or after a text that asks for a minimum time, is pressed after it.
         const minimum =
           kind === "button" ? buttonWait(state.recentText, track.timed.has(site)) : null;
         if (minimum !== null && missed === 0 && fits(minimum) && (await pass(minimum))) {
           taken.push(`[waited ${minimum} s]`);
-          waited = true;
-        }
-        // After time passed, the prompt may have changed; the next pass answers what is there now.
-        if (waited) {
-          const now = await readState(page);
-          if (now.site !== site || now.foreground !== state.foreground) {
+          if (await moved()) {
             await idle(300);
             continue;
           }
