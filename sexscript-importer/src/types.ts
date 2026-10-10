@@ -707,9 +707,38 @@ function nameOf(key: string): string {
 function closureReturnValues(closure: AstNode): AstNode[] {
   const nullValue: AstNode = { kind: "constant", span: null, value: null };
   const values: AstNode[] = [];
+  // `nr = Math.round(nr)` right before `return nr` in the same block: the result is the value just written, not every
+  // value the variable holds elsewhere (trick_or_treat_poker's getRandomBetween).
+  const written = new Map<AstNode, AstNode>();
+  const markWrites = (node: AstNode): void => {
+    if (node.kind === "closure" && node !== closure) return;
+    if (node.kind === "block" && Array.isArray(node.statements)) {
+      const statements = node.statements.filter(isAstNode);
+      for (let index = 1; index < statements.length; index += 1) {
+        const value = asNode(statements[index]!.value);
+        const previous = statements[index - 1]!;
+        const write = previous.kind === "expressionStatement" ? asNode(previous.expression) : null;
+        const right = asNode(write?.right);
+        if (
+          statements[index]!.kind === "return" &&
+          value?.kind === "variable" &&
+          write?.kind === "binary" &&
+          write.operator === "=" &&
+          right !== null &&
+          variableName(write.left) === variableName(value)
+        )
+          written.set(statements[index]!, right);
+      }
+    }
+    for (const child of Object.values(node)) {
+      for (const item of Array.isArray(child) ? child : [child])
+        if (isAstNode(item)) markWrites(item);
+    }
+  };
+  markWrites(closure);
   const visit = (node: AstNode): void => {
     if (node.kind === "closure") return;
-    if (node.kind === "return") values.push(asNode(node.value) ?? nullValue);
+    if (node.kind === "return") values.push(written.get(node) ?? asNode(node.value) ?? nullValue);
     for (const child of Object.values(node)) {
       for (const item of Array.isArray(child) ? child : [child]) if (isAstNode(item)) visit(item);
     }

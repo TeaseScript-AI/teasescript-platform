@@ -201,3 +201,14 @@ def shot = ""
 if (getBoolean("Photo?")) shot = null
 given[0] = shot
 show("Given " + given.size())
+// A function that writes its result right before it returns it returns that value's type, so a text cast of the
+// result needs no null test (trick_or_treat_poker's getRandomBetween).
+def randomBetween = { min, max ->
+	def nr = getRandom(max - min) + min
+	nr = Math.round(nr)
+	return nr
+}
+save("game.lowest", 2)
+def lowest = load("game.lowest")
+def drawn = randomBetween(lowest, 5)
+show("Drawn " + (drawn as String).length())

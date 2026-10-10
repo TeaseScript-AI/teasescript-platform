@@ -7,6 +7,19 @@ function sexscriptLegacyCall(action, args): boolean | number | null {
     return chanceOrFlag(args[0])
   }
 }
+function sexscriptLegacyRandom(limitValue) {
+  if limitValue == null {
+    return randomInteger(0..100)
+  }
+  let bound = limitValue - limitValue % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
 function sexscriptLegacyValue(value) {
   return value
 }
@@ -263,7 +276,7 @@ swats(2)
 // A default that reads an earlier parameter gives the parameter no type of the calls: this call leaves it out and
 // passes a text through it.
 let limit = 1.5
-function check(limitValue, n = limitValue) {
+function check(limitValue2, n = limitValue2) {
   let value = n
   if n == 0 {
     value = null
@@ -337,4 +350,17 @@ if 0 < given.length {
   given.add(shot)
 }
 say "Given ${given.length}"
+// A function that writes its result right before it returns it returns that value's type, so a text cast of the
+// result needs no null test (trick_or_treat_poker's getRandomBetween).
+function randomBetween(minValue, maxValue) {
+  // NOTE SX_PLUS_OPERAND_TYPE line 207: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  let nr = sexscriptLegacyRandom(maxValue - minValue) + minValue
+  // NOTE SX_ROUNDING_TIES line 208: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
+  nr = round(nr)
+  return nr
+}
+save 2 as "game.lowest"
+let lowest: integer? = load "game.lowest", default: null
+let drawn = randomBetween(lowest, 5)
+say "Drawn ${toString(drawn).length}"
 exit
