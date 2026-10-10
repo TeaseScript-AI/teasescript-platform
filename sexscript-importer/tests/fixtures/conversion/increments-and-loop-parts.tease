@@ -89,4 +89,28 @@ while card <= 5 {
     card += 2
   }
 }
+// A counter declared without a value that only loops use, each of which sets it first, is declared by each loop.
+function findFirst(listValue, from) {
+  if from < 0 {
+    // NOTE SX_LENGTH_RECEIVER line 58: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+    let at = listValue.length - 1
+    while at > 0 {
+      if listValue[at] > 2 {
+        return at
+      }
+      at -= 1
+    }
+    return -1
+  }
+  // NOTE SX_LENGTH_RECEIVER line 61: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  let at = from
+  while at < listValue.length {
+    if listValue[at] > 2 {
+      return at
+    }
+    at += 1
+  }
+  return -1
+}
+say "First ${findFirst([1, 3, 5], 0)}"
 exit

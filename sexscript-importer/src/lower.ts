@@ -265,6 +265,8 @@ interface LowerContext {
   integerVariables: ReadonlySet<string>;
   /** Variables holding a Java array of whole numbers (`new Integer[n]`), whose element stores truncate. */
   integerArrays: ReadonlySet<string>;
+  /** Variables declared without a value that only C-style loops which set them first use (loopOnlyCounters). */
+  loopOnlyCounters: ReadonlySet<string>;
   /** Calls through a closure parameter that only ever holds one closure of the script, by call (fixedClosureCalls). */
   fixedClosureCalls: ReadonlyMap<AstNode, string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
@@ -1558,6 +1560,7 @@ export function lowerParsedFile(
     bindings: new Map(),
     integerVariables: new Set(),
     integerArrays: new Set(),
+    loopOnlyCounters: new Set(),
     fixedClosureCalls: new Map(),
     textVariables: new Set(),
     walkedEntries: new Map(),
@@ -1662,6 +1665,7 @@ export function lowerParsedFile(
     context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
     context.integerArrays = integerArrays(body, context.bindings);
+    context.loopOnlyCounters = loopOnlyCounters(body, context.bindings);
     context.fixedClosureCalls = fixedClosureCalls(body);
     context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
@@ -2801,6 +2805,7 @@ function lowerHelperMethod(
     bindings: new Map(),
     integerVariables: new Set(),
     integerArrays: new Set(),
+    loopOnlyCounters: new Set(),
     fixedClosureCalls: new Map(),
     textVariables: new Set(),
     walkedEntries: new Map(),
@@ -4789,6 +4794,12 @@ function lowerDeclaration(
     ];
   }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
+  // A counter that only its loops use is declared by each of them (loopOnlyCounters).
+  if (
+    isEmptyGroovyExpression(right) &&
+    context.loopOnlyCounters.has(bindingKey(asNode(node.left), context.bindings) ?? "")
+  )
+    return [];
   // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed.
   if (isFileConstructor(right) && onlySizeReads(name, context)) return [];
   const java = javaDeclaration(name, right, span, javaHost(context));
@@ -9676,10 +9687,26 @@ function lowerCStyleFor(
   }
 
   const step = [...updatePrelude, ...updateStatements];
+  // The loop declares a counter that only loops which set it first use (loopOnlyCounters), as `for (def i = ...)`.
+  const counter = cStyleCounter(node, context.bindings);
+  const declares = counter !== null && context.loopOnlyCounters.has(counter);
   return [
     ...initialPrelude,
     ...initialStatements.map((statement): IrStatement =>
-      statement.kind === "let" ? { ...statement, loopCounter: true } : statement,
+      statement.kind === "let"
+        ? { ...statement, loopCounter: true }
+        : declares &&
+            statement.kind === "assign" &&
+            statement.operator === "=" &&
+            statement.target.kind === "variable"
+          ? {
+              kind: "let",
+              name: statement.target.name,
+              value: statement.value,
+              span: statement.span,
+              loopCounter: true,
+            }
+          : statement,
     ),
     {
       kind: "while",
@@ -15435,6 +15462,75 @@ function fixedClosureCalls(body: AstNode): Map<AstNode, string> {
 }
 
 /** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
+/**
+ * Variables declared without a value, `def i`, that only C-style loops use which set them in their first part, `for (i
+ * = start; ...)`, none inside another of them nor in a closure: Groovy's null start is never read, and each loop's
+ * value ends with it, so each loop declares the counter itself.
+ */
+function loopOnlyCounters(body: AstNode, keys: BindingKeys): Set<string> {
+  const declared = new Set<string>();
+  walkAst(body, (node) => {
+    const left = node.kind === "declaration" ? asNode(node.left) : null;
+    const right = asNode(node.right);
+    if (left === null || right === null || !isEmptyGroovyExpression(right)) return;
+    if ((text(left.originType) ?? "java.lang.Object") !== "java.lang.Object") return;
+    const key = bindingKey(left, keys);
+    if (key !== null) declared.add(key);
+  });
+  if (declared.size === 0) return declared;
+  const outside = new Set<string>();
+  // The closure each counter is declared in; a use in another one, such as a closure inside the loop, is outside.
+  const declaredIn = new Map<string, AstNode | null>();
+  const visit = (value: unknown, inside: ReadonlySet<string>, closure: AstNode | null): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, inside, closure);
+      return;
+    }
+    if (!isAstNode(value)) return;
+    const node = value;
+    const declaration = node.kind === "declaration" ? bindingKey(asNode(node.left), keys) : null;
+    if (declaration !== null && declared.has(declaration)) {
+      declaredIn.set(declaration, closure);
+      return;
+    }
+    if (node.kind === "variable") {
+      const key = bindingKey(node, keys);
+      if (
+        key !== null &&
+        declared.has(key) &&
+        (!inside.has(key) || !declaredIn.has(key) || declaredIn.get(key) !== closure)
+      )
+        outside.add(key);
+      return;
+    }
+    const counter = cStyleCounter(node, keys);
+    let within = inside;
+    if (counter !== null && declared.has(counter)) {
+      if (inside.has(counter)) outside.add(counter);
+      within = new Set([...inside, counter]);
+    }
+    for (const child of Object.values(node))
+      visit(child, within, node.kind === "closure" ? node : closure);
+  };
+  visit(body, new Set(), null);
+  return new Set([...declared].filter((key) => !outside.has(key)));
+}
+
+/** The variable a C-style `for` sets in its first part, `for (i = start; ...)`, or null. */
+function cStyleCounter(node: AstNode, keys: BindingKeys): string | null {
+  const collection = asNode(node.collection);
+  if (
+    node.kind !== "for" ||
+    text(node.variable) !== "forLoopDummyParameter" ||
+    collection?.kind !== "list"
+  )
+    return null;
+  const [initial] = nodeArray(collection.items);
+  return initial?.kind === "binary" && text(initial.operator) === "="
+    ? bindingKey(asNode(initial.left), keys)
+    : null;
+}
+
 function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
   const names = new Set<string>();
   walkAst(body, (node) => {
