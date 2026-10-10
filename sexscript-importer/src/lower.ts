@@ -8876,6 +8876,37 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
   return [{ kind: "if", condition, then, else: otherwise, span: node.span }];
 }
 
+/**
+ * A switch on a variable that only ever held null whose cases are texts, numbers, or flags, as the default's statements
+ * (`if true { ... }` where they declare variables, as a block); null for any other switch.
+ */
+function switchDefaultOnly(node: AstNode, context: LowerContext): IrStatement[] | null {
+  const valueNode = asNode(node.expression);
+  if (valueNode === null || isNullConstant(valueNode) || !holdsOnlyNull(valueNode, context))
+    return null;
+  const literal = (match: AstNode | null): boolean =>
+    match?.kind === "constant" && ["string", "number", "boolean"].includes(typeof match.value);
+  if (
+    !nodeArray(node.cases).every((item) => item.kind === "case" && literal(asNode(item.expression)))
+  )
+    return null;
+  const defaultSource = switchBodyStatements(asNode(node.default));
+  if (defaultSource === null) return null;
+  const line = node.span === null ? "" : ` line ${node.span.line}`;
+  const statements = eliminateSwitchBreaks(withoutTerminalBreak(defaultSource));
+  return [
+    {
+      kind: "comment",
+      text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This switch is on a variable that only ever held null, which no case matched; the conversion keeps only its default.`,
+      trailing: false,
+      span: node.span,
+    },
+    ...(statements.length === 0
+      ? []
+      : lowerStatement({ kind: "block", span: node.span, statements }, context)),
+  ];
+}
+
 /** Whether a value is null wherever it is read: the null constant, or a variable that only ever held null. */
 function holdsOnlyNull(node: AstNode, context: LowerContext): boolean {
   return (
@@ -9562,6 +9593,9 @@ function lowerForControlExpression(node: AstNode, context: LowerContext): IrStat
 
 function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   const valueNode = asNode(node.expression);
+  // A switch on a variable that only ever held null ran its default: no case of a text, number, or flag matched null.
+  const defaultOnly = switchDefaultOnly(node, context);
+  if (defaultOnly !== null) return defaultOnly;
   const value = valueNode === null ? null : lowerExpression(valueNode, context);
   if (value === null)
     return [

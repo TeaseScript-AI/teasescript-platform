@@ -50,4 +50,11 @@ if kind == null {
   say "No kind yet"
 }
 // NOTE SX_NULL_ONLY_VARIABLE line 29: This test needs a value in a variable that only ever held null, so it never passed; the conversion leaves its branch out.
+// A switch on such a variable ran its default, as no text case matched null.
+// NOTE SX_NULL_ONLY_VARIABLE line 31: platform is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+// NOTE SX_NULL_ONLY_VARIABLE line 32: This switch is on a variable that only ever held null, which no case matched; the conversion keeps only its default.
+if true {
+  let voiceless = "No voice"
+  say voiceless
+}
 exit

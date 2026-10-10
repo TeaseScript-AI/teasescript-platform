@@ -27,3 +27,13 @@ def challengeType
 def kind = challengeType
 if (kind == null) show("No kind yet")
 if (challengeType != null) show("Kind " + challengeType)
+// A switch on such a variable ran its default, as no text case matched null.
+def platform
+switch (platform) {
+	case "mac":
+		show("Mac")
+		break
+	default:
+		def voiceless = "No voice"
+		show(voiceless)
+}
