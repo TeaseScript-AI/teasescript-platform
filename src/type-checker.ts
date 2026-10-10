@@ -570,6 +570,53 @@ function storedPlace(slot: OpenType): OpenType | undefined {
     : undefined;
 }
 
+/**
+ * Whether a slot's decision may be replayed although parts of it are still undecided (see `recordDecisions`): only when
+ * nothing it reaches through copies and decided slots holds itself, which each later check would decide one level
+ * deeper, or held a value the compiler cannot know, which a new slot would forget. Each slot is visited once.
+ */
+function replayableDecisions(): (decider: OpenType) => boolean {
+  /** For each visited slot, whether it reaches neither a cycle nor a value the compiler cannot know. */
+  const verdicts = new Map<OpenType, boolean>();
+  return (decider) => {
+    const onPath = new Set<OpenType>();
+    const frames: { slot: OpenType; next: OpenType[]; clean: boolean }[] = [];
+    const enter = (slot: OpenType): void => {
+      onPath.add(slot);
+      frames.push({ slot, next: slotEdges(slot), clean: slot.heldUnknown === undefined });
+    };
+    if (!verdicts.has(decider)) enter(decider);
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1]!;
+      const next = frame.next.pop();
+      if (next === undefined) {
+        frames.pop();
+        onPath.delete(frame.slot);
+        verdicts.set(frame.slot, frame.clean);
+        // What a slot reaches, the slots that reach it reach too.
+        if (!frame.clean && frames.length > 0) frames[frames.length - 1]!.clean = false;
+      } else if (onPath.has(next) || verdicts.get(next) === false) frame.clean = false;
+      else if (!verdicts.has(next)) enter(next);
+    }
+    return verdicts.get(decider)!;
+  };
+}
+
+/** The slots a slot's type depends on: the one it was copied from, and those directly in the type that decided it. */
+function slotEdges(slot: OpenType): OpenType[] {
+  const edges: OpenType[] = slot.copiedFrom === undefined ? [] : [slot.copiedFrom];
+  const pending: StaticType[] = slot.resolved === null ? [] : [slot.resolved];
+  while (pending.length > 0) {
+    const part = pending.pop()!;
+    if (part.kind === "open") edges.push(part);
+    else if (part.kind === "union") for (const member of part.members) pending.push(member);
+    else if (isCollection(part)) pending.push(part.element);
+    else if (part.kind === "object" && part.properties !== null)
+      for (const value of part.properties.values()) pending.push(value);
+  }
+  return edges;
+}
+
 /** The name of the variable a declaration creates. */
 function declaredName(declaration: Declaration): string {
   if (declaration.kind === "identifier") return declaration.name;
@@ -993,22 +1040,33 @@ class TypeChecker {
     const observed = [...places.keys()].filter((slot) => slot.observed === true);
     const copied = [...places.keys()].filter((slot) => slot.copiedFrom !== undefined);
     const { deciding, unknown } = decidingSlots([...observed, ...copied]);
-    // A decision that still leaves a part undecided, such as a list that holds itself, is not taken over: it would only
-    // give the next check another part to decide.
+    const undecided = (decider: OpenType): boolean =>
+      containsType(decider.resolved!, (part) => part.kind === "open");
     const settled = (decider: OpenType | null | undefined): decider is OpenType =>
-      decider !== null &&
-      decider !== undefined &&
-      !containsType(decider.resolved!, (part) => part.kind === "open");
+      decider !== null && decider !== undefined && !undecided(decider);
+    // A decision that still leaves parts undecided, such as `{ images: null }`, is taken over with new slots for them,
+    // which the next check decides by its own stores. One that reaches a value that holds itself, such as `a.add(a)`,
+    // is not: each next check would find another part to decide.
+    const replayable = replayableDecisions();
     for (const slot of observed) {
       const decider = deciding.get(slot);
       // Without a decision, a value the compiler cannot know that reached the slot is replayed instead: it decides
       // nothing, but earlier reads then know that the slot may hold such a value.
       const held = unknown.get(slot);
-      const decision: Decision | undefined = settled(decider)
-        ? { type: decider.resolved!, at: slot.resolvedAt ?? decider.resolvedAt! }
-        : held !== undefined && decider === null
-          ? { type: UNKNOWN_TYPE, at: held }
-          : undefined;
+      const type =
+        decider === null || decider === undefined
+          ? undefined
+          : !undecided(decider)
+            ? decider.resolved!
+            : replayable(decider)
+              ? detachedType(decider.resolved!)
+              : undefined;
+      const decision: Decision | undefined =
+        type !== undefined
+          ? { type, at: slot.resolvedAt ?? decider!.resolvedAt! }
+          : held !== undefined && decider === null
+            ? { type: UNKNOWN_TYPE, at: held }
+            : undefined;
       if (decision === undefined) continue;
       const place = places.get(slot)!;
       const paths = this.#decided.get(place.root) ?? new Map<string, Decision>();
@@ -7112,9 +7170,10 @@ function programEffects(program: Program): ProgramEffects {
     if (statement.kind === "globalStatement" && statement.assignment !== null)
       noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
     if (statement.kind === "assignmentStatement") {
-      // A store into an element or property changes the variable that holds it, too.
+      // A store into an element or property changes the variable that holds it in place, too.
       const root = rootName(statement.target);
-      if (root !== null) write(root, "assigns", loop, inside);
+      if (root !== null)
+        write(root, statement.target.kind === "identifier" ? "assigns" : "changes", loop, inside);
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }

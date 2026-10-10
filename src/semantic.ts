@@ -1776,7 +1776,12 @@ class SemanticValidator {
   }
 
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
-    this.#recordSharedWrite(rootName(target), scope, "assigns");
+    // A store into an element or property changes the variable that holds it in place.
+    this.#recordSharedWrite(
+      rootName(target),
+      scope,
+      target.kind === "identifier" ? "assigns" : "changes",
+    );
     if (target.kind === "identifier") {
       if (target.name === "debugMode") {
         this.#report(
