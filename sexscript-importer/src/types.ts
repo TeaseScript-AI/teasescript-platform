@@ -203,7 +203,7 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
       const name = variableName(node);
       if (name === null) return UNKNOWN;
       const key = environment.bindingOf?.(node) ?? name;
-      const scoped = key === name ? undefined : environment.bindingTypes?.get(key);
+      const scoped = environment.bindingTypes?.get(key);
       return scoped ?? environment.variables.get(name) ?? UNKNOWN;
     }
     case "not":
@@ -671,7 +671,9 @@ export function inferVariableTypes(
   for (const [key, type] of types) {
     const name = nameOf(key);
     variables.set(name, (variables.get(name) ?? 0) | type);
-    if (key !== name) bindingTypes.set(key, type);
+    // A script-level variable has its own type too, apart from the function variables of the same name, as
+    // interrogation's `for (def i = 0; …)` beside a function's `for (def i = count; …)`.
+    bindingTypes.set(key, type);
   }
   const unknownNames = new Set([...unknownKeys].map(nameOf));
   const assignmentCounts = new Map<string, number>();

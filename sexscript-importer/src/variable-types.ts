@@ -732,6 +732,13 @@ function analyse(
   const knownNull = knownNullCompares(statements);
   // The types of the elements stored in each list that starts without an element type (storeElement).
   const elementWrites = new Map<Binding, TeaseType[]>();
+  // Lists that start empty and get a variable whose type allows null, `answers[i] = answer` (storeElement).
+  const nullableWrites = new Set<Binding>();
+  const noteNullable = (list: Binding | undefined, value: IrExpression, scope: Scope): void => {
+    const type = typeOf(value, scope);
+    if (list !== undefined && value.kind === "variable" && type.kind === "optional")
+      nullableWrites.add(list);
+  };
   // The types of the values written to each slot of a list of empty slots, `[null] * n`, also unknown ones.
   const slotWrites = new Map<Binding, TeaseType[]>();
   const analysis: Analysis = {
@@ -1196,7 +1203,10 @@ function analyse(
           const list = scope.resolve(item.target.target.name);
           if (list !== undefined && item.operator === "=" && emptySlots(list.declaration?.value))
             slotWrites.set(list, [...(slotWrites.get(list) ?? []), value]);
-          if (list !== undefined && item.operator === "=") storeElement(list, value, item);
+          if (list !== undefined && item.operator === "=") {
+            noteNullable(list, item.value, scope);
+            storeElement(list, value, item);
+          }
           return;
         }
         if (item.target.kind !== "variable") return;
@@ -1298,7 +1308,10 @@ function analyse(
           value.dict !== true
         ) {
           const list = scope.resolve(value.target.name);
-          if (list !== undefined) storeElement(list, typeOf(value.arguments[0]!, scope), item);
+          if (list !== undefined) {
+            noteNullable(list, value.arguments[0]!, scope);
+            storeElement(list, typeOf(value.arguments[0]!, scope), item);
+          }
         }
         return;
       }
@@ -1494,6 +1507,12 @@ function analyse(
     if (element?.kind === "union" && annotation(listOf(element)) !== null) {
       const union = listOf(element);
       change(() => (list.union = union));
+    }
+    // An element that may be null, `answers[i] = answer` after `answer = snapfile` (interrogation), holds null in
+    // Groovy's list as well: the list's elements may be null.
+    else if (element?.kind === "scalar" && nullableWrites.has(list)) {
+      const nullable = listOf({ kind: "optional", value: element });
+      change(() => (list.union = nullable));
     }
   }
   // A list of empty slots whose slots get values of several types, or of a type the conversion does not know, such as
@@ -2072,6 +2091,9 @@ export function annotation(type: TeaseType): string | null {
     value.kind === "scalar" ||
     value.kind === "temporal" ||
     (value.kind === "list" && value.element.kind === "scalar") ||
+    (value.kind === "list" &&
+      value.element.kind === "optional" &&
+      value.element.value.kind === "scalar") ||
     (value.kind === "union" && value.members.every(isWritableMember)) ||
     (value.kind === "list" && hasUnion(value) && writableElements(value.element)) ||
     // Any list, object, dict, or range is written by its kind, which an optional one needs: `list | null`.

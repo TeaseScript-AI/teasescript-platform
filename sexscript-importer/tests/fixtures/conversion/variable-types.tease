@@ -307,4 +307,34 @@ let outcome = playRound(21)
 // NOTE SX_PLUS_OPERAND_TYPE line 192: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 shockTime += sexscriptLegacyValue(outcome[1])
 say "${outcome[0]} ${shockTime}"
+// A script variable keeps its own type beside a function's variable of the same name, so a list it indexes grows as
+// Groovy's did (interrogation's answers), and a list that gets a variable that may be null holds null (its mug shot).
+let given: string?[] = []
+for pos in 0..2 {
+  // NOTE SX_LIST_GROWTH line 197: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+  if pos < given.length {
+    given[pos] = load "answer.${pos}", default: ""
+  } else {
+    given.add(load("answer.${pos}", default: ""))
+  }
+}
+function countBack(n) {
+  let pos = n
+  while pos > 0 {
+    say "Left ${pos}"
+    pos -= 1
+  }
+}
+countBack(2)
+let shot: string? = ""
+if askBoolean "Photo?" {
+  shot = null
+}
+// NOTE SX_LIST_GROWTH line 202: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+if 0 < given.length {
+  given[0] = shot
+} else {
+  given.add(shot)
+}
+say "Given ${given.length}"
 exit

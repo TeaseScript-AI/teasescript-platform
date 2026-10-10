@@ -191,3 +191,13 @@ def shockTime = 0
 def outcome = playRound(21)
 shockTime += outcome[1]
 show(outcome[0] + " " + shockTime)
+// A script variable keeps its own type beside a function's variable of the same name, so a list it indexes grows as
+// Groovy's did (interrogation's answers), and a list that gets a variable that may be null holds null (its mug shot).
+def given = []
+for (def pos = 0; pos < 2; pos++) given[pos] = loadString("answer." + pos)
+def countBack = { n -> for (def pos = n; pos > 0; pos--) show("Left " + pos) }
+countBack(2)
+def shot = ""
+if (getBoolean("Photo?")) shot = null
+given[0] = shot
+show("Given " + given.size())
