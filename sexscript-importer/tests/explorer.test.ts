@@ -1161,6 +1161,16 @@ test(
       helper(`  let v0 = load key, default: 0\n${helperCopies}  return v2048`, 'get("score")'),
       ["score > 7"],
     );
+    // And the helper's returns of such copies read them once for all its returns.
+    const returnedCopies = Array.from(
+      { length: 1024 },
+      (_, index) =>
+        `  let v${index + 1} = v${index}\n  if load("pick", default: 0) == ${index + 1} {\n    return v${index + 1}\n  }\n`,
+    ).join("");
+    assert.deepEqual(
+      helper(`  let v0 = load key, default: 0\n${returnedCopies}  return v0`, 'get("score")'),
+      ["score > 7"],
+    );
     // A helper's variable passed through a chain of calls is read once per call.
     const calls = Array.from({ length: 64 }, () => "  value = identity(value)\n").join("");
     assert.deepEqual(

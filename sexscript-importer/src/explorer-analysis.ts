@@ -323,6 +323,12 @@ function optionValues(options: unknown): unknown[] | null {
  * proof holds (conservative, so that the work stays bounded).
  */
 const CARRIER_WORK = 2_000_000;
+/**
+ * How many steps the readings of a helper's variables that hold a parameter-keyed load take in all, per plan
+ * (`#keyedFlow`), after which such variables are read as their own flows: their loads' keys are no longer named there,
+ * and what they carry is kept loosely in a stored-value proof, so that the work stays bounded.
+ */
+const KEYED_WORK = 500_000;
 
 /** How many stored keys' carriers ({@link DataFlow}) are kept at once, as each can reach much of a plan. */
 const CARRIER_KEYS = 32;
@@ -484,6 +490,8 @@ export class DataFlow {
   #unknown: { readonly own: ReadonlySet<string>; readonly saved: boolean } | null | undefined;
   readonly #resolvedKeys = new Set<string>();
   #carrierWork = 0;
+  /** The steps of the readings of helpers' keyed variables ({@link KEYED_WORK}). */
+  #keyedWork = 0;
   #carrierGraph: {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
@@ -2069,10 +2077,19 @@ export class DataFlow {
       return known;
     }
     const found = emptyFlow();
+    // The helper's variables a return reads are read once for all its returns.
+    const followed = new Set<string>();
     for (const index of this.#returnsFor(call, bound))
       merge(
         found,
-        this.#flowAt(this.#instructions[index]!.value, index, substitute, constants, depth),
+        this.#flowAt(
+          this.#instructions[index]!.value,
+          index,
+          substitute,
+          constants,
+          depth,
+          followed,
+        ),
       );
     this.#callFlows.set(memo, found);
     this.#callFlows.set(given, found);
@@ -2170,6 +2187,7 @@ export class DataFlow {
     const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
     for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
       const { value, at } = item;
+      if (followed !== null) this.#keyedWork += 1;
       if (Array.isArray(value)) {
         for (const each of value) pending.push({ value: each, at });
         continue;
@@ -2196,7 +2214,13 @@ export class DataFlow {
         // With a text among the constants, a variable of the function's own that holds a load whose key a variable
         // names, or a value computed from one, is read as its assignments are.
         const key = value.kind === "identifier" && texts ? this.#keyOf(value) : "";
-        if (key === "" || followed?.has(key) === true || !this.#keyedLocal(key)) continue;
+        if (
+          key === "" ||
+          followed?.has(key) === true ||
+          !this.#keyedLocal(key) ||
+          this.#keyedWork > KEYED_WORK
+        )
+          continue;
         if (followed === null) merge(flow, this.#keyedFlow(key, substitute, bound, depth));
         else {
           followed.add(key);
@@ -2243,6 +2267,8 @@ export class DataFlow {
     const known = this.#callFlows.get(memo);
     if (known !== undefined) return known;
     const flow = emptyFlow();
+    // Past the work these readings may take, the variable's own flow (flowOf) stands.
+    if (this.#keyedWork > KEYED_WORK) return flow;
     const followed = new Set([key]);
     for (const each of this.#assigned.get(key) ?? [])
       merge(flow, this.#flowAt(each.value, each.index, substitute, bound, depth, followed));
