@@ -105,3 +105,14 @@ def wornToys = [:]
 wornToys[GAG] = [name: "ball gag"]
 def stateToy = getStateToy("gagged")
 if (stateToy) show("Remove your " + wornToys[stateToy].name)
+// A closure every return of which builds a map with computed keys gives a dict, also to a variable set from it.
+def SIDES = [left: "left", right: "right"]
+def sides = {
+	if (getRandom(2) == 0) {
+		return [(SIDES.left): "you", (SIDES.right): "me"]
+	} else {
+		return [(SIDES.left): "me", (SIDES.right): "you"]
+	}
+}
+def both = sides()
+show("Left is " + both.left + ", right is " + sides().right)

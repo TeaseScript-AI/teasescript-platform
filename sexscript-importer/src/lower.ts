@@ -578,6 +578,8 @@ export function lowerParsedFiles(files: readonly ParsedGroovyFile[]): MigrationP
 export interface MapUses {
   /** Maps used as lookup tables, which become dicts (#536). */
   dictionaries: Set<string>;
+  /** Closures every return of which gives such a map, whose calls are dicts too. */
+  dictionaryFunctions: Set<string>;
   /** Fields used on maps that stay objects, which their literals declare (null when Groovy added them later). */
   recordFields: Map<string, string[]>;
   /** Legacy types of the values each dict holds. */
@@ -831,10 +833,15 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
 
 function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const dictionaries = new Set<string>();
-  for (const { body, types, keys } of bodies)
-    for (const name of dictionaryVariables(body, types, keys)) dictionaries.add(name);
+  const dictionaryFunctions = new Set<string>();
+  for (const { body, types, keys } of bodies) {
+    const found = dictionaryVariables(body, types, keys);
+    for (const name of found.variables) dictionaries.add(name);
+    for (const name of found.functions) dictionaryFunctions.add(name);
+  }
   const uses: MapUses = {
     dictionaries,
+    dictionaryFunctions,
     recordFields: new Map(),
     dictionaryValues: new Map(),
     dictionaryElements: new Map(),
@@ -14136,13 +14143,14 @@ const LOOKUP_METHODS = new Set([
  * Variables that hold a Groovy map used as a lookup table, which becomes a `dict` (#536): looked up by a runtime key,
  * given lookup methods or a loop, or built with computed or non-name keys. Other maps stay objects with fixed
  * properties. A map assigned to, from, or compared with a dict variable is a dict too, since a dict never equals an
- * object.
+ * object. So is the result of a closure every return of which gives one, `def get_fighters = { return [(TYPE.human):
+ * left] }`, and a variable set from its call: `functions`.
  */
 function dictionaryVariables(
   body: AstNode,
   types: TypeEnvironment,
   keys: BindingKeys,
-): Set<string> {
+): { variables: Set<string>; functions: Set<string> } {
   const names = new Set<string>();
   const keyOf = (node: unknown): string | null => bindingKey(node, keys);
   const typeOf = (node: unknown): number =>
@@ -14159,6 +14167,8 @@ function dictionaryVariables(
     return literal !== undefined || onlyOf(inferType(key, types), STRING);
   };
   const aliases: Array<[string, string]> = [];
+  // Variables set from a call of a closure of the script.
+  const calls: Array<[string, string]> = [];
   walkAst(body, (node) => {
     if (node.kind === "binary" && node.operator === "[") {
       const name = keyOf(node.left);
@@ -14199,15 +14209,41 @@ function dictionaryVariables(
     const target = assigns ? keyOf(node.left) : null;
     const value = assigns ? asNode(node.right) : null;
     if (target === null || value === null) return;
-    if (value.kind === "map") {
-      for (const entry of nodeArray(value.entries)) {
-        const key = constantString(entry.key);
-        if (key === null || !isTeaseObjectPropertyName(key)) names.add(target);
-      }
-    }
+    if (dictionaryLiteral(value)) names.add(target);
     const source = keyOf(value);
     if (source !== null) aliases.push([target, source]);
+    const called =
+      value.kind === "methodCall" && value.implicitThis === true
+        ? constantString(value.method)
+        : null;
+    if (called !== null) calls.push([target, called]);
   });
+  // The closures whose every return gives a dict literal or a dict variable, and nothing as the value of a last
+  // expression; a closure that ends otherwise gives null, as a call of one that returns nothing does.
+  const returns = new Map<string, AstNode[]>();
+  walkAst(body, (node) => {
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    const closure = asNode(node.right);
+    if (name === null || closure?.kind !== "closure") return;
+    const statements = nodeArray(asNode(closure.body)?.statements);
+    if (statements.length === 0 || statements.at(-1)!.kind === "expressionStatement") return;
+    const values: AstNode[] = [];
+    let open = false;
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(visit);
+      if (!isAstNode(value) || value.kind === "closure") return;
+      if (value.kind === "return") {
+        const returned = asNode(value.value);
+        if (returned === null || isNullConstant(returned)) open = true;
+        else values.push(returned);
+        return;
+      }
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(statements);
+    if (!open && values.length > 0) returns.set(name, values);
+  });
+  const functions = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [target, source] of aliases) {
@@ -14217,8 +14253,31 @@ function dictionaryVariables(
         changed = true;
       }
     }
+    for (const [name, values] of returns) {
+      if (functions.has(name)) continue;
+      if (!values.every((value) => dictionaryLiteral(value) || names.has(keyOf(value) ?? "")))
+        continue;
+      functions.add(name);
+      changed = true;
+    }
+    for (const [target, called] of calls) {
+      if (!functions.has(called) || names.has(target)) continue;
+      names.add(target);
+      changed = true;
+    }
   }
-  return names;
+  return { variables: names, functions };
+}
+
+/** Whether a Groovy map literal has a key that is no TeaseScript property name, so that it becomes a dict. */
+function dictionaryLiteral(value: AstNode): boolean {
+  return (
+    value.kind === "map" &&
+    nodeArray(value.entries).some((entry) => {
+      const key = constantString(entry.key);
+      return key === null || !isTeaseObjectPropertyName(key);
+    })
+  );
 }
 
 /**
@@ -16286,8 +16345,15 @@ function dictStatement(
   }
 }
 
-/** Whether an expression is a variable that holds a map used as a lookup table (#536). */
+/**
+ * Whether an expression is a variable that holds a map used as a lookup table (#536), or a call of a closure that
+ * returns one (dictionaryVariables).
+ */
 function isDictionary(node: AstNode, context: LowerContext): boolean {
+  const called =
+    node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
+  if (called !== null)
+    return context.mapUses.dictionaryFunctions.has(called) && context.functions.has(called);
   const key = bindingKey(node, context.bindings);
   return (
     key !== null && context.mapUses.dictionaries.has(key) && !context.shadowingReferences.has(node)

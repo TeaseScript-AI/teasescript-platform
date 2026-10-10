@@ -190,4 +190,17 @@ let stateToy = getStateToy("gagged")
 if stateToy != null and stateToy != "" {
   say "Remove your ${wornToys["${stateToy}"].name}"
 }
+// A closure every return of which builds a map with computed keys gives a dict, also to a variable set from it.
+let SIDES = { left: "left", right: "right" }
+function sides {
+  if randomInteger(0..2) == 0 {
+    return dict{ [SIDES.left]: "you", [SIDES.right]: "me" }
+  } else {
+    return dict{ [SIDES.left]: "me", [SIDES.right]: "you" }
+  }
+}
+let both = sides()
+// NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+say "Left is ${both["left"]}, right is ${sides()["right"]}"
 exit
