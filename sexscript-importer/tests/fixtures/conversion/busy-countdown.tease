@@ -251,4 +251,34 @@ let remaining = 3
 while remaining > 0 {
   remaining = countDown(remaining)
 }
+// A wait in a function the condition calls stays, as does the clock copied through a local.
+function sampleSlowly {
+  say "Sampling slowly"
+  wait 0.2 s
+  return getAbsoluteDateTime().toSeconds()
+}
+let slowEnd = getAbsoluteDateTime().toSeconds() + 1
+while sampleSlowly() < slowEnd {
+  say "Slow"
+}
+function copiedNow {
+  let first = getAbsoluteDateTime().toSeconds()
+  let second = first
+  return second
+}
+let copiedEnd = copiedNow() + 1
+// NOTE SX_CLOCK_LOOP line 130: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so a pass after one in which the clock did not advance starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
+let passClock12: absoluteDateTime? = null
+let frame7: messageHandle? = null
+while copiedNow() < copiedEnd {
+  if passClock12 == getAbsoluteDateTime() {
+    wait 0.1 s
+  }
+  passClock12 = getAbsoluteDateTime()
+  if frame7 == null {
+    frame7 = say "Copied", instant
+  } else {
+    frame7.text = "Copied"
+  }
+}
 exit

@@ -65,7 +65,9 @@ export function withClockLoopTicks(
         ![...clocked].some((name) => reads(nested.condition, name))
       )
         return [nested];
-      for (const name of calledFunctions(nested.body, functions)) callees.add(name);
+      // The functions the condition and the body call, whose waits a pass may rely on.
+      for (const name of calledFunctions([nested.condition, ...nested.body], functions))
+        callees.add(name);
       // A loop whose condition, or every way back to it, surely makes the clock advance keeps its waits, which a
       // text's reading time would not replace.
       if (
@@ -407,25 +409,41 @@ function inFrame(statements: IrStatement[], frame: string): IrStatement[] {
   });
 }
 
-/** The variables a loop body sets from the clock. */
+/** The variables a loop or function body sets from the clock, also through another such variable (`b = a`). */
 function clockVariables(
   statements: readonly IrStatement[],
   clockFunctions: ReadonlySet<string>,
 ): Set<string> {
   const names = new Set<string>();
-  const visit = (items: readonly IrStatement[]): void => {
+  const fromClock = (value: IrExpression): boolean =>
+    readsClock(value, clockFunctions) || [...names].some((name) => reads(value, name));
+  const visit = (items: readonly IrStatement[]): boolean => {
+    let added = false;
     for (const item of items) {
+      const name =
+        item.kind === "assign" && item.target.kind === "variable"
+          ? item.target.name
+          : item.kind === "let"
+            ? item.name
+            : null;
       if (
-        item.kind === "assign" &&
-        item.target.kind === "variable" &&
-        readsClock(item.value, clockFunctions)
-      )
-        names.add(item.target.name);
-      if (item.kind === "let" && readsClock(item.value, clockFunctions)) names.add(item.name);
-      if (item.kind !== "function") withNestedBlocks(item, (body) => (visit(body), body));
+        name !== null &&
+        !names.has(name) &&
+        (item.kind === "assign" || item.kind === "let") &&
+        fromClock(item.value)
+      ) {
+        names.add(name);
+        added = true;
+      }
+      if (item.kind !== "function")
+        withNestedBlocks(item, (body) => {
+          added = visit(body) || added;
+          return body;
+        });
     }
+    return added;
   };
-  visit(statements);
+  while (visit(statements));
   return names;
 }
 
@@ -446,7 +464,7 @@ function reads(value: unknown, name: string): boolean {
 
 /** The functions that statements call, also through the functions those call. */
 function calledFunctions(
-  statements: readonly IrStatement[],
+  statements: unknown,
   functions: ReadonlyMap<string, IrStatement[]>,
 ): Set<string> {
   const found = new Set<string>();

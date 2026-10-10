@@ -701,15 +701,16 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   ran on real time, but a TeaseScript clock advances only at waits, and a text's reading time passes none. A loop that
   only redraws a countdown becomes a visible timer over the same time (`SX_BUSY_COUNTDOWN`). Another loop whose
   condition reads the clock (directly, through a variable the body sets from it, or through a function that returns
-  it, also through a local) and whose passes do not all surely make the clock advance (a wait of a time known to be
+  it, also through locals) and whose passes do not all surely make the clock advance (a wait of a time known to be
   more than none, a button, an ask, audio played to its end, or a call of a function every way through which does,
   not skipped by `continue` or by the right side of `and` or `or`) keeps the time of its last pass's start: a pass
   after one in which the clock did not advance starts with a wait of a tenth of a second, so a pass that waits keeps
-  its time, and a busy one sets how many passes the loop makes (`SX_CLOCK_LOOP`), as in ZapEdgeStrip's dice rolls,
+  its time, unless it waits less than a millisecond, which the clock's whole milliseconds do not show, and a busy one
+  sets how many passes the loop makes (`SX_CLOCK_LOOP`), as in ZapEdgeStrip's dice rolls,
   Nim's closing window, BreatheAcademy's countdown, and the loops of guessit, selfbt, smackedforcash, and
   trick_or_treat_poker. Where nothing in the loop may wait at all, it only redrew its texts, which become one message
   that changes in place, as the legacy display redrew one text. A wait in a loop that polls the clock, or in a function
-  it calls, stays, also after a text whose reading time would replace it elsewhere (`SX_WAIT_CLOCK`).
+  its condition or body calls, stays, also after a text whose reading time would replace it elsewhere (`SX_WAIT_CLOCK`).
 - Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
   the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
   more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an

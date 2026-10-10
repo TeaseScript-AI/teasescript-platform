@@ -121,3 +121,10 @@ def sampleEnd = sampleNow() + 1
 while (sampleNow() < sampleEnd) show("Sampling")
 def remaining = 3
 while (remaining > 0) remaining = countDown(remaining)
+// A wait in a function the condition calls stays, as does the clock copied through a local.
+def sampleSlowly = { -> show("Sampling slowly"); wait(0.2); return getTime() }
+def slowEnd = getTime() + 1
+while (sampleSlowly() < slowEnd) show("Slow")
+def copiedNow = { -> def first = getTime(); def second = first; return second }
+def copiedEnd = copiedNow() + 1
+while (copiedNow() < copiedEnd) show("Copied")
