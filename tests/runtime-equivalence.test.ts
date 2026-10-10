@@ -129,6 +129,28 @@ test("a prepared receiver whose index removes its ancestor keeps the value it se
   }
 });
 
+test("a list joined with += under a prepared receiver leaves the receiver the value it selected", () => {
+  // `rows += more` stores a new list in `rows` (V30 §16), so the receiver selected before the call keeps the old one.
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "let rows = [[0]]",
+      "function grow: integer {",
+      "    rows += [[1]]",
+      "    return 7",
+      "}",
+      "rows[0].add(grow())",
+      "say rows",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.equal(result.finalSnapshot.failure, null);
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["[[0], [1]]"],
+  );
+});
+
 test("a prepared receiver whose index adds the value it names resumes from every checkpoint", () => {
   // The receiver's root is captured before its index runs, and the index adds the element or entry it names.
   for (const [setup, change, shown, expected] of [
