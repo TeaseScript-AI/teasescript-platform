@@ -13,3 +13,11 @@ def paddles = ["toys.paddle", "toys.hairbrush"]
 def noKeys = new String[0]
 def spanker = loadFirstTrue(paddles.toArray(noKeys))
 show("Spanker ${spanker}")
+// A number that a restore may leave null orders below every value, which the comparison writes out, so it narrows.
+def square = -1
+def saved = null
+def restore = { -> square = saved }
+if (getRandom(2) == 0) restore()
+def base = square
+if (base < 0) base = 0
+show("Base " + (base + 1))

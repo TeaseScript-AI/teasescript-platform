@@ -1054,8 +1054,25 @@ function analyse(
             : null;
         if (plain(left!) !== null && plain(left!) === plain(right!)) {
           plainCompares.add(child);
+          guardedCompares.delete(child);
           analysis.indexes.add(child);
-        } else plainCompares.delete(child);
+        } else {
+          plainCompares.delete(child);
+          // A number variable that may be null beside a settled number, `x == null or x < 5`, which narrows it too.
+          const nullable = (side: number): boolean =>
+            compared[side]!.kind === "variable" &&
+            [left!, right!][side]!.kind === "optional" &&
+            plain(nonNull([left!, right!][side]!)) === "number";
+          const settledNumber = (side: number): boolean =>
+            plain([left!, right!][side]!) === "number" && settledValue(compared[side]!);
+          const side =
+            nullable(0) && settledNumber(1) ? 0 : nullable(1) && settledNumber(0) ? 1 : null;
+          if (side === null) guardedCompares.delete(child);
+          else {
+            guardedCompares.set(child, side);
+            analysis.indexes.add(child);
+          }
+        }
       }
     });
   };
@@ -2381,6 +2398,47 @@ const wholeBounds = new WeakSet<IrStatement>();
 const ORDER_OPERATORS = new Set(["<", "<=", ">", ">="]);
 /** Orderings of two sides that typing proves to be numbers, or texts, which read as the plain comparison. */
 const plainCompares = new WeakSet<IrExpression>();
+/**
+ * Orderings of a number variable that may be null and a settled number, with the side the variable is on, which test
+ * for null first (guardedCompare).
+ */
+const guardedCompares = new WeakMap<IrExpression, 0 | 1>();
+
+/**
+ * Groovy's ordering of a variable that may be null with a value that is not, written out: null is below every value, so
+ * `x < k` is `x == null or x < k`, and `x > k` is `x != null and x > k`; `variable` is the side the variable is on.
+ */
+function guardedCompare(
+  operator: string,
+  left: IrExpression,
+  right: IrExpression,
+  variable: 0 | 1,
+): IrExpression {
+  const nullBelow = (variable === 0) === (operator === "<" || operator === "<=");
+  return {
+    kind: "binary",
+    operator: nullBelow ? "or" : "and",
+    left: {
+      kind: "binary",
+      operator: nullBelow ? "==" : "!=",
+      left: variable === 0 ? left : right,
+      right: { kind: "literal", value: null },
+    },
+    right: { kind: "binary", operator, left, right },
+  };
+}
+
+/** Whether evaluating a value can neither fail nor change anything: a literal, a variable, or `+`, `-`, `*` of these. */
+function settledValue(value: IrExpression): boolean {
+  if (value.kind === "literal" || value.kind === "variable") return true;
+  if (value.kind === "unary") return value.operator !== "not" && settledValue(value.value);
+  return (
+    value.kind === "binary" &&
+    ["+", "-", "*"].includes(value.operator) &&
+    settledValue(value.left) &&
+    settledValue(value.right)
+  );
+}
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
@@ -2490,6 +2548,14 @@ function withIntegerIndexes<T extends IrStatement>(
       return plainTruth(copy.positional[0]!, truthType);
     if (plainCompares.has(value) && copy.kind === "binary" && copy.left.kind === "call")
       return { ...copy, left: copy.left.positional[0]!, right: copy.left.positional[1]! };
+    const guarded = guardedCompares.get(value);
+    if (guarded !== undefined && copy.kind === "binary" && copy.left.kind === "call")
+      return guardedCompare(
+        copy.operator,
+        copy.left.positional[0]!,
+        copy.left.positional[1]!,
+        guarded,
+      );
     if (copy.kind === "index" && textIndexes.has(value))
       return helperCall("textAt", [copy.target, copy.index]);
     if (copy.kind === "binary" && openTimes.has(value)) {

@@ -9523,10 +9523,11 @@ function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>(
 }
 
 /**
- * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that starts
- * with one or with null.
+ * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that is set
+ * to one or to null, also through another variable; the null start of a variable that starts with 0 (zeroStartNumbers)
+ * is none.
  */
-function mayReadNull(node: AstNode, context: LowerContext): boolean {
+function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   if (node.kind === "methodCall") {
     const name = legacyApiCall(node, context)?.name ?? "";
     if (DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name)) return true;
@@ -9542,8 +9543,15 @@ function mayReadNull(node: AstNode, context: LowerContext): boolean {
   }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
-  const first = key === null ? undefined : context.assignedValues.get(key)?.[0];
-  return first !== undefined && (isNullConstant(first) || mayReadNull(first, context));
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  const values = context.assignedValues.get(key) ?? [];
+  const zeroStart = context.mapUses.zeroStartNumbers.has(key);
+  return values.some(
+    (value, position) =>
+      !(zeroStart && position === 0) &&
+      (isNullConstant(value) || mayReadNull(value, context, seen)),
+  );
 }
 
 /** Methods whose results are whole numbers. */

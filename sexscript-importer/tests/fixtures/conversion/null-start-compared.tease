@@ -57,4 +57,18 @@ let paddles = ["toys.paddle", "toys.hairbrush"]
 let noKeys = sexscriptLegacyArray(0, null)
 let spanker: string? = sexscriptLegacyLoadFirstTrue(paddles)
 say "Spanker ${spanker}"
+// A number that a restore may leave null orders below every value, which the comparison writes out, so it narrows.
+let square: integer? = -1
+// NOTE SX_NULL_ONLY_VARIABLE line 18: saved is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+function restore {
+  square = null
+}
+if randomInteger(0..2) == 0 {
+  restore()
+}
+let base: integer? = square
+if base == null or base < 0 {
+  base = 0
+}
+say "Base ${base + 1}"
 exit

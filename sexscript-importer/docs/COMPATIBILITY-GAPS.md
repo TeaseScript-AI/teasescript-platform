@@ -257,7 +257,10 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   reads too, keeps the helper, and so does a read without a default, whose null the helper keeps of an open type.
 - Groovy's null-aware ordering (`sexscriptLegacyCompare`) and truth (`sexscriptLegacyTruth`) stay helpers only where
   typing cannot rule out null or tell the type: two sides proven numbers or texts compare plainly (`visits < 2`), and
-  a value of a known scalar type or a list tests plainly (`count != 0`, `items.length > 0`).
+  a value of a known scalar type or a list tests plainly (`count != 0`, `items.length > 0`). A number variable that
+  may be null beside a number that is not, a literal, a variable, or a sum, difference, or product of these, writes
+  Groovy's order out, `base == null or base < 0` and `square != null and square > 66`, which also narrows it. A
+  variable may be null where any value it is set to may be, also through copies (SlideLadderDare's `square`, `base`).
 - Groovy ordered comparisons accept null (`null` sorts first, so `null >= 5` is false); TeaseScript comparisons fail
   at runtime. Conversions keep plain comparisons: guarding every comparison of a stored number would bury the intent,
   and the corpus scripts that compare a missing key (isolated smoke runs of Domme3 `discipline` and `maintenance`)
