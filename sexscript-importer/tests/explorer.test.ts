@@ -3737,6 +3737,20 @@ test(
       false,
       "Check",
     );
+    // A button's capture, kept after its function returned, while another function binds the name.
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'function arm {\n  let wantedHour = getDateTime().hour\n  showPermanentButton "Invoke" {\n' +
+            '    showButton "Check"\n    if getDateTime().hour == wantedHour {\n      say "True."\n    } else {\n' +
+            '      say "False."\n    }\n  }\n}\nfunction active {\n  let wantedHour = getDateTime().hour + 1\n' +
+            '  showButton "Outside"\n}\narm()\nactive()\nexit\n',
+        },
+      ],
+      true,
+    );
   },
 );
 

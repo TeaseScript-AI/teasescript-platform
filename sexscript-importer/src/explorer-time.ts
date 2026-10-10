@@ -806,9 +806,9 @@ type Value =
   | undefined;
 
 /**
- * A state to evaluate in: its variables by innermost binding, and those whose name it binds once, by the scope that
- * holds them as the model names them ({@link scoped}): a function's own in that function's frames, a file's own in that
- * file's frames or a scope it keeps; and its stored values by key.
+ * A state to evaluate in: the variables whose name it binds once, by name, and also by the scope that holds them as
+ * the model names them ({@link scoped}) when that scope has one activation: a function's own in that function's
+ * frames, a file's own in that file's frames or a scope it keeps; and its stored values by key.
  */
 export interface TimeContext {
   readonly bindings: ReadonlyMap<string, unknown>;
@@ -920,11 +920,12 @@ function valueAt(expression: unknown, reading: Reading): Value {
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
       if (defined == null) {
-        // A variable named by its scope takes a binding only when the state binds its name once, in that scope; when the
-        // state binds the name otherwise, whose the binding is is not known. Another, the innermost of its name.
+        // A variable takes a binding only when the state binds its name once (a variable named by its scope: in that
+        // scope); when the state binds the name otherwise, whose the binding is is not known.
         const bare = bareName(node.name);
         if (bare === node.name) {
           if (context.bindings.has(bare)) return runtimeValue(context.bindings.get(bare));
+          if (context.named.has(bare)) return undefined;
         } else if (context.scoped.has(node.name))
           return runtimeValue(context.scoped.get(node.name));
         else if (context.named.has(bare)) return undefined;
@@ -1445,7 +1446,7 @@ export function storedHolds(
   return typeof value === "boolean" ? value : undefined;
 }
 
-/** The context of a state's snapshot: its variables, innermost binding first, and its stored values. */
+/** The context of a state's snapshot: its variables whose name it binds once, and its stored values. */
 export function timeContext(snapshot: Data): TimeContext {
   const bindings = new Map<string, unknown>();
   // Each binding of a name, with the scope that holds it when that is clear ({@link TimeContext}).
@@ -1491,11 +1492,16 @@ export function timeContext(snapshot: Data): TimeContext {
         typeof scope.file === "number" ? single(`file ${scope.file}`) : null,
         binding.value,
       );
-  // A variable named by its scope is read from the state only where the state binds its name once, in that scope.
+  // A variable is read from the state only where the state binds its name once (one named by its scope: in that
+  // scope): a handler's capture, kept in a scope, is not another frame's binding of its name.
   const scoped = new Map<string, unknown>();
-  for (const [name, found] of held)
-    if (found.length === 1 && found[0]!.scope !== null)
-      scoped.set(`${name}\u0001${found[0]!.scope}`, found[0]!.value);
+  for (const [name, found] of held) {
+    if (found.length !== 1) {
+      bindings.delete(name);
+      continue;
+    }
+    if (found[0]!.scope !== null) scoped.set(`${name}\u0001${found[0]!.scope}`, found[0]!.value);
+  }
   const storage = new Map<string, unknown>();
   for (const entry of list(snapshot.scriptStorage))
     if (typeof entry.key === "string") storage.set(entry.key, entry.value);
