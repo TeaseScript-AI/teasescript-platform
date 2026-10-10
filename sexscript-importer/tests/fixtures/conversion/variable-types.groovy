@@ -215,3 +215,15 @@ show("Drawn " + (drawn as String).length())
 // A variable declared with a type converts what it is set to, so the function returns its type: a text here.
 def digits = { String x = ""; x = 3; return x }
 show(digits() + 1)
+// The type of the variable a function returns is that of its own declaration, also one around the function, which
+// converts what the function sets it to; a closure's own variable of the name is another variable.
+String label = ""
+def relabel = { label = 3; return label }
+show(relabel() + 1)
+amount = "before"
+def recount = {
+	def inner = { String amount = "nested"; return amount }
+	amount = 3
+	return amount
+}
+show(recount().intValue() + 1)

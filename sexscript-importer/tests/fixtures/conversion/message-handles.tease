@@ -142,8 +142,9 @@ say "${part}.."
 // positions and takes each number from them.
 let reps = 3
 let counter3 = say "0 reps", instant
-for rOffset in 0..=abs(reps - 1) {
-  let r = 1 + rOffset * sign(reps - 1)
+let rTo = reps
+for rOffset in 0..=floor(abs(rTo - 1)) {
+  let r = 1 + rOffset * sign(rTo - 1)
   counter3.text = "${r} reps"
   wait 1 s
 }

@@ -2,9 +2,15 @@
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
-function sexscriptLegacyCall(action, args): boolean | number | null {
+function sexscriptLegacyCall(action, args): boolean | number | string | null {
   if action == "chanceOrFlag" {
     return chanceOrFlag(args[0])
+  }
+  if action == "innerCallback1" {
+    if args.length >= 1 {
+      return innerCallback1(args[0])
+    }
+    return innerCallback1()
   }
 }
 function sexscriptLegacyRandom(limitValue) {
@@ -157,7 +163,7 @@ function chanceOrFlag(n): boolean | number {
 say "C ${chanceOrFlag(2)}"
 // A variable that holds what a closure value returns takes the result type of the dispatcher that calls it.
 let pick = "chanceOrFlag"
-let picked: boolean | number | null = false
+let picked: boolean | number | string | null = false
 picked = sexscriptLegacyCall(pick, [3])
 say "P ${picked}"
 // A list that may become null, of elements no code shows, and a value that is first a number and then a date, are
@@ -370,4 +376,24 @@ function digits {
   return x
 }
 say "${digits()}${1}"
+// The type of the variable a function returns is that of its own declaration, also one around the function, which
+// converts what the function sets it to; a closure's own variable of the name is another variable.
+let labelValue = ""
+function relabel {
+  labelValue = "3"
+  return labelValue
+}
+say "${relabel()}${1}"
+// NOTE SX_UNION_TYPE line 223: Groovy let 'amount' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if amount is string { ... }
+let amount: string | integer = "before"
+function innerCallback1(it = null) {
+  let amountValue = "nested"
+  return amountValue
+}
+function recount {
+  amount = 3
+  return amount
+}
+// NOTE SX_INT_RANGE line 229: Java's intValue() dropped the bits of a whole number beyond the int range and capped a decimal number at it; toInteger() keeps the whole number.
+say toInteger(recount()) + 1
 exit

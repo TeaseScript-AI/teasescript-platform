@@ -140,8 +140,9 @@ counted("Alternating cheeks.")
 // wait after a text that a loop builds anew each pass is its tick, so the countdown keeps its speed.
 function countDown(text, timeValue, speed) {
   let leftValue = timeValue / speed
-  for itOffset in 0..=abs(floor(timeValue / speed) - 1) {
-    let it = 1 + itOffset * sign(floor(timeValue / speed) - 1)
+  let itTo = floor(timeValue / speed)
+  for itOffset in 0..=floor(abs(itTo - 1)) {
+    let it = 1 + itOffset * sign(itTo - 1)
     say "${text}", instant
     say "${toInteger(leftValue * speed)} seconds", instant
     leftValue -= 1

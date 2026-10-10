@@ -56,8 +56,9 @@ say "Score: ${score}"
 // A range up to a value that may hold a fraction iterates up to the whole number below it, as Groovy did.
 let swats = 17
 let perCheek = swats / 2
-for swatOffset in 0..=abs(floor(perCheek) - 1) {
-  let swat = 1 + swatOffset * sign(floor(perCheek) - 1)
+let swatTo = floor(perCheek)
+for swatOffset in 0..=floor(abs(swatTo - 1)) {
+  let swat = 1 + swatOffset * sign(swatTo - 1)
   say "Swat ${swat}"
 }
 // An increment in an argument of a function that reads the counter keeps the old value first and counts before the

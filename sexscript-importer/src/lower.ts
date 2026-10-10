@@ -9704,11 +9704,10 @@ export function withGroovyRanges(
       return [statement];
     const { from, to, inclusive } = statement.collection;
     const { variable, body, span } = statement;
-    const changed = changedInBody(body);
     const before: IrStatement[] = [];
+    // Groovy computed the range once, its first bound first, before the first pass.
     const bound = (value: IrExpression, suffix: string): IrExpression => {
-      if (value.kind === "literal" || (!hasEffect(value) && !readsAny(value, changed)))
-        return value;
+      if (value.kind === "literal") return value;
       const name = fresh(`${variable}${suffix}`);
       before.push({ kind: "let", name, value, span });
       return { kind: "variable", name };
@@ -9740,55 +9739,17 @@ export function withGroovyRanges(
       {
         ...statement,
         variable: offset,
+        // A range that starts at a fraction goes through the numbers a whole step apart from it.
         collection: {
           kind: "range",
           from: { kind: "literal", value: 0 },
-          to: call("abs", distance),
+          to: call(inclusive ? "floor" : "ceil", call("abs", distance)),
           inclusive,
         },
         body: [{ kind: "let", name: variable, value: number, span }, ...body],
       },
     ];
   });
-}
-
-/**
- * The variables that statements set, and `*` where they call a function of the script, which may set any script
- * variable.
- */
-function changedInBody(statements: readonly IrStatement[]): Set<string> {
-  const names = new Set<string>();
-  const visit = (statement: IrStatement): void => {
-    if (statement.kind === "let") names.add(statement.name);
-    if (statement.kind === "assign") {
-      let target = statement.target;
-      while (target.kind === "index" || target.kind === "property") target = target.target;
-      if (target.kind === "variable") names.add(target.name);
-    }
-    if (statement.kind === "for") names.add(statement.variable);
-    const calls = (value: IrExpression): IrExpression => {
-      if (value.kind === "call" && value.local === true) names.add("*");
-      return mapChildren(value, calls);
-    };
-    mapOwnExpressions(statement, (value) => calls(value));
-    withNestedBlocks(statement, (body) => {
-      body.forEach(visit);
-      return body;
-    });
-  };
-  statements.forEach(visit);
-  return names;
-}
-
-/** Whether a value reads a variable of `names`, or any variable where `names` holds `*`. */
-function readsAny(value: IrExpression, names: ReadonlySet<string>): boolean {
-  let found = false;
-  const visit = (child: IrExpression): IrExpression => {
-    if (child.kind === "variable" && (names.has("*") || names.has(child.name))) found = true;
-    return mapChildren(child, visit);
-  };
-  visit(value);
-  return found;
 }
 
 /**

@@ -24,3 +24,11 @@ show("Drawn " + dice.nextInt(whole))
 def rewardPoints = getRandom(2)
 (1..rewardPoints).each { show("Stroke " + it) }
 for (k in 0..<rewardPoints) show("Before " + k)
+// A range whose direction shows only at runtime is computed once, its first bound first, and one that starts at a
+// fraction goes through the numbers a whole step from it.
+def low = 1
+def lift = { low = 3; return 4 }
+for (k in low..lift()) show("Bound " + k)
+def start = 2.5
+def stop = 5
+for (k in start..stop) show("Half " + k)
