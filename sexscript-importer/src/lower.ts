@@ -70,7 +70,7 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
-import { withListAliasesAsPaths } from "./list-aliases.ts";
+import { withListAliasesAsPaths, withTupleAssignments } from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
@@ -1769,7 +1769,10 @@ export function lowerParsedFile(
     context.bindings = bindingKeys(desugared, file.sourceName);
     body = splitScratchVariables(desugared, context);
     // Changes through an element or an iterated item reach the list they came from, as Groovy's shared lists did.
-    body = withListAliasesAsPaths(body, (base) => freshName(base, context));
+    body = withListAliasesAsPaths(
+      withTupleAssignments(body, (base) => freshName(base, context)),
+      (base) => freshName(base, context),
+    );
   }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
@@ -11749,6 +11752,11 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     if (context.menuIndexes.has(node)) return { kind: "index", target, index };
     // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on, or that tests a
     // position for null.
+    // A variable of Groovy's multiple assignment took null past the end of the list (withTupleAssignments).
+    if (node.tupleItem === true) {
+      const read = useHelper(context, "itemAt", [target, index]);
+      return read.kind === "call" ? { ...read, open: true } : read;
+    }
     if (
       !context.writeTargets.has(node) &&
       (mayIndexPastEnd(indexNode, context, targetNode) || nullComparedReads.has(node))

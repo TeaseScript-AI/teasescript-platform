@@ -76,6 +76,69 @@ function mayBeNegative(value: AstNode, negative: ReadonlySet<string>): boolean {
   return name !== null && negative.has(name);
 }
 
+/**
+ * Groovy's multiple assignment, `(a, b) = list`, set each variable to the element at its position, null past the end;
+ * it becomes one assignment per variable from the list kept in a new variable, each read marked `tupleItem` for a read
+ * that gives null past the end (enforced_chastity's server state). The declaring form, `def (a, b) = list`, converts
+ * as a declaration.
+ */
+export function withTupleAssignments(body: AstNode, fresh: (base: string) => string): AstNode {
+  const expand = (statement: AstNode): AstNode[] | null => {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    const assigned =
+      expression?.kind === "binary" &&
+      expression.operator === "=" &&
+      asNode(expression.left)?.kind === "tuple";
+    const value = asNode(expression?.right);
+    if (expression === null || value === null || !assigned) return null;
+    const targets = nodeArray(asNode(expression.left)?.items);
+    if (targets.length === 0) return null;
+    const span = statement.span;
+    const values = fresh("values");
+    const item = (position: number): AstNode => ({
+      kind: "binary",
+      span,
+      operator: "[",
+      left: variable(values, span),
+      right: constant(position, span),
+      tupleItem: true,
+    });
+    const keep: AstNode = {
+      kind: "expressionStatement",
+      span,
+      expression: {
+        kind: "declaration",
+        span,
+        multipleAssignment: false,
+        left: variable(values, span),
+        right: value,
+      },
+    };
+    return [
+      keep,
+      ...targets.map((target, position): AstNode => ({
+        kind: "expressionStatement",
+        span,
+        expression: { kind: "binary", span, operator: "=", left: target, right: item(position) },
+      })),
+    ];
+  };
+  const rewrite = (node: AstNode): AstNode => {
+    if (node.kind === "block")
+      return {
+        ...node,
+        statements: nodeArray(node.statements).flatMap(
+          (statement) => expand(statement) ?? [rewrite(statement)],
+        ),
+      };
+    const expanded = expand(node);
+    if (expanded !== null) return { kind: "block", span: node.span, statements: expanded };
+    return mapChildren(node, rewrite);
+  };
+  return rewrite(body);
+}
+
 /** Rewrites the loops over a list that change their item, everywhere in the node. */
 function loops(node: AstNode, fresh: (base: string) => string): AstNode {
   const result = mapChildren(node, (child) => loops(child, fresh));

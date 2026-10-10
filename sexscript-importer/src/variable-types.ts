@@ -437,7 +437,11 @@ export function enforceVariableTypes(
             binding.placeholder === undefined ? null : emptyValue(binding.placeholder);
           if (placeholder !== null) next = { ...next, value: placeholder };
           if (truncations.has(statement)) next = { ...next, value: truncate(next.value) };
-          if (binding.open === true) next = { ...next, value: helperCall("value", [next.value]) };
+          // An open variable has no written type: its values are checked where they are used.
+          if (binding.open === true) {
+            const { type: _type, ...untyped } = next;
+            next = { ...untyped, value: helperCall("value", [next.value]) };
+          }
           if (integerLoads.has(statement)) {
             result.annotated += 1;
             next = { ...next, type: binding.optional ? "integer?" : "integer" };
@@ -458,12 +462,17 @@ export function enforceVariableTypes(
             (binding.widened &&
               type !== undefined &&
               (nonNull(type).kind === "list" || typeName(nonNull(type)) === "number"));
-          if (needed && written !== null) {
+          if (needed && written !== null && binding.open !== true) {
             result.annotated += 1;
             next = { ...next, type: written };
           }
           // An empty list needs its element type written.
-          if (placeholder?.kind === "list" && written !== null && next.type === undefined)
+          if (
+            placeholder?.kind === "list" &&
+            written !== null &&
+            next.type === undefined &&
+            binding.open !== true
+          )
             next = { ...next, type: written };
           if (
             next.type === undefined &&
@@ -1212,6 +1221,10 @@ function analyse(
         if (item.target.kind !== "variable") return;
         const target = scope.resolve(item.target.name);
         if (target === undefined) return;
+        // A value of a type the conversion does not know, such as an element of Groovy's multiple assignment, keeps
+        // the variable open.
+        if (item.value.kind === "call" && item.value.open === true && target.open !== true)
+          change(() => (target.open = true));
         const type = bindingType(target);
         const first = item.value.kind === "template" ? item.value.parts[0] : undefined;
         if (

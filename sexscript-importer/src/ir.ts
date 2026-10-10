@@ -392,6 +392,8 @@ export type IrExpression =
       positional: IrExpression[];
       named: Record<string, IrExpression>;
       local?: true;
+      /** A value of a type the conversion does not know, which keeps a variable it is assigned to open. */
+      open?: true;
     }
   /** Interpolated string: literal text segments and `${...}` values in source order. */
   | { kind: "template"; parts: Array<{ text: string } | { value: IrExpression }> };
