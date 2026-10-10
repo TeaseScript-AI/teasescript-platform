@@ -9767,7 +9767,7 @@ function mayIndexPastEnd(
 }
 
 /** Whether a variable used as a list position is ever assigned a negative number, such as -1 for "none yet". */
-function mayIndexNegative(node: AstNode, context: LowerContext): boolean {
+function mayIndexNegative(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   // `choice - 1` after a menu whose first button gave 0, such as a "Back" button.
   if (node.kind === "binary" && node.operator === "-") {
     const right = constantValue(asNode(node.right) ?? undefined);
@@ -9776,9 +9776,13 @@ function mayIndexNegative(node: AstNode, context: LowerContext): boolean {
   }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
-  return (
-    key !== null &&
-    (context.assignedValues.get(key) ?? []).some((value) => negativeConstantIndex(value) !== null)
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  // Also through another variable, `colIndex = unfairColIndex` after `unfairColIndex = -1` (PainStacks).
+  return (context.assignedValues.get(key) ?? []).some(
+    (value) =>
+      negativeConstantIndex(value) !== null ||
+      (value.kind === "variable" && mayIndexNegative(value, context, seen)),
   );
 }
 

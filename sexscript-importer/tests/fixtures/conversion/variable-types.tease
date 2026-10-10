@@ -276,4 +276,15 @@ pair.add("Hearts")
 pair.add(3)
 // NOTE SX_PLUS_OPERAND_TYPE line 166: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Pair ${pair[0]} ${sexscriptLegacyValue(pair[1]) + 1}"
+// A list of empty slots whose slots get values of several types, one of them a parameter's, is a record, which stays
+// open (PainStacks' stack items).
+function stackItem(level, timeValue) {
+  let item = sexscriptLegacyValue(sexscriptLegacyRepeatList([null], 3))
+  item[0] = false
+  item[1] = level
+  item[2] = timeValue
+  return item
+}
+let slots = stackItem(4, 2.5)
+say "Item ${slots[1]} ${slots[2]}"
 exit

@@ -120,6 +120,11 @@ interface Binding {
    * starts with.
    */
   placeholder?: TeaseType;
+  /**
+   * A list of empty slots, Groovy `[null] * n`, whose slots get values of several or of unknown types (a positional
+   * record), which the declaration keeps open.
+   */
+  open?: boolean;
 }
 
 /** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
@@ -432,6 +437,7 @@ export function enforceVariableTypes(
             binding.placeholder === undefined ? null : emptyValue(binding.placeholder);
           if (placeholder !== null) next = { ...next, value: placeholder };
           if (truncations.has(statement)) next = { ...next, value: truncate(next.value) };
+          if (binding.open === true) next = { ...next, value: helperCall("value", [next.value]) };
           if (integerLoads.has(statement)) {
             result.annotated += 1;
             next = { ...next, type: binding.optional ? "integer?" : "integer" };
@@ -723,6 +729,8 @@ function analyse(
   const knownNull = knownNullCompares(statements);
   // The types of the elements stored in each list that starts without an element type (storeElement).
   const elementWrites = new Map<Binding, TeaseType[]>();
+  // The types of the values written to each slot of a list of empty slots, `[null] * n`, also unknown ones.
+  const slotWrites = new Map<Binding, TeaseType[]>();
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -1172,6 +1180,8 @@ function analyse(
         const value = typeOf(item.value, scope);
         if (item.target.kind === "index" && item.target.target.kind === "variable") {
           const list = scope.resolve(item.target.target.name);
+          if (list !== undefined && item.operator === "=" && emptySlots(list.declaration?.value))
+            slotWrites.set(list, [...(slotWrites.get(list) ?? []), value]);
           if (list !== undefined && item.operator === "=") storeElement(list, value, item);
           return;
         }
@@ -1456,6 +1466,8 @@ function analyse(
   // `out[0] = text` and `out[1] = 0` (ADR 0021 rule 1.3), needs their union written on its declaration.
   for (const [list, written] of elementWrites) {
     if (list.declaration === null || list.fixed !== undefined || list.union !== undefined) continue;
+    // Empty slots hold null until written, which no union of the written types takes; the slots rule below opens them.
+    if (emptySlots(list.declaration.value)) continue;
     let element: TeaseType | null = written[0]!;
     for (const type of written.slice(1)) {
       if (element === null) break;
@@ -1469,6 +1481,18 @@ function analyse(
       const union = listOf(element);
       change(() => (list.union = union));
     }
+  }
+  // A list of empty slots whose slots get values of several types, or of a type the conversion does not know, such as
+  // a parameter's, is a positional record (PainStacks' `[done, painLevel, shockTime, waitTime, glitch]`): its first
+  // value would fix one element type, so the list stays open.
+  for (const [list, written] of slotWrites) {
+    if (list.open === true || list.declaration === null || list.fixed !== undefined) continue;
+    const types = written.filter((type) => type.kind !== "null").map(nonNull);
+    const several = types.some(
+      (type) =>
+        type.kind === "unknown" || !isAssignable(types[0]!, type) || !isAssignable(type, types[0]!),
+    );
+    if (several) change(() => (list.open = true));
   }
   // A parameter without a Groovy type that some call gives a number that may be a fraction, `numSeries / 4`, and every
   // other call a number or a whole number, holds numbers, so a variable it sets does too (DisciplineClinic's numSeries).
@@ -1775,6 +1799,19 @@ function nullTestedNames(value: unknown, names = new Set<string>()): Set<string>
   }
   for (const child of Object.values(value)) nullTestedNames(child, names);
   return names;
+}
+
+/** Groovy `[null] * n`, a list of n empty slots. */
+function emptySlots(value: IrExpression | undefined): boolean {
+  const items =
+    value?.kind === "call" && value.name === "sexscriptLegacyRepeatList"
+      ? value.positional[0]
+      : undefined;
+  return (
+    items?.kind === "list" &&
+    items.items.length > 0 &&
+    items.items.every((item) => item.kind === "literal" && item.value === null)
+  );
 }
 
 /** The type a variable keeps, or undefined when the compiler does not check it (a null or unknown initializer). */

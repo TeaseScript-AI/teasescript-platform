@@ -212,4 +212,15 @@ if askBoolean "Shoot?" {
 let rounds = load "game.rounds", default: 2
 let marks = sexscriptLegacyRepeatList([null], toInteger(rounds))
 say "Marks ${marks.length}"
+// A -1 copied through another variable counts from the end too (PainStacks' unfair column).
+let stacks = [
+  [1],
+  [2],
+  [3]
+]
+let unfairColumn = -1
+let column = 0
+column = unfairColumn
+// NOTE SX_NEGATIVE_INDEX line 62: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+say "Last ${sexscriptLegacyItemAt(stacks, column)[0]}"
 exit

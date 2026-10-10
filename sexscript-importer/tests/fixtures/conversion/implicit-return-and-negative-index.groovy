@@ -54,3 +54,9 @@ def rounds = loadInteger("game.rounds")
 if (rounds == null) rounds = 2
 def marks = [null] * rounds
 show("Marks " + marks.size())
+// A -1 copied through another variable counts from the end too (PainStacks' unfair column).
+def stacks = [[1], [2], [3]]
+def unfairColumn = -1
+def column = 0
+column = unfairColumn
+show("Last " + stacks[column][0])

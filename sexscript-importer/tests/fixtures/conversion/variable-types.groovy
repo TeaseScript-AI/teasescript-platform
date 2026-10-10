@@ -164,3 +164,14 @@ def pair = []
 pair[0] = "Hearts"
 pair[1] = 3
 show("Pair " + pair[0] + " " + (pair[1] + 1))
+// A list of empty slots whose slots get values of several types, one of them a parameter's, is a record, which stays
+// open (PainStacks' stack items).
+def stackItem = { level, time ->
+	List item = [null] * 3
+	item[0] = false
+	item[1] = level
+	item[2] = time
+	return item
+}
+def slots = stackItem(4, 2.5)
+show("Item " + slots[1] + " " + slots[2])
